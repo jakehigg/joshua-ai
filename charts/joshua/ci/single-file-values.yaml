@@ -1,0 +1,33 @@
+# One values file that holds a whole installation: the config, the credentials,
+# the registry login, and the volume. The values are not real.
+config: |
+  name: Test House
+  timezone: UTC
+  people:
+    - id: alex
+      name: Alex
+      role: member
+      handles:
+        telegram: "123456789"
+imagePullSecret:
+  create: true
+  registry: registry.example.com
+  username: joshua
+  password: not-a-real-password
+secrets:
+  create: true
+  core:
+    values:
+      DATABASE_URL: postgresql://joshua:pw@joshua-postgres:5432/joshua
+      CLAUDE_CODE_OAUTH_TOKEN: not-a-real-token
+      JOSHUA_TOKEN_CORE: not-a-real-token
+  channels:
+    values:
+      TELEGRAM_BOT_TOKEN: not-a-real-token
+      JOSHUA_TOKEN_CHANNELS: not-a-real-token
+  gateway:
+    values:
+      JOSHUA_TOKEN_GATEWAY: not-a-real-token
+  postgres:
+    values:
+      POSTGRES_PASSWORD: pw

@@ -25,10 +25,7 @@ spec:
         checksum/config: {{ toJson .Values.config | sha256sum }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "joshua.imagePullSecrets" . | nindent 6 }}
       securityContext:
         fsGroup: 1000
       {{- if and .Values.dataPermissions.enabled .Values.persistence.enabled }}

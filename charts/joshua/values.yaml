@@ -17,6 +17,16 @@ image:
 # A package on a registry can be private. Name the pull secret here when it is.
 imagePullSecrets: []
 
+# Or let the chart make the pull secret, so one values file holds everything.
+# The credential goes into the cluster, so keep this file out of Git. The chart
+# adds the secret to imagePullSecrets for you.
+imagePullSecret:
+  create: false
+  name: joshua-registry
+  registry: ""
+  username: ""
+  password: ""
+
 # The name of the group of people this instance serves. It reaches the
 # containers through joshua.yaml.
 instanceName: Joshua
@@ -49,8 +59,18 @@ existingConfigMap: ""
 # optional unless the key says `{optional: false}`, so a container starts
 # without a credential it does not use.
 secrets:
+  # Make the Secrets from the `values` map in each block below, so one values
+  # file holds the whole installation. It is off by default, because a secret
+  # in a values file is a secret in any repository that file reaches. Turn it
+  # on only for a file you keep out of Git, such as one you pass to
+  # `helm install -f` by hand.
+  create: false
   core:
     name: joshua-core-secrets
+    # The credentials themselves, when secrets.create is true. Every key here
+    # also becomes an environment variable of the same name, so a credential
+    # needs no entry in `keys` as well.
+    values: {}
     keys:
       DATABASE_URL: {}
       CLAUDE_CODE_OAUTH_TOKEN: {}
@@ -61,6 +81,7 @@ secrets:
       JOSHUA_TOKEN_CI: {}
   channels:
     name: joshua-channels-secrets
+    values: {}
     keys:
       TELEGRAM_BOT_TOKEN: {}
       BLUEBUBBLES_PASSWORD: {}
@@ -74,11 +95,13 @@ secrets:
   # credential apart from the model credential.
   postgres:
     name: joshua-core-secrets
+    values: {}
     keys:
       # Postgres refuses to start without it, so this one is not optional.
       POSTGRES_PASSWORD: {optional: false}
   gateway:
     name: joshua-gateway-secrets
+    values: {}
     keys:
       JOSHUA_TOKEN_CHANNELS: {}
       JOSHUA_TOKEN_CORE: {}

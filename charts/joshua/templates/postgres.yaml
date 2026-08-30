@@ -36,9 +36,7 @@ spec:
         app.kubernetes.io/name: joshua-postgres
         {{- include "joshua.labels" . | nindent 8 }}
     spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets: {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "joshua.imagePullSecrets" . | nindent 6 }}
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000

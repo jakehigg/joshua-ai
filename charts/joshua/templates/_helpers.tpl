@@ -51,10 +51,18 @@ capabilities:
      its Secret from the key's own `name`, or from the component default, and
      its key from the key's own `key`, or from the variable name. An entry is
      optional unless the key sets `optional: false`, so a container starts
-     without a credential it does not use. */}}
+     without a credential it does not use. A key in `values` needs no entry in
+     `keys`: the chart wires it under its own name. */}}
 {{- define "joshua.secretEnv" -}}
 {{- $default := .secret.name -}}
-{{- range $var, $from := .secret.keys }}
+{{- $wired := dict -}}
+{{- range $var, $_ := (.secret.values | default dict) -}}
+{{- $_ := set $wired $var dict -}}
+{{- end -}}
+{{- range $var, $from := (.secret.keys | default dict) -}}
+{{- $_ := set $wired $var ($from | default dict) -}}
+{{- end -}}
+{{- range $var, $from := $wired }}
 {{- $from = $from | default dict }}
 - name: {{ $var }}
   valueFrom:
@@ -63,4 +71,24 @@ capabilities:
       key: {{ $from.key | default $var }}
       optional: {{ if hasKey $from "optional" }}{{ $from.optional }}{{ else }}true{{ end }}
 {{- end }}
+{{- end -}}
+
+{{/* Every pull secret a pod uses: the ones you name, and the one the chart
+     makes. */}}
+{{- define "joshua.imagePullSecrets" -}}
+{{- $all := .Values.imagePullSecrets | default list -}}
+{{- if .Values.imagePullSecret.create -}}
+{{- $all = concat $all (list (dict "name" .Values.imagePullSecret.name)) -}}
+{{- end -}}
+{{- with $all }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{/* The .dockerconfigjson for a registry that needs a login. */}}
+{{- define "joshua.dockerConfigJson" -}}
+{{- $r := .Values.imagePullSecret -}}
+{{- $auth := printf "%s:%s" $r.username $r.password | b64enc -}}
+{{- dict "auths" (dict $r.registry (dict "username" $r.username "password" $r.password "auth" $auth)) | toJson -}}
 {{- end -}}
