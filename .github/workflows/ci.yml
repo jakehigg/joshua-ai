@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  UV_VERSION: "0.12.5"
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --all-packages
+      - run: uv lock --check
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run python scripts/check_test_policy.py
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        member: [shared, channels, gateway, core]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: joshua
+          POSTGRES_USER: joshua
+          POSTGRES_PASSWORD: joshua
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U joshua -d joshua"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://joshua:joshua@localhost:5432/joshua
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --all-packages
+      - name: unit tests
+        if: matrix.member != 'core'
+        run: >
+          uv run --package joshua-${{ matrix.member }} pytest ${{ matrix.member }}/tests
+          --cov=joshua_${{ matrix.member }} --cov-report=term --cov-fail-under=80
+      # core: the store layer runs only against Postgres, so the integration
+      # suite counts toward coverage. pytest exit 5 ("no tests ran") from an
+      # empty integration suite is not a failure.
+      - name: unit and integration tests
+        if: matrix.member == 'core'
+        run: |
+          uv run --package joshua-core pytest core/tests --cov=joshua_core --cov-report= --cov-fail-under=0
+          rc=0
+          uv run --package joshua-core pytest core/tests -m integration \
+            --cov=joshua_core --cov-append --cov-report= --cov-fail-under=0 || rc=$?
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then exit "$rc"; fi
+          uv run --package joshua-core coverage report --show-missing --fail-under=80
+
+  build:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp joshua.example.yaml joshua.yaml
+      - run: docker compose build

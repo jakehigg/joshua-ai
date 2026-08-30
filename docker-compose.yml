@@ -1,0 +1,144 @@
+# The self-hoster's whole deployment. `make init-env && make up` starts the
+# four services on one host. The k8s component (phase 6) mirrors this file.
+#
+# Secrets come only from `.env` (see `.env.example`). No secret is written in
+# this file; every value is a literal or a `${VAR}` from `.env`.
+#
+# Network: compose puts every service on one default network. Only `core`
+# (Anthropic API, SDK web tools) and `gateway` (MCP upstreams) reach the
+# internet. Egress is not enforced here; that is a phase 6 concern.
+
+# All three app containers hold every fleet token, because each one verifies
+# the callers it trusts (see CLAUDE.md, "Identity and auth"). `make init-env`
+# mints the values into `.env`.
+x-fleet-tokens: &fleet-tokens
+  JOSHUA_TOKEN_CHANNELS: ${JOSHUA_TOKEN_CHANNELS:-}
+  JOSHUA_TOKEN_CORE: ${JOSHUA_TOKEN_CORE:-}
+  JOSHUA_TOKEN_GATEWAY: ${JOSHUA_TOKEN_GATEWAY:-}
+  JOSHUA_TOKEN_LAPTOP: ${JOSHUA_TOKEN_LAPTOP:-}
+
+# The channel credentials go to `channels` alone. joshua.yaml references them
+# as ${VAR:-}, so a container without the variable expands it to the empty
+# string; only the container that owns a secret defines it.
+x-config-vars: &config-vars
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  BLUEBUBBLES_PASSWORD: ${BLUEBUBBLES_PASSWORD:-}
+  IMESSAGE_WEBHOOK_SECRET: ${IMESSAGE_WEBHOOK_SECRET:-}
+
+# Runtime knobs every container reads. Documented in .env.example.
+x-runtime-vars: &runtime-vars
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+# Each app serves `/healthz` on port 8000. The slim images have no curl, so the
+# check uses python. `urlopen` exits non-zero on a non-200 response.
+x-app-healthcheck: &app-healthcheck
+  test:
+    ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 20s
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: joshua
+      POSTGRES_DB: joshua
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "joshua", "-d", "joshua"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    # Not published on the host. Only `core` connects, over the compose network.
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: [*fleet-tokens, *runtime-vars]
+      JOSHUA_CONFIG: /etc/joshua/joshua.yaml
+      ADMIN_CALLERS: laptop
+    volumes:
+      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - data:/data
+    healthcheck: *app-healthcheck
+
+  core:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: [*fleet-tokens, *runtime-vars]
+      JOSHUA_CONFIG: /etc/joshua/joshua.yaml
+      DATABASE_URL: postgresql://joshua:${POSTGRES_PASSWORD:-}@postgres:5432/joshua
+      GATEWAY_URL: http://gateway:8000
+      CHANNELS_URL: http://channels:8000
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # The embedding model is downloaded once into the model-cache volume.
+      MEMORY_EMBED_CACHE_DIR: ${MEMORY_EMBED_CACHE_DIR:-/home/app/.cache/fastembed}
+      # `sdk` uses the Claude Agent SDK. `stub` needs no Anthropic token.
+      AGENT_BACKEND: ${AGENT_BACKEND:-sdk}
+      # Read-only token for the optional memos memory source.
+      MEMOS_TOKEN: ${MEMOS_TOKEN:-}
+    volumes:
+      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - data:/data
+      # The SDK config dir. A named volume keeps sessions across restarts.
+      - claude-config:/home/app/.claude
+      # The embedding model (about 65 MB). A named volume keeps it across
+      # restarts, so core downloads it once instead of on every start.
+      - model-cache:/home/app/.cache/fastembed
+    # Published on the loopback address only, so `scripts/chat.py` on this host
+    # reaches `/v1/turns/stream` with the laptop token. Nothing off the host can
+    # reach it.
+    ports:
+      - "127.0.0.1:8081:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
+  channels:
+    build:
+      context: .
+      dockerfile: channels/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: [*fleet-tokens, *config-vars, *runtime-vars]
+      JOSHUA_CONFIG: /etc/joshua/joshua.yaml
+      CORE_URL: http://core:8000
+    volumes:
+      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - data:/data
+    # Published on the host so BlueBubbles and webhook callers reach it. Drop
+    # this block when neither `channels.imessage` nor `channels.webhooks` runs.
+    ports:
+      - "8080:8000"
+    depends_on:
+      core:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
+  # Wiki viewer. A placeholder until phase 5. Off by default; start it with
+  # `docker compose --profile viewer up`.
+  viewer:
+    image: busybox:1.36
+    profiles: ["viewer"]
+    command: ["sh", "-c", "echo 'viewer arrives in phase 5'; sleep infinity"]
+
+volumes:
+  pgdata:
+  data:
+  claude-config:
+  model-cache:

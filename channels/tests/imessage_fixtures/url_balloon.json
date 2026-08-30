@@ -1,0 +1,45 @@
+{
+  "type": "new-message",
+  "data": {
+    "originalROWID": 12351,
+    "guid": "EEFF0011-1111-2222-3333-444455556666",
+    "text": "https://www.example.com/recipes/braised-short-ribs",
+    "subject": null,
+    "balloonBundleId": "com.apple.messages.URLBalloonProvider",
+    "handle": {
+      "originalROWID": 9,
+      "address": "+15551234567",
+      "service": "iMessage",
+      "country": "us"
+    },
+    "handleId": 9,
+    "isFromMe": false,
+    "dateCreated": 1754300000250,
+    "error": 0,
+    "attachments": [
+      {
+        "guid": "att-guid-plugin-0001",
+        "transferName": "8B3A9C21-77E4-4E0B-9E2C-1D5F6A0B7C88.pluginPayloadAttachment",
+        "mimeType": null,
+        "totalBytes": 20480,
+        "hideAttachment": true,
+        "isSticker": false
+      }
+    ],
+    "chats": [
+      {
+        "originalROWID": 3,
+        "guid": "iMessage;-;+15551234567",
+        "style": 45,
+        "chatIdentifier": "+15551234567",
+        "displayName": null
+      }
+    ],
+    "associatedMessageGuid": null,
+    "associatedMessageType": null,
+    "threadOriginatorGuid": null,
+    "itemType": 0,
+    "groupTitle": null,
+    "partCount": 1
+  }
+}

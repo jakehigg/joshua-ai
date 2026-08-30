@@ -1,0 +1,44 @@
+{
+  "additionalProperties": false,
+  "description": "Core's answer to a submitted turn, as the channels client records it.\n\n``accepted`` is True only for a 202. ``status`` is the HTTP status the client\nsaw. ``turn_id`` is set on a 202. ``reason`` names why a turn was not accepted\n(``unknown_sender``, ``overloaded``, ``duplicate``, or core's own reason).",
+  "properties": {
+    "accepted": {
+      "title": "Accepted",
+      "type": "boolean"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "status": {
+      "title": "Status",
+      "type": "integer"
+    },
+    "turn_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Turn Id"
+    }
+  },
+  "required": [
+    "accepted",
+    "status"
+  ],
+  "title": "TurnAck",
+  "type": "object"
+}

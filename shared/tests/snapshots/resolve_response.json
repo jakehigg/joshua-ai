@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "Chat": {
+      "additionalProperties": false,
+      "description": "The conversation surface. ``kind`` picks per-person or shared (group).",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "dm",
+            "group"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "Chat",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The concrete channel and chat for a destination name or ref.\n\n``channel_id`` and ``chat_kind`` are flat aliases of ``channel`` and\n``chat.kind`` that core's channels resolver reads.",
+  "properties": {
+    "channel": {
+      "title": "Channel",
+      "type": "string"
+    },
+    "channel_id": {
+      "title": "Channel Id",
+      "type": "string"
+    },
+    "chat": {
+      "$ref": "#/$defs/Chat"
+    },
+    "chat_kind": {
+      "enum": [
+        "dm",
+        "group"
+      ],
+      "title": "Chat Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "channel",
+    "chat",
+    "channel_id",
+    "chat_kind"
+  ],
+  "title": "ResolveResponse",
+  "type": "object"
+}

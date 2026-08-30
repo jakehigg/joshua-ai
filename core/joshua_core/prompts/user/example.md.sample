@@ -1,0 +1,14 @@
+# Example snippet
+
+This file is an example. Its name does not end in `.md`, so the composer does not
+load it. Copy it to a `.md` name to activate your own content.
+
+## House rules
+
+- Keep replies short.
+- Use metric units.
+
+## Custom MCP server
+
+The `weather` server in `joshua.yaml` returns a forecast. Call `get_forecast`
+with a city name when a person asks about the weather.

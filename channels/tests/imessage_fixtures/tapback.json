@@ -1,0 +1,35 @@
+{
+  "type": "new-message",
+  "data": {
+    "originalROWID": 12349,
+    "guid": "EEFF0011-1111-2222-3333-444455556666",
+    "text": "Liked “dinner at 7?”",
+    "subject": null,
+    "handle": {
+      "originalROWID": 11,
+      "address": "mia.example@example.com",
+      "service": "iMessage",
+      "country": "us"
+    },
+    "handleId": 11,
+    "isFromMe": false,
+    "dateCreated": 1754300400000,
+    "error": 0,
+    "attachments": [],
+    "chats": [
+      {
+        "originalROWID": 4,
+        "guid": "iMessage;+;chat100000000000000001",
+        "style": 43,
+        "chatIdentifier": "chat100000000000000001",
+        "displayName": "Everyone"
+      }
+    ],
+    "associatedMessageGuid": "p:0/BBCCDDEE-1111-2222-3333-444455556666",
+    "associatedMessageType": 2000,
+    "threadOriginatorGuid": null,
+    "itemType": 0,
+    "groupTitle": "Everyone",
+    "partCount": 1
+  }
+}

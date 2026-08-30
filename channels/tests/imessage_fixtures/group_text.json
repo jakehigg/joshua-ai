@@ -1,0 +1,35 @@
+{
+  "type": "new-message",
+  "data": {
+    "originalROWID": 12346,
+    "guid": "BBCCDDEE-1111-2222-3333-444455556666",
+    "text": "dinner at 7?",
+    "subject": null,
+    "handle": {
+      "originalROWID": 11,
+      "address": "Mia.Example@Example.COM",
+      "service": "iMessage",
+      "country": "us"
+    },
+    "handleId": 11,
+    "isFromMe": false,
+    "dateCreated": 1754300100000,
+    "error": 0,
+    "attachments": [],
+    "chats": [
+      {
+        "originalROWID": 4,
+        "guid": "iMessage;+;chat100000000000000001",
+        "style": 43,
+        "chatIdentifier": "chat100000000000000001",
+        "displayName": "Everyone"
+      }
+    ],
+    "associatedMessageGuid": null,
+    "associatedMessageType": null,
+    "threadOriginatorGuid": null,
+    "itemType": 0,
+    "groupTitle": "Everyone",
+    "partCount": 1
+  }
+}

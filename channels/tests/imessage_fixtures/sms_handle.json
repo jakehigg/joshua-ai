@@ -1,0 +1,35 @@
+{
+  "type": "new-message",
+  "data": {
+    "originalROWID": 12350,
+    "guid": "FF001122-1111-2222-3333-444455556666",
+    "text": "your package arrives today",
+    "subject": null,
+    "handle": {
+      "originalROWID": 21,
+      "address": "+15559998888",
+      "service": "SMS",
+      "country": "us"
+    },
+    "handleId": 21,
+    "isFromMe": false,
+    "dateCreated": 1754300500000,
+    "error": 0,
+    "attachments": [],
+    "chats": [
+      {
+        "originalROWID": 7,
+        "guid": "SMS;-;+15559998888",
+        "style": 45,
+        "chatIdentifier": "+15559998888",
+        "displayName": null
+      }
+    ],
+    "associatedMessageGuid": null,
+    "associatedMessageType": null,
+    "threadOriginatorGuid": null,
+    "itemType": 0,
+    "groupTitle": null,
+    "partCount": 1
+  }
+}

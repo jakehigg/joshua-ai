@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# uv and ruff caches
+.uv/
+.uv-cache/
+.ruff_cache/
+
+# Coverage
+.coverage
+coverage.xml
+
+# Secrets and local config. Anchored to the repo root.
+.env
+/joshua.yaml
+
+# Your own private files (see CONTRIBUTING.md). Never committed.
+/local/
+
+# Data volume
+/data/
+
+# Tool artifacts
+*.db
+*.log

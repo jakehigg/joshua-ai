@@ -1,0 +1,48 @@
+{
+  "type": "new-message",
+  "data": {
+    "originalROWID": 12347,
+    "guid": "CCDDEEFF-1111-2222-3333-444455556666",
+    "text": "￼",
+    "subject": null,
+    "handle": {
+      "originalROWID": 9,
+      "address": "+15551234567",
+      "service": "iMessage",
+      "country": "us"
+    },
+    "handleId": 9,
+    "isFromMe": false,
+    "dateCreated": 1754300200000,
+    "error": 0,
+    "attachments": [
+      {
+        "guid": "att-guid-0001",
+        "transferName": "IMG_0001.HEIC",
+        "mimeType": "image/heic",
+        "totalBytes": 123456
+      },
+      {
+        "guid": "att-guid-0002",
+        "transferName": "MOV_0002.MOV",
+        "mimeType": "video/quicktime",
+        "totalBytes": 99999999
+      }
+    ],
+    "chats": [
+      {
+        "originalROWID": 3,
+        "guid": "iMessage;-;+15551234567",
+        "style": 45,
+        "chatIdentifier": "+15551234567",
+        "displayName": null
+      }
+    ],
+    "associatedMessageGuid": null,
+    "associatedMessageType": null,
+    "threadOriginatorGuid": null,
+    "itemType": 0,
+    "groupTitle": null,
+    "partCount": 1
+  }
+}

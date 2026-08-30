@@ -1,0 +1,124 @@
+# The one joshua config file. Copy it, edit it, and mount it at
+# /etc/joshua/joshua.yaml. Secrets never live here — put them in .env and
+# reference them as ${VAR:-}, as the channels section below shows. The ${VAR:-}
+# form expands to the empty string where the variable is not set, so only the
+# container that owns a secret defines it, and an empty credential turns the
+# feature off. Validate a file
+# before you deploy it:
+#
+#   python -m joshua_shared.config validate joshua.example.yaml
+
+name: Home
+timezone: America/New_York
+people:
+  - id: alex
+    name: Alex
+    role: member
+    journal: auto                 # auto | ask | off — how the agent journals life updates (default auto)
+    handles:
+      telegram: "998877"
+      imessage: "+15551234567"
+  - id: mia
+    name: Mia
+    role: member
+    handles:
+      telegram: "112233"
+      imessage: "+15557654321"
+groups:
+  - id: everyone
+    channel: imessage
+    chat_id: "iMessage;+;chat100000000000000001"
+    members:
+      - alex
+      - mia
+
+channels:
+  telegram:
+    bot_token: ${TELEGRAM_BOT_TOKEN:-}
+    unknown_sender: drop          # Telegram never replies to a stranger unless this is 'reply'
+  imessage:
+    bluebubbles_url: http://bluebubbles.local:1234
+    bluebubbles_password: ${BLUEBUBBLES_PASSWORD:-}
+    webhook_path_secret: ${IMESSAGE_WEBHOOK_SECRET:-}
+    unknown_sender: drop          # iMessage never replies to a stranger unless this is 'reply'
+    coalesce_window_s: 2.0        # merge a burst from one sender into one turn; 0 disables
+    stale_max_age_s: 900.0        # drop a webhook older than this (a replay); 0 disables
+    reconcile_interval_s: 60      # poll BlueBubbles for missed webhooks this often; 0 disables
+    reconcile_lookback_s: 300     # how far back the poll watermark starts at boot
+    send_chunk_chars: 4000        # split an outbound reply into chunks of this size
+  webhooks:
+    allowed_callers:
+      - laptop
+      - ci
+  destinations:
+    everyone: imessage:group:everyone
+  limits:
+    max_text_chars: 8000
+    max_attachment_bytes: 26214400
+    per_handle_per_minute: 20
+    attachment_retention_days: 365     # delete stored attachments older than this; 0 keeps forever
+    keep_originals: false              # also store the pre-downscale original next to the stored file
+
+core:
+  model: claude-opus-5
+  max_turns: 20
+  session_idle_seconds: 1800
+  pool_max: 20
+  reflection_model: claude-sonnet-5
+  scheduler_tick_seconds: 15   # how often the scheduler checks for due tasks
+
+memory:
+  recent_posts: 3            # blog days kept verbatim in the system prompt
+  recent_max_chars: 6000     # cap for the recent-days block; oldest post truncated first
+  shared_max_chars: 2000  # cap for the shared section (members and group sessions)
+  nightly_at: "03:30"           # local time of the nightly reflection run
+  daily_rollover: true          # after the nightly run, start each session fresh
+  min_chars_for_post: 200       # skip a person's blog post below this much transcript text
+  inject:
+    enabled: true      # prepend relevant notes/files to each turn (RAG injection)
+    full_sim: 0.72     # top match ≥ this → inject chunk bodies (zero tool calls)
+    hint_sim: 0.60     # top match ≥ this → name the files as a hint
+    top_k: 2           # chunks injected on a `full` decision
+    max_chars: 1200    # per-chunk text cap in the note and the audit row
+  embed_model: BAAI/bge-small-en-v1.5
+  # In-core RAG over the data volume. `files` is the kernel source and always
+  # runs; other adapters are optional. An adapter with no options takes an empty
+  # value.
+  sources:
+    files:
+    # Optional: scrape a Memos instance into the index, read-only. The token
+    # needs read access only; give the Memos user no more visibility than the
+    # you want indexed. Uncomment to enable.
+    # memos:
+    #   url: https://memos.example.net
+    #   token: ${MEMOS_TOKEN:-}        # from .env, never inline
+    #   schedule: nightly              # nightly | "every 6h" | seconds
+    #   scope: shared                  # shared | person:<id>
+    #   visibility:                    # PRIVATE memos are never indexed
+    #     - PROTECTED
+    #     - PUBLIC
+    #   person_tag_prefix: "person/"   # a memo tagged person/alex lands under alex
+  index_interval_s: 60      # how often the files source re-indexes the volume
+  # Retrieval tuning (ported from joshua-kb).
+  chunk_chars: 1600
+  min_sim: 0.55
+  per_doc_cap: 3
+  recency_bonus: 0.08
+  recency_half_life_days: 14.0
+
+mcp:
+  # Only servers the shipped gateway image can run belong here. The image has no
+  # `uv` or node, so a `type: stdio` server that starts with `uvx` or `npx` does
+  # not start and the gateway retries it forever. To add such a server, build it
+  # into your own gateway image, or run it as its own container and reach it with
+  # `type: http`. See docs/config.md.
+  files:                          # builtin, always available in the image
+    kind: builtin
+    allow: all
+
+modules:                        # reserved; no code reads this list yet
+  - scheduling
+  - files
+
+viewer:                         # reserved; no viewer ships yet
+  enabled: false

@@ -1,0 +1,246 @@
+{
+  "$defs": {
+    "Attachment": {
+      "additionalProperties": false,
+      "description": "One inbound file. ``path`` is files-MCP relative: ``attachments/YYYY/MM/<file>``.\n\n``name`` is the stored filename. ``original_name`` is what the platform called\nthe file, so the agent can name it back to the person.",
+      "properties": {
+        "mime": {
+          "title": "Mime",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "original_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Name"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "mime"
+      ],
+      "title": "Attachment",
+      "type": "object"
+    },
+    "Chat": {
+      "additionalProperties": false,
+      "description": "The conversation surface. ``kind`` picks per-person or shared (group).",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "dm",
+            "group"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "Chat",
+      "type": "object"
+    },
+    "EventOptions": {
+      "additionalProperties": false,
+      "description": "Options for a ``kind == \"event\"`` turn.\n\n``verbatim`` makes core deliver a channel-addressed event's ``text`` straight\nto the channel with no model call.",
+      "properties": {
+        "verbatim": {
+          "default": false,
+          "title": "Verbatim",
+          "type": "boolean"
+        }
+      },
+      "title": "EventOptions",
+      "type": "object"
+    },
+    "Handle": {
+      "additionalProperties": false,
+      "description": "The verified sender, stamped by channels. ``id`` is the platform handle.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "telegram",
+            "imessage",
+            "webhook",
+            "voice",
+            "cli"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "title": "Handle",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One normalized turn from any channel.\n\n``handle`` is None only for ``kind == \"event\"``. ``message_id`` is the\nplatform id and the idempotency key. ``event_type`` and ``payload`` carry an\nevent (``kind == \"event\"``); core routes those.",
+  "properties": {
+    "attachments": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Attachment"
+      },
+      "title": "Attachments",
+      "type": "array"
+    },
+    "channel": {
+      "title": "Channel",
+      "type": "string"
+    },
+    "chat": {
+      "$ref": "#/$defs/Chat"
+    },
+    "event_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Event Type"
+    },
+    "framing": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Framing"
+    },
+    "handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Handle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "kind": {
+      "default": "message",
+      "enum": [
+        "message",
+        "event"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "message_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Message Id"
+    },
+    "options": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EventOptions"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "payload": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Payload"
+    },
+    "reply_to": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reply To"
+    },
+    "text": {
+      "default": "",
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "channel",
+    "chat"
+  ],
+  "title": "TurnEvent",
+  "type": "object"
+}

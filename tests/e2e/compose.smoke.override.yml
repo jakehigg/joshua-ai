@@ -1,0 +1,8 @@
+# Overlay for `make smoke`. It publishes the compose Postgres on the host so the
+# core smoke suite (run from the dev venv) can reach it over ``DATABASE_URL``.
+# The base ``docker-compose.yml`` keeps Postgres unpublished; this overlay adds a
+# host port only for the smoke run. ``SMOKE_PG_PORT`` overrides the host port.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${SMOKE_PG_PORT:-5432}:5432"

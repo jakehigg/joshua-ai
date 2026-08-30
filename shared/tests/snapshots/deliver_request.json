@@ -1,0 +1,28 @@
+{
+  "additionalProperties": false,
+  "description": "Core's outbound reply. Channels resolves ``channel`` to an adapter.\n\n``channel`` is a channel id, a logical ref, or a destination name.\n``attachments`` are files-MCP relative paths (``attachments/YYYY/MM/<file>``\nor ``shared/\u2026``); channels maps each to a data-volume path.",
+  "properties": {
+    "attachments": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Attachments",
+      "type": "array"
+    },
+    "channel": {
+      "title": "Channel",
+      "type": "string"
+    },
+    "text": {
+      "default": "",
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "channel"
+  ],
+  "title": "DeliverRequest",
+  "type": "object"
+}
