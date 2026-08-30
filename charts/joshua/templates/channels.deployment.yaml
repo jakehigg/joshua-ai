@@ -26,7 +26,9 @@ spec:
         checksum/config: {{ toJson .Values.config | sha256sum }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
-      {{- include "joshua.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         fsGroup: 1000
       containers:
