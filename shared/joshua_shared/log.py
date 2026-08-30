@@ -21,7 +21,7 @@ _HEALTH_PATHS = frozenset({"/healthz", "/readyz"})
 
 # Credential shapes that must never reach a log line. Also used by the
 # config loader to refuse literal credentials in joshua.yaml.
-CREDENTIAL_PREFIXES = ("sk-ant-", "xoxb-", "ak2_", "GOCSPX-")
+CREDENTIAL_PREFIXES = ("sk-ant-", "glpat-", "xoxb-", "ak2_", "GOCSPX-")
 _REDACTION = "[REDACTED]"
 _BEARER_RE = re.compile(r"Bearer\s+\S+")
 _PREFIX_RE = re.compile("(?:" + "|".join(re.escape(p) for p in CREDENTIAL_PREFIXES) + r")\S+")

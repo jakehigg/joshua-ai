@@ -152,7 +152,7 @@ The files MCP keeps one rule and dropped another:
 
 Secrets live in `.env` and nowhere else. `joshua.yaml` refers to them as
 `${VAR}`. The loader refuses a literal credential in `joshua.yaml`: a value that
-starts with `sk-ant-`, `xoxb-`, `ak2_`, or `GOCSPX-` fails validation.
+starts with `sk-ant-`, `glpat-`, `xoxb-`, `ak2_`, or `GOCSPX-` fails validation.
 The log formatter replaces a bearer token and any value with those prefixes
 with `[REDACTED]`.
 
