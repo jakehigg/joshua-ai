@@ -45,14 +45,9 @@ spec:
               value: /data
             - name: ADMIN_CALLERS
               value: {{ .Values.gateway.adminCallers | quote }}
-            {{/* Add an upstream credential as another key in this Secret when an
-                 MCP server in joshua.yaml refers to it as ${VAR}. */}}
-            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.gateway "keys" (list
-                "JOSHUA_TOKEN_CHANNELS" "JOSHUA_TOKEN_CORE" "JOSHUA_TOKEN_GATEWAY"
-                "JOSHUA_TOKEN_LAPTOP" "JOSHUA_TOKEN_CI")) | nindent 12 }}
-            {{- with .Values.gateway.extraSecretKeys }}
-            {{- include "joshua.secretEnv" (dict "secret" $.Values.secrets.gateway "keys" .) | nindent 12 }}
-            {{- end }}
+            {{/* Add an upstream credential as another key in secrets.gateway
+                 when an MCP server in joshua.yaml refers to it as ${VAR}. */}}
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.gateway) | nindent 12 }}
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
           livenessProbe:

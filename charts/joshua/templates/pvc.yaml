@@ -14,8 +14,10 @@ spec:
   {{- if not (eq .Values.persistence.storageClass "unset") }}
   storageClassName: {{ .Values.persistence.storageClass | quote }}
   {{- end }}
-  {{- with .Values.persistence.volumeName }}
-  volumeName: {{ . }}
+  {{- if .Values.persistence.volume.enabled }}
+  volumeName: {{ .Values.persistence.volume.name }}
+  {{- else if .Values.persistence.volumeName }}
+  volumeName: {{ .Values.persistence.volumeName }}
   {{- end }}
   resources:
     requests:

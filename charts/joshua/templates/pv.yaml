@@ -1,0 +1,34 @@
+{{- if and .Values.persistence.enabled .Values.persistence.volume.enabled }}
+{{/* A PersistentVolume for storage that the cluster's provisioner does not
+     make, such as an NFS export. The claim in pvc.yaml binds to it by name.
+     Helm does not delete it on an uninstall when the reclaim policy is Retain,
+     so the data outlives the release. */}}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.persistence.volume.name }}
+  labels:
+    {{- include "joshua.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  capacity:
+    storage: {{ .Values.persistence.volume.capacity | default .Values.persistence.size }}
+  accessModes:
+    {{- if .Values.persistence.volume.accessModes }}
+    {{- toYaml .Values.persistence.volume.accessModes | nindent 4 }}
+    {{- else }}
+    - {{ .Values.persistence.accessMode }}
+    {{- end }}
+  persistentVolumeReclaimPolicy: {{ .Values.persistence.volume.reclaimPolicy }}
+  {{- if not (eq .Values.persistence.storageClass "unset") }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  {{- with .Values.persistence.volume.mountOptions }}
+  mountOptions:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.persistence.volume.source }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+{{- end }}

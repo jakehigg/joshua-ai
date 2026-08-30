@@ -79,14 +79,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
-      - run: helm lint charts/joshua -f charts/joshua/ci/test-values.yaml
-      # Rendering proves the templates produce valid Kubernetes objects. It
-      # needs no cluster.
-      - run: helm template joshua charts/joshua -f charts/joshua/ci/test-values.yaml > /tmp/rendered.yaml
       - uses: yokawasa/action-setup-kube-tools@v0.11.2
         with:
           kubeconform: "0.6.7"
-      - run: kubeconform -strict -ignore-missing-schemas -summary /tmp/rendered.yaml
+      # Each file in ci/ is one installation the chart must render. Rendering
+      # proves the templates make valid Kubernetes objects, and it needs no
+      # cluster.
+      - name: Lint and render every values file
+        run: |
+          for f in charts/joshua/ci/*-values.yaml; do
+            echo "== $f"
+            helm lint charts/joshua -f "$f"
+            helm template joshua charts/joshua -f "$f" > /tmp/rendered.yaml
+            kubeconform -strict -ignore-missing-schemas -summary /tmp/rendered.yaml
+          done
 
   build:
     if: github.event_name == 'push'

@@ -3,6 +3,10 @@
 # host names, your storage, and your secrets in your own values file.
 
 # The container images. The three share a tag, because they ship together.
+# The chart builds each reference as
+#   <registry>/<repository>/joshua-ai-<component>:<tag>
+# Set core.image, channels.image, or gateway.image to a whole reference to
+# ignore this block for that container, such as a build in your own registry.
 image:
   registry: ghcr.io
   repository: jakehigg
@@ -30,11 +34,57 @@ existingConfigMap: ""
 # values file is a secret in a Git repository. Make these with your own tool,
 # such as Sealed Secrets, External Secrets, or SOPS, and name them here.
 #
-# Each Secret holds the keys that container needs. docs/config.md lists them.
+# `name` is where a key comes from by default. `keys` maps the environment
+# variable the container reads to the Secret it comes from. An empty value means
+# the Secret in `name`, under a key of the same spelling. Give `name` or `key`
+# to take one variable from somewhere else:
+#
+#   keys:
+#     DATABASE_URL: {}                                  # joshua-core-secrets/DATABASE_URL
+#     CLAUDE_CODE_OAUTH_TOKEN: {name: anthropic, key: token}
+#
+# Set a key to null to stop passing that variable, because Helm merges a map
+# and does not replace it. Add a key to pass another variable, such as an
+# upstream credential a gateway MCP server reads as ${VAR}. Every variable is
+# optional unless the key says `{optional: false}`, so a container starts
+# without a credential it does not use.
 secrets:
-  core: joshua-core-secrets
-  channels: joshua-channels-secrets
-  gateway: joshua-gateway-secrets
+  core:
+    name: joshua-core-secrets
+    keys:
+      DATABASE_URL: {}
+      CLAUDE_CODE_OAUTH_TOKEN: {}
+      JOSHUA_TOKEN_CHANNELS: {}
+      JOSHUA_TOKEN_CORE: {}
+      JOSHUA_TOKEN_GATEWAY: {}
+      JOSHUA_TOKEN_LAPTOP: {}
+      JOSHUA_TOKEN_CI: {}
+  channels:
+    name: joshua-channels-secrets
+    keys:
+      TELEGRAM_BOT_TOKEN: {}
+      BLUEBUBBLES_PASSWORD: {}
+      IMESSAGE_WEBHOOK_SECRET: {}
+      JOSHUA_TOKEN_CHANNELS: {}
+      JOSHUA_TOKEN_CORE: {}
+      JOSHUA_TOKEN_GATEWAY: {}
+      JOSHUA_TOKEN_LAPTOP: {}
+      JOSHUA_TOKEN_CI: {}
+  # The database password. It is separate, so an instance can hold the database
+  # credential apart from the model credential.
+  postgres:
+    name: joshua-core-secrets
+    keys:
+      # Postgres refuses to start without it, so this one is not optional.
+      POSTGRES_PASSWORD: {optional: false}
+  gateway:
+    name: joshua-gateway-secrets
+    keys:
+      JOSHUA_TOKEN_CHANNELS: {}
+      JOSHUA_TOKEN_CORE: {}
+      JOSHUA_TOKEN_GATEWAY: {}
+      JOSHUA_TOKEN_LAPTOP: {}
+      JOSHUA_TOKEN_CI: {}
 
 # The shared /data volume. All three containers mount it at once, so the access
 # mode is ReadWriteMany and the class must support it.
@@ -49,6 +99,25 @@ persistence:
   storageClass: ""
   # Bind one named PersistentVolume. Leave it empty for dynamic provisioning.
   volumeName: ""
+  # Make the PersistentVolume as well as the claim. Use this for storage that
+  # exists outside the cluster's provisioner, such as an NFS export or a disk
+  # you made yourself. The claim binds to it by name.
+  volume:
+    enabled: false
+    name: joshua-data
+    # An empty capacity means persistence.size.
+    capacity: ""
+    # Empty means persistence.accessMode.
+    accessModes: []
+    reclaimPolicy: Retain
+    mountOptions: []
+    # The volume source, copied into the PersistentVolume as it is. Give one
+    # of nfs, csi, hostPath, local, or any other source Kubernetes accepts:
+    #   source:
+    #     nfs:
+    #       server: 10.0.0.2
+    #       path: /export/joshua
+    source: {}
 
 # An NFS export usually arrives owned by root, and Kubernetes does not apply
 # fsGroup to an NFS volume. This init container makes /data and the two subPath
@@ -59,6 +128,8 @@ dataPermissions:
 
 core:
   replicaCount: 1
+  # A whole image reference, which ignores the `image` block above.
+  image: ""
   # core owns the database pool and the agent session directory, so two pods
   # must never run at once.
   strategy: Recreate
@@ -74,6 +145,8 @@ core:
 
 channels:
   replicaCount: 1
+  # A whole image reference, which ignores the `image` block above.
+  image: ""
   # A Telegram bot token permits one poller, so a rolling update would run two
   # for a moment and Telegram would reject the second.
   strategy: Recreate
@@ -88,6 +161,8 @@ channels:
 
 gateway:
   replicaCount: 1
+  # A whole image reference, which ignores the `image` block above.
+  image: ""
   strategy: Recreate
   adminCallers: laptop,ci
   resources:
@@ -116,10 +191,12 @@ postgres:
   image: pgvector/pgvector:pg16
   database: joshua
   username: joshua
-  # The password comes from the core Secret, under the key POSTGRES_PASSWORD.
+  # The password comes from secrets.postgres.
   storage:
     size: 10Gi
     storageClass: ""
+    # Bind one named PersistentVolume instead of provisioning one.
+    volumeName: ""
   resources:
     requests:
       cpu: 100m

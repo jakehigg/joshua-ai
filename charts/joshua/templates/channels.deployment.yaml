@@ -51,10 +51,7 @@ spec:
             {{/* The channel credentials also back the ${VAR} references in
                  joshua.yaml. A container without a variable expands it to the
                  empty string, so only the container that owns a secret has it. */}}
-            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.channels "keys" (list
-                "TELEGRAM_BOT_TOKEN" "BLUEBUBBLES_PASSWORD" "IMESSAGE_WEBHOOK_SECRET"
-                "JOSHUA_TOKEN_CHANNELS" "JOSHUA_TOKEN_CORE" "JOSHUA_TOKEN_GATEWAY"
-                "JOSHUA_TOKEN_LAPTOP" "JOSHUA_TOKEN_CI")) | nindent 12 }}
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.channels) | nindent 12 }}
           resources:
             {{- toYaml .Values.channels.resources | nindent 12 }}
           livenessProbe:

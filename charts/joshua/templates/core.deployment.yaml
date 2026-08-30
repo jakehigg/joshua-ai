@@ -79,10 +79,7 @@ spec:
                  volume keeps it across a restart, so core downloads it once. */}}
             - name: MEMORY_EMBED_CACHE_DIR
               value: /home/app/.cache/fastembed
-            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.core "keys" (list
-                "DATABASE_URL" "CLAUDE_CODE_OAUTH_TOKEN"
-                "JOSHUA_TOKEN_CHANNELS" "JOSHUA_TOKEN_CORE" "JOSHUA_TOKEN_GATEWAY"
-                "JOSHUA_TOKEN_LAPTOP" "JOSHUA_TOKEN_CI")) | nindent 12 }}
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.core) | nindent 12 }}
           resources:
             {{- toYaml .Values.core.resources | nindent 12 }}
           livenessProbe:
