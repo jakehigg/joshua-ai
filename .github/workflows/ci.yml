@@ -78,6 +78,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      # The chart and the images ship together, so a chart must never meet an
+      # image it did not ship with.
+      - name: The chart version and the application version agree
+        run: uv run --with pyyaml python scripts/check_chart_version.py
       - uses: azure/setup-helm@v4
       - uses: yokawasa/action-setup-kube-tools@v0.11.2
         with:

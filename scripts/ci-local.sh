@@ -14,6 +14,8 @@ echo "==> lint: ruff check"
 uv run ruff check .
 echo "==> lint: ruff format --check"
 uv run ruff format --check .
+echo "==> lint: chart version"
+uv run --with pyyaml python scripts/check_chart_version.py
 
 for member in shared channels gateway; do
   echo "==> test: $member"

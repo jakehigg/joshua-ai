@@ -175,3 +175,14 @@ A package on a registry can be private, and that is a different setting from
 the visibility of the repository. Check the package page after the first
 release. When the package is private, name a pull secret in
 `imagePullSecrets`.
+
+## Versions
+
+The chart version and the application version are always the same. The chart
+and the three containers ship together, and an interface between them can
+change in any release before 1.0, so a chart must never meet an image it did
+not ship with.
+
+This makes an install safe by default: leave `image.tag` empty and the chart
+pulls the images of its own version. Set `image.tag` only to pin a build you
+made yourself, and then keep the chart at the version those images came from.
