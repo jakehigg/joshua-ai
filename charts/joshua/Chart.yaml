@@ -12,10 +12,10 @@ type: application
 # `--version` and `--app-version` set to it, so a release keeps the two the
 # same without reading this file. Bump both here in the change that needs a
 # release, and tag the merge commit.
-version: 0.0.2
+version: 0.0.3
 # An empty `image.tag` in values means this version, so the chart pulls the
 # images that shipped with it.
-appVersion: "0.0.2"
+appVersion: "0.0.3"
 home: https://github.com/jakehigg/joshua-ai
 sources:
   - https://github.com/jakehigg/joshua-ai
