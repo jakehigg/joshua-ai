@@ -4,7 +4,7 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
-## 0.0.2 - 2026-08-30
+## 0.0.3 - 2026-08-30
 
 ### Added
 
