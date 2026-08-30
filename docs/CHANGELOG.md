@@ -11,6 +11,15 @@ person who runs Joshua.
 - `GET /admin/chats/unconfigured` on `channels` lists the group chats that
   `joshua.yaml` does not hold, so you can read a group's chat id without
   stopping Joshua. It holds no message text and no sender handle.
+- A Helm chart at `charts/joshua`, to run the three containers on Kubernetes.
+  One values file holds the images, the whole `joshua.yaml`, the names of the
+  Secrets each container reads, the storage, and the optional Ingress. The
+  chart makes no Secret.
+- The chart can bind storage you made yourself, for a site that keeps volumes
+  outside the deployment tool. `persistence.existingClaim` binds the `/data`
+  claim and `postgres.storage.existingClaim` binds the database claim.
+- A release workflow. A `v*` tag builds the three images to the GitHub
+  container registry, packages the chart, and attaches both to a release.
 - Three containers, `channels`, `core`, and `gateway`, from one repository and
   one `docker-compose.yml`. `make up` starts them.
 - Channels: Telegram, iMessage through BlueBubbles, a webhook route for

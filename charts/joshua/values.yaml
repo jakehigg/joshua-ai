@@ -1,0 +1,212 @@
+# Joshua ships three containers that share one volume. This file holds every
+# value an installation changes. Nothing here names one deployment: put your
+# host names, your storage, and your secrets in your own values file.
+
+# The container images. The three share a tag, because they ship together.
+# The chart builds each reference as
+#   <registry>/<repository>/joshua-ai-<component>:<tag>
+# Set core.image, channels.image, or gateway.image to a whole reference to
+# ignore this block for that container, such as a build in your own registry.
+image:
+  registry: ghcr.io
+  repository: jakehigg
+  # Empty means the chart's appVersion. Set it to pin a build.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# A package on a registry can be private. Name the pull secret here when it is.
+imagePullSecrets: []
+
+# The whole joshua.yaml, as a string. Every option is documented in
+# docs/config.md. The chart writes it to a ConfigMap and mounts it read-only in
+# all three containers. Leave it empty to supply your own ConfigMap through
+# config.existingConfigMap.
+config: ""
+
+# Use a ConfigMap you made yourself. It must hold the key joshua.yaml.
+existingConfigMap: ""
+
+# Every secret a container reads. The chart never makes a Secret: a secret in a
+# values file is a secret in a Git repository. Make these with your own tool,
+# such as Sealed Secrets, External Secrets, or SOPS, and name them here.
+#
+# `name` is where a key comes from by default. `keys` maps the environment
+# variable the container reads to the Secret it comes from. An empty value means
+# the Secret in `name`, under a key of the same spelling. Give `name` or `key`
+# to take one variable from somewhere else:
+#
+#   keys:
+#     DATABASE_URL: {}                                  # joshua-core-secrets/DATABASE_URL
+#     CLAUDE_CODE_OAUTH_TOKEN: {name: anthropic, key: token}
+#
+# Set a key to null to stop passing that variable, because Helm merges a map
+# and does not replace it. Add a key to pass another variable, such as an
+# upstream credential a gateway MCP server reads as ${VAR}. Every variable is
+# optional unless the key says `{optional: false}`, so a container starts
+# without a credential it does not use.
+secrets:
+  core:
+    name: joshua-core-secrets
+    keys:
+      DATABASE_URL: {}
+      CLAUDE_CODE_OAUTH_TOKEN: {}
+      JOSHUA_TOKEN_CHANNELS: {}
+      JOSHUA_TOKEN_CORE: {}
+      JOSHUA_TOKEN_GATEWAY: {}
+      JOSHUA_TOKEN_LAPTOP: {}
+      JOSHUA_TOKEN_CI: {}
+  channels:
+    name: joshua-channels-secrets
+    keys:
+      TELEGRAM_BOT_TOKEN: {}
+      BLUEBUBBLES_PASSWORD: {}
+      IMESSAGE_WEBHOOK_SECRET: {}
+      JOSHUA_TOKEN_CHANNELS: {}
+      JOSHUA_TOKEN_CORE: {}
+      JOSHUA_TOKEN_GATEWAY: {}
+      JOSHUA_TOKEN_LAPTOP: {}
+      JOSHUA_TOKEN_CI: {}
+  # The database password. It is separate, so an instance can hold the database
+  # credential apart from the model credential.
+  postgres:
+    name: joshua-core-secrets
+    keys:
+      # Postgres refuses to start without it, so this one is not optional.
+      POSTGRES_PASSWORD: {optional: false}
+  gateway:
+    name: joshua-gateway-secrets
+    keys:
+      JOSHUA_TOKEN_CHANNELS: {}
+      JOSHUA_TOKEN_CORE: {}
+      JOSHUA_TOKEN_GATEWAY: {}
+      JOSHUA_TOKEN_LAPTOP: {}
+      JOSHUA_TOKEN_CI: {}
+
+# The shared /data volume. All three containers mount it at once, so the access
+# mode is ReadWriteMany and the class must support it.
+persistence:
+  enabled: true
+  # Bind an existing claim instead of making one.
+  existingClaim: ""
+  accessMode: ReadWriteMany
+  size: 20Gi
+  # An empty string disables dynamic provisioning, for a statically bound
+  # volume. Leave it unset to use the default class.
+  storageClass: ""
+  # Bind one named PersistentVolume. Leave it empty for dynamic provisioning.
+  volumeName: ""
+  # Make the PersistentVolume as well as the claim. Use this for storage that
+  # exists outside the cluster's provisioner, such as an NFS export or a disk
+  # you made yourself. The claim binds to it by name.
+  volume:
+    enabled: false
+    name: joshua-data
+    # An empty capacity means persistence.size.
+    capacity: ""
+    # Empty means persistence.accessMode.
+    accessModes: []
+    reclaimPolicy: Retain
+    mountOptions: []
+    # The volume source, copied into the PersistentVolume as it is. Give one
+    # of nfs, csi, hostPath, local, or any other source Kubernetes accepts:
+    #   source:
+    #     nfs:
+    #       server: 10.0.0.2
+    #       path: /export/joshua
+    source: {}
+
+# An NFS export usually arrives owned by root, and Kubernetes does not apply
+# fsGroup to an NFS volume. This init container makes /data and the two subPath
+# directories writable for uid 1000 before core starts. It is idempotent.
+dataPermissions:
+  enabled: true
+  image: busybox:1.36
+
+core:
+  replicaCount: 1
+  # A whole image reference, which ignores the `image` block above.
+  image: ""
+  # core owns the database pool and the agent session directory, so two pods
+  # must never run at once.
+  strategy: Recreate
+  agentBackend: sdk
+  adminCallers: laptop,ci
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1536Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+channels:
+  replicaCount: 1
+  # A whole image reference, which ignores the `image` block above.
+  image: ""
+  # A Telegram bot token permits one poller, so a rolling update would run two
+  # for a moment and Telegram would reject the second.
+  strategy: Recreate
+  adminCallers: laptop,ci
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+gateway:
+  replicaCount: 1
+  # A whole image reference, which ignores the `image` block above.
+  image: ""
+  strategy: Recreate
+  adminCallers: laptop,ci
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# Only channels is reachable from outside the cluster, for a webhook. core and
+# gateway are never exposed.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+
+# Joshua needs one Postgres with pgvector. The chart can run one for you, or
+# you can point DATABASE_URL at your own.
+postgres:
+  enabled: true
+  image: pgvector/pgvector:pg16
+  database: joshua
+  username: joshua
+  # The password comes from secrets.postgres.
+  storage:
+    # Bind a claim you made yourself. Use this when the volumes are made
+    # outside the chart, because they are infrastructure with a longer life
+    # than a release. The claim must exist before the StatefulSet starts.
+    existingClaim: ""
+    # The three values below apply only when existingClaim is empty.
+    size: 10Gi
+    storageClass: ""
+    # Bind one named PersistentVolume instead of provisioning one.
+    volumeName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

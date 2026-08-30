@@ -1,0 +1,20 @@
+# Values that make the chart render in CI. They exercise the paths a real
+# installation uses, and they name no real deployment.
+config: |
+  name: Test House
+  timezone: UTC
+  people:
+    - id: alex
+      name: Alex
+      role: member
+      handles:
+        telegram: "123456789"
+persistence:
+  storageClass: ""
+  volumeName: joshua-data-pv
+ingress:
+  enabled: true
+  className: nginx
+  host: joshua.example.com
+  tls:
+    enabled: true

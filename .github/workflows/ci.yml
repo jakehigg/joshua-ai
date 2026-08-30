@@ -23,6 +23,10 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run python scripts/check_test_policy.py
+      # The root suite holds the architecture guards: no container imports
+      # another, the compose file expands, and an image owns its mount points.
+      # No other job runs it.
+      - run: uv run pytest tests
 
   test:
     runs-on: ubuntu-latest
@@ -69,6 +73,34 @@ jobs:
             --cov=joshua_core --cov-append --cov-report= --cov-fail-under=0 || rc=$?
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then exit "$rc"; fi
           uv run --package joshua-core coverage report --show-missing --fail-under=80
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      # The chart and the images ship together, so a chart must never meet an
+      # image it did not ship with.
+      - name: The chart version and the application version agree
+        run: uv run --with pyyaml python scripts/check_chart_version.py
+      - uses: azure/setup-helm@v4
+      - uses: yokawasa/action-setup-kube-tools@v0.11.2
+        with:
+          kubeconform: "0.6.7"
+      # Each file in ci/ is one installation the chart must render. Rendering
+      # proves the templates make valid Kubernetes objects, and it needs no
+      # cluster.
+      - name: Lint and render every values file
+        run: |
+          for f in charts/joshua/ci/*-values.yaml; do
+            echo "== $f"
+            helm lint charts/joshua -f "$f"
+            helm template joshua charts/joshua -f "$f" > /tmp/rendered.yaml
+            kubeconform -strict -ignore-missing-schemas -summary /tmp/rendered.yaml
+          done
 
   build:
     if: github.event_name == 'push'

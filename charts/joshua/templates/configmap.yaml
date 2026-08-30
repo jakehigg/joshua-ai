@@ -1,0 +1,14 @@
+{{- if not .Values.existingConfigMap }}
+{{- if not .Values.config }}
+{{- fail "set config to your joshua.yaml, or set existingConfigMap to a ConfigMap that holds the key joshua.yaml" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: joshua-config
+  labels:
+    {{- include "joshua.labels" . | nindent 4 }}
+data:
+  joshua.yaml: |
+{{ .Values.config | indent 4 }}
+{{- end }}

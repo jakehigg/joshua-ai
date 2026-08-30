@@ -1,0 +1,37 @@
+# Values that exercise the override paths: an image from another registry, a
+# credential from another Secret, and a PersistentVolume the chart makes. They
+# name no real deployment.
+config: |
+  name: Test House
+  timezone: UTC
+  people:
+    - id: alex
+      name: Alex
+      role: member
+      handles:
+        telegram: "123456789"
+core:
+  image: registry.example.com/joshua/core:test
+channels:
+  image: registry.example.com/joshua/channels:test
+gateway:
+  image: registry.example.com/joshua/gateway:test
+secrets:
+  core:
+    keys:
+      CLAUDE_CODE_OAUTH_TOKEN: {name: anthropic-oauth, key: token}
+      JOSHUA_TOKEN_CI: null
+persistence:
+  storageClass: ""
+  volume:
+    enabled: true
+    name: joshua-data-test
+    capacity: 50Gi
+    mountOptions: [nfsvers=4.1]
+    source:
+      nfs:
+        server: nfs.example.com
+        path: /export/joshua
+postgres:
+  storage:
+    existingClaim: joshua-pgdata-test

@@ -1,0 +1,25 @@
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+{{/* One volume for all three containers, so the access mode is ReadWriteMany.
+     A storageClass of "" disables dynamic provisioning for a statically bound
+     volume; leaving it unset uses the cluster default. */}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: joshua-data
+  labels:
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode }}
+  {{- if not (eq .Values.persistence.storageClass "unset") }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  {{- if .Values.persistence.volume.enabled }}
+  volumeName: {{ .Values.persistence.volume.name }}
+  {{- else if .Values.persistence.volumeName }}
+  volumeName: {{ .Values.persistence.volumeName }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}
