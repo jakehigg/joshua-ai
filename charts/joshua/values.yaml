@@ -1,0 +1,134 @@
+# Joshua ships three containers that share one volume. This file holds every
+# value an installation changes. Nothing here names one deployment: put your
+# host names, your storage, and your secrets in your own values file.
+
+# The container images. The three share a tag, because they ship together.
+image:
+  registry: ghcr.io
+  repository: jakehigg
+  # Empty means the chart's appVersion. Set it to pin a build.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# A package on a registry can be private. Name the pull secret here when it is.
+imagePullSecrets: []
+
+# The name of the group of people this instance serves. It reaches the
+# containers through joshua.yaml.
+instanceName: Joshua
+
+# The whole joshua.yaml, as a string. Every option is documented in
+# docs/config.md. The chart writes it to a ConfigMap and mounts it read-only in
+# all three containers. Leave it empty to supply your own ConfigMap through
+# config.existingConfigMap.
+config: ""
+
+# Use a ConfigMap you made yourself. It must hold the key joshua.yaml.
+existingConfigMap: ""
+
+# Every secret a container reads. The chart never makes a Secret: a secret in a
+# values file is a secret in a Git repository. Make these with your own tool,
+# such as Sealed Secrets, External Secrets, or SOPS, and name them here.
+#
+# Each Secret holds the keys that container needs. docs/config.md lists them.
+secrets:
+  core: joshua-core-secrets
+  channels: joshua-channels-secrets
+  gateway: joshua-gateway-secrets
+
+# The shared /data volume. All three containers mount it at once, so the access
+# mode is ReadWriteMany and the class must support it.
+persistence:
+  enabled: true
+  # Bind an existing claim instead of making one.
+  existingClaim: ""
+  accessMode: ReadWriteMany
+  size: 20Gi
+  # An empty string disables dynamic provisioning, for a statically bound
+  # volume. Leave it unset to use the default class.
+  storageClass: ""
+  # Bind one named PersistentVolume. Leave it empty for dynamic provisioning.
+  volumeName: ""
+
+# An NFS export usually arrives owned by root, and Kubernetes does not apply
+# fsGroup to an NFS volume. This init container makes /data and the two subPath
+# directories writable for uid 1000 before core starts. It is idempotent.
+dataPermissions:
+  enabled: true
+  image: busybox:1.36
+
+core:
+  replicaCount: 1
+  # core owns the database pool and the agent session directory, so two pods
+  # must never run at once.
+  strategy: Recreate
+  agentBackend: sdk
+  adminCallers: laptop,ci
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1536Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+channels:
+  replicaCount: 1
+  # A Telegram bot token permits one poller, so a rolling update would run two
+  # for a moment and Telegram would reject the second.
+  strategy: Recreate
+  adminCallers: laptop,ci
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+gateway:
+  replicaCount: 1
+  strategy: Recreate
+  adminCallers: laptop,ci
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# Only channels is reachable from outside the cluster, for a webhook. core and
+# gateway are never exposed.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+
+# Joshua needs one Postgres with pgvector. The chart can run one for you, or
+# you can point DATABASE_URL at your own.
+postgres:
+  enabled: true
+  image: pgvector/pgvector:pg16
+  database: joshua
+  username: joshua
+  # The password comes from the core Secret, under the key POSTGRES_PASSWORD.
+  storage:
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

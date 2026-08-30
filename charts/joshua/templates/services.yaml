@@ -1,0 +1,19 @@
+{{/* One ClusterIP Service for each container. An in-cluster caller uses the
+     short name in the namespace, such as http://joshua-core:8000. */}}
+{{- range $name := list "core" "channels" "gateway" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: joshua-{{ $name }}
+  labels:
+    app.kubernetes.io/name: joshua-{{ $name }}
+    {{- include "joshua.labels" $ | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: joshua-{{ $name }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+{{- end }}

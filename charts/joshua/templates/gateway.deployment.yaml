@@ -1,0 +1,85 @@
+{{/* gateway is the outbound trust boundary. It holds every upstream credential
+     and applies the tool policy for each person. Nothing outside the namespace
+     reaches it. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joshua-gateway
+  labels:
+    app.kubernetes.io/name: joshua-gateway
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: {{ .Values.gateway.strategy }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: joshua-gateway
+        {{- include "joshua.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: gateway
+          image: {{ include "joshua.image" (dict "root" $ "name" "gateway") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          securityContext:
+            {{- include "joshua.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: JOSHUA_CONFIG
+              value: /etc/joshua/joshua.yaml
+            - name: JOSHUA_DATA_DIR
+              value: /data
+            - name: ADMIN_CALLERS
+              value: {{ .Values.gateway.adminCallers | quote }}
+            {{/* Add an upstream credential as another key in this Secret when an
+                 MCP server in joshua.yaml refers to it as ${VAR}. */}}
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.gateway "keys" (list
+                "JOSHUA_TOKEN_CHANNELS" "JOSHUA_TOKEN_CORE" "JOSHUA_TOKEN_GATEWAY"
+                "JOSHUA_TOKEN_LAPTOP" "JOSHUA_TOKEN_CI")) | nindent 12 }}
+            {{- with .Values.gateway.extraSecretKeys }}
+            {{- include "joshua.secretEnv" (dict "secret" $.Values.secrets.gateway "keys" .) | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/joshua
+              readOnly: true
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "joshua.configMapName" . }}
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default "joshua-data" }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}

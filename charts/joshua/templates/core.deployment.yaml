@@ -1,0 +1,132 @@
+{{/* core turns a message into a reply. It owns the database and the data
+     volume. The strategy is Recreate because two pods must never run at once:
+     core holds the database pool and the agent session directory. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joshua-core
+  labels:
+    app.kubernetes.io/name: joshua-core
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.core.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: {{ .Values.core.strategy }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-core
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: joshua-core
+        {{- include "joshua.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+      {{- if and .Values.dataPermissions.enabled .Values.persistence.enabled }}
+      {{/* An NFS export arrives owned by root, and Kubernetes does not apply
+           fsGroup to an NFS volume. The kubelet also makes a subPath directory
+           as root with mode 0755, so uid 1000 cannot write it: core would lose
+           its agent session state and could not download the embedding model.
+           Idempotent. */}}
+      initContainers:
+        - name: data-perms
+          image: {{ .Values.dataPermissions.image }}
+          command:
+            - sh
+            - -c
+            - |
+              chown 1000:1000 /data && chmod 770 /data
+              mkdir -p /data/claude-config /data/model-cache
+              chown 1000:1000 /data/claude-config /data/model-cache
+              chmod 770 /data/claude-config /data/model-cache
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- end }}
+      containers:
+        - name: core
+          image: {{ include "joshua.image" (dict "root" $ "name" "core") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          securityContext:
+            {{- include "joshua.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: JOSHUA_CONFIG
+              value: /etc/joshua/joshua.yaml
+            - name: JOSHUA_DATA_DIR
+              value: /data
+            - name: GATEWAY_URL
+              value: http://joshua-gateway:8000
+            - name: CHANNELS_URL
+              value: http://joshua-channels:8000
+            - name: AGENT_BACKEND
+              value: {{ .Values.core.agentBackend | quote }}
+            - name: ADMIN_CALLERS
+              value: {{ .Values.core.adminCallers | quote }}
+            {{/* The embedding model is about 65 MB. A subdirectory of the data
+                 volume keeps it across a restart, so core downloads it once. */}}
+            - name: MEMORY_EMBED_CACHE_DIR
+              value: /home/app/.cache/fastembed
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.core "keys" (list
+                "DATABASE_URL" "CLAUDE_CODE_OAUTH_TOKEN"
+                "JOSHUA_TOKEN_CHANNELS" "JOSHUA_TOKEN_CORE" "JOSHUA_TOKEN_GATEWAY"
+                "JOSHUA_TOKEN_LAPTOP" "JOSHUA_TOKEN_CI")) | nindent 12 }}
+          resources:
+            {{- toYaml .Values.core.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/joshua
+              readOnly: true
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: /data
+            {{/* The agent SDK writes its session state here. */}}
+            - name: data
+              mountPath: /home/app/.claude
+              subPath: claude-config
+            - name: data
+              mountPath: /home/app/.cache/fastembed
+              subPath: model-cache
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "joshua.configMapName" . }}
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default "joshua-data" }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

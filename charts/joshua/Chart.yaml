@@ -1,0 +1,20 @@
+apiVersion: v2
+name: joshua
+description: A personal AI agent you host yourself, as three containers and one shared volume.
+type: application
+# The chart version. It changes when the chart changes, and not when the
+# application changes.
+version: 0.1.0
+# The application version. The release workflow sets the image tag from this
+# unless values override it.
+appVersion: "0.0.1"
+home: https://github.com/jakehigg/joshua-ai
+sources:
+  - https://github.com/jakehigg/joshua-ai
+keywords:
+  - agent
+  - assistant
+  - mcp
+maintainers:
+  - name: jakehigg
+    url: https://github.com/jakehigg

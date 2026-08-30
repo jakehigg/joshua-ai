@@ -1,0 +1,87 @@
+{{/* channels is the inbound trust boundary. It checks the sender, stores a
+     file, and posts one turn to core. The strategy is Recreate because a
+     Telegram bot token permits one poller: a rolling update would run two for a
+     moment and Telegram would reject the second. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joshua-channels
+  labels:
+    app.kubernetes.io/name: joshua-channels
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.channels.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: {{ .Values.channels.strategy }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-channels
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: joshua-channels
+        {{- include "joshua.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: channels
+          image: {{ include "joshua.image" (dict "root" $ "name" "channels") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          securityContext:
+            {{- include "joshua.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: JOSHUA_CONFIG
+              value: /etc/joshua/joshua.yaml
+            - name: JOSHUA_DATA_DIR
+              value: /data
+            - name: CORE_URL
+              value: http://joshua-core:8000
+            - name: ADMIN_CALLERS
+              value: {{ .Values.channels.adminCallers | quote }}
+            {{/* The channel credentials also back the ${VAR} references in
+                 joshua.yaml. A container without a variable expands it to the
+                 empty string, so only the container that owns a secret has it. */}}
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.channels "keys" (list
+                "TELEGRAM_BOT_TOKEN" "BLUEBUBBLES_PASSWORD" "IMESSAGE_WEBHOOK_SECRET"
+                "JOSHUA_TOKEN_CHANNELS" "JOSHUA_TOKEN_CORE" "JOSHUA_TOKEN_GATEWAY"
+                "JOSHUA_TOKEN_LAPTOP" "JOSHUA_TOKEN_CI")) | nindent 12 }}
+          resources:
+            {{- toYaml .Values.channels.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/joshua
+              readOnly: true
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "joshua.configMapName" . }}
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default "joshua-data" }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
