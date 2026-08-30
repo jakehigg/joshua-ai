@@ -31,8 +31,12 @@ cd joshua-ai
 make init-env
 ```
 
-This command copies `.env.example` to `.env`. It writes a database password and
-one token for each container. Keep this file. Do not commit it.
+This command copies `.env.example` to `.env`. It writes a database password,
+one token for each container, and the version of Joshua you run. Keep this
+file. Do not commit it.
+
+Your installation stays on that version until you change `JOSHUA_VERSION` in
+`.env`. A later `git pull` does not move it.
 
 ## 3. Add your Claude token
 

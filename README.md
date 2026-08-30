@@ -73,17 +73,34 @@ make test    # pytest for the root and each member
 
 ## Run
 
+There are two ways to run Joshua. Use the first one unless you change the code.
+
+**Run a release.** `make up` starts the images that the release workflow
+publishes to the GitHub container registry. Nothing is built.
+
 ```
 make init-env    # create .env and mint the container tokens
-make up          # start the released images
-make pull        # get a newer release
+make up          # start
 make down        # stop
-make logs        # follow logs
+make logs        # follow the logs
 ```
 
-`make up` pulls the images from the GitHub container registry. Nothing is
-built. Set `JOSHUA_VERSION` in `.env` to take another release. To run a build
-of your own checkout, use `make up-dev`.
+`make init-env` writes `JOSHUA_VERSION` into your `.env`, so your installation
+stays on one release. A `git pull` does not move it. To update, put the version
+you want in `.env`, then `make pull && make up`. The releases are at
+<https://github.com/jakehigg/joshua-ai/releases>.
+
+**Run your own build.** `make up-dev` builds the three images from your
+checkout and starts those instead. Use it when you change the code.
+
+```
+make up-dev      # build, then start
+```
+
+The two do not interfere. A build is tagged `joshua-ai-<component>:dev`, so it
+never replaces a release on your machine, and `make up` still starts the
+release. Both use the same containers and the same volumes, so your data stays
+when you change from one to the other.
 
 ## Contribute
 

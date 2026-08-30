@@ -12,7 +12,8 @@ Routes:
   reconnects with the current gateway toolset.
 - ``GET /admin/transcript/{conversation_id}`` — the last rows of a conversation.
 - ``POST /admin/kb/reindex`` — reconcile the memory index (body ``{source?,
-  person?, full?}``).
+  person?, full?, background?}``). ``background`` answers 202 at once and runs
+  the pass after, for a caller that must not wait.
 - ``GET /admin/kb/status`` — per-source indexer state and chunk counts.
 - ``GET /admin/kb/events`` — recent retrieval-audit rows (body ``{limit?}``).
 - ``POST /admin/reflect`` — run or re-run the nightly reflection for one day
@@ -23,6 +24,7 @@ Routes:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime
 from typing import Any
@@ -35,13 +37,30 @@ from joshua_shared.fleet_auth import (
     load_fleet_tokens,
     parse_callers,
 )
+from joshua_shared.log import get_logger
 
 from joshua_core import people
 from joshua_core.memory import embed
 
+logger = get_logger("core.admin")
+
+
 # Transcript tail bounds for ``GET /admin/transcript``.
 _DEFAULT_TRANSCRIPT_LIMIT = 40
 _MAX_TRANSCRIPT_LIMIT = 500
+
+
+def _log_background_reindex(task: asyncio.Task[Any]) -> None:
+    """Report a background pass. Nobody waits for it, so a failure that is not
+    logged here is lost. ``GET /admin/kb/status`` holds the same error."""
+    if task.cancelled():
+        logger.warning({"message": "background reindex cancelled"})
+        return
+    error = task.exception()
+    if error is not None:
+        logger.error({"message": "background reindex failed", "error": str(error)})
+    else:
+        logger.info({"message": "background reindex done", "results": task.result()})
 
 
 def _data_dir() -> str:
@@ -166,11 +185,31 @@ def build_admin_router() -> APIRouter:
         if not isinstance(body, dict):
             return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
         indexer = request.app.state.ctx.indexer
-        results = await indexer.reindex(
-            source=str(body["source"]) if body.get("source") else None,
-            person=str(body["person"]) if body.get("person") else None,
-            full=bool(body.get("full")),
-        )
+        source = str(body["source"]) if body.get("source") else None
+        person = str(body["person"]) if body.get("person") else None
+        full = bool(body.get("full"))
+
+        if bool(body.get("background")):
+            # A full re-embed of a large corpus takes minutes and holds a CPU
+            # for all of them. `background` starts the pass and answers at
+            # once, so a caller such as the restore script does not wait.
+            # `GET /admin/kb/status` reports progress and any error.
+            task = asyncio.create_task(indexer.reindex(source=source, person=person, full=full))
+            tasks = getattr(request.app.state, "kb_tasks", None)
+            if tasks is None:
+                tasks = set()
+                request.app.state.kb_tasks = tasks
+            # Hold a reference. asyncio keeps only a weak one, so a task with
+            # no reference can be collected in the middle of the pass.
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+            task.add_done_callback(_log_background_reindex)
+            return JSONResponse(
+                {"started": True, "source": source, "person": person, "full": full},
+                status_code=202,
+            )
+
+        results = await indexer.reindex(source=source, person=person, full=full)
         return JSONResponse({"results": results})
 
     @router.get("/admin/kb/status")

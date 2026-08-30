@@ -104,7 +104,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
 | `POST /admin/sessions/flush` | `ADMIN_CALLERS` | | `{"flushed": n}` |
 | `GET /admin/transcript/{conversation}?limit=` | `ADMIN_CALLERS` | | `{"conversation_id", "rows": […]}` |
-| `POST /admin/kb/reindex` | `ADMIN_CALLERS` | `{"source"?, "person"?, "full"?}` | `{"results": …}` |
+| `POST /admin/kb/reindex` | `ADMIN_CALLERS` | `{"source"?, "person"?, "full"?, "background"?}` | `{"results": …}`, or 202 `{"started": true, …}` for `background` |
 | `GET /admin/kb/status` | `ADMIN_CALLERS` | | `{"sources": {…}, "stats": […]}` |
 | `GET /admin/kb/events?limit=` | `ADMIN_CALLERS` | | `{"events": […]}` |
 | `POST /admin/reflect` | `ADMIN_CALLERS` | `{"person"?, "date"?}` | the reflection summary |
