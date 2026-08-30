@@ -23,9 +23,15 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 CHANNELS_HEALTH = "http://localhost:8080/healthz"
 
 
+# The e2e stack builds the images from this checkout, so the test proves the
+# code in the tree and not the last release. That needs the developer override,
+# because docker-compose.yml alone only names released images.
+_FILES = ("-f", "docker-compose.yml", "-f", "docker-compose.dev.yml")
+
+
 def _compose(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["docker", "compose", *args],
+        ["docker", "compose", *_FILES, *args],
         cwd=ROOT,
         check=True,
         capture_output=True,

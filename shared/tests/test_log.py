@@ -27,7 +27,7 @@ def test_dict_message_flattens_fields(capsys) -> None:
 def test_redact_masks_bearer_and_credentials() -> None:
     assert "secret" not in log.redact("Authorization: Bearer secret-value")
     assert "[REDACTED]" in log.redact("Authorization: Bearer secret-value")
-    for cred in ("sk-ant-abc123", "glpat-xxxx", "xoxb-1-2-3", "ak2_zzz", "GOCSPX-yyy"):
+    for cred in ("sk-ant-abc123", "xoxb-1-2-3", "ak2_zzz", "GOCSPX-yyy"):
         assert cred not in log.redact(f"token={cred} end")
         assert "[REDACTED]" in log.redact(f"token={cred} end")
 

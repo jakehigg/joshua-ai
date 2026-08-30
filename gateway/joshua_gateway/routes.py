@@ -247,7 +247,7 @@ class UpstreamRoute:
     def matches(self, scope):
         if scope["type"] == "http":
             path = scope.get("path", "")
-            # The trailing "/" boundary keeps /gitlab from matching /gitlab-dev.
+            # The trailing "/" boundary keeps /tracker from matching /tracker-dev.
             if path == self.prefix or path.startswith(self.prefix + "/"):
                 return Match.FULL, {}
         return Match.NONE, {}

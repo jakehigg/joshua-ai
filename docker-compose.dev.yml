@@ -1,0 +1,28 @@
+# Build the three images from this checkout instead of pulling a release. Use
+# it when you change the code:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# `make up-dev` is the same command. Compose tags each build with the name in
+# docker-compose.yml, so `make up` afterwards runs your build until you pull
+# again.
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+
+  core:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+
+  channels:
+    build:
+      context: .
+      dockerfile: channels/Dockerfile
+
+  viewer:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile

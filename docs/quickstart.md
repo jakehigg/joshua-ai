@@ -83,8 +83,8 @@ make validate
 ```
 
 The command prints `ok: joshua.yaml` and the number of people it found. The
-first run builds the core image, so it takes some minutes. `make up` in the
-next step reuses the build. If you skip this step, `make up` runs the same
+first run pulls the core image, so it takes a few minutes. `make up` in the
+next step uses the same image. If you skip this step, `make up` runs the same
 check and stops on the same error.
 
 ## 5. Start Joshua
@@ -93,9 +93,10 @@ check and stops on the same error.
 make up
 ```
 
-Compose builds three images and starts four containers: `postgres`, `gateway`,
-`core`, and `channels`. The first start takes some minutes. It builds the images
-and downloads the embedding model.
+Compose starts four containers: `postgres`, `gateway`, `core`, and `channels`.
+The images come from the GitHub container registry, so nothing is built. The
+first start takes a few minutes, because it pulls the images and downloads the
+embedding model.
 
 Make sure that everything runs:
 

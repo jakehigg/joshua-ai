@@ -129,22 +129,22 @@ def test_build_http_scoped_and_identities():
 def test_view_pattern_two_entries_one_upstream():
     catalog = build_from(
         """
-        gitlab-readonly:
+        tracker-readonly:
           type: stdio
-          command: mcp-gitlab
+          command: mcp-tracker
           allow: all
           tools:
             allow:
               - "get_*"
-        gitlab-full:
+        tracker-full:
           type: stdio
-          command: mcp-gitlab
+          command: mcp-tracker
           allow: all
         """
     )
-    assert set(catalog) == {"gitlab-readonly", "gitlab-full"}
-    assert catalog["gitlab-readonly"].tool_filter.permits("delete_x") is False
-    assert catalog["gitlab-full"].tool_filter.permits("delete_x") is True
+    assert set(catalog) == {"tracker-readonly", "tracker-full"}
+    assert catalog["tracker-readonly"].tool_filter.permits("delete_x") is False
+    assert catalog["tracker-full"].tool_filter.permits("delete_x") is True
 
 
 # -- reload diff (app level) ----------------------------------------------

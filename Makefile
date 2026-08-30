@@ -1,4 +1,4 @@
-.PHONY: sync lint fmt test up down nuke logs ps shell-core psql init-env e2e smoke chat validate backup restore
+.PHONY: sync lint fmt test up up-dev pull down nuke logs ps shell-core psql init-env e2e smoke chat validate backup restore
 
 MEMBERS := shared channels core gateway
 
@@ -25,8 +25,20 @@ test:
 joshua.yaml:
 	cp joshua.example.yaml joshua.yaml
 
+# Start the released images. Nothing is built. Set JOSHUA_VERSION in .env to
+# take another release.
 up: joshua.yaml
-	docker compose up --build
+	docker compose up -d
+	docker compose ps
+
+# Get a newer release of the images.
+pull:
+	docker compose pull
+
+# Start your own build of this checkout. Use it when you change the code.
+up-dev: joshua.yaml
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+	docker compose ps
 
 down:
 	docker compose down
@@ -39,8 +51,8 @@ nuke:
 
 # Check joshua.yaml. The secrets in .env must be in the environment, because the
 # config file refers to them.
-# Runs in the core image, so the host needs no Python. The first run builds
-# the image; `make up` reuses the build. Compose passes the secrets from .env.
+# Runs in the core image, so the host needs no Python. The first run pulls the
+# image; `make up` reuses it. Compose passes the secrets from .env.
 validate: joshua.yaml
 	docker compose run --rm --no-deps -T --entrypoint joshua-config core validate /etc/joshua/joshua.yaml
 

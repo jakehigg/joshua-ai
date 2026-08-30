@@ -20,9 +20,6 @@ coverage.xml
 .env
 /joshua.yaml
 
-# Your own private files (see CONTRIBUTING.md). Never committed.
-/local/
-
 # Data volume
 /data/
 

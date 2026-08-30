@@ -60,9 +60,9 @@ def test_all_three_shapes_and_view_validate() -> None:
             mia:
               headers:
                 Authorization: "Bearer ${SPOTIFY_TOKEN_MIA}"
-        gitlab-readonly:
+        tracker-readonly:
           type: stdio
-          command: mcp-gitlab
+          command: mcp-tracker
           allow:
             - alex
           tools:
@@ -77,7 +77,7 @@ def test_all_three_shapes_and_view_validate() -> None:
             "SPOTIFY_TOKEN_MIA": "sl",
         },
     )
-    assert set(cfg.mcp) == {"files", "weather", "spotify", "gitlab-readonly"}
+    assert set(cfg.mcp) == {"files", "weather", "spotify", "tracker-readonly"}
     assert cfg.mcp["files"].kind == "builtin"
     assert cfg.mcp["weather"].tools.allow == ["get_*"]
     assert cfg.mcp["weather"].tools.deny == ["*_admin"]
@@ -238,9 +238,9 @@ def test_identity_headers_on_stdio_server_fails() -> None:
     with pytest.raises(config.ConfigError) as exc:
         parse_mcp(
             """
-            gitlab:
+            tracker:
               type: stdio
-              command: mcp-gitlab
+              command: mcp-tracker
               allow:
                 - alex
               identities:

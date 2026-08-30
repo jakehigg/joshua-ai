@@ -109,4 +109,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp joshua.example.yaml joshua.yaml
-      - run: docker compose build
+      # The three Dockerfiles must still build from the tree. The base compose
+      # file names released images, so the build needs the developer override.
+      - run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build

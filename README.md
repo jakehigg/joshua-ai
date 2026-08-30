@@ -56,7 +56,8 @@ subscription. You do not need Python, and you do not need a Telegram bot.
 - `core/`: package `joshua_core`
 - `gateway/`: package `joshua_gateway`
 
-Each of the three builds an image from its own `Dockerfile`.
+Each of the three ships an image, built from its own `Dockerfile` by the
+release workflow.
 
 Each member has its own `pyproject.toml`, `Dockerfile`, and `tests/`. The repo
 is a `uv` workspace. It uses Python 3.13, `ruff`, and `pytest`.
@@ -74,10 +75,15 @@ make test    # pytest for the root and each member
 
 ```
 make init-env    # create .env and mint the container tokens
-make up          # docker compose up --build
+make up          # start the released images
+make pull        # get a newer release
 make down        # stop
 make logs        # follow logs
 ```
+
+`make up` pulls the images from the GitHub container registry. Nothing is
+built. Set `JOSHUA_VERSION` in `.env` to take another release. To run a build
+of your own checkout, use `make up-dev`.
 
 ## Contribute
 

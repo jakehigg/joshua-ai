@@ -1,104 +1,31 @@
 # Contributing
 
-This page is for two kinds of people: someone who runs their own Joshua and
-wants to keep their own changes, and someone who wants to send a change back.
-Both start the same way.
+Thank you for your interest in Joshua. This page says how to send a change.
 
-## Set up the repository
+## Set up
 
-You keep your code in your own fork. The main repository is `upstream`. Your
-fork is `origin`.
+You work in a fork. The main repository is `upstream`. Your fork is `origin`.
 
-1. On GitHub, fork the repository.
-2. Clone your fork:
+1. Fork the repository on GitHub.
+2. Clone your fork and add the main repository:
 
 ```
 git clone git@github.com:<you>/joshua-ai.git
 cd joshua-ai
-```
-
-3. Add the main repository as `upstream`:
-
-```
 git remote add upstream https://github.com/jakehigg/joshua-ai.git
 git fetch upstream
 ```
 
-4. Make sure the two remotes are right:
+3. Install the workspace:
 
 ```
-git remote -v
+make sync
 ```
 
-`origin` is your fork. `upstream` is the main repository. You push to
-`origin`. You pull from `upstream`.
+You need Python 3.13 and [uv](https://docs.astral.sh/uv/). Docker is needed
+only to run the stack.
 
-## Keep your own changes
-
-Keep `main` clean. It tracks `upstream/main` and nothing else. Put your own
-changes on a branch of your own, for example `mine`:
-
-```
-git checkout -b mine main
-```
-
-Commit your changes there. Push the branch to your fork:
-
-```
-git push -u origin mine
-```
-
-Run Joshua from that branch. When you want a change from the main repository,
-update `main` and put your branch on top of it:
-
-```
-git checkout main
-git fetch upstream
-git merge --ff-only upstream/main
-git push origin main
-git checkout mine
-git rebase main
-```
-
-If the rebase stops on a conflict, fix the file, run `git add <file>`, then
-`git rebase --continue`. After a rebase, push with `git push --force-with-lease
-origin mine`. The flag refuses to overwrite a commit you have not seen.
-
-### Files that never leave your machine
-
-`.env` holds your secrets. `joshua.yaml` holds your people and their handles.
-Git ignores both. Git also ignores `local/`. Put anything else that is yours
-alone under `local/`: a compose override, a script, notes. Nothing under
-`local/` can reach a commit.
-
-Before you push a branch, run:
-
-```
-git status
-```
-
-Make sure that `.env` and `joshua.yaml` are not in the list.
-
-### A private remote
-
-If you want a second copy of your branch somewhere private, add a second
-remote and push there too:
-
-```
-git remote add private git@your.git.host:you/joshua-ai.git
-git push private mine
-```
-
-Push without `-u` here. The branch keeps its tracking on `origin`, and the
-push to `private` is an extra copy.
-
-`main` still comes from `upstream`. Your branch goes to `origin`, `private`,
-or both. The main repository never sees a push from you. It sees pull requests
-only.
-
-## Send a change back
-
-A change for the main repository starts from `main`, not from your own branch.
+## Make a change
 
 1. Open an issue first, or find the issue the change belongs to. An issue
    says: Goal, Why, Spec, Acceptance criteria, Tests, Out of scope.
@@ -121,37 +48,57 @@ make test
 uv run python scripts/check_test_policy.py
 ```
 
-5. Commit. The subject is one short line. The body says why. Write both in
+5. To try the change in the stack, run your own build of the checkout:
+
+```
+make up-dev
+```
+
+`make up` runs the released images. `make up-dev` builds the three images from
+your working tree.
+
+6. Commit. The subject is one short line. The body says why. Write both in
    Simplified Technical English (below).
-6. Push the branch to your fork and open a pull request against
+7. Push the branch to your fork and open a pull request against
    `upstream/main`:
 
 ```
 git push -u origin 42-telegram-privacy-mode
 ```
 
-7. In the pull request, say what changed and why, and end with
-   `Closes #42`. CI must be green before review.
+8. In the pull request, say what changed and why, and end with `Closes #42`.
+   CI must be green before review.
 
 One pull request closes one issue. The maintainer squash-merges it. After the
-merge, update your `main` from `upstream` and delete the branch.
+merge, update your `main` from `upstream` and delete the branch:
 
-If you run Joshua from your own branch `mine`, and you also want the change
-there before the merge, cherry-pick it: `git checkout mine && git cherry-pick
-<commit>`. After the merge, a rebase of `mine` onto `main` drops the duplicate.
+```
+git checkout main
+git fetch upstream
+git merge --ff-only upstream/main
+git push origin main
+git branch -d 42-telegram-privacy-mode
+```
 
-## Develop
+## Files that never reach a commit
 
-You need Python 3.13 and [uv](https://docs.astral.sh/uv/). Docker is needed
-only to run the stack.
+`.env` holds your secrets. `joshua.yaml` holds your people and their handles.
+Git ignores both. Before you push, run `git status` and make sure that neither
+is in the list.
+
+No hostname, IP address, person, or secret from your own installation belongs
+in a diff.
+
+## The commands
 
 ```
 make sync    # install the workspace
-make lint    # ruff check, ruff format --check
+make lint    # ruff check, ruff format --check, chart version
 make fmt     # ruff format, ruff check --fix
 make test    # pytest for every member
 make smoke   # postgres in compose + the integration suite
-make up      # the whole stack
+make up      # the whole stack, from the released images
+make up-dev  # the whole stack, from your build of this checkout
 ```
 
 `CLAUDE.md` holds the conventions: the three goals, the vocabulary, the auth

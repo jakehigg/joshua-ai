@@ -6,6 +6,14 @@ person who runs Joshua.
 
 ## Unreleased
 
+### Changed
+
+- `make up` starts the released images from the GitHub container registry.
+  Nothing is built, so a first start takes minutes and not tens of minutes.
+  Set `JOSHUA_VERSION` in `.env` to take another release, and `make pull` to
+  get it. `make up-dev` builds the three images from your checkout, for a
+  person who changes the code.
+
 ### Added
 
 - `GET /admin/chats/unconfigured` on `channels` lists the group chats that

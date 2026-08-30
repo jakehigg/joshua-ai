@@ -150,12 +150,17 @@ added person survives a restart and a config edit.
 
 ## Update Joshua
 
+Set `JOSHUA_VERSION` in `.env` to the release you want, then:
+
 ```
-git pull
+make pull
 make up
 ```
 
-`make up` rebuilds the images and restarts the containers. The database schema
+`make pull` gets the images of that release and `make up` restarts the
+containers. Without `JOSHUA_VERSION`, compose takes the version in
+`docker-compose.yml`. The releases are at
+<https://github.com/jakehigg/joshua-ai/releases>. The database schema
 is additive. A new version adds tables and columns and never removes one, so
 an update needs no migration step. The documentation in `wiki/joshua/` is
 replaced at each start.
