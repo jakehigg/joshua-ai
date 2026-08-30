@@ -110,6 +110,20 @@ The PersistentVolume carries `helm.sh/resource-policy: keep`, so an uninstall
 leaves the data. `postgres.storage.volumeName` binds the database to a named
 volume in the same way.
 
+The database has the same two ways. `postgres.storage.existingClaim` binds a
+claim you made yourself, and the StatefulSet then makes no claim of its own:
+
+```yaml
+postgres:
+  storage:
+    existingClaim: joshua-pgdata
+```
+
+Use it when you make the volumes outside the chart, because a volume lives
+longer than a release. The claim must exist before the StatefulSet starts.
+Without it, the StatefulSet makes the claim from `postgres.storage.size`,
+`storageClass`, and `volumeName`.
+
 `dataPermissions.enabled` runs a short init container that makes `/data` and its
 two subdirectories writable for uid 1000. An NFS export usually arrives owned by
 root, and Kubernetes does not apply `fsGroup` to an NFS volume. Leave it on

@@ -34,4 +34,4 @@ persistence:
         path: /export/joshua
 postgres:
   storage:
-    volumeName: joshua-pgdata-test
+    existingClaim: joshua-pgdata-test

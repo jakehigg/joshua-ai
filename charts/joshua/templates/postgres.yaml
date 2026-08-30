@@ -79,6 +79,14 @@ spec:
           volumeMounts:
             - name: pgdata
               mountPath: /var/lib/postgresql/data
+{{- if .Values.postgres.storage.existingClaim }}
+      {{/* A claim made outside the chart. The StatefulSet makes no claim of its
+           own, so an uninstall leaves the volume alone. */}}
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: {{ .Values.postgres.storage.existingClaim }}
+{{- else }}
   volumeClaimTemplates:
     - metadata:
         name: pgdata
@@ -94,4 +102,5 @@ spec:
         resources:
           requests:
             storage: {{ .Values.postgres.storage.size }}
+{{- end }}
 {{- end }}

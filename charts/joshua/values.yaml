@@ -17,10 +17,6 @@ image:
 # A package on a registry can be private. Name the pull secret here when it is.
 imagePullSecrets: []
 
-# The name of the group of people this instance serves. It reaches the
-# containers through joshua.yaml.
-instanceName: Joshua
-
 # The whole joshua.yaml, as a string. Every option is documented in
 # docs/config.md. The chart writes it to a ConfigMap and mounts it read-only in
 # all three containers. Leave it empty to supply your own ConfigMap through
@@ -193,6 +189,11 @@ postgres:
   username: joshua
   # The password comes from secrets.postgres.
   storage:
+    # Bind a claim you made yourself. Use this when the volumes are made
+    # outside the chart, because they are infrastructure with a longer life
+    # than a release. The claim must exist before the StatefulSet starts.
+    existingClaim: ""
+    # The three values below apply only when existingClaim is empty.
     size: 10Gi
     storageClass: ""
     # Bind one named PersistentVolume instead of provisioning one.
