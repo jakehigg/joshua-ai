@@ -90,7 +90,11 @@ jobs:
       - name: keep the digest
         run: |
           mkdir -p /tmp/digests
-          touch "/tmp/digests/${{ steps.build.outputs.digest }}"
+          # The output is "sha256:<hex>". Keep the hex alone: an artifact path
+          # cannot hold a colon, and the merge job puts the prefix back.
+          digest='${{ steps.build.outputs.digest }}'
+          echo "digest ${digest}"
+          touch "/tmp/digests/${digest#sha256:}"
       - uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.member }}-${{ matrix.platform.arch }}
