@@ -1,10 +1,46 @@
 # Changelog
 
-Joshua has no numbered release yet. This file starts with the state of
-`main` on 2026-08-28. From here on, each entry names what changed for the
-person who runs Joshua.
+Each entry names what changed for the person who runs Joshua. The releases,
+with the images and the packaged chart, are at
+<https://github.com/jakehigg/joshua-ai/releases>.
 
-## Unreleased
+## 0.0.2 - 2026-08-30
+
+### Added
+
+- An image for arm64, next to the one for amd64. A `docker pull` on an Apple
+  Silicon Mac, a Raspberry Pi, or an ARM server failed before this, so Joshua
+  did not install on such a machine at all.
+- `make init-env` writes `JOSHUA_VERSION` into `.env`, so an installation
+  stays on one release. A `git pull` does not move it. To update, put the
+  version you want in `.env`, then `make pull && make up`.
+- `make up-dev` builds the three images from your checkout and starts those,
+  for a person who changes the code. A build is tagged
+  `joshua-ai-<component>:dev`, so it never replaces a release on your machine.
+- `POST /admin/kb/reindex` takes `{"background": true}`. It answers 202 at
+  once and runs the pass after.
+- `make restore FROM=… NO_EMBED=1` restores without a rebuild of the search
+  index. The indexer takes the restored files on its next pass, and the
+  nightly run covers the rest.
+
+### Changed
+
+- `make up` starts the released images from the GitHub container registry.
+  Nothing is built, so a first start takes minutes and not tens of minutes.
+- A restore no longer waits for the search index. It starts the rebuild and
+  returns. The pass makes an embedding for every document and holds a CPU
+  until it ends, and the restore says so.
+
+### Fixed
+
+- The restore sent the fleet token to `curl` as an argument, where every user
+  on the machine reads it in `ps`. It goes on stdin now.
+- A build from a checkout was tagged with the release reference, so it
+  replaced the release on your machine and `make up` then ran the build.
+
+## 0.0.1 - 2026-08-30
+
+The first release.
 
 ### Added
 

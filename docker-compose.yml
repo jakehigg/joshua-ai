@@ -1,5 +1,9 @@
-# The self-hoster's whole deployment. `make init-env && make up` starts the
-# four services on one host. The k8s component (phase 6) mirrors this file.
+# The whole deployment on one host. `make init-env && make up` starts the four
+# services. The images come from the GitHub container registry, so nothing is
+# built here: set JOSHUA_VERSION in `.env` to take another release.
+#
+# To run your own build instead, add the developer override:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 #
 # Secrets come only from `.env` (see `.env.example`). No secret is written in
 # this file; every value is a literal or a `${VAR}` from `.env`.
@@ -58,9 +62,7 @@ services:
     # Not published on the host. Only `core` connects, over the compose network.
 
   gateway:
-    build:
-      context: .
-      dockerfile: gateway/Dockerfile
+    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.2}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *runtime-vars]
@@ -72,9 +74,7 @@ services:
     healthcheck: *app-healthcheck
 
   core:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
+    image: ghcr.io/jakehigg/joshua-ai-core:${JOSHUA_VERSION:-0.0.2}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *runtime-vars]
@@ -110,9 +110,7 @@ services:
     healthcheck: *app-healthcheck
 
   channels:
-    build:
-      context: .
-      dockerfile: channels/Dockerfile
+    image: ghcr.io/jakehigg/joshua-ai-channels:${JOSHUA_VERSION:-0.0.2}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *config-vars, *runtime-vars]
@@ -137,9 +135,7 @@ services:
   # front for TLS. It gets `/data` (read-write, for the delete) and the viewer
   # passwords, and no fleet token or upstream credential.
   viewer:
-    build:
-      context: .
-      dockerfile: gateway/Dockerfile
+    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.2}
     profiles: ["viewer"]
     restart: unless-stopped
     # The gateway image entrypoint runs the gateway app; the viewer is the

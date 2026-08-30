@@ -1,0 +1,37 @@
+# Build the images from this checkout instead of running a release. Use it when
+# you change the code:
+#
+#   make up-dev
+#
+# which is:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# The builds are tagged `joshua-ai-<component>:dev`, so they never replace a
+# release on your machine. `make up` still runs the release, and `make up-dev`
+# still runs your build. Nothing here changes docker-compose.yml.
+services:
+  gateway:
+    image: joshua-ai-gateway:dev
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+
+  core:
+    image: joshua-ai-core:dev
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+
+  channels:
+    image: joshua-ai-channels:dev
+    build:
+      context: .
+      dockerfile: channels/Dockerfile
+
+  # The viewer is a second entrypoint in the gateway image.
+  viewer:
+    image: joshua-ai-gateway:dev
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile

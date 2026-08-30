@@ -77,10 +77,14 @@ def test_named_volume_mount_points_are_owned_in_the_image() -> None:
     import yaml
 
     raw = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    # docker-compose.yml names released images. The Dockerfile of a service is
+    # in the developer override, which is the file that builds them.
+    dev = yaml.safe_load((ROOT / "docker-compose.dev.yml").read_text())
     volumes = set(raw.get("volumes") or {})
     for service in CONTAINERS:
         body = raw["services"][service]
-        dockerfile = (ROOT / body["build"]["dockerfile"]).read_text()
+        build = dev["services"][service]["build"]
+        dockerfile = (ROOT / build["dockerfile"]).read_text()
         for mount in body.get("volumes") or []:
             source, _, target = str(mount).partition(":")
             target = target.split(":")[0]
@@ -90,7 +94,7 @@ def test_named_volume_mount_points_are_owned_in_the_image() -> None:
                 rf"mkdir -p {re.escape(target)}\b.*chown 1000:1000 {re.escape(target)}\b",
                 dockerfile,
             )
-            assert owned, f"{service}: {body['build']['dockerfile']} does not own {target}"
+            assert owned, f"{service}: {build['dockerfile']} does not own {target}"
 
 
 def test_every_entrypoint_configures_logging() -> None:

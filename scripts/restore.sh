@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
 # Restore a Joshua backup into this stack.
-# Usage: scripts/restore.sh <backup_dir> [--force]
-#        scripts/restore.sh <db.dump> <data.tar.gz> [--force]
+# Usage: scripts/restore.sh <backup_dir> [--force] [--no-embed]
+#        scripts/restore.sh <db.dump> <data.tar.gz> [--force] [--no-embed]
 #
 # The database must be empty, or you must pass --force. --force drops every
 # table before the restore. The data volume is replaced in full.
 #
 # After the restore the script starts the stack and asks core to rebuild the
-# search index from the restored files.
+# search index. The request returns at once and the pass runs in core, which
+# holds a CPU until it ends. --no-embed skips the request: the indexer picks
+# up the restored files on its next pass, and the nightly run covers the
+# rest.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 force=0
+embed=1
 args=()
 for arg in "$@"; do
   case "$arg" in
     --force) force=1 ;;
+    --no-embed) embed=0 ;;
     *) args+=("$arg") ;;
   esac
 done
@@ -24,7 +29,7 @@ done
 case "${#args[@]}" in
   1) dump="${args[0]}/db.dump"; tarball="${args[0]}/data.tar.gz" ;;
   2) dump="${args[0]}"; tarball="${args[1]}" ;;
-  *) echo "usage: scripts/restore.sh <backup_dir> [--force]" >&2; exit 2 ;;
+  *) echo "usage: scripts/restore.sh <backup_dir> [--force] [--no-embed]" >&2; exit 2 ;;
 esac
 for f in "$dump" "$tarball"; do
   [ -f "$f" ] || { echo "restore: $f is not a file" >&2; exit 2; }
@@ -86,12 +91,31 @@ for _ in $(seq 1 60); do
 done
 
 set -a; . ./.env; set +a
-if [ -n "${JOSHUA_TOKEN_LAPTOP:-}" ]; then
-  echo "restore: rebuilding the search index"
-  curl -fs -X POST -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" \
-    -H "Content-Type: application/json" -d '{"full": true}' \
-    http://127.0.0.1:8081/admin/kb/reindex >/dev/null \
-    || echo "restore: the reindex request failed. Run it by hand: POST /admin/kb/reindex {\"full\": true}" >&2
+if [ "$embed" -eq 0 ]; then
+  echo "restore: the search index is not rebuilt, because of --no-embed."
+  echo "restore: core indexes the restored files on its next pass, and the"
+  echo "restore: nightly run covers the rest. To start a full pass by hand:"
+  echo "restore:   POST /admin/kb/reindex {\"full\": true, \"background\": true}"
+elif [ -n "${JOSHUA_TOKEN_LAPTOP:-}" ]; then
+  echo "restore: starting a full rebuild of the search index"
+  # `background` makes core answer at once and do the pass after. The token
+  # goes to curl on stdin, as a config file, and never in an argument: every
+  # user on the machine can read the argument list of every process, so
+  # `-H "Authorization: Bearer $TOKEN"` shows the token in `ps`.
+  if printf 'header = "Authorization: Bearer %s"\n' "$JOSHUA_TOKEN_LAPTOP" |
+    curl -fs --max-time 30 --config - -X POST \
+      -H "Content-Type: application/json" \
+      -d '{"full": true, "background": true}' \
+      http://127.0.0.1:8081/admin/kb/reindex >/dev/null
+  then
+    echo "restore: the rebuild runs in core now. It embeds every document, so"
+    echo "restore: it holds a CPU until it ends. A large corpus takes minutes."
+    echo "restore: Joshua answers while it runs, and a search gets better as it"
+    echo "restore: goes. Watch it with GET /admin/kb/status. Next time, pass"
+    echo "restore: --no-embed to leave the work to the nightly run."
+  else
+    echo "restore: the reindex request failed. Run it by hand: POST /admin/kb/reindex {\"full\": true, \"background\": true}" >&2
+  fi
 fi
 
 echo "restore: done"

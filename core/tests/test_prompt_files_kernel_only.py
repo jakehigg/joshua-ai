@@ -21,7 +21,6 @@ _FORBIDDEN = [
     ("home assistant", re.compile(r"home\s*assistant", re.IGNORECASE)),
     ("reminders", re.compile(r"reminders", re.IGNORECASE)),
     ("pantry", re.compile(r"pantry", re.IGNORECASE)),
-    ("gitlab", re.compile(r"gitlab", re.IGNORECASE)),
     ("ops", re.compile(r"\bops\b", re.IGNORECASE)),
     ("memos", re.compile(r"\bmemos\b", re.IGNORECASE)),
     ("wiki.js", re.compile(r"wiki\.js", re.IGNORECASE)),

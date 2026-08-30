@@ -71,7 +71,7 @@ A private registry needs its own Secret in the same way, named in
 
 ```
 kubectl create secret docker-registry joshua-registry -n joshua \
-  --docker-server=harbor.example.net --docker-username=... --docker-password=...
+  --docker-server=registry.example.net --docker-username=... --docker-password=...
 ```
 
 ## The volume
@@ -168,7 +168,7 @@ ignore that block for one container, such as a build in your own registry:
 
 ```yaml
 core:
-  image: harbor.example.net/joshua/core:local-1
+  image: registry.example.net/joshua/core:local-1
 ```
 
 A package on a registry can be private, and that is a different setting from

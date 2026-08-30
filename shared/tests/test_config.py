@@ -124,7 +124,7 @@ def test_duplicate_handle_fails() -> None:
 
 def test_literal_credential_fails_with_path() -> None:
     # A fake token with a real prefix, so the loader must refuse it.
-    fake = "glpat-abc123def"  # gitleaks:allow
+    fake = "xoxb-abc123def"  # gitleaks:allow
     text = GOOD.replace("bot_token: ${TELEGRAM_BOT_TOKEN}", f"bot_token: {fake}")
     with pytest.raises(config.ConfigError) as exc:
         config.parse(text, ENV, source="test.yaml")
@@ -134,9 +134,9 @@ def test_literal_credential_fails_with_path() -> None:
 
 
 def test_credential_from_env_is_allowed() -> None:
-    cfg = config.parse(GOOD, {"TELEGRAM_BOT_TOKEN": "glpat-secret-from-env"}, source="test.yaml")
+    cfg = config.parse(GOOD, {"TELEGRAM_BOT_TOKEN": "xoxb-secret-from-env"}, source="test.yaml")
     assert cfg.channels.telegram is not None
-    assert cfg.channels.telegram.bot_token == "glpat-secret-from-env"
+    assert cfg.channels.telegram.bot_token == "xoxb-secret-from-env"
 
 
 def test_unset_variable_names_variable() -> None:

@@ -425,11 +425,11 @@ route. Give each a different filter to expose a different view of the same serve
 
 ```yaml
 mcp:
-  gitlab-readonly:
+  tracker-readonly:
     type: stdio
-    command: mcp-gitlab
+    command: mcp-tracker
     env:
-      GITLAB_TOKEN: ${GITLAB_PAT_RO}
+      TRACKER_TOKEN: ${TRACKER_TOKEN_RO}
     allow:
       - alex
     tools:
@@ -437,11 +437,11 @@ mcp:
         - "get_*"
         - "list_*"
         - "search_*"
-  gitlab-full:
+  tracker-full:
     type: stdio
-    command: mcp-gitlab
+    command: mcp-tracker
     env:
-      GITLAB_TOKEN: ${GITLAB_PAT}
+      TRACKER_TOKEN: ${TRACKER_TOKEN}
     allow:
       - alex
 ```

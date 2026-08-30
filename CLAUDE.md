@@ -265,7 +265,12 @@ it. `make e2e` runs the compose-level tests.
 
 ## Deployment
 
-The deployment path in this repository is `docker-compose.yml`. Never add
-cluster detail to this repository: no hostnames, IP addresses, rosters, or
-manifests for a particular installation. Keep such files in your own private
-fork or under `local/`, which git ignores.
+Two deployment paths ship here: `docker-compose.yml` for one host, and the Helm
+chart in `charts/joshua` for Kubernetes. Both take released images from the
+GitHub container registry, and neither builds. `docker-compose.dev.yml` adds a
+build for a developer.
+
+Never add the detail of one installation to this repository: no hostname, IP
+address, roster, credential, or manifest for a particular deployment. Every
+such value belongs in a values file or an environment file that the person who
+runs Joshua keeps.

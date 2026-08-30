@@ -94,7 +94,7 @@ message text and no sender handle.
 | `POST /admin/sessions/flush` | close every session. The next message starts a fresh one. |
 | `GET /admin/transcript/<conversation>?limit=40` | the last rows of one conversation |
 | `GET /admin/kb/status` | the index: per source, when it ran, how many documents and chunks |
-| `POST /admin/kb/reindex` | reconcile the index. `{"full": true}` re-embeds everything. `{"person": "sam"}` limits it to one person. |
+| `POST /admin/kb/reindex` | reconcile the index. `{"full": true}` re-embeds everything. `{"person": "sam"}` limits it to one person. `{"background": true}` answers 202 at once and runs the pass after. |
 | `GET /admin/kb/events?limit=40` | what retrieval found for recent turns, and what it injected |
 | `POST /admin/reflect` | run the nightly reflection now. `{"date": "2026-08-27", "person": "sam"}` re-runs one day for one person. |
 | `POST /admin/turn` | run one turn with no channel: `{"channel", "text", "person"}`. The reply comes back in the response and is not delivered. |
@@ -148,15 +148,44 @@ A person that Joshua adds with `add_user` goes to `/data/people.yaml`, not to
 `joshua.yaml`. The loader merges that file over `people` at each load, so an
 added person survives a restart and a config edit.
 
-## Update Joshua
+## The two ways to run Joshua
+
+`make up` starts the images of a release, from the GitHub container registry.
+Nothing is built. This is the way to run Joshua.
+
+`make up-dev` builds the three images from your checkout and starts those. Use
+it only when you change the code. A build is tagged
+`joshua-ai-<component>:dev`, so it never replaces a release on your machine.
+
+Both use the same containers and the same volumes. `make down`, `make logs`,
+`make ps`, `make backup`, and `make restore` work for either.
+
+## The version you run
+
+`make init-env` writes `JOSHUA_VERSION` into `.env`, so an installation stays
+on one release. Nothing moves it: not `git pull`, and not a new release. Read
+it at any time:
 
 ```
-git pull
+grep JOSHUA_VERSION .env
+```
+
+There is no `latest` tag on the registry. Every image reference names one
+version, so a start always gets the same three images.
+
+## Update Joshua
+
+Put the release you want in `.env`, then:
+
+```
+make pull
 make up
 ```
 
-`make up` rebuilds the images and restarts the containers. The database schema
-is additive. A new version adds tables and columns and never removes one, so
+`make pull` gets the images of that release and `make up` restarts the
+containers. The releases are at
+<https://github.com/jakehigg/joshua-ai/releases>. Read `CHANGELOG.md` first.
+The database schema is additive. A new version adds tables and columns and never removes one, so
 an update needs no migration step. The documentation in `wiki/joshua/` is
 replaced at each start.
 
@@ -197,6 +226,36 @@ The restore refuses a database that already has tables. `make restore FROM=…
 FORCE=1` drops them first. The restore replaces the `/data` volume in full,
 starts the stack, and asks `core` to rebuild the search index from the restored
 files.
+
+### The rebuild of the search index
+
+The request returns at once and the pass runs in `core`. It makes an embedding
+for every document, so **it holds a CPU until it ends**. A large corpus takes
+minutes. Joshua answers while it runs, and a search gets better as the pass
+goes. Watch it:
+
+```
+curl -s -H "$auth" 127.0.0.1:8081/admin/kb/status
+```
+
+`running` is true while the pass runs. `last_error` names a failure.
+
+To leave the work for later:
+
+```
+make restore FROM=<backup directory> NO_EMBED=1
+```
+
+`core` then indexes the restored files on its next pass, which is every
+`memory.index_interval_s` seconds, and the nightly reflection covers the rest.
+This costs nothing at the time of the restore, and a search is weaker until the
+index catches up. Start a full pass at any time:
+
+```
+curl -s -X POST -H "$auth" -H 'Content-Type: application/json' \
+  -d '{"full": true, "background": true}' \
+  127.0.0.1:8081/admin/kb/reindex
+```
 
 `make nuke` deletes the volumes. It asks first.
 

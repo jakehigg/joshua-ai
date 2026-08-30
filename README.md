@@ -56,7 +56,8 @@ subscription. You do not need Python, and you do not need a Telegram bot.
 - `core/`: package `joshua_core`
 - `gateway/`: package `joshua_gateway`
 
-Each of the three builds an image from its own `Dockerfile`.
+Each of the three ships an image, built from its own `Dockerfile` by the
+release workflow.
 
 Each member has its own `pyproject.toml`, `Dockerfile`, and `tests/`. The repo
 is a `uv` workspace. It uses Python 3.13, `ruff`, and `pytest`.
@@ -72,12 +73,34 @@ make test    # pytest for the root and each member
 
 ## Run
 
+There are two ways to run Joshua. Use the first one unless you change the code.
+
+**Run a release.** `make up` starts the images that the release workflow
+publishes to the GitHub container registry. Nothing is built.
+
 ```
 make init-env    # create .env and mint the container tokens
-make up          # docker compose up --build
+make up          # start
 make down        # stop
-make logs        # follow logs
+make logs        # follow the logs
 ```
+
+`make init-env` writes `JOSHUA_VERSION` into your `.env`, so your installation
+stays on one release. A `git pull` does not move it. To update, put the version
+you want in `.env`, then `make pull && make up`. The releases are at
+<https://github.com/jakehigg/joshua-ai/releases>.
+
+**Run your own build.** `make up-dev` builds the three images from your
+checkout and starts those instead. Use it when you change the code.
+
+```
+make up-dev      # build, then start
+```
+
+The two do not interfere. A build is tagged `joshua-ai-<component>:dev`, so it
+never replaces a release on your machine, and `make up` still starts the
+release. Both use the same containers and the same volumes, so your data stays
+when you change from one to the other.
 
 ## Contribute
 
