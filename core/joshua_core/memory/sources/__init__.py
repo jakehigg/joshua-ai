@@ -9,8 +9,8 @@ entry; the indexer does not change.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Protocol, runtime_checkable
 
@@ -29,6 +29,9 @@ class Document:
     provenance: str = "own"  # "own" | "external"
     tags: tuple[str, ...] = ()
     doc_date: date | None = None  # for recency ranking (blog posts, memos)
+    # Parsed frontmatter ``key: value`` pairs. ``FilesSource`` fills it; a flat
+    # source (memos) leaves it empty. The indexer reads it for a taught skill.
+    frontmatter: Mapping[str, str] = field(default_factory=dict)
 
 
 @runtime_checkable

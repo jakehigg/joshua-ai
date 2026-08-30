@@ -60,6 +60,7 @@ def _check(
     chat_kind: str = "dm",
     text_len: int = 1,
     attachment_bytes: int = 0,
+    chat_title: str | None = None,
 ):
     return guard.check(
         channel_type="telegram",
@@ -68,6 +69,7 @@ def _check(
         chat_kind=chat_kind,
         text_len=text_len,
         attachment_bytes=attachment_bytes,
+        chat_title=chat_title,
     )
 
 
@@ -243,3 +245,63 @@ def test_the_refusal_log_never_holds_the_message(caplog) -> None:
         _check(_guard(), "555", text_len=4000)
     for record in caplog.records:
         assert "text" not in (record.msg if isinstance(record.msg, dict) else {})
+
+
+# --- Unconfigured groups -----------------------------------------------------
+#
+# An operator cannot add a group whose chat id never appears anywhere. The
+# refusal ring does not hold it: a sender on the roster is allowed, so no
+# refusal happens and nothing is recorded.
+
+NEW_CHAT = "-100777"
+
+
+async def test_enrolled_sender_in_an_unconfigured_group_is_recorded() -> None:
+    guard = _guard()
+    verdict = _check(guard, "998877", chat_id=NEW_CHAT, chat_kind="group", chat_title="Family")
+    assert verdict.allowed  # alex is on the roster, so no refusal is recorded
+    assert guard.recent() == []
+    groups = guard.unconfigured()
+    assert len(groups) == 1
+    assert groups[0]["chat_id"] == NEW_CHAT
+    assert groups[0]["chat_title"] == "Family"
+    assert groups[0]["channel_type"] == "telegram"
+
+
+async def test_unknown_sender_in_an_unconfigured_group_is_recorded_once() -> None:
+    guard = _guard()
+    refused = _check(guard, "000000", chat_id=NEW_CHAT, chat_kind="group")
+    assert not refused.allowed and refused.reason == REASON_UNKNOWN
+    _check(guard, "998877", chat_id=NEW_CHAT, chat_kind="group")
+    assert len(guard.unconfigured()) == 1
+
+
+async def test_a_configured_group_is_not_recorded() -> None:
+    guard = _guard()
+    _check(guard, "111222", chat_id=GROUP_CHAT, chat_kind="group")
+    _check(guard, "998877", chat_id=OPEN_CHAT, chat_kind="group")
+    assert guard.unconfigured() == []
+
+
+async def test_a_direct_message_is_not_recorded() -> None:
+    guard = _guard()
+    _check(guard, "998877", chat_id="dm", chat_kind="dm")
+    assert guard.unconfigured() == []
+
+
+async def test_the_record_holds_no_text_and_no_handle() -> None:
+    """The chat is named, the people in it are not."""
+    guard = _guard()
+    _check(guard, "998877", chat_id=NEW_CHAT, chat_kind="group", chat_title="Family")
+    entry = guard.unconfigured()[0]
+    assert set(entry) == {"channel_type", "chat_id", "chat_title", "at"}
+    assert "998877" not in str(entry)
+
+
+async def test_the_ring_is_bounded() -> None:
+    from joshua_channels.guard import UNCONFIGURED_RING_SIZE
+
+    guard = _guard()
+    for n in range(UNCONFIGURED_RING_SIZE + 5):
+        _check(guard, "998877", chat_id=f"-100{n:04d}", chat_kind="group")
+    assert len(guard.unconfigured()) == UNCONFIGURED_RING_SIZE

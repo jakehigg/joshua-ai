@@ -61,22 +61,43 @@ def _indexer(pool, root: Path) -> tuple[MemoryStore, Indexer]:
     return store, Indexer(store, {"files": FilesSource(root)}, embed_model="m", chunk_chars=1600)
 
 
-async def test_person_scope(db, repo, tmp_path: Path, count_embed) -> None:
+async def test_a_search_reaches_the_whole_corpus(db, repo, tmp_path: Path, count_embed) -> None:
+    """One corpus since #25: a search is not narrowed by who asks.
+
+    The wiki is what Joshua knows and a journal is when something happened, so a
+    question about last Tuesday has to be able to reach the journal of the
+    person it happened to. Before #25 each person saw their own journal alone.
+    """
     await _people(repo)
     _tree(tmp_path)
     store, indexer = _indexer(db.pool, tmp_path)
     await indexer.reindex()
 
+    everything = {"blog/2026-08-01.md", "blog/2026-08-02.md", "wiki/w.md", "shared/s.md"}
+
     alice = {c.path for c in await search(store, "alice", VEC, k=10, min_sim=0.0)}
-    assert {"blog/2026-08-01.md", "wiki/w.md", "shared/s.md"} <= alice
-    assert "blog/2026-08-02.md" not in alice  # never sees Bob's rows
-
     bob = {c.path for c in await search(store, "bob", VEC, k=10, min_sim=0.0)}
-    assert {"blog/2026-08-02.md", "wiki/w.md", "shared/s.md"} <= bob
-    assert "blog/2026-08-01.md" not in bob
-
     group = {c.path for c in await search(store, None, VEC, k=10, min_sim=0.0)}
-    assert group == {"wiki/w.md", "shared/s.md"}  # a group turn sees the wiki and shared
+
+    assert everything <= alice
+    assert everything <= bob
+    # A group turn reads the same corpus. It used to see the wiki and shared only.
+    assert everything <= group
+
+
+async def test_a_result_still_names_whose_episode_it_is(
+    db, repo, tmp_path: Path, count_embed
+) -> None:
+    """``person_id`` stopped being a filter and stays as provenance."""
+    await _people(repo)
+    _tree(tmp_path)
+    store, indexer = _indexer(db.pool, tmp_path)
+    await indexer.reindex()
+
+    rows = {c.path: c.person_id for c in await search(store, "alice", VEC, k=10, min_sim=0.0)}
+    assert rows["blog/2026-08-01.md"] == "alice"
+    assert rows["blog/2026-08-02.md"] == "bob"
+    assert rows["wiki/w.md"] is None
 
 
 async def test_incremental_edit_delete_unchanged(db, repo, tmp_path: Path, count_embed) -> None:

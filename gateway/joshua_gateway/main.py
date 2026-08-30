@@ -34,10 +34,9 @@ from joshua_gateway.upstream import Upstream
 
 logger = get_logger("gateway")
 
-# The only fleet caller allowed on the MCP routes. A person's tools and files
-# are reached through core, never directly.
-# (CLAUDE.md). This is the same for every route; per-person access is the person
-# gate on the server spec.
+# Only core is admitted on the MCP routes. A person's tools and files are reached
+# through core, never directly. Per-person access is the person gate on the
+# server spec.
 MCP_ROUTE_CALLERS = frozenset({"core"})
 
 

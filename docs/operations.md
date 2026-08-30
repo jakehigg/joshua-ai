@@ -13,7 +13,7 @@ Each container answers two open routes on its port:
 
 | Container | `/readyz` checks |
 |---|---|
-| `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` after a poll error. iMessage reports whether BlueBubbles answers a ping. |
+| `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` while a poll error stands, and `ok: true` again after the next good poll. iMessage reports whether BlueBubbles answers a ping. |
 | `core` | `db` (the database answers) and `layout` (the data volume is complete and writable) |
 | `gateway` | `connected`, `errored`, `total`: the MCP upstreams |
 
@@ -63,6 +63,26 @@ auth="Authorization: Bearer $JOSHUA_TOKEN_LAPTOP"
 |---|---|
 | `GET /admin/guard/stats` | how many messages the guard refused, by reason |
 | `GET /admin/guard/recent` | the last 200 refusals, with the sender's handle. Use it to find a new person's Telegram id. |
+| `GET /admin/chats/unconfigured` | the group chats `joshua.yaml` does not list. Use it to find a group's chat id. |
+
+### Add a group chat
+
+Joshua answers a group only when `joshua.yaml` lists it. To add one:
+
+1. Add Joshua to the chat and send one message there.
+2. Read the chat id:
+
+```
+curl -sH "$auth" localhost:8080/admin/chats/unconfigured
+```
+
+3. Put the `chat_id` in `groups` in `joshua.yaml`, with an `id` and the
+   `channel`. Add `members` to admit only some senders.
+4. Reload the config (see "Change the config").
+
+The route lists a chat whether the sender is on the roster or not, because a
+group of enrolled people refuses nobody and so writes no refusal. It holds no
+message text and no sender handle.
 
 ### core, on `127.0.0.1:8081`
 
@@ -204,6 +224,45 @@ the next message starts a fresh one with the profile and the recent posts as
 context. `memory.md` explains the rules.
 
 To run the reflection by hand, or to re-run one day, use `POST /admin/reflect`.
+
+## The viewer
+
+The viewer is a read-only web page for the wiki and a person's own files. It is
+off by default. To turn it on:
+
+1. Set a password for each person in `.env`. Name it `VIEWER_PW_<ID>` in upper
+   case, for example `VIEWER_PW_ALEX`.
+
+   ```
+   VIEWER_PW_ALEX=a-long-random-password
+   ```
+
+   For a bcrypt hash instead of a literal, set the value to a `$2` string.
+
+2. Turn the viewer on in `joshua.yaml` and list each person:
+
+   ```yaml
+   viewer:
+     enabled: true
+     users:
+       alex: ${VIEWER_PW_ALEX:-}
+   ```
+
+3. Validate and start it:
+
+   ```
+   make validate
+   docker compose --profile viewer up -d viewer
+   ```
+
+The viewer listens on host port 8081. Open `http://localhost:8081/` and sign in
+with the person id and the password. Put a reverse proxy in front for TLS
+before you expose it off the host.
+
+A member sees a "move this page to trash" button on a wiki page. It moves the
+page to `wiki/.trash/` and drops it from the search index at the next index run.
+A guest reads the wiki but cannot delete. To restore a page, move it back from
+`wiki/.trash/<timestamp>/` with a shell.
 
 ## Where the data is
 

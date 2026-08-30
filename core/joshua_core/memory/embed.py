@@ -10,11 +10,16 @@ degrades to an "unavailable" message rather than crashing.
 
 ``EMBED_DIM`` must match the ``vector(384)`` column in the ``kb_chunk`` schema —
 do not change the dimension without re-embedding every row.
+
+The model cache directory is tested before the model is built. A directory that
+the process cannot write degrades to a temporary one, so a wrong mount costs a
+download on each start and not the whole memory.
 """
 
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 
 from joshua_shared.log import get_logger
@@ -30,6 +35,73 @@ _model = None  # fastembed.TextEmbedding | None
 _unavailable = False  # set once if fastembed can't be loaded, to stop retrying
 
 
+def is_available() -> bool:
+    """True while the model can still be used. False once a load has failed.
+
+    The answer needs no load, so a probe route can call it on each request. A
+    model that is not tried yet reads as available, because nothing is wrong
+    yet. No name, no path, and no secret leave this function.
+    """
+    return not _unavailable
+
+
+def _is_writable(path: str) -> bool:
+    """True when ``path`` exists or can be made, and accepts a new file.
+
+    A probe file is used, not ``os.access``. ``os.access`` reads the mode bits
+    and gives a wrong answer on an NFS export with root squash, and with an
+    ACL that the mode bits do not show.
+    """
+    probe = os.path.join(path, ".joshua-write-probe")
+    try:
+        os.makedirs(path, exist_ok=True)
+        with open(probe, "w"):
+            pass
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            os.unlink(probe)
+        except OSError:
+            pass
+
+
+def _usable_cache_dir(configured: str | None) -> str | None:
+    """Return a writable model cache directory, or None to let fastembed choose.
+
+    A deployment can point MEMORY_EMBED_CACHE_DIR at a directory that the
+    container user cannot write: a k8s subPath that arrives root-owned, a bind
+    mount, an NFS export, or a rootless host where the uid does not map. The
+    model download then fails, so every embedding fails, and the agent keeps
+    answering with no memory. A temporary directory keeps the memory alive.
+    The model is downloaded again on each start, which is the cost of the wrong
+    mount, so the warning names both paths.
+    """
+    if not configured:
+        return None
+    if _is_writable(configured):
+        return configured
+    fallback = os.path.join(tempfile.gettempdir(), "joshua-fastembed")
+    if not _is_writable(fallback):
+        logger.warning(
+            {
+                "message": "embed cache dir not writable, and no fallback",
+                "configured": configured,
+                "fallback": fallback,
+            }
+        )
+        return None
+    logger.warning(
+        {
+            "message": "embed cache dir not writable, using a temporary directory",
+            "configured": configured,
+            "fallback": fallback,
+        }
+    )
+    return fallback
+
+
 def _get_model(model_name: str):
     global _model, _unavailable
     if _model is not None or _unavailable:
@@ -41,8 +113,9 @@ def _get_model(model_name: str):
             from fastembed import TextEmbedding  # type: ignore
 
             # Persist the ONNX model on the embed cache dir (MEMORY_EMBED_CACHE_DIR)
-            # so it survives restarts instead of re-downloading each time.
-            cache_dir = os.environ.get("MEMORY_EMBED_CACHE_DIR") or None
+            # so it survives restarts instead of re-downloading each time. An
+            # unwritable directory degrades to a temporary one, not to no memory.
+            cache_dir = _usable_cache_dir(os.environ.get("MEMORY_EMBED_CACHE_DIR") or None)
             _model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
             logger.info(
                 {"message": "embedding model loaded", "model": model_name, "cache_dir": cache_dir}

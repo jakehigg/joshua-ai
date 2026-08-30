@@ -48,6 +48,9 @@ class TurnCtx:
     person_id: str | None
     turn_id: str
     profile: str = ""
+    # The message embedding, computed once and shared between providers (the
+    # injection provider fills it; the taught-skill provider reuses it).
+    embedding: list[float] | None = None
 
 
 ContextProvider = Callable[[TurnCtx], Awaitable[str | None]]
@@ -74,14 +77,21 @@ WRITE_TOOLS = ("mcp__files__write_file", "mcp__files__rename_file")
 
 
 def written_paths(tool_calls: list[dict[str, Any]]) -> list[str]:
-    """The paths a turn's write calls targeted, in call order, without duplicates.
+    """The paths a turn actually wrote, in call order, without duplicates.
+
+    A write the gateway refused is not here. The field used to read the argument
+    of the call and never the result, so a guest chat that wrote nothing logged
+    three file names and an operator had no way to tell (#26).
+
+    A call with no recorded outcome counts as failed. Silence is not success,
+    and naming a file that does not exist is the fault this guards.
 
     A ``rename_file`` reports its destination, because that is where the content
     ends up.
     """
     paths: list[str] = []
     for call in tool_calls:
-        if call.get("name") not in WRITE_TOOLS:
+        if call.get("name") not in WRITE_TOOLS or not call.get("ok", False):
             continue
         data = call.get("input") or {}
         path = data.get("to") or data.get("path")
@@ -90,8 +100,29 @@ def written_paths(tool_calls: list[dict[str, Any]]) -> list[str]:
     return paths
 
 
+def failed_writes(tool_calls: list[dict[str, Any]]) -> int:
+    """How many write calls the turn made that did not land.
+
+    Only the count. A refused path is not logged, because a path can carry text
+    a person sent.
+    """
+    return sum(
+        1 for call in tool_calls if call.get("name") in WRITE_TOOLS and not call.get("ok", False)
+    )
+
+
 def _new_turn_id() -> str:
     return "t-" + uuid4().hex[:12]
+
+
+def _chat_id(channel_id: str) -> str:
+    """The platform chat id inside a namespaced channel id.
+
+    ``telegram:-100200`` gives ``-100200``. ``groups_by_chat`` is keyed on the
+    platform id, and the channel row keeps it namespaced.
+    """
+    _, _, rest = channel_id.partition(":")
+    return rest or channel_id
 
 
 class ConversationManager:
@@ -173,6 +204,7 @@ class ConversationManager:
         mem_mtime = memory_prompt.newest_mtime(mem_paths)
         cwd = self._session_cwd(conversation.id)
 
+        role = self._conversation_role(channel, conversation)
         gateway_names = allowed_gateway_servers(self._settings, conversation.person_id)
         server_names = [*gateway_names, *self._builtin_factories]
 
@@ -197,6 +229,7 @@ class ConversationManager:
             self._gateway_token,
             conversation.person_id,
             conversation.id,
+            role,
         )
         deps = ToolDeps(
             repo=self._repo,
@@ -216,6 +249,28 @@ class ConversationManager:
             resume=resume,
         )
         return AgentSession(options), deps, profile_name, mem_paths, mem_mtime
+
+    def _conversation_role(self, channel: Channel, conversation: Conversation) -> str:
+        """The role this conversation carries, for the gateway file policy.
+
+        A direct message carries the role of its person. A group carries the role
+        derived from its ``members``: ``member`` only when every handle names a
+        member. Anything else is a guest, which is the safe default for a chat
+        core cannot vouch for.
+
+        The role is a property of the conversation and not of the turn, because
+        the SDK writes the gateway headers onto the command line of the CLI
+        subprocess when the session starts. A per-turn role could not reach the
+        gateway without rebuilding the session for every message.
+        """
+        if channel.session_mode != "shared" and conversation.person_id:
+            person = self._settings.person(conversation.person_id)
+            return person.role if person is not None else "guest"
+        group = self._settings.groups_by_chat(channel.channel_type, _chat_id(channel.id))
+        if group is None:
+            return "guest"
+        role, _ = self._settings.group_role(group)
+        return role
 
     async def _get_or_create(self, channel: Channel, conversation: Conversation) -> _Managed:
         async with self._pool_lock:
@@ -420,6 +475,9 @@ class ConversationManager:
                 # Paths the agent wrote this turn. The nightly reflection reads
                 # these to tell a skill file from a journal entry.
                 "written": written_paths(result.tool_calls),
+                **(
+                    {"write_failed": failed} if (failed := failed_writes(result.tool_calls)) else {}
+                ),
             }
             await self._repo.add_transcript(
                 conversation.id,

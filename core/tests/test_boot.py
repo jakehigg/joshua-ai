@@ -42,7 +42,10 @@ def test_boot_applies_schema_and_seeds(monkeypatch, tmp_path) -> None:
         # bootstrapped the data volume.
         assert client.get("/healthz").json() == {"ok": True}
         ready = client.get("/readyz").json()
-        assert ready == {"ok": True, "checks": {"db": True, "layout": True}}
+        assert ready == {
+            "ok": True,
+            "checks": {"db": True, "layout": True, "embed": True},
+        }
 
         # Seeding ran during startup; verify from an independent connection.
         people = asyncio.run(_list_people())

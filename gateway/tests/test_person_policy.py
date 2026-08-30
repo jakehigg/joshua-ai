@@ -11,7 +11,7 @@ import sys
 
 import httpx2
 import pytest
-from conftest import FIXTURE, bearer, gateway_session
+from conftest import FIXTURE, TOKENS, bearer, gateway_session
 from joshua_gateway import person
 from joshua_gateway.main import lifespan
 from joshua_gateway.observability import CALL_LOG, SESSIONS
@@ -113,23 +113,27 @@ async def test_no_person_sees_only_a(gateway):
     assert resp.status_code == 403
 
 
-# -- laptop debug gating (acceptance) -------------------------------------
+# -- only core is trusted (acceptance) ------------------------------------
 
 
-def test_laptop_person_ignored_without_debug(gateway, monkeypatch):
+def test_laptop_person_header_is_ignored(gateway):
     with TestClient(gateway(two_servers())) as client:
         resp = client.get("/b", headers={**bearer("laptop"), **person_header("alex")})
     # The header is ignored, so the request has no person; b denies no person.
     assert resp.status_code == 403
 
 
-def test_no_setting_widens_the_trusted_identity(monkeypatch):
+def test_no_identity_but_core_is_trusted():
     """Only core may say which person a request belongs to.
 
-    A debug switch used to add `laptop` here. The header decides who reads and
-    writes a person's files, so nothing may widen it (#86).
+    resolve() ignores the person header from every other fleet identity, so the
+    request has no person and gets what an unknown person gets. The header
+    decides who reads and writes a person's files, and nothing widens the rule.
     """
-    monkeypatch.setenv("GATEWAY_DEBUG_PERSON_FROM", "laptop")
+    for identity in sorted(set(TOKENS) - {"core"}):
+        assert resolve(identity, "alex", "c1", {"alex"}) == Attribution(
+            person=None, conversation=None
+        )
     assert person.trusted_identities() == frozenset({"core"})
 
 

@@ -90,11 +90,19 @@ async def test_full_injection_and_audit_row(db, repo, tmp_path: Path, const_embe
     assert events[0]["turn_id"] == "t-x"
     uris = {r["uri"] for r in events[0]["results"]}
     assert "blog/2026-08-20.md" in uris
-    assert "blog/2026-08-21.md" not in uris  # Bob's private doc is out of scope
+    # One corpus since #25: the journal of another person is in scope, and the
+    # audit row still records every document the search considered.
+    assert "blog/2026-08-21.md" in uris
     assert any(r["injected"] and r["uri"] == "blog/2026-08-20.md" for r in events[0]["results"])
 
 
-async def test_scope_person_and_group(db, repo, tmp_path: Path, const_embed) -> None:
+async def test_a_group_turn_reaches_the_same_corpus(db, repo, tmp_path: Path, const_embed) -> None:
+    """A group turn is not a narrower turn since #25.
+
+    It used to see ``shared/`` alone, because no one person owned it. Now the
+    corpus is shared, so a family chat can answer a question about anybody's
+    week.
+    """
     await repo.upsert_person("alice", "Alice")
     await repo.upsert_person("bob", "Bob")
     _tree(tmp_path)
@@ -104,11 +112,16 @@ async def test_scope_person_and_group(db, repo, tmp_path: Path, const_embed) -> 
     bob_note = await _run(bob_ctx, store, repo)
     assert bob_note is not None
     assert "stir-fry" in bob_note
-    assert "00 flour" not in bob_note  # never sees Alice's rows
 
     group_ctx = await _ctx(repo, "telegram:group", None, "what is the guest wifi password")
     group_note = await _run(group_ctx, store, repo)
     assert group_note is not None
-    assert "guest wifi" in group_note.lower()
     events = await repo.kb_events(1)
-    assert {r["uri"] for r in events[0]["results"]} == {"shared/house.md"}
+    uris = {r["uri"] for r in events[0]["results"]}
+    # Before #25 this set held ``shared/house.md`` alone. A journal reaching it
+    # is the whole change.
+    assert any(uri.startswith("blog/") for uri in uris)
+    # The fixture embeds every document to the same vector, so each one ties and
+    # the top-k order is arbitrary. Which document wins is not asserted: the
+    # scope is what this test is about. ``test_a_search_reaches_the_whole_corpus``
+    # proves the shared files are still reachable.

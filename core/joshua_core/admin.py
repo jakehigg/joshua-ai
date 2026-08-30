@@ -37,6 +37,7 @@ from joshua_shared.fleet_auth import (
 )
 
 from joshua_core import people
+from joshua_core.memory import embed
 
 # Transcript tail bounds for ``GET /admin/transcript``.
 _DEFAULT_TRANSCRIPT_LIMIT = 40
@@ -178,7 +179,13 @@ def build_admin_router() -> APIRouter:
         if denied is not None:
             return denied
         ctx = request.app.state.ctx
-        return JSONResponse({"sources": ctx.indexer.status(), "stats": await ctx.memory.kb_stats()})
+        return JSONResponse(
+            {
+                "sources": ctx.indexer.status(),
+                "stats": await ctx.memory.kb_stats(),
+                "embed": embed.is_available(),
+            }
+        )
 
     @router.get("/admin/kb/events")
     async def kb_events(request: Request):  # type: ignore[no-untyped-def]

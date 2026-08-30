@@ -36,6 +36,11 @@ identity_ctx: ContextVar[str] = ContextVar("gateway_identity", default="unknown"
 person_ctx: ContextVar[str | None] = ContextVar("gateway_person", default=None)
 conversation_ctx: ContextVar[str | None] = ContextVar("gateway_conversation", default=None)
 
+# The role core asserted for this request. Unlike ``person_ctx``, this one IS
+# access control: the files server builds its root set from it. None means the
+# caller asserted no role, and the files server then reads and writes nothing.
+role_ctx: ContextVar[str | None] = ContextVar("gateway_role", default=None)
+
 DEFAULT_CALL_LOG_SIZE = 2000
 
 

@@ -57,9 +57,13 @@ def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_router_serves_both_guard_routes() -> None:
+def test_router_serves_the_admin_routes() -> None:
     paths = {route.path for route in build_admin_router().routes}
-    assert paths == {"/admin/guard/stats", "/admin/guard/recent"}
+    assert paths == {
+        "/admin/guard/stats",
+        "/admin/guard/recent",
+        "/admin/chats/unconfigured",
+    }
 
 
 async def test_stats_requires_admin_caller() -> None:
@@ -114,3 +118,30 @@ async def test_stats_without_guard_is_zeroed() -> None:
         resp = await client.get("/admin/guard/stats", headers=_bearer(LAPTOP_TOKEN))
     assert resp.status_code == 200
     assert resp.json()["refused_total"] == 0
+
+
+async def test_unconfigured_requires_admin_caller() -> None:
+    app, _ = _app_with_guard()
+    async with _client(app) as client:
+        assert (await client.get("/admin/chats/unconfigured")).status_code == 401
+        resp = await client.get("/admin/chats/unconfigured", headers=_bearer(CORE_TOKEN))
+        assert resp.status_code == 403
+
+
+async def test_unconfigured_lists_a_group_the_config_does_not_hold() -> None:
+    app, guard = _app_with_guard()
+    guard.check(
+        channel_type="telegram",
+        sender_handle="998877",
+        chat_id="-100777",
+        chat_kind="group",
+        chat_title="Family",
+        text_len=1,
+        attachment_bytes=0,
+    )
+    async with _client(app) as client:
+        resp = await client.get("/admin/chats/unconfigured", headers=_bearer(LAPTOP_TOKEN))
+        assert resp.status_code == 200
+        groups = resp.json()["groups"]
+        assert [g["chat_id"] for g in groups] == ["-100777"]
+        assert groups[0]["chat_title"] == "Family"

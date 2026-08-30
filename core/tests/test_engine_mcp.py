@@ -67,3 +67,17 @@ def test_gateway_servers_headers(cfg):
 def test_gateway_servers_person_defaults_to_unknown(cfg):
     servers = gateway_servers(["files"], "http://gw:8000", "tok", None, "conv-1")
     assert servers["files"]["headers"]["X-Joshua-Person"] == "unknown"
+
+
+def test_gateway_servers_send_the_role(cfg):
+    """The role is what the gateway acts on since #25; the person is provenance."""
+    servers = gateway_servers(["files"], "http://gw:8000", "tok", "alex", "conv-1", "member")
+    assert servers["files"]["headers"]["X-Joshua-Role"] == "member"
+    assert servers["files"]["headers"]["X-Joshua-Person"] == "alex"
+
+
+def test_gateway_servers_role_defaults_to_guest(cfg):
+    """A caller that names no role gets the safe one: a guest writes nothing."""
+    servers = gateway_servers(["files"], "http://gw:8000", "tok", None, "conv-1")
+    assert servers["files"]["headers"]["X-Joshua-Role"] == "guest"
+    assert servers["files"]["headers"]["X-Joshua-Person"] == "unknown"

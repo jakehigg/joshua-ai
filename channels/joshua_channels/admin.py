@@ -9,6 +9,8 @@ Routes:
 - ``GET /admin/guard/stats`` — the refusal and truncation counters.
 - ``GET /admin/guard/recent`` — the recent refusals; ``address`` is the handle an
   operator enrolls.
+- ``GET /admin/chats/unconfigured`` — the group chats ``joshua.yaml`` does not
+  list; ``chat_id`` is what an operator copies into ``groups``.
 """
 
 from __future__ import annotations
@@ -46,5 +48,13 @@ def build_admin_router() -> APIRouter:
     ):
         guard = getattr(request.app.state.ctx, "guard", None)
         return JSONResponse({"recent": guard.recent() if guard is not None else []})
+
+    @router.get("/admin/chats/unconfigured")
+    async def chats_unconfigured(  # type: ignore[no-untyped-def]
+        request: Request,
+        _identity: str = Depends(require_identity(admin=True)),
+    ):
+        guard = getattr(request.app.state.ctx, "guard", None)
+        return JSONResponse({"groups": guard.unconfigured() if guard is not None else []})
 
     return router

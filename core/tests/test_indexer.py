@@ -53,6 +53,8 @@ class FakeStore:
         self.replaced: list[tuple[str | None, str]] = []
         self.deleted: list[tuple[str | None, str]] = []
         self.purged: list[list[str]] = []
+        # The last replace call's kind, title, and (heading, text) chunks.
+        self.last_replace: dict = {}
 
     async def kb_index_state(self, source: str):
         return dict(self.state)
@@ -72,7 +74,13 @@ class FakeStore:
         chunks,
     ):
         self.replaced.append((person_id, path))
-        return len(list(chunks))
+        chunk_list = list(chunks)
+        self.last_replace = {
+            "kind": kind,
+            "title": title,
+            "chunks": [(h, t) for h, t, _ in chunk_list],
+        }
+        return len(chunk_list)
 
     async def kb_delete_item(self, source, person_id, path):
         self.deleted.append((person_id, path))
@@ -169,3 +177,116 @@ async def test_unknown_source_reported(_count_embeds) -> None:
     indexer = Indexer(store, {"files": FakeSource([])}, embed_model="m", chunk_chars=1600)  # type: ignore[arg-type]
     results = await indexer.reindex(source="memos")
     assert results == {"memos": {"error": "unknown source"}}
+
+
+# --- taught skills -----------------------------------------------------------
+
+
+def _skill_doc(path: str, frontmatter: dict[str, str], body: str, rev: str = "r1") -> Document:
+    return Document(
+        source="files",
+        uri=path,
+        person_id=None,
+        title="ignored for skills",
+        text=body,
+        updated_at=MTIME,
+        rev=rev,
+        frontmatter=frontmatter,
+    )
+
+
+async def test_skill_document_one_chunk_per_trigger(monkeypatch: pytest.MonkeyPatch) -> None:
+    embedded: list[str] = []
+
+    def capture(text: str, model: str = "") -> list[float]:
+        embedded.append(text)
+        return [0.0] * 384
+
+    monkeypatch.setattr(embed_module, "embed", capture)
+    doc = _skill_doc(
+        "wiki/skills/movie.md",
+        {"name": "movie time", "triggers": '["movie time", "let\'s watch a movie"]'},
+        "Dim the lights and turn on the TV.",
+    )
+    store = FakeStore()
+    await _indexer(store, [doc]).reindex()
+    assert store.last_replace["kind"] == "skill"
+    assert store.last_replace["title"] == "movie time"
+    # One chunk per trigger: heading is the trigger, text is the full instructions.
+    assert store.last_replace["chunks"] == [
+        ("movie time", "Dim the lights and turn on the TV."),
+        ("let's watch a movie", "Dim the lights and turn on the TV."),
+    ]
+    # The bare trigger phrase is embedded — no title breadcrumb.
+    assert embedded == ["movie time", "let's watch a movie"]
+
+
+async def test_skill_title_defaults_to_slug(_count_embeds) -> None:
+    doc = _skill_doc("wiki/skills/coffee.md", {"triggers": '["coffee"]'}, "Brew a cup.")
+    store = FakeStore()
+    await _indexer(store, [doc]).reindex()
+    assert store.last_replace["title"] == "coffee"
+
+
+async def test_broken_skill_skipped_others_still_index(_count_embeds, caplog) -> None:
+    good = _doc("alice", "wiki/a.md", "r1")
+    broken = _skill_doc("wiki/skills/bad.md", {}, "No frontmatter body.")  # no triggers
+    store = FakeStore()
+    with caplog.at_level("WARNING"):
+        stats = (await _indexer(store, [good, broken]).reindex())["files"]
+    assert stats["indexed"] == 2 and stats["failed"] == 0
+    assert ("alice", "wiki/a.md") in store.replaced
+    assert store.last_replace["chunks"] != []  # the good doc still wrote chunks
+    assert any("wiki/skills/bad.md" in r.getMessage() for r in caplog.records)
+
+
+async def test_empty_triggers_writes_no_rows(_count_embeds) -> None:
+    doc = _skill_doc("wiki/skills/off.md", {"triggers": "[]"}, "Instructions.")
+    store = FakeStore()
+    await _indexer(store, [doc]).reindex()
+    assert (None, "wiki/skills/off.md") in store.replaced
+    assert store.last_replace["chunks"] == []
+
+
+async def test_lost_model_logs_one_line_for_the_pass(
+    monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """A lost model must not write one warning for each document.
+
+    Eleven thousand identical lines hid the cause of a real outage. The pass
+    reports the count one time instead.
+    """
+    monkeypatch.setattr(embed_module, "embed", lambda text, model="": None)
+    monkeypatch.setattr(embed_module, "is_available", lambda: False)
+    docs = [_doc("alice", f"wiki/{n}.md", "r1") for n in range(5)]
+
+    with caplog.at_level("WARNING"):
+        stats = (await _indexer(FakeStore(), docs).reindex())["files"]
+
+    assert stats["failed"] == 5
+    per_doc = [r for r in caplog.records if "kb index failed" in r.getMessage()]
+    per_pass = [r for r in caplog.records if "kb index failed for the pass" in r.getMessage()]
+    assert per_doc == per_pass, "no per-document warning may survive a lost model"
+    assert len(per_pass) == 1
+    assert "failed" in per_pass[0].getMessage()
+
+
+async def test_one_bad_document_keeps_its_own_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """With the model up, a single failure is that document's fault: name it."""
+    monkeypatch.setattr(embed_module, "is_available", lambda: True)
+
+    docs = [_doc("alice", "wiki/a.md", "r1"), _doc("alice", "wiki/b.md", "r1")]
+    monkeypatch.setattr(
+        embed_module,
+        "embed",
+        lambda text, model="": None if "wiki/b.md" in text else [0.1] * 384,
+    )
+
+    with caplog.at_level("WARNING"):
+        await _indexer(FakeStore(), docs).reindex()
+
+    per_doc = [r for r in caplog.records if "kb index failed" in r.getMessage()]
+    assert any("wiki/b.md" in r.getMessage() for r in per_doc)
+    assert not any("for the pass" in r.getMessage() for r in per_doc)

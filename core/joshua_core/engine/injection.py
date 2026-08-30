@@ -29,6 +29,7 @@ from joshua_shared.log import get_logger
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
+from joshua_core.memory.skills import SKILL_KIND
 from joshua_core.memory.store import MemoryStore
 from joshua_core.store.repo import Repo
 
@@ -151,6 +152,11 @@ async def kb_context(
     if vec is None:
         logger.warning({"message": "kb inject skipped: embedding unavailable"})
         return None
+    # Share the vector with the taught-skill provider so one turn embeds once.
+    try:
+        ctx.embedding = vec
+    except AttributeError:
+        pass
 
     try:
         ranked = await search(
@@ -159,6 +165,7 @@ async def kb_context(
             vec,
             k=max(6, top_k * 3),
             min_sim=hint_sim,
+            exclude_kinds=(SKILL_KIND,),
             recency_bonus=recency_bonus,
             recency_half_life_days=recency_half_life_days,
             per_doc_cap=per_doc_cap,

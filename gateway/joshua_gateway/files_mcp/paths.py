@@ -1,13 +1,30 @@
 """Path confinement for the files MCP.
 
-Every path a person gives is resolved against that person's root set. A path that
-escapes a root — through ``..``, an absolute path, or a symlink that points out of
-the root — is rejected before any file operation runs. A ``PathError`` message is
-safe to return to the caller: it names the root, never the resolved absolute path.
+Every path is resolved against the root set of the request. A path that escapes
+a root, through ``..``, an absolute path, or a symlink that points out of the
+root, is rejected before any file operation runs. A ``PathError`` message is
+safe to return to the caller: it names the root, never the resolved absolute
+path.
 
-The person comes from the request, never from a tool argument. There is one
-wiki. Everyone reads it; a member writes it; a guest reads it only. A request
-with no person (or the literal ``unknown``) gets ``wiki`` and ``shared`` read.
+**The corpus is one corpus.** The wiki is what Joshua knows, the journal under
+``people/<id>/blog/`` is when something happened, and an attachment is the
+artifact. None of the three belongs to one person, so no root is keyed on a
+person. ``people/<id>/`` says whose episode a journal entry records; it is
+provenance, not a wall.
+
+Two different rules used to live in one function here. Only one of them is
+gone:
+
+- **The person boundary** decided which person could reach ``people/<id>/``.
+  That rule is deleted. See issue #25.
+- **The write domain** decides which container owns a path. ``channels`` alone
+  writes an attachment, ``core`` alone writes ``profile.md``, and the agent
+  writes the wiki and the journal. That rule stays, and ``write_subdir``
+  carries it. A member gets a read-only view of an attachment because
+  ``channels`` owns that path, and not because it belongs to somebody else.
+
+The role decides the write and nothing else decides it. A member writes, a
+guest reads, and a request with no role is a guest.
 """
 
 from __future__ import annotations
@@ -16,12 +33,31 @@ import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-# The person id for a request that core could not attribute to a known person.
+# The person id for a request core could not attribute to a known person. The
+# person no longer gates a path; it is kept for the audit trail and for the
+# provenance of a journal entry.
 UNKNOWN = "unknown"
 
-# Roots that ``list_files`` and ``search_files`` accept by name (``profile.md`` is
-# a single file, reached only through ``read_file``).
-DIR_ROOTS = ("wiki", "blog", "attachments", "shared")
+# The role that writes. Every other role reads.
+MEMBER = "member"
+GUEST = "guest"
+
+# Roots that ``list_files`` and ``search_files`` accept by name.
+DIR_ROOTS = ("wiki", "people", "shared")
+
+# The journal lives at ``people/<id>/blog/``. The agent writes there and nowhere
+# else below ``people``, because ``core`` owns ``profile.md`` and ``channels``
+# owns ``attachments/``.
+JOURNAL_SUBDIR = "blog"
+
+# Root names from the model before #25, when each person had their own tree.
+# ``resolve`` names the replacement instead of saying "unknown root", because a
+# taught skill written before the change still holds the old name.
+_RETIRED_ROOTS = {
+    "blog": f"people/<person>/{JOURNAL_SUBDIR}/",
+    "profile.md": "people/<person>/profile.md",
+    "attachments": "people/<person>/attachments/",
+}
 
 
 class PathError(Exception):
@@ -49,43 +85,55 @@ class Root:
     can_write: bool
     md_only: bool
     is_file: bool = False
+    write_subdir: str | None = None
+    """The write domain inside a root that holds more than one owner's files.
 
-
-def person_roots(data_root: Path, person: str | None, *, wiki_write: bool) -> dict[str, Root]:
-    """Return the roots ``person`` may reach under ``data_root``.
-
-    ``wiki`` is the one wiki at ``<data>/wiki``; everyone reads it and
-    ``wiki_write`` (true for a member) grants writes. ``shared`` holds the
-    shared profile and the group attachments and is read-only for everyone. A
-    request with no person, or the literal ``unknown``, gets ``wiki`` and
-    ``shared`` read and nothing else.
+    When set, a write must land at ``<root>/<first>/<write_subdir>/...``. The
+    ``people`` root holds three kinds of file with three owners: the journal,
+    which the agent writes; ``profile.md``, which ``core`` writes; and
+    ``attachments/``, which ``channels`` writes. The role says whether this
+    request may write at all. This says where such a write may land.
     """
-    wiki = data_root / "wiki"
-    shared = Root("shared", data_root / "shared", can_write=False, md_only=True)
-    if person is None or person == UNKNOWN:
-        return {
-            "wiki": Root("wiki", wiki, can_write=False, md_only=True),
-            "shared": shared,
-        }
-    home = data_root / "people" / person
+
+
+def roots(data_root: Path, *, role: str) -> dict[str, Root]:
+    """Return the roots a request with ``role`` may reach under ``data_root``.
+
+    The set does not depend on which person sent the turn. One corpus, three
+    roots:
+
+    - ``wiki``: what Joshua knows. A member writes it.
+    - ``people``: the journal, the profiles, and the attachments of everybody.
+      A member writes the journal alone; see ``write_subdir``.
+    - ``shared``: the shared profile and the group attachments. Nobody writes
+      it through this server; ``core`` owns it.
+
+    ``role`` is ``member`` or anything else. Anything else, including a missing
+    role and the literal ``unknown``, reads and writes nothing. That keeps the
+    safe default: a request core could not attribute gets no write.
+    """
+    member = role == MEMBER
     return {
-        "wiki": Root("wiki", wiki, can_write=wiki_write, md_only=True),
-        "blog": Root("blog", home / "blog", can_write=True, md_only=True),
-        "profile.md": Root(
-            "profile.md", home / "profile.md", can_write=False, md_only=False, is_file=True
+        "wiki": Root("wiki", data_root / "wiki", can_write=member, md_only=True),
+        "people": Root(
+            "people",
+            data_root / "people",
+            can_write=member,
+            md_only=True,
+            write_subdir=JOURNAL_SUBDIR,
         ),
-        "attachments": Root("attachments", home / "attachments", can_write=False, md_only=False),
-        "shared": shared,
+        "shared": Root("shared", data_root / "shared", can_write=False, md_only=True),
     }
 
 
-def resolve(path: str, roots: dict[str, Root], *, write: bool) -> tuple[Root, Path]:
+def resolve(path: str, root_set: dict[str, Root], *, write: bool) -> tuple[Root, Path]:
     """Resolve a root-relative ``path`` to an absolute path inside its root.
 
-    ``path`` starts with a root name, such as ``wiki/notes/x.md``, ``profile.md``,
-    or ``attachments/2026/08/a.jpg``. Raises ``PathError`` for an unknown root, a
-    ``..`` or absolute path, a symlink that leaves the root, a write to a read-only
-    root, or a non-``.md`` write to a markdown root.
+    ``path`` starts with a root name, such as ``wiki/notes/x.md``,
+    ``people/alex/blog/2026-08-29.md``, or ``shared/profile.md``. Raises
+    ``PathError`` for an unknown root, a ``..`` or absolute path, a symlink that
+    leaves the root, a write to a read-only root, a non-``.md`` write to a
+    markdown root, or a write outside the write domain of the root.
     """
     raw = path.strip()
     if not raw:
@@ -98,8 +146,16 @@ def resolve(path: str, roots: dict[str, Root], *, write: bool) -> tuple[Root, Pa
     if any(part == ".." for part in parts):
         raise PathError("path must not contain '..'")
 
-    root = roots.get(parts[0])
+    root = root_set.get(parts[0])
     if root is None:
+        replacement = _RETIRED_ROOTS.get(parts[0])
+        if replacement is not None:
+            # A skill taught before #25 still holds the old per-person name.
+            # Name the new path so the person can correct the skill.
+            raise PathError(
+                f"the root '{parts[0]}' is gone: the corpus is shared now. "
+                f"Use {replacement} instead."
+            )
         raise PathError(f"unknown or forbidden root: {parts[0]}")
 
     if root.is_file:
@@ -116,6 +172,12 @@ def resolve(path: str, roots: dict[str, Root], *, write: bool) -> tuple[Root, Pa
             raise PathError(f"{root.name} is read-only")
         if root.md_only and candidate.suffix != ".md":
             raise PathError("only .md files may be written")
+        if root.write_subdir is not None:
+            # ``people/<person>/<write_subdir>/...``: parts[1] is the person and
+            # parts[2] is the kind. A write anywhere else below ``people`` would
+            # cross into the write domain of core or of channels.
+            if len(parts) < 4 or parts[2] != root.write_subdir:
+                raise PathError(f"only {root.name}/<person>/{root.write_subdir}/ may be written")
 
     # realpath resolves every symlink in the existing prefix, so a link that
     # points out of the root fails the containment check below. A create write

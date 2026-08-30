@@ -8,7 +8,8 @@ MCP routes, attributes the request to a person, applies the per-server person
 gate, binds the person to the session, then forwards to the upstream session
 manager (503 while down).
 
-The person comes from ``X-Joshua-Person``, trusted only from ``core``. A server
+The person comes from ``X-Joshua-Person`` and the role from ``X-Joshua-Role``,
+both trusted only from ``core``. The role is what the files server acts on. A server
 with
 ``allow: all`` admits any person; a scoped server admits only its named people
 and denies a request with no person. A denied request is 403 before any upstream
@@ -35,6 +36,7 @@ from joshua_gateway.observability import (
     identity_ctx,
     now_iso,
     person_ctx,
+    role_ctx,
 )
 from joshua_gateway.upstream import Upstream
 
@@ -119,6 +121,7 @@ async def _authenticate(scope, allowed: frozenset[str], name: str, send: Send):
             headers.get("x-joshua-person"),
             headers.get("x-joshua-conversation"),
             _known_persons(),
+            headers.get("x-joshua-role"),
         )
     except person_policy.PersonError as exc:
         await _reject(send, 400, exc.message.encode())
@@ -146,6 +149,7 @@ async def _forward(up: Upstream, identity: str, attr, scope, receive, send) -> N
         identity_ctx.set(identity),
         person_ctx.set(attr.person),
         conversation_ctx.set(attr.conversation),
+        role_ctx.set(attr.role),
     )
     try:
         mgr = up.mgr
@@ -157,6 +161,7 @@ async def _forward(up: Upstream, identity: str, attr, scope, receive, send) -> N
         identity_ctx.reset(tokens[0])
         person_ctx.reset(tokens[1])
         conversation_ctx.reset(tokens[2])
+        role_ctx.reset(tokens[3])
 
 
 def make_asgi(up: Upstream, allowed: frozenset[str]):

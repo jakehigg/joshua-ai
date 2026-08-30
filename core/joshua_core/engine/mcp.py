@@ -35,12 +35,22 @@ def gateway_servers(
     token: str,
     person_id: str | None,
     conversation_id: str,
+    role: str = "guest",
 ) -> dict[str, dict[str, Any]]:
     """Build the SDK ``mcp_servers`` map that routes each name through the gateway.
 
-    Every entry carries the fleet bearer, the person header, and the conversation
-    header. The gateway records the conversation header; a later trust policy uses it for URL
-    grants and taint.
+    Every entry carries the fleet bearer, the person header, the conversation
+    header, and the role header. The gateway records the conversation header; a
+    later trust policy uses it for URL grants and taint.
+
+    **The role is the access control, and the person is not.** Since #25 the
+    corpus of Joshua is shared, so the role alone decides whether the agent
+    writes. The person rides along for the audit trail. A direct message carries
+    the role of that person; a group carries the role derived from its members.
+
+    The role of a conversation cannot change inside a session. The SDK writes
+    this whole map onto the command line of the CLI subprocess when the session
+    starts, so a header set here holds until the session is rebuilt.
     """
     base = gateway_url.rstrip("/")
     person = person_id or "unknown"
@@ -52,6 +62,7 @@ def gateway_servers(
                 "Authorization": f"Bearer {token}",
                 "X-Joshua-Person": person,
                 "X-Joshua-Conversation": conversation_id,
+                "X-Joshua-Role": role,
             },
         }
         for name in names

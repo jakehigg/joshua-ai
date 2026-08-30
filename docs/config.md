@@ -135,6 +135,21 @@ group. Every message from that chat is attributed to the group, not to a person.
 List `members` (the platform handles) to admit only those senders. A known person
 in the chat is always allowed as that person, whatever the `members` list holds.
 
+`members` also sets what the chat may write. A group writes the wiki only when
+`members` is not empty and every handle in it names a person whose role is
+`member`. An empty list admits anybody in that chat, so it writes nothing. A
+handle that names no person carries no role, so it holds the chat to read-only
+as well.
+
+One chat carries one role, so **one guest in a family chat stops Joshua writing
+for the members too**. That is deliberate: a session cannot change its role for
+one turn. Core logs a `group role` line at start that names each group, its
+derived role, and the handle that lowered it, so you can see why a chat is
+read-only.
+
+A group chat that `joshua.yaml` does not list appears on
+`GET /admin/chats/unconfigured`, with the chat id to add here.
+
 ### Guard audit
 
 The guard counts every refusal and keeps a bounded ring of the recent refusals.
@@ -198,6 +213,17 @@ is one of three decisions. See [memory.md](memory.md#what-the-turn-brings-and-wh
 Raise `full_sim` if answers use text that is not relevant. Lower `hint_sim` if
 answers miss things that are in your files. Change one value at a time, and read
 `GET /admin/kb/events` for a few real questions before the next change.
+
+### Taught skills
+
+A taught skill is a `wiki/skills/<slug>.md` file: a "when I say X, do Y"
+behavior a member teaches in chat. See [memory.md](memory.md#taught-skills).
+
+| Key | Default | What it does |
+|---|---|---|
+| `skills.enabled` | `true` | `false` runs no taught-skill match. No turn gets a skill block |
+| `skills.min_sim` | `0.62` | the similarity floor for a trigger match |
+| `skills.top_k` | `1` | most skills one turn can fire |
 
 ### Index
 
@@ -446,16 +472,43 @@ identity server, a person added to `identities` starts one connection and a pers
 removed stops one. The other people's connections are untouched. A body
 `{"server": "<name>"}` restarts one entry.
 
-## modules and viewer
+## modules
 
-Two top-level keys are reserved. The loader accepts them and validates their
-shape, and no code reads them yet.
+`modules` is a reserved list of module names. It is the hook for optional
+prompt and tool modules. Today the kernel ships every capability and the list
+has no effect. The loader accepts it and validates its shape.
 
-- `modules`: a list of module names. It is the hook for optional prompt and
-  tool modules. Today the kernel ships every capability and the list has no
-  effect.
-- `viewer.enabled`: a flag for a read-only web viewer of a person's files. No
-  viewer ships yet. The `viewer` compose service is a placeholder.
+## viewer
+
+`viewer` runs a read-only web viewer for the wiki and a person's own files. A
+person opens a browser, signs in with a password, and reads the wiki, their own
+profile, their own journal, their own attachments, and the shared profile. A
+member can also delete a wiki page, which moves it to `wiki/.trash/`. A guest
+cannot. The agent never reaches the viewer, and the viewer never calls core.
+
+The viewer is off by default. Start it with `docker compose --profile viewer
+up`; it listens on host port 8081. Put a reverse proxy in front for TLS.
+
+- `viewer.enabled`: `false` by default. The viewer refuses to start when it is
+  false.
+- `viewer.users`: a map of person id to a password reference. A key must name a
+  person in `people`, or the config fails to load. A person with no entry, or
+  an empty value, cannot sign in.
+
+Set each password through the environment, never a literal in `joshua.yaml`:
+
+```yaml
+viewer:
+  enabled: true
+  users:
+    alex: ${VIEWER_PW_ALEX:-}
+```
+
+A value that starts with `$2` is a bcrypt hash and is checked with bcrypt. Any
+other value is a literal password. Put the value in `.env` as `VIEWER_PW_ALEX`
+(the id in upper case). See `.env.example`.
+
+The role, member or guest, comes from `people`. It is never set in `viewer`.
 
 ## Agent backend
 

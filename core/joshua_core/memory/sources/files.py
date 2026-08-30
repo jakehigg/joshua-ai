@@ -145,6 +145,7 @@ class FilesSource:
             provenance=provenance,
             tags=_parse_tags(meta.get("tags")),
             doc_date=doc_date,
+            frontmatter=meta,
         )
 
     async def list_documents(self) -> AsyncIterator[Document]:

@@ -100,8 +100,8 @@ Route allowlists, by default:
 - channels `POST /webhook/imessage/{secret}`: no bearer. The path secret is the
   credential. A wrong secret gets 404, never 401. The handler always answers
   200 fast, because BlueBubbles never retries.
-- gateway MCP routes: `core`, and `laptop` for debugging. `X-Joshua-Person` is
-  trusted only from `core`.
+- gateway MCP routes: `core` only. `X-Joshua-Person` is trusted only from
+  `core`.
 - `/admin/*` on every container: `ADMIN_CALLERS` (default `laptop,ci`), checked
   on every admin route with no exception.
 - `/healthz`: open, `{"ok": true}`. `/readyz`: open, booleans and counts, no

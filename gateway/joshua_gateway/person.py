@@ -1,13 +1,18 @@
-"""Person attribution for gateway requests.
+"""Person and role attribution for gateway requests.
 
-Core asserts the person and conversation of every MCP request with the
-``X-Joshua-Person`` and ``X-Joshua-Conversation`` headers. The gateway trusts
-those headers only from ``core``. From any other caller the headers are ignored
-and the request has no person. No setting changes this: the header decides who
-reads and writes a person's files, so nothing may widen it.
+Core asserts the person, the conversation, and the role of every MCP request
+with the ``X-Joshua-Person``, ``X-Joshua-Conversation``, and ``X-Joshua-Role``
+headers. The gateway trusts those headers only from ``core``. From any other
+caller they are ignored and the request has no person and no role. No setting
+changes this, so nothing may widen it.
 
-A trusted person must match the person id pattern and exist in
-``people``, or be the literal ``unknown``. Anything else is a 400.
+**The role is the access control; the person is not.** Since #25 the corpus of
+Joshua is shared, and the role alone decides whether a request writes. The
+person is kept for the audit trail and for the provenance of a journal entry.
+
+A trusted person must match the person id pattern and exist in ``people``, or
+be the literal ``unknown``. A trusted role must be ``member`` or ``guest``.
+Anything else is a 400.
 """
 
 from __future__ import annotations
@@ -25,6 +30,9 @@ UNKNOWN = "unknown"
 # The one identity trusted to say which person a request belongs to.
 _TRUSTED = frozenset({"core"})
 
+# The roles core may assert. A guest reads; a member also writes.
+_ROLES = frozenset({"member", "guest"})
+
 
 class PersonError(Exception):
     """A trusted person header is malformed or names no known person (400)."""
@@ -41,6 +49,7 @@ class Attribution:
 
     person: str | None
     conversation: str | None
+    role: str | None = None
 
 
 def trusted_identities() -> frozenset[str]:
@@ -53,20 +62,25 @@ def resolve(
     person_header: str | None,
     conversation_header: str | None,
     known_persons: Container[str],
+    role_header: str | None = None,
 ) -> Attribution:
-    """Attribute a request to a person and conversation.
+    """Attribute a request to a person, a conversation, and a role.
 
     ``identity`` is the authenticated fleet caller. Returns an empty attribution
     when the caller may not assert the headers. Raises ``PersonError`` for a
-    trusted but invalid person header.
+    trusted but invalid person or role header.
     """
     if identity not in trusted_identities():
-        return Attribution(person=None, conversation=None)
+        return Attribution(person=None, conversation=None, role=None)
 
     person = (person_header or "").strip() or None
     if person is not None and person != UNKNOWN:
         if not _PERSON_RE.match(person) or person not in known_persons:
             raise PersonError(f"unknown person: {person}")
 
+    role = (role_header or "").strip() or None
+    if role is not None and role not in _ROLES:
+        raise PersonError(f"unknown role: {role}")
+
     conversation = (conversation_header or "").strip() or None
-    return Attribution(person=person, conversation=conversation)
+    return Attribution(person=person, conversation=conversation, role=role)

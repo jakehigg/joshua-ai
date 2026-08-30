@@ -118,3 +118,41 @@ def _collect(sink):
         sink.append(chunk)
 
     return on_delta
+
+
+# -- Tool results ride on a user message (#26) -------------------------------
+
+
+class _Block:
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class _Msg:
+    def __init__(self, content):
+        self.content = content
+
+
+def test_tool_results_are_read_from_a_user_message() -> None:
+    """A result carries the id of the call it answers, and whether it failed."""
+    msg = _Msg(
+        [
+            _Block(tool_use_id="a", is_error=False),
+            _Block(tool_use_id="b", is_error=True),
+        ]
+    )
+    assert agent._tool_results(msg) == {"a": False, "b": True}
+
+
+def test_a_tool_call_carries_its_id() -> None:
+    """Without the id a result cannot be joined to the call that made it."""
+    msg = _Msg(
+        [_Block(type="tool_use", name="mcp__files__write_file", input={"path": "x"}, id="a")]
+    )
+    calls = agent._tool_calls(msg)
+    assert calls == [{"id": "a", "name": "mcp__files__write_file", "input": {"path": "x"}}]
+
+
+def test_tool_results_ignores_a_message_with_no_blocks() -> None:
+    assert agent._tool_results(_Msg("plain text")) == {}

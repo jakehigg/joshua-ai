@@ -43,6 +43,25 @@ def parse_good(**overrides: str) -> config.JoshuaConfig:
     return config.parse(GOOD, ENV, source="test.yaml")
 
 
+def test_viewer_users_load_and_default() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  users:\n    alex: ${VIEWER_PW_ALEX:-}\n"
+    cfg = config.parse(text, {**ENV, "VIEWER_PW_ALEX": "secret"}, source="test.yaml")
+    assert cfg.viewer.enabled is True
+    assert cfg.viewer.users == {"alex": "secret"}
+
+
+def test_viewer_defaults_to_disabled_with_no_users() -> None:
+    cfg = config.parse(GOOD, ENV, source="test.yaml")
+    assert cfg.viewer.enabled is False
+    assert cfg.viewer.users == {}
+
+
+def test_viewer_users_unknown_person_fails() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  users:\n    ghost: ${VIEWER_PW_GHOST:-x}\n"
+    with pytest.raises(config.ConfigError, match="viewer.users: unknown person id 'ghost'"):
+        config.parse(text, ENV, source="test.yaml")
+
+
 def test_happy_path_and_defaults() -> None:
     cfg = config.parse(GOOD, ENV, source="test.yaml")
     assert cfg.name == "Home"
@@ -209,3 +228,87 @@ def test_example_channel_secrets_are_optional() -> None:
     assert cfg.channels.telegram.bot_token == ""
     assert cfg.channels.imessage.bluebubbles_password == ""
     assert cfg.channels.imessage.webhook_path_secret == ""
+
+
+def test_skills_top_k_defaults_to_one() -> None:
+    """One turn fires one skill. See the comment on Skills in config.py."""
+    assert config.Skills().top_k == 1
+
+
+def test_skills_top_k_can_be_raised() -> None:
+    assert config.Skills(top_k=2).top_k == 2
+
+
+# -- The derived role of a group (#25) ---------------------------------------
+#
+# A group writes the wiki only when every handle in ``members`` names a member.
+# The whole chat carries one role, because a session cannot change its role for
+# one turn, so one guest holds the chat down for everybody.
+
+_ROLES_YAML = """
+name: Test
+timezone: UTC
+people:
+  - id: alex
+    name: Alex
+    role: member
+    handles:
+      telegram: "111"
+  - id: mia
+    name: Mia
+    role: guest
+    handles:
+      telegram: "222"
+groups:
+  - id: all-members
+    channel: telegram
+    chat_id: "-1001"
+    members:
+      - "111"
+  - id: has-guest
+    channel: telegram
+    chat_id: "-1002"
+    members:
+      - "111"
+      - "222"
+  - id: open
+    channel: telegram
+    chat_id: "-1003"
+  - id: stranger
+    channel: telegram
+    chat_id: "-1004"
+    members:
+      - "111"
+      - "999"
+"""
+
+
+def _roles_cfg():
+    return config.parse(_ROLES_YAML, env={}, source="<test>")
+
+
+def _group(cfg, group_id: str):
+    return next(g for g in cfg.groups if g.id == group_id)
+
+
+def test_a_group_of_members_derives_member() -> None:
+    cfg = _roles_cfg()
+    assert cfg.group_role(_group(cfg, "all-members")) == ("member", None)
+
+
+def test_a_group_holding_a_guest_derives_guest() -> None:
+    """One guest holds the chat down, for the members too."""
+    cfg = _roles_cfg()
+    assert cfg.group_role(_group(cfg, "has-guest")) == ("guest", "222")
+
+
+def test_a_group_with_no_members_derives_guest() -> None:
+    """An empty list admits anybody in the chat, so it grants nothing."""
+    cfg = _roles_cfg()
+    assert cfg.group_role(_group(cfg, "open")) == ("guest", None)
+
+
+def test_a_handle_that_names_nobody_derives_guest() -> None:
+    """A handle with no person carries no role to trust."""
+    cfg = _roles_cfg()
+    assert cfg.group_role(_group(cfg, "stranger")) == ("guest", "999")

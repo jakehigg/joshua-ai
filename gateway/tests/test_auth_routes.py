@@ -39,7 +39,7 @@ def test_upstream_route_invalid_bearer(gateway):
 
 
 def test_upstream_route_forbids_non_mcp_caller(gateway):
-    # MCP routes admit core and laptop only; ci authenticates but is not admitted.
+    # MCP routes admit core only; ci authenticates but is not admitted.
     with TestClient(gateway()) as client:
         assert client.get("/echo", headers=bearer("ci")).status_code == 403
 

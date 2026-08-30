@@ -108,7 +108,12 @@ def result_json(res):
 
 
 def roots(data_root, person="alex", wiki_write=True):
-    return paths.person_roots(data_root, person, wiki_write=wiki_write)
+    """The root set of a request. Since #25 only the role decides.
+
+    ``person`` stays in the signature so the call sites below read the same. It
+    no longer changes what a request may reach.
+    """
+    return paths.roots(data_root, role="member" if wiki_write else "guest")
 
 
 TRAVERSALS = [
@@ -136,19 +141,21 @@ def test_traversal_message_hides_absolute_path(data_root, bad):
 
 
 def test_resolve_allows_blog_md_write(data_root):
-    root, abs_path = paths.resolve("blog/2026-08-24-1200-note.md", roots(data_root), write=True)
-    assert root.name == "blog"
+    root, abs_path = paths.resolve(
+        "people/alex/blog/2026-08-24-1200-note.md", roots(data_root), write=True
+    )
+    assert root.name == "people"
     assert abs_path == data_root / "people" / "alex" / "blog" / "2026-08-24-1200-note.md"
 
 
 def test_resolve_rejects_non_md_blog_write(data_root):
     with pytest.raises(paths.PathError):
-        paths.resolve("blog/note.txt", roots(data_root), write=True)
+        paths.resolve("people/alex/blog/note.txt", roots(data_root), write=True)
 
 
 def test_resolve_rejects_write_to_attachments(data_root):
     with pytest.raises(paths.PathError):
-        paths.resolve("attachments/2026/08/a.md", roots(data_root), write=True)
+        paths.resolve("people/alex/attachments/2026/08/a.md", roots(data_root), write=True)
 
 
 def test_resolve_rejects_non_md_write(data_root):
@@ -183,12 +190,48 @@ def test_shared_is_never_writable(data_root):
         paths.resolve("shared/x.md", roots(data_root, wiki_write=True), write=True)
 
 
-def test_no_person_gets_wiki_and_shared_read(data_root):
-    for person in (None, paths.UNKNOWN):
-        r = paths.person_roots(data_root, person, wiki_write=True)
-        assert set(r) == {"wiki", "shared"}
-        assert r["wiki"].can_write is False
-        assert r["shared"].can_write is False
+def test_a_request_with_no_role_writes_nothing(data_root):
+    """The safe default: a turn core could not attribute reads and writes nothing."""
+    for role in ("", "guest", "nonsense"):
+        r = paths.roots(data_root, role=role)
+        assert set(r) == {"wiki", "people", "shared"}
+        assert all(root.can_write is False for root in r.values())
+
+
+def test_a_member_writes_the_wiki_and_the_journal(data_root):
+    r = paths.roots(data_root, role="member")
+    assert r["wiki"].can_write is True
+    assert r["people"].can_write is True
+    assert r["shared"].can_write is False
+
+
+def test_the_root_set_does_not_depend_on_a_person(data_root):
+    """The heart of #25: identity is a path lookup, and not a permission."""
+    assert paths.roots(data_root, role="member") == paths.roots(data_root, role="member")
+
+
+def test_a_member_reads_the_journal_of_another_person(data_root):
+    """One corpus. The journal of mia is not walled off from alex."""
+    r = paths.roots(data_root, role="member")
+    root, resolved = paths.resolve("people/mia/blog/x.md", r, write=False)
+    assert root.name == "people"
+    assert resolved == data_root / "people" / "mia" / "blog" / "x.md"
+
+
+def test_the_write_domain_holds_below_people(data_root):
+    """The role says whether a write may happen; this says where it may land."""
+    r = paths.roots(data_root, role="member")
+    paths.resolve("people/alex/blog/ok.md", r, write=True)
+    for denied in ("people/alex/profile.md", "people/alex/attachments/x.md"):
+        with pytest.raises(paths.PathError, match="may be written"):
+            paths.resolve(denied, r, write=True)
+
+
+def test_a_retired_root_names_its_replacement(data_root):
+    """A skill taught before #25 still says ``blog/``. Say where it went."""
+    r = paths.roots(data_root, role="member")
+    with pytest.raises(paths.PathError, match="people/<person>/blog/"):
+        paths.resolve("blog/x.md", r, write=True)
 
 
 # -- through the gateway ----------------------------------------------------
@@ -267,8 +310,8 @@ async def test_write_rejects_over_256kb(gateway, data_root):
 @pytest.mark.parametrize(
     "args",
     [
-        {"path": "blog/2026-08-24.md", "content": "x\n", "mode": "overwrite"},
-        {"path": "attachments/2026/08/a.md", "content": "x\n"},
+        {"path": "people/alex/blog/2026-08-24.md", "content": "x\n", "mode": "overwrite"},
+        {"path": "people/alex/attachments/2026/08/a.md", "content": "x\n"},
         {"path": "wiki/script.py", "content": "print(1)\n"},
         {"path": "../escape.md", "content": "x\n"},
         {"path": "/data/people/mia/wiki/x.md", "content": "x\n"},
@@ -303,7 +346,9 @@ async def test_read_image_returns_image_block(gateway, data_root):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            res = await session.call_tool("read_file", {"path": "attachments/2026/08/p.png"})
+            res = await session.call_tool(
+                "read_file", {"path": "people/alex/attachments/2026/08/p.png"}
+            )
     block = res.content[0]
     assert block.type == "image"
     assert block.mime_type == "image/png"
@@ -318,9 +363,11 @@ async def test_read_heic_returns_metadata_only(gateway, data_root):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            res = await session.call_tool("read_file", {"path": "attachments/2026/08/a.heic"})
+            res = await session.call_tool(
+                "read_file", {"path": "people/alex/attachments/2026/08/a.heic"}
+            )
     payload = result_json(res)
-    assert payload["path"] == "attachments/2026/08/a.heic"
+    assert payload["path"] == "people/alex/attachments/2026/08/a.heic"
     assert "note" in payload
 
 
@@ -329,10 +376,11 @@ async def test_read_blog_allowed_write_blog_denied(gateway, data_root):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            read = await session.call_tool("read_file", {"path": "blog/2026-08-24.md"})
+            read = await session.call_tool("read_file", {"path": "people/alex/blog/2026-08-24.md"})
             assert read.content[0].text == "dear diary\n"
             write = await session.call_tool(
-                "write_file", {"path": "blog/x.md", "content": "x\n", "mode": "overwrite"}
+                "write_file",
+                {"path": "people/alex/blog/x.md", "content": "x\n", "mode": "overwrite"},
             )
     assert write.is_error is True
 
@@ -348,6 +396,31 @@ async def test_wiki_is_one_for_everyone(gateway, data_root):
     assert (data_root / "wiki" / "mine.md").exists()
     assert seen.is_error is False
     assert seen.content[0].text == "j\n"
+
+
+async def test_member_teaches_skill_guest_cannot(gateway, data_root, config_path, monkeypatch):
+    """A taught skill is a wiki file: a member writes ``wiki/skills/<slug>.md``;
+    a guest write to the same path is refused and the file is not created."""
+    from joshua_shared import config
+
+    app = gateway(files_yaml())
+    text = config_path.read_text().replace("    name: Mia\n", "    name: Mia\n    role: guest\n")
+    config_path.write_text(text)
+    monkeypatch.setattr(config, "_cache", None)
+    skill = '---\nname: movie time\ntriggers: ["movie time"]\n---\nDim the lights.\n'
+    async with lifespan(app):
+        async with gateway_session(app, "/files", "core", {"X-Joshua-Person": "alex"}) as session:
+            member = await session.call_tool(
+                "write_file", {"path": "wiki/skills/movie.md", "content": skill}
+            )
+        async with gateway_session(app, "/files", "core", {"X-Joshua-Person": "mia"}) as session:
+            guest = await session.call_tool(
+                "write_file", {"path": "wiki/skills/guest.md", "content": skill}
+            )
+    assert member.is_error is False
+    assert (data_root / "wiki" / "skills" / "movie.md").exists()
+    assert guest.is_error is True and "read-only" in guest.content[0].text
+    assert not (data_root / "wiki" / "skills" / "guest.md").exists()
 
 
 async def test_guest_reads_wiki_but_cannot_write_it(gateway, data_root, config_path, monkeypatch):
@@ -367,12 +440,13 @@ async def test_guest_reads_wiki_but_cannot_write_it(gateway, data_root, config_p
                 "rename_file", {"path": "wiki/note.md", "new_name": "n2.md"}
             )
             blog = await session.call_tool(
-                "write_file", {"path": "blog/today.md", "content": "ok\n"}
+                "write_file", {"path": "people/alex/blog/today.md", "content": "ok\n"}
             )
     assert read.content[0].text == "hello wiki\ntodo item\n"
     assert write.is_error is True and "read-only" in write.content[0].text
     assert rename.is_error is True
-    assert blog.is_error is False
+    # Since #25 a guest writes nothing, the journal included.
+    assert blog.is_error is True and "read-only" in blog.content[0].text
     assert not (data_root / "wiki" / "g.md").exists()
 
 
@@ -381,15 +455,16 @@ async def test_read_profile_allowed_write_denied(gateway, data_root):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            read = await session.call_tool("read_file", {"path": "profile.md"})
+            read = await session.call_tool("read_file", {"path": "people/alex/profile.md"})
             assert read.content[0].text == "# Alex\n"
             write = await session.call_tool(
-                "write_file", {"path": "profile.md", "content": "x\n", "mode": "overwrite"}
+                "write_file",
+                {"path": "people/alex/profile.md", "content": "x\n", "mode": "overwrite"},
             )
     assert write.is_error is True
 
 
-async def test_no_person_reads_wiki_and_shared_only(gateway, data_root):
+async def test_no_role_reads_the_corpus_and_writes_nothing(gateway, data_root):
     app = gateway(files_yaml())
     async with lifespan(app):
         async with gateway_session(app, "/files", "core") as session:
@@ -397,11 +472,12 @@ async def test_no_person_reads_wiki_and_shared_only(gateway, data_root):
             assert shared.content[0].text == "shared pizza\n"
             listed = await session.call_tool("list_files", {"root": "wiki"})
             denied = await session.call_tool("write_file", {"path": "wiki/x.md", "content": "x\n"})
-            blog = await session.call_tool("list_files", {"root": "blog"})
+            blog = await session.call_tool("list_files", {"root": "people"})
     assert listed.is_error is False
     assert "wiki/note.md" in [i["path"] for i in result_json(listed)]
     assert denied.is_error is True
-    assert blog.is_error is True
+    # One corpus: a request with no role reads people/, and writes nothing.
+    assert blog.is_error is False
 
 
 async def test_shared_is_read_only_for_a_member(gateway, data_root):
@@ -459,10 +535,10 @@ async def test_blog_write_stamps_name_and_frontmatter(gateway, data_root, fixed_
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
             res = await session.call_tool(
-                "write_file", {"path": "blog/new-fertilizer.md", "content": "# Notes\n"}
+                "write_file", {"path": "people/alex/blog/new-fertilizer.md", "content": "# Notes\n"}
             )
     assert res.is_error is False
-    assert result_json(res)["path"] == "blog/2026-08-27-1432-new-fertilizer.md"
+    assert result_json(res)["path"] == "people/alex/blog/2026-08-27-1432-new-fertilizer.md"
     post = data_root / "people" / "alex" / "blog" / "2026-08-27-1432-new-fertilizer.md"
     text = post.read_text()
     assert text.startswith("---\n")
@@ -475,11 +551,13 @@ async def test_blog_same_minute_slug_dedupes(gateway, data_root, fixed_clock):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            await session.call_tool("write_file", {"path": "blog/rue.md", "content": "one\n"})
-            second = await session.call_tool(
-                "write_file", {"path": "blog/rue.md", "content": "two\n"}
+            await session.call_tool(
+                "write_file", {"path": "people/alex/blog/rue.md", "content": "one\n"}
             )
-    assert result_json(second)["path"] == "blog/2026-08-27-1432-rue-2.md"
+            second = await session.call_tool(
+                "write_file", {"path": "people/alex/blog/rue.md", "content": "two\n"}
+            )
+    assert result_json(second)["path"] == "people/alex/blog/2026-08-27-1432-rue-2.md"
 
 
 async def test_blog_digest_name_reserved(gateway, data_root, fixed_clock):
@@ -488,7 +566,7 @@ async def test_blog_digest_name_reserved(gateway, data_root, fixed_clock):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
             res = await session.call_tool(
-                "write_file", {"path": "blog/2026-08-27.md", "content": "digest\n"}
+                "write_file", {"path": "people/alex/blog/2026-08-27.md", "content": "digest\n"}
             )
     assert res.is_error is True
     assert "reserved" in res.content[0].text
@@ -502,13 +580,16 @@ async def test_blog_keeps_supplied_stamp_and_overwrite_denied(gateway, data_root
         async with gateway_session(app, "/files", "core", headers) as session:
             kept = await session.call_tool(
                 "write_file",
-                {"path": "blog/2026-08-01-0900-trip.md", "content": "---\ndate: x\n---\nbody\n"},
+                {
+                    "path": "people/alex/blog/2026-08-01-0900-trip.md",
+                    "content": "---\ndate: x\n---\nbody\n",
+                },
             )
             over = await session.call_tool(
                 "write_file",
-                {"path": "blog/again.md", "content": "x\n", "mode": "overwrite"},
+                {"path": "people/alex/blog/again.md", "content": "x\n", "mode": "overwrite"},
             )
-    assert result_json(kept)["path"] == "blog/2026-08-01-0900-trip.md"
+    assert result_json(kept)["path"] == "people/alex/blog/2026-08-01-0900-trip.md"
     assert over.is_error is True and "append-only" in over.content[0].text
 
 
@@ -521,15 +602,20 @@ async def test_blog_frontmatter_attachments_validated(gateway, data_root, fixed_
             good = await session.call_tool(
                 "write_file",
                 {
-                    "path": "blog/garden.md",
-                    "content": "---\nattachments:\n  - attachments/2026/08/g.jpg\n---\nhi\n",
+                    "path": "people/alex/blog/garden.md",
+                    "content": (
+                        "---\nattachments:\n  - people/alex/attachments/2026/08/g.jpg\n---\nhi\n"
+                    ),
                 },
             )
             bad = await session.call_tool(
                 "write_file",
                 {
-                    "path": "blog/garden.md",
-                    "content": "---\nattachments:\n  - attachments/2026/08/missing.jpg\n---\nhi\n",
+                    "path": "people/alex/blog/garden.md",
+                    "content": (
+                        "---\nattachments:\n"
+                        "  - people/alex/attachments/2026/08/missing.jpg\n---\nhi\n"
+                    ),
                 },
             )
     assert good.is_error is False
@@ -557,12 +643,15 @@ async def test_rename_attachment_keeps_timestamp_prefix(gateway, data_root):
             res = await session.call_tool(
                 "rename_file",
                 {
-                    "path": "attachments/2026/08/2026-08-27-143210-IMG_4471.jpg",
+                    "path": "people/alex/attachments/2026/08/2026-08-27-143210-IMG_4471.jpg",
                     "new_name": "garden-north-bed.jpg",
                 },
             )
     assert res.is_error is False
-    assert result_json(res)["path"] == "attachments/2026/08/2026-08-27-143210-garden-north-bed.jpg"
+    assert (
+        result_json(res)["path"]
+        == "people/alex/attachments/2026/08/2026-08-27-143210-garden-north-bed.jpg"
+    )
     assert (src.parent / "2026-08-27-143210-garden-north-bed.jpg").exists()
     assert not src.exists()
 
@@ -582,11 +671,11 @@ async def test_rename_wiki_file(gateway, data_root):
 @pytest.mark.parametrize(
     "args",
     [
-        {"path": "attachments/2026/08/a.jpg", "new_name": "../x.jpg"},
-        {"path": "attachments/2026/08/a.jpg", "new_name": "sub/x.jpg"},
+        {"path": "people/alex/attachments/2026/08/a.jpg", "new_name": "../x.jpg"},
+        {"path": "people/alex/attachments/2026/08/a.jpg", "new_name": "sub/x.jpg"},
         {"path": "/data/people/mia/wiki/x.md", "new_name": "y.md"},
-        {"path": "attachments/2026/08/a.jpg", "new_name": "a.png"},
-        {"path": "profile.md", "new_name": "other.md"},
+        {"path": "people/alex/attachments/2026/08/a.jpg", "new_name": "a.png"},
+        {"path": "people/alex/profile.md", "new_name": "other.md"},
     ],
 )
 async def test_rename_rejections_hide_absolute_path(gateway, data_root, args):
@@ -610,7 +699,10 @@ async def test_rename_refuses_existing_target(gateway, data_root):
         async with gateway_session(app, "/files", "core", headers) as session:
             res = await session.call_tool(
                 "rename_file",
-                {"path": "attachments/2026/08/2026-08-27-143210-a.jpg", "new_name": "b.jpg"},
+                {
+                    "path": "people/alex/attachments/2026/08/2026-08-27-143210-a.jpg",
+                    "new_name": "b.jpg",
+                },
             )
     assert res.is_error is True and "exists" in res.content[0].text
 
@@ -629,14 +721,54 @@ async def test_list_files_adds_original_name(gateway, data_root):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            listing = await session.call_tool(
-                "list_files", {"root": "attachments", "recursive": True}
-            )
+            listing = await session.call_tool("list_files", {"root": "people", "recursive": True})
     entries = result_json(listing)
     paths_seen = [e["path"] for e in entries]
     assert not any(p.endswith(".meta.json") for p in paths_seen)
     entry = next(e for e in entries if e["path"].endswith("IMG_4471.jpg"))
     assert entry["original_name"] == "IMG_4471.HEIC"
+
+
+async def test_list_files_reports_channels_sidecar(gateway, data_root):
+    # Store a real attachment through the channels pipeline, then read it back
+    # through the files MCP. The sidecar the pipeline writes carries the sender's
+    # name into ``list_files`` with no gateway change.
+    from joshua_channels.attachments import AttachmentPipeline
+
+    inbox = data_root / "inbox" / "m1"
+    inbox.mkdir(parents=True)
+    (inbox / "IMG_0001.png").write_bytes(PNG_1PX)
+    stored = await AttachmentPipeline(data_dir=data_root).process(
+        inbox, person_id="alex", group_id=None
+    )
+    assert stored[0].original_name == "IMG_0001.png"
+
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            listing = await session.call_tool("list_files", {"root": "people", "recursive": True})
+    entries = result_json(listing)
+    assert not any(e["path"].endswith(".meta.json") for e in entries)
+    entry = next(e for e in entries if e["path"].endswith(stored[0].name))
+    assert entry["original_name"] == "IMG_0001.png"
+
+
+async def test_list_files_includes_attachment_without_sidecar(gateway, data_root):
+    # A missing or failed sidecar degrades to "no original_name", never to a
+    # stored file that drops out of the listing. This locks the graceful path:
+    # the bytes are the product; the sidecar is optional metadata.
+    base = data_root / "people" / "alex" / "attachments" / "2026" / "08"
+    stored = base / "2026-08-27-143210-IMG_9999.jpg"
+    stored.write_bytes(PNG_1PX)  # no .meta.json sidecar next to it
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            listing = await session.call_tool("list_files", {"root": "people", "recursive": True})
+    entries = result_json(listing)
+    entry = next(e for e in entries if e["path"].endswith("IMG_9999.jpg"))
+    assert "original_name" not in entry
 
 
 async def test_read_pdf_returns_text(gateway, data_root):
@@ -646,9 +778,11 @@ async def test_read_pdf_returns_text(gateway, data_root):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            res = await session.call_tool("read_file", {"path": "attachments/2026/08/doc.pdf"})
+            res = await session.call_tool(
+                "read_file", {"path": "people/alex/attachments/2026/08/doc.pdf"}
+            )
     text = res.content[0].text
-    assert "PDF attachments/2026/08/doc.pdf: 1 page(s)" in text
+    assert "PDF people/alex/attachments/2026/08/doc.pdf: 1 page(s)" in text
     assert "Hello PDF" in text
 
 
@@ -659,7 +793,9 @@ async def test_read_pdf_caps_long_document(gateway, data_root):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            res = await session.call_tool("read_file", {"path": "attachments/2026/08/big.pdf"})
+            res = await session.call_tool(
+                "read_file", {"path": "people/alex/attachments/2026/08/big.pdf"}
+            )
     text = res.content[0].text
     assert "30 page(s)" in text
     assert "capped" in text
@@ -674,7 +810,50 @@ async def test_read_corrupt_pdf_falls_back_to_metadata(gateway, data_root):
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            res = await session.call_tool("read_file", {"path": "attachments/2026/08/broken.pdf"})
+            res = await session.call_tool(
+                "read_file", {"path": "people/alex/attachments/2026/08/broken.pdf"}
+            )
     payload = result_json(res)
-    assert payload["path"] == "attachments/2026/08/broken.pdf"
+    assert payload["path"] == "people/alex/attachments/2026/08/broken.pdf"
     assert "PDF" in payload["note"]
+
+
+# -- The role is the boundary (#25) ------------------------------------------
+
+
+async def test_the_role_header_grants_the_write(gateway, data_root):
+    """A group turn carries no person and still writes, because it carries a role."""
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "member"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            wrote = await session.call_tool(
+                "write_file", {"path": "wiki/group.md", "content": "from the family chat\n"}
+            )
+    assert wrote.is_error is False
+    assert (data_root / "wiki" / "group.md").exists()
+
+
+async def test_the_role_header_refuses_the_write_for_a_guest(gateway, data_root):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "guest"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            wrote = await session.call_tool(
+                "write_file", {"path": "wiki/nope.md", "content": "no\n"}
+            )
+            read = await session.call_tool("read_file", {"path": "wiki/note.md"})
+    assert wrote.is_error is True and "read-only" in wrote.content[0].text
+    # A guest still reads the whole corpus.
+    assert read.is_error is False
+    assert not (data_root / "wiki" / "nope.md").exists()
+
+
+async def test_an_unknown_role_is_refused_at_the_boundary(gateway):
+    """The gateway validates what core asserts; a bad role is a 400, not a guess."""
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex", "X-Joshua-Role": "root"}
+        with pytest.raises(Exception):  # noqa: B017 — the transport surfaces the 400
+            async with gateway_session(app, "/files", "core", headers) as session:
+                await session.call_tool("read_file", {"path": "wiki/note.md"})

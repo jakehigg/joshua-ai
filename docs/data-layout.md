@@ -17,6 +17,7 @@ Production uses the fixed `/data`.
 /data/wiki/README.md
 /data/wiki/**.md                                 (the one wiki, incl. wiki/skills/*.md)
 /data/wiki/joshua/*.md                           (docs from the repo, rewritten each start)
+/data/wiki/.trash/<UTC timestamp>/**             (pages the viewer deleted; the index skips it)
 /data/shared/README.md
 /data/shared/profile.md
 /data/shared/attachments/<group>/YYYY/MM/<file>  (files from a group chat)
@@ -32,9 +33,13 @@ volume.
 All three containers run as uid 1000. All three mount the volume read-write.
 The code decides who writes what:
 
+`people/<id>/` groups a person's files. It is provenance and not a boundary:
+the corpus is shared, and any member reads any journal. What a person may write
+comes from their role, never from the path. See `security.md`.
+
 - channels writes `people/<id>/attachments/`, `shared/attachments/`,
   `people/<id>/cli/`, and `inbox/`.
-- core writes `blog/`, `profile.md`, `shared/profile.md`, `wiki/joshua/`, and
+- core writes `people/<id>/blog/`, `profile.md`, `shared/profile.md`, `wiki/joshua/`, and
   `inbox/sessions/`.
 - gateway (files MCP) writes `wiki/` for a member and `blog/` for any person.
 
@@ -52,6 +57,25 @@ from the image at each start. Core replaces an edit there, and an upgrade
 brings the new text. Core touches no other directory. The index holds these
 pages at shared scope, so any person can ask about them. `JOSHUA_DOCS_DIR` sets
 the source directory. The default is `/app/docs`.
+
+`wiki/skills/<slug>.md` is a taught skill: a "when I say X, do Y" behavior. The
+frontmatter holds a `name` and a `triggers` list; the body is the instructions.
+
+```
+---
+name: movie time
+triggers: ["movie time", "let's watch a movie"]
+---
+Dim the living room lights to 30 percent and turn on the TV.
+```
+
+A member teaches one. [memory.md](memory.md#taught-skills) explains the match.
+
+`wiki/.trash/` holds pages the viewer deleted. A delete moves the page to
+`wiki/.trash/<UTC timestamp>/<the path under wiki>`; it is never a hard delete.
+The timestamp directory keeps the original tree, so you restore a page with a
+shell. The index skips any path with a `.trash` part, so a deleted page leaves
+the search index at the next index run.
 
 An older layout kept a wiki per person under `people/<id>/wiki/`. At start,
 core moves those pages to `wiki/<id>/` and removes the empty directory. A page

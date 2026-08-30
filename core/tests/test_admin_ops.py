@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from joshua_core.admin import build_admin_router
+from joshua_core.memory import embed as embed_module
 from joshua_core.store.models import Channel, Conversation
 from starlette.testclient import TestClient
 
@@ -194,3 +195,33 @@ def test_ops_routes_require_admin(client) -> None:
     assert client.get("/admin/transcript/conv-1").status_code == 401
     turn = client.post("/admin/turn", json={"channel": "telegram:1", "text": "x"})
     assert turn.status_code == 401
+
+
+def _kb_client(monkeypatch, available: bool) -> TestClient:
+    monkeypatch.setenv("JOSHUA_TOKEN_LAPTOP", LAPTOP)
+    monkeypatch.delenv("ADMIN_CALLERS", raising=False)
+    monkeypatch.setattr(embed_module, "is_available", lambda: available)
+
+    class FakeIndexer:
+        def status(self) -> dict[str, Any]:
+            return {"files": {"last_run": None}}
+
+    class FakeMemory:
+        async def kb_stats(self) -> dict[str, Any]:
+            return {"documents": 0, "chunks": 0}
+
+    app = FastAPI()
+    app.state.ctx = SimpleNamespace(indexer=FakeIndexer(), memory=FakeMemory())
+    app.include_router(build_admin_router())
+    return TestClient(app)
+
+
+def test_kb_status_reports_the_embedding_model(monkeypatch) -> None:
+    body = _kb_client(monkeypatch, True).get("/admin/kb/status", headers=_laptop()).json()
+    assert body["embed"] is True
+
+
+def test_kb_status_reports_a_lost_embedding_model(monkeypatch) -> None:
+    """A healthy container with no memory must be visible on an admin route."""
+    body = _kb_client(monkeypatch, False).get("/admin/kb/status", headers=_laptop()).json()
+    assert body["embed"] is False

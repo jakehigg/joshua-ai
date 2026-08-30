@@ -22,6 +22,7 @@ from joshua_shared.log import get_logger
 
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.chunker import chunk_markdown
+from joshua_core.memory.skills import SKILL_KIND, is_skill_path, parse_skill, skill_slug
 from joshua_core.memory.sources import Document, Source
 from joshua_core.memory.store import MemoryStore
 
@@ -66,6 +67,8 @@ class Indexer:
         return {name: dict(state) for name, state in self._status.items()}
 
     async def _index_document(self, doc: Document) -> int:
+        if doc.source == "files" and is_skill_path(doc.uri):
+            return await self._index_skill(doc)
         chunks = chunk_markdown(doc.text, self._chunk_chars)
         embedded: list[tuple[str, str, list[float]]] = []
         for c in chunks:
@@ -81,6 +84,38 @@ class Indexer:
             path=doc.uri,
             kind=_kind_from_uri(doc.uri),
             title=doc.title,
+            provenance=doc.provenance,
+            file_sha256=doc.rev,
+            file_mtime=doc.updated_at,
+            doc_date=doc.doc_date,
+            chunks=embedded,
+        )
+
+    async def _index_skill(self, doc: Document) -> int:
+        """Index a taught skill: one ``kind='skill'`` row per trigger phrase.
+
+        The trigger phrase alone is embedded (no title breadcrumb — the match is
+        phrase against phrase); the row text is the full instructions. A file
+        that does not parse is skipped with one warning, and its rows are cleared
+        so a broken edit stops firing. An empty trigger list writes no rows.
+        """
+        skill = parse_skill(doc.frontmatter, doc.text, path=doc.uri)
+        if skill is None:
+            logger.warning({"message": "taught skill unparseable; skipped", "path": doc.uri})
+            await self._store.kb_delete_item(doc.source, doc.person_id, doc.uri)
+            return 0
+        embedded: list[tuple[str, str, list[float]]] = []
+        for trigger in skill.triggers:
+            vec = await asyncio.to_thread(embed_module.embed, trigger, self._embed_model)
+            if vec is None:
+                raise RuntimeError("embedding unavailable (fastembed not loaded?)")
+            embedded.append((trigger, skill.instructions, vec))
+        return await self._store.kb_replace_item(
+            source=doc.source,
+            person_id=doc.person_id,
+            path=doc.uri,
+            kind=SKILL_KIND,
+            title=skill.name or skill_slug(doc.uri),
             provenance=doc.provenance,
             file_sha256=doc.rev,
             file_mtime=doc.updated_at,
@@ -137,12 +172,23 @@ class Indexer:
                 ]
 
                 indexed = failed = 0
+                # A lost embedding model fails every document of every pass. One
+                # line for each document buries the cause, so the pass is counted
+                # and reported one time. A single bad document keeps its own line,
+                # because that is a fault of that document.
+                embed_ok = embed_module.is_available()
+                first_error = ""
+                first_path = ""
                 for doc in changed:
                     try:
                         await self._index_document(doc)
                         indexed += 1
                     except Exception as e:  # noqa: BLE001 — one bad doc must not sink the pass
                         failed += 1
+                        if not embed_ok:
+                            first_error = first_error or str(e)
+                            first_path = first_path or doc.uri
+                            continue
                         logger.warning(
                             {
                                 "message": "kb index failed",
@@ -152,6 +198,16 @@ class Indexer:
                                 "error": str(e),
                             }
                         )
+                if not embed_ok and failed:
+                    logger.warning(
+                        {
+                            "message": "kb index failed for the pass",
+                            "source": name,
+                            "failed": failed,
+                            "example_path": first_path,
+                            "error": first_error,
+                        }
+                    )
                 for person_id, path in removed:
                     await self._store.kb_delete_item(name, person_id, path)
 

@@ -162,10 +162,11 @@ def _assistant_text(msg: Any) -> str:
 
 
 def _tool_calls(msg: Any) -> list[dict[str, Any]]:
-    """Collect tool_use calls (name + input) from an assistant message.
+    """Collect tool_use calls (id + name + input) from an assistant message.
 
     Match on either the ``tool_use`` type or a bare ``name`` so a minor SDK shape
-    change degrades to "no tools captured" rather than an error.
+    change degrades to "no tools captured" rather than an error. The ``id`` ties
+    a call to its result; see ``_tool_results``.
     """
     calls: list[dict[str, Any]] = []
     for block in getattr(msg, "content", None) or []:
@@ -173,8 +174,32 @@ def _tool_calls(msg: Any) -> list[dict[str, Any]]:
         name = getattr(block, "name", None)
         if name and (btype == "tool_use" or btype is None) and not getattr(block, "text", None):
             inp = getattr(block, "input", None)
-            calls.append({"name": str(name), "input": inp if isinstance(inp, dict) else {}})
+            calls.append(
+                {
+                    "id": str(getattr(block, "id", "") or ""),
+                    "name": str(name),
+                    "input": inp if isinstance(inp, dict) else {},
+                }
+            )
     return calls
+
+
+def _tool_results(msg: Any) -> dict[str, bool]:
+    """Map each ``tool_use_id`` in a user message to whether it failed.
+
+    A tool result comes back on a ``UserMessage``, not on the assistant message
+    that made the call, so a caller has to join the two on the id. Without this
+    a refused write looks the same as a write that landed: see issue #26.
+    """
+    results: dict[str, bool] = {}
+    content = getattr(msg, "content", None)
+    if not isinstance(content, list):
+        return results
+    for block in content:
+        use_id = getattr(block, "tool_use_id", None)
+        if use_id:
+            results[str(use_id)] = bool(getattr(block, "is_error", False))
+    return results
 
 
 class AgentSession:
@@ -261,6 +286,7 @@ class AgentSession:
         usage: dict[str, Any] | None = None
         cost: float | None = None
         is_error = False
+        tool_errors: dict[str, bool] = {}
         result_text: str | None = None
 
         async for msg in self._client.receive_response():
@@ -273,7 +299,11 @@ class AgentSession:
                 continue
 
             cls = type(msg).__name__
-            if cls == "AssistantMessage":
+            if cls == "UserMessage":
+                # A tool result rides on a user message. Record the outcome so a
+                # refused write is not reported as a write (#26).
+                tool_errors.update(_tool_results(msg))
+            elif cls == "AssistantMessage":
                 calls.extend(_tool_calls(msg))
                 # With partial streaming the assembled message duplicates the
                 # deltas; use it only as a fallback.
@@ -293,6 +323,11 @@ class AgentSession:
         # Deliver the final result (the clean final answer), not the concatenation
         # of all assistant text, which includes inter-tool narration.
         text = (result_text or "").strip() or "".join(parts).strip()
+        # Stamp each call with its outcome. A call with no result recorded is
+        # treated as failed: silence is not success, and over-reporting a write
+        # is the fault this guards.
+        for call in calls:
+            call["ok"] = not tool_errors.get(str(call.get("id") or ""), True)
         seen: set[str] = set()
         tools_used = [c["name"] for c in calls if not (c["name"] in seen or seen.add(c["name"]))]
         logger.info(

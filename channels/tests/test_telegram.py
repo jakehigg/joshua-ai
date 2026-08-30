@@ -478,6 +478,53 @@ async def test_poll_error_sets_failing_and_names_conflict(tmp_path: Path) -> Non
     assert body["errors"] == 2
 
 
+async def test_poll_error_then_success_recovers(tmp_path: Path) -> None:
+    from telegram.error import Conflict
+
+    adapter = _adapter(tmp_path)
+    adapter._on_poll_error(Conflict("terminated by other getUpdates request"))
+    adapter._on_poll_error(Conflict("terminated by other getUpdates request"))
+
+    # A rolling update overlap ends and polling recovers.
+    adapter._on_poll_ok()
+
+    body = (await adapter.health()).as_dict()
+    assert body["ok"] is True
+    assert "reason" not in body
+    assert body["errors"] == 2  # the past errors stay visible to the operator
+
+
+async def test_inbound_message_marks_poll_ok(tmp_path: Path) -> None:
+    from telegram.error import Conflict
+
+    core = FakeCore()
+    adapter = _adapter(tmp_path, core=core)
+    adapter._on_poll_error(Conflict("terminated by other getUpdates request"))
+    ctx = SimpleNamespace(bot=FakeBot())
+
+    # A delivered update proves get_updates works again.
+    await adapter._on_message(_update(), ctx)
+
+    body = (await adapter.health()).as_dict()
+    assert body["ok"] is True
+    assert body["errors"] == 1
+
+
+async def test_repeating_poll_error_stays_unhealthy(tmp_path: Path) -> None:
+    from telegram.error import Conflict
+
+    adapter = _adapter(tmp_path)
+    adapter._on_poll_error(Conflict("terminated by other getUpdates request"))
+    adapter._on_poll_ok()  # a brief recovery
+    adapter._on_poll_error(Conflict("terminated by other getUpdates request"))
+    adapter._on_poll_error(Conflict("terminated by other getUpdates request"))
+
+    body = (await adapter.health()).as_dict()
+    assert body["ok"] is False
+    assert "getUpdates" in body["reason"]
+    assert body["errors"] == 3
+
+
 async def test_poll_error_redacts_bot_token(tmp_path: Path) -> None:
     from telegram.error import InvalidToken
 

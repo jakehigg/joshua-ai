@@ -1,9 +1,11 @@
 """Data access for the ``kb_chunk`` index — all memory SQL lives here.
 
 Ported from joshua-kb's ``app/repo.py`` (``kb_replace_item``, ``kb_search``,
-``kb_index_state``, ``kb_delete_item``) with the person-scope predicate: a
-person sees their own rows plus shared rows (``person_id IS NULL``); a
-group turn (``person_id`` None) sees shared rows only.
+``kb_index_state``, ``kb_delete_item``).
+
+Since #25 a search reaches the whole corpus. ``person_id`` stays on the row as
+provenance: it records whose episode a journal chunk holds, and it no longer
+narrows a search.
 """
 
 from __future__ import annotations
@@ -138,28 +140,44 @@ class MemoryStore:
         k: int,
         min_sim: float,
         sources: Sequence[str] | None = None,
+        kinds: Sequence[str] | None = None,
+        exclude_kinds: Sequence[str] | None = None,
     ) -> list[KbChunk]:
-        """Top-k chunks above the cosine floor, scoped to this person plus shared.
+        """Top-k chunks above the cosine floor, over the whole corpus.
 
-        ``person_id = %s`` admits the caller's own rows; ``person_id IS NULL``
-        admits shared rows. A group turn (``person_id`` None) matches shared only,
-        because ``person_id = NULL`` is never true.
+        ``person_id`` no longer narrows the search. Since #25 the corpus is one
+        corpus: the wiki is what Joshua knows and the journal is when something
+        happened, so a question about last Tuesday must reach the journal of the
+        person it happened to. The column stays on the row as provenance, and a
+        result still says whose episode it records.
+
+        The argument is kept so a caller reads the same, and so a later scope,
+        if one is wanted, has somewhere to go.
+
+        ``kinds`` limits the search to those kinds; ``exclude_kinds`` drops them
+        (the taught-skill trigger rows are excluded from ordinary recall this
+        way).
         """
         vec = _vec_literal(embedding)
-        source_clause = "AND source = ANY(%s)" if sources else ""
-        params: list[Any] = [vec, person_id]
+        clauses = ["embedding IS NOT NULL"]
+        params: list[Any] = [vec]
         if sources:
+            clauses.append("source = ANY(%s)")
             params.append(list(sources))
+        if kinds:
+            clauses.append("kind = ANY(%s)")
+            params.append(list(kinds))
+        if exclude_kinds:
+            clauses.append("NOT (kind = ANY(%s))")
+            params.append(list(exclude_kinds))
+        clauses.append("1 - (embedding <=> %s::vector) >= %s")
         params += [vec, min_sim, vec, k]
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 f"""
                 SELECT *, 1 - (embedding <=> %s::vector) AS similarity
                 FROM kb_chunk
-                WHERE embedding IS NOT NULL
-                  AND (person_id = %s OR person_id IS NULL)
-                  {source_clause}
-                  AND 1 - (embedding <=> %s::vector) >= %s
+                WHERE {" AND ".join(clauses)}
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
                 """,

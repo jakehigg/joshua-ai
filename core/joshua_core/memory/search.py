@@ -29,6 +29,8 @@ async def search(
     k: int,
     min_sim: float,
     sources: Sequence[str] | None = None,
+    kinds: Sequence[str] | None = None,
+    exclude_kinds: Sequence[str] | None = None,
     prefer_recent: bool = False,
     recency_bonus: float = 0.08,
     recency_half_life_days: float = 14.0,
@@ -42,6 +44,8 @@ async def search(
         k=max(k * _CANDIDATE_MULTIPLIER, 20),
         min_sim=min_sim,
         sources=sources,
+        kinds=kinds,
+        exclude_kinds=exclude_kinds,
     )
     ranked = rank_chunks(
         candidates,

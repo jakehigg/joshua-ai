@@ -73,6 +73,27 @@ leaves a root.
 The error names the root, never the real path. A request with no person, or
 the `unknown` person, gets `wiki/` and `shared/` read-only and nothing else.
 
+## One corpus, and two axes
+
+Joshua holds one corpus, and it is the memory of one entity. The wiki is what
+Joshua knows. The journal at `people/<id>/blog/` is when something happened. An
+attachment is the artifact. None of the three belongs to one person:
+`people/<id>/` says whose episode a journal entry records, and it is provenance,
+not a wall.
+
+Two axes carry the whole model:
+
+| Axis | What it holds | What decides |
+|---|---|---|
+| The corpus of Joshua | wiki, journal, attachments | the **role** |
+| An upstream MCP server | Gmail, a calendar, your own store | the **person** |
+
+Something that must stay private to one person lives outside Joshua, behind an
+MCP server. The gateway applies a tool policy for each person, so that store
+stays theirs. A group turn reaches the corpus and reaches no upstream of a
+person, so a family chat writes the family wiki and touches nobody's private
+store.
+
 ## Members and guests
 
 A person is a `member` or a `guest`. The role is a trust tier inside one
@@ -80,19 +101,52 @@ instance. It is not a hosting concept.
 
 | | Member | Guest |
 |---|---|---|
-| Own journal and profile | yes | yes |
-| Read the wiki, through `files` and `search_memory` | yes | yes |
-| Write the wiki | yes | no |
+| Read the corpus, through `files` and `search_memory` | yes | yes |
+| Write the wiki and a journal post | yes | no |
 | The shared profile in the prompt | yes | no |
-| Shared files through `files` and `search_memory` | yes | yes |
 | Add a person | yes | no |
 | Shapes the shared profile from group chats | yes | no |
 | MCP servers | per `allow` | per `allow` |
 
-A guest is a person you trust for a while: a visitor, a friend who tries
-Joshua. A guest reads the whole wiki and `shared/`, and writes neither. Put
-nothing in the wiki or in `shared/` that a guest must not see. Tool access is per person id, not per role. A guest
-with `allow: all` on a server gets that server.
+**Write is the only real difference.** A guest is a person you trust for a
+while: a visitor, a friend who tries Joshua. A guest reads the whole corpus and
+writes none of it. Put nothing in the corpus that a guest must not see. Tool
+access is per person id, not per role: a guest with `allow: all` on a server
+gets that server.
+
+An `owner` role arrives later, and it will be the only role that adds a person.
+
+### What decides a write
+
+The gateway acts on the `X-Joshua-Role` header, which only `core` may assert.
+`X-Joshua-Person` rides along for the audit trail and decides nothing about a
+file.
+
+A conversation carries one role. A direct message carries the role of its
+person. A group carries a derived role: `member` only when `members` is not
+empty and every handle in it names a member. An empty list, or a handle that
+names nobody, is a guest chat.
+
+So one guest in a family chat stops Joshua writing for the members too. That is
+the safe direction, and it is not visible from the chat, so `core` logs a
+`group role` line at start that names the group, the role, and the handle that
+lowered it.
+
+The role belongs to the conversation and not to the turn, because the SDK
+writes the gateway headers onto the command line of the CLI subprocess when a
+session starts. A per-turn role could not reach the gateway without rebuilding
+the session for every message.
+
+### Two rules that look alike
+
+The files MCP keeps one rule and dropped another:
+
+- **The person boundary** decided which person could reach `people/<id>/`. It is
+  gone. The corpus is shared.
+- **The write domain** decides which container owns a path: `channels` alone
+  writes an attachment, `core` alone writes `profile.md`, and the agent writes
+  the wiki and the journal. It stays. A member reads an attachment and does not
+  write one, because `channels` owns that path.
 
 ## Secrets
 

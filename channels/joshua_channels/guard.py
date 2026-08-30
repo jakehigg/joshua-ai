@@ -43,6 +43,10 @@ REFUSAL_REASONS = (REASON_UNKNOWN, REASON_RATE_LIMITED)
 # How many recent refusals the ring keeps.
 RECENT_RING_SIZE = 200
 
+# How many unconfigured group chats to remember. One entry for each chat, not
+# one for each message, so a busy group takes one slot.
+UNCONFIGURED_RING_SIZE = 50
+
 
 logger = get_logger("channels.guard")
 
@@ -60,6 +64,21 @@ class Verdict:
     person_id: str | None = None
     group_id: str | None = None
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class UnconfiguredGroup:
+    """One group chat that ``joshua.yaml`` does not list.
+
+    Holds what an operator needs to add the group and nothing else. No message
+    text and no sender handle: a person in the chat may be a stranger, and this
+    record exists to name the chat, not the people in it.
+    """
+
+    channel_type: str
+    chat_id: str
+    chat_title: str | None
+    at: float
 
 
 @dataclass(frozen=True)
@@ -121,6 +140,9 @@ class Guard:
         self._counts: dict[str, int] = {reason: 0 for reason in REFUSAL_REASONS}
         self._counts[REASON_TRUNCATED] = 0
         self._recent: deque[Refusal] = deque(maxlen=RECENT_RING_SIZE)
+        # Keyed by (channel_type, chat_id) so a busy chat takes one slot and the
+        # log line is written one time. Insertion order is the age order.
+        self._unconfigured: dict[tuple[str, str], UnconfiguredGroup] = {}
         self._lock = Lock()
 
     def _config(self) -> JoshuaConfig:
@@ -134,11 +156,16 @@ class Guard:
         sender_handle: str,
         chat_id: str,
         chat_kind: str,
+        chat_title: str | None = None,
         text_len: int,
         attachment_bytes: int,
     ) -> Verdict:
         """Return the verdict for one inbound message. Record every refusal."""
         cfg = self._config()
+        # Recorded before any refusal, and for a sender on the roster too. An
+        # operator cannot configure a group whose chat id never appears.
+        if chat_kind == "group" and cfg.groups_by_chat(channel_type, chat_id) is None:
+            self._note_unconfigured(channel_type, chat_id, chat_title)
         person = cfg.people_by_handle(channel_type, sender_handle)
         person_id = person.id if person is not None else None
         group_id: str | None = None
@@ -177,6 +204,40 @@ class Guard:
         if group.members and sender_handle not in group.members:
             return None
         return group.id
+
+    def _note_unconfigured(self, channel_type: str, chat_id: str, chat_title: str | None) -> None:
+        """Remember a group chat that the config does not list.
+
+        One record and one log line for each chat. The record holds no message
+        text and no sender handle.
+        """
+        key = (channel_type, chat_id)
+        with self._lock:
+            if key in self._unconfigured:
+                return
+            if len(self._unconfigured) >= UNCONFIGURED_RING_SIZE:
+                self._unconfigured.pop(next(iter(self._unconfigured)))
+            self._unconfigured[key] = UnconfiguredGroup(
+                channel_type=channel_type,
+                chat_id=chat_id,
+                chat_title=chat_title,
+                at=self._wall_clock(),
+            )
+        # A group Joshua cannot answer as a group is as invisible to the operator
+        # as a dropped message. The chat id is what `joshua.yaml` needs.
+        logger.info(
+            {
+                "message": "group not configured",
+                "channel_type": channel_type,
+                "chat_id": chat_id,
+                "chat_title": chat_title,
+            }
+        )
+
+    def unconfigured(self) -> list[dict]:
+        """The unconfigured group chats, oldest first, for the admin route."""
+        with self._lock:
+            return [asdict(entry) for entry in self._unconfigured.values()]
 
     def _refuse(self, channel_type: str, address: str, chat_id: str, reason: str) -> Verdict:
         with self._lock:

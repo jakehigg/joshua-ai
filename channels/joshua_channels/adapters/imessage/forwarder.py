@@ -456,6 +456,7 @@ class Forwarder:
             sender_handle=message.sender_address,
             chat_id=message.chat_guid,
             chat_kind="group" if message.is_group else "dm",
+            chat_title=message.chat_display_name,
             text_len=len(message.text),
             attachment_bytes=_declared_bytes(message),
         )

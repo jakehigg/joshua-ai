@@ -21,9 +21,13 @@ from mcp.client.streamable_http import streamable_http_client
 
 FIXTURE = Path(__file__).parent / "fixtures" / "echo_server.py"
 
-# identity -> token. `core` is the MCP route caller; `laptop`/`ci` are admins.
+# identity -> token, the fleet. `core` is the MCP route caller; `laptop`/`ci` are
+# admins; `channels` and `gateway` reach neither the MCP routes nor the admin
+# routes on the gateway.
 TOKENS = {
     "core": "core-token",
+    "channels": "channels-token",
+    "gateway": "gateway-token",
     "laptop": "laptop-token",
     "ci": "ci-token",
 }

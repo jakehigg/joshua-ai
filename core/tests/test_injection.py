@@ -105,10 +105,19 @@ class FakeStore:
     def __init__(self, chunks: list[KbChunk]) -> None:
         self._chunks = chunks
         self.seen: list[str | None] = []
+        self.exclude_seen: list[Any] = []
 
-    async def kb_search(self, person_id, embedding, *, k, min_sim, sources=None):  # type: ignore[no-untyped-def]
+    async def kb_search(  # type: ignore[no-untyped-def]
+        self, person_id, embedding, *, k, min_sim, sources=None, kinds=None, exclude_kinds=None
+    ):
         self.seen.append(person_id)
-        return list(self._chunks) if person_id == "alice" else []
+        self.exclude_seen.append(exclude_kinds)
+        if person_id != "alice":
+            return []
+        rows = self._chunks
+        if exclude_kinds:
+            rows = [c for c in rows if c.kind not in exclude_kinds]
+        return list(rows)
 
 
 class BoomStore:
@@ -195,6 +204,31 @@ async def test_hint_names_file() -> None:
     assert note is not None
     assert "wiki/pizza.md" in note
     assert repo.events[0]["decision"] == "hint"
+
+
+async def test_excludes_skill_rows_from_injection() -> None:
+    skill = KbChunk(
+        person_id="alice",
+        source="files",
+        kind="skill",
+        path="wiki/skills/movie.md",
+        title="Movie",
+        heading="movie time",
+        text="Dim the lights.",
+        similarity=0.99,
+    )
+    store, repo = FakeStore([skill, _chunk(0.9)]), FakeRepo()
+    note = await _run(_ctx("tell me about pizza dough"), store, repo)
+    assert store.exclude_seen[0] == ("skill",)  # the exclude filter is forwarded
+    assert note is not None
+    assert "Dim the lights." not in note  # a skill row never reaches the note
+    assert "00 flour" in note
+
+
+async def test_stores_embedding_on_ctx() -> None:
+    ctx = _ctx("tell me about pizza dough")
+    await _run(ctx, FakeStore([_chunk(0.9)]), FakeRepo())
+    assert ctx.embedding == [0.1] * 384  # shared with the taught-skill provider
 
 
 # --- register ----------------------------------------------------------------

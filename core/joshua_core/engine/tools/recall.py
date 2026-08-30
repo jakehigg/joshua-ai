@@ -20,6 +20,7 @@ from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.search import search
+from joshua_core.memory.skills import SKILL_KIND
 from joshua_core.memory.store import MemoryStore
 
 logger = get_logger("tools.recall")
@@ -62,6 +63,7 @@ async def do_search_memory(
         vec,
         k=limit,
         min_sim=min_sim,
+        exclude_kinds=(SKILL_KIND,),
         recency_bonus=recency_bonus,
         recency_half_life_days=recency_half_life_days,
         per_doc_cap=per_doc_cap,

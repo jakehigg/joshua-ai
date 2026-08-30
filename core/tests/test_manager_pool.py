@@ -10,6 +10,7 @@ from engine_fakes import (
     make_conversation,
     make_settings,
 )
+from joshua_core.engine import manager
 from joshua_core.engine.manager import ConversationManager
 
 
@@ -57,3 +58,44 @@ async def test_get_or_create_returns_same_managed(tmp_path):
     first = await manager._get_or_create(channel, conversation)
     second = await manager._get_or_create(channel, conversation)
     assert first is second
+
+
+# -- What a turn actually wrote (#26) ----------------------------------------
+#
+# `written` used to read the argument of a write call and never the result, so a
+# guest chat that wrote nothing logged three file names. An operator reading
+# that line went looking for files that were never made.
+
+
+def _call(name: str, path: str, ok: bool) -> dict:
+    return {"id": f"t-{path}", "name": name, "input": {"path": path}, "ok": ok}
+
+
+def test_a_refused_write_is_not_reported_as_written() -> None:
+    calls = [_call("mcp__files__write_file", "wiki/nope.md", ok=False)]
+    assert manager.written_paths(calls) == []
+    assert manager.failed_writes(calls) == 1
+
+
+def test_a_mixed_turn_reports_the_write_that_landed() -> None:
+    calls = [
+        _call("mcp__files__write_file", "people/alex/blog/ok.md", ok=True),
+        _call("mcp__files__write_file", "blog/retired.md", ok=False),
+    ]
+    assert manager.written_paths(calls) == ["people/alex/blog/ok.md"]
+    assert manager.failed_writes(calls) == 1
+
+
+def test_a_turn_with_no_write_call_is_unchanged() -> None:
+    calls = [
+        {"id": "t-1", "name": "mcp__files__read_file", "input": {"path": "wiki/x.md"}, "ok": True}
+    ]
+    assert manager.written_paths(calls) == []
+    assert manager.failed_writes(calls) == 0
+
+
+def test_a_call_with_no_outcome_counts_as_failed() -> None:
+    """Silence is not success. A missing result must not read as a write."""
+    calls = [{"id": "t-1", "name": "mcp__files__write_file", "input": {"path": "wiki/x.md"}}]
+    assert manager.written_paths(calls) == []
+    assert manager.failed_writes(calls) == 1

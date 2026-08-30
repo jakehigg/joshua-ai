@@ -1,15 +1,22 @@
 """The files MCP server, hosted in-process by the gateway as the ``files`` builtin.
 
-It lets the agent list, read, search, write, and rename files under the requesting
-person's roots: the one wiki under ``wiki/`` (a member writes, a guest reads);
-blog posts under ``blog/`` (create or
-append, never overwrite); ``profile.md`` and ``attachments/`` for reading; and
-``shared/`` (the shared profile and the group attachments, read-only). It is the
-agent's only file interface — it replaces the SDK ``Read``/``Write``/``Edit`` tools,
-so the agent reaches exactly these paths and nothing else.
+It lets the agent list, read, search, write, and rename files in the corpus: the
+one wiki under ``wiki/`` (a member writes, a guest reads);
+a journal post under ``people/<person>/blog/`` (create or append, never
+overwrite); ``people/<person>/profile.md`` and
+``people/<person>/attachments/`` for reading; and ``shared/`` (the shared
+profile and the group attachments, read-only). It is the agent's only file
+interface. It replaces the SDK ``Read``/``Write``/``Edit`` tools, so the agent
+reaches exactly these paths and nothing else.
 
-The person comes from the request (``person_ctx``), never from a tool argument.
-``paths.resolve`` confines every path to that person's root set. A path violation
+**One corpus.** The wiki is what Joshua knows, the journal is when something
+happened, and an attachment is the artifact. Since #25 no root is keyed on a
+person: the role of the request decides the write, and ``people/<person>/`` is
+provenance. A member writes the wiki and the journal; a guest writes nothing;
+a request with no role writes nothing.
+
+The role comes from the request (``role_ctx``), never from a tool argument.
+``paths.resolve`` confines every path to the root set of the request. A path violation
 returns a tool error with a plain message; it never echoes the absolute path.
 
 There is no ``delete_file``. Deletion is a human action through the viewer or a
@@ -41,10 +48,12 @@ from joshua_gateway.files_mcp.paths import (
     UNKNOWN,
     PathError,
     Root,
-    person_roots,
     resolve,
 )
-from joshua_gateway.observability import person_ctx
+from joshua_gateway.files_mcp.paths import (
+    roots as roots_for_role,
+)
+from joshua_gateway.observability import person_ctx, role_ctx
 
 # The data volume, fixed at /data in every container; overridable for tests.
 DATA_ENV = "JOSHUA_DATA_DIR"
@@ -226,17 +235,27 @@ def build_files_server(
 ) -> Server:
     """Build the files ``Server`` for a data volume at ``root_dir``.
 
-    ``timezone`` is the configured timezone; the server stamps a blog post name
-    in it. ``role_for`` returns a person's role; a ``member`` may write the
-    wiki, anyone else reads it. The default reads ``joshua.yaml``.
+    ``timezone`` is the configured timezone; the server stamps a journal post
+    name in it. ``role_for`` returns a person's role, and it is the fallback for
+    a request that carries a person but no role header.
     """
     tz = ZoneInfo(timezone)
     roles = role_for or _role_from_config
 
     def roots_for_request() -> dict[str, Root]:
-        person = person_ctx.get()
-        member = person is not None and person != UNKNOWN and roles(person) == "member"
-        return person_roots(root_dir, person, wiki_write=member)
+        """The root set of this request, from the role and never from the person.
+
+        Since #25 the corpus is shared, so the role alone decides. ``role_ctx``
+        holds what core asserted. An older core sends no role header, so a
+        request that names a person falls back to the role of that person; a
+        request with neither reads and writes nothing.
+        """
+        role = role_ctx.get()
+        if role is None:
+            person = person_ctx.get()
+            if person is not None and person != UNKNOWN:
+                role = roles(person)
+        return roots_for_role(root_dir, role=role or "")
 
     async def on_list_tools(ctx, params):
         return types.ListToolsResult(tools=TOOLS)
@@ -295,7 +314,7 @@ def _read_file(roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo) -> ty
         rel = _rel_path(root, abs_path)
         return _read_pdf(abs_path, rel)
 
-    if root.name == "attachments":
+    if _people_kind(args.get("path", "")) == "attachments":
         mime = IMAGE_MIME.get(abs_path.suffix.lower())
         if mime is not None:
             data = base64.b64encode(abs_path.read_bytes()).decode("ascii")
@@ -321,7 +340,7 @@ def _write_file(roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo) -> t
     path = args.get("path", "")
     root, abs_path = resolve(path, roots, write=True)
 
-    if root.name == "blog":
+    if _people_kind(path) == "blog":
         return _write_blog(roots, path, content, mode, tz)
 
     _check_frontmatter(content)
@@ -340,11 +359,17 @@ def _write_file(roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo) -> t
 def _rename_file(
     roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo
 ) -> types.CallToolResult:
-    root, src = resolve(args.get("path", ""), roots, write=False)
-    if root.name not in ("wiki", "blog", "attachments"):
+    rel = args.get("path", "")
+    root, src = resolve(rel, roots, write=False)
+    kind = _people_kind(rel)
+    if root.name == "wiki":
+        pass
+    elif root.name == "people" and kind in ("blog", "attachments"):
+        pass
+    else:
         raise FilesError(f"cannot rename in {root.name}")
-    if root.name == "wiki" and not root.can_write:
-        raise FilesError("wiki is read-only for a guest")
+    if not root.can_write:
+        raise FilesError(f"{root.name} is read-only for a guest")
     if not src.is_file():
         raise FilesError("file not found")
 
@@ -359,7 +384,7 @@ def _rename_file(
     if not stem:
         raise FilesError("new_name is empty after sanitizing")
 
-    if root.name == "attachments":
+    if kind == "attachments":
         prefix = _attachment_prefix(src.name)
         final = f"{prefix}{stem}{src.suffix}"
     else:
@@ -426,15 +451,19 @@ def _write_blog(
         raise FilesError("a blog post is append-only; write a new post or append")
 
     parts = PurePosixPath(path.strip()).parts
-    if len(parts) < 2:
-        raise FilesError("blog needs a filename, such as blog/notes.md")
+    if len(parts) < 4:
+        raise FilesError(
+            "a journal post needs a person and a filename, such as people/alex/blog/notes.md"
+        )
     name = parts[-1]
     if _BLOG_DIGEST.match(name):
-        raise FilesError("blog/YYYY-MM-DD.md is reserved for the nightly digest")
+        raise FilesError("people/<person>/blog/YYYY-MM-DD.md is reserved for the nightly digest")
 
     now_local = _now().astimezone(tz)
     stamped = name if _BLOG_STAMPED.match(name) else _stamp_blog_name(name, now_local)
-    new_rel = "/".join(["blog", *parts[1:-1], stamped])
+    # Keep every segment but the filename, so the post stays in the journal of
+    # the person the path named.
+    new_rel = "/".join([*parts[:-1], stamped])
     root, abs_path = resolve(new_rel, roots, write=True)
 
     if mode == "append" and abs_path.exists():
@@ -442,7 +471,9 @@ def _write_blog(
         _validate_attachments((_parse_frontmatter(content) or {}).get("attachments"), roots)
         data = abs_path.read_bytes() + content.encode("utf-8")
     else:
-        body = _blog_frontmatter(content, person_ctx.get(), now_local, roots)
+        # The author is the person in the path. A group turn carries no person
+        # in the header, and the post still belongs to somebody.
+        body = _blog_frontmatter(content, _people_person(path), now_local, roots)
         data = body.encode("utf-8")
         if mode == "create" and abs_path.exists():
             abs_path = _dedupe_path(abs_path)
@@ -487,7 +518,12 @@ def _blog_frontmatter(
 
 
 def _validate_attachments(listed: Any, roots: dict[str, Root]) -> None:
-    """Check each frontmatter attachment path exists under the ``attachments`` root."""
+    """Check each frontmatter attachment path names a stored attachment.
+
+    A path is ``people/<person>/attachments/...`` since #25. The check is that
+    the file exists and sits in the attachments of somebody, so a post cannot
+    point at a wiki page or at a journal entry and call it a photo.
+    """
     if listed in (None, []):
         return
     if not isinstance(listed, list):
@@ -498,7 +534,7 @@ def _validate_attachments(listed: Any, roots: dict[str, Root]) -> None:
             root, abs_path = resolve(rel, roots, write=False)
         except PathError as exc:
             raise FilesError(f"attachment not found: {rel}") from exc
-        if root.name != "attachments" or not abs_path.is_file():
+        if _people_kind(rel) != "attachments" or not abs_path.is_file():
             raise FilesError(f"attachment not found: {rel}")
 
 
@@ -562,6 +598,31 @@ def _read_pdf(abs_path: Path, rel: str) -> types.CallToolResult:
 
 
 # -- helpers ----------------------------------------------------------------
+
+
+def _people_kind(path: str) -> str | None:
+    """The kind a ``people/<person>/<kind>/...`` path names, or None.
+
+    Since #25 the corpus is one tree, so a handler asks what a path *is* rather
+    than which per-person root it came from. ``people/alex/blog/x.md`` gives
+    ``blog``; ``people/alex/attachments/2026/08/a.jpg`` gives ``attachments``.
+    """
+    parts = PurePosixPath(path.strip()).parts
+    if len(parts) >= 3 and parts[0] == "people":
+        return parts[2]
+    return None
+
+
+def _people_person(path: str) -> str | None:
+    """The person a ``people/<person>/...`` path names, or None.
+
+    The author of a journal post comes from the path, not from the request. A
+    group turn carries no person, and the post still belongs to somebody.
+    """
+    parts = PurePosixPath(path.strip()).parts
+    if len(parts) >= 2 and parts[0] == "people":
+        return parts[1]
+    return None
 
 
 def _rel_path(root: Root, abs_path: Path) -> str:

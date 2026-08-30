@@ -112,6 +112,13 @@ class Person(_Model):
 
 
 class Group(_Model):
+    """One group chat Joshua answers.
+
+    ``members`` holds the platform handles admitted in that chat. It is both the
+    way in and, since #25, the source of the role: see
+    ``JoshuaConfig.group_role``.
+    """
+
     id: str
     channel: str
     chat_id: str
@@ -185,6 +192,20 @@ class Inject(_Model):
     max_chars: int = 1200
 
 
+class Skills(_Model):
+    # Taught skills: a member writes ``wiki/skills/<slug>.md`` with trigger
+    # phrases; a matching turn fires the instructions.
+    #
+    # ``top_k`` is 1 because only the trigger phrase is embedded. Two skills
+    # that answer the same shape of message sit close together: "here's a
+    # plant" and "here's a receipt" measure 0.72, above ``min_sim``. A second
+    # skill then rides in below the one that was asked for, and the agent gets
+    # two sets of instructions. Raise it when you want two.
+    enabled: bool = True
+    min_sim: float = Field(default=0.62, ge=0.0, le=1.0)
+    top_k: int = Field(default=1, ge=1)
+
+
 class Memory(_Model):
     recent_posts: int = 3
     # Character caps for the system-prompt recency tier.
@@ -196,6 +217,7 @@ class Memory(_Model):
     # for the nightly reflection to write their blog post.
     min_chars_for_post: int = Field(default=200, ge=0)
     inject: Inject = Inject()
+    skills: Skills = Skills()
     embed_model: str = "BAAI/bge-small-en-v1.5"
     # Source adapters the indexer runs, name → adapter options. ``files`` is the
     # kernel and always runs even if absent here; an option ``schedule`` sets a
@@ -341,7 +363,13 @@ class McpServer(_Model):
 
 
 class Viewer(_Model):
+    # The read-only web viewer. ``users`` maps a person id to a password
+    # reference: a ``$2`` bcrypt hash, or a literal password, normally injected
+    # from ``VIEWER_PW_<ID>`` through ``${VIEWER_PW_ALEX:-}``. A key must name a
+    # person in ``people`` (checked in ``JoshuaConfig._check_viewer``). A person
+    # with no entry, or an empty value, cannot sign in.
     enabled: bool = False
+    users: dict[str, str] = {}
 
 
 class JoshuaConfig(_Model):
@@ -399,12 +427,42 @@ class JoshuaConfig(_Model):
                         raise ValueError(f"mcp.{name}: {pid} is allowed but has no identity")
         return self
 
+    @model_validator(mode="after")
+    def _check_viewer(self) -> JoshuaConfig:
+        person_ids = {person.id for person in self.people}
+        for pid in self.viewer.users:
+            if pid not in person_ids:
+                raise ValueError(f"viewer.users: unknown person id '{pid}'")
+        return self
+
     def person(self, person_id: str) -> Person | None:
         """Return the person with this id, or None."""
         for person in self.people:
             if person.id == person_id:
                 return person
         return None
+
+    def group_role(self, group: Group) -> tuple[str, str | None]:
+        """The role of a group chat, and the handle that lowered it.
+
+        A group is a ``member`` chat only when ``members`` is not empty and every
+        handle in it names a person whose role is ``member``. Anything else is a
+        ``guest`` chat: an empty list admits anybody, and a handle that names
+        nobody carries no role to trust.
+
+        The whole chat carries one role, because a session cannot change its role
+        for one turn. So one guest in a family chat stops Joshua writing for the
+        members too. That is the safe direction, and it is not obvious from the
+        outside, which is why the second value names the handle that caused it
+        and ``core`` logs it at start.
+        """
+        if not group.members:
+            return "guest", None
+        for handle in group.members:
+            person = self.people_by_handle(group.channel, handle)
+            if person is None or person.role != "member":
+                return "guest", handle
+        return "member", None
 
     def people_by_handle(self, handle_type: str, handle_id: str) -> Person | None:
         """Return the person who owns ``handle_type``:``handle_id``, or None.

@@ -117,6 +117,7 @@ class TelegramAdapter:
         self._bot = bot
         self._poll_errors = 0
         self._last_poll_error: str | None = None
+        self._polling_ok = True
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -146,7 +147,17 @@ class TelegramAdapter:
         """
         self._poll_errors += 1
         self._last_poll_error = self._redact(str(error) or type(error).__name__)
+        self._polling_ok = False
         logger.warning({"message": "telegram poll error", "reason": self._last_poll_error})
+
+    def _on_poll_ok(self) -> None:
+        """Record a successful poll for ``/readyz``.
+
+        A delivered update proves ``get_updates`` works now, so a transient error
+        that recovered does not keep the check false. The error counter stays for
+        the operator, but the adapter reports ok again.
+        """
+        self._polling_ok = True
 
     def _redact(self, text: str) -> str:
         """Drop the bot token from an error text and cap its length."""
@@ -157,11 +168,15 @@ class TelegramAdapter:
     async def health(self) -> AdapterHealth:
         """Report the adapter state for ``/readyz``.
 
-        A started adapter that has not raised is ``ok``. An adapter whose last
-        poll raised is failing; ``reason`` names the last error and ``errors``
-        counts the polls that raised.
+        The report is the current state, not history. A started adapter whose
+        last poll worked is ``ok``, even after an earlier error that recovered. An
+        adapter whose last poll raised is failing; ``reason`` names that error.
+        ``errors`` counts every poll that raised, so the operator sees a past
+        error on a recovered adapter too.
         """
-        if self._last_poll_error is None:
+        if self._polling_ok:
+            if self._poll_errors:
+                return AdapterHealth(ok=True, detail={"errors": self._poll_errors})
             return AdapterHealth(ok=True)
         return AdapterHealth(
             ok=False,
@@ -185,6 +200,7 @@ class TelegramAdapter:
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Normalize one Telegram update into a turn and submit it to core."""
+        self._on_poll_ok()
         message = update.effective_message
         user = update.effective_user
         chat = update.effective_chat
@@ -206,6 +222,7 @@ class TelegramAdapter:
             sender_handle=sender_handle,
             chat_id=chat_id,
             chat_kind=chat_kind,
+            chat_title=chat.title,
             text_len=len(text),
             attachment_bytes=_attachment_bytes(message),
         )

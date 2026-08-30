@@ -130,12 +130,34 @@ services:
         condition: service_healthy
     healthcheck: *app-healthcheck
 
-  # Wiki viewer. A placeholder until phase 5. Off by default; start it with
-  # `docker compose --profile viewer up`.
+  # Read-only web viewer for the wiki and a person's own files. A second
+  # entrypoint in the gateway image. Off by default; start it with
+  # `docker compose --profile viewer up`. Set `viewer.enabled: true` and a
+  # `viewer.users` entry per person in joshua.yaml first. Put a reverse proxy in
+  # front for TLS. It gets `/data` (read-write, for the delete) and the viewer
+  # passwords, and no fleet token or upstream credential.
   viewer:
-    image: busybox:1.36
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
     profiles: ["viewer"]
-    command: ["sh", "-c", "echo 'viewer arrives in phase 5'; sleep infinity"]
+    restart: unless-stopped
+    # The gateway image entrypoint runs the gateway app; the viewer is the
+    # second entrypoint in the same image.
+    entrypoint: ["python", "-m", "joshua_gateway.viewer"]
+    environment:
+      <<: *runtime-vars
+      JOSHUA_CONFIG: /etc/joshua/joshua.yaml
+      # One password per person who signs in. Add a `VIEWER_PW_<ID>` line for
+      # each id in `viewer.users`, in upper case. joshua.yaml reads them as
+      # `${VIEWER_PW_<ID>:-}`.
+      VIEWER_PW_ALEX: ${VIEWER_PW_ALEX:-}
+    volumes:
+      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - data:/data
+    ports:
+      - "8081:8000"
+    healthcheck: *app-healthcheck
 
 volumes:
   pgdata:

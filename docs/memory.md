@@ -21,10 +21,13 @@ are closest to it.
 | `wiki/**.md` | everyone |
 | `shared/**.md` | everyone |
 
-A person finds their own journal, the wiki, and the shared files. They never
-find another person's journal. A group chat finds the wiki and the shared
-files, because no one person owns the turn. A guest follows the same rule as a member: their own files, plus
-shared.
+A search reaches the whole corpus. The wiki is what Joshua knows and a journal
+is when something happened, so a question about last Tuesday must be able to
+reach the journal of the person it happened to. `person_id` stays on each row
+as provenance, and a result still says whose episode it records.
+
+A group chat searches the same corpus as a direct message. A guest searches it
+too: reading is not what separates a guest from a member. Writing is.
 
 `.trash/` directories and `*.meta.json` files are not indexed.
 
@@ -90,6 +93,52 @@ restart core after an edit:
 ```
 docker compose restart core
 ```
+
+## Taught skills
+
+A person can teach Joshua a skill: "when I say X, do Y". A taught skill is one
+Markdown file at `wiki/skills/<slug>.md`. The trigger phrases sit in the
+frontmatter; the body is the instructions Joshua follows when a phrase matches.
+
+```
+---
+name: movie time
+triggers: ["movie time", "let's watch a movie"]
+---
+Dim the living room lights to 30 percent and turn on the TV.
+```
+
+- `name` is the display name. It falls back to the slug when it is absent.
+- `triggers` is a list of phrases. An empty list turns the skill off.
+- The body is the instructions.
+
+The indexer turns each trigger into one row in the index, with the row kind
+`skill`. Before each turn, core matches the message against those rows. A match
+above `memory.skills.min_sim` (0.62) puts the instructions in front of the
+agent, best first, up to `memory.skills.top_k` (1) skills. The match is by
+meaning, so a paraphrase of a trigger still fires.
+
+One turn fires one skill, because only the trigger is embedded. Two skills that
+answer the same shape of message sit close together: "here's a plant" and
+"here's a receipt" measure 0.72. A higher `top_k` lets the second one ride in
+below the skill that was asked for. Raise it when you want two.
+
+A trigger row is an instruction, not a note. It never appears in the per-turn
+injection note and never comes back from `search_memory`.
+
+### Who can teach, who can trigger
+
+A member writes `wiki/skills/<slug>.md` through the files MCP. The wiki is
+read-only for a guest, so a guest cannot teach a skill or change one. There is
+one wiki, so a taught skill is shared: it fires for every person, a guest
+included. A guest can already read the file, so a guest match adds no access.
+
+### The index delay
+
+A skill starts to work after the next index pass
+(`memory.index_interval_s`, 60 seconds by default). A skill never fires on the
+turn that taught it. To stop a skill, a member sets `triggers: []` or deletes the
+file. A deleted file stops firing on the next pass.
 
 ## Two ways a blog post is written
 
@@ -198,6 +247,22 @@ from `huggingface.co` on the first start.
 `/home/app/.cache/fastembed`. Compose mounts the `model-cache` volume there, and
 the k8s overlay mounts the `model-cache` subdirectory of the data volume. So core
 downloads the model one time.
+
+`GET /readyz` reports the model as `checks.embed`, and `GET /admin/kb/status`
+reports it as `embed`. A lost model does not make core unready, because core
+still answers a turn. Use the field to see the loss, because the container stays
+healthy with no memory.
+
+The directory must be writable for the user that core runs as, uid 1000. A
+bind mount, an NFS export, a k8s subPath, or a rootless host can give a
+directory that root owns. Core tests the directory at the first embedding. When
+it cannot write, it logs `embed cache dir not writable, using a temporary
+directory` with both paths and keeps the memory. The model is then downloaded
+again on each start, so correct the mount:
+
+```
+chown 1000:1000 <the cache directory>
+```
 
 Do not put the cache under `/data/inbox`. Channels deletes each item there that
 is more than one hour old.

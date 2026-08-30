@@ -9,6 +9,11 @@ Two event shapes arrive.
 
 ## Named event → skill
 
+An event skill is not a taught skill. An event skill lives under
+`<prompts_dir>/skills/`, ships with the image, and fires on a webhook event. A
+taught skill lives under `wiki/skills/`, a person teaches it in chat, and a
+phrase in a message fires it — see [memory.md](memory.md#taught-skills).
+
 A named event carries an `event_type`. Core looks it up in the skill registry.
 A skill is one Markdown file:
 

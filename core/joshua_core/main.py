@@ -21,12 +21,13 @@ from joshua_shared.log import get_logger, install_healthcheck_filter
 
 from joshua_core.admin import build_admin_router
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
-from joshua_core.engine import injection
+from joshua_core.engine import injection, taught_skills
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
 from joshua_core.engine.tools import recall, registration, scheduling
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
+from joshua_core.memory import embed
 from joshua_core.memory.indexer import Indexer, IndexerLoop
 from joshua_core.memory.nightly import NightlyReflector
 from joshua_core.memory.sources.files import FilesSource
@@ -91,6 +92,29 @@ def resolve_agent_backend(env: Mapping[str, str] | None = None) -> str:
     return value
 
 
+def _log_group_roles(settings) -> None:
+    """Say what each group chat may do, and why.
+
+    A group writes the wiki only when every handle in ``members`` names a
+    member. One guest in a family chat therefore stops Joshua writing for the
+    members too, and nothing on the screen says so. This line is where an
+    operator finds out.
+    """
+    for group in settings.groups:
+        role, blocked_by = settings.group_role(group)
+        logger.info(
+            {
+                "message": "group role",
+                "group": group.id,
+                "channel": group.channel,
+                "role": role,
+                # The handle that held the group down to guest, or None when the
+                # group is a member chat or lists nobody at all.
+                "lowered_by": blocked_by,
+            }
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     install_healthcheck_filter()
@@ -147,6 +171,7 @@ async def lifespan(app: FastAPI):
     await scheduler.start()
     indexer_loop.start()
     await reflector.start()
+    _log_group_roles(settings)
     logger.info({"message": "joshua-core up", "agent_backend": agent_backend})
     try:
         yield
@@ -195,9 +220,9 @@ def _build_memory(
 ) -> tuple[Indexer, IndexerLoop]:
     """Wire the in-core RAG: the ``files`` source (always on), any optional
     source adapter from ``memory.sources``, the indexer, its interval loop, the
-    ``recall`` builtin tool, and the per-turn injection provider. A source with
-    a bad config, or a name with no adapter yet, is logged and skipped rather
-    than failing boot."""
+    ``recall`` builtin tool, the per-turn injection provider, and the taught-skill
+    provider. A source with a bad config, or a name with no adapter yet, is logged
+    and skipped rather than failing boot."""
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     memory = settings.memory
     sources: dict[str, Any] = {"files": FilesSource(data_dir)}
@@ -220,6 +245,7 @@ def _build_memory(
     )
     recall.register(manager, store, settings)
     injection.register(manager, store, settings, repo)
+    taught_skills.register(manager, store, settings, repo)
     return indexer, IndexerLoop(indexer, intervals)
 
 
@@ -248,6 +274,11 @@ async def healthz() -> dict[str, bool]:
 async def readyz(request: Request) -> dict:
     """Readiness: the DB answers a trivial query and the data layout is good.
 
+    ``checks.embed`` reports the embedding model, and does not hold ``ok`` down.
+    A lost model costs the memory, not the turn, so core stays in service and
+    answers. The check makes the loss visible to a probe, because the symptom
+    is otherwise a healthy container that remembers nothing.
+
     No secrets, no inventory.
     """
     ctx: AppContext | None = getattr(request.app.state, "ctx", None)
@@ -260,7 +291,11 @@ async def readyz(request: Request) -> dict:
         except Exception:  # noqa: BLE001 — any failure means not ready
             db_ok = False
     layout_ok = not layout.validate_layout()
-    return {"ok": db_ok and layout_ok, "checks": {"db": db_ok, "layout": layout_ok}}
+    embed_ok = embed.is_available()
+    return {
+        "ok": db_ok and layout_ok,
+        "checks": {"db": db_ok, "layout": layout_ok, "embed": embed_ok},
+    }
 
 
 def build_app() -> FastAPI:

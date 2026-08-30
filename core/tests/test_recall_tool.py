@@ -7,6 +7,8 @@ without a database. Embedding is monkeypatched to a constant vector.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.tools.recall import do_search_memory
@@ -20,9 +22,13 @@ class FakeStore:
 
     def __init__(self) -> None:
         self.seen_person: list[str | None] = []
+        self.exclude_seen: list[Any] = []
 
-    async def kb_search(self, person_id, embedding, *, k, min_sim, sources=None):
+    async def kb_search(
+        self, person_id, embedding, *, k, min_sim, sources=None, kinds=None, exclude_kinds=None
+    ):
         self.seen_person.append(person_id)
+        self.exclude_seen.append(exclude_kinds)
         shared = KbChunk(
             person_id=None,
             source="files",
@@ -33,19 +39,34 @@ class FakeStore:
             text="Guest wifi password",
             similarity=0.9,
         )
-        if person_id is None:
-            return [shared]
-        own = KbChunk(
-            person_id=person_id,
+        skill = KbChunk(
+            person_id=None,
             source="files",
-            kind="wiki",
-            path="wiki/me.md",
-            title="Me",
-            heading="",
-            text="My notes",
-            similarity=0.95,
+            kind="skill",
+            path="wiki/skills/movie.md",
+            title="Movie",
+            heading="movie time",
+            text="Dim the lights.",
+            similarity=0.99,
         )
-        return [own, shared]
+        rows = [shared, skill]
+        if person_id is not None:
+            rows.insert(
+                0,
+                KbChunk(
+                    person_id=person_id,
+                    source="files",
+                    kind="wiki",
+                    path="wiki/me.md",
+                    title="Me",
+                    heading="",
+                    text="My notes",
+                    similarity=0.95,
+                ),
+            )
+        if exclude_kinds:
+            rows = [c for c in rows if c.kind not in exclude_kinds]
+        return rows
 
 
 def _deps(person_id: str | None) -> ToolDeps:
@@ -78,6 +99,13 @@ async def test_group_turn_sees_shared_only() -> None:
     results = await _run(_deps(None), store)
     assert store.seen_person == [None]
     assert [r["path"] for r in results] == ["shared/house.md"]
+
+
+async def test_skill_rows_excluded_from_search_memory() -> None:
+    store = FakeStore()
+    results = await _run(_deps("alice"), store)
+    assert store.exclude_seen[0] == ("skill",)  # the exclude filter is forwarded
+    assert all("skills/" not in r["path"] for r in results)  # never a taught skill
 
 
 async def test_empty_query_returns_nothing() -> None:

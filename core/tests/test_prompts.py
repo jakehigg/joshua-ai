@@ -114,7 +114,9 @@ def test_member_prompt_has_journal_section() -> None:
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
     assert "## Your journal of each person" in prompt
-    assert "write a short post to `blog/<slug>.md`" in prompt
+    assert "write a short post to" in prompt
+    # The journal is addressed by person since #25; one corpus, no private tree.
+    assert "`people/<id>/blog/<slug>.md`" in prompt
 
 
 def test_journal_auto_adds_no_preference_line() -> None:
