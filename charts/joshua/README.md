@@ -60,9 +60,9 @@ the Secrets by hand:
 
 ```
 kubectl create secret generic joshua-core-secrets -n joshua \
-  --from-literal=DATABASE_URL=postgresql://joshua:PW@joshua-postgres:5432/joshua \
+  --from-literal=DATABASE_URL=postgresql://joshua:YOUR_PASSWORD@joshua-postgres:5432/joshua \
   --from-literal=CLAUDE_CODE_OAUTH_TOKEN=... \
-  --from-literal=POSTGRES_PASSWORD=PW \
+  --from-literal=POSTGRES_PASSWORD=YOUR_PASSWORD \
   --from-literal=JOSHUA_TOKEN_CORE=...
 ```
 
@@ -134,6 +134,28 @@ unless you know your storage arrives with the right owner.
 Only `channels` has an Ingress, and only when you enable it. `core` holds the
 agent and `gateway` holds every upstream credential, so neither is reachable
 from outside the namespace.
+
+`channels` needs an Ingress only when a channel gets a message pushed to it,
+such as the iMessage webhook from BlueBubbles. Telegram polls out and needs
+none.
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  host: joshua.example.net
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  tls:
+    enabled: true
+    # Empty means "<host>-tls".
+    secretName: joshua-channels-tls
+```
+
+The chart stops with an error when `ingress.enabled` is true and
+`ingress.host` is empty, because an Ingress with no host takes every request
+that reaches the class. One host belongs to one Ingress: the admission webhook of
+the controller refuses a second Ingress with the same host and path.
 
 ## Images
 
