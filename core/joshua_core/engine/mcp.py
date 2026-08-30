@@ -43,10 +43,10 @@ def gateway_servers(
     header, and the role header. The gateway records the conversation header; a
     later trust policy uses it for URL grants and taint.
 
-    **The role is the access control, and the person is not.** Since #25 the
-    corpus of Joshua is shared, so the role alone decides whether the agent
-    writes. The person rides along for the audit trail. A direct message carries
-    the role of that person; a group carries the role derived from its members.
+    **The role is the access control, and the person is not.** The corpus of
+    Joshua is shared, so the role alone decides whether the agent writes. The
+    person rides along for the audit trail. A direct message carries the role of
+    that person; a group carries the role derived from its members.
 
     The role of a conversation cannot change inside a session. The SDK writes
     this whole map onto the command line of the CLI subprocess when the session

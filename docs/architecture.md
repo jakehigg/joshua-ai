@@ -4,7 +4,7 @@ Joshua is three containers and one database. The three containers ship from one
 repository and one `docker-compose.yml`. The same code runs on one Docker host
 and on Kubernetes.
 
-![Joshua v4 high-level architecture](images/architecture.svg)
+![The three containers and what passes between them](images/architecture.svg)
 
 ```
                 inbound trust boundary                 outbound trust boundary

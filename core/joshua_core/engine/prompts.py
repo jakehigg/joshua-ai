@@ -91,7 +91,7 @@ class PromptComposer:
     """Compose a session's system prompt from the kernel files and the identity.
 
     ``prompts_dir`` holds the two prompt subdirectories; it defaults to the packaged
-    ``joshua_core/prompts``. The kernel files that v4 ships live in ``builtin/``. A
+    ``joshua_core/prompts``. The kernel files that Joshua ships live in ``builtin/``. A
     self-hoster drops custom ``.md`` snippets in ``user/``; the composer loads every
     such file and appends it to each session. ``person_prompts`` maps a person id to
     the file that holds that person's snippet (from ``people[].prompt``); a

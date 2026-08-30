@@ -6,9 +6,9 @@ headers. The gateway trusts those headers only from ``core``. From any other
 caller they are ignored and the request has no person and no role. No setting
 changes this, so nothing may widen it.
 
-**The role is the access control; the person is not.** Since #25 the corpus of
-Joshua is shared, and the role alone decides whether a request writes. The
-person is kept for the audit trail and for the provenance of a journal entry.
+**The role is the access control; the person is not.** The corpus of Joshua is
+shared, and the role alone decides whether a request writes. The person is kept
+for the audit trail and for the provenance of a journal entry.
 
 A trusted person must match the person id pattern and exist in ``people``, or
 be the literal ``unknown``. A trusted role must be ``member`` or ``guest``.

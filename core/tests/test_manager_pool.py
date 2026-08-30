@@ -60,11 +60,10 @@ async def test_get_or_create_returns_same_managed(tmp_path):
     assert first is second
 
 
-# -- What a turn actually wrote (#26) ----------------------------------------
+# -- What a turn actually wrote ------------------------------------------------
 #
-# `written` used to read the argument of a write call and never the result, so a
-# guest chat that wrote nothing logged three file names. An operator reading
-# that line went looking for files that were never made.
+# `written` names the writes that landed. A refused write is not there, so an
+# operator reading the line does not look for a file that was never made.
 
 
 def _call(name: str, path: str, ok: bool) -> dict:

@@ -188,8 +188,8 @@ def _tool_results(msg: Any) -> dict[str, bool]:
     """Map each ``tool_use_id`` in a user message to whether it failed.
 
     A tool result comes back on a ``UserMessage``, not on the assistant message
-    that made the call, so a caller has to join the two on the id. Without this
-    a refused write looks the same as a write that landed: see issue #26.
+    that made the call, so a caller joins the two on the id. Without the join, a
+    refused write reads the same as a write that landed.
     """
     results: dict[str, bool] = {}
     content = getattr(msg, "content", None)
@@ -300,8 +300,8 @@ class AgentSession:
 
             cls = type(msg).__name__
             if cls == "UserMessage":
-                # A tool result rides on a user message. Record the outcome so a
-                # refused write is not reported as a write (#26).
+                # A tool result rides on a user message. Record the outcome, so
+                # a refused write is not reported as a write.
                 tool_errors.update(_tool_results(msg))
             elif cls == "AssistantMessage":
                 calls.extend(_tool_calls(msg))

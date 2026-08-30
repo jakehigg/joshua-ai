@@ -1,7 +1,7 @@
 """Guards + normalization. Pure functions, fixture-driven, no I/O.
 
 Ported from the joshua/imessage bridge suite. The behaviour is unchanged; the
-old C1 ``to_event`` wire-shape assertions are dropped because v4 builds a
+old ``to_event`` wire-shape assertions are dropped because Joshua builds a
 ``TurnEvent`` in the adapter instead of a multipart event.
 """
 

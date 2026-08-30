@@ -1,6 +1,6 @@
 # Changelog
 
-Joshua v4 has no numbered release yet. This file starts with the state of
+Joshua has no numbered release yet. This file starts with the state of
 `main` on 2026-08-28. From here on, each entry names what changed for the
 person who runs Joshua.
 

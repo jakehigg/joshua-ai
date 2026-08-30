@@ -90,18 +90,17 @@ async def test_full_injection_and_audit_row(db, repo, tmp_path: Path, const_embe
     assert events[0]["turn_id"] == "t-x"
     uris = {r["uri"] for r in events[0]["results"]}
     assert "blog/2026-08-20.md" in uris
-    # One corpus since #25: the journal of another person is in scope, and the
-    # audit row still records every document the search considered.
+    # One corpus: the journal of another person is in scope, and the audit row
+    # records every document the search considered.
     assert "blog/2026-08-21.md" in uris
     assert any(r["injected"] and r["uri"] == "blog/2026-08-20.md" for r in events[0]["results"])
 
 
 async def test_a_group_turn_reaches_the_same_corpus(db, repo, tmp_path: Path, const_embed) -> None:
-    """A group turn is not a narrower turn since #25.
+    """A group turn is not a narrower turn.
 
-    It used to see ``shared/`` alone, because no one person owned it. Now the
-    corpus is shared, so a family chat can answer a question about anybody's
-    week.
+    The corpus is shared, so a family chat can answer a question about
+    anybody's week.
     """
     await repo.upsert_person("alice", "Alice")
     await repo.upsert_person("bob", "Bob")
@@ -118,8 +117,7 @@ async def test_a_group_turn_reaches_the_same_corpus(db, repo, tmp_path: Path, co
     assert group_note is not None
     events = await repo.kb_events(1)
     uris = {r["uri"] for r in events[0]["results"]}
-    # Before #25 this set held ``shared/house.md`` alone. A journal reaching it
-    # is the whole change.
+    # A journal reaches this set, and not ``shared/house.md`` alone.
     assert any(uri.startswith("blog/") for uri in uris)
     # The fixture embeds every document to the same vector, so each one ties and
     # the top-k order is arbitrary. Which document wins is not asserted: the

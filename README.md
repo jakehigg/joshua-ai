@@ -1,8 +1,11 @@
-# Joshua v4
+# Joshua
+
+> **Pre-release.** The interfaces, the config, and the data layout can change
+> between commits. Read `docs/CHANGELOG.md` before you update.
 
 Joshua is a personal AI agent for one person or a small group of people who
-share it: a family, friends, a team. v4 rebuilds it into three containers that ship
-from one monorepo and one `docker-compose.yml`. The three containers are
+share it: a family, friends, a team. It ships as three containers from one
+repository and one `docker-compose.yml`. The three containers are
 `channels` (the inbound trust boundary), `core` (the agent, memory, and
 scheduling), and `gateway` (the outbound trust boundary that holds every
 upstream credential). A shared package, `joshua_shared`, holds the code the
@@ -16,7 +19,7 @@ SDK web tools.
 
 ## Architecture
 
-![Joshua v4 high-level architecture](docs/images/architecture.svg)
+![The three containers and what passes between them](docs/images/architecture.svg)
 
 A message enters through `channels`, which authenticates the platform, applies
 the allowlist and the rate limits, and stores any attachment. `channels` sends a
@@ -49,9 +52,11 @@ subscription. You do not need Python, and you do not need a Telegram bot.
 ## Layout
 
 - `shared/`: package `joshua_shared`
-- `channels/`: package `joshua_channels`, image `joshua-v4-channels`
-- `core/`: package `joshua_core`, image `joshua-v4-core`
-- `gateway/`: package `joshua_gateway`, image `joshua-v4-gateway`
+- `channels/`: package `joshua_channels`
+- `core/`: package `joshua_core`
+- `gateway/`: package `joshua_gateway`
+
+Each of the three builds an image from its own `Dockerfile`.
 
 Each member has its own `pyproject.toml`, `Dockerfile`, and `tests/`. The repo
 is a `uv` workspace. It uses Python 3.13, `ruff`, and `pytest`.

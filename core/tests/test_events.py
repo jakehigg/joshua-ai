@@ -442,8 +442,9 @@ async def test_channels_resolver_over_http() -> None:
 
 
 def test_skill_registry_default_resolves_to_the_packaged_prompts() -> None:
-    """``SkillRegistry(None)`` must resolve, because ``core.prompts_dir`` defaults
-    to None. It used to raise, so it was the one caller that blocked that default."""
+    """``SkillRegistry(None)`` must resolve, because ``core.prompts_dir``
+    defaults to None. A caller that raises on the default blocks it for
+    everybody."""
     from joshua_core.events import SkillRegistry
 
     registry = SkillRegistry(None)

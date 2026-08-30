@@ -299,7 +299,7 @@ Every file that arrives goes through one pipeline:
    `shared/attachments/<group>/YYYY/MM/`.
 
 The agent reads a stored file with the `files` tool. It can cite a file in a
-journal post by its `attachments/…` path.
+journal post by its `people/<id>/attachments/…` path.
 
 `channels.limits.attachment_retention_days` (default `365`) deletes stored
 files older than that. `0` keeps every file. `keep_originals: true` also

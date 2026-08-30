@@ -1,8 +1,8 @@
 """Derived session profiles.
 
 A profile decides which kernel prompt files compose a session's system prompt and
-carries the per-session engine ceilings (model, max turns, idle TTL). v4 derives
-the profile from the person's role and the chat kind — there is no
+carries the per-session engine ceilings (model, max turns, idle TTL). The
+profile comes from the person's role and the chat kind. There is no
 ``profiles.yaml`` matrix. Tool exposure comes from the gateway config, not from
 the profile.
 """

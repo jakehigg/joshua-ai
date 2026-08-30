@@ -11,7 +11,7 @@ destination through the adapter (low latency, no model call) and still posts the
 event to core so core records the ``inject`` transcript row. The order is deliver
 first, then record.
 
-The body is the v4 shape (``destination``, ``text``, ``verbatim``, ``image_urls``,
+The body is the current shape (``destination``, ``text``, ``verbatim``, ``image_urls``,
 ``event_type``, ``payload``, ``source``). A compatibility shim accepts the old
 ``/inject`` field names (``channel``, ``content``) for one release and logs their
 use as deprecated. ``framing`` and ``handle`` are never read from the body; they
@@ -52,8 +52,8 @@ IMAGE_TIMEOUT_S = 10.0
 # is a 400, so the route never fetches a local or non-network resource.
 _ALLOWED_SCHEMES = ("http", "https")
 
-# Old ``/inject`` field name -> v4 field name. The shim maps these for one
-# release; the v4 field wins when both are present.
+# Old ``/inject`` field name -> current field name. The shim maps these for one
+# release; the current field wins when both are present.
 _SHIM_FIELDS = {"channel": "destination", "content": "text"}
 
 # Content type -> file extension for a downloaded image. An unknown type keeps
@@ -93,10 +93,10 @@ class DownloadOutcome:
 
 
 def normalize_body(body: dict) -> dict:
-    """Map the old ``/inject`` field names onto the v4 shape.
+    """Map the old ``/inject`` field names onto the current shape.
 
     Returns a new dict. Logs one deprecation line naming the old fields that were
-    used. The v4 field wins when both an old and a new name are present.
+    used. The current field wins when both an old and a new name are present.
     """
     normalized = dict(body)
     used_old: list[str] = []

@@ -339,50 +339,58 @@ mcp:
 ### The files MCP
 
 `files` is a builtin. It is the agent's only file interface. It lists, reads,
-searches, writes, and renames files. There is one wiki, and everyone uses it.
-The person's own files are their journal, their profile, and their
-attachments. Every path is confined to a root. The person comes from the
-request, never from a tool argument.
+searches, writes, and renames files. Every path is confined to a root.
 
-Roots for person P under `/data`:
+The corpus is one corpus. The wiki is what Joshua knows, a journal records when
+something happened, and an attachment is the artifact. No root is keyed on a
+person: the role of the request decides the write, and `people/<id>/` records
+whose episode a journal entry holds. The role comes from the request, never from
+a tool argument.
+
+Three roots under `/data`:
 
 | Root | Path | Read | Write |
 |---|---|---|---|
-| `wiki/` | `wiki/` | everyone | a member, `.md` only. A guest reads only. |
-| `blog/` | `people/P/blog/` | P | P, `.md` only, create or append |
-| `profile.md` | `people/P/profile.md` | P | no |
-| `attachments/` | `people/P/attachments/` | P | no |
+| `wiki/` | `wiki/` | everyone | a member, `.md` only |
+| `people/` | `people/` | everyone | a member, `people/<id>/blog/` only, `.md` only, create or append |
 | `shared/` | `shared/` | everyone | no |
 
-`wiki/joshua/` holds the documentation that the repo ships. Core replaces it at
-each start. A request with no person, or `unknown`, gets `wiki/` and `shared/`
-read and nothing else.
+A member writes the wiki and a journal post. A guest reads and writes nothing.
+A request with no role is a guest.
 
-Channels stores an inbound attachment under `attachments/YYYY/MM/` with the name
+The write rule below `people/` is the write domain of a container, and not a
+wall between people: `channels` owns `people/<id>/attachments/` and `core` owns
+`people/<id>/profile.md`, so the agent reads both and writes neither.
+
+`wiki/joshua/` holds the documentation that the repo ships. Core replaces it at
+each start.
+
+Channels stores an inbound attachment under `people/<id>/attachments/YYYY/MM/` with the name
 `YYYY-MM-DD-HHMMSS-<stem>.<ext>`, where `<stem>` is the sanitized original stem.
 The timestamp is the arrival time in `timezone`, the person's wall
 clock, so the name reads naturally. The message frontmatter and the index keep
 UTC. A second file with the same name in the same second gets `-2`, `-3`, and so
 on before the extension.
 
-A `blog/` write is create or append only. Overwrite is refused. The server names
-the post: `write_file` to `blog/<slug>.md` lands as
-`blog/YYYY-MM-DD-HHMM-<slug>.md`, stamped with the gateway clock in
+A journal write is create or append only. Overwrite is refused. The server
+names the post: `write_file` to `people/<id>/blog/<slug>.md` lands as
+`people/<id>/blog/YYYY-MM-DD-HHMM-<slug>.md`, stamped with the gateway clock in
 `timezone`. A name that already carries a valid `YYYY-MM-DD-HHMM-`
 prefix is kept. A second write with the same slug in the same minute gets `-2`,
-`-3`, and so on. The digest name `blog/YYYY-MM-DD.md` (no time part) is reserved
+`-3`, and so on. The digest name `people/<id>/blog/YYYY-MM-DD.md` (no time part) is reserved
 for core and is refused. `write_file` injects frontmatter (`date`, `person`,
 `source: chat`, `attachments: []`) when the post has none. When the post lists
-`attachments`, the server checks each path exists under the person's
-`attachments/` root.
+`attachments`, the server checks each path names a stored attachment under
+`people/<id>/attachments/`.
 
 Tools: `list_files`, `read_file`, `write_file`, `rename_file`, and
 `search_files`. `read_file` returns an image block for a `.jpg`, `.jpeg`, `.png`,
-`.gif`, or `.webp` in `attachments/`. A `.pdf` returns its extracted text (the
+`.gif`, or `.webp` under `people/<id>/attachments/`. A `.pdf` returns its extracted text (the
 first 20 pages, capped at 256 KB). Another attachment returns text when it is
 UTF-8 and 256 KB or less, else metadata only. `write_file` writes `.md` only, at
 most 256 KB, and `mode: create` fails when the file exists. `rename_file` renames
-one file in place under `wiki/`, `blog/`, or `attachments/`; `new_name` is a bare
+one file in place under `wiki/`, a journal, or an attachments directory.
+`new_name` is a bare
 filename and the extension must not change. An attachment keeps its date-time
 prefix, so the person renames the descriptive part only. `search_files` is a
 substring or regex search over markdown text, not semantic search. `list_files`
@@ -519,7 +527,7 @@ It is an env var, not a `joshua.yaml` key. `docker-compose.yml` defaults it to
 | Value | Runs | Needs |
 |---|---|---|
 | `sdk` (default) | Real Claude through the Claude Agent SDK | `CLAUDE_CODE_OAUTH_TOKEN` and the bundled `claude` CLI (in the core image) |
-| `stub` | A canned reply, for plumbing tests | Nothing — no SDK, token, or network |
+| `stub` | A canned reply, for plumbing tests | Nothing: no SDK, token, or network |
 
 Get a token with `claude setup-token`. For `stub`, set `AGENT_BACKEND=stub` in
 `.env` and leave `CLAUDE_CODE_OAUTH_TOKEN` empty. Any other value fails at boot.
@@ -529,7 +537,7 @@ Get a token with `claude setup-token`. For `stub`, set `AGENT_BACKEND=stub` in
 The core image ships its system prompt as Markdown files in two directories under
 `core/joshua_core/prompts/`:
 
-- `builtin/` holds the kernel files that v4 ships (`base.md`, `shared/profile.md`,
+- `builtin/` holds the kernel files that Joshua ships (`base.md`, `shared/profile.md`,
   `chat.md`, `group.md`, `guest.md`, `event.md`, `scheduled.md`). A profile
   composes its prompt from these files. Do not edit them. An upstream pull can
   overwrite them.

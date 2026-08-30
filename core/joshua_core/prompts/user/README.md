@@ -22,5 +22,5 @@ guest, event, scheduled). You do not edit any Python code or the kernel files in
   with `.`) are ignored.
 - The composer sorts files by name. Use a name prefix such as `10-`, `20-` to
   set the order.
-- The kernel files in `builtin/` ship with v4. Do not edit them. Add your content
+- The kernel files in `builtin/` ship with Joshua. Do not edit them. Add your content
   here instead, so an upstream pull does not overwrite it.

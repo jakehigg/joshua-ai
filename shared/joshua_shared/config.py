@@ -114,9 +114,8 @@ class Person(_Model):
 class Group(_Model):
     """One group chat Joshua answers.
 
-    ``members`` holds the platform handles admitted in that chat. It is both the
-    way in and, since #25, the source of the role: see
-    ``JoshuaConfig.group_role``.
+    ``members`` holds the platform handles admitted in that chat. It is both
+    the way in and the source of the role: see ``JoshuaConfig.group_role``.
     """
 
     id: str

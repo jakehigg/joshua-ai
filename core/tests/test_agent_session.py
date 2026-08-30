@@ -120,7 +120,7 @@ def _collect(sink):
     return on_delta
 
 
-# -- Tool results ride on a user message (#26) -------------------------------
+# -- Tool results ride on a user message --------------------------------------
 
 
 class _Block:

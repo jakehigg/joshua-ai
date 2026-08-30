@@ -79,9 +79,8 @@ WRITE_TOOLS = ("mcp__files__write_file", "mcp__files__rename_file")
 def written_paths(tool_calls: list[dict[str, Any]]) -> list[str]:
     """The paths a turn actually wrote, in call order, without duplicates.
 
-    A write the gateway refused is not here. The field used to read the argument
-    of the call and never the result, so a guest chat that wrote nothing logged
-    three file names and an operator had no way to tell (#26).
+    A write the gateway refused is not here, so an operator reading the log
+    does not look for a file that was never made.
 
     A call with no recorded outcome counts as failed. Silence is not success,
     and naming a file that does not exist is the fault this guards.

@@ -12,16 +12,11 @@ artifact. None of the three belongs to one person, so no root is keyed on a
 person. ``people/<id>/`` says whose episode a journal entry records; it is
 provenance, not a wall.
 
-Two different rules used to live in one function here. Only one of them is
-gone:
-
-- **The person boundary** decided which person could reach ``people/<id>/``.
-  That rule is deleted. See issue #25.
-- **The write domain** decides which container owns a path. ``channels`` alone
-  writes an attachment, ``core`` alone writes ``profile.md``, and the agent
-  writes the wiki and the journal. That rule stays, and ``write_subdir``
-  carries it. A member gets a read-only view of an attachment because
-  ``channels`` owns that path, and not because it belongs to somebody else.
+One rule decides a write: **the write domain**, which says the container that
+owns a path. ``channels`` writes an attachment, ``core`` writes ``profile.md``,
+and the agent writes the wiki and the journal. ``write_subdir`` carries the
+rule. A member reads an attachment and does not write one, because ``channels``
+owns that path.
 
 The role decides the write and nothing else decides it. A member writes, a
 guest reads, and a request with no role is a guest.
@@ -34,8 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 # The person id for a request core could not attribute to a known person. The
-# person no longer gates a path; it is kept for the audit trail and for the
-# provenance of a journal entry.
+# person is kept for the audit trail and for the provenance of a journal entry.
+# It does not gate a path.
 UNKNOWN = "unknown"
 
 # The role that writes. Every other role reads.
@@ -50,9 +45,9 @@ DIR_ROOTS = ("wiki", "people", "shared")
 # owns ``attachments/``.
 JOURNAL_SUBDIR = "blog"
 
-# Root names from the model before #25, when each person had their own tree.
-# ``resolve`` names the replacement instead of saying "unknown root", because a
-# taught skill written before the change still holds the old name.
+# Root names a taught skill can still hold from an earlier layout, when each
+# person had a separate tree. ``resolve`` names the replacement instead of
+# "unknown root", so a person can correct the skill.
 _RETIRED_ROOTS = {
     "blog": f"people/<person>/{JOURNAL_SUBDIR}/",
     "profile.md": "people/<person>/profile.md",
@@ -150,8 +145,8 @@ def resolve(path: str, root_set: dict[str, Root], *, write: bool) -> tuple[Root,
     if root is None:
         replacement = _RETIRED_ROOTS.get(parts[0])
         if replacement is not None:
-            # A skill taught before #25 still holds the old per-person name.
-            # Name the new path so the person can correct the skill.
+            # A skill can hold a name from the earlier per-person layout. Name
+            # the new path, so the person can correct the skill.
             raise PathError(
                 f"the root '{parts[0]}' is gone: the corpus is shared now. "
                 f"Use {replacement} instead."

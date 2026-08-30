@@ -2,7 +2,7 @@
 log. Pure where it can be (injected clock, no queue, no I/O).
 
 Ported from the joshua/imessage bridge suite. ``submit()`` behaviour is
-unchanged; the tests build the v4 ``Forwarder`` (guard + core client + pipeline)
+unchanged; the tests build the ``Forwarder`` (guard + core client + pipeline)
 with offline fakes instead of the old httpx/respx core POST.
 """
 

@@ -183,11 +183,10 @@ def _require_auth(handler: Any) -> Any:
 def _roots_for(person: Person) -> dict[str, Root]:
     """The display roots of the viewer, which are still per person.
 
-    The corpus is shared since #25, and the files MCP no longer keys a root on a
-    person. The viewer still does, because its URL space says "mine": ``/profile``
-    and ``/blog/`` name no person, so they can only mean the person who signed
-    in. Opening the viewer to the whole corpus needs a URL for each person, and
-    that is a separate change.
+    The corpus is shared, and the files MCP keys no root on a person. The viewer
+    does, because its URL space says "mine": ``/profile`` and ``/blog/`` name no
+    person, so they can only mean the person who signed in. A view of the whole
+    corpus needs a URL for each person, which is a separate change.
 
     This is a view, not a boundary. The viewer is read-only for everybody except
     a member deleting a wiki page, and it authenticates its own reader. Nothing

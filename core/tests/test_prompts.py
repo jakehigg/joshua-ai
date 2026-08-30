@@ -115,7 +115,7 @@ def test_member_prompt_has_journal_section() -> None:
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
     assert "## Your journal of each person" in prompt
     assert "write a short post to" in prompt
-    # The journal is addressed by person since #25; one corpus, no private tree.
+    # The journal is addressed by person: one corpus, no private tree.
     assert "`people/<id>/blog/<slug>.md`" in prompt
 
 
@@ -147,8 +147,8 @@ def test_journal_off_line_reaches_a_guest() -> None:
 def test_default_prompts_dir_resolves_to_the_packaged_files() -> None:
     """With no ``prompts_dir`` set, every kernel prompt file must read non-empty.
 
-    The config default used to be ``/app/prompts``, a path no image has, so the
-    composer silently produced an empty prompt for every profile.
+    A default that names a path no image holds makes the composer produce an
+    empty prompt for every profile, and it does so in silence.
     """
     from joshua_core.engine.profiles import _PROMPT_FILES
     from joshua_shared.config import Core

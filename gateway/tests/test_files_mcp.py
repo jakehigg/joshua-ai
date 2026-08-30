@@ -108,10 +108,10 @@ def result_json(res):
 
 
 def roots(data_root, person="alex", wiki_write=True):
-    """The root set of a request. Since #25 only the role decides.
+    """The root set of a request. Only the role decides.
 
     ``person`` stays in the signature so the call sites below read the same. It
-    no longer changes what a request may reach.
+    does not change what a request may reach.
     """
     return paths.roots(data_root, role="member" if wiki_write else "guest")
 
@@ -206,7 +206,7 @@ def test_a_member_writes_the_wiki_and_the_journal(data_root):
 
 
 def test_the_root_set_does_not_depend_on_a_person(data_root):
-    """The heart of #25: identity is a path lookup, and not a permission."""
+    """Identity is a path lookup, and not a permission."""
     assert paths.roots(data_root, role="member") == paths.roots(data_root, role="member")
 
 
@@ -228,7 +228,7 @@ def test_the_write_domain_holds_below_people(data_root):
 
 
 def test_a_retired_root_names_its_replacement(data_root):
-    """A skill taught before #25 still says ``blog/``. Say where it went."""
+    """A skill can still name a retired root. Say where the path went."""
     r = paths.roots(data_root, role="member")
     with pytest.raises(paths.PathError, match="people/<person>/blog/"):
         paths.resolve("blog/x.md", r, write=True)
@@ -445,7 +445,7 @@ async def test_guest_reads_wiki_but_cannot_write_it(gateway, data_root, config_p
     assert read.content[0].text == "hello wiki\ntodo item\n"
     assert write.is_error is True and "read-only" in write.content[0].text
     assert rename.is_error is True
-    # Since #25 a guest writes nothing, the journal included.
+    # A guest writes nothing, the journal included.
     assert blog.is_error is True and "read-only" in blog.content[0].text
     assert not (data_root / "wiki" / "g.md").exists()
 
@@ -729,19 +729,27 @@ async def test_list_files_adds_original_name(gateway, data_root):
     assert entry["original_name"] == "IMG_4471.HEIC"
 
 
-async def test_list_files_reports_channels_sidecar(gateway, data_root):
-    # Store a real attachment through the channels pipeline, then read it back
-    # through the files MCP. The sidecar the pipeline writes carries the sender's
-    # name into ``list_files`` with no gateway change.
-    from joshua_channels.attachments import AttachmentPipeline
+async def test_list_files_reports_the_attachment_sidecar(gateway, data_root):
+    """``list_files`` carries the sender's filename and hides the sidecar itself.
 
-    inbox = data_root / "inbox" / "m1"
-    inbox.mkdir(parents=True)
-    (inbox / "IMG_0001.png").write_bytes(PNG_1PX)
-    stored = await AttachmentPipeline(data_dir=data_root).process(
-        inbox, person_id="alex", group_id=None
+    The sidecar is written here in the shape ``docs/data-layout.md`` documents,
+    and not through the channels pipeline: a gateway test must not import
+    another container. ``channels`` pins the writer side in
+    ``test_sidecar_holds_original_name_mime_and_received_at``.
+    """
+    base = data_root / "people" / "alex" / "attachments" / "2026" / "08"
+    stored = base / "2026-08-27-143210-IMG_0001.png"
+    stored.write_bytes(PNG_1PX)
+    (base / f"{stored.name}.meta.json").write_text(
+        json.dumps(
+            {
+                "original_name": "IMG_0001.png",
+                "mime": "image/png",
+                "received_at": "2026-08-27T14:32:10+00:00",
+            }
+        ),
+        encoding="utf-8",
     )
-    assert stored[0].original_name == "IMG_0001.png"
 
     app = gateway(files_yaml())
     async with lifespan(app):
@@ -750,7 +758,7 @@ async def test_list_files_reports_channels_sidecar(gateway, data_root):
             listing = await session.call_tool("list_files", {"root": "people", "recursive": True})
     entries = result_json(listing)
     assert not any(e["path"].endswith(".meta.json") for e in entries)
-    entry = next(e for e in entries if e["path"].endswith(stored[0].name))
+    entry = next(e for e in entries if e["path"].endswith(stored.name))
     assert entry["original_name"] == "IMG_0001.png"
 
 
@@ -818,7 +826,7 @@ async def test_read_corrupt_pdf_falls_back_to_metadata(gateway, data_root):
     assert "PDF" in payload["note"]
 
 
-# -- The role is the boundary (#25) ------------------------------------------
+# -- The role is the boundary --------------------------------------------------
 
 
 async def test_the_role_header_grants_the_write(gateway, data_root):

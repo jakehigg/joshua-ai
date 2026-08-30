@@ -3,9 +3,9 @@
 Ported from joshua-kb's ``app/repo.py`` (``kb_replace_item``, ``kb_search``,
 ``kb_index_state``, ``kb_delete_item``).
 
-Since #25 a search reaches the whole corpus. ``person_id`` stays on the row as
-provenance: it records whose episode a journal chunk holds, and it no longer
-narrows a search.
+A search reaches the whole corpus. ``person_id`` stays on the row as
+provenance: it records whose episode a journal chunk holds, and it does not
+narrow a search.
 """
 
 from __future__ import annotations
@@ -145,11 +145,11 @@ class MemoryStore:
     ) -> list[KbChunk]:
         """Top-k chunks above the cosine floor, over the whole corpus.
 
-        ``person_id`` no longer narrows the search. Since #25 the corpus is one
-        corpus: the wiki is what Joshua knows and the journal is when something
-        happened, so a question about last Tuesday must reach the journal of the
-        person it happened to. The column stays on the row as provenance, and a
-        result still says whose episode it records.
+        ``person_id`` does not narrow the search. The corpus is one corpus: the
+        wiki is what Joshua knows and the journal is when something happened, so
+        a question about last Tuesday must reach the journal of the person it
+        happened to. The column stays on the row as provenance, and a result
+        says whose episode it records.
 
         The argument is kept so a caller reads the same, and so a later scope,
         if one is wanted, has somewhere to go.

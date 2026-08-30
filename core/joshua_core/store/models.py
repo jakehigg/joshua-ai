@@ -1,9 +1,8 @@
 """Frozen dataclasses that mirror the store rows.
 
-Stdlib only, so they import without psycopg. Every field maps to a column;
-``workspace_dir`` and ``prompt_profile`` are gone in v4 (a person's workspace is
-``/data/people/<id>``, and the prompt profile is derived from role and chat
-kind).
+Stdlib only, so they import without psycopg. Every field maps to a column. A
+person's workspace is ``/data/people/<id>``, and the prompt profile comes from
+the role and the chat kind.
 """
 
 from __future__ import annotations

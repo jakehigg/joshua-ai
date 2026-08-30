@@ -70,7 +70,7 @@ def test_gateway_servers_person_defaults_to_unknown(cfg):
 
 
 def test_gateway_servers_send_the_role(cfg):
-    """The role is what the gateway acts on since #25; the person is provenance."""
+    """The role is what the gateway acts on; the person is provenance."""
     servers = gateway_servers(["files"], "http://gw:8000", "tok", "alex", "conv-1", "member")
     assert servers["files"]["headers"]["X-Joshua-Role"] == "member"
     assert servers["files"]["headers"]["X-Joshua-Person"] == "alex"

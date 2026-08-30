@@ -10,10 +10,10 @@ interface. It replaces the SDK ``Read``/``Write``/``Edit`` tools, so the agent
 reaches exactly these paths and nothing else.
 
 **One corpus.** The wiki is what Joshua knows, the journal is when something
-happened, and an attachment is the artifact. Since #25 no root is keyed on a
-person: the role of the request decides the write, and ``people/<person>/`` is
-provenance. A member writes the wiki and the journal; a guest writes nothing;
-a request with no role writes nothing.
+happened, and an attachment is the artifact. No root is keyed on a person: the
+role of the request decides the write, and ``people/<person>/`` is provenance.
+A member writes the wiki and the journal. A guest writes nothing, and a request
+with no role writes nothing.
 
 The role comes from the request (``role_ctx``), never from a tool argument.
 ``paths.resolve`` confines every path to the root set of the request. A path violation
@@ -245,10 +245,10 @@ def build_files_server(
     def roots_for_request() -> dict[str, Root]:
         """The root set of this request, from the role and never from the person.
 
-        Since #25 the corpus is shared, so the role alone decides. ``role_ctx``
-        holds what core asserted. An older core sends no role header, so a
-        request that names a person falls back to the role of that person; a
-        request with neither reads and writes nothing.
+        The corpus is shared, so the role alone decides. ``role_ctx`` holds
+        what core asserted. A core that sends no role header falls back to the
+        role of the person it names; a request with neither reads and writes
+        nothing.
         """
         role = role_ctx.get()
         if role is None:
@@ -520,9 +520,9 @@ def _blog_frontmatter(
 def _validate_attachments(listed: Any, roots: dict[str, Root]) -> None:
     """Check each frontmatter attachment path names a stored attachment.
 
-    A path is ``people/<person>/attachments/...`` since #25. The check is that
-    the file exists and sits in the attachments of somebody, so a post cannot
-    point at a wiki page or at a journal entry and call it a photo.
+    A path is ``people/<person>/attachments/...``. The check is that the file
+    exists and sits in the attachments of somebody, so a post cannot point at a
+    wiki page or at a journal entry and call it a photo.
     """
     if listed in (None, []):
         return
@@ -603,9 +603,9 @@ def _read_pdf(abs_path: Path, rel: str) -> types.CallToolResult:
 def _people_kind(path: str) -> str | None:
     """The kind a ``people/<person>/<kind>/...`` path names, or None.
 
-    Since #25 the corpus is one tree, so a handler asks what a path *is* rather
-    than which per-person root it came from. ``people/alex/blog/x.md`` gives
-    ``blog``; ``people/alex/attachments/2026/08/a.jpg`` gives ``attachments``.
+    The corpus is one tree, so a handler asks what a path *is* rather than
+    which root it came from. ``people/alex/blog/x.md`` gives ``blog``;
+    ``people/alex/attachments/2026/08/a.jpg`` gives ``attachments``.
     """
     parts = PurePosixPath(path.strip()).parts
     if len(parts) >= 3 and parts[0] == "people":

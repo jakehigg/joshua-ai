@@ -239,7 +239,7 @@ def test_skills_top_k_can_be_raised() -> None:
     assert config.Skills(top_k=2).top_k == 2
 
 
-# -- The derived role of a group (#25) ---------------------------------------
+# -- The derived role of a group ----------------------------------------------
 #
 # A group writes the wiki only when every handle in ``members`` names a member.
 # The whole chat carries one role, because a session cannot change its role for

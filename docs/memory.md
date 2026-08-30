@@ -145,7 +145,8 @@ file. A deleted file stops firing on the next pass.
 A person's blog (`people/<id>/blog/`) is the durable record of their life. Two
 paths write it:
 
-- **Nightly reflection** writes one digest per day (`blog/YYYY-MM-DD.md`) from
+- **Nightly reflection** writes one digest per day
+  (`people/<id>/blog/YYYY-MM-DD.md`) from
   that day's conversations. See the `memory` section of `CLAUDE.md`.
 - **On-demand journaling** writes a post the moment a person shares a life
   update in chat. This is the primary way memory is created.
@@ -154,15 +155,16 @@ paths write it:
 
 When a person shares an event, a change, a milestone, or a photo with context,
 the agent writes a short post with the files MCP `write_file` tool. The agent
-passes a plain slug such as `blog/garden.md`. The files MCP stamps the date and
-time onto the filename, so the post lands at
-`blog/YYYY-MM-DD-HHMM-<slug>.md`.
+names the person the update is about and passes a plain slug, such as
+`people/alex/blog/garden.md`. The files MCP stamps the date and time onto the
+filename, so the post lands at
+`people/alex/blog/YYYY-MM-DD-HHMM-garden.md`.
 
 Rules the agent follows (see `prompts/builtin/people.md`):
 
 - One post per distinct update.
 - First person, in the person's voice, not the agent's.
-- Cite each attached file by its `attachments/…` path. In the frontmatter
+- Cite each attached file by its `people/<id>/attachments/…` path. In the frontmatter
   `attachments:` list and once in the body.
 - Do not post for a question, chit-chat, or a request.
 

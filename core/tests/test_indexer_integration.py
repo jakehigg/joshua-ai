@@ -62,11 +62,11 @@ def _indexer(pool, root: Path) -> tuple[MemoryStore, Indexer]:
 
 
 async def test_a_search_reaches_the_whole_corpus(db, repo, tmp_path: Path, count_embed) -> None:
-    """One corpus since #25: a search is not narrowed by who asks.
+    """One corpus: a search is not narrowed by who asks.
 
     The wiki is what Joshua knows and a journal is when something happened, so a
-    question about last Tuesday has to be able to reach the journal of the
-    person it happened to. Before #25 each person saw their own journal alone.
+    question about last Tuesday has to reach the journal of the person it
+    happened to.
     """
     await _people(repo)
     _tree(tmp_path)
@@ -81,14 +81,14 @@ async def test_a_search_reaches_the_whole_corpus(db, repo, tmp_path: Path, count
 
     assert everything <= alice
     assert everything <= bob
-    # A group turn reads the same corpus. It used to see the wiki and shared only.
+    # A group turn reads the same corpus.
     assert everything <= group
 
 
 async def test_a_result_still_names_whose_episode_it_is(
     db, repo, tmp_path: Path, count_embed
 ) -> None:
-    """``person_id`` stopped being a filter and stays as provenance."""
+    """``person_id`` is provenance and not a filter."""
     await _people(repo)
     _tree(tmp_path)
     store, indexer = _indexer(db.pool, tmp_path)

@@ -1,6 +1,6 @@
 """Guard: a kernel prompt file must name only kernel tools.
 
-The v4 kernel prompt must not reference the legacy tools or claim web
+The kernel prompt must not reference the legacy tools or claim web
 access the agent does not have. This grep runs over every packaged
 prompt file.
 """

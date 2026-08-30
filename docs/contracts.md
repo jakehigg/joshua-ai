@@ -42,7 +42,7 @@ One message or event, from `channels` to `core`.
 | `options` | object | `null` | `verbatim: true` records the text with no model call |
 | `framing` | string | `null` | replaces the default event framing |
 
-`Attachment.path` is relative to the person's roots: `attachments/YYYY/MM/<file>`
+`Attachment.path` is relative to `/data`: `people/<id>/attachments/YYYY/MM/<file>`
 or `shared/…`.
 
 ### DeliverRequest
@@ -76,6 +76,7 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `GET /readyz` | open | | `{"ok": bool, "checks": {<channel>: {"ok": bool, …}}}` |
 | `POST /v1/deliver` | `core` | DeliverRequest | `200 {"delivered": true, "parts": n}`, `400 bad_request` or `invalid_attachment`, `404 unknown_channel`, `502 send_failed` |
 | `GET /v1/channels/resolve?ref=` | `core` | | `200` ResolveResponse, `404 unknown_channel` |
+| `GET /v1/channels/refusals?limit=` | `core` | | `200 {"refusals": [{"channel_type", "address", "chat_id", "reason", "at"}]}`. The handle and the channel, never a message body. |
 | `POST /v1/events` | `channels.webhooks.allowed_callers` | see `channels.md` | `202 {"accepted": true}`, `200 {"ignored": true}`, `400`, `404 unknown_channel`, `502`, `503 core_unavailable` |
 | `POST /webhook/imessage/{secret}` | none, the path secret | BlueBubbles payload | always `200`. A wrong secret gets `404`. |
 | `POST /v1/cli/turns/stream` | `channels.webhooks.allowed_callers` | `{"person": id, "text": str}` | SSE, or `400`, `403 {"reason": <guard reason>}`, `503 core_unavailable` |
