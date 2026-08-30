@@ -48,14 +48,33 @@ make test
 uv run python scripts/check_test_policy.py
 ```
 
-5. To try the change in the stack, run your own build of the checkout:
+5. To try the change in the running stack, build your checkout:
 
 ```
 make up-dev
 ```
 
-`make up` runs the released images. `make up-dev` builds the three images from
-your working tree.
+`make up` runs a release, and `make up-dev` runs your build. A build is tagged
+`joshua-ai-<component>:dev`, so it never replaces a release on your machine.
+Both use the same containers and the same volumes, so `make down`, `make
+logs`, and `make ps` work for either. Run `make up-dev` again after each
+change: it rebuilds what changed and restarts.
+
+Only `make up-dev` knows about your build. `make up`, `make validate`, `make
+backup`, `make restore`, and a bare `docker compose` command read
+`docker-compose.yml` alone, so they start a release and not your code. To make
+every command take your build, name both files in the environment:
+
+```
+export COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+```
+
+Compose reads `COMPOSE_FILE` in place of the default, so `docker compose ps`,
+the scripts, and `make` all use your build until you unset it. Without it, a
+restore quietly puts you back on the release images.
+
+`make test` and `make smoke` always run your code. They run pytest from your
+own environment, and the only container they start is Postgres.
 
 6. Commit. The subject is one short line. The body says why. Write both in
    Simplified Technical English (below).
