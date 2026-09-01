@@ -495,7 +495,8 @@ member can also delete a wiki page, which moves it to `wiki/.trash/`. A guest
 cannot. The agent never reaches the viewer, and the viewer never calls core.
 
 The viewer is off by default. Start it with `docker compose --profile viewer
-up`; it listens on host port 8081. Put a reverse proxy in front for TLS.
+up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
+reverse proxy in front for TLS.
 
 - `viewer.enabled`: `false` by default. The viewer refuses to start when it is
   false.
@@ -509,12 +510,18 @@ Set each password through the environment, never a literal in `joshua.yaml`:
 viewer:
   enabled: true
   users:
-    alex: ${VIEWER_PW_ALEX:-}
+    alex: ""
 ```
 
-A value that starts with `$2` is a bcrypt hash and is checked with bcrypt. Any
-other value is a literal password. Put the value in `.env` as `VIEWER_PW_ALEX`
-(the id in upper case). See `.env.example`.
+The password comes from `VIEWER_PASSWORDS` in `.env`, one variable that holds
+every one of them as `<person-id>=<value>` pairs, comma separated. A value
+that starts with `$2` is a bcrypt hash and is checked with bcrypt. Any other
+value is a literal password, which cannot hold a comma. See `.env.example`.
+
+The list in `viewer.users` is the authorization: a person who is not a key
+there cannot sign in, whatever the environment holds. An entry with a value
+still works, so an installation that puts the reference in `joshua.yaml`
+keeps working.
 
 The role, member or guest, comes from `people`. It is never set in `viewer`.
 

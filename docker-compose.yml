@@ -134,6 +134,10 @@ services:
   # `viewer.users` entry per person in joshua.yaml first. Put a reverse proxy in
   # front for TLS. It gets `/data` (read-write, for the delete) and the viewer
   # passwords, and no fleet token or upstream credential.
+  #
+  # It is published on the loopback address, on its own port, so it starts
+  # beside the rest of the stack and nothing off the host reaches it. Put the
+  # reverse proxy in front of 127.0.0.1:8082.
   viewer:
     image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.3}
     profiles: ["viewer"]
@@ -144,15 +148,17 @@ services:
     environment:
       <<: *runtime-vars
       JOSHUA_CONFIG: /etc/joshua/joshua.yaml
-      # One password per person who signs in. Add a `VIEWER_PW_<ID>` line for
-      # each id in `viewer.users`, in upper case. joshua.yaml reads them as
-      # `${VIEWER_PW_<ID>:-}`.
-      VIEWER_PW_ALEX: ${VIEWER_PW_ALEX:-}
+      # Every viewer password, in one variable, so no person id is named in
+      # this tracked file. Set it in `.env` as a comma-separated list of
+      # `<person-id>=<bcrypt hash>` pairs; `.env.example` has the format. An
+      # id must also be a key of `viewer.users` in joshua.yaml, which is what
+      # says who may sign in.
+      VIEWER_PASSWORDS: ${VIEWER_PASSWORDS:-}
     volumes:
       - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
       - data:/data
     ports:
-      - "8081:8000"
+      - "127.0.0.1:8082:8000"
     healthcheck: *app-healthcheck
 
 volumes:

@@ -128,8 +128,12 @@ viewer:                         # a read-only web viewer for the wiki and a
                                 # person's own files. Off by default.
   enabled: false
   # One entry per person who may sign in, id -> password reference. A member can
-  # also delete a wiki page. Set the password through the environment, never a
-  # literal here. A `$2` value is a bcrypt hash; any other value is a literal
-  # password. A key must name a person in `people`. Uncomment to add a person:
+  # also delete a wiki page. This list says who may sign in; a person who is not
+  # a key here cannot sign in, whatever the environment holds. A key must name a
+  # person in `people`.
+  #
+  # Leave the value empty and put the password in `VIEWER_PASSWORDS` in `.env`,
+  # so no password is in this file. A `$2` value is a bcrypt hash; any other
+  # value is a literal password. Uncomment to add a person:
   # users:
-  #   alex: ${VIEWER_PW_ALEX:-}
+  #   alex: ""

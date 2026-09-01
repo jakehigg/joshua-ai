@@ -287,3 +287,99 @@ def test_readyz_needs_no_auth_and_leaks_no_name(client):
     # No person name or password appears.
     assert "alex" not in response.text
     assert ALEX_PW not in response.text
+
+
+# -- where a password comes from -----------------------------------------------
+
+# `viewer.users` with empty values: the compose file names no person, so every
+# password arrives through one environment variable.
+CONFIG_NO_REFERENCES = textwrap.dedent("""\
+    name: Test
+    timezone: America/New_York
+    people:
+      - id: alex
+        name: Alex
+      - id: mia
+        name: Mia
+        role: guest
+    viewer:
+      enabled: true
+      users:
+        alex: ""
+        mia: ""
+    """)
+
+
+@pytest.fixture
+def env_client(monkeypatch, tmp_path):
+    """A viewer whose passwords can only come from the environment."""
+
+    def build(*, passwords: str = "", pw_vars: dict[str, str] | None = None) -> TestClient:
+        data = tmp_path / "data"
+        data.mkdir(exist_ok=True)
+        _tree(data)
+        cfg_path = tmp_path / "joshua.yaml"
+        cfg_path.write_text(CONFIG_NO_REFERENCES)
+
+        monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
+        monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
+        monkeypatch.delenv("VIEWER_PW_ALEX", raising=False)
+        monkeypatch.delenv("VIEWER_PW_MIA", raising=False)
+        monkeypatch.setenv(viewer.VIEWER_PASSWORDS_ENV, passwords)
+        for name, value in (pw_vars or {}).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(config, "_cache", None)
+        monkeypatch.setattr(config, "_cache_path", None)
+        monkeypatch.setattr(config, "_cache_sidecar_mtime", None)
+        return TestClient(viewer.build_app())
+
+    return build
+
+
+def test_one_variable_carries_every_password(env_client):
+    """The compose file passed VIEWER_PW_ALEX, which named the example person."""
+    client = env_client(passwords=f"alex={ALEX_PW},mia={MIA_PW}")
+    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
+    assert client.get("/wiki/pizza.md", auth=("mia", MIA_PW)).status_code == 200
+
+
+def test_a_person_whose_id_is_not_the_example_id_signs_in(env_client):
+    """No tracked file names a person, so a real install needs no edit to one."""
+    client = env_client(passwords=f"mia={MIA_PW}")
+    assert client.get("/wiki/pizza.md", auth=("mia", MIA_PW)).status_code == 200
+
+
+def test_a_bcrypt_hash_in_the_variable_works(env_client):
+    hashed = bcrypt.hashpw(ALEX_PW.encode(), bcrypt.gensalt()).decode()
+    client = env_client(passwords=f"alex={hashed}")
+    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
+    assert client.get("/wiki/pizza.md", auth=("alex", "wrong")).status_code == 401
+
+
+def test_a_person_not_in_viewer_users_never_signs_in(env_client):
+    """`viewer.users` is the authorization. The environment is only the secret."""
+    client = env_client(passwords=f"nobody={ALEX_PW}")
+    assert client.get("/wiki/pizza.md", auth=("nobody", ALEX_PW)).status_code == 401
+
+
+def test_an_empty_variable_signs_nobody_in(env_client):
+    client = env_client(passwords="")
+    assert client.get("/wiki/pizza.md", auth=("alex", "")).status_code == 401
+    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 401
+
+
+def test_a_malformed_pair_is_ignored(env_client):
+    client = env_client(passwords=f"nonsense,,alex={ALEX_PW},mia=")
+    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
+    assert client.get("/wiki/pizza.md", auth=("mia", "")).status_code == 401
+
+
+def test_the_per_person_variable_still_works(env_client):
+    """An installation that injects VIEWER_PW_<ID> its own way keeps working."""
+    client = env_client(pw_vars={"VIEWER_PW_ALEX": ALEX_PW})
+    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
+
+
+def test_the_config_entry_wins_over_the_environment(client):
+    """The first fixture still resolves through ${VIEWER_PW_<ID>} in joshua.yaml."""
+    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200

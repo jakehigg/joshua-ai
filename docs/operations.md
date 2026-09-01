@@ -320,23 +320,34 @@ To run the reflection by hand, or to re-run one day, use `POST /admin/reflect`.
 The viewer is a read-only web page for the wiki and a person's own files. It is
 off by default. To turn it on:
 
-1. Set a password for each person in `.env`. Name it `VIEWER_PW_<ID>` in upper
-   case, for example `VIEWER_PW_ALEX`.
+1. Put every password in `VIEWER_PASSWORDS` in `.env`, as a comma-separated
+   list of `<person-id>=<value>` pairs. One variable carries all of them, so
+   no tracked file names a person.
 
    ```
-   VIEWER_PW_ALEX=a-long-random-password
+   VIEWER_PASSWORDS=alex=a-long-random-password,mia=$2b$12$...
    ```
 
-   For a bcrypt hash instead of a literal, set the value to a `$2` string.
+   A value that starts with `$2` is a bcrypt hash. Any other value is a
+   literal password, which cannot hold a comma. Make a hash with:
 
-2. Turn the viewer on in `joshua.yaml` and list each person:
+   ```
+   docker compose run --rm --no-deps -T --entrypoint python core -c \
+     "import bcrypt,getpass;print(bcrypt.hashpw(getpass.getpass().encode(),bcrypt.gensalt()).decode())"
+   ```
+
+2. Turn the viewer on in `joshua.yaml` and list each person who may sign in.
+   Leave the value empty; the password comes from `.env`.
 
    ```yaml
    viewer:
      enabled: true
      users:
-       alex: ${VIEWER_PW_ALEX:-}
+       alex: ""
    ```
+
+   This list is what says who may sign in. A person who is not a key here
+   cannot sign in, whatever `VIEWER_PASSWORDS` holds.
 
 3. Validate and start it:
 
@@ -345,9 +356,10 @@ off by default. To turn it on:
    docker compose --profile viewer up -d viewer
    ```
 
-The viewer listens on host port 8081. Open `http://localhost:8081/` and sign in
-with the person id and the password. Put a reverse proxy in front for TLS
-before you expose it off the host.
+The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
+`http://127.0.0.1:8082/` and sign in with the person id and the password.
+Nothing off the host reaches it: put a reverse proxy in front, for TLS, before
+you expose it.
 
 A member sees a "move this page to trash" button on a wiki page. It moves the
 page to `wiki/.trash/` and drops it from the search index at the next index run.

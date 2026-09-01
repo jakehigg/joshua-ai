@@ -40,6 +40,20 @@ with the images and the packaged chart, are at
   message to whichever poller asks first, and the rehearsal stack takes the
   real messages. `KEEP_TOKEN=1` says you mean it. `operations.md` has the two
   rules for a safe rehearsal.
+- `docker compose --profile viewer up` starts. The viewer and `core` both
+  published host port 8081, so the viewer could not bind. The viewer now
+  listens on `127.0.0.1:8082`, on the loopback address like `core`, and no
+  longer on every interface.
+
+### Changed
+
+- The viewer takes every password from one variable, `VIEWER_PASSWORDS` in
+  `.env`, as a comma-separated list of `<person-id>=<value>` pairs. The
+  compose file passed `VIEWER_PW_ALEX`, which names the person in the example
+  config, so a real installation had to edit a tracked file to sign in. Put
+  your passwords in `VIEWER_PASSWORDS`, and leave the values in
+  `viewer.users` empty. A `viewer.users` entry that carries a reference still
+  works.
 
 ## 0.0.3 - 2026-08-30
 
