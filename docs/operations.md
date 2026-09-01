@@ -220,13 +220,43 @@ To restore on a new machine:
 1. Clone the repository.
 2. Copy `env` from the backup to `.env`, and `joshua.yaml` to the repository
    root.
-3. Run `make up` once, then `make down`. This creates the volumes.
+3. Run `make pull`. The restore reads the volume name from the `core` image.
 4. Run `make restore FROM=<backup directory>`.
 
 The restore refuses a database that already has tables. `make restore FROM=…
 FORCE=1` drops them first. The restore replaces the `/data` volume in full,
 starts the stack, and asks `core` to rebuild the search index from the restored
 files.
+
+### To rehearse a restore
+
+Rehearse a restore before you need one. Two rules make a rehearsal safe.
+
+**Blank every live credential first.** Set `TELEGRAM_BOT_TOKEN=` in the `.env`
+of the rehearsal stack, and blank each OAuth token. Telegram long polling has
+no lock: two stacks that hold one bot token both poll it, Telegram gives each
+message to whichever poller asks first, and neither stack reports an error.
+Your live messages then land in the throwaway stack. The same is true of an
+OAuth token to an upstream. The restore refuses to go on when the `.env` holds
+a token and the stack is not the one the backup came from; `--keep-token` says
+you mean it.
+
+**Restore into a directory with a different name.** The directory name becomes
+the compose project name, and the project name keys the volumes, so a
+different directory gives the rehearsal its own database and its own `/data`.
+The live stack is untouched.
+
+```
+git clone <the repository> joshua-rehearsal
+cd joshua-rehearsal
+cp <backup>/joshua.yaml .
+cp <backup>/env .env
+# blank TELEGRAM_BOT_TOKEN and every OAuth token in .env now
+make pull
+make restore FROM=<backup directory>
+```
+
+Delete the directory and its volumes (`make nuke`) when you are done.
 
 ### The rebuild of the search index
 

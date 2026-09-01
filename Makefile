@@ -140,6 +140,11 @@ backup:
 # The restore starts a full rebuild of the search index, which holds a CPU
 # until it ends. NO_EMBED=1 skips it and leaves the work to the nightly run.
 #   make restore FROM=... NO_EMBED=1
+#
+# A rehearsal restore into a second stack must blank TELEGRAM_BOT_TOKEN and
+# every OAuth token first, or it takes the live messages. KEEP_TOKEN=1 says
+# you mean to keep them.
+#   make restore FROM=... KEEP_TOKEN=1
 restore:
 	@test -n "$(FROM)" || { echo 'set FROM to a backup directory, e.g. make restore FROM=backups/joshua-...'; exit 1; }
-	@scripts/restore.sh "$(FROM)" $(if $(FORCE),--force,) $(if $(NO_EMBED),--no-embed,)
+	@scripts/restore.sh "$(FROM)" $(if $(FORCE),--force,) $(if $(NO_EMBED),--no-embed,) $(if $(KEEP_TOKEN),--keep-token,)

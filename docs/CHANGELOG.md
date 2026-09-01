@@ -31,6 +31,15 @@ with the images and the packaged chart, are at
   is. Every answer was a `200` before, so a Kubernetes readiness probe could
   never fail and a broken container still took traffic. Read the note in
   `operations.md` before you add a second replica.
+- `make restore` works on a fresh checkout. It stopped with `invalid container
+  name or ID: value is empty`, because it read the volume name from a
+  container that no image could make. It now pulls the image, finds the volume
+  before it changes anything, and says what to do when it cannot.
+- `make restore` refuses to restore into a second stack while `.env` holds a
+  live `TELEGRAM_BOT_TOKEN`. Two stacks poll one bot, Telegram gives each
+  message to whichever poller asks first, and the rehearsal stack takes the
+  real messages. `KEEP_TOKEN=1` says you mean it. `operations.md` has the two
+  rules for a safe rehearsal.
 
 ## 0.0.3 - 2026-08-30
 
