@@ -4,6 +4,20 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Fixed
+
+- A journal post goes to the person the turn belongs to. The agent was told
+  to write `people/<id>/blog/`, and the only name it held was the display
+  name, so on every installation where the two differ it made a second
+  directory beside the real one and the journal split in two. The files MCP
+  now refuses a person segment that names nobody, and the prompt carries the
+  person id.
+- A turn with no person, such as a group chat, writes no journal post. Such a
+  turn reached a person's directory before. It still reads and writes the
+  wiki.
+
 ## 0.0.3 - 2026-08-30
 
 ### Added

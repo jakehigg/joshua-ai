@@ -51,10 +51,19 @@ _UNKNOWN_WHO = (
     "that read or write files."
 )
 
-_MEMBER_WHO = "You are speaking with {name}, a member (system-verified)."
+# The person id is in the identity line because a file path needs it. The
+# display name and the id are two different strings, and a path built from the
+# name names nobody.
+_MEMBER_WHO = (
+    "You are speaking with {name}, a member (system-verified). "
+    "Their person id is `{pid}`, so their journal is `people/{pid}/blog/`. "
+    "A person id is not a display name; never build a path from a name."
+)
 
 _GUEST_WHO = (
     "You are speaking with {name}, a guest (system-verified). "
+    "Their person id is `{pid}`, so their journal is `people/{pid}/blog/`. "
+    "A person id is not a display name; never build a path from a name. "
     "Help them with their own notes, the shared files, and general questions. "
     "You have no access to shared systems or other people's files; if asked, "
     "say so plainly."
@@ -78,8 +87,9 @@ TOOLS_BLOCK = (
     "The `files` tool reads and writes your Markdown notes: `list_files`, "
     "`read_file`, `write_file`, and `search_files`. It reaches the wiki under "
     "`wiki/` (one wiki for everyone; `wiki/joshua/` is your own documentation), "
-    "this person's journal under `blog/`, the shared profile and group files under "
-    "`shared/`, and inbound `attachments/`. The `scheduling` tool sets and cancels "
+    "a person's journal under `people/<person-id>/blog/`, their profile and "
+    "inbound files under `people/<person-id>/`, and the shared profile and group "
+    "files under `shared/`. The `scheduling` tool sets and cancels "
     "scheduled work. Other "
     "tools are listed in your tool list; use them when they fit the request. You "
     "have only the tools in that list — if none fits, say so plainly rather than "
@@ -190,10 +200,10 @@ class PromptComposer:
         elif person is None:
             who = _UNKNOWN_WHO
         elif person.role == "guest":
-            who = _GUEST_WHO.format(name=person.display_name)
+            who = _GUEST_WHO.format(name=person.display_name, pid=person.id)
             who += self._journal_line(person)
         else:
-            who = _MEMBER_WHO.format(name=person.display_name)
+            who = _MEMBER_WHO.format(name=person.display_name, pid=person.id)
             snippet = self._person_snippet(person)
             if snippet:
                 who += f"\n\n### About {person.display_name}\n\n{snippet}"

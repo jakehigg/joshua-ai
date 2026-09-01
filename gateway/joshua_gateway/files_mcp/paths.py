@@ -18,13 +18,21 @@ and the agent writes the wiki and the journal. ``write_subdir`` carries the
 rule. A member reads an attachment and does not write one, because ``channels``
 owns that path.
 
-The role decides the write and nothing else decides it. A member writes, a
-guest reads, and a request with no role is a guest.
+The role decides whether a request writes at all. A member writes, a guest
+reads, and a request with no role is a guest.
+
+**A person segment must name a person.** ``people/<id>/`` is provenance, and a
+segment that names nobody is not provenance: it makes a directory beside the
+real one, and the journal splits in two. ``write_persons`` carries the roster,
+so a write below ``people`` lands in the tree of a person who exists. A request
+that names no person carries an empty roster and writes below ``people``
+nowhere, because a post has to belong to somebody.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -47,12 +55,18 @@ JOURNAL_SUBDIR = "blog"
 
 # Root names a taught skill can still hold from an earlier layout, when each
 # person had a separate tree. ``resolve`` names the replacement instead of
-# "unknown root", so a person can correct the skill.
+# "unknown root", so a person can correct the skill. The replacement is a
+# format string: ``{person}`` takes the person id of the request, so the caller
+# is given the path and never has to compose the segment itself.
 _RETIRED_ROOTS = {
-    "blog": f"people/<person>/{JOURNAL_SUBDIR}/",
-    "profile.md": "people/<person>/profile.md",
-    "attachments": "people/<person>/attachments/",
+    "blog": f"people/{{person}}/{JOURNAL_SUBDIR}/",
+    "profile.md": "people/{person}/profile.md",
+    "attachments": "people/{person}/attachments/",
 }
+
+# What ``{person}`` becomes when the request names no person. The caller is told
+# the segment is an id it does not have, rather than invited to invent one.
+_NO_PERSON = "<the person id, which this request does not carry>"
 
 
 class PathError(Exception):
@@ -90,12 +104,33 @@ class Root:
     request may write at all. This says where such a write may land.
     """
 
+    write_persons: frozenset[str] = frozenset()
+    """The person ids the first segment of a write may name.
 
-def roots(data_root: Path, *, role: str) -> dict[str, Root]:
+    Read with ``write_subdir``: that says which kind of file may be written,
+    and this says whose tree may hold it. An empty set refuses every person
+    segment, which is what a request with no attributed person gets.
+    """
+
+    request_person: str | None = None
+    """The person this request is attributed to, for the error message alone.
+
+    It gates nothing. A refusal names this person's own path, so the caller is
+    told where the write belongs instead of guessing a segment.
+    """
+
+
+def roots(
+    data_root: Path,
+    *,
+    role: str,
+    people: Iterable[str] = (),
+    person: str | None = None,
+) -> dict[str, Root]:
     """Return the roots a request with ``role`` may reach under ``data_root``.
 
-    The set does not depend on which person sent the turn. One corpus, three
-    roots:
+    What a request may *read* does not depend on which person sent the turn.
+    One corpus, three roots:
 
     - ``wiki``: what Joshua knows. A member writes it.
     - ``people``: the journal, the profiles, and the attachments of everybody.
@@ -106,8 +141,15 @@ def roots(data_root: Path, *, role: str) -> dict[str, Root]:
     ``role`` is ``member`` or anything else. Anything else, including a missing
     role and the literal ``unknown``, reads and writes nothing. That keeps the
     safe default: a request core could not attribute gets no write.
+
+    ``people`` is the roster, and ``person`` is who the request belongs to. A
+    write below ``people`` needs both: the segment must name somebody on the
+    roster, and a request that carries no person writes there at all, because
+    a journal post belongs to a person. ``person`` never widens what a request
+    reaches; it only lets a refusal name the right path.
     """
     member = role == MEMBER
+    attributed = person is not None and person != UNKNOWN
     return {
         "wiki": Root("wiki", data_root / "wiki", can_write=member, md_only=True),
         "people": Root(
@@ -116,9 +158,37 @@ def roots(data_root: Path, *, role: str) -> dict[str, Root]:
             can_write=member,
             md_only=True,
             write_subdir=JOURNAL_SUBDIR,
+            write_persons=frozenset(people) if attributed else frozenset(),
+            request_person=person if attributed else None,
         ),
         "shared": Root("shared", data_root / "shared", can_write=False, md_only=True),
     }
+
+
+def _person_slot(root_set: dict[str, Root]) -> str:
+    """The person id to write into a path a message hands back to the caller."""
+    root = root_set.get("people")
+    person = root.request_person if root is not None else None
+    return person or _NO_PERSON
+
+
+def _bad_person_message(root: Root) -> str:
+    """Refuse a person segment that names nobody, and name the path that works.
+
+    The caller composed a segment. Handing back a template with a slot in it is
+    what produced the bad write, so the message carries the path in full when
+    the request names a person, and says the id is missing when it does not.
+    """
+    if root.request_person is not None:
+        return (
+            f"the person segment names nobody on the roster. Write to "
+            f"{root.name}/{root.request_person}/{root.write_subdir}/ instead. "
+            f"A display name is not a person id."
+        )
+    return (
+        f"a write to {root.name}/ needs the person id of the person the turn "
+        f"belongs to, and this request carries none."
+    )
 
 
 def resolve(path: str, root_set: dict[str, Root], *, write: bool) -> tuple[Root, Path]:
@@ -146,10 +216,11 @@ def resolve(path: str, root_set: dict[str, Root], *, write: bool) -> tuple[Root,
         replacement = _RETIRED_ROOTS.get(parts[0])
         if replacement is not None:
             # A skill can hold a name from the earlier per-person layout. Name
-            # the new path, so the person can correct the skill.
+            # the whole new path, filled in, so the person can correct the
+            # skill and the caller composes no segment of its own.
             raise PathError(
                 f"the root '{parts[0]}' is gone: the corpus is shared now. "
-                f"Use {replacement} instead."
+                f"Use {replacement.format(person=_person_slot(root_set))} instead."
             )
         raise PathError(f"unknown or forbidden root: {parts[0]}")
 
@@ -173,6 +244,8 @@ def resolve(path: str, root_set: dict[str, Root], *, write: bool) -> tuple[Root,
             # cross into the write domain of core or of channels.
             if len(parts) < 4 or parts[2] != root.write_subdir:
                 raise PathError(f"only {root.name}/<person>/{root.write_subdir}/ may be written")
+            if parts[1] not in root.write_persons:
+                raise PathError(_bad_person_message(root))
 
     # realpath resolves every symlink in the existing prefix, so a link that
     # points out of the root fails the containment check below. A create write
