@@ -73,7 +73,7 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | Route | Callers | Request | Reply |
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
-| `GET /readyz` | open | | `{"ok": bool, "checks": {<channel>: {"ok": bool, …}}}` |
+| `GET /readyz` | open | | `{"ok": bool, "checks": {<channel>: {"ok": bool, …}}}`. `200` when ready, `503` when not. |
 | `POST /v1/deliver` | `core` | DeliverRequest | `200 {"delivered": true, "parts": n}`, `400 bad_request` or `invalid_attachment`, `404 unknown_channel`, `502 send_failed` |
 | `GET /v1/channels/resolve?ref=` | `core` | | `200` ResolveResponse, `404 unknown_channel` |
 | `GET /v1/channels/refusals?limit=` | `core` | | `200 {"refusals": [{"channel_type", "address", "chat_id", "reason", "at"}]}`. The handle and the channel, never a message body. |
@@ -96,7 +96,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | Route | Callers | Request | Reply |
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
-| `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool}}` |
+| `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. |
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
@@ -134,7 +134,7 @@ it.
 | Route | Callers | Request | Reply |
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
-| `GET /readyz` | open | | `{"ok": bool, "connected", "errored", "total"}`, counts only |
+| `GET /readyz` | open | | `{"ok": bool, "connected", "errored", "total"}`, counts only. `200` when ready, `503` when not. |
 | `ANY /<server>` and `/<server>/…` | `core` | MCP over streamable HTTP | the upstream's answer. `403` when the person may not use this server. `409` when a live session changes person. `503` when the upstream is down. |
 | `POST /admin/reload` | `ADMIN_CALLERS` | `{"server": name}` or empty | `{"reloaded": {…}, "failed": {…}}`, `502` when one failed |
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |

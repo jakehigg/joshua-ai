@@ -198,3 +198,33 @@ def test_validate_layout_wants_a_wiki(tmp_path) -> None:
     assert "wiki/ missing" in layout.validate_layout(root)
     layout.bootstrap_wiki(root)
     assert "wiki/ missing" not in layout.validate_layout(root)
+
+
+# -- the writability check -------------------------------------------------
+
+
+def test_validate_layout_reports_no_fault_for_a_writable_root(data_dir: Path) -> None:
+    """The check writes a file. It does not read the mode bits, which can lie.
+
+    On an NFS export the server decides who may write, so a data root core had
+    written to for the life of the instance read as not writable and `/readyz`
+    reported a fault that was not there.
+    """
+    layout.bootstrap_wiki()
+    layout.bootstrap_shared("Test House")
+    assert [p for p in layout.validate_layout() if "not writable" in p] == []
+
+
+def test_validate_layout_still_reports_a_root_it_cannot_write(tmp_path: Path) -> None:
+    """A path below a regular file can never be made, whatever the uid is."""
+    blocker = tmp_path / "afile"
+    blocker.write_text("not a directory")
+    problems = layout.validate_layout(blocker / "data")
+    assert problems == [f"data root missing: {blocker / 'data'}"]
+
+
+def test_validate_layout_leaves_no_probe_file(data_dir: Path) -> None:
+    layout.bootstrap_wiki()
+    layout.bootstrap_shared("Test House")
+    layout.validate_layout()
+    assert [p.name for p in data_dir.iterdir() if p.name.startswith(".joshua-write-probe")] == []

@@ -24,6 +24,13 @@ with the images and the packaged chart, are at
   document that fails for a fault of its own until its content changes.
   `GET /admin/kb/status` reports such a document by path, under
   `unindexable`.
+- `/readyz` no longer reports a data volume as not writable when it is. The
+  check read the mode bits, and on an NFS export the server decides, so the
+  bits lie. It now writes a probe file and removes it.
+- `/readyz` answers `503` when the container is not ready, and `200` when it
+  is. Every answer was a `200` before, so a Kubernetes readiness probe could
+  never fail and a broken container still took traffic. Read the note in
+  `operations.md` before you add a second replica.
 
 ## 0.0.3 - 2026-08-30
 

@@ -57,3 +57,22 @@ async def test_readyz_with_no_adapters_is_ok_and_empty() -> None:
         body = (await client.get("/readyz")).json()
     assert body["ok"] is True
     assert body["checks"] == {}
+
+
+# -- the status code is the answer ---------------------------------------------
+
+
+async def test_readyz_answers_503_when_an_adapter_is_failing() -> None:
+    """A probe reads the code. A body under a 200 is a probe that cannot fail."""
+    failing = FakeAdapter("telegram", health=AdapterHealth(ok=False, reason="Conflict"))
+    async with _client(failing) as client:
+        response = await client.get("/readyz")
+    assert response.status_code == 503
+    assert response.json()["ok"] is False
+
+
+async def test_readyz_answers_200_when_every_adapter_is_well() -> None:
+    async with _client(FakeAdapter("telegram")) as client:
+        response = await client.get("/readyz")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True

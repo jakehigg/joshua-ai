@@ -22,6 +22,7 @@ import os
 import tempfile
 import threading
 
+from joshua_shared.fs import is_writable
 from joshua_shared.log import get_logger
 
 logger = get_logger("memory.embed")
@@ -45,28 +46,6 @@ def is_available() -> bool:
     return not _unavailable
 
 
-def _is_writable(path: str) -> bool:
-    """True when ``path`` exists or can be made, and accepts a new file.
-
-    A probe file is used, not ``os.access``. ``os.access`` reads the mode bits
-    and gives a wrong answer on an NFS export with root squash, and with an
-    ACL that the mode bits do not show.
-    """
-    probe = os.path.join(path, ".joshua-write-probe")
-    try:
-        os.makedirs(path, exist_ok=True)
-        with open(probe, "w"):
-            pass
-        return True
-    except OSError:
-        return False
-    finally:
-        try:
-            os.unlink(probe)
-        except OSError:
-            pass
-
-
 def _usable_cache_dir(configured: str | None) -> str | None:
     """Return a writable model cache directory, or None to let fastembed choose.
 
@@ -80,10 +59,10 @@ def _usable_cache_dir(configured: str | None) -> str | None:
     """
     if not configured:
         return None
-    if _is_writable(configured):
+    if is_writable(configured):
         return configured
     fallback = os.path.join(tempfile.gettempdir(), "joshua-fastembed")
-    if not _is_writable(fallback):
+    if not is_writable(fallback):
         logger.warning(
             {
                 "message": "embed cache dir not writable, and no fallback",

@@ -232,13 +232,20 @@ async def readyz(request: Request) -> JSONResponse:
     ``errored`` counts the upstreams whose last connect failed. It separates a
     misconfigured server that never connects (for example a ``stdio`` server the
     image cannot run) from one that is still warming up, so the fault is visible
-    without a name."""
+    without a name.
+
+    The status code carries the answer: 200 when ready, 503 when not. A probe
+    reads the code and nothing else, so a body that says ``ok: false`` under a
+    200 is a probe that can never fail."""
     upstreams: dict[str, Upstream] = getattr(request.app.state, "upstreams", {})
     total = len(upstreams)
     connected = sum(1 for up in upstreams.values() if up.status == "connected")
     errored = sum(1 for up in upstreams.values() if up.status == "error")
     ok = total > 0 and connected == total
-    return JSONResponse({"ok": ok, "connected": connected, "errored": errored, "total": total})
+    return JSONResponse(
+        {"ok": ok, "connected": connected, "errored": errored, "total": total},
+        status_code=200 if ok else 503,
+    )
 
 
 def build_app() -> Starlette:

@@ -8,13 +8,14 @@ admin routes.
 Each container answers two open routes on its port:
 
 - `GET /healthz` returns `{"ok": true}` when the process runs.
-- `GET /readyz` returns `{"ok": bool, ...}` with the checks that matter for that
-  container.
+- `GET /readyz` returns `{"ok": bool, ...}` with the checks that matter for
+  that container. It answers `200` when the container is ready and `503` when
+  it is not, so a Kubernetes readiness probe can act on it.
 
 | Container | `/readyz` checks |
 |---|---|
 | `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` while a poll error stands, and `ok: true` again after the next good poll. iMessage reports whether BlueBubbles answers a ping. |
-| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable) |
+| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable). `embed` reports the model and does not hold `ok` down: a lost model costs the memory and not the turn. |
 | `gateway` | `connected`, `errored`, `total`: the MCP upstreams |
 
 From the host:

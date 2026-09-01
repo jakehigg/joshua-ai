@@ -61,3 +61,21 @@ def test_readyz_needs_no_auth(gateway):
         assert client.get("/readyz").status_code == 200
         # The full inventory (with tool names) stays behind admin auth.
         assert client.get("/admin/inventory", headers=bearer("laptop")).status_code == 200
+
+
+# -- the status code is the answer ---------------------------------------------
+
+
+def _readyz_response(*statuses: str):
+    upstreams = {f"s{i}": SimpleNamespace(status=s) for i, s in enumerate(statuses)}
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(upstreams=upstreams)))
+    return asyncio.run(readyz(request))
+
+
+def test_readyz_answers_503_when_an_upstream_errored():
+    """A probe reads the code. A body under a 200 is a probe that cannot fail."""
+    assert _readyz_response("connected", "error").status_code == 503
+
+
+def test_readyz_answers_200_when_every_upstream_is_connected():
+    assert _readyz_response("connected", "connected").status_code == 200

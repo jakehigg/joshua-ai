@@ -13,6 +13,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from joshua_shared import config as config_module
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger, install_healthcheck_filter
@@ -191,13 +192,17 @@ async def healthz() -> dict[str, bool]:
     return {"ok": True}
 
 
-async def readyz(request: Request) -> dict:
+async def readyz(request: Request) -> JSONResponse:
     """Readiness: one entry per registered adapter, keyed by ``channel_type``.
 
     Each entry is ``{"ok": bool}`` plus a short ``reason`` when the adapter raised
     on its last poll. ``ok`` is False when any registered adapter is failing. A
     channel that is off has no adapter, so it is not a fault. No entry holds a
     secret.
+
+    The status code carries the answer: 200 when ready, 503 when not. A probe
+    reads the code and nothing else, so a body that says ``ok: false`` under a
+    200 is a probe that can never fail.
     """
     checks: dict[str, object] = {}
     ok = True
@@ -211,7 +216,7 @@ async def readyz(request: Request) -> dict:
             checks[channel_type] = health.as_dict()
             if not health.ok:
                 ok = False
-    return {"ok": ok, "checks": checks}
+    return JSONResponse({"ok": ok, "checks": checks}, status_code=200 if ok else 503)
 
 
 def build_app(context: ChannelsContext | None = None) -> FastAPI:
