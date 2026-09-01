@@ -7,6 +7,13 @@ single-flight lock, so its passes never overlap. Per-document errors are logged
 and skipped; a source that fails to list records its error and never blocks
 another source.
 
+A document can fail for a fault of its own, such as a person id that names no
+row. Its revision is never stored, so every following pass sees it as changed
+and fails it again. Such a document is held as **unindexable** at that
+revision: it is passed over until its content changes, a full reindex asks for
+it, or the process restarts. The condition is one entry in the status, not a
+count that climbs forever.
+
 The startup pass makes every deploy self-heal (a first-boot empty index is just
 the degenerate diff where everything is new). The interval loop keeps the
 ``files`` source fresh; other adapters run on their own schedule.
@@ -39,6 +46,24 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# SQLSTATE class 23 is an integrity constraint violation: the row breaks a rule
+# of the schema, so the same row breaks it again on every pass.
+_CONSTRAINT_CLASS = "23"
+
+
+def _is_unindexable(exc: BaseException) -> bool:
+    """True when the document is at fault, and a retry gives the same answer.
+
+    A constraint violation and a malformed document are faults of the document.
+    Everything else, such as a lost connection or a lost embedding model, is a
+    fault of the run, and the next pass is allowed to try again.
+    """
+    sqlstate = getattr(exc, "sqlstate", None)
+    if isinstance(sqlstate, str) and sqlstate.startswith(_CONSTRAINT_CLASS):
+        return True
+    return isinstance(exc, ValueError | TypeError)
+
+
 class Indexer:
     def __init__(
         self,
@@ -57,14 +82,34 @@ class Indexer:
             name: {"last_run": None, "last_result": None, "last_error": None, "running": False}
             for name in sources
         }
+        # source -> {(person_id, uri): the revision that could not be stored}.
+        # Held in the process: a restart is a reasonable time to try once more.
+        self._unindexable: dict[str, dict[tuple[str | None, str], str]] = {
+            name: {} for name in sources
+        }
 
     @property
     def sources(self) -> dict[str, Source]:
         return self._sources
 
     def status(self) -> dict[str, Any]:
-        """Per-source last run, result counts, and last error for the admin API."""
-        return {name: dict(state) for name, state in self._status.items()}
+        """Per-source last run, result counts, last error, and what is unindexable.
+
+        ``unindexable`` names the documents that are held back and why they are
+        held back. It is a condition an operator acts on, so it names the paths
+        rather than counting the same failure again on every pass.
+        """
+        out: dict[str, Any] = {}
+        for name, state in self._status.items():
+            held = self._unindexable[name]
+            out[name] = {
+                **state,
+                "unindexable": {
+                    "count": len(held),
+                    "paths": sorted(uri for _, uri in held)[:20],
+                },
+            }
+        return out
 
     async def _index_document(self, doc: Document) -> int:
         if doc.source == "files" and is_skill_path(doc.uri):
@@ -171,6 +216,17 @@ class Indexer:
                     if key not in live_keys and (person is None or key[0] == person)
                 ]
 
+                held = self._unindexable[name]
+                # A document that vanished, or that came back at a new revision,
+                # is no longer the document that failed.
+                for key in [k for k in held if k not in live_keys]:
+                    del held[key]
+                if full:
+                    # An operator asked for the whole source. Try them again.
+                    held.clear()
+                skipped = [d for d in changed if held.get((d.person_id, d.uri)) == d.rev]
+                changed = [d for d in changed if held.get((d.person_id, d.uri)) != d.rev]
+
                 indexed = failed = 0
                 # A lost embedding model fails every document of every pass. One
                 # line for each document buries the cause, so the pass is counted
@@ -183,19 +239,28 @@ class Indexer:
                     try:
                         await self._index_document(doc)
                         indexed += 1
+                        held.pop((doc.person_id, doc.uri), None)
                     except Exception as e:  # noqa: BLE001 — one bad doc must not sink the pass
                         failed += 1
                         if not embed_ok:
                             first_error = first_error or str(e)
                             first_path = first_path or doc.uri
                             continue
+                        unindexable = _is_unindexable(e)
+                        if unindexable:
+                            held[(doc.person_id, doc.uri)] = doc.rev
                         logger.warning(
                             {
-                                "message": "kb index failed",
+                                "message": (
+                                    "kb document unindexable" if unindexable else "kb index failed"
+                                ),
                                 "source": name,
                                 "path": doc.uri,
                                 "person": doc.person_id,
                                 "error": str(e),
+                                # A held document is not tried again, so this
+                                # line is written one time and not each pass.
+                                "held": unindexable,
                             }
                         )
                 if not embed_ok and failed:
@@ -217,6 +282,8 @@ class Indexer:
                     "indexed": indexed,
                     "removed": len(removed),
                     "failed": failed,
+                    "skipped": len(skipped),
+                    "unindexable": len(held),
                 }
                 self._status[name].update(
                     last_run=_now_iso(),

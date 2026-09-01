@@ -225,7 +225,13 @@ def _build_memory(
     and skipped rather than failing boot."""
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     memory = settings.memory
-    sources: dict[str, Any] = {"files": FilesSource(data_dir)}
+
+    async def _person_ids() -> set[str]:
+        """The roster the index is keyed on. A chunk carries this foreign key,
+        so a directory that names nobody here holds nothing storable."""
+        return {person.id for person in await repo.list_people()}
+
+    sources: dict[str, Any] = {"files": FilesSource(data_dir, persons=_person_ids)}
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
     for name, options in memory.sources.items():
         if name == "files":

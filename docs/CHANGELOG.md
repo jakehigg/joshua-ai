@@ -17,6 +17,13 @@ with the images and the packaged chart, are at
 - A turn with no person, such as a group chat, writes no journal post. Such a
   turn reached a person's directory before. It still reads and writes the
   wiki.
+- One document that the index cannot hold no longer fails on every pass. A
+  directory below `/data/people/` that names no person made the same failure
+  every 60 seconds, about 2,880 times a day, and the search index never
+  settled. The indexer now walks only the people on the roster, and holds a
+  document that fails for a fault of its own until its content changes.
+  `GET /admin/kb/status` reports such a document by path, under
+  `unindexable`.
 
 ## 0.0.3 - 2026-08-30
 

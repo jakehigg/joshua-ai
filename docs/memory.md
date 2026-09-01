@@ -75,6 +75,14 @@ Read this when an answer is wrong. It says what Joshua read before it answered.
 `GET /admin/kb/status` reports the state of each source and the chunk count.
 `POST /admin/kb/reindex` re-indexes on demand.
 
+Each source also reports `unindexable`: the documents the index cannot hold,
+with their paths. A document gets there when the fault is its own, such as a
+journal post below a directory that names no person. It is passed over until
+its content changes, a full reindex asks for it, or core restarts, so one bad
+document does not make the same failure on every pass. When the count is not
+zero, look at the paths: usually a directory below `/data/people/` that no
+person owns. Move it, or add the person.
+
 ### Tuning it
 
 The knobs are the `memory` section of `joshua.yaml`. See
@@ -204,6 +212,10 @@ kernel adapter and always runs. Other adapters are optional. Each is one entry
 under `memory.sources`. A source that fails to list is isolated. It never
 blocks `files`, and its last error shows at `GET /admin/kb/status`. Remove a
 source from `memory.sources` and its rows are purged on the next run.
+
+The `files` adapter walks one directory per person below `/data/people/`. It
+takes the roster from the database, so a directory that names no person is
+skipped and reported one time for each pass.
 
 ### `memos`
 

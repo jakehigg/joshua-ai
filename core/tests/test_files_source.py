@@ -97,3 +97,60 @@ async def test_rev_changes_with_content(tmp_path: Path) -> None:
     _write(f, "# Pizza\n\nSecond, edited version of the recipe body.\n")
     second = (await _docs(tmp_path))[0].rev
     assert first != second
+
+
+# -- a directory that names no person ------------------------------------------
+
+
+async def _docs_with_roster(root: Path, roster: set[str]) -> list:
+    async def persons() -> set[str]:
+        return roster
+
+    src = FilesSource(root, persons=persons)
+    return [d async for d in src.list_documents()]
+
+
+async def test_a_directory_that_names_no_person_is_skipped(tmp_path: Path) -> None:
+    """A chunk carries a foreign key to people, so such a document is unstorable."""
+    _tree(tmp_path)
+    _write(tmp_path / "people/Ghost/blog/x.md", "# Ghost\n\nAn orphan directory.\n")
+    docs = await _docs_with_roster(tmp_path, {"alice", "bob"})
+    assert {d.person_id for d in docs if d.person_id is not None} == {"alice", "bob"}
+
+
+async def test_the_real_documents_still_index_beside_an_orphan(tmp_path: Path) -> None:
+    _tree(tmp_path)
+    _write(tmp_path / "people/ghost/blog/x.md", "# Ghost\n\nAn orphan directory.\n")
+    docs = await _docs_with_roster(tmp_path, {"alice", "bob"})
+    assert ("alice", "blog/2026-08-24.md") in {(d.person_id, d.uri) for d in docs}
+    assert ("bob", "blog/2026-08-23.md") in {(d.person_id, d.uri) for d in docs}
+
+
+async def test_the_skip_is_one_line_for_the_pass(tmp_path: Path, caplog) -> None:
+    """One stray directory made a line for each of its documents, on every pass."""
+    _tree(tmp_path)
+    for name in ("x", "y", "z"):
+        _write(tmp_path / f"people/ghost/blog/{name}.md", f"# {name}\n\nAn orphan post.\n")
+    with caplog.at_level("WARNING"):
+        await _docs_with_roster(tmp_path, {"alice", "bob"})
+    lines = [r for r in caplog.records if "name no person" in r.getMessage()]
+    assert len(lines) == 1
+
+
+async def test_no_roster_walks_every_slug_directory(tmp_path: Path) -> None:
+    """Without a roster the adapter is a plain walker, which the unit tests want."""
+    _tree(tmp_path)
+    _write(tmp_path / "people/ghost/blog/x.md", "# Ghost\n\nAn orphan directory.\n")
+    docs = await _docs(tmp_path)
+    assert "ghost" in {d.person_id for d in docs}
+
+
+async def test_fetch_skips_an_orphan_directory(tmp_path: Path) -> None:
+    _tree(tmp_path)
+    _write(tmp_path / "people/ghost/blog/only.md", "# Ghost\n\nAn orphan post here.\n")
+
+    async def persons() -> set[str]:
+        return {"alice", "bob"}
+
+    src = FilesSource(tmp_path, persons=persons)
+    assert await src.fetch("blog/only.md") is None
