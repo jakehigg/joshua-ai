@@ -164,3 +164,29 @@ def _example_person_ids() -> list[str]:
 
     raw = yaml.safe_load((ROOT / "joshua.example.yaml").read_text())
     return [person["id"] for person in raw.get("people", [])]
+
+
+def test_a_copy_of_a_secret_file_is_ignored() -> None:
+    """A secret reaches a commit as a copy, not as the file the rule names.
+
+    `.env` and `/joshua.yaml` matched their own names exactly, so a working
+    copy such as `.env.backup` was an ordinary untracked file and `git add -A`
+    took it. The suffix wildcards close that. The example files carry no value
+    and must stay visible.
+    """
+    import subprocess
+
+    def ignored(name: str) -> bool:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "--no-index", name],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        # 0 ignored, 1 not ignored; anything else is a git failure.
+        assert result.returncode in (0, 1), result.stderr.decode()
+        return result.returncode == 0
+
+    for name in (".env", ".env.backup", ".env.bak", "joshua.yaml", "joshua.yaml.backup"):
+        assert ignored(name), f"{name} would be committed"
+    for name in (".env.example", "joshua.example.yaml"):
+        assert not ignored(name), f"{name} must stay tracked"
