@@ -9,6 +9,7 @@ runs in the container event loop; ``start`` and ``stop`` drive the
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -35,6 +36,15 @@ TELEGRAM_MAX = 4096
 
 # The longest poll-error reason reported on ``/readyz``.
 REASON_MAX = 200
+
+# How long a poll error stands before the adapter reports itself well again.
+#
+# Long polling gives no success callback, so recovery is read from the error
+# stream: the polling loop calls the error callback on every failed poll, so a
+# fault that continues keeps reporting itself. An error that stops arriving is
+# an error that stopped. The window is several poll cycles wide, so a fault
+# that is still there never looks recovered.
+POLL_RECOVERY_S = 90.0
 
 # The reply core delivers when a turn fails. Sent only on a 5xx from core.
 TURN_FAILED = "Sorry, something went wrong handling that."
@@ -117,7 +127,9 @@ class TelegramAdapter:
         self._bot = bot
         self._poll_errors = 0
         self._last_poll_error: str | None = None
-        self._polling_ok = True
+        # When the last poll error arrived, on the monotonic clock. None means
+        # no error stands. A wall clock would jump; this one does not.
+        self._last_poll_error_at: float | None = None
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -143,21 +155,24 @@ class TelegramAdapter:
 
         The polling loop calls this on every failed poll and keeps retrying. A
         conflicting instance, a bad or revoked token, or a network fault raises
-        here and sets the adapter to failing.
+        here and sets the adapter to failing. Each call moves the clock, so a
+        fault that continues never ages out of ``POLL_RECOVERY_S``.
         """
         self._poll_errors += 1
         self._last_poll_error = self._redact(str(error) or type(error).__name__)
-        self._polling_ok = False
+        self._last_poll_error_at = time.monotonic()
         logger.warning({"message": "telegram poll error", "reason": self._last_poll_error})
 
     def _on_poll_ok(self) -> None:
-        """Record a successful poll for ``/readyz``.
+        """Record a delivered update for ``/readyz``.
 
-        A delivered update proves ``get_updates`` works now, so a transient error
-        that recovered does not keep the check false. The error counter stays for
-        the operator, but the adapter reports ok again.
+        An update proves ``get_updates`` works now, so the fault is cleared at
+        once rather than waiting out the window. The error counter stays for
+        the operator. A quiet bot never reaches here, which is why the window
+        exists: recovery cannot depend on somebody sending a message.
         """
-        self._polling_ok = True
+        self._last_poll_error = None
+        self._last_poll_error_at = None
 
     def _redact(self, text: str) -> str:
         """Drop the bot token from an error text and cap its length."""
@@ -168,21 +183,27 @@ class TelegramAdapter:
     async def health(self) -> AdapterHealth:
         """Report the adapter state for ``/readyz``.
 
-        The report is the current state, not history. A started adapter whose
-        last poll worked is ``ok``, even after an earlier error that recovered. An
-        adapter whose last poll raised is failing; ``reason`` names that error.
-        ``errors`` counts every poll that raised, so the operator sees a past
-        error on a recovered adapter too.
+        The report is the current state, not history. An adapter is failing
+        while a poll error stands, and a poll error stands until it is
+        ``POLL_RECOVERY_S`` old or an update arrives. ``reason`` names the
+        error. ``errors`` counts every poll that raised, so the operator sees a
+        past error on a recovered adapter too.
         """
-        if self._polling_ok:
-            if self._poll_errors:
-                return AdapterHealth(ok=True, detail={"errors": self._poll_errors})
-            return AdapterHealth(ok=True)
-        return AdapterHealth(
-            ok=False,
-            reason=self._last_poll_error,
-            detail={"errors": self._poll_errors},
-        )
+        if self._error_stands():
+            return AdapterHealth(
+                ok=False,
+                reason=self._last_poll_error,
+                detail={"errors": self._poll_errors},
+            )
+        if self._poll_errors:
+            return AdapterHealth(ok=True, detail={"errors": self._poll_errors})
+        return AdapterHealth(ok=True)
+
+    def _error_stands(self) -> bool:
+        """True while the last poll error is recent enough to still be true."""
+        if self._last_poll_error_at is None:
+            return False
+        return (time.monotonic() - self._last_poll_error_at) < POLL_RECOVERY_S
 
     async def stop(self) -> None:
         """Stop long polling and shut the application down."""

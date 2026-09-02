@@ -27,6 +27,17 @@ with the images and the packaged chart, are at
 - `/readyz` no longer reports a data volume as not writable when it is. The
   check read the mode bits, and on an NFS export the server decides, so the
   bits lie. It now writes a probe file and removes it.
+- A document that the index cannot hold anything for is no longer re-processed
+  every 60 seconds. A zero-byte journal post produced no chunk, so no row, and
+  the diff reads a missing row as a changed document: the pass reported
+  `indexed: 1, failed: 0` forever and wrote nothing. Such a document is now
+  held until its content changes, and `GET /admin/kb/status` names it under
+  `empty`.
+- One Telegram poll error no longer makes `/readyz` report the channel as down
+  until somebody sends a message. The recovery flag was set from a delivered
+  update alone, so an idle bot stayed false after a transient fault. A poll
+  error now stands for 90 seconds and a continuing fault keeps renewing it, so
+  the report follows the fault.
 - `core` answers `/readyz` with `503` when it is not ready, and `200` when it
   is. Every answer was a `200` before, so a Kubernetes readiness probe could
   never fail and a core with no database still took traffic. `channels` and

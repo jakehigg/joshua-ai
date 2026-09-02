@@ -124,6 +124,7 @@ async def test_bootstrap_indexes_everything(_count_embeds) -> None:
         "failed": 0,
         "skipped": 0,
         "unindexable": 0,
+        "empty": 0,
     }
     assert set(store.replaced) == {(None, "shared/s.md"), ("alice", "wiki/a.md")}
     assert store.purged == [["files"]]
@@ -369,6 +370,7 @@ async def test_the_status_names_the_condition_and_the_count(_count_embeds) -> No
     held = indexer.status()["files"]["unindexable"]
     assert held["count"] == 1
     assert held["paths"] == ["blog/x.md"]
+    assert indexer.status()["files"]["empty"]["count"] == 0
 
 
 async def test_a_held_document_logs_one_line_and_not_one_a_pass(_count_embeds, caplog) -> None:
@@ -413,3 +415,81 @@ async def test_a_document_that_vanishes_leaves_no_entry_behind(_count_embeds) ->
     docs.clear()
     await indexer.reindex()
     assert indexer.status()["files"]["unindexable"]["count"] == 0
+
+
+# -- a document with nothing in it ---------------------------------------------
+
+
+class EmptyStore(FakeStore):
+    """A document that yields no chunk writes no row, the way the real store does."""
+
+    async def kb_replace_item(self, **kwargs):
+        chunks = list(kwargs["chunks"])
+        if not chunks:
+            return 0
+        return await super().kb_replace_item(**{**kwargs, "chunks": chunks})
+
+
+def _empty_doc(person: str | None, path: str, rev: str) -> Document:
+    return Document(
+        source="files",
+        uri=path,
+        person_id=person,
+        title=path,
+        text="",
+        updated_at=MTIME,
+        rev=rev,
+    )
+
+
+async def test_an_empty_document_is_not_reindexed_every_pass(_count_embeds) -> None:
+    """No chunk means no row, and the diff reads a missing row as changed.
+
+    A zero-byte journal post did this on a live instance: `indexed: 1,
+    failed: 0` on every pass, once a minute, for days, and nothing in the index
+    to show for it.
+    """
+    docs = [_empty_doc("alice", "blog/empty.md", "r1"), _doc("alice", "wiki/a.md", "r1")]
+    store = EmptyStore()
+    indexer = _indexer(store, docs)
+
+    first = (await indexer.reindex())["files"]
+    assert first["indexed"] == 2 and first["failed"] == 0
+    assert first["empty"] == 1
+
+    store.state = {("alice", "wiki/a.md"): "r1"}
+    second = (await indexer.reindex())["files"]
+    assert second["changed"] == 0
+    assert second["skipped"] == 1
+
+
+async def test_an_empty_document_is_retried_when_it_gains_content(_count_embeds) -> None:
+    docs = [_empty_doc("alice", "blog/empty.md", "r1")]
+    store = EmptyStore()
+    indexer = _indexer(store, docs)
+    await indexer.reindex()
+
+    docs[0] = _doc("alice", "blog/empty.md", "r2")
+    stats = (await indexer.reindex())["files"]
+    assert stats["changed"] == 1 and stats["indexed"] == 1
+    assert indexer.status()["files"]["empty"]["count"] == 0
+    assert ("alice", "blog/empty.md") in store.replaced
+
+
+async def test_the_status_names_an_empty_document(_count_embeds) -> None:
+    indexer = _indexer(EmptyStore(), [_empty_doc("alice", "blog/empty.md", "r1")])
+    await indexer.reindex()
+    empty = indexer.status()["files"]["empty"]
+    assert empty["count"] == 1
+    assert empty["paths"] == ["blog/empty.md"]
+    assert indexer.status()["files"]["unindexable"]["count"] == 0
+
+
+async def test_an_empty_document_logs_one_line_and_not_one_a_pass(_count_embeds, caplog) -> None:
+    indexer = _indexer(EmptyStore(), [_empty_doc("alice", "blog/empty.md", "r1")])
+    with caplog.at_level("INFO"):
+        await indexer.reindex()
+        await indexer.reindex()
+        await indexer.reindex()
+    lines = [r for r in caplog.records if "nothing to index" in r.getMessage()]
+    assert len(lines) == 1

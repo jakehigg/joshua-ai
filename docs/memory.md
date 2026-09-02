@@ -75,6 +75,10 @@ Read this when an answer is wrong. It says what Joshua read before it answered.
 `GET /admin/kb/status` reports the state of each source and the chunk count.
 `POST /admin/kb/reindex` re-indexes on demand.
 
+Each source also reports `empty`: the documents that hold nothing to index,
+such as a zero-byte file. They are not a fault, and they are named so that a
+pass which reports no work is explainable.
+
 Each source also reports `unindexable`: the documents the index cannot hold,
 with their paths. A document gets there when the fault is its own, such as a
 journal post below a directory that names no person. It is passed over until
