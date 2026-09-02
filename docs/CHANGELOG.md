@@ -27,10 +27,12 @@ with the images and the packaged chart, are at
 - `/readyz` no longer reports a data volume as not writable when it is. The
   check read the mode bits, and on an NFS export the server decides, so the
   bits lie. It now writes a probe file and removes it.
-- `/readyz` answers `503` when the container is not ready, and `200` when it
+- `core` answers `/readyz` with `503` when it is not ready, and `200` when it
   is. Every answer was a `200` before, so a Kubernetes readiness probe could
-  never fail and a broken container still took traffic. Read the note in
-  `operations.md` before you add a second replica.
+  never fail and a core with no database still took traffic. `channels` and
+  `gateway` keep the `200`: their `ok` reports an upstream, not whether the
+  container can serve, and a failing poller or a failed MCP connection must
+  not take the pod out of its Service.
 - `make restore` works on a fresh checkout. It stopped with `invalid container
   name or ID: value is empty`, because it read the volume name from a
   container that no image could make. It now pulls the image, finds the volume

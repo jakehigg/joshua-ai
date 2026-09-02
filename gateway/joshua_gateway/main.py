@@ -234,18 +234,19 @@ async def readyz(request: Request) -> JSONResponse:
     image cannot run) from one that is still warming up, so the fault is visible
     without a name.
 
-    The status code carries the answer: 200 when ready, 503 when not. A probe
-    reads the code and nothing else, so a body that says ``ok: false`` under a
-    200 is a probe that can never fail."""
+    **The status code stays 200, and it is not an oversight.** ``ok`` here says
+    that every upstream connected, and that is not what readiness means. The
+    gateway is ready when it can serve a tool call, and the ``files`` builtin
+    answers whatever an upstream is doing. A 503 would take the pod out of the
+    Service, so one MCP server that fails to connect would take away every
+    tool, including the ones that work. The body carries the count; the code
+    carries whether this container can serve."""
     upstreams: dict[str, Upstream] = getattr(request.app.state, "upstreams", {})
     total = len(upstreams)
     connected = sum(1 for up in upstreams.values() if up.status == "connected")
     errored = sum(1 for up in upstreams.values() if up.status == "error")
     ok = total > 0 and connected == total
-    return JSONResponse(
-        {"ok": ok, "connected": connected, "errored": errored, "total": total},
-        status_code=200 if ok else 503,
-    )
+    return JSONResponse({"ok": ok, "connected": connected, "errored": errored, "total": total})
 
 
 def build_app() -> Starlette:

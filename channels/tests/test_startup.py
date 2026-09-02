@@ -59,19 +59,25 @@ async def test_readyz_with_no_adapters_is_ok_and_empty() -> None:
     assert body["checks"] == {}
 
 
-# -- the status code is the answer ---------------------------------------------
+# -- a failing poller is not an unready container ------------------------------
 
 
-async def test_readyz_answers_503_when_an_adapter_is_failing() -> None:
-    """A probe reads the code. A body under a 200 is a probe that cannot fail."""
-    failing = FakeAdapter("telegram", health=AdapterHealth(ok=False, reason="Conflict"))
+async def test_a_failing_adapter_keeps_the_200() -> None:
+    """channels serves core and the webhook while a poller is failing.
+
+    A 503 takes the pod out of the Service. One upstream that a person does not
+    use would then stop the webhook that they do use, so a poll error is
+    reported in the body and never in the status code.
+    """
+    failing = FakeAdapter("telegram", health=AdapterHealth(ok=False, reason="Bad Gateway"))
     async with _client(failing) as client:
         response = await client.get("/readyz")
-    assert response.status_code == 503
+    assert response.status_code == 200
     assert response.json()["ok"] is False
+    assert response.json()["checks"]["telegram"]["reason"] == "Bad Gateway"
 
 
-async def test_readyz_answers_200_when_every_adapter_is_well() -> None:
+async def test_a_well_adapter_also_gives_the_200() -> None:
     async with _client(FakeAdapter("telegram")) as client:
         response = await client.get("/readyz")
     assert response.status_code == 200

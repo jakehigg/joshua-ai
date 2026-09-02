@@ -9,14 +9,16 @@ Each container answers two open routes on its port:
 
 - `GET /healthz` returns `{"ok": true}` when the process runs.
 - `GET /readyz` returns `{"ok": bool, ...}` with the checks that matter for
-  that container. It answers `200` when the container is ready and `503` when
-  it is not, so a Kubernetes readiness probe can act on it.
+  that container. `core` answers `503` when it is not ready, so a Kubernetes
+  readiness probe can act on it. `channels` and `gateway` always answer `200`:
+  their checks report an upstream, not whether the container can serve. See
+  the table.
 
 | Container | `/readyz` checks |
 |---|---|
-| `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` while a poll error stands, and `ok: true` again after the next good poll. iMessage reports whether BlueBubbles answers a ping. |
-| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable). `embed` reports the model and does not hold `ok` down: a lost model costs the memory and not the turn. |
-| `gateway` | `connected`, `errored`, `total`: the MCP upstreams |
+| `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` while a poll error stands, and `ok: true` again after the next good poll. iMessage reports whether BlueBubbles answers a ping. The code stays `200`: channels serves `core` and the webhook while a poller is failing, and a `503` would stop the webhook that works because of an upstream that does not. |
+| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable). Either one false is a `503`. `embed` reports the model and does not hold `ok` down: a lost model costs the memory and not the turn. |
+| `gateway` | `connected`, `errored`, `total`: the MCP upstreams. The code stays `200`: the `files` builtin answers whatever an upstream is doing, and a `503` would take away every tool because one failed to connect. |
 
 From the host:
 

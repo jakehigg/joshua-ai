@@ -200,9 +200,13 @@ async def readyz(request: Request) -> JSONResponse:
     channel that is off has no adapter, so it is not a fault. No entry holds a
     secret.
 
-    The status code carries the answer: 200 when ready, 503 when not. A probe
-    reads the code and nothing else, so a body that says ``ok: false`` under a
-    200 is a probe that can never fail.
+    **The status code stays 200, and it is not an oversight.** ``ok`` here says
+    that every outbound poller is well, and that is not what readiness means.
+    channels is ready when it can take a turn from ``core`` and answer the
+    iMessage webhook, and it does both while a Telegram poll is failing. A 503
+    would take the pod out of the Service, so one upstream that a person does
+    not use would stop the webhook that they do use. The body carries the
+    fault; the code carries whether this container can serve.
     """
     checks: dict[str, object] = {}
     ok = True
@@ -216,7 +220,7 @@ async def readyz(request: Request) -> JSONResponse:
             checks[channel_type] = health.as_dict()
             if not health.ok:
                 ok = False
-    return JSONResponse({"ok": ok, "checks": checks}, status_code=200 if ok else 503)
+    return JSONResponse({"ok": ok, "checks": checks})
 
 
 def build_app(context: ChannelsContext | None = None) -> FastAPI:
