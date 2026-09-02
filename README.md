@@ -42,7 +42,7 @@ subscription. You do not need Python, and you do not need a Telegram bot.
 - [docs/channels.md](docs/channels.md): the terminal, Telegram, iMessage, webhooks.
 - [docs/config.md](docs/config.md): every setting in `joshua.yaml`.
 - [docs/memory.md](docs/memory.md): notes, journal, profiles, retrieval.
-- [docs/operations.md](docs/operations.md): health, logs, updates, backup.
+- [docs/operations.md](docs/operations.md): health, logs, updates, backup, the viewer.
 - [docs/architecture.md](docs/architecture.md): the three containers.
 - [docs/security.md](docs/security.md): what the agent can and cannot reach.
 - [docs/contracts.md](docs/contracts.md): every HTTP route.
@@ -101,6 +101,22 @@ The two do not interfere. A build is tagged `joshua-ai-<component>:dev`, so it
 never replaces a release on your machine, and `make up` still starts the
 release. Both use the same containers and the same volumes, so your data stays
 when you change from one to the other.
+
+## Read your notes in a browser
+
+Joshua writes Markdown to a volume, so a text editor is enough to read it. The
+optional **viewer** is a small read-only web page for the same files: the
+wiki, your profile, your journal, your attachments, and the shared profile. A
+person signs in with a password and reads; a member can also move a wiki page
+to the trash, which is the only way to delete a page, because the agent has no
+delete tool.
+
+It is off by default, and it holds no credential of its own. To turn it on,
+see [docs/operations.md](docs/operations.md#the-viewer).
+
+```
+docker compose --profile viewer up -d viewer   # then http://127.0.0.1:8082/
+```
 
 ## Contribute
 

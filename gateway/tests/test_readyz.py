@@ -61,3 +61,27 @@ def test_readyz_needs_no_auth(gateway):
         assert client.get("/readyz").status_code == 200
         # The full inventory (with tool names) stays behind admin auth.
         assert client.get("/admin/inventory", headers=bearer("laptop")).status_code == 200
+
+
+# -- an errored upstream is not an unready container ---------------------------
+
+
+def _readyz_response(*statuses: str):
+    upstreams = {f"s{i}": SimpleNamespace(status=s) for i, s in enumerate(statuses)}
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(upstreams=upstreams)))
+    return asyncio.run(readyz(request))
+
+
+def test_an_errored_upstream_keeps_the_200():
+    """The files builtin answers whatever an upstream is doing.
+
+    A 503 takes the pod out of the Service, so one MCP server that fails to
+    connect would take away every tool, including the ones that work.
+    """
+    response = _readyz_response("connected", "error")
+    assert response.status_code == 200
+    assert json.loads(response.body)["ok"] is False
+
+
+def test_every_upstream_connected_also_gives_the_200():
+    assert _readyz_response("connected", "connected").status_code == 200

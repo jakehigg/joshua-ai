@@ -232,7 +232,15 @@ async def readyz(request: Request) -> JSONResponse:
     ``errored`` counts the upstreams whose last connect failed. It separates a
     misconfigured server that never connects (for example a ``stdio`` server the
     image cannot run) from one that is still warming up, so the fault is visible
-    without a name."""
+    without a name.
+
+    **The status code stays 200, and it is not an oversight.** ``ok`` here says
+    that every upstream connected, and that is not what readiness means. The
+    gateway is ready when it can serve a tool call, and the ``files`` builtin
+    answers whatever an upstream is doing. A 503 would take the pod out of the
+    Service, so one MCP server that fails to connect would take away every
+    tool, including the ones that work. The body carries the count; the code
+    carries whether this container can serve."""
     upstreams: dict[str, Upstream] = getattr(request.app.state, "upstreams", {})
     total = len(upstreams)
     connected = sum(1 for up in upstreams.values() if up.status == "connected")

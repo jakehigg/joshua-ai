@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from joshua_shared import config as config_module
 from joshua_shared import layout
 from joshua_shared.config import JoshuaConfig
@@ -225,7 +226,13 @@ def _build_memory(
     and skipped rather than failing boot."""
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     memory = settings.memory
-    sources: dict[str, Any] = {"files": FilesSource(data_dir)}
+
+    async def _person_ids() -> set[str]:
+        """The roster the index is keyed on. A chunk carries this foreign key,
+        so a directory that names nobody here holds nothing storable."""
+        return {person.id for person in await repo.list_people()}
+
+    sources: dict[str, Any] = {"files": FilesSource(data_dir, persons=_person_ids)}
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
     for name, options in memory.sources.items():
         if name == "files":
@@ -271,8 +278,12 @@ async def healthz() -> dict[str, bool]:
     return {"ok": True}
 
 
-async def readyz(request: Request) -> dict:
+async def readyz(request: Request) -> JSONResponse:
     """Readiness: the DB answers a trivial query and the data layout is good.
+
+    The status code carries the answer: 200 when ready, 503 when not. A probe
+    reads the code and nothing else, so a body that says ``ok: false`` under a
+    200 is a probe that can never fail.
 
     ``checks.embed`` reports the embedding model, and does not hold ``ok`` down.
     A lost model costs the memory, not the turn, so core stays in service and
@@ -292,10 +303,11 @@ async def readyz(request: Request) -> dict:
             db_ok = False
     layout_ok = not layout.validate_layout()
     embed_ok = embed.is_available()
-    return {
-        "ok": db_ok and layout_ok,
-        "checks": {"db": db_ok, "layout": layout_ok, "embed": embed_ok},
-    }
+    ok = db_ok and layout_ok
+    return JSONResponse(
+        {"ok": ok, "checks": {"db": db_ok, "layout": layout_ok, "embed": embed_ok}},
+        status_code=200 if ok else 503,
+    )
 
 
 def build_app() -> FastAPI:

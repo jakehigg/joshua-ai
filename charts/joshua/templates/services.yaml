@@ -1,6 +1,9 @@
 {{/* One ClusterIP Service for each container. An in-cluster caller uses the
-     short name in the namespace, such as http://joshua-core:8000. */}}
-{{- range $name := list "core" "channels" "gateway" }}
+     short name in the namespace, such as http://joshua-core:8000. The viewer
+     gets one only when it runs. */}}
+{{- $names := list "core" "channels" "gateway" }}
+{{- if .Values.viewer.enabled }}{{- $names = append $names "viewer" }}{{- end }}
+{{- range $name := $names }}
 apiVersion: v1
 kind: Service
 metadata:

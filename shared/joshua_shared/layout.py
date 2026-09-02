@@ -21,6 +21,7 @@ import os
 from importlib import resources
 from pathlib import Path
 
+from joshua_shared.fs import is_writable
 from joshua_shared.ids import PERSON_ID_RE
 
 # The default mount point. `JOSHUA_DATA_DIR` overrides it for tests.
@@ -211,12 +212,15 @@ def validate_layout(root: Path | str | None = None) -> list[str]:
     Checks the data root exists and is writable, `wiki/` and `shared/` exist,
     and every person directory carries its subdirectories and `profile.md`. `/readyz`
     reports `layout: false` when the list is not empty.
+
+    The writability check writes a probe file. The mode bits are not the answer
+    on an NFS export, where the server decides; see `joshua_shared.fs`.
     """
     base = _root(root)
     problems: list[str] = []
     if not base.is_dir():
         return [f"data root missing: {base}"]
-    if not os.access(base, os.W_OK):
+    if not is_writable(base):
         problems.append(f"data root not writable: {base}")
     if not wiki_root(root).is_dir():
         problems.append("wiki/ missing")

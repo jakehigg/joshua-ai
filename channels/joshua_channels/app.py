@@ -13,6 +13,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from joshua_shared import config as config_module
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger, install_healthcheck_filter
@@ -191,13 +192,21 @@ async def healthz() -> dict[str, bool]:
     return {"ok": True}
 
 
-async def readyz(request: Request) -> dict:
+async def readyz(request: Request) -> JSONResponse:
     """Readiness: one entry per registered adapter, keyed by ``channel_type``.
 
     Each entry is ``{"ok": bool}`` plus a short ``reason`` when the adapter raised
     on its last poll. ``ok`` is False when any registered adapter is failing. A
     channel that is off has no adapter, so it is not a fault. No entry holds a
     secret.
+
+    **The status code stays 200, and it is not an oversight.** ``ok`` here says
+    that every outbound poller is well, and that is not what readiness means.
+    channels is ready when it can take a turn from ``core`` and answer the
+    iMessage webhook, and it does both while a Telegram poll is failing. A 503
+    would take the pod out of the Service, so one upstream that a person does
+    not use would stop the webhook that they do use. The body carries the
+    fault; the code carries whether this container can serve.
     """
     checks: dict[str, object] = {}
     ok = True
@@ -211,7 +220,7 @@ async def readyz(request: Request) -> dict:
             checks[channel_type] = health.as_dict()
             if not health.ok:
                 ok = False
-    return {"ok": ok, "checks": checks}
+    return JSONResponse({"ok": ok, "checks": checks})
 
 
 def build_app(context: ChannelsContext | None = None) -> FastAPI:

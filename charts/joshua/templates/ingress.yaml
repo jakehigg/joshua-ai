@@ -2,8 +2,10 @@
 {{- if not .Values.ingress.host }}
 {{- fail "ingress.enabled needs ingress.host" }}
 {{- end }}
-{{/* Only channels is reachable from outside. core holds the agent and gateway
-     holds every upstream credential, so neither is ever exposed. */}}
+{{/* channels answers a webhook from outside. core holds the agent and gateway
+     holds every upstream credential, so neither is ever exposed. The viewer
+     has its own block below, because it is a different host and a different
+     audience: a person in a browser. */}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -34,6 +36,51 @@ spec:
             backend:
               service:
                 name: joshua-channels
+                port:
+                  number: 8000
+{{- end }}
+
+{{- if .Values.viewer.ingress.enabled }}
+{{- if not .Values.viewer.enabled }}
+{{- fail "viewer.ingress.enabled needs viewer.enabled" }}
+{{- end }}
+{{- if not .Values.viewer.ingress.host }}
+{{- fail "viewer.ingress.enabled needs viewer.ingress.host" }}
+{{- end }}
+---
+{{/* The viewer serves plain HTTP and holds every route behind HTTP basic. The
+     password crosses the wire on each request, so terminate TLS here and keep
+     the host off the public internet unless you mean it. */}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: joshua-viewer
+  labels:
+    app.kubernetes.io/name: joshua-viewer
+    {{- include "joshua.labels" . | nindent 4 }}
+  {{- with .Values.viewer.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.viewer.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.viewer.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.viewer.ingress.host }}
+      secretName: {{ .Values.viewer.ingress.tls.secretName | default (printf "%s-tls" .Values.viewer.ingress.host) }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.viewer.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: joshua-viewer
                 port:
                   number: 8000
 {{- end }}

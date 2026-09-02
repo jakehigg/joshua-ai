@@ -62,12 +62,6 @@ def test_usable_cache_dir_falls_back_when_it_cannot_write(tmp_path: Path) -> Non
     assert got == os.path.join(tempfile.gettempdir(), "joshua-fastembed")
 
 
-def test_is_writable_rejects_a_path_below_a_file(tmp_path: Path) -> None:
-    blocker = tmp_path / "afile"
-    blocker.write_text("not a directory")
-    assert embed_module._is_writable(str(blocker / "cache")) is False
-
-
 def test_get_model_passes_the_fallback_to_fastembed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

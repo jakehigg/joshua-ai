@@ -107,13 +107,21 @@ def result_json(res):
 # -- paths.resolve unit (property-style traversal) --------------------------
 
 
-def roots(data_root, person="alex", wiki_write=True):
-    """The root set of a request. Only the role decides.
+ROSTER = ("alex", "mia")
 
-    ``person`` stays in the signature so the call sites below read the same. It
-    does not change what a request may reach.
+
+def roots(data_root, person="alex", wiki_write=True):
+    """The root set of a request. The role decides what is reachable.
+
+    ``person`` says who the request belongs to. It widens nothing; it decides
+    only whether a write below ``people`` has a person segment to land on.
     """
-    return paths.roots(data_root, role="member" if wiki_write else "guest")
+    return paths.roots(
+        data_root,
+        role="member" if wiki_write else "guest",
+        people=ROSTER,
+        person=person,
+    )
 
 
 TRAVERSALS = [
@@ -199,20 +207,24 @@ def test_a_request_with_no_role_writes_nothing(data_root):
 
 
 def test_a_member_writes_the_wiki_and_the_journal(data_root):
-    r = paths.roots(data_root, role="member")
+    r = roots(data_root)
     assert r["wiki"].can_write is True
     assert r["people"].can_write is True
     assert r["shared"].can_write is False
 
 
-def test_the_root_set_does_not_depend_on_a_person(data_root):
-    """Identity is a path lookup, and not a permission."""
-    assert paths.roots(data_root, role="member") == paths.roots(data_root, role="member")
+def test_reading_does_not_depend_on_a_person(data_root):
+    """Identity is a path lookup, and not a read permission."""
+    alex = paths.roots(data_root, role="member", people=ROSTER, person="alex")
+    mia = paths.roots(data_root, role="member", people=ROSTER, person="mia")
+    for name in ("wiki", "people", "shared"):
+        assert alex[name].base == mia[name].base
+        assert alex[name].can_write == mia[name].can_write
 
 
 def test_a_member_reads_the_journal_of_another_person(data_root):
     """One corpus. The journal of mia is not walled off from alex."""
-    r = paths.roots(data_root, role="member")
+    r = roots(data_root)
     root, resolved = paths.resolve("people/mia/blog/x.md", r, write=False)
     assert root.name == "people"
     assert resolved == data_root / "people" / "mia" / "blog" / "x.md"
@@ -220,7 +232,7 @@ def test_a_member_reads_the_journal_of_another_person(data_root):
 
 def test_the_write_domain_holds_below_people(data_root):
     """The role says whether a write may happen; this says where it may land."""
-    r = paths.roots(data_root, role="member")
+    r = roots(data_root)
     paths.resolve("people/alex/blog/ok.md", r, write=True)
     for denied in ("people/alex/profile.md", "people/alex/attachments/x.md"):
         with pytest.raises(paths.PathError, match="may be written"):
@@ -228,10 +240,21 @@ def test_the_write_domain_holds_below_people(data_root):
 
 
 def test_a_retired_root_names_its_replacement(data_root):
-    """A skill can still name a retired root. Say where the path went."""
-    r = paths.roots(data_root, role="member")
-    with pytest.raises(paths.PathError, match="people/<person>/blog/"):
+    """A skill can still name a retired root. Hand back the whole path.
+
+    The replacement carries the person id of the request, so the caller never
+    composes the segment itself.
+    """
+    with pytest.raises(paths.PathError, match=r"people/alex/blog/"):
+        paths.resolve("blog/x.md", roots(data_root), write=True)
+
+
+def test_a_retired_root_asks_for_no_guess_with_no_person(data_root):
+    """With no person there is no id to name, and none is invented."""
+    r = roots(data_root, person=None)
+    with pytest.raises(paths.PathError) as excinfo:
         paths.resolve("blog/x.md", r, write=True)
+    assert "<person>" not in excinfo.value.message
 
 
 # -- through the gateway ----------------------------------------------------
@@ -865,3 +888,81 @@ async def test_an_unknown_role_is_refused_at_the_boundary(gateway):
         with pytest.raises(Exception):  # noqa: B017 — the transport surfaces the 400
             async with gateway_session(app, "/files", "core", headers) as session:
                 await session.call_tool("read_file", {"path": "wiki/note.md"})
+
+
+# -- The person segment must name a person -------------------------------------
+
+
+def test_a_write_to_a_person_who_does_not_exist_is_refused(data_root):
+    """A display name is not a person id, and a path built from one names nobody."""
+    with pytest.raises(paths.PathError) as excinfo:
+        paths.resolve("people/Alex Smith/blog/note.md", roots(data_root), write=True)
+    assert "names nobody" in excinfo.value.message
+    assert not (data_root / "people" / "Alex Smith").exists()
+
+
+def test_the_refusal_names_the_path_that_works(data_root):
+    """The caller is handed the whole path, so it composes no segment of its own."""
+    with pytest.raises(paths.PathError) as excinfo:
+        paths.resolve("people/not-a-person/blog/note.md", roots(data_root), write=True)
+    message = excinfo.value.message
+    assert "people/alex/blog/" in message
+    assert str(data_root) not in message
+
+
+def test_a_turn_with_no_person_writes_no_journal(data_root):
+    """A post belongs to somebody. A turn that names nobody has no author."""
+    r = roots(data_root, person=None)
+    for segment in ("alex", "mia", "not-a-person"):
+        with pytest.raises(paths.PathError):
+            paths.resolve(f"people/{segment}/blog/x.md", r, write=True)
+
+
+def test_the_unknown_person_writes_no_journal(data_root):
+    """``unknown`` is the literal core sends for a turn it could not attribute."""
+    r = roots(data_root, person=paths.UNKNOWN)
+    with pytest.raises(paths.PathError):
+        paths.resolve("people/alex/blog/x.md", r, write=True)
+
+
+def test_a_real_person_still_writes_the_journal(data_root):
+    """The rule refuses a stranger and keeps the case that has to work."""
+    for person in ("alex", "mia"):
+        root, abs_path = paths.resolve(
+            f"people/{person}/blog/note.md", roots(data_root, person=person), write=True
+        )
+        assert abs_path == data_root / "people" / person / "blog" / "note.md"
+
+
+def test_a_person_who_does_not_exist_is_still_readable(data_root):
+    """The rule gates a write. Reading the corpus is unchanged."""
+    root, abs_path = paths.resolve("people/ghost/blog/x.md", roots(data_root), write=False)
+    assert abs_path == data_root / "people" / "ghost" / "blog" / "x.md"
+
+
+async def test_a_group_turn_writes_no_journal_through_the_gateway(gateway, data_root):
+    """A person-less turn reached a person's namespace and made a directory."""
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "member"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            wrote = await session.call_tool(
+                "write_file",
+                {"path": "people/alex/blog/from-the-group.md", "content": "note\n"},
+            )
+    assert wrote.is_error is True
+    assert not list((data_root / "people" / "alex" / "blog").glob("*from-the-group*"))
+
+
+async def test_a_display_name_makes_no_directory_through_the_gateway(gateway, data_root):
+    """The whole defect in one test: the second, parallel directory is never made."""
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex", "X-Joshua-Role": "member"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            wrote = await session.call_tool(
+                "write_file", {"path": "people/Alex/blog/garden.md", "content": "note\n"}
+            )
+    assert wrote.is_error is True
+    assert "people/alex/blog/" in wrote.content[0].text
+    assert not (data_root / "people" / "Alex Smith").exists()

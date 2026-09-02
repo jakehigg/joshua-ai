@@ -116,7 +116,31 @@ def test_member_prompt_has_journal_section() -> None:
     assert "## Your journal of each person" in prompt
     assert "write a short post to" in prompt
     # The journal is addressed by person: one corpus, no private tree.
-    assert "`people/<id>/blog/<slug>.md`" in prompt
+    assert "`people/<person-id>/blog/<slug>.md`" in prompt
+
+
+def test_the_identity_block_carries_the_person_id() -> None:
+    """A journal path needs the id, and the display name is a different string."""
+    composer = PromptComposer()
+    prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+    assert "person id is `alex`" in prompt
+    assert "people/alex/blog/" in prompt
+
+
+def test_a_guest_is_told_their_person_id_too() -> None:
+    composer = PromptComposer()
+    prompt = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM)
+    assert "person id is `sam`" in prompt
+    assert "people/sam/blog/" in prompt
+
+
+def test_the_tools_block_names_no_retired_root() -> None:
+    """`blog/` was a root once. Naming it teaches the agent a path that fails."""
+    composer = PromptComposer()
+    prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+    tools = prompt[prompt.index("## Your tools") :]
+    assert "`blog/`" not in tools
+    assert "people/<person-id>/blog/" in tools
 
 
 def test_journal_auto_adds_no_preference_line() -> None:

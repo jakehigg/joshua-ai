@@ -7,6 +7,19 @@ single-flight lock, so its passes never overlap. Per-document errors are logged
 and skipped; a source that fails to list records its error and never blocks
 another source.
 
+A document can leave no row in the index, and the diff reads a missing row as
+a changed document. Both shapes then repeat on every pass forever:
+
+* it fails for a fault of its own, such as a person id that names no row, and
+  the failure is counted (**unindexable**);
+* it succeeds and yields no chunk, because the file is empty, and nothing is
+  counted at all (**empty**). This one is silent: the pass reports
+  ``indexed: 1, failed: 0`` and writes nothing.
+
+Either way the revision is held in the process, and the document is passed
+over until its content changes, a full reindex asks for it, or the process
+restarts.
+
 The startup pass makes every deploy self-heal (a first-boot empty index is just
 the degenerate diff where everything is new). The interval loop keeps the
 ``files`` source fresh; other adapters run on their own schedule.
@@ -39,6 +52,32 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# SQLSTATE class 23 is an integrity constraint violation: the row breaks a rule
+# of the schema, so the same row breaks it again on every pass.
+_CONSTRAINT_CLASS = "23"
+
+
+def _held_report(
+    held: dict[tuple[str | None, str], tuple[str, str]], reason: str
+) -> dict[str, Any]:
+    """The count and the paths held back for one reason."""
+    paths = sorted(uri for (_, uri), (_, held_reason) in held.items() if held_reason == reason)
+    return {"count": len(paths), "paths": paths[:20]}
+
+
+def _is_unindexable(exc: BaseException) -> bool:
+    """True when the document is at fault, and a retry gives the same answer.
+
+    A constraint violation and a malformed document are faults of the document.
+    Everything else, such as a lost connection or a lost embedding model, is a
+    fault of the run, and the next pass is allowed to try again.
+    """
+    sqlstate = getattr(exc, "sqlstate", None)
+    if isinstance(sqlstate, str) and sqlstate.startswith(_CONSTRAINT_CLASS):
+        return True
+    return isinstance(exc, ValueError | TypeError)
+
+
 class Indexer:
     def __init__(
         self,
@@ -57,14 +96,33 @@ class Indexer:
             name: {"last_run": None, "last_result": None, "last_error": None, "running": False}
             for name in sources
         }
+        # source -> {(person_id, uri): (revision, reason)} for a document that
+        # left no row in the index at that revision. Held in the process: a
+        # restart is a reasonable time to try once more.
+        self._held: dict[str, dict[tuple[str | None, str], tuple[str, str]]] = {
+            name: {} for name in sources
+        }
 
     @property
     def sources(self) -> dict[str, Source]:
         return self._sources
 
     def status(self) -> dict[str, Any]:
-        """Per-source last run, result counts, and last error for the admin API."""
-        return {name: dict(state) for name, state in self._status.items()}
+        """Per-source last run, result counts, last error, and what is held back.
+
+        ``unindexable`` is a fault to act on, so it names the paths. ``empty``
+        is a file with nothing to index, which is not a fault; it is counted
+        and named so that a pass which reports no work is explainable.
+        """
+        out: dict[str, Any] = {}
+        for name, state in self._status.items():
+            held = self._held[name]
+            out[name] = {
+                **state,
+                "unindexable": _held_report(held, "unindexable"),
+                "empty": _held_report(held, "empty"),
+            }
+        return out
 
     async def _index_document(self, doc: Document) -> int:
         if doc.source == "files" and is_skill_path(doc.uri):
@@ -171,6 +229,22 @@ class Indexer:
                     if key not in live_keys and (person is None or key[0] == person)
                 ]
 
+                held = self._held[name]
+                # A document that vanished, or that came back at a new revision,
+                # is no longer the document that left no row.
+                for key in [k for k in held if k not in live_keys]:
+                    del held[key]
+                if full:
+                    # An operator asked for the whole source. Try them again.
+                    held.clear()
+
+                def _is_held(doc: Document) -> bool:
+                    entry = held.get((doc.person_id, doc.uri))
+                    return entry is not None and entry[0] == doc.rev
+
+                skipped = [d for d in changed if _is_held(d)]
+                changed = [d for d in changed if not _is_held(d)]
+
                 indexed = failed = 0
                 # A lost embedding model fails every document of every pass. One
                 # line for each document buries the cause, so the pass is counted
@@ -181,21 +255,46 @@ class Indexer:
                 first_path = ""
                 for doc in changed:
                     try:
-                        await self._index_document(doc)
+                        chunks = await self._index_document(doc)
                         indexed += 1
+                        key = (doc.person_id, doc.uri)
+                        if chunks:
+                            held.pop(key, None)
+                        else:
+                            # No chunk means no row, and the diff reads a
+                            # missing row as a changed document. Hold the
+                            # revision, or this repeats on every pass.
+                            if key not in held:
+                                logger.info(
+                                    {
+                                        "message": "kb document has nothing to index",
+                                        "source": name,
+                                        "path": doc.uri,
+                                        "person": doc.person_id,
+                                    }
+                                )
+                            held[key] = (doc.rev, "empty")
                     except Exception as e:  # noqa: BLE001 — one bad doc must not sink the pass
                         failed += 1
                         if not embed_ok:
                             first_error = first_error or str(e)
                             first_path = first_path or doc.uri
                             continue
+                        unindexable = _is_unindexable(e)
+                        if unindexable:
+                            held[(doc.person_id, doc.uri)] = (doc.rev, "unindexable")
                         logger.warning(
                             {
-                                "message": "kb index failed",
+                                "message": (
+                                    "kb document unindexable" if unindexable else "kb index failed"
+                                ),
                                 "source": name,
                                 "path": doc.uri,
                                 "person": doc.person_id,
                                 "error": str(e),
+                                # A held document is not tried again, so this
+                                # line is written one time and not each pass.
+                                "held": unindexable,
                             }
                         )
                 if not embed_ok and failed:
@@ -217,6 +316,9 @@ class Indexer:
                     "indexed": indexed,
                     "removed": len(removed),
                     "failed": failed,
+                    "skipped": len(skipped),
+                    "unindexable": sum(1 for _, reason in held.values() if reason == "unindexable"),
+                    "empty": sum(1 for _, reason in held.values() if reason == "empty"),
                 }
                 self._status[name].update(
                     last_run=_now_iso(),

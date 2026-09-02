@@ -60,13 +60,18 @@ uses another person's credential.
 
 The `files` server confines every path to the speaker's roots:
 
-| Root | Read | Write |
+| Path | Read | Write |
 |---|---|---|
 | `wiki/` | everyone | a member, `.md` only. A guest reads only. |
-| `blog/` | the person | the person, `.md` only, create or append |
-| `profile.md` | the person | nobody. Nightly reflection writes it. |
-| `attachments/` | the person | nobody. Channels writes it. |
+| `people/<id>/blog/` | everyone | a member, `.md` only, create or append |
+| `people/<id>/profile.md` | everyone | nobody. Nightly reflection writes it. |
+| `people/<id>/attachments/` | everyone | nobody. Channels writes it. |
 | `shared/` | everyone | nobody. Core and channels write it. |
+
+A write below `people/` must name a person who is on the roster. A segment
+that names nobody, such as a display name, is refused and makes no directory.
+A turn that carries no person writes no journal at all, because a post belongs
+to a person; a group turn writes the wiki instead.
 
 The server refuses a path with `..`, an absolute path, and a symlink that
 leaves a root.
@@ -174,14 +179,14 @@ A prompt injection is the realistic attack: a message, a file, or a tool result
 that tells the agent to do something. This is what it can do at most:
 
 - Read the wiki, and write it when the speaker is a member.
-- Read and write the speaker's own `blog/`.
+- Read any journal, and write a post to the speaker's own
+  `people/<id>/blog/`.
 - Read `shared/`.
 - Call the MCP servers the speaker is allowed, with the speaker's identity.
 - Reply on the channel the turn came from, and to any destination through a
   scheduled task.
 
-It cannot read another person's journal. It cannot read a token. It cannot run a
-command. It cannot fetch a URL, because no tool does that. A server that acts
+It cannot read a token. It cannot run a command. It cannot fetch a URL, because no tool does that. A server that acts
 on the world, such as home automation, is exactly as exposed as its `allow`
 list makes it. Keep such servers on a short list.
 

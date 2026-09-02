@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from joshua_channels.adapters import telegram as telegram_adapter
 from joshua_channels.adapters.telegram import (
     NO_CAPTION_TEXT,
     TURN_FAILED,
@@ -560,3 +561,84 @@ def test_resolve_ref_dm_and_group(tmp_path: Path) -> None:
     assert adapter.resolve_ref("dm:nobody") is None
     assert adapter.resolve_ref("group:nope") is None
     assert adapter.resolve_ref("weird") is None
+
+
+# -- a poll error that nobody clears -------------------------------------------
+
+
+async def test_a_transient_poll_error_recovers_with_no_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recovery must not wait for a person to send something.
+
+    A live instance reported `telegram: {ok: false, reason: "Bad Gateway"}` for
+    over 90 minutes after one transient error, while polling was fine. The flag
+    cleared only on a delivered update, and an idle bot delivers none.
+    """
+    from telegram.error import NetworkError
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(telegram_adapter.time, "monotonic", lambda: clock["now"])
+
+    adapter = _adapter(tmp_path)
+    adapter._on_poll_error(NetworkError("Bad Gateway"))
+    assert (await adapter.health()).ok is False
+
+    # No message arrives. The error simply stops being reported.
+    clock["now"] += telegram_adapter.POLL_RECOVERY_S + 1
+    body = (await adapter.health()).as_dict()
+    assert body["ok"] is True
+    assert "reason" not in body
+    assert body["errors"] == 1  # the past error stays visible
+
+
+async def test_an_error_that_keeps_arriving_stays_unhealthy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fault that continues keeps calling the callback, so it never ages out."""
+    from telegram.error import Conflict
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(telegram_adapter.time, "monotonic", lambda: clock["now"])
+
+    adapter = _adapter(tmp_path)
+    for _ in range(20):
+        adapter._on_poll_error(Conflict("terminated by other getUpdates request"))
+        clock["now"] += telegram_adapter.POLL_RECOVERY_S / 3
+        assert (await adapter.health()).ok is False
+
+    body = (await adapter.health()).as_dict()
+    assert body["ok"] is False
+    assert body["errors"] == 20
+
+
+async def test_an_error_still_stands_inside_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from telegram.error import NetworkError
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(telegram_adapter.time, "monotonic", lambda: clock["now"])
+
+    adapter = _adapter(tmp_path)
+    adapter._on_poll_error(NetworkError("Bad Gateway"))
+    clock["now"] += telegram_adapter.POLL_RECOVERY_S - 1
+    assert (await adapter.health()).ok is False
+
+
+async def test_a_delivered_message_clears_the_fault_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An update is proof, so it does not wait out the window."""
+    from telegram.error import NetworkError
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(telegram_adapter.time, "monotonic", lambda: clock["now"])
+
+    adapter = _adapter(tmp_path, core=FakeCore())
+    adapter._on_poll_error(NetworkError("Bad Gateway"))
+    await adapter._on_message(_update(), SimpleNamespace(bot=FakeBot()))
+
+    body = (await adapter.health()).as_dict()
+    assert body["ok"] is True
+    assert body["errors"] == 1

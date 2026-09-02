@@ -11,19 +11,27 @@ name. ``doc_date`` comes from a ``blog/YYYY-MM-DD*.md`` name (the nightly digest
 ``YYYY-MM-DD.md`` and agent posts ``YYYY-MM-DD-HHMM-<slug>.md``) or a frontmatter
 ``date``. Frontmatter ``date``/``tags``/``provenance`` are honored when present.
 ``.trash/`` directories and ``*.meta.json`` sidecars are ignored.
+
+A directory below ``people/`` that names nobody holds no document that can be
+indexed, because a chunk carries a foreign key to ``people``. The adapter takes
+the roster and skips such a directory, and says so one time per pass. A restore
+from an older volume, a hand copy, and a partial migration all make this shape.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 from joshua_shared import layout
+from joshua_shared.log import get_logger
 
 from joshua_core.memory.sources import Document
+
+logger = get_logger("memory.sources.files")
 
 # Person kinds this adapter indexes. ``attachments/`` and ``profile.md`` are not
 # retrieval content and are skipped.
@@ -100,21 +108,51 @@ class FilesSource:
 
     name = "files"
 
-    def __init__(self, data_dir: Path | str):
+    def __init__(
+        self,
+        data_dir: Path | str,
+        *,
+        persons: Callable[[], Awaitable[Collection[str]]] | None = None,
+    ):
         self._data_dir = Path(data_dir)
+        self._persons = persons
 
-    def _person_ids(self) -> list[str]:
+    async def _person_ids(self) -> list[str]:
+        """The person directories to walk, and a line for each one skipped.
+
+        ``persons`` is the roster. Without it every slug directory is walked,
+        which is what a caller with no database wants. With it, a directory
+        that names nobody is left alone: its documents cannot be stored, and
+        offering them makes the same failure on every pass.
+        """
         people = self._data_dir / "people"
         if not people.is_dir():
             return []
+        known = set(await self._persons()) if self._persons is not None else None
         ids: list[str] = []
+        orphans: list[str] = []
         for entry in sorted(people.iterdir()):
             if not entry.is_dir():
                 continue
             try:
-                ids.append(layout.safe_segment(entry.name))
+                person_id = layout.safe_segment(entry.name)
             except ValueError:
-                continue  # a stray non-slug directory is not a person
+                orphans.append(entry.name)  # a stray non-slug directory is not a person
+                continue
+            if known is not None and person_id not in known:
+                orphans.append(entry.name)
+                continue
+            ids.append(person_id)
+        if orphans:
+            # One line for the pass. One line per document is how a single
+            # stray directory made thousands of identical lines a day.
+            logger.warning(
+                {
+                    "message": "kb skipped directories that name no person",
+                    "count": len(orphans),
+                    "directories": sorted(orphans)[:10],
+                }
+            )
         return ids
 
     def _markdown(self, base: Path) -> Iterator[Path]:
@@ -149,7 +187,7 @@ class FilesSource:
         )
 
     async def list_documents(self) -> AsyncIterator[Document]:
-        for person_id in self._person_ids():
+        for person_id in await self._person_ids():
             root = layout.person_root(person_id, self._data_dir)
             for kind in _PERSON_KINDS:
                 base = root / kind
@@ -171,7 +209,7 @@ class FilesSource:
             return None
         if not uri.startswith(tuple(f"{kind}/" for kind in _PERSON_KINDS)):
             return None
-        for person_id in self._person_ids():
+        for person_id in await self._person_ids():
             root = layout.person_root(person_id, self._data_dir)
             file = root / uri
             if file.is_file() and ".trash" not in file.parts:

@@ -132,11 +132,13 @@ TOOLS = [
         name="list_files",
         description=(
             "List files under one root. wiki is the one wiki that everyone uses; "
-            "wiki/joshua/ holds Joshua's own documentation. blog is your journal, "
-            "attachments your files, shared the shared profile and group files. "
-            "Returns [{path, bytes, modified}]; each path is root-relative and "
-            "accepted by read_file. An attachment adds original_name when the "
-            "sender's filename is known."
+            "wiki/joshua/ holds Joshua's own documentation. people holds every "
+            "person's journal, profile, and files, one directory per person id; "
+            "shared holds the shared profile and the group files. Pass subpath to "
+            "go deeper, such as root people and subpath <person-id>/blog. Returns "
+            "[{path, bytes, modified}]; each path is root-relative and accepted by "
+            "read_file. An attachment adds original_name when the sender's "
+            "filename is known."
         ),
         input_schema={
             "type": "object",
@@ -164,11 +166,13 @@ TOOLS = [
     types.Tool(
         name="write_file",
         description=(
-            "Write one .md file under wiki/ or blog/. A guest may write blog/ only. "
-            "mode create fails if the file exists; overwrite replaces it; append "
-            "adds to it. A blog/ post is create or append only; pass a slug such as "
-            "blog/garden-notes.md and the server stamps the date and time into the "
-            "name. Max 256 KB."
+            "Write one .md file under wiki/ or people/<person-id>/blog/. The "
+            "person segment is the person id given in your system prompt, never a "
+            "display name; a segment that names nobody is refused. mode create "
+            "fails if the file exists; overwrite replaces it; append adds to it. A "
+            "journal post is create or append only; pass a plain slug such as "
+            "people/<person-id>/blog/garden-notes.md and the server stamps the date "
+            "and time into the name. Max 256 KB."
         ),
         input_schema={
             "type": "object",
@@ -187,9 +191,10 @@ TOOLS = [
     types.Tool(
         name="rename_file",
         description=(
-            "Rename one file in place under wiki/, blog/, or attachments/. new_name "
-            "is a bare filename; the extension must not change. An attachment keeps "
-            "its date-time prefix, so you rename the descriptive part only."
+            "Rename one file in place under wiki/, people/<person-id>/blog/, or "
+            "people/<person-id>/attachments/. new_name is a bare filename; the "
+            "extension must not change. An attachment keeps its date-time prefix, "
+            "so you rename the descriptive part only."
         ),
         input_schema={
             "type": "object",
@@ -227,35 +232,49 @@ def _role_from_config(person: str) -> str | None:
     return entry.role if entry is not None else None
 
 
+def _persons_from_config() -> frozenset[str]:
+    """The person ids on the roster. Read per request, so a reload is seen."""
+    from joshua_shared import config
+
+    return frozenset(entry.id for entry in config.load().people)
+
+
 def build_files_server(
     root_dir: Path,
     *,
     timezone: str = "UTC",
     role_for: Callable[[str], str | None] | None = None,
+    persons: Callable[[], frozenset[str]] | None = None,
 ) -> Server:
     """Build the files ``Server`` for a data volume at ``root_dir``.
 
     ``timezone`` is the configured timezone; the server stamps a journal post
     name in it. ``role_for`` returns a person's role, and it is the fallback for
-    a request that carries a person but no role header.
+    a request that carries a person but no role header. ``persons`` returns the
+    roster, which says which person segment a write below ``people`` may name.
     """
     tz = ZoneInfo(timezone)
     roles = role_for or _role_from_config
+    roster = persons or _persons_from_config
 
     def roots_for_request() -> dict[str, Root]:
-        """The root set of this request, from the role and never from the person.
+        """The root set of this request, from the role and from the person.
 
-        The corpus is shared, so the role alone decides. ``role_ctx`` holds
-        what core asserted. A core that sends no role header falls back to the
-        role of the person it names; a request with neither reads and writes
-        nothing.
+        The corpus is shared, so the role alone decides what a request reads
+        and whether it writes. ``role_ctx`` holds what core asserted. A core
+        that sends no role header falls back to the role of the person it
+        names; a request with neither reads and writes nothing.
+
+        The person decides one thing more: a write below ``people`` needs a
+        person segment that names somebody, and a request core could not
+        attribute has no such segment to offer.
         """
+        person = person_ctx.get()
         role = role_ctx.get()
         if role is None:
-            person = person_ctx.get()
             if person is not None and person != UNKNOWN:
                 role = roles(person)
-        return roots_for_role(root_dir, role=role or "")
+        return roots_for_role(root_dir, role=role or "", people=roster(), person=person)
 
     async def on_list_tools(ctx, params):
         return types.ListToolsResult(tools=TOOLS)
@@ -452,9 +471,9 @@ def _write_blog(
 
     parts = PurePosixPath(path.strip()).parts
     if len(parts) < 4:
-        raise FilesError(
-            "a journal post needs a person and a filename, such as people/alex/blog/notes.md"
-        )
+        person = roots["people"].request_person
+        where = f"people/{person}/blog/" if person else "people/<person-id>/blog/"
+        raise FilesError(f"a journal post needs a person and a filename, under {where}")
     name = parts[-1]
     if _BLOG_DIGEST.match(name):
         raise FilesError("people/<person>/blog/YYYY-MM-DD.md is reserved for the nightly digest")

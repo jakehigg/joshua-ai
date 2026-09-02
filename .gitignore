@@ -17,8 +17,13 @@ venv/
 coverage.xml
 
 # Secrets and local config. Anchored to the repo root.
-.env
-/joshua.yaml
+#
+# The suffix wildcards cover a copy, which is how a secret gets committed: a
+# name like `.env.backup` matches no exact rule, so `git add -A` takes it.
+# `.env.example` carries no value and stays tracked.
+.env*
+!.env.example
+/joshua.yaml*
 
 # Data volume
 /data/

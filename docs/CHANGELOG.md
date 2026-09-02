@@ -4,6 +4,80 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## 0.0.4 - 2026-09-01
+
+### Fixed
+
+- A journal post goes to the person the turn belongs to. The agent was told
+  to write `people/<id>/blog/`, and the only name it held was the display
+  name, so on every installation where the two differ it made a second
+  directory beside the real one and the journal split in two. The files MCP
+  now refuses a person segment that names nobody, and the prompt carries the
+  person id.
+- A turn with no person, such as a group chat, writes no journal post. Such a
+  turn reached a person's directory before. It still reads and writes the
+  wiki.
+- One document that the index cannot hold no longer fails on every pass. A
+  directory below `/data/people/` that names no person made the same failure
+  every 60 seconds, about 2,880 times a day, and the search index never
+  settled. The indexer now walks only the people on the roster, and holds a
+  document that fails for a fault of its own until its content changes.
+  `GET /admin/kb/status` reports such a document by path, under
+  `unindexable`.
+- `/readyz` no longer reports a data volume as not writable when it is. The
+  check read the mode bits, and on an NFS export the server decides, so the
+  bits lie. It now writes a probe file and removes it.
+- A document that the index cannot hold anything for is no longer re-processed
+  every 60 seconds. A zero-byte journal post produced no chunk, so no row, and
+  the diff reads a missing row as a changed document: the pass reported
+  `indexed: 1, failed: 0` forever and wrote nothing. Such a document is now
+  held until its content changes, and `GET /admin/kb/status` names it under
+  `empty`.
+- One Telegram poll error no longer makes `/readyz` report the channel as down
+  until somebody sends a message. The recovery flag was set from a delivered
+  update alone, so an idle bot stayed false after a transient fault. A poll
+  error now stands for 90 seconds and a continuing fault keeps renewing it, so
+  the report follows the fault.
+- `core` answers `/readyz` with `503` when it is not ready, and `200` when it
+  is. Every answer was a `200` before, so a Kubernetes readiness probe could
+  never fail and a core with no database still took traffic. `channels` and
+  `gateway` keep the `200`: their `ok` reports an upstream, not whether the
+  container can serve, and a failing poller or a failed MCP connection must
+  not take the pod out of its Service.
+- `make restore` works on a fresh checkout. It stopped with `invalid container
+  name or ID: value is empty`, because it read the volume name from a
+  container that no image could make. It now pulls the image, finds the volume
+  before it changes anything, and says what to do when it cannot.
+- `make restore` refuses to restore into a second stack while `.env` holds a
+  live `TELEGRAM_BOT_TOKEN`. Two stacks poll one bot, Telegram gives each
+  message to whichever poller asks first, and the rehearsal stack takes the
+  real messages. `KEEP_TOKEN=1` says you mean it. `operations.md` has the two
+  rules for a safe rehearsal.
+- `docker compose --profile viewer up` starts. The viewer and `core` both
+  published host port 8081, so the viewer could not bind. The viewer now
+  listens on `127.0.0.1:8082`, on the loopback address like `core`, and no
+  longer on every interface.
+
+### Added
+
+- The Helm chart can run the viewer. It is off by default; `viewer.enabled`
+  puts the pod in the cluster, and `viewer.enabled` inside your `config` lets
+  the process start. It gets its own Service, its own optional ingress, and
+  one Secret that holds `VIEWER_PASSWORDS`. It holds no fleet token and no
+  upstream credential.
+- The viewer is named in `README.md` and in `docs/quickstart.md`. It shipped
+  with neither, so nobody knew it was there.
+
+### Changed
+
+- The viewer takes every password from one variable, `VIEWER_PASSWORDS` in
+  `.env`, as a comma-separated list of `<person-id>=<value>` pairs. The
+  compose file passed `VIEWER_PW_ALEX`, which names the person in the example
+  config, so a real installation had to edit a tracked file to sign in. Put
+  your passwords in `VIEWER_PASSWORDS`, and leave the values in
+  `viewer.users` empty. A `viewer.users` entry that carries a reference still
+  works.
+
 ## 0.0.3 - 2026-08-30
 
 ### Added

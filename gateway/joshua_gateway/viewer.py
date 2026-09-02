@@ -54,6 +54,12 @@ logger = get_logger("viewer")
 REALM = "joshua viewer"
 _TRASH_STAMP = "%Y%m%dT%H%M%SZ"
 
+# Where a viewer password can come from, besides the entry in ``viewer.users``.
+# ``VIEWER_PASSWORDS`` carries every one of them in a single variable, so a
+# tracked file can pass them all through and name no person.
+VIEWER_PASSWORDS_ENV = "VIEWER_PASSWORDS"
+VIEWER_PW_PREFIX = "VIEWER_PW_"
+
 # The person's home page shows at most this many recent journal posts; search
 # returns at most this many hits.
 RECENT_BLOG_DAYS = 30
@@ -142,6 +148,41 @@ def _check_password(reference: str, provided: str) -> bool:
     return hmac.compare_digest(reference, provided)
 
 
+def _passwords_from_env() -> dict[str, str]:
+    """Parse ``VIEWER_PASSWORDS`` into person id -> password reference.
+
+    One variable carries every password, so the compose file names no person.
+    The format is ``<id>=<reference>``, comma separated. A reference is a
+    bcrypt hash, which holds no comma; a literal password with a comma in it
+    cannot be carried here, and a hash is the wanted form anyway.
+    """
+    out: dict[str, str] = {}
+    for item in os.environ.get(VIEWER_PASSWORDS_ENV, "").split(","):
+        person_id, separator, reference = item.strip().partition("=")
+        if separator and person_id.strip() and reference.strip():
+            out[person_id.strip()] = reference.strip()
+    return out
+
+
+def _password_reference(cfg: Any, user: str) -> str:
+    """The password reference for ``user``, or "" when there is none.
+
+    ``viewer.users`` says who may sign in, and the key must be there. The
+    reference itself comes from the entry, from ``VIEWER_PASSWORDS``, or from
+    ``VIEWER_PW_<ID>``, in that order. An id that is not a key of
+    ``viewer.users`` gets nothing, whatever the environment holds.
+    """
+    if user not in cfg.viewer.users:
+        return ""
+    reference = cfg.viewer.users.get(user) or ""
+    if reference:
+        return reference
+    reference = _passwords_from_env().get(user, "")
+    if reference:
+        return reference
+    return os.environ.get(f"{VIEWER_PW_PREFIX}{user.upper().replace('-', '_')}", "")
+
+
 def _authenticate(request: Request) -> Person | None:
     """Return the signed-in person, or None for a missing or wrong credential.
 
@@ -153,8 +194,7 @@ def _authenticate(request: Request) -> Person | None:
         return None
     user, password = creds
     cfg = config.load()
-    reference = cfg.viewer.users.get(user, "")
-    if not _check_password(reference, password):
+    if not _check_password(_password_reference(cfg, user), password):
         return None
     return cfg.person(user)
 

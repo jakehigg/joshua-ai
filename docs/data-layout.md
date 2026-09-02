@@ -41,7 +41,9 @@ comes from their role, never from the path. See `security.md`.
   `people/<id>/cli/`, and `inbox/`.
 - core writes `people/<id>/blog/`, `profile.md`, `shared/profile.md`, `wiki/joshua/`, and
   `inbox/sessions/`.
-- gateway (files MCP) writes `wiki/` and `people/<id>/blog/` for a member.
+- gateway (files MCP) writes `wiki/` and `people/<id>/blog/` for a member. The
+  `<id>` must be a person on the roster, so a write makes no directory beside
+  a real one.
 
 Nobody else writes. `/data/wiki/**` and `/data/shared/**` are readable by
 everyone.

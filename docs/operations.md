@@ -8,14 +8,17 @@ admin routes.
 Each container answers two open routes on its port:
 
 - `GET /healthz` returns `{"ok": true}` when the process runs.
-- `GET /readyz` returns `{"ok": bool, ...}` with the checks that matter for that
-  container.
+- `GET /readyz` returns `{"ok": bool, ...}` with the checks that matter for
+  that container. `core` answers `503` when it is not ready, so a Kubernetes
+  readiness probe can act on it. `channels` and `gateway` always answer `200`:
+  their checks report an upstream, not whether the container can serve. See
+  the table.
 
 | Container | `/readyz` checks |
 |---|---|
-| `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` while a poll error stands, and `ok: true` again after the next good poll. iMessage reports whether BlueBubbles answers a ping. |
-| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable) |
-| `gateway` | `connected`, `errored`, `total`: the MCP upstreams |
+| `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` while a poll error stands, and `ok: true` again after the next good poll. iMessage reports whether BlueBubbles answers a ping. The code stays `200`: channels serves `core` and the webhook while a poller is failing, and a `503` would stop the webhook that works because of an upstream that does not. |
+| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable). Either one false is a `503`. `embed` reports the model and does not hold `ok` down: a lost model costs the memory and not the turn. |
+| `gateway` | `connected`, `errored`, `total`: the MCP upstreams. The code stays `200`: the `files` builtin answers whatever an upstream is doing, and a `503` would take away every tool because one failed to connect. |
 
 From the host:
 
@@ -219,13 +222,43 @@ To restore on a new machine:
 1. Clone the repository.
 2. Copy `env` from the backup to `.env`, and `joshua.yaml` to the repository
    root.
-3. Run `make up` once, then `make down`. This creates the volumes.
+3. Run `make pull`. The restore reads the volume name from the `core` image.
 4. Run `make restore FROM=<backup directory>`.
 
 The restore refuses a database that already has tables. `make restore FROM=…
 FORCE=1` drops them first. The restore replaces the `/data` volume in full,
 starts the stack, and asks `core` to rebuild the search index from the restored
 files.
+
+### To rehearse a restore
+
+Rehearse a restore before you need one. Two rules make a rehearsal safe.
+
+**Blank every live credential first.** Set `TELEGRAM_BOT_TOKEN=` in the `.env`
+of the rehearsal stack, and blank each OAuth token. Telegram long polling has
+no lock: two stacks that hold one bot token both poll it, Telegram gives each
+message to whichever poller asks first, and neither stack reports an error.
+Your live messages then land in the throwaway stack. The same is true of an
+OAuth token to an upstream. The restore refuses to go on when the `.env` holds
+a token and the stack is not the one the backup came from; `--keep-token` says
+you mean it.
+
+**Restore into a directory with a different name.** The directory name becomes
+the compose project name, and the project name keys the volumes, so a
+different directory gives the rehearsal its own database and its own `/data`.
+The live stack is untouched.
+
+```
+git clone <the repository> joshua-rehearsal
+cd joshua-rehearsal
+cp <backup>/joshua.yaml .
+cp <backup>/env .env
+# blank TELEGRAM_BOT_TOKEN and every OAuth token in .env now
+make pull
+make restore FROM=<backup directory>
+```
+
+Delete the directory and its volumes (`make nuke`) when you are done.
 
 ### The rebuild of the search index
 
@@ -289,23 +322,34 @@ To run the reflection by hand, or to re-run one day, use `POST /admin/reflect`.
 The viewer is a read-only web page for the wiki and a person's own files. It is
 off by default. To turn it on:
 
-1. Set a password for each person in `.env`. Name it `VIEWER_PW_<ID>` in upper
-   case, for example `VIEWER_PW_ALEX`.
+1. Put every password in `VIEWER_PASSWORDS` in `.env`, as a comma-separated
+   list of `<person-id>=<value>` pairs. One variable carries all of them, so
+   no tracked file names a person.
 
    ```
-   VIEWER_PW_ALEX=a-long-random-password
+   VIEWER_PASSWORDS=alex=a-long-random-password,mia=$2b$12$...
    ```
 
-   For a bcrypt hash instead of a literal, set the value to a `$2` string.
+   A value that starts with `$2` is a bcrypt hash. Any other value is a
+   literal password, which cannot hold a comma. Make a hash with:
 
-2. Turn the viewer on in `joshua.yaml` and list each person:
+   ```
+   docker compose run --rm --no-deps -T --entrypoint python core -c \
+     "import bcrypt,getpass;print(bcrypt.hashpw(getpass.getpass().encode(),bcrypt.gensalt()).decode())"
+   ```
+
+2. Turn the viewer on in `joshua.yaml` and list each person who may sign in.
+   Leave the value empty; the password comes from `.env`.
 
    ```yaml
    viewer:
      enabled: true
      users:
-       alex: ${VIEWER_PW_ALEX:-}
+       alex: ""
    ```
+
+   This list is what says who may sign in. A person who is not a key here
+   cannot sign in, whatever `VIEWER_PASSWORDS` holds.
 
 3. Validate and start it:
 
@@ -314,14 +358,23 @@ off by default. To turn it on:
    docker compose --profile viewer up -d viewer
    ```
 
-The viewer listens on host port 8081. Open `http://localhost:8081/` and sign in
-with the person id and the password. Put a reverse proxy in front for TLS
-before you expose it off the host.
+The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
+`http://127.0.0.1:8082/` and sign in with the person id and the password.
+Nothing off the host reaches it: put a reverse proxy in front, for TLS, before
+you expose it.
 
 A member sees a "move this page to trash" button on a wiki page. It moves the
 page to `wiki/.trash/` and drops it from the search index at the next index run.
 A guest reads the wiki but cannot delete. To restore a page, move it back from
 `wiki/.trash/<timestamp>/` with a shell.
+
+The viewer holds no fleet token and no upstream credential. It reads the volume
+through the same resolver as the agent's `files` tool, so the two never drift
+on who reads what, and it calls no other container.
+
+On Kubernetes the chart runs it as its own deployment, off by default, with
+the passwords in a Secret and an ingress of its own. See
+[the chart README](../charts/joshua/README.md#the-viewer).
 
 ## Where the data is
 
