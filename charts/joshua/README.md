@@ -129,6 +129,57 @@ two subdirectories writable for uid 1000. An NFS export usually arrives owned by
 root, and Kubernetes does not apply `fsGroup` to an NFS volume. Leave it on
 unless you know your storage arrives with the right owner.
 
+## The viewer
+
+The chart can also run the read-only web viewer, which is the gateway image
+with a second entrypoint. It is off by default. A person signs in with HTTP
+basic and reads the wiki, their own profile, their own journal, their own
+attachments, and the shared profile. A member can move a wiki page to the
+trash. The viewer holds no fleet token and no upstream credential; it reads
+the volume and calls no container.
+
+Two switches turn it on, and both are needed:
+
+```yaml
+# 1. put the pod in the cluster
+viewer:
+  enabled: true
+  ingress:
+    enabled: true
+    className: nginx-internal
+    host: <your host>
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    tls:
+      enabled: true
+
+# 2. let the process start, inside the joshua.yaml you pass as `config`
+config: |
+  ...
+  viewer:
+    enabled: true
+    users:
+      <person-id>: ""
+```
+
+With only the first, the container exits at once and its log says why.
+
+The passwords are a Secret, named by `secrets.viewer` and made outside the
+chart like every other. It holds one key, `VIEWER_PASSWORDS`, whose value is
+`<person-id>=<bcrypt hash>` pairs, comma separated:
+
+```
+kubectl -n <namespace> create secret generic joshua-viewer-secrets \
+  --from-literal=VIEWER_PASSWORDS='alice=$2b$12$...,bob=$2b$12$...'
+```
+
+`viewer.users` in your config is the authorization: a person who is not a key
+there cannot sign in, whatever the Secret holds.
+
+The viewer serves plain HTTP and puts every route behind HTTP basic, so the
+password crosses the wire on each request. Terminate TLS at the ingress, and
+keep the host off the public internet unless you mean to publish your notes.
+
 ## What the chart does not expose
 
 Only `channels` has an Ingress, and only when you enable it. `core` holds the

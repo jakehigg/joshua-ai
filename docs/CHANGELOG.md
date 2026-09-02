@@ -45,6 +45,16 @@ with the images and the packaged chart, are at
   listens on `127.0.0.1:8082`, on the loopback address like `core`, and no
   longer on every interface.
 
+### Added
+
+- The Helm chart can run the viewer. It is off by default; `viewer.enabled`
+  puts the pod in the cluster, and `viewer.enabled` inside your `config` lets
+  the process start. It gets its own Service, its own optional ingress, and
+  one Secret that holds `VIEWER_PASSWORDS`. It holds no fleet token and no
+  upstream credential.
+- The viewer is named in `README.md` and in `docs/quickstart.md`. It shipped
+  with neither, so nobody knew it was there.
+
 ### Changed
 
 - The viewer takes every password from one variable, `VIEWER_PASSWORDS` in

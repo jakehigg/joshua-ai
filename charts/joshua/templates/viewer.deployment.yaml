@@ -1,0 +1,93 @@
+{{- if .Values.viewer.enabled }}
+{{/* The read-only web viewer. It is the gateway image with the second
+     entrypoint, and it is not the gateway: it holds no fleet token and no
+     upstream credential, and it never calls core. A person signs in with
+     HTTP basic and reads the wiki, their own profile, their own journal,
+     their own attachments, and the shared profile.
+
+     Two switches turn it on, and both are needed. This one puts the pod in
+     the cluster. `viewer.enabled: true` inside `config` lets the process
+     start; without it the container exits and says so in its log. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joshua-viewer
+  labels:
+    app.kubernetes.io/name: joshua-viewer
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.viewer.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: {{ .Values.viewer.strategy }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-viewer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: joshua-viewer
+        {{- include "joshua.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: viewer
+          {{/* The viewer ships in the gateway image. `viewer.image` overrides
+               the whole reference for a build of your own. */}}
+          image: {{ .Values.viewer.image | default (include "joshua.image" (dict "root" $ "name" "gateway")) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "joshua_gateway.viewer"]
+          ports:
+            - containerPort: 8000
+          securityContext:
+            {{- include "joshua.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: JOSHUA_CONFIG
+              value: /etc/joshua/joshua.yaml
+            - name: JOSHUA_DATA_DIR
+              value: /data
+            {{/* Every viewer password, in one variable, as
+                 `<person-id>=<bcrypt hash>` pairs. No person is named here,
+                 so nothing in this chart names your roster. */}}
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.viewer) | nindent 12 }}
+          resources:
+            {{- toYaml .Values.viewer.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/joshua
+              readOnly: true
+            {{- if .Values.persistence.enabled }}
+            {{/* Read-write: a member moves a wiki page to wiki/.trash/. That
+                 is the one write the viewer makes, and it is never a hard
+                 delete. */}}
+            - name: data
+              mountPath: /data
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "joshua.configMapName" . }}
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default "joshua-data" }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

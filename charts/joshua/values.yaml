@@ -81,6 +81,14 @@ secrets:
       JOSHUA_TOKEN_GATEWAY: {}
       JOSHUA_TOKEN_LAPTOP: {}
       JOSHUA_TOKEN_CI: {}
+  # The viewer reads one variable and nothing else. It holds no fleet token and
+  # no upstream credential, because it talks to no container: it reads the
+  # volume. VIEWER_PASSWORDS is every viewer password in one value, as
+  # `<person-id>=<bcrypt hash>` pairs, comma separated.
+  viewer:
+    name: joshua-viewer-secrets
+    keys:
+      VIEWER_PASSWORDS: {}
 
 # The shared /data volume. All three containers mount it at once, so the access
 # mode is ReadWriteMany and the class must support it.
@@ -168,6 +176,45 @@ gateway:
     limits:
       cpu: "1"
       memory: 1Gi
+
+# The read-only web viewer for the wiki and a person's own files. It is the
+# gateway image with a second entrypoint, and it is off by default.
+#
+# Two switches turn it on, and both are needed:
+#   viewer.enabled here      puts the pod in the cluster
+#   viewer.enabled in config lets the process start
+# The second is inside the joshua.yaml you pass as `config`. With only the
+# first, the container exits at once and says why in its log.
+#
+# Passwords come from secrets.viewer, never from this file. `viewer.users` in
+# your config says who may sign in. See docs/operations.md.
+viewer:
+  enabled: false
+  replicaCount: 1
+  # A whole image reference, which ignores the `image` block above. Empty means
+  # the gateway image, which is where the viewer ships.
+  image: ""
+  # The viewer writes to the volume when a member trashes a wiki page, so two
+  # pods must never race.
+  strategy: Recreate
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # The viewer serves plain HTTP behind HTTP basic, so the password crosses the
+  # wire on each request. Terminate TLS at the ingress, and keep the host off
+  # the public internet unless you mean to publish your notes.
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls:
+      enabled: false
+      secretName: ""
 
 # Only channels is reachable from outside the cluster, for a webhook. core and
 # gateway are never exposed.

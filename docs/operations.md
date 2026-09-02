@@ -366,6 +366,14 @@ page to `wiki/.trash/` and drops it from the search index at the next index run.
 A guest reads the wiki but cannot delete. To restore a page, move it back from
 `wiki/.trash/<timestamp>/` with a shell.
 
+The viewer holds no fleet token and no upstream credential. It reads the volume
+through the same resolver as the agent's `files` tool, so the two never drift
+on who reads what, and it calls no other container.
+
+On Kubernetes the chart runs it as its own deployment, off by default, with
+the passwords in a Secret and an ingress of its own. See
+[the chart README](../charts/joshua/README.md#the-viewer).
+
 ## Where the data is
 
 | Docker volume | Holds | `make nuke` deletes it |
