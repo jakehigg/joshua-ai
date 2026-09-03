@@ -4,6 +4,14 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- A push to a branch builds the three images and tags them with the commit
+  SHA. An ArgoCD Application can follow a branch and run each push, for a
+  test instance. The chart README has the Application.
+
 ## 0.0.4 - 2026-09-01
 
 ### Fixed

@@ -227,6 +227,35 @@ the visibility of the repository. Check the package page after the first
 release. When the package is private, name a pull secret in
 `imagePullSecrets`.
 
+## Run a branch
+
+A push to a branch that is not `main` builds the three images for amd64 and
+tags them with the full commit SHA, as
+`<registry>/<repository>/joshua-ai-<component>:<sha>`. A second tag,
+`branch-<name>`, moves with each push. A branch build is not a release: it has
+no release page and no packaged chart.
+
+To follow a branch with ArgoCD, point the chart source at the branch and take
+the image tag from the commit ArgoCD resolved:
+
+```yaml
+spec:
+  sources:
+    - repoURL: https://github.com/jakehigg/joshua-ai.git
+      path: charts/joshua
+      targetRevision: my-branch
+      helm:
+        parameters:
+          - name: image.tag
+            value: $ARGOCD_APP_REVISION
+```
+
+Each push then renders the chart of the new commit with the images of the same
+commit. ArgoCD can see a commit before its build ends. The new pod waits in
+`ImagePullBackOff` until the images arrive, and a container with the `Recreate`
+strategy is down for that time. Use this on an instance that you test, not on
+one that people use.
+
 ## Versions
 
 The chart version and the application version are always the same. The chart
