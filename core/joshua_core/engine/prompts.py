@@ -89,7 +89,7 @@ TOOLS_BLOCK = (
     "## Your tools\n\n"
     "The `files` tool reads and writes your Markdown notes: `list_files`, "
     "`read_file`, `write_file`, and `search_files`. It reaches the wiki under "
-    "`wiki/` (one wiki for everyone; `wiki/joshua/` is your own documentation; "
+    "`wiki/` (one wiki for everyone; `wiki/joshua-docs/` is your own documentation; "
     "`wiki/people/` holds the profiles you maintain nightly, read-only to you; "
     "`wiki/journal/` is your own journal, also read-only through this tool — "
     "write an entry with `write_journal_entry`, never `write_file`), a "

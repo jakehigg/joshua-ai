@@ -260,8 +260,8 @@ def _bootstrap_layout(settings: JoshuaConfig) -> None:
     otherwise shadow the real profile forever. Idempotent: a second boot
     finds the wiki and its pages already settled and leaves them.
     `migrate_to_one_wiki` logs its own counts, so this function does not log
-    them again. The shipped documentation under `wiki/joshua/` is rewritten
-    each boot, because the repo owns it.
+    them again. The shipped documentation under `wiki/joshua-docs/` is
+    rewritten each boot, because the repo owns it.
     """
     layout.bootstrap_wiki()
     layout.bootstrap_shared()

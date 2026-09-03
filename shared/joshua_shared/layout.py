@@ -10,7 +10,7 @@ There is one wiki, at `<data>/wiki/`. It is Joshua's memory:
 
 - `Home.md` is the front page. It is created once, from a template, and never
   rewritten, so a person's own edits to it survive every start.
-- `joshua/` is the documentation the repo ships. Core replaces it at each
+- `joshua-docs/` is the documentation the repo ships. Core replaces it at each
   start.
 - `journal/YYYY/MM/DD/` is Joshua's day-by-day memory: the nightly page for
   that day, and any entry Joshua wrote during it. This is Joshua's own
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from datetime import date
 from importlib import resources
 from pathlib import Path
@@ -148,12 +149,12 @@ def wiki_root(root: Path | str | None = None) -> Path:
 
 
 def docs_root(root: Path | str | None = None) -> Path:
-    """`<data>/wiki/joshua`, the documentation the repo ships.
+    """`<data>/wiki/joshua-docs`, the documentation the repo ships.
 
     The name says where the files come from, so nobody mistakes the directory
     for their own and keeps notes in it.
     """
-    return wiki_root(root) / "joshua"
+    return wiki_root(root) / "joshua-docs"
 
 
 def home_path(root: Path | str | None = None) -> Path:
@@ -300,7 +301,7 @@ def bootstrap_shared_profile(name: str = "Joshua", root: Path | str | None = Non
 
 
 def bootstrap_docs(root: Path | str | None = None, source: Path | str | None = None) -> int:
-    """Copy the shipped documentation into `wiki/joshua/`. Returns the file count.
+    """Copy the shipped documentation into `wiki/joshua-docs/`. Returns the file count.
 
     These files belong to Joshua, not to the people, so each start replaces
     them and an upgrade brings the new text. `source` defaults to
@@ -436,6 +437,26 @@ def _remove_stale_readmes(root: Path | str | None, counts: dict[str, int]) -> No
             counts["readmes_removed"] += 1
 
 
+def _migrate_docs_folder(root: Path | str | None, counts: dict[str, int]) -> None:
+    """Rename `wiki/joshua/` to `wiki/joshua-docs/`. See `migrate_to_one_wiki`.
+
+    When `wiki/joshua-docs/` does not exist yet, the old folder is renamed in
+    place. When both exist, `wiki/joshua/` is removed with its contents: core
+    owns this folder and rewrites it at each start, so nothing in it is a
+    person's.
+    """
+    old = wiki_root(root) / "joshua"
+    if not old.is_dir():
+        return
+    new = docs_root(root)
+    if new.exists():
+        shutil.rmtree(old)
+        counts["docs_folder_removed"] += 1
+    else:
+        os.replace(old, new)
+        counts["docs_folder_renamed"] += 1
+
+
 def migrate_to_one_wiki(root: Path | str | None = None) -> dict[str, int]:
     """Move a pre-single-wiki layout onto the wiki. Idempotent; safe at every start.
 
@@ -452,9 +473,10 @@ def migrate_to_one_wiki(root: Path | str | None = None) -> dict[str, int]:
     `people: [<id>]` and `date: YYYY-MM-DD` added, either to an existing
     `---` block or as a new one, and any existing key is left alone.
 
-    Also moves `shared/profile.md` to `wiki/people/everyone.md`, and deletes
+    Also moves `shared/profile.md` to `wiki/people/everyone.md`, deletes
     `shared/README.md` and `wiki/README.md` (the front page, `Home.md`,
-    replaces them).
+    replaces them), and renames an old `wiki/joshua/` to `wiki/joshua-docs/`
+    (or removes it, if `wiki/joshua-docs/` is already there).
 
     A target that already exists and is not still the shipped, unedited
     template is left alone: the source stays in place and the move counts
@@ -468,8 +490,9 @@ def migrate_to_one_wiki(root: Path | str | None = None) -> dict[str, int]:
     one ever existed, is left untouched.
 
     Returns a count for `journal_moved`, `journal_legacy`, `profiles_moved`,
-    `shared_profile_moved`, `skipped`, and `readmes_removed`. Logs one INFO
-    line with these counts when anything moved.
+    `shared_profile_moved`, `skipped`, `readmes_removed`, `docs_folder_renamed`,
+    and `docs_folder_removed`. Logs one INFO line with these counts when
+    anything moved.
     """
     counts = {
         "journal_moved": 0,
@@ -478,6 +501,8 @@ def migrate_to_one_wiki(root: Path | str | None = None) -> dict[str, int]:
         "shared_profile_moved": 0,
         "skipped": 0,
         "readmes_removed": 0,
+        "docs_folder_renamed": 0,
+        "docs_folder_removed": 0,
     }
 
     people = _root(root) / "people"
@@ -490,6 +515,7 @@ def migrate_to_one_wiki(root: Path | str | None = None) -> dict[str, int]:
 
     _migrate_shared_profile(root, counts)
     _remove_stale_readmes(root, counts)
+    _migrate_docs_folder(root, counts)
 
     if any(counts.values()):
         _logger.info({"message": "migrated to one wiki", **counts})

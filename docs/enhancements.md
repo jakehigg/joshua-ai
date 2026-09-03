@@ -24,7 +24,7 @@ Joshua code at all. The contract:
   The viewer moves a page to `wiki/.trash/` instead.
 - The memory index picks up any change within `memory.index_interval_s`
   (default 60 seconds). See [docs/memory.md](memory.md).
-- `wiki/joshua/` holds the repo docs. Core rewrites this folder at each
+- `wiki/joshua-docs/` holds the repo docs. Core rewrites this folder at each
   start, so an edit there is lost.
 - Two writers can change one file. The last write wins. There is no lock.
 - Joshua ignores any file or directory whose name starts with a dot, at any

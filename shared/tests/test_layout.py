@@ -267,7 +267,7 @@ def test_bootstrap_docs_publishes_the_shipped_pages(tmp_path) -> None:
     assert (published / "config.md").read_text() == "# Config\n"
     assert not (published / "notes.txt").exists()
     assert "Joshua's documentation" in (published / "README.md").read_text()
-    assert published == root / "wiki" / "joshua"
+    assert published == root / "wiki" / "joshua-docs"
 
 
 def test_bootstrap_docs_replaces_an_edited_page(tmp_path) -> None:
@@ -364,6 +364,8 @@ def test_migrate_to_one_wiki_moves_the_full_old_tree(tmp_path) -> None:
         "shared_profile_moved": 1,
         "skipped": 0,
         "readmes_removed": 2,
+        "docs_folder_renamed": 0,
+        "docs_folder_removed": 0,
     }
 
     digest = root / "wiki" / "journal" / "2026" / "03" / "04" / "alex.md"
@@ -412,6 +414,8 @@ def test_migrate_to_one_wiki_is_idempotent(tmp_path) -> None:
         "shared_profile_moved": 0,
         "skipped": 0,
         "readmes_removed": 0,
+        "docs_folder_renamed": 0,
+        "docs_folder_removed": 0,
     }
 
 
@@ -464,6 +468,8 @@ def test_migrate_to_one_wiki_leaves_an_untouched_volume_alone(tmp_path) -> None:
         "shared_profile_moved": 0,
         "skipped": 0,
         "readmes_removed": 0,
+        "docs_folder_renamed": 0,
+        "docs_folder_removed": 0,
     }
 
 
@@ -490,6 +496,8 @@ def test_migrate_to_one_wiki_disambiguates_a_same_slug_collision(tmp_path) -> No
         "shared_profile_moved": 0,
         "skipped": 0,
         "readmes_removed": 0,
+        "docs_folder_renamed": 0,
+        "docs_folder_removed": 0,
     }
 
 
@@ -530,6 +538,8 @@ def test_migrate_to_one_wiki_names_an_old_digest_by_person(tmp_path) -> None:
         "shared_profile_moved": 0,
         "skipped": 0,
         "readmes_removed": 0,
+        "docs_folder_renamed": 0,
+        "docs_folder_removed": 0,
     }
 
 
@@ -566,6 +576,48 @@ def test_migrate_to_one_wiki_does_not_replace_an_edited_shared_profile(tmp_path)
     assert (root / "shared" / "profile.md").is_file()
     assert counts["shared_profile_moved"] == 0
     assert counts["skipped"] == 1
+
+
+def test_migrate_to_one_wiki_renames_the_old_docs_folder(tmp_path) -> None:
+    """`wiki/joshua/` is the old name; the migration renames it in place when
+    `wiki/joshua-docs/` is not there yet."""
+    root = tmp_path / "data"
+    _write(root / "wiki" / "joshua" / "quickstart.md", "# Quickstart\n")
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    assert not (root / "wiki" / "joshua").exists()
+    assert (layout.docs_root(root) / "quickstart.md").read_text() == "# Quickstart\n"
+    assert counts["docs_folder_renamed"] == 1
+    assert counts["docs_folder_removed"] == 0
+
+
+def test_migrate_to_one_wiki_removes_the_old_docs_folder_when_both_exist(tmp_path) -> None:
+    """When `wiki/joshua-docs/` already exists, core has already replaced the
+    docs at the new path, so the stale `wiki/joshua/` is removed outright."""
+    root = tmp_path / "data"
+    _write(root / "wiki" / "joshua" / "quickstart.md", "# Old quickstart\n")
+    _write(root / "wiki" / "joshua-docs" / "quickstart.md", "# New quickstart\n")
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    assert not (root / "wiki" / "joshua").exists()
+    assert (layout.docs_root(root) / "quickstart.md").read_text() == "# New quickstart\n"
+    assert counts["docs_folder_renamed"] == 0
+    assert counts["docs_folder_removed"] == 1
+
+
+def test_migrate_to_one_wiki_docs_folder_step_is_idempotent(tmp_path) -> None:
+    root = tmp_path / "data"
+    _write(root / "wiki" / "joshua" / "quickstart.md", "# Quickstart\n")
+
+    first = layout.migrate_to_one_wiki(root)
+    second = layout.migrate_to_one_wiki(root)
+
+    assert first["docs_folder_renamed"] == 1
+    assert second["docs_folder_renamed"] == 0
+    assert second["docs_folder_removed"] == 0
+    assert (layout.docs_root(root) / "quickstart.md").read_text() == "# Quickstart\n"
 
 
 # -- the writability check -------------------------------------------------

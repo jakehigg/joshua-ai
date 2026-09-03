@@ -15,7 +15,7 @@ def _write(path: Path, text: str) -> None:
 
 def _tree(root: Path) -> None:
     _write(root / "wiki/pizza.md", "# Pizza\n\nDough and sauce recipe notes here.\n")
-    _write(root / "wiki/joshua/quickstart.md", "# Quickstart\n\nThe shipped documentation.\n")
+    _write(root / "wiki/joshua-docs/quickstart.md", "# Quickstart\n\nThe shipped documentation.\n")
     _write(
         root / "wiki/journal/2026/08/24/2026-08-24.md",
         "---\ndate: 2026-08-24\npeople: [alice]\nsource: nightly\n---\n"
@@ -46,7 +46,7 @@ async def test_lists_the_wiki_all_shared_scope(tmp_path: Path) -> None:
     by_uri = {d.uri: d for d in docs}
 
     assert "wiki/pizza.md" in by_uri
-    assert "wiki/joshua/quickstart.md" in by_uri
+    assert "wiki/joshua-docs/quickstart.md" in by_uri
     assert "wiki/journal/2026/08/24/2026-08-24.md" in by_uri
     assert "wiki/journal/2026/08/23/garden.md" in by_uri
     assert "wiki/people/alice.md" in by_uri

@@ -189,8 +189,8 @@ make up
 containers. The releases are at
 <https://github.com/jakehigg/joshua-ai/releases>. Read `CHANGELOG.md` first.
 The database schema is additive. A new version adds tables and columns and never removes one, so
-an update needs no migration step. The documentation in `wiki/joshua/` is
-replaced at each start.
+an update needs no migration step. The documentation in `wiki/joshua-docs/`
+is replaced at each start.
 
 Read `CHANGELOG.md` before an update. It names every change that a person who
 runs Joshua can see.

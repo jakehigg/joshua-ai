@@ -120,7 +120,7 @@ TOOLS = [
         name="list_files",
         description=(
             "List files under one root. wiki is the one wiki that everyone uses; "
-            "wiki/joshua/ holds Joshua's own documentation, wiki/journal/ holds "
+            "wiki/joshua-docs/ holds Joshua's own documentation, wiki/journal/ holds "
             "Joshua's own journal, and wiki/people/ holds Joshua's profile of "
             "each person. people holds a person's own attachments and terminal "
             "history, one directory per person id; shared holds the group's "

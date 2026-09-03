@@ -120,7 +120,7 @@ One volume mounts at `/data` in all three containers:
 /data/wiki/people/<id>.md                        a profile; core writes it (nightly), gateway for that person
 /data/wiki/people/everyone.md                    the shared profile; core writes it (nightly)
 /data/wiki/**.md                                 the rest of the wiki; gateway writes it for a member
-/data/wiki/joshua/*.md                           the repo docs; core rewrites them each start
+/data/wiki/joshua-docs/*.md                      the repo docs; core rewrites them each start
 /data/people/<id>/attachments/YYYY/MM/<file>     channels writes it
 /data/people/<id>/cli/outbox.jsonl               channels writes it
 /data/shared/attachments/<group>/YYYY/MM/        channels writes it

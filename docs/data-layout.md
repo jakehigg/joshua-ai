@@ -18,7 +18,7 @@ already at the new path stays where it is. See [Migration](#migration).
 
 ```
 /data/wiki/Home.md                               front page; core makes it once, Joshua and people keep it
-/data/wiki/joshua/*.md                           docs from the repo, rewritten each start
+/data/wiki/joshua-docs/*.md                      docs from the repo, rewritten each start
 /data/wiki/journal/YYYY/MM/DD/YYYY-MM-DD.md      the nightly page for that day
 /data/wiki/journal/YYYY/MM/DD/<slug>.md          an entry Joshua wrote that day
 /data/wiki/people/<person_id>.md                 Joshua's profile of a person
@@ -49,7 +49,7 @@ may write comes from their role, never from the path. See `security.md`.
 
 - channels writes `people/<id>/attachments/`, `shared/attachments/`,
   `people/<id>/cli/`, and `inbox/`.
-- core writes `wiki/journal/`, `wiki/people/`, `wiki/joshua/`, and
+- core writes `wiki/journal/`, `wiki/people/`, `wiki/joshua-docs/`, and
   `inbox/sessions/`.
 - gateway (files MCP) writes the rest of `wiki/` for a member, and
   `wiki/people/<id>.md` for that person. The `<id>` must be a person on the
@@ -67,7 +67,7 @@ A member writes it. A guest only reads it. `Home.md` is the front page.
 touches it again. An edit a person makes to the page stays.
 
 The agent files reference pages in the wiki: recipes, how things work,
-decisions, plans. `wiki/joshua/` is different. The repo owns it.
+decisions, plans. `wiki/joshua-docs/` is different. The repo owns it.
 
 Core copies the documentation from the image at each start. Core replaces an
 edit there, and an upgrade brings the new text. The index holds these pages
@@ -155,7 +155,9 @@ Bootstrap runs at core startup for every configured person, and again when
 profile is bootstrapped. For each person, it moves `blog/*.md` onto
 `wiki/journal/` and `profile.md` onto `wiki/people/<id>.md`. It also moves
 `shared/profile.md` onto `wiki/people/everyone.md`, and removes
-`shared/README.md` and `wiki/README.md`, which `Home.md` replaces.
+`shared/README.md` and `wiki/README.md`, which `Home.md` replaces. An
+existing `wiki/joshua/` is renamed to `wiki/joshua-docs/`; if both are
+present, `wiki/joshua/` is removed instead, since core owns and rewrites it.
 
 An old per-person digest, `blog/YYYY-MM-DD.md`, lands as `<id>.md` in the
 day's journal folder: `YYYY-MM-DD.md` itself is reserved for the new

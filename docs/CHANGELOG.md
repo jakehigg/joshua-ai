@@ -21,6 +21,8 @@ with the images and the packaged chart, are at
 
 ### Changed
 
+- The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name
+  says what it is. Core renames an existing `wiki/joshua/` at start.
 - The agent's file tools, the viewer, and the index now ignore any dot-file
   or dot-directory at any depth, so a wiki frontend can keep its own state
   in the folder.

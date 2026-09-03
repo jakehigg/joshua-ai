@@ -365,8 +365,8 @@ The write rule below `people/` is the write domain of a container, and not a
 wall between people: `channels` owns `people/<id>/attachments/` and `core` owns
 `people/<id>/profile.md`, so the agent reads both and writes neither.
 
-`wiki/joshua/` holds the documentation that the repo ships. Core replaces it at
-each start.
+`wiki/joshua-docs/` holds the documentation that the repo ships. Core
+replaces it at each start.
 
 Channels stores an inbound attachment under `people/<id>/attachments/YYYY/MM/` with the name
 `YYYY-MM-DD-HHMMSS-<stem>.<ext>`, where `<stem>` is the sanitized original stem.

@@ -10,8 +10,8 @@ pages, not tied to one day. Add to it. Correct it. Joshua does the same.
   remembers that a person did something.
 - `people/`: a profile Joshua keeps for each person, plus `everyone.md`, the
   shared profile. A person may edit their own profile.
-- `joshua/`: the documentation Joshua ships. A release replaces it, so do
-  not edit it.
+- `joshua-docs/`: the documentation Joshua ships. A release replaces it, so
+  do not edit it.
 
 A change anywhere in this folder reaches Joshua in about one minute.
 
