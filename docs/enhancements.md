@@ -18,8 +18,8 @@ Joshua code at all. The contract:
   optional front matter. `wiki/journal/` (Joshua's journal) and `wiki/people/`
   (the profiles) are part of the wiki, so a frontend shows them to every
   account it has, the same as any other page.
-- `wiki/Home.md` is the front page. It is made once, from a template, and
-  Joshua never rewrites it.
+- `wiki/Home.md` is the front page. Core makes it once, from a template.
+  You and Joshua both keep it.
 - The agent writes pages through its `files` tool and never deletes a page.
   The viewer moves a page to `wiki/.trash/` instead.
 - The memory index picks up any change within `memory.index_interval_s`
@@ -90,9 +90,8 @@ Things to know:
   `wiki/`, so a `.git` directory appears there. It commits only its own
   edits, so a page the agent wrote shows a "not under version control"
   notice until a person commits it from the edit page.
-- Its front page is `Home`. The wiki has a `README.md`, not a `Home` page,
-  so `/` reports not found at first. Open the page index from the menu, or
-  create a `Home` page.
+- Its front page is `Home`, and `wiki/Home.md` is that page, so `/` opens
+  on it.
 - A delete in Otter Wiki is a real delete of the file. Otter Wiki keeps its
   own git history of the delete, but the file does not go to
   `wiki/.trash/`.

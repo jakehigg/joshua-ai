@@ -17,7 +17,7 @@ already at the new path stays where it is. See [Migration](#migration).
 ## Tree
 
 ```
-/data/wiki/Home.md                               front page, made once, never overwritten
+/data/wiki/Home.md                               front page; core makes it once, Joshua and people keep it
 /data/wiki/joshua/*.md                           docs from the repo, rewritten each start
 /data/wiki/journal/YYYY/MM/DD/YYYY-MM-DD.md      the nightly page for that day
 /data/wiki/journal/YYYY/MM/DD/<slug>.md          an entry Joshua wrote that day
@@ -159,8 +159,8 @@ profile is bootstrapped. For each person, it moves `blog/*.md` onto
 
 An old per-person digest, `blog/YYYY-MM-DD.md`, lands as `<id>.md` in the
 day's journal folder: `YYYY-MM-DD.md` itself is reserved for the new
-instance-wide nightly page. A colliding journal entry — two posts, one
-person, one day, the same slug — gets the old post's time appended to its
+instance-wide nightly page. A colliding journal entry, two posts by
+one person on one day with the same slug, gets the old post's time appended to its
 name. A moved journal page gets `people` and `date` added to its
 frontmatter, so the index can still scope it to the person who wrote it.
 When a target already exists and it is not still the unedited shipped

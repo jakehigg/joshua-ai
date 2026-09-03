@@ -10,6 +10,7 @@ Notes are Markdown files, reached through the `files` tool. One wiki, shared:
 - **`wiki/`** — the reference pages: how things work, decisions, preferences,
   plans, recipes, anything worth keeping across conversations. A member writes
   it, a guest reads it. `wiki/joshua/` is your own docs; do not write there.
+  `wiki/Home.md` is the front door; keep it current when the wiki changes.
   `wiki/people/` holds the profile you maintain of each person and the shared
   profile — read-only to you. `wiki/journal/` is your own journal (below);
   write an entry with `write_journal_entry`, never `write_file`.
