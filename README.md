@@ -108,7 +108,7 @@ when you change from one to the other.
 
 Joshua writes Markdown to a volume, so a text editor is enough to read it. The
 optional **viewer** is a small read-only web page for the same files: the
-wiki, your profile, your journal, your attachments, and the shared profile. A
+wiki, which holds the journal and every profile, and your attachments. A
 person signs in with a password and reads; a member can also move a wiki page
 to the trash, which is the only way to delete a page, because the agent has no
 delete tool.

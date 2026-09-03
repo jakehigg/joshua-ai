@@ -68,12 +68,11 @@ core:
   scheduler_tick_seconds: 15   # how often the scheduler checks for due tasks
 
 memory:
-  recent_posts: 3            # blog days kept verbatim in the system prompt
-  recent_max_chars: 6000     # cap for the recent-days block; oldest post truncated first
+  # The journal reaches a turn through retrieval only; nothing here holds its text.
   shared_max_chars: 2000  # cap for the shared section (members and group sessions)
   nightly_at: "03:30"           # local time of the nightly reflection run
   daily_rollover: true          # after the nightly run, start each session fresh
-  min_chars_for_post: 200       # skip a person's blog post below this much transcript text
+  min_chars_for_post: 200       # skip the day's journal page below this much combined transcript
   inject:
     enabled: true      # prepend relevant notes/files to each turn (RAG injection)
     full_sim: 0.72     # top match ≥ this → inject chunk bodies (zero tool calls)

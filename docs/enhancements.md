@@ -15,7 +15,11 @@ The wiki is a plug-in interface, and this is why a wiki frontend needs no
 Joshua code at all. The contract:
 
 - The wiki is `/data/wiki/**.md`: UTF-8 Markdown, subfolders allowed,
-  optional front matter.
+  optional front matter. `wiki/journal/` (Joshua's journal) and `wiki/people/`
+  (the profiles) are part of the wiki, so a frontend shows them to every
+  account it has, the same as any other page.
+- `wiki/Home.md` is the front page. It is made once, from a template, and
+  Joshua never rewrites it.
 - The agent writes pages through its `files` tool and never deletes a page.
   The viewer moves a page to `wiki/.trash/` instead.
 - The memory index picks up any change within `memory.index_interval_s`

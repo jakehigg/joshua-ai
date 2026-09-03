@@ -6,6 +6,7 @@ fixed `/data`.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -25,11 +26,15 @@ def test_data_root_honors_env_override(data_dir: Path) -> None:
 
 def test_path_helpers(data_dir: Path) -> None:
     assert layout.person_root("alex") == data_dir / "people" / "alex"
-    assert layout.person_dir("alex", "blog") == data_dir / "people" / "alex" / "blog"
-    assert layout.profile_path("alex") == data_dir / "people" / "alex" / "profile.md"
+    assert layout.person_dir("alex", "attachments") == data_dir / "people" / "alex" / "attachments"
+    assert layout.legacy_blog_dir("alex") == data_dir / "people" / "alex" / "blog"
+    assert layout.profile_path("alex") == data_dir / "wiki" / "people" / "alex.md"
     assert layout.shared_root() == data_dir / "shared"
     assert layout.inbox_root() == data_dir / "inbox"
-    assert layout.shared_profile_path() == data_dir / "shared" / "profile.md"
+    assert layout.shared_profile_path() == data_dir / "wiki" / "people" / "everyone.md"
+    assert layout.home_path() == data_dir / "wiki" / "Home.md"
+    assert layout.people_pages_root() == data_dir / "wiki" / "people"
+    assert layout.journal_root() == data_dir / "wiki" / "journal"
 
 
 def test_person_dir_rejects_unknown_kind(data_dir: Path) -> None:
@@ -37,10 +42,21 @@ def test_person_dir_rejects_unknown_kind(data_dir: Path) -> None:
         layout.person_dir("alex", "profile")
 
 
+def test_person_dir_rejects_blog(data_dir: Path) -> None:
+    """The journal lives in the wiki now; `blog` is not a `person_dir` kind."""
+    with pytest.raises(ValueError):
+        layout.person_dir("alex", "blog")
+
+
 @pytest.mark.parametrize("bad", ["..", "a/b", "/abs", "Alex", "a" * 33, ""])
 def test_safe_segment_rejects_bad_ids(bad: str) -> None:
     with pytest.raises(ValueError):
         layout.safe_segment(bad)
+
+
+def test_profile_path_rejects_the_reserved_shared_id(data_dir: Path) -> None:
+    with pytest.raises(ValueError):
+        layout.profile_path(layout.SHARED_PROFILE_NAME)
 
 
 @pytest.mark.parametrize(
@@ -76,12 +92,71 @@ def test_is_hidden_false_for_a_path_outside_base(tmp_path: Path) -> None:
     assert layout.is_hidden(outside, base) is False
 
 
+# -- journal helpers ---------------------------------------------------------
+
+
+def test_journal_day_dir_and_page(data_dir: Path) -> None:
+    day = date(2026, 3, 4)
+    assert layout.journal_day_dir(day) == data_dir / "wiki" / "journal" / "2026" / "03" / "04"
+    assert (
+        layout.journal_day_page(day)
+        == data_dir / "wiki" / "journal" / "2026" / "03" / "04" / "2026-03-04.md"
+    )
+
+
+def test_journal_entry_path(data_dir: Path) -> None:
+    day = date(2026, 3, 4)
+    assert (
+        layout.journal_entry_path(day, "planted-tomatoes")
+        == data_dir / "wiki" / "journal" / "2026" / "03" / "04" / "planted-tomatoes.md"
+    )
+
+
+@pytest.mark.parametrize("bad", ["", "Slug", "slug!", "-slug", "a" * 65])
+def test_journal_entry_path_rejects_a_bad_slug(data_dir: Path, bad: str) -> None:
+    with pytest.raises(ValueError):
+        layout.journal_entry_path(date(2026, 3, 4), bad)
+
+
+def test_journal_entry_path_rejects_the_day_page_name(data_dir: Path) -> None:
+    day = date(2026, 3, 4)
+    with pytest.raises(ValueError):
+        layout.journal_entry_path(day, "2026-03-04")
+
+
+def test_journal_day_from_path_parses_a_good_path(data_dir: Path) -> None:
+    day = date(2026, 3, 4)
+    assert layout.journal_day_from_path(layout.journal_day_page(day)) == day
+    assert layout.journal_day_from_path(layout.journal_entry_path(day, "note")) == day
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "legacy/alex/note.md",
+        "2026/03/x.md",
+        "2026/13/04/x.md",
+        "not-a-year/03/04/x.md",
+    ],
+)
+def test_journal_day_from_path_returns_none_for_a_bad_path(data_dir: Path, rel: str) -> None:
+    path = layout.journal_root() / rel
+    assert layout.journal_day_from_path(path) is None
+
+
+def test_journal_day_from_path_returns_none_outside_the_journal(data_dir: Path) -> None:
+    assert layout.journal_day_from_path(data_dir / "wiki" / "people" / "alex.md") is None
+
+
+# -- bootstrap ----------------------------------------------------------------
+
+
 def test_bootstrap_person_builds_tree_and_profile(data_dir: Path) -> None:
     layout.bootstrap_person("alex", "Alex")
     home = data_dir / "people" / "alex"
-    for sub in ("blog", "attachments"):
-        assert (home / sub).is_dir()
-    profile = home / "profile.md"
+    assert (home / "attachments").is_dir()
+    profile = layout.profile_path("alex")
+    assert profile == data_dir / "wiki" / "people" / "alex.md"
     assert profile.is_file()
     assert profile.read_text().splitlines()[0] == "# Alex"
 
@@ -99,21 +174,30 @@ def test_bootstrap_person_is_idempotent(data_dir: Path) -> None:
     assert profile.stat().st_mtime_ns == before
 
 
-def test_bootstrap_shared_writes_readme_and_profile(data_dir: Path) -> None:
-    layout.bootstrap_shared("Test House")
-    assert (data_dir / "shared" / "README.md").is_file()
+def test_bootstrap_shared_writes_attachments_only(data_dir: Path) -> None:
+    layout.bootstrap_shared()
+    assert (data_dir / "shared" / "attachments").is_dir()
+    assert not (data_dir / "shared" / "README.md").exists()
+    assert not (data_dir / "shared" / "profile.md").exists()
+
+
+def test_bootstrap_shared_profile_writes_the_page(data_dir: Path) -> None:
+    layout.bootstrap_wiki()
+    layout.bootstrap_shared_profile("Test House")
     profile = layout.shared_profile_path()
+    assert profile == data_dir / "wiki" / "people" / "everyone.md"
     assert profile.is_file()
     assert profile.read_text().splitlines()[0] == "# Test House"
 
 
-def test_bootstrap_shared_is_idempotent(data_dir: Path) -> None:
-    layout.bootstrap_shared("Test House")
+def test_bootstrap_shared_profile_is_idempotent(data_dir: Path) -> None:
+    layout.bootstrap_wiki()
+    layout.bootstrap_shared_profile("Test House")
     profile = layout.shared_profile_path()
     profile.write_text("# Test House\nlearned facts\n")
     before = profile.stat().st_mtime_ns
 
-    layout.bootstrap_shared("Test House")
+    layout.bootstrap_shared_profile("Test House")
 
     assert profile.read_text() == "# Test House\nlearned facts\n"
     assert profile.stat().st_mtime_ns == before
@@ -121,19 +205,31 @@ def test_bootstrap_shared_is_idempotent(data_dir: Path) -> None:
 
 def test_two_people_fresh_volume(data_dir: Path) -> None:
     layout.bootstrap_wiki()
-    layout.bootstrap_shared("Test House")
+    layout.bootstrap_shared()
+    layout.bootstrap_shared_profile("Test House")
     layout.bootstrap_person("alex", "Alex")
     layout.bootstrap_person("remy", "Remy")
     assert layout.validate_layout() == []
 
 
-def test_validate_layout_reports_missing_blog(data_dir: Path) -> None:
-    layout.bootstrap_shared("Test House")
+def test_validate_layout_reports_missing_attachments(data_dir: Path) -> None:
+    layout.bootstrap_wiki()
+    layout.bootstrap_shared()
     layout.bootstrap_person("alex", "Alex")
-    (data_dir / "people" / "alex" / "blog").rmdir()
+    (data_dir / "people" / "alex" / "attachments").rmdir()
 
     problems = layout.validate_layout()
-    assert "people/alex/blog/ missing" in problems
+    assert "people/alex/attachments/ missing" in problems
+
+
+def test_validate_layout_reports_missing_profile_page(data_dir: Path) -> None:
+    layout.bootstrap_wiki()
+    layout.bootstrap_shared()
+    layout.bootstrap_person("alex", "Alex")
+    layout.profile_path("alex").unlink()
+
+    problems = layout.validate_layout()
+    assert "wiki/people/alex.md missing" in problems
 
 
 def test_validate_layout_reports_missing_data_root(data_dir: Path) -> None:
@@ -151,7 +247,7 @@ def test_root_override_ignores_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(layout.DATA_DIR_ENV, str(tmp_path / "env"))
     explicit = tmp_path / "explicit"
     layout.bootstrap_person("alex", "Alex", root=explicit)
-    assert (explicit / "people" / "alex" / "blog").is_dir()
+    assert (explicit / "people" / "alex" / "attachments").is_dir()
     assert not (tmp_path / "env").exists()
 
 
@@ -195,42 +291,281 @@ def test_bootstrap_docs_skips_a_missing_source(tmp_path) -> None:
     assert not layout.docs_root(root).exists()
 
 
-def test_bootstrap_wiki_creates_the_tree(tmp_path) -> None:
+def test_bootstrap_wiki_creates_the_tree_and_home_once(tmp_path) -> None:
     root = tmp_path / "data"
-    assert layout.bootstrap_wiki(root) == 0
+    layout.bootstrap_wiki(root)
     wiki = layout.wiki_root(root)
     assert (wiki / "skills").is_dir()
-    assert (wiki / "README.md").read_text().startswith("# Wiki")
-    readme = wiki / "README.md"
-    readme.write_text("edited\n")
+    assert (wiki / "journal").is_dir()
+    assert (wiki / "people").is_dir()
+    home = layout.home_path(root)
+    assert home.read_text().startswith("# Home")
+
+    home.write_text("edited\n")
     layout.bootstrap_wiki(root)
-    assert readme.read_text() == "edited\n"  # idempotent, keeps an edit
+    assert home.read_text() == "edited\n"  # idempotent, keeps an edit
 
 
-def test_bootstrap_wiki_moves_legacy_per_person_pages(tmp_path) -> None:
+def test_bootstrap_wiki_deletes_a_stale_readme(tmp_path) -> None:
     root = tmp_path / "data"
-    legacy = root / "people" / "alex" / "wiki"
-    (legacy / "recipes").mkdir(parents=True)
-    (legacy / "recipes" / "pizza.md").write_text("# Pizza\n")
-    (legacy / "note.md").write_text("note\n")
-    (root / "wiki" / "alex").mkdir(parents=True)
-    (root / "wiki" / "alex" / "note.md").write_text("already here\n")
+    wiki = layout.wiki_root(root)
+    wiki.mkdir(parents=True)
+    (wiki / "README.md").write_text("# Wiki\n")
 
-    moved = layout.bootstrap_wiki(root)
+    layout.bootstrap_wiki(root)
 
-    assert moved == 1
-    assert (root / "wiki" / "alex" / "recipes" / "pizza.md").read_text() == "# Pizza\n"
-    assert (root / "wiki" / "alex" / "note.md").read_text() == "already here\n"
-    assert (legacy / "note.md").exists()  # a clash stays where it was
-    assert not (legacy / "recipes").exists()
+    assert not (wiki / "README.md").exists()
+    assert layout.home_path(root).is_file()
 
 
 def test_validate_layout_wants_a_wiki(tmp_path) -> None:
     root = tmp_path / "data"
-    layout.bootstrap_shared("Home", root)
+    layout.bootstrap_shared(root)
     assert "wiki/ missing" in layout.validate_layout(root)
     layout.bootstrap_wiki(root)
     assert "wiki/ missing" not in layout.validate_layout(root)
+
+
+# -- migrate_to_one_wiki ------------------------------------------------------
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def _old_tree(root: Path) -> None:
+    """Build a full pre-single-wiki tree: two people, a digest, an agent post,
+    a profile each, a shared profile, and both READMEs."""
+    _write(root / "people" / "alex" / "blog" / "2026-03-04.md", "# 2026-03-04\nnightly digest\n")
+    _write(
+        root / "people" / "alex" / "blog" / "2026-03-04-0930-planted-tomatoes.md",
+        "planted tomatoes\n",
+    )
+    _write(root / "people" / "alex" / "blog" / "notes.txt", "not a dated post\n")
+    _write(root / "people" / "alex" / "profile.md", "# Alex\n")
+    _write(root / "people" / "remy" / "blog" / "2026-03-05.md", "# 2026-03-05\nnightly digest\n")
+    _write(root / "people" / "remy" / "profile.md", "# Remy\n")
+    _write(root / "shared" / "profile.md", "# Home\n")
+    _write(root / "shared" / "README.md", "# Shared\n")
+    _write(root / "wiki" / "README.md", "# Wiki\n")
+
+
+def test_migrate_to_one_wiki_moves_the_full_old_tree(tmp_path) -> None:
+    root = tmp_path / "data"
+    _old_tree(root)
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    assert counts == {
+        "journal_moved": 3,
+        "journal_legacy": 1,
+        "profiles_moved": 2,
+        "shared_profile_moved": 1,
+        "skipped": 0,
+        "readmes_removed": 2,
+    }
+
+    digest = root / "wiki" / "journal" / "2026" / "03" / "04" / "alex.md"
+    assert digest.is_file()
+    assert "people: [alex]" in digest.read_text()
+    assert "date: 2026-03-04" in digest.read_text()
+    assert "nightly digest" in digest.read_text()
+    assert not (root / "wiki" / "journal" / "2026" / "03" / "04" / "2026-03-04.md").exists()
+
+    entry = root / "wiki" / "journal" / "2026" / "03" / "04" / "alex-planted-tomatoes.md"
+    assert entry.is_file()
+    assert "people: [alex]" in entry.read_text()
+    assert "planted tomatoes" in entry.read_text()
+
+    legacy = root / "wiki" / "journal" / "legacy" / "alex" / "notes.txt"
+    assert legacy.read_text() == "not a dated post\n"
+
+    digest2 = root / "wiki" / "journal" / "2026" / "03" / "05" / "remy.md"
+    assert digest2.is_file()
+    assert "people: [remy]" in digest2.read_text()
+    assert not (root / "wiki" / "journal" / "2026" / "03" / "05" / "2026-03-05.md").exists()
+
+    assert (root / "wiki" / "people" / "alex.md").read_text() == "# Alex\n"
+    assert (root / "wiki" / "people" / "remy.md").read_text() == "# Remy\n"
+    assert (root / "wiki" / "people" / "everyone.md").read_text() == "# Home\n"
+
+    assert not (root / "people" / "alex" / "blog").exists()
+    assert not (root / "people" / "remy" / "blog").exists()
+    assert not (root / "people" / "alex" / "profile.md").exists()
+    assert not (root / "shared" / "profile.md").exists()
+    assert not (root / "shared" / "README.md").exists()
+    assert not (root / "wiki" / "README.md").exists()
+
+
+def test_migrate_to_one_wiki_is_idempotent(tmp_path) -> None:
+    root = tmp_path / "data"
+    _old_tree(root)
+
+    layout.migrate_to_one_wiki(root)
+    second = layout.migrate_to_one_wiki(root)
+
+    assert second == {
+        "journal_moved": 0,
+        "journal_legacy": 0,
+        "profiles_moved": 0,
+        "shared_profile_moved": 0,
+        "skipped": 0,
+        "readmes_removed": 0,
+    }
+
+
+def test_migrate_to_one_wiki_does_not_overwrite_an_existing_target(tmp_path) -> None:
+    root = tmp_path / "data"
+    _old_tree(root)
+    target = root / "wiki" / "journal" / "2026" / "03" / "04" / "alex.md"
+    _write(target, "already migrated by hand\n")
+    _write(root / "wiki" / "people" / "alex.md", "# Alex (already migrated)\n")
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    assert target.read_text() == "already migrated by hand\n"
+    assert (root / "wiki" / "people" / "alex.md").read_text() == "# Alex (already migrated)\n"
+    # the un-overwritten sources stay in place
+    assert (root / "people" / "alex" / "blog" / "2026-03-04.md").is_file()
+    assert (root / "people" / "alex" / "profile.md").is_file()
+    assert counts["skipped"] == 2
+
+
+def test_migrate_to_one_wiki_adds_missing_keys_to_existing_front_matter(tmp_path) -> None:
+    root = tmp_path / "data"
+    _write(
+        root / "people" / "alex" / "blog" / "2026-03-04.md",
+        "---\ntitle: My day\n---\ncontent\n",
+    )
+
+    layout.migrate_to_one_wiki(root)
+
+    text = (root / "wiki" / "journal" / "2026" / "03" / "04" / "alex.md").read_text()
+    assert "title: My day" in text
+    assert "people: [alex]" in text
+    assert "date: 2026-03-04" in text
+    assert "content" in text
+
+
+def test_migrate_to_one_wiki_leaves_an_untouched_volume_alone(tmp_path) -> None:
+    root = tmp_path / "data"
+    layout.bootstrap_wiki(root)
+    layout.bootstrap_shared(root)
+    layout.bootstrap_shared_profile("Test House", root)
+    layout.bootstrap_person("alex", "Alex", root=root)
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    assert counts == {
+        "journal_moved": 0,
+        "journal_legacy": 0,
+        "profiles_moved": 0,
+        "shared_profile_moved": 0,
+        "skipped": 0,
+        "readmes_removed": 0,
+    }
+
+
+def test_migrate_to_one_wiki_disambiguates_a_same_slug_collision(tmp_path) -> None:
+    """Two posts, one person, one day, the same slug: the second post falls
+    back to its own time instead of being skipped and left behind."""
+    root = tmp_path / "data"
+    _write(root / "people" / "alex" / "blog" / "2026-08-29-1336-haiku.md", "first haiku\n")
+    _write(root / "people" / "alex" / "blog" / "2026-08-29-1342-haiku.md", "second haiku\n")
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    day_dir = root / "wiki" / "journal" / "2026" / "08" / "29"
+    assert "first haiku" in (day_dir / "alex-haiku.md").read_text()
+    assert "second haiku" in (day_dir / "alex-haiku-1342.md").read_text()
+    assert counts["journal_moved"] == 2
+    assert counts["skipped"] == 0
+
+    second = layout.migrate_to_one_wiki(root)
+    assert second == {
+        "journal_moved": 0,
+        "journal_legacy": 0,
+        "profiles_moved": 0,
+        "shared_profile_moved": 0,
+        "skipped": 0,
+        "readmes_removed": 0,
+    }
+
+
+def test_migrate_to_one_wiki_names_an_old_digest_by_person(tmp_path) -> None:
+    """Two people's digests on one day never collide: `YYYY-MM-DD.md` is
+    reserved for the new instance-wide nightly page, so each old digest gets
+    its own page named by the person id."""
+    root = tmp_path / "data"
+    _write(
+        root / "people" / "alex" / "blog" / "2026-08-29.md",
+        "---\nperson: alex\n---\n# 2026-08-29\njake's day\n",
+    )
+    _write(root / "people" / "mia" / "blog" / "2026-08-29.md", "# 2026-08-29\nlauren's day\n")
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    day_dir = root / "wiki" / "journal" / "2026" / "08" / "29"
+    jake_page = day_dir / "alex.md"
+    lauren_page = day_dir / "mia.md"
+    assert jake_page.is_file()
+    assert lauren_page.is_file()
+    assert not (day_dir / "2026-08-29.md").exists()
+
+    jake_text = jake_page.read_text()
+    assert "person: alex" in jake_text  # an existing key survives untouched
+    assert "people: [alex]" in jake_text
+    assert "date: 2026-08-29" in jake_text
+    assert "people: [mia]" in lauren_page.read_text()
+
+    assert counts["journal_moved"] == 2
+    assert counts["skipped"] == 0
+
+    second = layout.migrate_to_one_wiki(root)
+    assert second == {
+        "journal_moved": 0,
+        "journal_legacy": 0,
+        "profiles_moved": 0,
+        "shared_profile_moved": 0,
+        "skipped": 0,
+        "readmes_removed": 0,
+    }
+
+
+def test_migrate_to_one_wiki_replaces_an_unedited_shared_profile_template(tmp_path) -> None:
+    """A boot that ran the old, wrong order left `everyone.md` as the
+    unedited template. A migration that finds it now must not treat it as
+    the real shared profile and skip forever."""
+    root = tmp_path / "data"
+    layout.bootstrap_wiki(root)
+    layout.bootstrap_shared_profile("Test House", root)
+    _write(root / "shared" / "profile.md", "# Test House\nreal shared facts\n")
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    assert layout.shared_profile_path(root).read_text() == "# Test House\nreal shared facts\n"
+    assert not (root / "shared" / "profile.md").exists()
+    assert counts["shared_profile_moved"] == 1
+    assert counts["skipped"] == 0
+
+
+def test_migrate_to_one_wiki_does_not_replace_an_edited_shared_profile(tmp_path) -> None:
+    """A real, edited `everyone.md` is never overwritten; the source stays
+    and the move counts as skipped."""
+    root = tmp_path / "data"
+    layout.bootstrap_wiki(root)
+    layout.bootstrap_shared_profile("Test House", root)
+    edited = layout.shared_profile_path(root)
+    edited.write_text("# Test House\n## About\nJake and Mia live here.\n")
+    _write(root / "shared" / "profile.md", "# Test House\nsomething else\n")
+
+    counts = layout.migrate_to_one_wiki(root)
+
+    assert edited.read_text() == "# Test House\n## About\nJake and Mia live here.\n"
+    assert (root / "shared" / "profile.md").is_file()
+    assert counts["shared_profile_moved"] == 0
+    assert counts["skipped"] == 1
 
 
 # -- the writability check -------------------------------------------------
@@ -244,7 +579,7 @@ def test_validate_layout_reports_no_fault_for_a_writable_root(data_dir: Path) ->
     reported a fault that was not there.
     """
     layout.bootstrap_wiki()
-    layout.bootstrap_shared("Test House")
+    layout.bootstrap_shared()
     assert [p for p in layout.validate_layout() if "not writable" in p] == []
 
 
@@ -258,6 +593,6 @@ def test_validate_layout_still_reports_a_root_it_cannot_write(tmp_path: Path) ->
 
 def test_validate_layout_leaves_no_probe_file(data_dir: Path) -> None:
     layout.bootstrap_wiki()
-    layout.bootstrap_shared("Test House")
+    layout.bootstrap_shared()
     layout.validate_layout()
     assert [p.name for p in data_dir.iterdir() if p.name.startswith(".joshua-write-probe")] == []

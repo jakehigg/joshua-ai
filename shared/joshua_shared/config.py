@@ -206,14 +206,17 @@ class Skills(_Model):
 
 
 class Memory(_Model):
+    # No-ops, kept only so a config file written before the journal moved into
+    # the wiki still validates. The recency tier holds no journal text now; a
+    # turn reaches the journal through retrieval only.
     recent_posts: int = 3
-    # Character caps for the system-prompt recency tier.
     recent_max_chars: int = Field(default=6000, gt=0)
+    # Character cap for the system-prompt shared-profile section.
     shared_max_chars: int = Field(default=2000, gt=0)
     nightly_at: str = "03:30"
     daily_rollover: bool = True
-    # A person needs at least this many characters of transcript text on a day
-    # for the nightly reflection to write their blog post.
+    # Joshua needs at least this many characters of the day's combined
+    # transcript for the nightly reflection to write the day's journal page.
     min_chars_for_post: int = Field(default=200, ge=0)
     inject: Inject = Inject()
     skills: Skills = Skills()

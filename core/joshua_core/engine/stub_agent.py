@@ -24,9 +24,10 @@ logger = get_logger("engine.stub")
 # was built with, so a test can assert which servers a session would open.
 ECHO_TOOLS_MARKER = "[[echo-tools]]"
 
-# A prompt that contains this marker makes the stub write a journal post to the
-# turn speaker's ``blog/``, standing in for the SDK agent's ``write_file`` call,
-# so the on-demand journal flow runs end to end without the SDK.
+# A prompt that contains this marker makes the stub write a journal entry
+# naming the turn speaker, standing in for the SDK agent's
+# ``write_journal_entry`` call, so the on-demand journal flow runs end to end
+# without the SDK.
 JOURNAL_MARKER = "[[journal]]"
 
 # The files-MCP-relative attachment paths cited in a turn's attach note.
@@ -108,11 +109,12 @@ class StubAgentSession:
         )
 
     def _write_journal(self, prompt: str) -> None:
-        """Write one dated journal post to the turn speaker's ``blog/``.
+        """Write one journal entry naming the turn speaker, under today's folder.
 
-        Mirrors what the SDK agent does through the files MCP: stamp the filename
-        with the date, cite the turn's attachments in the frontmatter and body.
-        Writes nothing when there is no resolved speaker (a group turn with no
+        Mirrors what the SDK agent does through ``write_journal_entry``: place
+        the entry under the day's journal folder, name the speaker in
+        ``people``, and cite the turn's attachments in the body. Writes
+        nothing when there is no resolved speaker (a group turn with no
         sender) or when the speaker turned journaling off.
         """
         if self._turn_person is None or self._data_dir is None:
@@ -124,25 +126,23 @@ class StubAgentSession:
         message = prompt.split("\n\n")[-1].replace(JOURNAL_MARKER, "").strip()
 
         now = datetime.now().astimezone()
-        blog = layout.person_dir(self._turn_person, "blog", self._data_dir)
-        blog.mkdir(parents=True, exist_ok=True)
-        post = blog / f"{now:%Y-%m-%d-%H%M}-journal.md"
+        slug = f"{now:%H%M}-journal"
+        entry = layout.journal_entry_path(now.date(), slug, self._data_dir)
+        entry.parent.mkdir(parents=True, exist_ok=True)
 
-        atts = ", ".join(attachments)
         lines = [
             "---",
-            f"date: {now.isoformat()}",
-            f"person: {self._turn_person}",
-            "source: chat",
-            f"attachments: [{atts}]",
-            "---",
-            "",
-            message or "Journal note.",
+            f"date: {now.date().isoformat()}",
+            f"people: [{self._turn_person}]",
+            "source: agent",
         ]
+        if attachments:
+            lines.append(f"attachments: [{', '.join(attachments)}]")
+        lines += ["---", "", message or "Journal note."]
         if attachments:
             lines.append("")
             lines.append(f"Photo: {attachments[0]}")
-        post.write_text("\n".join(lines) + "\n")
+        entry.write_text("\n".join(lines) + "\n")
         self.journal_writes += 1
 
     async def interrupt(self) -> None:

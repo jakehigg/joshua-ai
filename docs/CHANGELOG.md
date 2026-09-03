@@ -15,12 +15,29 @@ with the images and the packaged chart, are at
   by default. The `enhancements.yaml` file picks a choice for each slot.
   Otter Wiki is the first wiki frontend, and a custom slot lets you plug in
   your own container. See `docs/enhancements.md`.
+- A gateway tool, `write_journal_entry`, lets the agent write a dated entry
+  to Joshua's own journal in the wiki. Joshua writes it, in its own voice,
+  about a person, not for a person.
 
 ### Changed
 
 - The agent's file tools, the viewer, and the index now ignore any dot-file
   or dot-directory at any depth, so a wiki frontend can keep its own state
   in the folder.
+- Joshua now keeps its whole memory in one wiki. The journal moves to
+  `wiki/journal/`, a profile moves to `wiki/people/<id>.md`, and the shared
+  profile moves to `wiki/people/everyone.md`. On the first start after the
+  upgrade, core moves each person's files onto these paths and leaves no
+  target it finds already there. Every moved path changes, so the whole
+  corpus re-embeds once.
+- The journal is Joshua's own record of what happened, not a person's blog.
+  It reaches a turn only through search: the confidence-gated injection or
+  the `search_memory` tool. No turn gets a journal block in the system
+  prompt any more. The `memory.recent_posts` and `memory.recent_max_chars`
+  settings still load, but nothing reads them now.
+- `wiki/Home.md` is the wiki's front page. Core makes it once, from a
+  template, and never rewrites it after that. Core also removes the old
+  `wiki/README.md` and `shared/README.md`, which `Home.md` replaces.
 
 ## 0.0.4 - 2026-09-01
 

@@ -37,9 +37,9 @@ Each `people[]` entry takes:
 - `role`: `member` (default) or `guest`.
 - `handles`: a map of channel to handle id.
 - `prompt`: a path to an extra prompt snippet for this person.
-- `journal`: how the agent journals this person's life updates: `auto`
-  (default, write a post on its own), `ask` (offer first), or `off` (never post
-  unless asked). See [memory.md](memory.md).
+- `journal`: consent for what Joshua's journal says about this person's own
+  life updates: `auto` (default, write an entry on its own), `ask` (offer
+  first), or `off` (write an entry only when asked). See [memory.md](memory.md).
 
 ## Helpers
 
@@ -188,14 +188,17 @@ docker compose restart core
 
 ### Prompt tiers
 
-Every turn carries the person's `profile.md` and their most recent blog days in
-the system prompt. These are always present, whatever the search finds.
+Every turn carries the person's profile page in the system prompt, and the
+shared profile too for a member or a group session. This is always present,
+whatever the search finds. The journal carries no prompt tier: it reaches a
+turn only through retrieval. See
+[memory.md](memory.md#the-journal-reaches-a-turn-only-through-retrieval).
 
 | Key | Default | What it does |
 |---|---|---|
-| `recent_posts` | `3` | blog days kept in full in the prompt |
-| `recent_max_chars` | `6000` | cap for those days. The oldest is cut first |
 | `shared_max_chars` | `2000` | cap for the shared profile section |
+| `recent_posts` | `3` | accepted for a config from an earlier release; no longer read |
+| `recent_max_chars` | `6000` | accepted for a config from an earlier release; no longer read |
 
 ### Retrieval
 

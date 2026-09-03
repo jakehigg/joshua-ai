@@ -227,12 +227,7 @@ def _build_memory(
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     memory = settings.memory
 
-    async def _person_ids() -> set[str]:
-        """The roster the index is keyed on. A chunk carries this foreign key,
-        so a directory that names nobody here holds nothing storable."""
-        return {person.id for person in await repo.list_people()}
-
-    sources: dict[str, Any] = {"files": FilesSource(data_dir, persons=_person_ids)}
+    sources: dict[str, Any] = {"files": FilesSource(data_dir)}
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
     for name, options in memory.sources.items():
         if name == "files":
@@ -257,16 +252,21 @@ def _build_memory(
 
 
 def _bootstrap_layout(settings: JoshuaConfig) -> None:
-    """Create the data volume tree: the wiki, `shared/`, and every person.
+    """Create the data volume tree, then bring an older layout onto it.
 
-    Idempotent: a second boot finds the dirs and the template files present
-    and leaves them. The shipped documentation under `wiki/joshua/` is
-    rewritten each boot, because the repo owns it.
+    `migrate_to_one_wiki` runs before any template page is written, so a
+    profile it finds at its target is a real one, never a template this
+    boot wrote first — a template written before the move ran would
+    otherwise shadow the real profile forever. Idempotent: a second boot
+    finds the wiki and its pages already settled and leaves them.
+    `migrate_to_one_wiki` logs its own counts, so this function does not log
+    them again. The shipped documentation under `wiki/joshua/` is rewritten
+    each boot, because the repo owns it.
     """
-    moved = layout.bootstrap_wiki()
-    if moved:
-        logger.info({"message": "moved legacy per-person wiki pages into wiki/", "pages": moved})
-    layout.bootstrap_shared(settings.name)
+    layout.bootstrap_wiki()
+    layout.bootstrap_shared()
+    layout.migrate_to_one_wiki()
+    layout.bootstrap_shared_profile(settings.name)
     pages = layout.bootstrap_docs()
     if pages:
         logger.info({"message": "repo docs published", "pages": pages})

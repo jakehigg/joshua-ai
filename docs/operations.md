@@ -309,18 +309,21 @@ the first start, the stack runs with no access.
 destination.
 
 At `memory.nightly_at` local time (default `03:30`), `core` reads the previous
-day's transcripts, writes each person's post for that day to
-`blog/YYYY-MM-DD.md`, updates each `profile.md` and `shared/profile.md`, and
-re-indexes. With `memory.daily_rollover: true` it then closes every session, so
-the next message starts a fresh one with the profile and the recent posts as
+day's transcripts, writes one journal page per person for that day at
+`wiki/journal/YYYY/MM/DD/YYYY-MM-DD.md`, updates each profile page and the
+shared profile, and re-indexes. A day with nothing worth keeping gets no
+journal page. With `memory.daily_rollover: true` core then closes every
+session, so the next message starts a fresh one with the profile block as
 context. `memory.md` explains the rules.
 
 To run the reflection by hand, or to re-run one day, use `POST /admin/reflect`.
 
 ## The viewer
 
-The viewer is a read-only web page for the wiki and a person's own files. It is
-off by default. To turn it on:
+The viewer is a read-only web page for the wiki, which holds the journal and
+every profile, and a person's own attachments. A signed-in person gets a
+profile link for a quick jump to their own page. It is off by default. To
+turn it on:
 
 1. Put every password in `VIEWER_PASSWORDS` in `.env`, as a comma-separated
    list of `<person-id>=<value>` pairs. One variable carries all of them, so

@@ -25,7 +25,7 @@ def data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(layout.DATA_DIR_ENV, str(root))
     root.mkdir(parents=True)
     layout.bootstrap_wiki()
-    layout.bootstrap_shared("Test")
+    layout.bootstrap_shared()
     return root
 
 

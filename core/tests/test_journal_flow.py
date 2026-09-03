@@ -1,18 +1,21 @@
 """Integration tests for on-demand journaling against a real pgvector database.
 
-The stub backend writes a journal post when a turn carries the ``[[journal]]``
-marker (standing in for the SDK agent's ``write_file`` call). These tests prove
-the whole flow: a chat turn writes a dated blog post that cites its attachment,
-the indexer picks it up, and a later turn recalls it through injection. They also
-check the group-turn routing and the ``journal: off`` preference.
+The stub backend writes a journal entry when a turn carries the ``[[journal]]``
+marker (standing in for the SDK agent's ``write_journal_entry`` call). These
+tests prove the whole flow: a chat turn writes an entry under today's journal
+folder that cites its attachment, the indexer picks it up, and a later turn
+recalls it through injection. They also check the group-turn routing and the
+``journal: off`` preference.
 
 Embedding is monkeypatched to a fixed non-zero vector, so every indexed row
-scores cosine 1.0 and scope, not content, decides what a person retrieves — the
-same seam the injection integration tests use.
+scores cosine 1.0 and every document is shared scope, so the same seam the
+injection integration tests use proves the entry is reachable regardless of
+who asks.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -27,6 +30,7 @@ from joshua_core.memory.indexer import Indexer
 from joshua_core.memory.sources.files import FilesSource
 from joshua_core.memory.store import MemoryStore
 from joshua_shared import config as config_module
+from joshua_shared import layout
 
 pytestmark = pytest.mark.integration
 
@@ -82,7 +86,11 @@ async def _recall(ctx: Any, store: MemoryStore, repo) -> str | None:
     )
 
 
-async def test_journal_post_is_written_indexed_and_recalled(
+def _today_entries(tmp_path: Path) -> list[Path]:
+    return list(layout.journal_day_dir(date.today(), tmp_path).glob("*-journal.md"))
+
+
+async def test_journal_entry_is_written_indexed_and_recalled(
     db, repo, tmp_path: Path, const_embed
 ) -> None:
     await repo.upsert_person("alex", "Alex")
@@ -103,11 +111,11 @@ async def test_journal_post_is_written_indexed_and_recalled(
         attachments=[att],
     )
 
-    posts = list((tmp_path / "people/alex/blog").glob("*-journal.md"))
-    assert len(posts) == 1
-    body = posts[0].read_text()
+    entries = _today_entries(tmp_path)
+    assert len(entries) == 1
+    body = entries[0].read_text()
     assert "attachments/2026/08/2026-08-27-143210-IMG_4471.jpg" in body
-    assert "person: alex" in body
+    assert "people: [alex]" in body
 
     store = await _index(db.pool, tmp_path)
     ctx = SimpleNamespace(
@@ -120,10 +128,10 @@ async def test_journal_post_is_written_indexed_and_recalled(
     assert note is not None
     events = await repo.kb_events(1)
     uris = {r["uri"] for r in events[0]["results"]}
-    assert any(u.startswith("blog/") and u.endswith("-journal.md") for u in uris)
+    assert any(u.startswith("wiki/journal/") and u.endswith("-journal.md") for u in uris)
 
 
-async def test_journal_off_writes_no_post(db, repo, tmp_path: Path) -> None:
+async def test_journal_off_writes_no_entry(db, repo, tmp_path: Path) -> None:
     await repo.upsert_person("sam", "Sam")
     await repo.upsert_channel("telegram:sam", "telegram", default_person_id="sam")
     conv = await repo.get_or_create_conversation("telegram:sam", "sam")
@@ -137,12 +145,10 @@ async def test_journal_off_writes_no_post(db, repo, tmp_path: Path) -> None:
 
     session = manager._pool[conv.id].session
     assert session.journal_writes == 0
-    assert not (tmp_path / "people/sam/blog").exists() or not list(
-        (tmp_path / "people/sam/blog").glob("*.md")
-    )
+    assert _today_entries(tmp_path) == []
 
 
-async def test_group_turn_journals_to_the_speaker_not_shared(db, repo, tmp_path: Path) -> None:
+async def test_group_turn_journals_naming_the_speaker(db, repo, tmp_path: Path) -> None:
     await repo.upsert_person("alex", "Alex")
     await repo.upsert_channel(
         "telegram:everyone", "telegram", default_person_id=None, session_mode="shared"
@@ -158,14 +164,14 @@ async def test_group_turn_journals_to_the_speaker_not_shared(db, repo, tmp_path:
         person_id="alex",
     )
 
-    posts = list((tmp_path / "people/alex/blog").glob("*-journal.md"))
-    assert len(posts) == 1
-    assert "person: alex" in posts[0].read_text()
-    # A group turn never writes to the shared root.
+    entries = _today_entries(tmp_path)
+    assert len(entries) == 1
+    assert "people: [alex]" in entries[0].read_text()
+    # A group turn never writes to `shared/`.
     assert not list((tmp_path / "shared").glob("*.md"))
 
 
-async def test_group_turn_without_speaker_writes_no_post(db, repo, tmp_path: Path) -> None:
+async def test_group_turn_without_speaker_writes_no_entry(db, repo, tmp_path: Path) -> None:
     await repo.upsert_channel(
         "telegram:everyone", "telegram", default_person_id=None, session_mode="shared"
     )
@@ -180,6 +186,4 @@ async def test_group_turn_without_speaker_writes_no_post(db, repo, tmp_path: Pat
 
     session = manager._pool[conv.id].session
     assert session.journal_writes == 0
-    assert not (tmp_path / "people").exists() or not list(
-        (tmp_path / "people").rglob("*-journal.md")
-    )
+    assert _today_entries(tmp_path) == []

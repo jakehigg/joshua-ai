@@ -34,7 +34,8 @@ def make_settings(extra: str = "") -> Any:
 def canned_oneshot(
     *, post: str = "Alex had a good day.", profile: str | None = "# Alex\n## About\nLikes tea."
 ) -> Any:
-    """A oneshot that answers the person call with ``{post, profile}`` and the
+    """A oneshot that answers the journal-page and profile calls with
+    ``{post, profile}`` (each call reads only the key it needs) and the
     shared-profile call with a fixed shared profile."""
 
     async def _oneshot(*, system_prompt: str, user_prompt: str, model: str | None) -> str:
