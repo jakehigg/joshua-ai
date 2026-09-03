@@ -11,6 +11,16 @@ with the images and the packaged chart, are at
 - A push to a branch builds the three images and tags them with the commit
   SHA. An ArgoCD Application can follow a branch and run each push, for a
   test instance. The chart README has the Application.
+- Enhancements: optional services that run beside the three containers, off
+  by default. The `enhancements.yaml` file picks a choice for each slot.
+  Otter Wiki is the first wiki frontend, and a custom slot lets you plug in
+  your own container. See `docs/enhancements.md`.
+
+### Changed
+
+- The agent's file tools, the viewer, and the index now ignore any dot-file
+  or dot-directory at any depth, so a wiki frontend can keep its own state
+  in the folder.
 
 ## 0.0.4 - 2026-09-01
 

@@ -376,6 +376,11 @@ On Kubernetes the chart runs it as its own deployment, off by default, with
 the passwords in a Secret and an ingress of its own. See
 [the chart README](../charts/joshua/README.md#the-viewer).
 
+The viewer is read-only, and it ships with Joshua. For a browser editor that
+can also change the wiki, see the Otter Wiki enhancement in
+[docs/enhancements.md](enhancements.md). Unlike the viewer, Otter Wiki runs
+code from another project.
+
 ## Where the data is
 
 | Docker volume | Holds | `make nuke` deletes it |

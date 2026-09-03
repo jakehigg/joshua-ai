@@ -180,6 +180,62 @@ The viewer serves plain HTTP and puts every route behind HTTP basic, so the
 password crosses the wire on each request. Terminate TLS at the ingress, and
 keep the host off the public internet unless you mean to publish your notes.
 
+## Enhancements
+
+An enhancement is an optional component from another project, not from
+Joshua. It runs someone else's code, in its own pod, under its own license and
+its own repository. Every enhancement is off by default.
+
+The wiki is a folder of Markdown files at `/data/wiki`. Any tool that reads a
+folder of Markdown files can be its frontend. Each enhancement fills a
+**slot**: a role such as `wiki`. `use` in that slot names the **choice**, the
+frontend that fills it. `docs/enhancements.md` has the full contract for the
+folder and lists what each choice may and may not touch.
+
+### Otter Wiki
+
+[Otter Wiki](https://github.com/redimp/otterwiki) is a wiki over a git
+repository of Markdown files. Turn it on:
+
+```yaml
+enhancements:
+  wiki:
+    use: otterwiki
+    otterwiki:
+      ingress:
+        enabled: true
+        className: nginx
+        host: notes.example.com
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+        tls:
+          enabled: true
+      persistence:
+        size: 1Gi
+```
+
+The pod mounts the wiki alone, at `/app-data/repository`, through a subPath
+mount. It never sees a person's journal, profile, or attachments. A second
+claim, `enhancements.wiki.otterwiki.persistence` (`joshua-otterwiki-data`
+unless you set `existingClaim`), holds `/app-data`: its accounts, its
+settings, and its search database, apart from the wiki.
+
+Otter Wiki needs no Secret. It writes its own `SECRET_KEY` into
+`/app-data/settings.cfg` on first start. Open the site and register an
+account; the first account becomes the admin.
+
+Otter Wiki runs `git init` in the wiki on first start, so a `.git` directory
+appears in `wiki/`. Joshua ignores dot-directories.
+
+Otter Wiki serves plain HTTP behind its own login, and the session cookie
+crosses the wire on each request. Terminate TLS at the ingress, and keep the
+host off the public internet unless you mean to publish your notes.
+
+The [Otter Wiki documentation](https://otterwiki.com/Configuration) is the
+reference for every setting it reads. `docs/enhancements.md` has the Docker
+Compose side of this same choice, and the folder contract every wiki frontend
+follows.
+
 ## What the chart does not expose
 
 Only `channels` has an Ingress, and only when you enable it. `core` holds the

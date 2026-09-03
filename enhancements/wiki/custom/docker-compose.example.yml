@@ -1,0 +1,50 @@
+# This is one example of a custom enhancement: a wiki slot filled by your
+# own container instead of a named choice. Any container that reads a
+# folder of Markdown files works here.
+#
+# This example commits the wiki to a local git repository every few
+# minutes, so you get a history of edits with no server of its own.
+#
+# To use it: copy this file to docker-compose.yml in this same directory,
+# then edit it. `use: custom` in enhancements.yaml adds
+# enhancements/wiki/custom/docker-compose.yml to the compose command line.
+# docker-compose.yml is gitignored, so your copy stays local; this example
+# stays tracked.
+#
+# Rules for a custom overlay, the same as every enhancement:
+#   - Mount the wiki alone, never all of /data.
+#   - Publish a port on 127.0.0.1 only, never on every interface.
+#   - Never pass a Joshua fleet token or the Claude Agent SDK token. A
+#     custom container gets no Joshua credential.
+services:
+  wiki-git-sync:
+    image: alpine/git:2.47.2
+    # The volume below is owned by uid 1000, like every Joshua container.
+    user: "1000:1000"
+    restart: unless-stopped
+    volumes:
+      # Only the wiki, not all of /data.
+      - type: volume
+        source: data
+        target: /wiki
+        volume:
+          subpath: wiki
+    # One pass commits what changed, then sleeps. WIKI_GIT_SYNC_SECONDS in
+    # .env sets the interval; the default is five minutes.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        cd /wiki;
+        git init -q 2>/dev/null;
+        git config user.email joshua@localhost;
+        git config user.name joshua;
+        while :; do
+          git add -A;
+          git commit -qm "auto" || true;
+          sleep ${WIKI_GIT_SYNC_SECONDS:-300};
+        done
+    # core makes wiki/ on the volume at its first start, and a subpath mount
+    # fails when the directory does not exist yet. Wait for core.
+    depends_on:
+      core:
+        condition: service_healthy

@@ -1,0 +1,171 @@
+{{/* Otter Wiki (https://github.com/redimp/otterwiki) is an enhancement: a web
+     UI for the wiki, published by the Otter Wiki project and not by Joshua. It
+     sees /data/wiki alone, through a subPath mount, so it never sees a
+     person's journal or profile. It gets no fleet token and no Joshua
+     credential, because it talks to no container. */}}
+{{- if and .Values.enhancements.wiki.use (ne .Values.enhancements.wiki.use "otterwiki") }}
+{{- fail "enhancements.wiki.use must be \"\" or otterwiki" }}
+{{- end }}
+{{- if and .Values.enhancements.wiki.otterwiki.ingress.enabled (ne .Values.enhancements.wiki.use "otterwiki") }}
+{{- fail "enhancements.wiki.otterwiki.ingress.enabled needs enhancements.wiki.use: otterwiki" }}
+{{- end }}
+{{- if eq .Values.enhancements.wiki.use "otterwiki" }}
+{{- if not .Values.enhancements.wiki.otterwiki.persistence.existingClaim }}
+{{/* Accounts, settings, and the search database, apart from the wiki itself.
+     Losing this claim loses logins and settings, not a page. */}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: joshua-otterwiki-data
+  labels:
+    app.kubernetes.io/name: joshua-otterwiki
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.enhancements.wiki.otterwiki.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.enhancements.wiki.otterwiki.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joshua-otterwiki
+  labels:
+    app.kubernetes.io/name: joshua-otterwiki
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: {{ .Values.enhancements.wiki.otterwiki.strategy }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-otterwiki
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: joshua-otterwiki
+        {{- include "joshua.labels" . | nindent 8 }}
+      annotations:
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: otterwiki
+          image: {{ .Values.enhancements.wiki.otterwiki.image }}
+          imagePullPolicy: {{ .Values.enhancements.wiki.otterwiki.pullPolicy }}
+          securityContext:
+            {{- include "joshua.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SITE_NAME
+              value: {{ .Values.enhancements.wiki.otterwiki.siteName | quote }}
+            - name: RETAIN_PAGE_NAME_CASE
+              value: "True"
+            - name: COMMIT_MESSAGE
+              value: OPTIONAL
+            {{/* Otter Wiki writes its own SECRET_KEY into /app-data/settings.cfg
+                 on first start. It needs no Secret from this chart. */}}
+          resources:
+            {{- toYaml .Values.enhancements.wiki.otterwiki.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /-/login, port: 8080}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /-/login, port: 8080}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            {{/* The wiki alone, at the path Otter Wiki treats as its git
+                 repository. A person's journal, profile, and attachments live
+                 elsewhere on the same claim, so this subPath keeps them out of
+                 reach. Otter Wiki runs `git init` here on first start, so a
+                 `.git` directory appears in wiki/; Joshua ignores
+                 dot-directories. */}}
+            - name: data
+              mountPath: /app-data/repository
+              subPath: wiki
+            {{- end }}
+            - name: otterwiki-data
+              mountPath: /app-data
+      volumes:
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default "joshua-data" }}
+        {{- end }}
+        - name: otterwiki-data
+          persistentVolumeClaim:
+            claimName: {{ .Values.enhancements.wiki.otterwiki.persistence.existingClaim | default "joshua-otterwiki-data" }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: joshua-otterwiki
+  labels:
+    app.kubernetes.io/name: joshua-otterwiki
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: joshua-otterwiki
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+{{- if .Values.enhancements.wiki.otterwiki.ingress.enabled }}
+{{- if not .Values.enhancements.wiki.otterwiki.ingress.host }}
+{{- fail "enhancements.wiki.otterwiki.ingress.enabled needs enhancements.wiki.otterwiki.ingress.host" }}
+{{- end }}
+---
+{{/* Otter Wiki serves plain HTTP behind its own login, and the session cookie
+     crosses the wire on each request. Terminate TLS here, and keep the host
+     off the public internet unless you mean to publish your notes. */}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: joshua-otterwiki
+  labels:
+    app.kubernetes.io/name: joshua-otterwiki
+    {{- include "joshua.labels" . | nindent 4 }}
+  {{- with .Values.enhancements.wiki.otterwiki.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.enhancements.wiki.otterwiki.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.enhancements.wiki.otterwiki.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.enhancements.wiki.otterwiki.ingress.host }}
+      secretName: {{ .Values.enhancements.wiki.otterwiki.ingress.tls.secretName | default (printf "%s-tls" .Values.enhancements.wiki.otterwiki.ingress.host) }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.enhancements.wiki.otterwiki.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: joshua-otterwiki
+                port:
+                  number: 8080
+{{- end }}
+{{- end }}

@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo
 
 import mcp_types as types
 import yaml
+from joshua_shared.layout import is_hidden
 from mcp.server.lowlevel import Server
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
@@ -309,6 +310,8 @@ def _list_files(roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo) -> t
     for item in paths:
         if not item.is_file() or item.name.endswith(_META_SUFFIX):
             continue
+        if is_hidden(item, root.base):
+            continue
         stat = item.stat()
         entry = {
             "path": f"{root.name}/{item.relative_to(root.base).as_posix()}",
@@ -431,7 +434,7 @@ def _search_files(
     hits = []
     if base.is_dir():
         for item in sorted(base.rglob("*.md")):
-            if not item.is_file():
+            if not item.is_file() or is_hidden(item, root.base):
                 continue
             text = _read_utf8(item)
             if text is None:

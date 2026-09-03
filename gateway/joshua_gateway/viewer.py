@@ -36,6 +36,7 @@ import uvicorn
 import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
+from joshua_shared.layout import is_hidden
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from markdown_it import MarkdownIt
 from starlette.applications import Starlette
@@ -369,7 +370,8 @@ def _download(abs_path: Path) -> Response:
 
 def _iter_markdown(root: Root) -> Iterator[tuple[Path, str]]:
     """Yield ``(abs_path, root-relative posix path)`` for each markdown file in a
-    root, skipping the trash. A file root yields itself when it is markdown."""
+    root, skipping a dot entry such as ``.trash`` or ``.git`` at any depth. A
+    file root yields itself when it is markdown."""
     if root.is_file:
         if root.base.is_file() and root.base.suffix == ".md":
             yield root.base, root.name
@@ -377,7 +379,7 @@ def _iter_markdown(root: Root) -> Iterator[tuple[Path, str]]:
     if not root.base.is_dir():
         return
     for item in sorted(root.base.rglob("*.md")):
-        if ".trash" in item.parts or not item.is_file():
+        if not item.is_file() or is_hidden(item, root.base):
             continue
         yield item, item.relative_to(root.base).as_posix()
 

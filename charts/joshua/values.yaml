@@ -253,6 +253,44 @@ postgres:
       cpu: "1"
       memory: 1Gi
 
+# Enhancements are optional components from other projects. Each one runs code
+# that is not Joshua's, under its own license, in its own pod, and it is off by
+# default. The wiki is a folder of Markdown files, so any tool that reads such
+# a folder can be its frontend. `use` names the choice for a slot. See
+# docs/enhancements.md.
+enhancements:
+  wiki:
+    # "" for none, or otterwiki.
+    use: ""
+    # Otter Wiki (https://github.com/redimp/otterwiki, MIT): a wiki over a git
+    # repository of Markdown files. Not a Joshua image.
+    otterwiki:
+      image: redimp/otterwiki:2.24.0-slim
+      pullPolicy: IfNotPresent
+      siteName: Joshua wiki
+      # Accounts, settings, and the search database live in /app-data, apart
+      # from the wiki. The first account that registers is the admin.
+      persistence:
+        size: 1Gi
+        storageClass: ""
+        existingClaim: ""
+      strategy: Recreate
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      ingress:
+        enabled: false
+        className: ""
+        annotations: {}
+        host: ""
+        tls:
+          enabled: false
+          secretName: ""
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

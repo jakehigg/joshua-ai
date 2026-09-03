@@ -115,24 +115,31 @@ def test_every_entrypoint_configures_logging() -> None:
         )
 
 
+def _overlay_files() -> list[Path]:
+    return sorted((ROOT / "enhancements").glob("*/*/docker-compose*.yml"))
+
+
 def test_no_two_services_publish_the_same_host_port() -> None:
     """The viewer and core both published 8081, so the profile could not start.
 
     Compose starts a profile beside the default services, so a clash is not a
-    choice between two services. It is a bind failure.
+    choice between two services. It is a bind failure. An enhancement overlay
+    joins the same compose command line, so it is checked here too.
     """
     import yaml
 
-    raw = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    files = [ROOT / "docker-compose.yml", *_overlay_files()]
     seen: dict[str, str] = {}
-    for name, body in raw["services"].items():
-        for mapping in body.get("ports", []):
-            # "127.0.0.1:8082:8000" or "8080:8000"; the host port is second last.
-            host_port = str(mapping).split(":")[-2]
-            assert host_port not in seen, (
-                f"{name} and {seen[host_port]} both publish host port {host_port}"
-            )
-            seen[host_port] = name
+    for path in files:
+        raw = yaml.safe_load(path.read_text())
+        for name, body in raw["services"].items():
+            for mapping in body.get("ports", []):
+                # "127.0.0.1:8082:8000" or "8080:8000"; the host port is second last.
+                host_port = str(mapping).split(":")[-2]
+                assert host_port not in seen, (
+                    f"{name} in {path} and {seen[host_port]} both publish host port {host_port}"
+                )
+                seen[host_port] = f"{name} in {path}"
 
 
 def test_every_published_port_is_on_the_loopback_or_says_why() -> None:
@@ -154,9 +161,10 @@ def test_every_published_port_is_on_the_loopback_or_says_why() -> None:
 
 def test_the_compose_file_names_no_person() -> None:
     """A tracked file that names a person makes an operator edit it to sign in."""
-    text = (ROOT / "docker-compose.yml").read_text()
-    for person_id in _example_person_ids():
-        assert person_id.upper() not in text, f"docker-compose.yml names '{person_id}'"
+    for path in [ROOT / "docker-compose.yml", *_overlay_files()]:
+        text = path.read_text()
+        for person_id in _example_person_ids():
+            assert person_id.upper() not in text, f"{path} names '{person_id}'"
 
 
 def _example_person_ids() -> list[str]:

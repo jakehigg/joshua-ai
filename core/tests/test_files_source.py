@@ -90,6 +90,30 @@ async def test_fetch_resolves_by_path(tmp_path: Path) -> None:
     assert await src.fetch("attachments/note.md") is None  # not a retrieval kind
 
 
+async def test_dot_entries_are_ignored_at_any_depth(tmp_path: Path) -> None:
+    """A wiki frontend's own state (``.git``, ``.obsidian``, and so on) is never
+    a document, in the wiki or in a person's journal, however deep it sits."""
+    _write(tmp_path / "wiki/plants/a.md", "# Plants\n\nA normal wiki page.\n")
+    _write(tmp_path / "wiki/.git/config", "not markdown\n")
+    _write(tmp_path / "wiki/.git/refs/x.md", "# Ref\n\nGit's own state, not content.\n")
+    _write(tmp_path / "wiki/.obsidian/workspace.md", "# Workspace\n\nA note tool's state.\n")
+    _write(tmp_path / "people/alice/blog/.trash/old.md", "# Old\n\nTrashed journal entry.\n")
+    docs = await _docs(tmp_path)
+    by_uri = {(d.person_id, d.uri) for d in docs}
+    assert (None, "wiki/plants/a.md") in by_uri
+    assert not any(".git" in d.uri for d in docs)
+    assert not any(".obsidian" in d.uri for d in docs)
+    assert not any(".trash" in d.uri for d in docs)
+
+
+async def test_fetch_refuses_a_dot_entry(tmp_path: Path) -> None:
+    _write(tmp_path / "wiki/.git/config", "not markdown\n")
+    _write(tmp_path / "people/alice/blog/.trash/old.md", "# Old\n\nTrashed entry.\n")
+    src = FilesSource(tmp_path)
+    assert await src.fetch("wiki/.git/config") is None
+    assert await src.fetch("blog/.trash/old.md") is None
+
+
 async def test_rev_changes_with_content(tmp_path: Path) -> None:
     f = tmp_path / "wiki/pizza.md"
     _write(f, "# Pizza\n\nFirst version of the recipe body.\n")

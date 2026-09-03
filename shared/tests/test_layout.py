@@ -43,6 +43,39 @@ def test_safe_segment_rejects_bad_ids(bad: str) -> None:
         layout.safe_segment(bad)
 
 
+@pytest.mark.parametrize(
+    "rel",
+    [
+        ".git/config",
+        ".trash/2026/x.md",
+        "plants/.obsidian/workspace.md",
+        "a/b/.hidden/c.md",
+    ],
+)
+def test_is_hidden_true_for_a_dot_part_at_any_depth(tmp_path: Path, rel: str) -> None:
+    base = tmp_path / "wiki"
+    assert layout.is_hidden(base / rel, base) is True
+
+
+@pytest.mark.parametrize("rel", ["plants/a.md", "a/b/c.md", "note.md"])
+def test_is_hidden_false_for_a_plain_path(tmp_path: Path, rel: str) -> None:
+    base = tmp_path / "wiki"
+    assert layout.is_hidden(base / rel, base) is False
+
+
+def test_is_hidden_ignores_a_dot_above_the_base(tmp_path: Path) -> None:
+    """A dot in a parent directory, such as a host temp path, never counts."""
+    base = tmp_path / ".private" / "wiki"
+    assert layout.is_hidden(base / "plants" / "a.md", base) is False
+    assert layout.is_hidden(base, base) is False
+
+
+def test_is_hidden_false_for_a_path_outside_base(tmp_path: Path) -> None:
+    base = tmp_path / "wiki"
+    outside = tmp_path / "other" / ".git" / "config"
+    assert layout.is_hidden(outside, base) is False
+
+
 def test_bootstrap_person_builds_tree_and_profile(data_dir: Path) -> None:
     layout.bootstrap_person("alex", "Alex")
     home = data_dir / "people" / "alex"

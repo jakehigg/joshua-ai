@@ -79,6 +79,12 @@ The timestamp directory keeps the original tree, so you restore a page with a
 shell. The index skips any path with a `.trash` part, so a deleted page leaves
 the search index at the next index run.
 
+The agent's file tools, the viewer, and the index ignore any file or
+directory whose name starts with a dot, at any depth under `wiki/`. This is
+what lets a wiki frontend, such as Otter Wiki, keep its own state next to
+the pages: a `.git` directory is a common example. See
+[docs/enhancements.md](enhancements.md).
+
 An older layout kept a wiki per person under `people/<id>/wiki/`. At start,
 core moves those pages to `wiki/<id>/` and removes the empty directory. A page
 that already exists at the target stays where it was, and the log names the

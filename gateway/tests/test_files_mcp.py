@@ -186,6 +186,29 @@ def test_resolve_rejects_symlink_escape(data_root, tmp_path):
         paths.resolve("wiki/evil/secret.md", roots(data_root), write=False)
 
 
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        "wiki/.git/config",
+        "wiki/.trash/2026/x.md",
+        "people/alex/blog/.trash/old.md",
+        "shared/.obsidian/workspace.md",
+    ],
+)
+def test_resolve_rejects_a_hidden_entry(data_root, hidden):
+    """A dot segment, anywhere below the root, is forbidden — not only at the
+    top: it is a frontend's own state, never content."""
+    with pytest.raises(paths.PathError):
+        paths.resolve(hidden, roots(data_root), write=False)
+
+
+def test_hidden_entry_message_hides_absolute_path(data_root):
+    try:
+        paths.resolve("wiki/.git/config", roots(data_root), write=False)
+    except paths.PathError as exc:
+        assert str(data_root) not in exc.message
+
+
 def test_wiki_write_gated_by_role(data_root):
     with pytest.raises(paths.PathError):
         paths.resolve("wiki/x.md", roots(data_root, wiki_write=False), write=True)
@@ -361,6 +384,30 @@ async def test_list_and_search(gateway, data_root):
             found = await session.call_tool("search_files", {"query": "todo", "root": "wiki"})
             hits = result_json(found)
     assert hits and hits[0]["path"] == "wiki/note.md" and hits[0]["line"] == 2
+
+
+async def test_list_and_search_ignore_dot_entries(gateway, data_root):
+    """A wiki frontend's own state (``.git``, ``.obsidian``, and so on), at any
+    depth, never shows up in a listing or a search — only ``.trash`` was hidden
+    before; now every dot entry is."""
+    (data_root / "wiki" / ".git" / "refs").mkdir(parents=True)
+    (data_root / "wiki" / ".git" / "config").write_text("not markdown\n")
+    (data_root / "wiki" / ".git" / "refs" / "todo.md").write_text("todo git internals\n")
+    (data_root / "wiki" / ".obsidian").mkdir()
+    (data_root / "wiki" / ".obsidian" / "todo.md").write_text("todo obsidian state\n")
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            flat = result_json(await session.call_tool("list_files", {"root": "wiki"}))
+            recursive = result_json(
+                await session.call_tool("list_files", {"root": "wiki", "recursive": True})
+            )
+            found = await session.call_tool("search_files", {"query": "todo", "root": "wiki"})
+    hits = result_json(found)
+    assert {e["path"] for e in flat} == {"wiki/note.md"}
+    assert {e["path"] for e in recursive} == {"wiki/note.md"}
+    assert {h["path"] for h in hits} == {"wiki/note.md"}
 
 
 async def test_read_image_returns_image_block(gateway, data_root):

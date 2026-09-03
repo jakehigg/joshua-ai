@@ -142,6 +142,28 @@ def test_shared_profile_reads(client):
     assert "Shared facts" in text
 
 
+# -- dot entries --------------------------------------------------------------
+
+
+def test_dot_entries_are_hidden_from_home_and_search(client, tmp_path):
+    """A wiki frontend's own state never shows up as content, at any depth."""
+    data = tmp_path / "data"
+    _write(data / "wiki/.git/config", "not markdown\n")
+    _write(data / "wiki/.obsidian/workspace.md", "# Workspace\n\nA note tool's own state.\n")
+    home = client.get("/", auth=("alex", ALEX_PW)).text
+    assert "/wiki/.git" not in home
+    assert "/wiki/.obsidian" not in home
+    hits = client.get("/search", params={"q": "Workspace"}, auth=("alex", ALEX_PW)).text
+    assert "/wiki/.obsidian" not in hits
+
+
+def test_reading_a_dot_path_directly_is_404(client, tmp_path):
+    data = tmp_path / "data"
+    _write(data / "wiki/.git/config", "secret\n")
+    response = client.get("/wiki/.git/config", auth=("alex", ALEX_PW))
+    assert response.status_code == 404
+
+
 # -- path safety ------------------------------------------------------------
 
 

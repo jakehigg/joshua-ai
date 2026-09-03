@@ -55,6 +55,25 @@ def safe_segment(pid: str) -> str:
     return pid
 
 
+def is_hidden(path: Path, base: Path) -> bool:
+    """True when a part of `path`, below `base`, starts with a dot.
+
+    A wiki frontend or a note tool keeps its own state inside the data volume
+    as a dot directory: `.git`, `.obsidian`, `.trash`, and so on. Every place
+    that lists, searches, or indexes the corpus uses this one rule to ignore
+    such an entry, at any depth, so a tool's own state never counts as content.
+
+    Only the parts of `path` relative to `base` count. `base` itself, and a
+    dot anywhere above it (a host temp directory, for example), never make the
+    result true. A `path` that is not under `base` returns `False`.
+    """
+    try:
+        parts = path.relative_to(base).parts
+    except ValueError:
+        return False
+    return any(part.startswith(".") for part in parts)
+
+
 def data_root() -> Path:
     """The data volume root: `JOSHUA_DATA_DIR` if set, else `/data`."""
     return Path(os.environ.get(DATA_DIR_ENV) or DATA)

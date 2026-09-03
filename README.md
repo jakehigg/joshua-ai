@@ -47,6 +47,8 @@ subscription. You do not need Python, and you do not need a Telegram bot.
 - [docs/security.md](docs/security.md): what the agent can and cannot reach.
 - [docs/contracts.md](docs/contracts.md): every HTTP route.
 - [docs/data-layout.md](docs/data-layout.md) and [docs/events.md](docs/events.md).
+- [docs/enhancements.md](docs/enhancements.md): put your own frontend on the
+  wiki, or run Otter Wiki.
 - [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Layout
@@ -117,6 +119,13 @@ see [docs/operations.md](docs/operations.md#the-viewer).
 ```
 docker compose --profile viewer up -d viewer   # then http://127.0.0.1:8082/
 ```
+
+## Enhancements
+
+The wiki is a folder of Markdown files, so any tool that reads such a folder
+can be its frontend. Otter Wiki ships as one choice: a browser editor with
+search and page history. `enhancements.yaml` turns it on. See
+[docs/enhancements.md](docs/enhancements.md).
 
 ## Contribute
 

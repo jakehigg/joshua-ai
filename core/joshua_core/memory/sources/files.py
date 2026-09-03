@@ -10,7 +10,8 @@ Walks the data volume and yields one :class:`Document` per markdown file:
 name. ``doc_date`` comes from a ``blog/YYYY-MM-DD*.md`` name (the nightly digest
 ``YYYY-MM-DD.md`` and agent posts ``YYYY-MM-DD-HHMM-<slug>.md``) or a frontmatter
 ``date``. Frontmatter ``date``/``tags``/``provenance`` are honored when present.
-``.trash/`` directories and ``*.meta.json`` sidecars are ignored.
+A dot entry (``.trash/``, ``.git/``, and so on, at any depth) and a
+``*.meta.json`` sidecar are ignored.
 
 A directory below ``people/`` that names nobody holds no document that can be
 indexed, because a chunk carries a foreign key to ``people``. The adapter takes
@@ -27,6 +28,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from joshua_shared import layout
+from joshua_shared.layout import is_hidden
 from joshua_shared.log import get_logger
 
 from joshua_core.memory.sources import Document
@@ -159,7 +161,7 @@ class FilesSource:
         if not base.is_dir():
             return
         for file in sorted(base.rglob("*.md")):
-            if ".trash" in file.parts or not file.is_file():
+            if not file.is_file() or is_hidden(file, base):
                 continue
             yield file
 
@@ -204,7 +206,7 @@ class FilesSource:
         uses ``list_documents``; this backs targeted refresh."""
         if uri.startswith(tuple(f"{tree}/" for tree in _SHARED_TREES)):
             file = self._data_dir / uri
-            if file.is_file() and ".trash" not in file.parts:
+            if file.is_file() and not is_hidden(file, self._data_dir):
                 return self._document(file, person_id=None, path=uri)
             return None
         if not uri.startswith(tuple(f"{kind}/" for kind in _PERSON_KINDS)):
@@ -212,6 +214,6 @@ class FilesSource:
         for person_id in await self._person_ids():
             root = layout.person_root(person_id, self._data_dir)
             file = root / uri
-            if file.is_file() and ".trash" not in file.parts:
+            if file.is_file() and not is_hidden(file, root):
                 return self._document(file, person_id=person_id, path=uri)
         return None

@@ -197,8 +197,9 @@ def resolve(path: str, root_set: dict[str, Root], *, write: bool) -> tuple[Root,
     ``path`` starts with a root name, such as ``wiki/notes/x.md``,
     ``people/alex/blog/2026-08-29.md``, or ``shared/profile.md``. Raises
     ``PathError`` for an unknown root, a ``..`` or absolute path, a symlink that
-    leaves the root, a write to a read-only root, a non-``.md`` write to a
-    markdown root, or a write outside the write domain of the root.
+    leaves the root, a segment that starts with a dot (a frontend's own state,
+    such as ``.git`` or ``.trash``), a write to a read-only root, a non-``.md``
+    write to a markdown root, or a write outside the write domain of the root.
     """
     raw = path.strip()
     if not raw:
@@ -223,6 +224,13 @@ def resolve(path: str, root_set: dict[str, Root], *, write: bool) -> tuple[Root,
                 f"Use {replacement.format(person=_person_slot(root_set))} instead."
             )
         raise PathError(f"unknown or forbidden root: {parts[0]}")
+
+    if any(part.startswith(".") for part in parts[1:]):
+        # A wiki frontend or a note tool keeps its own state in a dot entry
+        # (``.git``, ``.obsidian``, ``.trash``) inside the root. That state is
+        # never part of the corpus, so a path naming it is forbidden the same
+        # way an unknown root is.
+        raise PathError(f"a hidden entry is forbidden in {root.name}")
 
     if root.is_file:
         if len(parts) != 1:
