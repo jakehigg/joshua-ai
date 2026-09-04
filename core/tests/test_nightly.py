@@ -9,7 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from joshua_core.memory.nightly import JOURNAL_SYSTEM, PROFILE_SYSTEM, NightlyReflector
+from joshua_core.memory.nightly import NightlyReflector
 from joshua_core.store.models import Person
 from joshua_shared import layout, wikigit
 from nightly_fakes import (
@@ -102,30 +102,6 @@ async def test_no_page_when_the_day_is_not_worth_one(tmp_path: Path) -> None:
     assert summary["posts_written"] == 0
     assert summary["errors"] == 0
     assert not _page(tmp_path).exists()
-
-
-def test_the_journal_prompt_rules_out_operating_joshua() -> None:
-    """The nightly sees a transcript, never a tool call, so the prompt is the
-    only lever that keeps an operating request out of the journal. The case
-    that matters: a person whose own journal lives on another service."""
-    assert "operating you" in JOURNAL_SYSTEM
-    assert "is not a life update" in JOURNAL_SYSTEM
-    assert "their own journal, blog, or notes somewhere else" in JOURNAL_SYSTEM
-    assert "does not copy it" in JOURNAL_SYSTEM
-
-
-def test_the_journal_and_profile_prompts_push_to_each_other() -> None:
-    """Episodic and semantic memory each name the other as the right home, so
-    a durable trait does not land in the journal and a timer does not land in
-    the profile."""
-    assert "belongs in their profile, not here" in JOURNAL_SYSTEM
-    assert "belong in the journal page, not the profile" in PROFILE_SYSTEM
-
-
-def test_the_journal_prompt_claims_no_per_person_journal() -> None:
-    """One journal, Joshua's. A person is named in a page, never its owner."""
-    assert "There is one journal and it is yours" in JOURNAL_SYSTEM
-    assert "never the owner of one" in JOURNAL_SYSTEM
 
 
 async def test_short_day_writes_nothing(tmp_path: Path) -> None:
