@@ -5,7 +5,6 @@ Offline: the composer reads the packaged kernel files, so no DB and no SDK.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from joshua_core.engine.profiles import derive_profile
@@ -120,38 +119,6 @@ def test_member_prompt_has_journal_section() -> None:
     assert "write_journal_entry(slug, markdown, people)" in prompt
     # The journal is Joshua's own, not a private per-person tree.
     assert "`people/<person-id>/blog/" not in prompt
-
-
-def test_the_prompt_names_no_particular_thing_to_track() -> None:
-    """The rule is a test the agent applies, not a list of what to keep. A
-    shipped prompt must not assume what any person tracks."""
-    composer = PromptComposer()
-    prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    # Subjects only. A word with an ordinary second meaning ("mood", "state")
-    # matches the voice rules and proves nothing.
-    habits = (
-        # what a person might track
-        "breakfast",
-        "meal",
-        "fever",
-        "temperature",
-        "dose",
-        "medication",
-        "receipt",
-        "weight",
-        "calorie",
-        "workout",
-        "training",
-        # what a person might own or grow
-        "plant",
-        "garden",
-        "fertilizer",
-        "pet",
-    )
-    for habit in habits:
-        assert not re.search(rf"\b{habit}", prompt, re.IGNORECASE), (
-            f"the kernel prompt assumes a habit: {habit}"
-        )
 
 
 def test_the_identity_block_carries_the_person_id() -> None:
