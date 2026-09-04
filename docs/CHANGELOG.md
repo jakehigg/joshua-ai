@@ -93,6 +93,12 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- A turn that wrote a journal entry reported writing nothing. The turn log
+  names the files a turn wrote, and it built that list from each call's
+  `path` argument, which `write_journal_entry` does not have: the tool takes a
+  slug and the gateway places the file. The entry landed correctly, and only
+  the record of it was missing. The path is now rebuilt the way the gateway
+  builds it.
 - The journal has one writer. `write_file` and `rename_file` now refuse a path
   under `wiki/journal/`, so an entry cannot land outside its day folder
   without the frontmatter the index reads, and the nightly page cannot be
