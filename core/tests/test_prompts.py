@@ -5,6 +5,7 @@ Offline: the composer reads the packaged kernel files, so no DB and no SDK.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from joshua_core.engine.profiles import derive_profile
@@ -120,15 +121,22 @@ def test_member_prompt_has_journal_section() -> None:
     assert "`people/<person-id>/blog/" not in prompt
 
 
+def _flat(text: str) -> str:
+    """The prompt with its hard wrapping collapsed, so a phrase that spans a
+    line break still matches."""
+    return " ".join(text.split())
+
+
 def test_the_prompt_rules_where_a_dated_thing_is_stored() -> None:
     """A series of dated observations is episodic. Without this rule the agent
     invents a wiki page and appends a row each time, which puts a time series
     in the store meant for what stays true."""
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    assert "Do not invent a wiki page of dated rows" in prompt
-    assert "If keeping it current means rewriting" in prompt
-    assert "adding another dated line, it is the journal" in prompt
+    flat = _flat(prompt)
+    assert "Do not invent a wiki page of dated rows" in flat
+    assert "If keeping it current means rewriting the page, it is the wiki" in flat
+    assert "adding another dated line, it is the journal" in flat
 
 
 def test_the_prompt_names_no_particular_thing_to_track() -> None:
@@ -136,8 +144,31 @@ def test_the_prompt_names_no_particular_thing_to_track() -> None:
     shipped prompt must not assume what any person tracks."""
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    for habit in ("breakfast", "fever", "temperature log", "receipt", "weight", "calorie"):
-        assert habit not in prompt.lower(), f"the kernel prompt assumes a habit: {habit}"
+    # Subjects only. A word with an ordinary second meaning ("mood", "state")
+    # matches the voice rules and proves nothing.
+    habits = (
+        # what a person might track
+        "breakfast",
+        "meal",
+        "fever",
+        "temperature",
+        "dose",
+        "medication",
+        "receipt",
+        "weight",
+        "calorie",
+        "workout",
+        "training",
+        # what a person might own or grow
+        "plant",
+        "garden",
+        "fertilizer",
+        "pet",
+    )
+    for habit in habits:
+        assert not re.search(rf"\b{habit}", prompt, re.IGNORECASE), (
+            f"the kernel prompt assumes a habit: {habit}"
+        )
 
 
 def test_a_standing_request_to_track_is_a_preference_not_a_page() -> None:
@@ -152,11 +183,12 @@ def test_asking_for_a_wiki_page_of_history_overrides_the_placement_rule() -> Non
     history easier to read in one place than to search for."""
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    assert "Unless a person asks for the page." in prompt
-    assert "Their request decides" in prompt
+    flat = _flat(prompt)
+    assert "Unless a person asks for the page." in flat
+    assert "Their request decides" in flat
     # The rule bans inventing such a page, not making one that was asked for.
-    assert "Do not invent a wiki page of dated rows" in prompt
-    assert "Never grow a wiki page of dated rows" not in prompt
+    assert "Do not invent a wiki page of dated rows" in flat
+    assert "Never grow a wiki page of dated rows" not in flat
 
 
 def test_the_journal_keeps_a_selectivity_bar() -> None:
@@ -164,8 +196,9 @@ def test_the_journal_keeps_a_selectivity_bar() -> None:
     beside it, that reads as an instruction to keep everything."""
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    assert "Most of a day is worth none." in prompt
-    assert "worth a record" in prompt
+    flat = _flat(prompt)
+    assert "Most of a day is worth none." in flat
+    assert "worth a record" in flat
 
 
 def test_the_identity_block_carries_the_person_id() -> None:

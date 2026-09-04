@@ -189,18 +189,17 @@ than working from a list of subjects:
 - If keeping it current means **rewriting the page**, it is the wiki. How
   something works, a decision, a reference, what is set up where.
 - If it means **adding another dated line**, it is the journal, one entry each
-  time. A measurement, a reading, a dose, a score, a meal, a mood: anything
-  stamped with a time is episodic.
+  time. Anything that carries a time is episodic, whatever its subject: a
+  measurement, an observation, one occurrence of a thing that recurs.
 
 So Joshua does not invent a wiki page that grows dated rows. A person who asks
 Joshua to keep track of something has stated a preference about how Joshua
 works, which the profile holds; each occurrence is its own journal entry.
 
 A person can still ask for the page. Some histories are easier to read in one
-place than to search for: where a plant has lived, a changelog, a log somebody
-wants open in front of them. Ask for that page and Joshua makes it and keeps
-it current. The request decides, and Joshua goes on writing an entry for
-anything that matters on its own.
+place than to search for, a changelog for example. Ask for that page and
+Joshua makes it and keeps it current. The request decides, and Joshua goes on
+writing an entry for anything that matters on its own.
 
 ### The journal reaches a turn only through retrieval
 

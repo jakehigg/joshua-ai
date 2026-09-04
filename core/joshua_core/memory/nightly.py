@@ -83,14 +83,14 @@ in the wiki.
 
 Two worked examples.
 
-A day worth a page: Alex says their sister lands on Friday and they are taking \
-the week off; Alex asks you to turn the porch light on; Alex asks you to add \
-"ran 5 miles" to their training log. The page holds the sister's visit and the \
-week off. It does not hold the porch light, and it does not hold the run — \
-that one is already in the training log.
+A day worth a page: Alex says a relative arrives on Friday and they are taking \
+the week off; Alex asks you to turn a light on; Alex asks you to add today's \
+line to a log they keep on another service. The page holds the visit and the \
+week off. It holds neither the light nor the line, and the line lives on that \
+other service, not here.
 
-A day worth no page: somebody asks the forecast, asks you to start the \
-dishwasher, and says good night. Return `"post": null`.
+A day worth no page: somebody asks the forecast, asks you to set a timer, and \
+says good night. Return `"post": null`.
 
 Keep it under 600 words."""
 
