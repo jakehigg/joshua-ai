@@ -24,6 +24,10 @@ coverage.xml
 .env*
 !.env.example
 /joshua.yaml*
+/enhancements.yaml*
+
+# A custom enhancement overlay is yours; the example next to it stays tracked.
+/enhancements/*/custom/docker-compose.yml
 
 # Data volume
 /data/

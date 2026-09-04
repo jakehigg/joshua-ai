@@ -22,7 +22,7 @@ class KbChunk:
     id: int = 0
     person_id: str | None = None
     source: str = ""  # adapter name: 'files' | 'memos' | ...
-    kind: str = ""  # adapter sub-type: files → 'blog' | 'wiki' | 'shared'
+    kind: str = ""  # adapter sub-type: files → 'journal' | 'profile' | 'wiki' | 'shared'
     path: str = ""  # Document.uri, e.g. 'wiki/recipes/pizza.md'
     provenance: str = "own"  # 'own' | 'external'
     title: str = ""
@@ -32,5 +32,5 @@ class KbChunk:
     similarity: float | None = None
     file_mtime: datetime | None = None
     file_sha256: str = ""
-    doc_date: date | None = None  # recency ranking (blog posts)
+    doc_date: date | None = None  # recency ranking (journal pages)
     indexed_at: datetime | None = None

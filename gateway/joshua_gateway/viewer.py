@@ -1,10 +1,11 @@
-"""Read-only web viewer for the wiki and a person's own files.
+"""Read-only web viewer for the wiki and a person's own attachments.
 
-A person opens a browser, signs in with HTTP basic, and reads the one wiki,
-their own ``profile.md``, their own journal, their own attachments, and the
-shared profile. The viewer never calls core and the agent never calls the
-viewer. It reads the data volume through the same resolver as the files MCP
-(``files_mcp.paths``), so the two never drift on who reads what.
+A person opens a browser, signs in with HTTP basic, and reads the one wiki
+(which carries Joshua's own journal and its profile of each person), their own
+attachments, and the shared attachments. The viewer never calls core and the
+agent never calls the viewer. It reads the data volume through the same
+resolver as the files MCP (``files_mcp.paths``), so the two never drift on who
+reads what.
 
 The one write action is a delete. A member moves a wiki page to the trash under
 ``wiki/.trash/``; it is never a hard delete. A guest cannot delete. Deletion
@@ -36,6 +37,7 @@ import uvicorn
 import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
+from joshua_shared.layout import is_hidden
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from markdown_it import MarkdownIt
 from starlette.applications import Starlette
@@ -60,10 +62,14 @@ _TRASH_STAMP = "%Y%m%dT%H%M%SZ"
 VIEWER_PASSWORDS_ENV = "VIEWER_PASSWORDS"
 VIEWER_PW_PREFIX = "VIEWER_PW_"
 
-# The person's home page shows at most this many recent journal posts; search
+# The person's home page shows at most this many recent attachments; search
 # returns at most this many hits.
-RECENT_BLOG_DAYS = 30
+HOME_ATTACHMENTS_MAX = 30
 SEARCH_MAX_RESULTS = 50
+
+# The sidecar a channels-stored attachment carries: ``<file>.meta.json``. Never
+# a piece of content on its own, so a listing hides it.
+_META_SUFFIX = ".meta.json"
 
 # The per-process secret for the delete CSRF token. A fresh value each start is
 # fine; a form from an earlier process fails and the person reloads the page.
@@ -73,7 +79,7 @@ _CSRF_SECRET = secrets.token_bytes(32)
 _MD = MarkdownIt("commonmark", {"html": False, "linkify": False})
 
 # Which viewer route serves each root, for a search hit link.
-_ROUTE_PREFIX = {"wiki": "/wiki/", "blog": "/blog/", "shared": "/shared/"}
+_ROUTE_PREFIX = {"wiki": "/wiki/", "shared": "/shared/"}
 
 _CSS = """\
 :root { color-scheme: light dark; --fg: #1a1a1a; --bg: #fbfbfb;
@@ -224,9 +230,9 @@ def _roots_for(person: Person) -> dict[str, Root]:
     """The display roots of the viewer, which are still per person.
 
     The corpus is shared, and the files MCP keys no root on a person. The viewer
-    does, because its URL space says "mine": ``/profile`` and ``/blog/`` name no
-    person, so they can only mean the person who signed in. A view of the whole
-    corpus needs a URL for each person, which is a separate change.
+    does, because its URL space says "mine": ``/attachments/`` names no person,
+    so it can only mean the person who signed in. A view of the whole corpus
+    needs a URL for each person, which is a separate change.
 
     This is a view, not a boundary. The viewer is read-only for everybody except
     a member deleting a wiki page, and it authenticates its own reader. Nothing
@@ -237,12 +243,8 @@ def _roots_for(person: Person) -> dict[str, Root]:
     member = person.role == "member"
     return {
         "wiki": Root("wiki", root / "wiki", can_write=member, md_only=True),
-        "blog": Root("blog", home / "blog", can_write=False, md_only=True),
-        "profile.md": Root(
-            "profile.md", home / "profile.md", can_write=False, md_only=False, is_file=True
-        ),
         "attachments": Root("attachments", home / "attachments", can_write=False, md_only=False),
-        "shared": Root("shared", root / "shared", can_write=False, md_only=True),
+        "shared": Root("shared", root / "shared", can_write=False, md_only=False),
     }
 
 
@@ -299,8 +301,7 @@ def _page(title: str, body: str, *, status: int = 200, nav: bool = True) -> HTML
 
 
 _NAV = (
-    '<nav><a href="/">home</a><a href="/profile">profile</a>'
-    '<a href="/blog/">journal</a>'
+    '<nav><a href="/">home</a>'
     '<form action="/search" method="get">'
     '<input name="q" placeholder="search" aria-label="search"></form></nav>'
 )
@@ -369,21 +370,33 @@ def _download(abs_path: Path) -> Response:
 
 def _iter_markdown(root: Root) -> Iterator[tuple[Path, str]]:
     """Yield ``(abs_path, root-relative posix path)`` for each markdown file in a
-    root, skipping the trash. A file root yields itself when it is markdown."""
-    if root.is_file:
-        if root.base.is_file() and root.base.suffix == ".md":
-            yield root.base, root.name
-        return
+    root, skipping a dot entry such as ``.trash`` or ``.git`` at any depth."""
     if not root.base.is_dir():
         return
     for item in sorted(root.base.rglob("*.md")):
-        if ".trash" in item.parts or not item.is_file():
+        if not item.is_file() or is_hidden(item, root.base):
             continue
         yield item, item.relative_to(root.base).as_posix()
 
 
 def _list_markdown(root: Root) -> list[str]:
     return [rel for _, rel in _iter_markdown(root)]
+
+
+def _list_attachments(root: Root) -> list[str]:
+    """Every stored attachment under a person's own ``attachments/``, newest
+    first, skipping a dot entry and the ``.meta.json`` sidecar next to a file."""
+    if not root.base.is_dir():
+        return []
+    names = [
+        item.relative_to(root.base).as_posix()
+        for item in root.base.rglob("*")
+        if item.is_file()
+        and not is_hidden(item, root.base)
+        and not item.name.endswith(_META_SUFFIX)
+    ]
+    names.sort(reverse=True)
+    return names
 
 
 def _section(title: str, links: list[tuple[str, str]]) -> str:
@@ -431,7 +444,24 @@ def _move_to_trash(root: Root, abs_path: Path) -> Path:
     dest = root.base / ".trash" / stamp / under_wiki
     dest.parent.mkdir(parents=True, exist_ok=True)
     os.replace(abs_path, dest)
+    _commit_trash(root, abs_path)
     return dest
+
+
+def _commit_trash(root: Root, abs_path: Path) -> None:
+    """Commit the delete ``_move_to_trash`` just made, when ``wiki.git`` is
+    enabled. ``.trash/`` is gitignored, so the commit records the removal
+    only, never the trashed copy. A failure here is a WARNING; the delete
+    already happened."""
+    try:
+        from joshua_shared import wikigit
+
+        if not wikigit.is_enabled(config.load()):
+            return
+        rel = abs_path.relative_to(root.base).as_posix()
+        wikigit.commit(root.base, [abs_path], f"viewer: trash {rel}")
+    except Exception as exc:  # noqa: BLE001 — a commit must never fail the delete
+        logger.warning({"message": "wiki commit failed", "error": str(exc)})
 
 
 # -- routes -----------------------------------------------------------------
@@ -439,42 +469,22 @@ def _move_to_trash(root: Root, abs_path: Path) -> Path:
 
 async def index(request: Request, person: Person) -> Response:
     roots = _roots_for(person)
-    body = [f"<h1>{escape(person.name)}</h1>"]
-
-    profile_root = roots["profile.md"]
-    if profile_root.base.is_file():
-        text = _read_text(profile_root.base)
-        if text is not None:
-            front, body_md = _split_frontmatter(text)
-            body.append(_frontmatter_html(front))
-            body.append(f'<article class="md">{_MD.render(body_md)}</article>')
-
-    recent = _list_markdown(roots["blog"])
-    recent.sort(reverse=True)
+    profile_url = f"/wiki/people/{person.id}.md"
+    body = [
+        f"<h1>{escape(person.name)}</h1>",
+        f'<p><a href="{escape(profile_url, quote=True)}">profile</a></p>',
+    ]
     body.append(
         _section(
-            "journal",
-            [(f"/blog/{name}", name) for name in recent[:RECENT_BLOG_DAYS]],
+            "attachments",
+            [
+                (f"/attachments/{rel}", rel)
+                for rel in _list_attachments(roots["attachments"])[:HOME_ATTACHMENTS_MAX]
+            ],
         )
     )
     body.append(_section("wiki", [(f"/wiki/{rel}", rel) for rel in _list_markdown(roots["wiki"])]))
     return _page(person.name, "".join(body))
-
-
-async def profile(request: Request, person: Person) -> Response:
-    return _serve(_roots_for(person), "profile.md", person, allow_delete=False)
-
-
-async def blog_index(request: Request, person: Person) -> Response:
-    names = _list_markdown(_roots_for(person)["blog"])
-    names.sort(reverse=True)
-    body = "<h1>journal</h1>" + _section("", [(f"/blog/{name}", name) for name in names])
-    return _page("journal", body)
-
-
-async def blog_post(request: Request, person: Person) -> Response:
-    rel = "blog/" + request.path_params["name"]
-    return _serve(_roots_for(person), rel, person, allow_delete=False)
 
 
 async def wiki_page(request: Request, person: Person) -> Response:
@@ -531,13 +541,11 @@ def _search(roots: dict[str, Root], query: str) -> list[tuple[str, str, str]]:
 
 
 def _search_url(root_name: str, rel: str) -> str:
-    if root_name == "profile.md":
-        return "/profile"
     return f"{_ROUTE_PREFIX[root_name]}{rel}"
 
 
 def _search_label(root_name: str, rel: str) -> str:
-    return "profile.md" if root_name == "profile.md" else f"{root_name}/{rel}"
+    return f"{root_name}/{rel}"
 
 
 async def delete(request: Request, person: Person) -> Response:
@@ -610,9 +618,6 @@ def build_app() -> Starlette:
             Route("/readyz", readyz),
             Route("/style.css", _require_auth(style)),
             Route("/", _require_auth(index)),
-            Route("/profile", _require_auth(profile)),
-            Route("/blog/", _require_auth(blog_index)),
-            Route("/blog/{name:path}", _require_auth(blog_post)),
             Route("/wiki/{path:path}", _require_auth(wiki_page)),
             Route("/shared/{path:path}", _require_auth(shared_page)),
             Route("/attachments/{path:path}", _require_auth(attachments)),

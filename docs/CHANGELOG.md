@@ -4,6 +4,53 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- A push to any branch, `main` included, builds the three images and tags
+  them with the commit SHA and `branch-<name>`, so `branch-main` always
+  names the newest commit on `main`. An ArgoCD Application can follow `main`
+  or a branch and run each push. The chart README has the Application, and
+  `docs/operations.md` has the Compose side. A weekly job removes the old
+  SHA-tagged builds and untagged layers from the registry.
+- Enhancements: optional services that run beside the three containers, off
+  by default. The `enhancements.yaml` file picks a choice for each slot.
+  Otter Wiki is the first wiki frontend, and a custom slot lets you plug in
+  your own container. See `docs/enhancements.md`.
+- A gateway tool, `write_journal_entry`, lets the agent write a dated entry
+  to Joshua's own journal in the wiki. Joshua writes it, in its own voice,
+  about a person, not for a person.
+- Joshua now keeps `/data/wiki` as a git repository: it makes the first
+  commit at launch, commits every write it makes, and commits anything else
+  that changed at each start and at the nightly run, so a wiki frontend such
+  as Otter Wiki never shows a page as not under version control. Set
+  `wiki.git: false` to leave git to a frontend or a sync tool. The custom
+  wiki enhancement example is now a push-to-remote sidecar; see
+  `docs/enhancements.md`.
+
+### Changed
+
+- The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name
+  says what it is. Core renames an existing `wiki/joshua/` at start.
+- The agent's file tools, the viewer, and the index now ignore any dot-file
+  or dot-directory at any depth, so a wiki frontend can keep its own state
+  in the folder.
+- Joshua now keeps its whole memory in one wiki. The journal moves to
+  `wiki/journal/`, a profile moves to `wiki/people/<id>.md`, and the shared
+  profile moves to `wiki/people/everyone.md`. On the first start after the
+  upgrade, core moves each person's files onto these paths and leaves no
+  target it finds already there. Every moved path changes, so the whole
+  corpus re-embeds once.
+- The journal is Joshua's own record of what happened, not a person's blog.
+  It reaches a turn only through search: the confidence-gated injection or
+  the `search_memory` tool. No turn gets a journal block in the system
+  prompt any more. The `memory.recent_posts` and `memory.recent_max_chars`
+  settings still load, but nothing reads them now.
+- `wiki/Home.md` is the wiki's front page. Core makes it once, from a
+  template, and never rewrites it after that. Core also removes the old
+  `wiki/README.md` and `shared/README.md`, which `Home.md` replaces.
+
 ## 0.0.4 - 2026-09-01
 
 ### Fixed

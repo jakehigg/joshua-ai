@@ -206,14 +206,17 @@ class Skills(_Model):
 
 
 class Memory(_Model):
+    # No-ops, kept only so a config file written before the journal moved into
+    # the wiki still validates. The recency tier holds no journal text now; a
+    # turn reaches the journal through retrieval only.
     recent_posts: int = 3
-    # Character caps for the system-prompt recency tier.
     recent_max_chars: int = Field(default=6000, gt=0)
+    # Character cap for the system-prompt shared-profile section.
     shared_max_chars: int = Field(default=2000, gt=0)
     nightly_at: str = "03:30"
     daily_rollover: bool = True
-    # A person needs at least this many characters of transcript text on a day
-    # for the nightly reflection to write their blog post.
+    # Joshua needs at least this many characters of the day's combined
+    # transcript for the nightly reflection to write the day's journal page.
     min_chars_for_post: int = Field(default=200, ge=0)
     inject: Inject = Inject()
     skills: Skills = Skills()
@@ -247,6 +250,18 @@ class Memory(_Model):
                 raise ValueError(f"memory source '{name}' options must be a mapping")
             normalized[name] = options
         return normalized
+
+
+class Wiki(_Model):
+    """Whether Joshua keeps `/data/wiki` as a git repository.
+
+    Joshua makes the first commit at launch, commits everything it writes,
+    and commits anything else that changed at each start and at the nightly
+    run, so a wiki frontend never shows a page as not under version control.
+    Set `git: false` to leave git to a frontend or a sync tool instead.
+    """
+
+    git: bool = True
 
 
 class McpToolPolicy(_Model):
@@ -379,6 +394,7 @@ class JoshuaConfig(_Model):
     channels: Channels = Channels()
     core: Core = Core()
     memory: Memory = Memory()
+    wiki: Wiki = Wiki()
     mcp: dict[str, McpServer] = {}
     modules: list[str] = []
     viewer: Viewer = Viewer()

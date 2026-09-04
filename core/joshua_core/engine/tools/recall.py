@@ -1,10 +1,10 @@
 """In-process ``recall`` tool server: search the caller's memory.
 
 One tool, ``search_memory``, runs a person-scoped RAG search over the indexed
-data volume: the caller's own ``blog`` documents plus the wiki and the
-shared documents. A group turn (``deps.person_id`` None) sees shared documents only.
-Read-only — each result carries the ``path`` the agent can open with the
-``files`` tool ``read_file``.
+data volume: the wiki (including the journal) plus any of the caller's own
+documents from another source (a memo, for example). A group turn
+(``deps.person_id`` None) sees shared documents only. Read-only — each result
+carries the ``path`` the agent can open with the ``files`` tool ``read_file``.
 """
 
 from __future__ import annotations

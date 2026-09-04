@@ -7,7 +7,6 @@ manager's session rebuild with the stub backend. No DB, no SDK.
 from __future__ import annotations
 
 import os
-from datetime import date
 from pathlib import Path
 
 from engine_fakes import (
@@ -34,44 +33,11 @@ def _seed_person(root: Path, person: Person, profile: str = "") -> None:
         layout.profile_path(person.id, root).write_text(profile)
 
 
-def _write_post(root: Path, pid: str, day: str, body: str) -> None:
-    (layout.person_dir(pid, "blog", root) / f"{day}.md").write_text(body)
-
-
 # --- build_memory_block ----------------------------------------------------
 
 
-def test_recent_posts_are_the_n_newest_dates(tmp_path: Path) -> None:
-    _seed_person(tmp_path, _MEMBER)
-    for day in ("2026-08-20", "2026-08-21", "2026-08-22", "2026-08-23", "2026-08-24"):
-        _write_post(tmp_path, "alex", day, f"post for {day}")
-
-    block = build_memory_block(_MEMBER, _DM, recent_posts=3, data_dir=tmp_path)
-
-    assert block is not None
-    dates = [d for d, _ in block.recent_posts]
-    assert dates == [date(2026, 8, 24), date(2026, 8, 23), date(2026, 8, 22)]
-
-
-def test_recent_posts_truncates_the_oldest_first(tmp_path: Path) -> None:
-    _seed_person(tmp_path, _MEMBER)
-    _write_post(tmp_path, "alex", "2026-08-24", "N" * 40)
-    _write_post(tmp_path, "alex", "2026-08-23", "M" * 40)
-    _write_post(tmp_path, "alex", "2026-08-22", "O" * 40)
-
-    # Budget holds the two newest whole and cuts into the oldest.
-    block = build_memory_block(_MEMBER, _DM, recent_posts=3, recent_max_chars=90, data_dir=tmp_path)
-
-    assert block is not None
-    newest, middle, oldest = block.recent_posts
-    assert newest[1] == "N" * 40  # newest untouched
-    assert middle[1] == "M" * 40
-    assert oldest[0] == date(2026, 8, 22)
-    assert len(oldest[1]) == 10  # 90 - 40 - 40
-    assert set(oldest[1]) == {"O"}
-
-
 def test_group_session_gets_only_the_shared_profile(tmp_path: Path) -> None:
+    layout.bootstrap_wiki(root=tmp_path)
     layout.bootstrap_shared(root=tmp_path)
     layout.shared_profile_path(tmp_path).write_text("# Home\n## About\nWe are four.")
 
@@ -79,11 +45,9 @@ def test_group_session_gets_only_the_shared_profile(tmp_path: Path) -> None:
 
     assert block is not None
     assert block.profile_md == ""
-    assert block.recent_posts == []
     assert block.shared_md is not None and "We are four." in block.shared_md
     rendered = render(block)
     assert "## Shared profile" in rendered
-    assert "## Recent days" not in rendered
 
 
 def test_group_session_without_shared_profile_is_none(tmp_path: Path) -> None:
@@ -96,6 +60,7 @@ def test_person_none_on_per_person_is_none(tmp_path: Path) -> None:
 
 def test_member_includes_shared_section(tmp_path: Path) -> None:
     _seed_person(tmp_path, _MEMBER)
+    layout.bootstrap_wiki(root=tmp_path)
     layout.bootstrap_shared(root=tmp_path)
     layout.shared_profile_path(tmp_path).write_text("# Home\nShared facts.")
 
@@ -107,6 +72,7 @@ def test_member_includes_shared_section(tmp_path: Path) -> None:
 
 def test_guest_has_no_shared_section(tmp_path: Path) -> None:
     _seed_person(tmp_path, _GUEST)
+    layout.bootstrap_wiki(root=tmp_path)
     layout.bootstrap_shared(root=tmp_path)
     layout.shared_profile_path(tmp_path).write_text("# Home\nShared facts.")
 
@@ -118,6 +84,7 @@ def test_guest_has_no_shared_section(tmp_path: Path) -> None:
 
 def test_shared_profile_capped_at_max_chars(tmp_path: Path) -> None:
     _seed_person(tmp_path, _MEMBER)
+    layout.bootstrap_wiki(root=tmp_path)
     layout.bootstrap_shared(root=tmp_path)
     layout.shared_profile_path(tmp_path).write_text("# Home\n" + "x" * 5000)
 
@@ -144,19 +111,17 @@ def test_profile_drops_title_and_template_comment(tmp_path: Path) -> None:
     assert "rewritten nightly" not in rendered
 
 
-def test_render_orders_profile_then_days_then_shared(tmp_path: Path) -> None:
+def test_render_orders_profile_then_shared(tmp_path: Path) -> None:
     _seed_person(tmp_path, _MEMBER, profile="# Alex\n## About\nA person.")
-    _write_post(tmp_path, "alex", "2026-08-24", "Today happened.")
+    layout.bootstrap_wiki(root=tmp_path)
     layout.bootstrap_shared(root=tmp_path)
     layout.shared_profile_path(tmp_path).write_text("# Home\nShared facts.")
 
     rendered = render(build_memory_block(_MEMBER, _DM, data_dir=tmp_path))
 
     profile_at = rendered.index("## About Alex")
-    days_at = rendered.index("## Recent days")
-    day_at = rendered.index("### 2026-08-24")
     shared_at = rendered.index("## Shared profile")
-    assert profile_at < days_at < day_at < shared_at
+    assert profile_at < shared_at
 
 
 # --- manager rebuild on a newer profile ------------------------------------

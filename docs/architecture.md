@@ -93,7 +93,7 @@ own part of it:
 | `people/<id>/blog/YYYY-MM-DD.md`, `people/<id>/profile.md`, `shared/profile.md` | core |
 | `wiki/` | gateway, for a member |
 | `people/<id>/blog/<dated post>` | gateway, for the person |
-| `wiki/joshua/` | core, at each start |
+| `wiki/joshua-docs/` | core, at each start |
 
 `data-layout.md` describes the tree. `memory.md` describes what `core` does with
 it.

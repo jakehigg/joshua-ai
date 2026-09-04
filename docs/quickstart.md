@@ -210,7 +210,7 @@ Everything Joshua writes is Markdown on one volume:
 /data/people/<id>/profile.md      who you are
 /data/people/<id>/blog/           what happened, one file per post
 /data/wiki/                       the wiki: reference pages for everyone
-/data/wiki/joshua/                Joshua's own documentation
+/data/wiki/joshua-docs/           Joshua's own documentation
 /data/shared/                     the shared profile and group-chat files
 ```
 

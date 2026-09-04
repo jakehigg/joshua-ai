@@ -37,9 +37,9 @@ Each `people[]` entry takes:
 - `role`: `member` (default) or `guest`.
 - `handles`: a map of channel to handle id.
 - `prompt`: a path to an extra prompt snippet for this person.
-- `journal`: how the agent journals this person's life updates: `auto`
-  (default, write a post on its own), `ask` (offer first), or `off` (never post
-  unless asked). See [memory.md](memory.md).
+- `journal`: consent for what Joshua's journal says about this person's own
+  life updates: `auto` (default, write an entry on its own), `ask` (offer
+  first), or `off` (write an entry only when asked). See [memory.md](memory.md).
 
 ## Helpers
 
@@ -188,14 +188,17 @@ docker compose restart core
 
 ### Prompt tiers
 
-Every turn carries the person's `profile.md` and their most recent blog days in
-the system prompt. These are always present, whatever the search finds.
+Every turn carries the person's profile page in the system prompt, and the
+shared profile too for a member or a group session. This is always present,
+whatever the search finds. The journal carries no prompt tier: it reaches a
+turn only through retrieval. See
+[memory.md](memory.md#the-journal-reaches-a-turn-only-through-retrieval).
 
 | Key | Default | What it does |
 |---|---|---|
-| `recent_posts` | `3` | blog days kept in full in the prompt |
-| `recent_max_chars` | `6000` | cap for those days. The oldest is cut first |
 | `shared_max_chars` | `2000` | cap for the shared profile section |
+| `recent_posts` | `3` | accepted for a config from an earlier release; no longer read |
+| `recent_max_chars` | `6000` | accepted for a config from an earlier release; no longer read |
 
 ### Retrieval
 
@@ -263,6 +266,25 @@ memory:
 
 A person below `min_chars_for_post` is skipped, and core logs the reason with
 the count. `POST /admin/reflect` runs or re-runs one day.
+
+## wiki
+
+`wiki.git` controls whether Joshua keeps `/data/wiki` as a git repository.
+The default is `true`.
+
+```yaml
+wiki:
+  git: true
+```
+
+When it is on, core makes the repository at its first start (`git init`,
+with a `.gitignore` that excludes `wiki/.trash/`), and commits at start, at
+each write the agent makes through the gateway, and at the nightly run. See
+[docs/data-layout.md](data-layout.md#the-wiki) for what gets committed and
+when, and [docs/operations.md](operations.md) for adding a remote.
+
+Set `git: false` to leave git to a wiki frontend, such as Otter Wiki, or to
+a sync tool of your own. Joshua then never touches `wiki/.git`.
 
 ## MCP servers
 
@@ -362,8 +384,8 @@ The write rule below `people/` is the write domain of a container, and not a
 wall between people: `channels` owns `people/<id>/attachments/` and `core` owns
 `people/<id>/profile.md`, so the agent reads both and writes neither.
 
-`wiki/joshua/` holds the documentation that the repo ships. Core replaces it at
-each start.
+`wiki/joshua-docs/` holds the documentation that the repo ships. Core
+replaces it at each start.
 
 Channels stores an inbound attachment under `people/<id>/attachments/YYYY/MM/` with the name
 `YYYY-MM-DD-HHMMSS-<stem>.<ext>`, where `<stem>` is the sanitized original stem.

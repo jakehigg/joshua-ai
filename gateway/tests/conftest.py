@@ -52,9 +52,15 @@ def echo_mcp(allow: str = "all", tools_allow: str = "echo") -> str:
         """)
 
 
-def joshua_yaml(mcp_block: str) -> str:
-    """A minimal, valid joshua.yaml carrying ``mcp_block`` under ``mcp:``."""
-    return textwrap.dedent("""\
+def joshua_yaml(mcp_block: str, *, wiki_git: bool | None = None) -> str:
+    """A minimal, valid joshua.yaml carrying ``mcp_block`` under ``mcp:``.
+
+    ``wiki_git`` adds a ``wiki: {git: ...}`` section when set; omitted, the
+    config keeps its default (``true``).
+    """
+    wiki_block = f"wiki:\n  git: {str(wiki_git).lower()}\n" if wiki_git is not None else ""
+    return (
+        textwrap.dedent("""\
             name: Test
             timezone: America/New_York
             people:
@@ -62,8 +68,11 @@ def joshua_yaml(mcp_block: str) -> str:
                 name: Alex
               - id: mia
                 name: Mia
-            mcp:
-            """) + textwrap.indent(mcp_block, "  ")
+            """)
+        + wiki_block
+        + "mcp:\n"
+        + textwrap.indent(mcp_block, "  ")
+    )
 
 
 @contextlib.asynccontextmanager
@@ -111,8 +120,9 @@ def gateway(monkeypatch, config_path):
     custom ``mcp`` block (the YAML under ``mcp:``).
     """
 
-    def _make(mcp: str | None = None):
-        config_path.write_text(joshua_yaml(mcp if mcp is not None else echo_mcp()))
+    def _make(mcp: str | None = None, *, wiki_git: bool | None = None):
+        block = mcp if mcp is not None else echo_mcp()
+        config_path.write_text(joshua_yaml(block, wiki_git=wiki_git))
         monkeypatch.setattr(config, "_cache", None)
         for identity, token in TOKENS.items():
             monkeypatch.setenv(f"JOSHUA_TOKEN_{identity.upper()}", token)

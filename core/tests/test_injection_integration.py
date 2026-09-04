@@ -1,13 +1,14 @@
 """Integration tests for per-turn injection against a real pgvector database.
 
 Covers the full-injection path end to end (index → embed → search → note →
-``kb_event`` audit) and the person-scope predicate. Embedding is monkeypatched to
-a fixed non-zero vector, so every indexed row scores cosine 1.0 and scope, not
-content, decides what a person retrieves.
+``kb_event`` audit). Embedding is monkeypatched to a fixed non-zero vector, so
+every indexed row scores cosine 1.0 and every document is shared scope now, so
+a search is not narrowed by who asks.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,10 +19,14 @@ from joshua_core.memory import embed as embed_module
 from joshua_core.memory.indexer import Indexer
 from joshua_core.memory.sources.files import FilesSource
 from joshua_core.memory.store import MemoryStore
+from joshua_shared import layout
 
 pytestmark = pytest.mark.integration
 
 VEC = [1.0] + [0.0] * 383
+
+DAY_ONE = date(2026, 8, 20)
+DAY_TWO = date(2026, 8, 21)
 
 
 @pytest.fixture
@@ -29,16 +34,20 @@ def const_embed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(embed_module, "embed", lambda text, model="": list(VEC))
 
 
+def _entry_path(root: Path, day: date, slug: str) -> Path:
+    path = layout.journal_entry_path(day, slug, root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _tree(root: Path) -> None:
-    (root / "people/alice/blog").mkdir(parents=True)
-    (root / "people/bob/blog").mkdir(parents=True)
-    (root / "shared").mkdir(parents=True)
-    (root / "people/alice/blog/2026-08-20.md").write_text(
+    _entry_path(root, DAY_ONE, "pizza-dough").write_text(
         "# Pizza dough\n\nUse 00 flour and give the dough a long cold rise.\n"
     )
-    (root / "people/bob/blog/2026-08-21.md").write_text(
-        "# Cooking\n\nBob keeps his private stir-fry notes here.\n"
+    _entry_path(root, DAY_TWO, "stir-fry").write_text(
+        "# Cooking\n\nBob's stir-fry notes go here.\n"
     )
+    (root / "shared").mkdir(parents=True, exist_ok=True)
     (root / "shared/house.md").write_text("# House\n\nThe guest wifi password is on the fridge.\n")
 
 
@@ -89,11 +98,14 @@ async def test_full_injection_and_audit_row(db, repo, tmp_path: Path, const_embe
     assert events[0]["decision"] == "full"
     assert events[0]["turn_id"] == "t-x"
     uris = {r["uri"] for r in events[0]["results"]}
-    assert "blog/2026-08-20.md" in uris
-    # One corpus: the journal of another person is in scope, and the audit row
-    # records every document the search considered.
-    assert "blog/2026-08-21.md" in uris
-    assert any(r["injected"] and r["uri"] == "blog/2026-08-20.md" for r in events[0]["results"])
+    assert "wiki/journal/2026/08/20/pizza-dough.md" in uris
+    # One corpus: another person's journal entry is in scope, and the audit
+    # row records every document the search considered.
+    assert "wiki/journal/2026/08/21/stir-fry.md" in uris
+    assert any(
+        r["injected"] and r["uri"] == "wiki/journal/2026/08/20/pizza-dough.md"
+        for r in events[0]["results"]
+    )
 
 
 async def test_a_group_turn_reaches_the_same_corpus(db, repo, tmp_path: Path, const_embed) -> None:
@@ -117,8 +129,8 @@ async def test_a_group_turn_reaches_the_same_corpus(db, repo, tmp_path: Path, co
     assert group_note is not None
     events = await repo.kb_events(1)
     uris = {r["uri"] for r in events[0]["results"]}
-    # A journal reaches this set, and not ``shared/house.md`` alone.
-    assert any(uri.startswith("blog/") for uri in uris)
+    # The journal reaches this set, and not ``shared/house.md`` alone.
+    assert any(uri.startswith("wiki/journal/") for uri in uris)
     # The fixture embeds every document to the same vector, so each one ties and
     # the top-k order is arbitrary. Which document wins is not asserted: the
     # scope is what this test is about. ``test_a_search_reaches_the_whole_corpus``

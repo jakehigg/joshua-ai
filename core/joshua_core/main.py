@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from joshua_shared import config as config_module
-from joshua_shared import layout
+from joshua_shared import layout, wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger, install_healthcheck_filter
 
@@ -227,12 +227,7 @@ def _build_memory(
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     memory = settings.memory
 
-    async def _person_ids() -> set[str]:
-        """The roster the index is keyed on. A chunk carries this foreign key,
-        so a directory that names nobody here holds nothing storable."""
-        return {person.id for person in await repo.list_people()}
-
-    sources: dict[str, Any] = {"files": FilesSource(data_dir, persons=_person_ids)}
+    sources: dict[str, Any] = {"files": FilesSource(data_dir)}
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
     for name, options in memory.sources.items():
         if name == "files":
@@ -257,21 +252,41 @@ def _build_memory(
 
 
 def _bootstrap_layout(settings: JoshuaConfig) -> None:
-    """Create the data volume tree: the wiki, `shared/`, and every person.
+    """Create the data volume tree, then bring an older layout onto it.
 
-    Idempotent: a second boot finds the dirs and the template files present
-    and leaves them. The shipped documentation under `wiki/joshua/` is
+    `migrate_to_one_wiki` runs before any template page is written, so a
+    profile it finds at its target is a real one, never a template this
+    boot wrote first — a template written before the move ran would
+    otherwise shadow the real profile forever. Idempotent: a second boot
+    finds the wiki and its pages already settled and leaves them.
+    `migrate_to_one_wiki` logs its own counts, so this function does not log
+    them again. The shipped documentation under `wiki/joshua-docs/` is
     rewritten each boot, because the repo owns it.
     """
-    moved = layout.bootstrap_wiki()
-    if moved:
-        logger.info({"message": "moved legacy per-person wiki pages into wiki/", "pages": moved})
-    layout.bootstrap_shared(settings.name)
+    layout.bootstrap_wiki()
+    layout.bootstrap_shared()
+    layout.migrate_to_one_wiki()
+    layout.bootstrap_shared_profile(settings.name)
     pages = layout.bootstrap_docs()
     if pages:
         logger.info({"message": "repo docs published", "pages": pages})
     for person in settings.people:
         layout.bootstrap_person(person.id, person.name)
+    _sync_wiki_git(settings)
+
+
+def _sync_wiki_git(settings: JoshuaConfig) -> None:
+    """Keep `wiki/` a git repository Joshua commits. See `wiki.git`.
+
+    The first run on an existing wiki commits every page; a later start
+    commits whatever changed outside Joshua (a person's editor, a sync
+    tool). A no-op when `wiki.git` is off.
+    """
+    if not wikigit.is_enabled(settings):
+        return
+    wiki_root = layout.wiki_root()
+    wikigit.ensure_repo(wiki_root)
+    wikigit.commit(wiki_root, None, "start: sync the wiki")
 
 
 async def healthz() -> dict[str, bool]:

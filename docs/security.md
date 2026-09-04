@@ -63,15 +63,16 @@ The `files` server confines every path to the speaker's roots:
 | Path | Read | Write |
 |---|---|---|
 | `wiki/` | everyone | a member, `.md` only. A guest reads only. |
-| `people/<id>/blog/` | everyone | a member, `.md` only, create or append |
-| `people/<id>/profile.md` | everyone | nobody. Nightly reflection writes it. |
+| `wiki/journal/` | everyone | a member, through `write_journal_entry` only. The nightly page is core alone. |
+| `wiki/people/<id>.md` | everyone | that person, when a member. Nightly reflection also rewrites it. |
+| `wiki/people/everyone.md` | everyone | nobody through the agent. Nightly reflection writes it. |
 | `people/<id>/attachments/` | everyone | nobody. Channels writes it. |
 | `shared/` | everyone | nobody. Core and channels write it. |
 
-A write below `people/` must name a person who is on the roster. A segment
-that names nobody, such as a display name, is refused and makes no directory.
-A turn that carries no person writes no journal at all, because a post belongs
-to a person; a group turn writes the wiki instead.
+A journal entry names at least one person in its `people` front matter. The
+gateway refuses a name that is not on the roster. Writing the journal follows
+the same role rule as the rest of the wiki: a guest never writes one, and a
+group chat writes one only when its derived role is member.
 
 The server refuses a path with `..`, an absolute path, and a symlink that
 leaves a root.
@@ -81,10 +82,10 @@ the `unknown` person, gets `wiki/` and `shared/` read-only and nothing else.
 ## One corpus, and two axes
 
 Joshua holds one corpus, and it is the memory of one entity. The wiki is what
-Joshua knows. The journal at `people/<id>/blog/` is when something happened. An
-attachment is the artifact. None of the three belongs to one person:
-`people/<id>/` says whose episode a journal entry records, and it is provenance,
-not a wall.
+Joshua knows. The journal, inside the wiki at `wiki/journal/`, is when
+something happened. An attachment is the artifact. None of the three belongs
+to one person: the `people` front matter on a journal entry says whose episode
+it records, and it is provenance, not a wall.
 
 Two axes carry the whole model:
 
@@ -149,9 +150,10 @@ The files MCP keeps one rule and dropped another:
 - **The person boundary** decided which person could reach `people/<id>/`. It is
   gone. The corpus is shared.
 - **The write domain** decides which container owns a path: `channels` alone
-  writes an attachment, `core` alone writes `profile.md`, and the agent writes
-  the wiki and the journal. It stays. A member reads an attachment and does not
-  write one, because `channels` owns that path.
+  writes an attachment, `core` writes every profile nightly, and the agent
+  writes the wiki: a page, a journal entry, and a member's own profile page.
+  It stays. A member reads an attachment and does not write one, because
+  `channels` owns that path.
 
 ## Secrets
 
@@ -178,9 +180,8 @@ the credential.
 A prompt injection is the realistic attack: a message, a file, or a tool result
 that tells the agent to do something. This is what it can do at most:
 
-- Read the wiki, and write it when the speaker is a member.
-- Read any journal, and write a post to the speaker's own
-  `people/<id>/blog/`.
+- Read the wiki, and write it when the speaker is a member: a page, a journal
+  entry through `write_journal_entry`, or the speaker's own profile page.
 - Read `shared/`.
 - Call the MCP servers the speaker is allowed, with the speaker's identity.
 - Reply on the channel the turn came from, and to any destination through a

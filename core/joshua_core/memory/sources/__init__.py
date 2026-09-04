@@ -28,7 +28,7 @@ class Document:
     rev: str  # opaque change marker (files: sha256; memos: updateTime)
     provenance: str = "own"  # "own" | "external"
     tags: tuple[str, ...] = ()
-    doc_date: date | None = None  # for recency ranking (blog posts, memos)
+    doc_date: date | None = None  # for recency ranking (journal pages, memos)
     # Parsed frontmatter ``key: value`` pairs. ``FilesSource`` fills it; a flat
     # source (memos) leaves it empty. The indexer reads it for a taught skill.
     frontmatter: Mapping[str, str] = field(default_factory=dict)

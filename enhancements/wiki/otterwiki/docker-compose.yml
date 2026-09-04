@@ -1,0 +1,62 @@
+# Otter Wiki (https://github.com/redimp/otterwiki) is a web UI to view and
+# edit the wiki at /data/wiki. MIT license. It is an enhancement: an
+# optional service that runs code from another project, not from Joshua.
+# This file builds nothing and ships no Joshua image.
+#
+# Every Otter Wiki setting is documented at
+# https://otterwiki.com/Configuration. docs/enhancements.md explains the
+# Joshua side: how to turn this on, and what it can and cannot reach.
+#
+# This overlay needs Docker Compose 2.26 or later. The wiki mount below uses
+# a named volume subpath, which earlier versions do not support.
+services:
+  otterwiki:
+    # Pinned. Not a Joshua image. The slim variant runs unprivileged and
+    # listens on 8080. Releases are at
+    # https://github.com/redimp/otterwiki/releases.
+    image: redimp/otterwiki:2.24.0-slim
+    # The volume below is owned by uid 1000, like every Joshua container.
+    user: "1000:1000"
+    restart: unless-stopped
+    environment:
+      SITE_NAME: ${OTTERWIKI_SITE_NAME:-Joshua wiki}
+      RETAIN_PAGE_NAME_CASE: "True"
+      COMMIT_MESSAGE: OPTIONAL
+      # Open by default, the same as Otter Wiki itself: anyone who reaches
+      # the port reads and edits, and the port is loopback only. The wiki
+      # holds Joshua's journal and the profiles, so before you expose the
+      # host, set these to REGISTERED in .env and register an account.
+      READ_ACCESS: ${OTTERWIKI_READ_ACCESS:-ANONYMOUS}
+      WRITE_ACCESS: ${OTTERWIKI_WRITE_ACCESS:-ANONYMOUS}
+      ATTACHMENT_ACCESS: ${OTTERWIKI_ATTACHMENT_ACCESS:-ANONYMOUS}
+      # Otter Wiki has no SECRET_KEY variable here on purpose. It writes its
+      # own into /app-data/settings.cfg on first start, so Joshua mints
+      # nothing for it and never holds it.
+    volumes:
+      # Accounts, settings, and the search database. The first account that
+      # registers with Otter Wiki becomes its admin.
+      - otterwiki-data:/app-data
+      # Only the wiki, not all of /data. Otter Wiki never sees a person's
+      # profile, journal, or attachments.
+      #
+      # Otter Wiki keeps its pages in a git repository and runs `git init`
+      # here on first start, so a `.git` directory appears under wiki/.
+      # Joshua ignores dot-directories.
+      - type: volume
+        source: data
+        target: /app-data/repository
+        volume:
+          subpath: wiki
+    # Loopback only, on its own port, the same way as the viewer in
+    # docker-compose.yml. 8080 is channels, 8081 core, 8082 the viewer.
+    ports:
+      - "127.0.0.1:8083:8080"
+    # core makes wiki/ on the volume at its first start, and a subpath mount
+    # fails when the directory does not exist yet. Wait for core, so a new
+    # stack starts in the right order.
+    depends_on:
+      core:
+        condition: service_healthy
+
+volumes:
+  otterwiki-data:

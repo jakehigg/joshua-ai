@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
 from joshua_core.memory.nightly import NightlyReflector
 from joshua_core.store.models import Person
-from joshua_shared import layout
+from joshua_shared import layout, wikigit
 from nightly_fakes import (
     FakeIndexer,
     FakeManager,
@@ -18,6 +21,8 @@ from nightly_fakes import (
     make_settings,
     row,
 )
+
+_GIT_MISSING = shutil.which("git") is None
 
 NY = ZoneInfo("America/New_York")
 DAY = date(2026, 8, 26)
@@ -32,7 +37,9 @@ PEOPLE = [
 
 
 def _bootstrap(root: Path) -> None:
-    layout.bootstrap_shared("Test House", root)
+    layout.bootstrap_wiki(root)
+    layout.bootstrap_shared(root)
+    layout.bootstrap_shared_profile("Test House", root)
     layout.bootstrap_person("alex", "Alex", root)
     layout.bootstrap_person("gwen", "Gwen", root)
 
@@ -50,11 +57,11 @@ def _reflector(tmp_path: Path, repo: FakeReflectRepo, *, oneshot=None, extra: st
     return reflector, indexer, manager
 
 
-def _blog(root: Path, pid: str, d: date = DAY) -> Path:
-    return layout.person_dir(pid, "blog", root) / f"{d.isoformat()}.md"
+def _page(root: Path, d: date = DAY) -> Path:
+    return layout.journal_day_page(d, root)
 
 
-async def test_writes_post_and_profile(tmp_path: Path) -> None:
+async def test_writes_page_and_profile(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     repo = FakeReflectRepo(
         people=PEOPLE,
@@ -67,13 +74,13 @@ async def test_writes_post_and_profile(tmp_path: Path) -> None:
 
     summary = await reflector.reflect(target_date=DAY)
 
-    post = _blog(tmp_path, "alex")
-    assert post.exists()
-    text = post.read_text()
-    assert text.startswith("---\ndate: 2026-08-26\nperson: alex\nsource: nightly\n---\n")
+    page = _page(tmp_path)
+    assert page.exists()
+    text = page.read_text()
+    assert text.startswith("---\ndate: 2026-08-26\npeople: [alex]\nsource: nightly\n---\n")
     assert "Alex had a good day." in text
     assert "Likes tea." in layout.profile_path("alex", tmp_path).read_text()
-    assert {"source": "files", "person": "alex"} in indexer.calls
+    assert {"source": "files", "person": None} in indexer.calls
     assert summary["posts_written"] == 1
     assert summary["profiles_updated"] == 1
 
@@ -92,13 +99,13 @@ async def test_short_day_writes_nothing(tmp_path: Path) -> None:
 
     summary = await reflector.reflect(target_date=DAY)
 
-    assert not _blog(tmp_path, "alex").exists()
+    assert not _page(tmp_path).exists()
     assert layout.profile_path("alex", tmp_path).read_text() == before
     assert indexer.calls == []
     assert summary["posts_written"] == 0
 
 
-async def test_rerun_overwrites_the_post(tmp_path: Path) -> None:
+async def test_rerun_overwrites_the_page(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     repo = FakeReflectRepo(
         people=PEOPLE,
@@ -115,12 +122,10 @@ async def test_rerun_overwrites_the_post(tmp_path: Path) -> None:
     )
     await reflector2.reflect(target_date=DAY)
 
-    posts = list(layout.person_dir("alex", "blog", tmp_path).glob("2026-08-26*.md"))
-    assert len(posts) == 1
-    assert "A different second entry." in posts[0].read_text()
+    assert "A different second entry." in _page(tmp_path).read_text()
 
 
-async def test_guest_dm_gets_a_post(tmp_path: Path) -> None:
+async def test_guest_dm_gets_a_page(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     repo = FakeReflectRepo(
         people=PEOPLE,
@@ -133,7 +138,8 @@ async def test_guest_dm_gets_a_post(tmp_path: Path) -> None:
 
     await reflector.reflect(target_date=DAY)
 
-    assert _blog(tmp_path, "gwen").exists()
+    text = _page(tmp_path).read_text()
+    assert "people: [gwen]" in text
 
 
 async def test_group_attributes_member_not_guest(tmp_path: Path) -> None:
@@ -153,15 +159,17 @@ async def test_group_attributes_member_not_guest(tmp_path: Path) -> None:
 
     summary = await reflector.reflect(target_date=DAY)
 
-    assert _blog(tmp_path, "alex").exists()
-    assert not _blog(tmp_path, "gwen").exists()
+    text = _page(tmp_path).read_text()
+    # Only the member is in the day's `people` front matter, but the group
+    # transcript (including the guest's turns) still fed the one call.
+    assert "people: [alex]" in text
     # The shared pass ran over the group chat.
     assert summary["shared_updated"] is True
     assert "Quiet weeknights." in layout.shared_profile_path(tmp_path).read_text()
     assert {"source": "files", "person": None} in indexer.calls
 
 
-async def test_unparseable_reflection_skips_person(tmp_path: Path) -> None:
+async def test_unparseable_reflection_skips_the_day(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     repo = FakeReflectRepo(
         people=PEOPLE,
@@ -174,7 +182,7 @@ async def test_unparseable_reflection_skips_person(tmp_path: Path) -> None:
 
     summary = await reflector.reflect(target_date=DAY)
 
-    assert not _blog(tmp_path, "alex").exists()
+    assert not _page(tmp_path).exists()
     assert summary["errors"] >= 1
     assert summary["posts_written"] == 0
 
@@ -203,11 +211,11 @@ async def test_skill_teaching_exchange_is_dropped(tmp_path: Path) -> None:
 
     await reflector.reflect(target_date=DAY)
 
-    assert not _blog(tmp_path, "alex").exists()
+    assert not _page(tmp_path).exists()
 
 
 async def test_a_journaled_day_still_reflects(tmp_path: Path) -> None:
-    """A regression: the agent journals with `write_file` during an
+    """A regression: the agent journals with `write_journal_entry` during an
     ordinary conversation, so keying the skip on the tool name threw the day
     away and `profile.md` was never written."""
     _bootstrap(tmp_path)
@@ -220,8 +228,8 @@ async def test_a_journaled_day_still_reflects(tmp_path: Path) -> None:
                 "out",
                 "Noted in your journal.",
                 T11,
-                tools=["mcp__files__write_file"],
-                written=["blog/moving-to-boston.md"],
+                tools=["mcp__files__write_journal_entry"],
+                written=["wiki/journal/2026/08/26/moving-to-boston.md"],
             ),
         ],
         conv_meta={
@@ -283,3 +291,57 @@ async def test_a_short_day_reports_why_it_was_skipped(tmp_path: Path) -> None:
     assert summary["people"] == 1
     assert summary["people_reflected"] == 0
     assert summary["posts_written"] == 0
+
+
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_nightly_commits_the_day_page(tmp_path: Path) -> None:
+    _bootstrap(tmp_path)
+    wiki = layout.wiki_root(tmp_path)
+    wikigit.ensure_repo(wiki)
+    wikigit.commit(wiki, None, "start: sync the wiki")
+    # An edit made outside Joshua during the day; the day-page commit only
+    # stages what the reflection wrote, so this is left for the broad sync.
+    (wiki / "note-by-a-person.md").write_text("hi\n")
+
+    repo = FakeReflectRepo(
+        people=PEOPLE,
+        rows=[row("c1", "in", LONG, T10), row("c1", "out", "Congratulations!", T11)],
+        conv_meta={
+            "c1": {"session_mode": "per_person", "person_id": "alex", "display_name": "Alex"}
+        },
+    )
+    reflector, _, _ = _reflector(tmp_path, repo)
+
+    await reflector.reflect(target_date=DAY)
+
+    log = subprocess.run(  # noqa: ASYNC221 — test assertion, not app code
+        ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True, check=True
+    ).stdout
+    assert f"nightly: {DAY.isoformat()}" in log
+    assert "nightly: sync the wiki" in log
+
+
+async def test_nightly_writes_nothing_to_git_when_wiki_git_is_off(tmp_path: Path) -> None:
+    _bootstrap(tmp_path)
+    repo = FakeReflectRepo(
+        people=PEOPLE,
+        rows=[row("c1", "in", LONG, T10), row("c1", "out", "Congratulations!", T11)],
+        conv_meta={
+            "c1": {"session_mode": "per_person", "person_id": "alex", "display_name": "Alex"}
+        },
+    )
+    calls: list[tuple] = []
+    import joshua_core.memory.nightly as nightly_module
+
+    orig_commit = nightly_module.wikigit.commit
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return orig_commit(*args, **kwargs)
+
+    reflector, _, _ = _reflector(tmp_path, repo, extra="wiki:\n  git: false\n")
+
+    await reflector.reflect(target_date=DAY)
+
+    assert calls == []
+    assert not (layout.wiki_root(tmp_path) / ".git").exists()

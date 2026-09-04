@@ -1,8 +1,8 @@
 """Person-scoped memory search: vector recall + recency-aware ranking.
 
 ``search`` over-fetches candidates by cosine from the person's scope, then
-applies :func:`rank_chunks` (per-document cap and a recency bonus for ``blog``
-kinds) to return the top ``k`` chunks.
+applies :func:`rank_chunks` (per-document cap and a recency bonus for
+``journal`` kinds) to return the top ``k`` chunks.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from joshua_core.memory.models import KbChunk
 from joshua_core.memory.ranking import PER_DOC_CAP, rank_chunks
 from joshua_core.memory.store import MemoryStore
 
-# Blog posts are time-anchored; wiki and shared reference pages are not.
-TEMPORAL_KINDS: tuple[str, ...] = ("blog",)
+# Journal pages are time-anchored; wiki and profile pages are not.
+TEMPORAL_KINDS: tuple[str, ...] = ("journal",)
 # Fetch this many times ``k`` candidates so the per-doc cap and recency
 # re-ordering have room to work before the final trim to ``k``.
 _CANDIDATE_MULTIPLIER = 5

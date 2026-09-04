@@ -21,6 +21,7 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from joshua_shared import wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
@@ -73,7 +74,11 @@ class _Managed:
     memory_mtime: float = 0.0
 
 
-WRITE_TOOLS = ("mcp__files__write_file", "mcp__files__rename_file")
+WRITE_TOOLS = (
+    "mcp__files__write_file",
+    "mcp__files__rename_file",
+    "mcp__files__write_journal_entry",
+)
 
 
 def written_paths(tool_calls: list[dict[str, Any]]) -> list[str]:
@@ -172,13 +177,11 @@ class ConversationManager:
         return cwd
 
     def _memory_block(self, person: Any, channel: Channel) -> Any:
-        """The recency tier (profile.md + recent posts + shared profile) for a session."""
+        """The recency tier (profile page + shared profile) for a session."""
         mem = self._settings.memory
         return memory_prompt.build_memory_block(
             person,
             channel,
-            recent_posts=mem.recent_posts,
-            recent_max_chars=mem.recent_max_chars,
             shared_max_chars=mem.shared_max_chars,
             data_dir=self._data_dir,
         )
@@ -217,6 +220,7 @@ class ConversationManager:
                 server_names=server_names,
                 resume=resume,
                 data_dir=self._data_dir,
+                wiki_git=wikigit.is_enabled(self._settings),
             )
             return session, None, profile_name, mem_paths, mem_mtime
 

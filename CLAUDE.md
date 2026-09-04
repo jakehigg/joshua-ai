@@ -40,8 +40,9 @@ Use one name for one thing, in code and in prose:
   **member** or a **guest**. The role is a trust tier, not a hosting concept.
 - **the wiki**: `/data/wiki/`, one wiki for everyone. There is no per-person
   wiki. A member writes it, a guest reads it.
-- **journal**: a person's `blog/`. **profile**: `profile.md`. **shared
-  profile**: `shared/profile.md`.
+- **journal**: Joshua's own journal, at `wiki/journal/`. It is not a person's
+  blog. **profile**: `wiki/people/<id>.md`. **shared profile**:
+  `wiki/people/everyone.md`.
 - **instance**: one deployment, one group of people, one database, one volume.
   There is no multi-tenant mode.
 - **channel**: a way to talk to Joshua. **destination**: a logical name that
@@ -114,29 +115,32 @@ Route allowlists, by default:
 One volume mounts at `/data` in all three containers:
 
 ```
-/data/people/<id>/profile.md                 core writes it (nightly)
-/data/people/<id>/blog/YYYY-MM-DD.md         core writes it (nightly digest)
-/data/people/<id>/blog/YYYY-MM-DD-HHMM-<slug>.md   gateway writes it (a journal post)
-/data/people/<id>/attachments/YYYY/MM/<file> channels writes it
-/data/people/<id>/cli/outbox.jsonl           channels writes it
-/data/wiki/**.md                             the one wiki; gateway writes it for a member
-/data/wiki/joshua/*.md                       the repo docs; core rewrites them each start
-/data/shared/profile.md                      the shared profile; core writes it
-/data/shared/attachments/<group>/YYYY/MM/    channels writes it
-/data/inbox/                                 channels scratch, short-lived
+/data/wiki/journal/YYYY/MM/DD/YYYY-MM-DD.md      the nightly page; core writes it
+/data/wiki/journal/YYYY/MM/DD/<slug>.md          a journal entry; gateway writes it
+/data/wiki/people/<id>.md                        a profile; core writes it (nightly), gateway for that person
+/data/wiki/people/everyone.md                    the shared profile; core writes it (nightly)
+/data/wiki/**.md                                 the rest of the wiki; gateway writes it for a member
+/data/wiki/joshua-docs/*.md                      the repo docs; core rewrites them each start
+/data/wiki/.git                                  the wiki's git repository; core and gateway write it
+/data/people/<id>/attachments/YYYY/MM/<file>     channels writes it
+/data/people/<id>/cli/outbox.jsonl               channels writes it
+/data/shared/attachments/<group>/YYYY/MM/        channels writes it
+/data/inbox/                                     channels scratch, short-lived
 ```
 
-Nobody else writes anything. `shared/` is read-only through the files MCP. A
-person id is a slug `^[a-z0-9][a-z0-9-]{0,31}$`. `joshua_shared.layout` builds
-every path and bootstraps the tree. `docs/data-layout.md` is the reference.
+Nobody else writes anything. `people/` and `shared/` are read-only through the
+files MCP. A person id is a slug `^[a-z0-9][a-z0-9-]{0,31}$`.
+`joshua_shared.layout` builds every path and bootstraps the tree.
+`docs/data-layout.md` is the reference.
 
 ## Memory
 
 `core/joshua_core/memory/` indexes the volume into the `kb_chunk` pgvector
-table, scoped by person. `person_id` NULL is shared scope: the wiki and
-`shared/`. A search is `person_id = %s OR person_id IS NULL`, so a person finds
-their own journal plus everything shared, and a group turn finds the shared
-scope only.
+table. The `files` source is always shared scope now: the wiki holds the
+journal and every profile, so `person_id` is NULL for every row it writes. The
+optional `memos` source can still scope a row to one person. A search is
+`person_id = %s OR person_id IS NULL`, so a person finds their own scoped rows,
+if any, plus everything shared, and a group turn finds the shared scope only.
 
 - Source adapters implement one protocol (`memory/sources/__init__.py`).
   `files` is the kernel adapter and always runs. `memos` is optional. The
@@ -147,17 +151,26 @@ scope only.
   `full` above `inject.full_sim`, `hint` above `inject.hint_sim`, else
   nothing. It never breaks a turn. Every decision writes one `kb_event` row.
 - The recency tier is separate (`memory/prompt.py::build_memory_block`): the
-  person's `profile.md`, the last `recent_posts` journal days, and the shared
-  profile for a member or a group session. A guest gets no shared profile
-  section.
+  person's profile page and, for a member or a group session, the shared
+  profile. A guest gets no shared profile section. The journal reaches a turn
+  only through retrieval, never through this block.
 - Nightly reflection (`memory/nightly.py`) writes the corpus at
-  `memory.nightly_at`: one post per person to `blog/YYYY-MM-DD.md`, a new
-  `profile.md` when something durable changed, and `shared/profile.md` from
-  the group chats. The daily rollover then closes every session.
+  `memory.nightly_at`: one selective page for the whole day at
+  `wiki/journal/YYYY/MM/DD/YYYY-MM-DD.md`, or none when nothing is worth
+  keeping, a new profile page at
+  `wiki/people/<id>.md` when something durable changed, and
+  `wiki/people/everyone.md` from the group chats. The daily rollover then
+  closes every session.
 - On-demand journaling: `prompts/builtin/people.md` tells the agent to write a
-  short dated post when a person shares a life update, gated by
-  `people[].journal` (`auto`, `ask`, `off`). The `stub` backend does the same
-  on a `[[journal]]` marker, so the flow is testable without the SDK.
+  short journal entry, in Joshua's own voice, when something a person shares
+  is worth keeping. `people[].journal` (`auto`, `ask`, `off`) is consent for
+  what a person says about themselves. The agent writes an entry with the
+  gateway tool `write_journal_entry(slug, markdown, people)`. The `stub`
+  backend does the same on a `[[journal]]` marker, so the flow is testable
+  without the SDK.
+- `joshua_shared.wikigit` keeps `wiki/` a git repository: core commits at
+  start and at the nightly run, gateway commits each wiki write and each
+  trash delete. `wiki.git` (default true) turns this off.
 
 `docs/memory.md` documents every knob. The admin routes are
 `POST /admin/kb/reindex`, `GET /admin/kb/status`, `GET /admin/kb/events`, and

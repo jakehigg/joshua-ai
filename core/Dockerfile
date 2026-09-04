@@ -27,10 +27,14 @@ FROM python:3.13-slim AS runtime
 # libgomp1 is the OpenMP runtime that onnxruntime (fastembed, the memory
 # embedder) links at import time. The slim image omits it, so without it the
 # embedding model fails to load and retrieval degrades to "unavailable".
+#
+# git backs `joshua_shared.wikigit`: core keeps `/data/wiki` as a git
+# repository and commits its own writes (see `wiki.git`).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     libgomp1 \
+    git \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \

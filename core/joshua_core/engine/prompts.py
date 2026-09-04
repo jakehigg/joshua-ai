@@ -5,9 +5,9 @@ A session's system prompt is layered, not a monolith:
     kernel prompt files  +  channel line  +  identity block  +  tools block
 
 The composed string replaces the SDK preset in full. The memory recency tier
-(the person's ``profile.md`` and recent posts, plus the shared profile for
-members) is passed in as a :class:`MemoryBlock` and appended last; older context
-arrives per turn through KB injection.
+(the person's profile page, plus the shared profile for members) is passed in
+as a :class:`MemoryBlock` and appended last; older context, including the
+journal, arrives per turn through KB injection.
 """
 
 from __future__ import annotations
@@ -51,19 +51,20 @@ _UNKNOWN_WHO = (
     "that read or write files."
 )
 
-# The person id is in the identity line because a file path needs it. The
-# display name and the id are two different strings, and a path built from the
-# name names nobody.
+# The person id is in the identity line because a file path, and a journal
+# entry's `people` list, need it. The display name and the id are two
+# different strings, and a path or an entry built from the name names nobody.
 _MEMBER_WHO = (
     "You are speaking with {name}, a member (system-verified). "
-    "Their person id is `{pid}`, so their journal is `people/{pid}/blog/`. "
-    "A person id is not a display name; never build a path from a name."
+    "Their person id is `{pid}`: pass it in `write_journal_entry`'s `people` "
+    "list when an entry names them, and use it, never a display name, in a "
+    "file path under `people/{pid}/`."
 )
 
 _GUEST_WHO = (
     "You are speaking with {name}, a guest (system-verified). "
-    "Their person id is `{pid}`, so their journal is `people/{pid}/blog/`. "
-    "A person id is not a display name; never build a path from a name. "
+    "Their person id is `{pid}`: use it, never a display name, in a file path "
+    "under `people/{pid}/`. "
     "Help them with their own notes, the shared files, and general questions. "
     "You have no access to shared systems or other people's files; if asked, "
     "say so plainly."
@@ -72,12 +73,14 @@ _GUEST_WHO = (
 # Per-person journal preference, appended to the identity block when it is not
 # the ``auto`` default. ``auto`` needs no line — ``people.md`` covers it.
 _JOURNAL_ASK = (
-    "{name} wants you to ask before you journal. When something is worth a post, "
-    'offer "want me to note that in your journal?" and write it only after they agree.'
+    "{name} wants you to ask before you journal about them. When something is "
+    'worth an entry, offer "want me to note that in your journal?" and write '
+    "it only after they agree."
 )
 _JOURNAL_OFF = (
-    "{name} has turned off automatic journaling. Do not write a journal post on "
-    "your own; write one only when {name} asks you to in the moment."
+    "{name} has turned off automatic journaling about them. Do not write a "
+    "journal entry naming them on your own; write one only when {name} asks "
+    "you to in the moment."
 )
 
 # One paragraph that stays true for every deployment: it names the always-present
@@ -86,10 +89,12 @@ TOOLS_BLOCK = (
     "## Your tools\n\n"
     "The `files` tool reads and writes your Markdown notes: `list_files`, "
     "`read_file`, `write_file`, and `search_files`. It reaches the wiki under "
-    "`wiki/` (one wiki for everyone; `wiki/joshua/` is your own documentation), "
-    "a person's journal under `people/<person-id>/blog/`, their profile and "
-    "inbound files under `people/<person-id>/`, and the shared profile and group "
-    "files under `shared/`. The `scheduling` tool sets and cancels "
+    "`wiki/` (one wiki for everyone; `wiki/joshua-docs/` is your own documentation; "
+    "`wiki/people/` holds the profiles you maintain nightly, read-only to you; "
+    "`wiki/journal/` is your own journal, also read-only through this tool — "
+    "write an entry with `write_journal_entry`, never `write_file`), a "
+    "person's inbound files under `people/<person-id>/attachments/`, and "
+    "group files under `shared/`. The `scheduling` tool sets and cancels "
     "scheduled work. Other "
     "tools are listed in your tool list; use them when they fit the request. You "
     "have only the tools in that list — if none fits, say so plainly rather than "

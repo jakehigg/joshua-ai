@@ -17,14 +17,15 @@ are closest to it.
 
 | Path | Who can find it |
 |---|---|
-| `people/<id>/blog/**.md` | that person |
-| `wiki/**.md` | everyone |
+| `wiki/**.md`, including `wiki/journal/` and `wiki/people/` | everyone |
 | `shared/**.md` | everyone |
 
-A search reaches the whole corpus. The wiki is what Joshua knows and a journal
-is when something happened, so a question about last Tuesday must be able to
-reach the journal of the person it happened to. `person_id` stays on each row
-as provenance, and a result still says whose episode it records.
+Joshua keeps its memory in one folder, the wiki. `wiki/journal/` is Joshua's
+own journal: what happened, in Joshua's voice, third person, names attached.
+`wiki/people/<id>.md` and `wiki/people/everyone.md` are the profiles. Every
+page in the wiki is shared scope, so a search reaches the whole corpus for
+every person. A question about last Tuesday reaches the journal entry that
+names the person it happened to, whoever asks.
 
 A group chat searches the same corpus as a direct message. A guest searches it
 too: reading is not what separates a guest from a member. Writing is.
@@ -81,11 +82,10 @@ pass which reports no work is explainable.
 
 Each source also reports `unindexable`: the documents the index cannot hold,
 with their paths. A document gets there when the fault is its own, such as a
-journal post below a directory that names no person. It is passed over until
-its content changes, a full reindex asks for it, or core restarts, so one bad
-document does not make the same failure on every pass. When the count is not
-zero, look at the paths: usually a directory below `/data/people/` that no
-person owns. Move it, or add the person.
+`memos` entry tagged for a person who is not on the roster. It is passed over
+until its content changes, a full reindex asks for it, or core restarts, so
+one bad document does not make the same failure on every pass. When the count
+is not zero, look at the paths and fix the source, or add the person.
 
 ### Tuning it
 
@@ -152,62 +152,61 @@ A skill starts to work after the next index pass
 turn that taught it. To stop a skill, a member sets `triggers: []` or deletes the
 file. A deleted file stops firing on the next pass.
 
-## Two ways a blog post is written
+## The journal is Joshua's, not a person's
 
-A person's blog (`people/<id>/blog/`) is the durable record of their life. Two
-paths write it:
+`wiki/journal/YYYY/MM/DD/` is Joshua's own journal: what happened, in
+Joshua's voice, third person, names attached. It is not a person's blog. Two
+kinds of page live in one day folder:
 
-- **Nightly reflection** writes one digest per day
-  (`people/<id>/blog/YYYY-MM-DD.md`) from
-  that day's conversations. See the `memory` section of `CLAUDE.md`.
-- **On-demand journaling** writes a post the moment a person shares a life
-  update in chat. This is the primary way memory is created.
+- `YYYY-MM-DD.md`: the nightly page. Nightly reflection writes it.
+- `<slug>.md`: an entry Joshua wrote during the day.
 
-## On-demand journaling
+Every page carries front matter: `date`, `people` (the ids it names), and
+`source` (`nightly` or `agent`). The journal is selective. It holds what would
+matter in a month: a fact about someone's life, a decision, a plan, a visit, a
+change. It never holds a tool call, a routine automation, the weather, or
+small talk. A day with nothing worth keeping gets no page.
 
-When a person shares an event, a change, a milestone, or a photo with context,
-the agent writes a short post with the files MCP `write_file` tool. The agent
-names the person the update is about and passes a plain slug, such as
-`people/alex/blog/garden.md`. The files MCP stamps the date and time onto the
-filename, so the post lands at
-`people/alex/blog/YYYY-MM-DD-HHMM-garden.md`.
+### The journal reaches a turn only through retrieval
 
-Rules the agent follows (see `prompts/builtin/people.md`):
+Nobody gets a journal block in the system prompt. The only way a journal entry
+reaches a turn is the same as any other wiki page: the confidence-gated
+per-turn injection, or the agent's own `search_memory` call. The old knobs
+`memory.recent_posts` and `memory.recent_max_chars` still load and validate,
+but nothing reads them.
 
-- One post per distinct update.
-- First person, in the person's voice, not the agent's.
-- Cite each attached file by its `people/<id>/attachments/…` path. In the frontmatter
-  `attachments:` list and once in the body.
-- Do not post for a question, chit-chat, or a request.
+For example, Alex tells Joshua "Sam is coming for dinner tonight." Joshua
+writes a journal entry that names Sam. On Wednesday, Sam, a guest,
+messages Joshua. Retrieval surfaces Tuesday's dinner entry, and Joshua can ask
+how it went.
 
-A post goes to the speaker's own blog. In a group chat it goes to the resolved
-sender's blog, never to a shared file. A group turn with no resolved sender
-writes no post.
+### Entries written during the day
 
-### Per-person preference
+A person can ask Joshua to keep something ("note that I had oatmeal for
+breakfast"), and Joshua also decides on its own when an update is worth an
+entry. The agent writes an entry with the gateway tool
+`write_journal_entry(slug, markdown, people)`.
 
-Each person has a `journal` setting in `people[]`:
+`people[].journal` (`auto`, `ask`, `off`) is consent for what a person says
+about themselves:
 
-- `auto` (default). The agent writes the post on its own.
-- `ask`: the agent offers first and writes only after the person agrees.
-- `off`: the agent never posts on its own. It posts only when asked.
+- `auto` (default). Joshua writes the entry on its own.
+- `ask`: Joshua offers first and writes only after the person agrees.
+- `off`: Joshua never writes an entry on its own. It writes one only when
+  asked.
 
-### Post format
+A member telling Joshua about a guest is enough for an entry that names the
+guest. The setting governs what a person shares about themselves, not what a
+member may tell Joshua about someone else.
 
-```
----
-date: 2026-08-27T14:32:00-04:00
-person: alex
-source: chat
-attachments: [attachments/2026/08/2026-08-27-143210-IMG_4471.jpg]
----
-Started using a new fertilizer on the garden today. It has grown a lot in the
-last three months.
-```
+The indexer picks up a new or changed journal page like any other wiki page,
+and chunks it into `kb_chunk` at shared scope. A later turn that asks about the
+same topic gets the entry back through per-turn injection or `search_memory`.
 
-The indexer picks up the new post and chunks it into `kb_chunk`, scoped to the
-person. A later turn that asks about the same topic gets the post back through
-per-turn injection or the `search_memory` tool.
+Every write in this section also lands in the wiki's own git history: the
+gateway commits an entry when the agent writes it, and the nightly reflection
+commits the day page and each profile it wrote, then anything else that
+changed. See `wiki.git` in [docs/config.md](config.md#wiki).
 
 ## Source adapters
 
@@ -217,9 +216,8 @@ under `memory.sources`. A source that fails to list is isolated. It never
 blocks `files`, and its last error shows at `GET /admin/kb/status`. Remove a
 source from `memory.sources` and its rows are purged on the next run.
 
-The `files` adapter walks one directory per person below `/data/people/`. It
-takes the roster from the database, so a directory that names no person is
-skipped and reported one time for each pass.
+The `files` adapter walks `wiki/` and `shared/`. Every document it finds is
+shared scope, so it needs no roster to walk the wiki.
 
 ### `memos`
 

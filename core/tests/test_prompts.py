@@ -59,7 +59,8 @@ def test_guest_prompt_has_guest_identity_and_no_people_section() -> None:
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM)
     assert "a guest (system-verified)" in prompt
-    # The guest profile drops shared/profile.md, so its content must not appear.
+    # The guest doesn't get the members' people.md prompt, so its content must
+    # not appear.
     assert "## The people you serve" not in prompt
     assert "wiki/recipes/" not in prompt
 
@@ -113,25 +114,26 @@ def test_compose_orders_files_then_identity_then_tools() -> None:
 def test_member_prompt_has_journal_section() -> None:
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    assert "## Your journal of each person" in prompt
-    assert "write a short post to" in prompt
-    # The journal is addressed by person: one corpus, no private tree.
-    assert "`people/<person-id>/blog/<slug>.md`" in prompt
+    assert "## Your journal" in prompt
+    assert "write_journal_entry(slug, markdown, people)" in prompt
+    # The journal is Joshua's own, not a private per-person tree.
+    assert "`people/<person-id>/blog/" not in prompt
 
 
 def test_the_identity_block_carries_the_person_id() -> None:
-    """A journal path needs the id, and the display name is a different string."""
+    """A journal entry's `people` list needs the id, and the display name is a
+    different string."""
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
     assert "person id is `alex`" in prompt
-    assert "people/alex/blog/" in prompt
+    assert "people/alex/" in prompt
 
 
 def test_a_guest_is_told_their_person_id_too() -> None:
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM)
     assert "person id is `sam`" in prompt
-    assert "people/sam/blog/" in prompt
+    assert "people/sam/" in prompt
 
 
 def test_the_tools_block_names_no_retired_root() -> None:
@@ -139,8 +141,9 @@ def test_the_tools_block_names_no_retired_root() -> None:
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
     tools = prompt[prompt.index("## Your tools") :]
-    assert "`blog/`" not in tools
-    assert "people/<person-id>/blog/" in tools
+    assert "blog" not in tools
+    assert "`wiki/journal/`" in tools
+    assert "write_journal_entry" in tools
 
 
 def test_journal_auto_adds_no_preference_line() -> None:
@@ -153,19 +156,19 @@ def test_journal_auto_adds_no_preference_line() -> None:
 def test_journal_ask_adds_ask_line() -> None:
     composer = PromptComposer(person_journal={"alex": "ask"})
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    assert "Alex wants you to ask before you journal." in prompt
+    assert "Alex wants you to ask before you journal about them." in prompt
 
 
 def test_journal_off_adds_off_line() -> None:
     composer = PromptComposer(person_journal={"alex": "off"})
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    assert "Alex has turned off automatic journaling." in prompt
+    assert "Alex has turned off automatic journaling about them." in prompt
 
 
 def test_journal_off_line_reaches_a_guest() -> None:
     composer = PromptComposer(person_journal={"sam": "off"})
     prompt = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM)
-    assert "Sam has turned off automatic journaling." in prompt
+    assert "Sam has turned off automatic journaling about them." in prompt
 
 
 def test_default_prompts_dir_resolves_to_the_packaged_files() -> None:

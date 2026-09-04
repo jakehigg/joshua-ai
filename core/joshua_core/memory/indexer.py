@@ -28,6 +28,7 @@ the degenerate diff where everything is new). The interval loop keeps the
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -42,9 +43,21 @@ from joshua_core.memory.store import MemoryStore
 logger = get_logger("memory.indexer")
 
 
+_JOURNAL_PREFIX = "wiki/journal/"
+_PROFILE_PAGE = re.compile(r"^wiki/people/[^/]+\.md\Z")
+
+
 def _kind_from_uri(uri: str) -> str:
-    """The document kind is the leading path segment (``blog`` | ``wiki`` |
-    ``shared`` for the files source; the adapter name for a flat source)."""
+    """The document kind, from its path.
+
+    ``wiki/journal/**`` is ``journal``; a ``wiki/people/*.md`` page (a
+    person's profile, or the shared profile) is ``profile``; anything else is
+    the leading path segment (``wiki`` | ``shared`` for the files source; the
+    adapter name for a flat source)."""
+    if uri.startswith(_JOURNAL_PREFIX):
+        return "journal"
+    if _PROFILE_PAGE.match(uri):
+        return "profile"
     return uri.split("/", 1)[0]
 
 

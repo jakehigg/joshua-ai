@@ -189,11 +189,26 @@ make up
 containers. The releases are at
 <https://github.com/jakehigg/joshua-ai/releases>. Read `CHANGELOG.md` first.
 The database schema is additive. A new version adds tables and columns and never removes one, so
-an update needs no migration step. The documentation in `wiki/joshua/` is
-replaced at each start.
+an update needs no migration step. The documentation in `wiki/joshua-docs/`
+is replaced at each start.
 
 Read `CHANGELOG.md` before an update. It names every change that a person who
 runs Joshua can see.
+
+### Run the newest main
+
+Set `JOSHUA_VERSION=branch-main` in `.env`, then:
+
+```
+make pull
+make up
+```
+
+This tracks every merge to `main`, not a tested release. The images are amd64
+only, so on an Apple Silicon host, run `make up-dev` from a checkout of `main`
+instead: it builds the images locally. A release is the tested, multi-arch,
+versioned build, and the default. To go back to one, put its version back in
+`JOSHUA_VERSION` and run `make pull && make up` again.
 
 ## Back up and restore
 
@@ -292,6 +307,27 @@ curl -s -X POST -H "$auth" -H 'Content-Type: application/json' \
 
 `make nuke` deletes the volumes. It asks first.
 
+### The wiki is a git repository
+
+`wiki.git` (default `true`) keeps `/data/wiki` under git, committed at start,
+at each write, and at the nightly run — see
+[docs/data-layout.md](data-layout.md#the-wiki). The backup archive holds it
+like any other file, so a restore brings the history back too.
+
+To keep a history outside the volume, add a remote and push from the gateway
+container, which mounts the wiki at `/data/wiki`:
+
+```
+docker compose exec gateway git -C /data/wiki remote add origin <url>
+docker compose exec gateway git -C /data/wiki push -u origin main
+```
+
+To look at the history without pushing anywhere:
+
+```
+docker compose exec gateway git -C /data/wiki log --oneline | head
+```
+
 ## The embedding model
 
 On the first start, `core` downloads its embedding model, about 65 MB, from
@@ -309,18 +345,21 @@ the first start, the stack runs with no access.
 destination.
 
 At `memory.nightly_at` local time (default `03:30`), `core` reads the previous
-day's transcripts, writes each person's post for that day to
-`blog/YYYY-MM-DD.md`, updates each `profile.md` and `shared/profile.md`, and
-re-indexes. With `memory.daily_rollover: true` it then closes every session, so
-the next message starts a fresh one with the profile and the recent posts as
+day's transcripts, writes one journal page per person for that day at
+`wiki/journal/YYYY/MM/DD/YYYY-MM-DD.md`, updates each profile page and the
+shared profile, and re-indexes. A day with nothing worth keeping gets no
+journal page. With `memory.daily_rollover: true` core then closes every
+session, so the next message starts a fresh one with the profile block as
 context. `memory.md` explains the rules.
 
 To run the reflection by hand, or to re-run one day, use `POST /admin/reflect`.
 
 ## The viewer
 
-The viewer is a read-only web page for the wiki and a person's own files. It is
-off by default. To turn it on:
+The viewer is a read-only web page for the wiki, which holds the journal and
+every profile, and a person's own attachments. A signed-in person gets a
+profile link for a quick jump to their own page. It is off by default. To
+turn it on:
 
 1. Put every password in `VIEWER_PASSWORDS` in `.env`, as a comma-separated
    list of `<person-id>=<value>` pairs. One variable carries all of them, so
@@ -375,6 +414,11 @@ on who reads what, and it calls no other container.
 On Kubernetes the chart runs it as its own deployment, off by default, with
 the passwords in a Secret and an ingress of its own. See
 [the chart README](../charts/joshua/README.md#the-viewer).
+
+The viewer is read-only, and it ships with Joshua. For a browser editor that
+can also change the wiki, see the Otter Wiki enhancement in
+[docs/enhancements.md](enhancements.md). Unlike the viewer, Otter Wiki runs
+code from another project.
 
 ## Where the data is
 

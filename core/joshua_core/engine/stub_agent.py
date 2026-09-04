@@ -13,7 +13,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from joshua_shared import layout
+from joshua_shared import layout, wikigit
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
@@ -24,9 +24,10 @@ logger = get_logger("engine.stub")
 # was built with, so a test can assert which servers a session would open.
 ECHO_TOOLS_MARKER = "[[echo-tools]]"
 
-# A prompt that contains this marker makes the stub write a journal post to the
-# turn speaker's ``blog/``, standing in for the SDK agent's ``write_file`` call,
-# so the on-demand journal flow runs end to end without the SDK.
+# A prompt that contains this marker makes the stub write a journal entry
+# naming the turn speaker, standing in for the SDK agent's
+# ``write_journal_entry`` call, so the on-demand journal flow runs end to end
+# without the SDK.
 JOURNAL_MARKER = "[[journal]]"
 
 # The files-MCP-relative attachment paths cited in a turn's attach note.
@@ -43,12 +44,14 @@ class StubAgentSession:
         server_names: list[str] | None = None,
         resume: str | None = None,
         data_dir: Path | str | None = None,
+        wiki_git: bool = True,
     ):
         self._system_prompt = system_prompt
         self._cwd = cwd
         self._session_id = f"stub-{conversation_id}"
         self._server_names = sorted(server_names or [])
         self._data_dir = Path(data_dir) if data_dir is not None else None
+        self._wiki_git = wiki_git
         # When built with a resume id, fail the first run once so the manager's
         # resume-retry path (rebuild without resume) is exercised offline.
         self._resume = resume
@@ -108,11 +111,12 @@ class StubAgentSession:
         )
 
     def _write_journal(self, prompt: str) -> None:
-        """Write one dated journal post to the turn speaker's ``blog/``.
+        """Write one journal entry naming the turn speaker, under today's folder.
 
-        Mirrors what the SDK agent does through the files MCP: stamp the filename
-        with the date, cite the turn's attachments in the frontmatter and body.
-        Writes nothing when there is no resolved speaker (a group turn with no
+        Mirrors what the SDK agent does through ``write_journal_entry``: place
+        the entry under the day's journal folder, name the speaker in
+        ``people``, and cite the turn's attachments in the body. Writes
+        nothing when there is no resolved speaker (a group turn with no
         sender) or when the speaker turned journaling off.
         """
         if self._turn_person is None or self._data_dir is None:
@@ -124,26 +128,28 @@ class StubAgentSession:
         message = prompt.split("\n\n")[-1].replace(JOURNAL_MARKER, "").strip()
 
         now = datetime.now().astimezone()
-        blog = layout.person_dir(self._turn_person, "blog", self._data_dir)
-        blog.mkdir(parents=True, exist_ok=True)
-        post = blog / f"{now:%Y-%m-%d-%H%M}-journal.md"
+        slug = f"{now:%H%M}-journal"
+        entry = layout.journal_entry_path(now.date(), slug, self._data_dir)
+        entry.parent.mkdir(parents=True, exist_ok=True)
 
-        atts = ", ".join(attachments)
         lines = [
             "---",
-            f"date: {now.isoformat()}",
-            f"person: {self._turn_person}",
-            "source: chat",
-            f"attachments: [{atts}]",
-            "---",
-            "",
-            message or "Journal note.",
+            f"date: {now.date().isoformat()}",
+            f"people: [{self._turn_person}]",
+            "source: agent",
         ]
+        if attachments:
+            lines.append(f"attachments: [{', '.join(attachments)}]")
+        lines += ["---", "", message or "Journal note."]
         if attachments:
             lines.append("")
             lines.append(f"Photo: {attachments[0]}")
-        post.write_text("\n".join(lines) + "\n")
+        entry.write_text("\n".join(lines) + "\n")
         self.journal_writes += 1
+        if self._wiki_git:
+            wiki_root = layout.wiki_root(self._data_dir)
+            rel = entry.relative_to(wiki_root).as_posix()
+            wikigit.commit(wiki_root, [entry], f"journal: {rel}")
 
     async def interrupt(self) -> None:
         logger.info({"message": "stub interrupt"})

@@ -180,6 +180,62 @@ The viewer serves plain HTTP and puts every route behind HTTP basic, so the
 password crosses the wire on each request. Terminate TLS at the ingress, and
 keep the host off the public internet unless you mean to publish your notes.
 
+## Enhancements
+
+An enhancement is an optional component from another project, not from
+Joshua. It runs someone else's code, in its own pod, under its own license and
+its own repository. Every enhancement is off by default.
+
+The wiki is a folder of Markdown files at `/data/wiki`. Any tool that reads a
+folder of Markdown files can be its frontend. Each enhancement fills a
+**slot**: a role such as `wiki`. `use` in that slot names the **choice**, the
+frontend that fills it. `docs/enhancements.md` has the full contract for the
+folder and lists what each choice may and may not touch.
+
+### Otter Wiki
+
+[Otter Wiki](https://github.com/redimp/otterwiki) is a wiki over a git
+repository of Markdown files. Turn it on:
+
+```yaml
+enhancements:
+  wiki:
+    use: otterwiki
+    otterwiki:
+      ingress:
+        enabled: true
+        className: nginx
+        host: notes.example.com
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+        tls:
+          enabled: true
+      persistence:
+        size: 1Gi
+```
+
+The pod mounts the wiki alone, at `/app-data/repository`, through a subPath
+mount. It never sees a person's journal, profile, or attachments. A second
+claim, `enhancements.wiki.otterwiki.persistence` (`joshua-otterwiki-data`
+unless you set `existingClaim`), holds `/app-data`: its accounts, its
+settings, and its search database, apart from the wiki.
+
+Otter Wiki needs no Secret. It writes its own `SECRET_KEY` into
+`/app-data/settings.cfg` on first start. Open the site and register an
+account; the first account becomes the admin.
+
+Otter Wiki runs `git init` in the wiki on first start, so a `.git` directory
+appears in `wiki/`. Joshua ignores dot-directories.
+
+Otter Wiki serves plain HTTP behind its own login, and the session cookie
+crosses the wire on each request. Terminate TLS at the ingress, and keep the
+host off the public internet unless you mean to publish your notes.
+
+The [Otter Wiki documentation](https://otterwiki.com/Configuration) is the
+reference for every setting it reads. `docs/enhancements.md` has the Docker
+Compose side of this same choice, and the folder contract every wiki frontend
+follows.
+
 ## What the chart does not expose
 
 Only `channels` has an Ingress, and only when you enable it. `core` holds the
@@ -226,6 +282,46 @@ A package on a registry can be private, and that is a different setting from
 the visibility of the repository. Check the package page after the first
 release. When the package is private, name a pull secret in
 `imagePullSecrets`.
+
+## Run main, or a branch
+
+A push to any branch, `main` included, builds the three images for amd64 and
+tags them with the full commit SHA, as
+`<registry>/<repository>/joshua-ai-<component>:<sha>`. A second tag,
+`branch-<name>`, moves with each push, so `branch-main` is always the newest
+commit on `main`. A branch build is not a release: it has no release page and
+no packaged chart.
+
+To follow `main` with ArgoCD, point the chart source at `main` and take the
+image tag from the commit ArgoCD resolved:
+
+```yaml
+spec:
+  sources:
+    - repoURL: https://github.com/jakehigg/joshua-ai.git
+      path: charts/joshua
+      targetRevision: main
+      helm:
+        parameters:
+          - name: image.tag
+            value: $ARGOCD_APP_REVISION
+```
+
+A feature branch works the same way: set `targetRevision` to its name. Each
+push then renders the chart of the new commit with the images of the same
+commit. ArgoCD can see a commit before its build ends. The new pod waits in
+`ImagePullBackOff` until the images arrive, and a container with the
+`Recreate` strategy is down for that time. Use this on an instance that you
+test, not on one that people use.
+
+Without ArgoCD, the simple mutable option is `image.tag: branch-main`. It
+moves to the newest commit on `main` at your next `helm upgrade`, with no
+parameter to compute.
+
+The chart version on `main` still carries the last release's version, while
+its templates are newer. An empty `image.tag` against a chart from `main`
+pulls that release's images, which may not match your templates. A release
+tag is the only place the chart and its images are guaranteed to agree.
 
 ## Versions
 

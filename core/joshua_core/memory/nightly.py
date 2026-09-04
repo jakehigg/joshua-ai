@@ -1,17 +1,21 @@
-"""Nightly reflection — Joshua writes each person's blog post and profile.
+"""Nightly reflection — Joshua writes the day's journal page and each
+person's profile.
 
-Every night, for one day of transcripts, the reflector writes a blog post per
-person (``blog/YYYY-MM-DD.md``) and rewrites ``profile.md`` when something durable
-changed. A final pass rewrites the shared profile (``shared/profile.md``)
-from the day's group chats. The post is the durable memory; the indexer picks it
-up; the daily rollover starts the next day's SDK session fresh.
+Every night, for one day of transcripts, the reflector writes one journal
+page for the whole instance (``journal_day_page(target)``), from every
+person's transcript and the group transcript together, and rewrites a
+person's profile (``profile_path(pid)``) when something durable changed. A
+final pass rewrites the shared profile (``shared_profile_path()``) from the
+day's group chats. The page is the durable memory; the indexer picks it up;
+the daily rollover starts the next day's SDK session fresh.
 
-The reflection is one tool-less LLM call per person (``run_oneshot``), so it never
-touches a live conversation. One person failing never stops the others.
+The reflection is one tool-less LLM call per document (``run_oneshot``), so it
+never touches a live conversation. One person's profile failing never stops
+the others, and never stops the journal page.
 
 Schedule: ``memory.nightly_at`` local time, on the same cron loop as the
-scheduler. ``POST /admin/reflect`` runs or re-runs one day on demand; re-running a
-date overwrites that day's post.
+scheduler. ``POST /admin/reflect`` runs or re-runs one day on demand; re-running
+a date overwrites that day's page.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from joshua_shared import layout
+from joshua_shared import layout, wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
@@ -33,7 +37,7 @@ logger = get_logger("memory.nightly")
 
 # A reply that wrote a skill file is teaching, not journal material. Its reply is
 # dropped from the transcript the reflection reads. Any other write — a journal
-# post, a wiki page — is ordinary work and stays.
+# entry, a wiki page — is ordinary work and stays.
 _SKILL_DIR = "skills/"
 
 # Shared preference-extraction rules, ported from the old core's PREFERENCE_SYSTEM.
@@ -43,25 +47,34 @@ Rules:
   preference behind it. Capture the reason with an aversion.
 - One reaction is a hypothesis, not a certainty. Write it as a tendency.
 - Never store transient state (a timer, today's plan, a one-off reminder, the
-  current weather). Those belong in the day's post, not the profile.
+  current weather). Those belong in the journal page, not the profile.
 - Ignore feature requests and skill teaching. They become code or skills, not
   memory.
 - Most days change nothing durable. Prefer to leave the profile as it is."""
 
-BLOG_SYSTEM = f"""\
-You are Joshua, writing a private daily journal about one person from your \
-conversations with them today. Return ONE JSON object and nothing else:
+JOURNAL_SYSTEM = """\
+You are Joshua, writing today's page in your own journal: what happened with \
+the people you talked with, in the third person, naming each person. Return \
+ONE JSON object and nothing else:
 
-{{"post": "<markdown>", "profile": "<full replacement markdown> or null}}
+{"post": "<markdown> or null}
 
-`post` is the day's entry, in the person's third person, as their assistant:
-what happened, what they told you, decisions they made, and things to follow up
-on. Never invent anything that is not in the transcript. Omit pleasantries. Keep
-it under 600 words. Transient items (a timer, a one-off reminder) belong here,
-not in the profile.
+`post` is the day's page: what happened, what people told you, decisions and \
+plans they made, a visit, a change in someone's life. Never invent anything \
+that is not in the transcript. Be selective — keep only what would still \
+matter in a month. Skip tool calls, routine automations, weather, \
+pleasantries, and anything already in the wiki. Return `"post": null` when \
+nothing today is worth keeping. Keep it under 600 words."""
 
-`profile` is a FULL replacement of their profile.md, or null when nothing durable
-changed today. Keep every template section heading. Keep it under 400 words.
+PROFILE_SYSTEM = f"""\
+You are Joshua, updating your profile of one person from your conversations \
+with them today. Return ONE JSON object and nothing else:
+
+{{"profile": "<full replacement markdown> or null}}
+
+`profile` is a FULL replacement of your profile of them, or null when nothing
+durable changed today. Keep every template section heading. Keep it under 400
+words.
 
 {_RULES}"""
 
@@ -71,10 +84,10 @@ the group chats today. Return ONE JSON object and nothing else:
 
 {{"profile": "<full replacement markdown> or null}}
 
-`profile` is a FULL replacement of shared/profile.md (who is who, shared facts, shared
-preferences such as "weeknight dinners must be quick"), or null when nothing
-durable changed today. Keep every template section heading. Keep it under 400
-words. Never invent anything that is not in the transcript.
+`profile` is a FULL replacement of the shared profile (who is who, shared facts,
+shared preferences such as "weeknight dinners must be quick"), or null when no
+durable change happened today. Keep every template section heading. Keep it
+under 400 words. Never invent anything that is not in the transcript.
 
 {_RULES}"""
 
@@ -102,8 +115,9 @@ def _parse_object(raw: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _frontmatter(target_date: date, person_id: str) -> str:
-    return f"---\ndate: {target_date.isoformat()}\nperson: {person_id}\nsource: nightly\n---\n"
+def _journal_frontmatter(target_date: date, people: list[str]) -> str:
+    people_str = ", ".join(people)
+    return f"---\ndate: {target_date.isoformat()}\npeople: [{people_str}]\nsource: nightly\n---\n"
 
 
 class _Bucket:
@@ -125,7 +139,7 @@ class _Bucket:
 
 
 class NightlyReflector:
-    """Write the day's blog posts and profiles, then roll sessions over."""
+    """Write the day's journal page and profiles, then roll sessions over."""
 
     def __init__(
         self,
@@ -209,53 +223,77 @@ class NightlyReflector:
     async def reflect(
         self, *, target_date: date | None = None, person: str | None = None
     ) -> dict[str, Any]:
-        """Write posts and profiles for one day. No session rollover.
+        """Write the day's journal page and profiles. No session rollover.
 
-        With ``person`` set, only that person is written and the shared pass is
-        skipped. Re-running a date overwrites that day's post.
+        With ``person`` set, only that person's profile is written, gated on
+        their own transcript, and no journal page and no shared pass run. A
+        full day run gates the journal page and every profile on the day's
+        combined transcript, across every person and the group. Re-running a
+        date overwrites that day's page.
         """
         target = target_date or self._yesterday()
         buckets, group = await self._collect(target)
         people = {p.id: p for p in await self._repo.list_people()}
-
         ids = [person] if person else list(buckets)
+
+        if person is not None:
+            combined_chars = buckets[person].chars if person in buckets else 0
+        else:
+            combined_chars = sum(b.chars for b in buckets.values()) + group.chars
+
         posts = profiles = errors = reflected = 0
-        for pid in ids:
-            bucket = buckets.get(pid)
-            if bucket is None:
-                logger.info({"message": "no transcript for the day", "person": pid})
-                continue
-            if bucket.chars < self._min_chars:
-                logger.info(
-                    {
-                        "message": "day too short to reflect",
-                        "person": pid,
-                        "chars": bucket.chars,
-                        "min_chars": self._min_chars,
-                    }
-                )
-                continue
-            reflected += 1
-            try:
-                wrote_post, wrote_profile, ok = await self._reflect_person(
-                    target, people.get(pid), pid, bucket
-                )
-                posts += int(wrote_post)
-                profiles += int(wrote_profile)
-                errors += int(not ok)
-            except Exception as exc:  # noqa: BLE001 — one person must not stop the rest
-                errors += 1
-                logger.error(
-                    {"message": "person reflection failed", "person": pid, "error": str(exc)}
-                )
+        written: list[Path] = []
+        if combined_chars < self._min_chars:
+            logger.info(
+                {
+                    "message": "day too short to reflect",
+                    "person": person,
+                    "chars": combined_chars,
+                    "min_chars": self._min_chars,
+                }
+            )
+        else:
+            reflected = len([pid for pid in ids if buckets.get(pid) is not None])
+            if person is None:
+                try:
+                    wrote, ok = await self._reflect_journal(target, ids, buckets, group, people)
+                    posts = int(wrote)
+                    errors += int(not ok)
+                    if wrote:
+                        written.append(layout.journal_day_page(target, self._data_dir))
+                except Exception as exc:  # noqa: BLE001 — a bad page must not stop the profiles
+                    errors += 1
+                    logger.error({"message": "journal reflection failed", "error": str(exc)})
+
+            for pid in ids:
+                bucket = buckets.get(pid)
+                if bucket is None:
+                    continue
+                try:
+                    wrote_profile, ok = await self._reflect_profile(
+                        target, people.get(pid), pid, bucket
+                    )
+                    profiles += int(wrote_profile)
+                    errors += int(not ok)
+                    if wrote_profile:
+                        written.append(layout.profile_path(pid, self._data_dir))
+                except Exception as exc:  # noqa: BLE001 — one person must not stop the rest
+                    errors += 1
+                    logger.error(
+                        {"message": "profile reflection failed", "person": pid, "error": str(exc)}
+                    )
 
         shared_updated = False
         if person is None and group.chars >= self._min_chars:
             try:
                 shared_updated = await self._reflect_shared(group)
+                if shared_updated:
+                    written.append(layout.shared_profile_path(self._data_dir))
             except Exception as exc:  # noqa: BLE001 — the shared pass is isolated too
                 errors += 1
                 logger.error({"message": "shared profile reflection failed", "error": str(exc)})
+
+        self._commit_wiki(target, written)
 
         summary = {
             "date": target.isoformat(),
@@ -269,44 +307,88 @@ class NightlyReflector:
         logger.info({"message": "nightly run complete", **summary})
         return summary
 
-    # --- per-person and shared passes ----------------------------------
+    def _commit_wiki(self, target: date, written: list[Path]) -> None:
+        """Commit what this run wrote, then sync anything else that changed
+        during the day. Both only when `wiki.git` is enabled."""
+        if not wikigit.is_enabled(self._settings):
+            return
+        wiki_root = layout.wiki_root(self._data_dir)
+        if written:
+            wikigit.commit(wiki_root, written, f"nightly: {target.isoformat()}")
+        wikigit.commit(wiki_root, None, "nightly: sync the wiki")
 
-    async def _reflect_person(
+    # --- journal, profile, and shared passes --------------------------------
+
+    async def _reflect_journal(
+        self,
+        target: date,
+        ids: list[str],
+        buckets: dict[str, _Bucket],
+        group: _Bucket,
+        people: dict[str, Any],
+    ) -> tuple[bool, bool]:
+        """Write the day's one journal page. Returns ``(wrote, ok)``; ``ok`` is
+        False on a parse failure."""
+        sections = []
+        for pid in ids:
+            bucket = buckets.get(pid)
+            if bucket is None:
+                continue
+            name = getattr(people.get(pid), "display_name", None) or pid
+            sections.append(f"# {name}'s day\n\n{bucket.render()}")
+        if group.chars:
+            sections.append(f"# Group chat\n\n{group.render()}")
+        user = f"# {target.isoformat()}\n\n" + "\n\n".join(sections)
+
+        data = await self._oneshot_json(JOURNAL_SYSTEM, user, required="post")
+        if data is None:
+            logger.error(
+                {
+                    "message": "journal reflection unparseable; skipping the page",
+                    "date": target.isoformat(),
+                }
+            )
+            return False, False
+
+        post = data.get("post")
+        if not (isinstance(post, str) and post.strip()):
+            return False, True
+
+        page_people = sorted(pid for pid in ids if pid in buckets)
+        self._write_journal_page(target, page_people, post.strip())
+        await self._reindex()
+        return True, True
+
+    async def _reflect_profile(
         self, target: date, person: Any, pid: str, bucket: _Bucket
-    ) -> tuple[bool, bool, bool]:
-        """Write one person's post and profile. Returns
-        ``(wrote_post, wrote_profile, ok)``; ``ok`` is False on a parse failure."""
-        profile_path = layout.profile_path(pid, self._data_dir)
-        existing = _read(profile_path) or "(no profile yet)"
+    ) -> tuple[bool, bool]:
+        """Update one person's profile. Returns ``(wrote_profile, ok)``; ``ok``
+        is False on a parse failure."""
+        path = layout.profile_path(pid, self._data_dir)
+        existing = _read(path) or "(no profile yet)"
         user = (
             f"# Transcript for {pid} on {target.isoformat()}\n\n{bucket.render()}\n\n"
-            f"# Current profile.md\n\n{existing}"
+            f"# Current profile\n\n{existing}"
         )
-        data = await self._oneshot_json(BLOG_SYSTEM, user, required="post")
+        data = await self._oneshot_json(PROFILE_SYSTEM, user, required="profile")
         if data is None:
-            logger.error({"message": "reflection unparseable; skipping person", "person": pid})
-            return False, False, False
+            logger.error(
+                {"message": "profile reflection unparseable; skipping person", "person": pid}
+            )
+            return False, False
 
-        wrote_post = False
-        post = data.get("post")
-        if isinstance(post, str) and post.strip():
-            self._write_post(target, pid, post.strip())
-            wrote_post = True
-
-        wrote_profile = False
         profile = data.get("profile")
-        if isinstance(profile, str) and profile.strip():
-            _write(profile_path, profile.strip() + "\n")
-            wrote_profile = True
+        if not (isinstance(profile, str) and profile.strip()):
+            return False, True
 
-        if wrote_post or wrote_profile:
-            await self._reindex(person=pid)
-        return wrote_post, wrote_profile, True
+        _write(path, profile.strip() + "\n")
+        await self._reindex()
+        return True, True
 
     async def _reflect_shared(self, group: _Bucket) -> bool:
         path = layout.shared_profile_path(self._data_dir)
         existing = _read(path) or "(no shared profile yet)"
-        user = f"# Group chats\n\n{group.render()}\n\n# Current shared/profile.md\n\n{existing}"
+        user = f"# Group chats\n\n{group.render()}\n\n# Current shared profile\n\n{existing}"
         data = await self._oneshot_json(SHARED_SYSTEM, user, required="profile")
         if data is None:
             logger.error({"message": "shared profile reflection unparseable; skipping"})
@@ -315,13 +397,13 @@ class NightlyReflector:
         if not (isinstance(profile, str) and profile.strip()):
             return False
         _write(path, profile.strip() + "\n")
-        await self._reindex(person=None)
+        await self._reindex()
         return True
 
-    def _write_post(self, target: date, pid: str, body: str) -> None:
-        blog = layout.person_dir(pid, "blog", self._data_dir)
-        blog.mkdir(parents=True, exist_ok=True)
-        (blog / f"{target.isoformat()}.md").write_text(_frontmatter(target, pid) + body + "\n")
+    def _write_journal_page(self, target: date, people: list[str], body: str) -> None:
+        path = layout.journal_day_page(target, self._data_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_journal_frontmatter(target, people) + body + "\n")
 
     async def _oneshot_json(
         self, system: str, user: str, *, required: str
@@ -335,10 +417,15 @@ class NightlyReflector:
             logger.warning({"message": "reflection parse failed", "attempt": attempt})
         return None
 
-    async def _reindex(self, *, person: str | None) -> None:
-        """Re-index so the new files are searchable by morning. Never fatal."""
+    async def _reindex(self) -> None:
+        """Re-index so the new page is searchable by morning. Never fatal.
+
+        Every document the reflector writes is shared scope, so a full-source
+        reindex is what makes it findable — there is no per-person partition
+        to narrow to.
+        """
         try:
-            await self._indexer.reindex(source="files", person=person)
+            await self._indexer.reindex(source="files")
         except Exception as exc:  # noqa: BLE001 — indexing lag must not fail the run
             logger.warning({"message": "post-reflection reindex failed", "error": str(exc)})
 
@@ -346,7 +433,7 @@ class NightlyReflector:
 
     async def _rollover(self) -> int:
         """Null every stale SDK session and flush the pool so the next turn is
-        fresh. Continuity carries through the profile and recent posts."""
+        fresh. Continuity carries through the profile and the journal."""
         today = now_in(self._tz).date()
         rolled = await self._repo.rollover_sessions(today)
         if rolled:
@@ -453,7 +540,7 @@ def _is_skill_path(path: str) -> bool:
 def _skill_turns(conv_rows: list[dict[str, Any]]) -> set[str]:
     """Turn ids whose reply wrote only skill files — teaching, dropped from the day.
 
-    A reply that wrote a journal post or a wiki page is ordinary work and stays.
+    A reply that wrote a journal entry or a wiki page is ordinary work and stays.
     A reply that wrote nothing stays. Only a reply whose every write went to a
     skills directory is teaching.
     """
@@ -468,7 +555,7 @@ def _skill_turns(conv_rows: list[dict[str, Any]]) -> set[str]:
 
 
 def _usable(row: dict[str, Any], skip: set[str]) -> str | None:
-    """The row's content if it belongs in a journal, else None.
+    """The row's content if it belongs in the journal, else None.
 
     A skill-teaching exchange drops both halves: the instruction that taught the
     skill is configuration, not a life update.

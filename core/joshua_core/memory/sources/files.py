@@ -1,47 +1,46 @@
 """The ``files`` source adapter — the kernel RAG source.
 
-Walks the data volume and yields one :class:`Document` per markdown file:
+Walks the wiki and yields one :class:`Document` per markdown page, all shared
+scope (``person_id`` None): Joshua's memory is one wiki now, not per-person
+content.
 
-- ``people/<id>/blog/**.md`` → kind ``blog``, scoped to that person
-- ``wiki/**.md``              → kind ``wiki``, shared scope (``person_id`` None)
-- ``shared/**.md``            → kind ``shared``, shared scope (``person_id`` None)
+- ``wiki/journal/**.md``  → the day-by-day pages and entries.
+- ``wiki/people/*.md``    → Joshua's profile of a person (and the shared
+  profile, ``everyone.md``).
+- anything else under ``wiki/`` → an ordinary wiki page.
+- ``shared/**.md``, if anything is still there, is indexed too, for
+  compatibility with a volume ``migrate_to_one_wiki`` has not yet run on.
 
 ``rev`` is the file sha256. ``title`` is the first ``# `` heading or the file
-name. ``doc_date`` comes from a ``blog/YYYY-MM-DD*.md`` name (the nightly digest
-``YYYY-MM-DD.md`` and agent posts ``YYYY-MM-DD-HHMM-<slug>.md``) or a frontmatter
-``date``. Frontmatter ``date``/``tags``/``provenance`` are honored when present.
-``.trash/`` directories and ``*.meta.json`` sidecars are ignored.
-
-A directory below ``people/`` that names nobody holds no document that can be
-indexed, because a chunk carries a foreign key to ``people``. The adapter takes
-the roster and skips such a directory, and says so one time per pass. A restore
-from an older volume, a hand copy, and a partial migration all make this shape.
+name. ``doc_date`` is the journal day a path belongs to
+(``layout.journal_day_from_path``), else a frontmatter ``date``, else None.
+Frontmatter ``date``/``tags``/``provenance`` are honored when present. A dot
+entry (``.trash/``, ``.git/``, and so on, at any depth) and a ``*.meta.json``
+sidecar are ignored.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 from joshua_shared import layout
+from joshua_shared.layout import is_hidden
 from joshua_shared.log import get_logger
 
 from joshua_core.memory.sources import Document
 
 logger = get_logger("memory.sources.files")
 
-# Person kinds this adapter indexes. ``attachments/`` and ``profile.md`` are not
-# retrieval content and are skipped.
-_PERSON_KINDS = ("blog",)
-
-# Top-level trees that everyone can see.
-_SHARED_TREES = ("wiki", "shared")
+# Top-level trees this adapter walks. ``shared`` is compatibility only: after
+# ``migrate_to_one_wiki`` it holds no markdown, but an older volume, or a hand
+# copy, may still have some.
+_TREES = ("wiki", "shared")
 
 _H1 = re.compile(r"^#\s+(.+?)\s*#*\s*$")
-_BLOG_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -91,79 +90,23 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
-def _date_from_blog_name(path: str) -> date | None:
-    if not path.startswith("blog/"):
-        return None
-    m = _BLOG_DATE.match(Path(path).name)
-    if not m:
-        return None
-    try:
-        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    except ValueError:
-        return None
-
-
 class FilesSource:
-    """Indexes markdown under the data volume. Always present (the kernel)."""
+    """Indexes the wiki's markdown. Always present (the kernel)."""
 
     name = "files"
 
-    def __init__(
-        self,
-        data_dir: Path | str,
-        *,
-        persons: Callable[[], Awaitable[Collection[str]]] | None = None,
-    ):
+    def __init__(self, data_dir: Path | str):
         self._data_dir = Path(data_dir)
-        self._persons = persons
-
-    async def _person_ids(self) -> list[str]:
-        """The person directories to walk, and a line for each one skipped.
-
-        ``persons`` is the roster. Without it every slug directory is walked,
-        which is what a caller with no database wants. With it, a directory
-        that names nobody is left alone: its documents cannot be stored, and
-        offering them makes the same failure on every pass.
-        """
-        people = self._data_dir / "people"
-        if not people.is_dir():
-            return []
-        known = set(await self._persons()) if self._persons is not None else None
-        ids: list[str] = []
-        orphans: list[str] = []
-        for entry in sorted(people.iterdir()):
-            if not entry.is_dir():
-                continue
-            try:
-                person_id = layout.safe_segment(entry.name)
-            except ValueError:
-                orphans.append(entry.name)  # a stray non-slug directory is not a person
-                continue
-            if known is not None and person_id not in known:
-                orphans.append(entry.name)
-                continue
-            ids.append(person_id)
-        if orphans:
-            # One line for the pass. One line per document is how a single
-            # stray directory made thousands of identical lines a day.
-            logger.warning(
-                {
-                    "message": "kb skipped directories that name no person",
-                    "count": len(orphans),
-                    "directories": sorted(orphans)[:10],
-                }
-            )
-        return ids
 
     def _markdown(self, base: Path) -> Iterator[Path]:
         if not base.is_dir():
             return
         for file in sorted(base.rglob("*.md")):
-            if ".trash" in file.parts or not file.is_file():
+            if not file.is_file() or is_hidden(file, base):
                 continue
             yield file
 
-    def _document(self, file: Path, *, person_id: str | None, path: str) -> Document:
+    def _document(self, file: Path, *, path: str) -> Document:
         raw = file.read_bytes()
         rev = hashlib.sha256(raw).hexdigest()
         text = raw.decode("utf-8", errors="replace")
@@ -171,11 +114,13 @@ class FilesSource:
         mtime = datetime.fromtimestamp(file.stat().st_mtime, tz=UTC)
         title = _first_heading(body) or file.stem
         provenance = "external" if meta.get("provenance", "").lower() == "external" else "own"
-        doc_date = _parse_date(meta.get("date")) or _date_from_blog_name(path)
+        doc_date = layout.journal_day_from_path(file, self._data_dir) or _parse_date(
+            meta.get("date")
+        )
         return Document(
             source=self.name,
             uri=path,
-            person_id=person_id,
+            person_id=None,
             title=title,
             text=body,
             updated_at=mtime,
@@ -187,31 +132,17 @@ class FilesSource:
         )
 
     async def list_documents(self) -> AsyncIterator[Document]:
-        for person_id in await self._person_ids():
-            root = layout.person_root(person_id, self._data_dir)
-            for kind in _PERSON_KINDS:
-                base = root / kind
-                for file in self._markdown(base):
-                    path = str(file.relative_to(root))
-                    yield self._document(file, person_id=person_id, path=path)
-        for tree in _SHARED_TREES:
+        for tree in _TREES:
             for file in self._markdown(self._data_dir / tree):
                 path = str(file.relative_to(self._data_dir))
-                yield self._document(file, person_id=None, path=path)
+                yield self._document(file, path=path)
 
     async def fetch(self, uri: str) -> Document | None:
         """Resolve one document by its relative path. Cold path — the indexer
         uses ``list_documents``; this backs targeted refresh."""
-        if uri.startswith(tuple(f"{tree}/" for tree in _SHARED_TREES)):
-            file = self._data_dir / uri
-            if file.is_file() and ".trash" not in file.parts:
-                return self._document(file, person_id=None, path=uri)
+        if not uri.startswith(tuple(f"{tree}/" for tree in _TREES)):
             return None
-        if not uri.startswith(tuple(f"{kind}/" for kind in _PERSON_KINDS)):
-            return None
-        for person_id in await self._person_ids():
-            root = layout.person_root(person_id, self._data_dir)
-            file = root / uri
-            if file.is_file() and ".trash" not in file.parts:
-                return self._document(file, person_id=person_id, path=uri)
+        file = self._data_dir / uri
+        if file.is_file() and not is_hidden(file, self._data_dir):
+            return self._document(file, path=uri)
         return None

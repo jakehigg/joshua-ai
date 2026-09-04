@@ -3,6 +3,8 @@ echo-tools probe."""
 
 from __future__ import annotations
 
+from datetime import date
+
 from engine_fakes import (
     FakeComposer,
     FakeRepo,
@@ -14,6 +16,7 @@ from engine_fakes import (
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.types import Attachment
 from joshua_shared import config as config_module
+from joshua_shared import layout
 
 FILES_MCP = """
 mcp:
@@ -161,10 +164,10 @@ async def test_journal_marker_writes_post_for_the_speaker(tmp_path):
         channel, conversation, "I started a new fertilizer today [[journal]]", attachments=[att]
     )
 
-    posts = list((tmp_path / "people" / "alex" / "blog").glob("*-journal.md"))
-    assert len(posts) == 1
-    body = posts[0].read_text()
-    assert "person: alex" in body
+    entries = list(layout.journal_day_dir(date.today(), tmp_path).glob("*-journal.md"))
+    assert len(entries) == 1
+    body = entries[0].read_text()
+    assert "people: [alex]" in body
     assert "attachments/2026/08/2026-08-27-090000-IMG.jpg" in body
     assert manager._pool["c1"].session.journal_writes == 1
 
@@ -178,7 +181,7 @@ async def test_journal_off_writes_no_post(tmp_path):
     await manager.run_turn(channel, conversation, "I painted the fence [[journal]]")
 
     assert manager._pool["c1"].session.journal_writes == 0
-    assert not (tmp_path / "people" / "sam" / "blog").exists()
+    assert not list(layout.journal_root(tmp_path).rglob("*-journal.md"))
 
 
 async def test_group_journal_goes_to_the_resolved_speaker(tmp_path):
@@ -195,8 +198,9 @@ async def test_group_journal_goes_to_the_resolved_speaker(tmp_path):
         person_id="alex",
     )
 
-    posts = list((tmp_path / "people" / "alex" / "blog").glob("*-journal.md"))
-    assert len(posts) == 1
+    entries = list(layout.journal_day_dir(date.today(), tmp_path).glob("*-journal.md"))
+    assert len(entries) == 1
+    assert "people: [alex]" in entries[0].read_text()
     assert not (tmp_path / "shared").exists()
 
 

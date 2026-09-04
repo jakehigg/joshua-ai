@@ -1,4 +1,4 @@
-"""The files MCP: path confinement and the four tools, both as units and through
+"""The files MCP: path confinement and the six tools, both as units and through
 the gateway.
 
 The unit tests drive ``paths.resolve`` against a tmp ``/data`` tree with two
@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
+import subprocess
 import textwrap
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx2
 import pytest
@@ -20,6 +23,7 @@ from conftest import bearer, gateway_session
 from joshua_gateway.files_mcp import paths, server
 from joshua_gateway.main import lifespan
 from joshua_gateway.observability import CALL_LOG
+from joshua_shared import wikigit
 
 # A 1x1 PNG, enough to prove an image read returns an ImageContent block.
 PNG_1PX = base64.b64decode(
@@ -69,7 +73,7 @@ def make_pdf(texts: list[str]) -> bytes:
 
 @pytest.fixture
 def fixed_clock(monkeypatch):
-    """Freeze the blog clock at 2026-08-27 18:32:10 UTC (14:32 in America/New_York)."""
+    """Freeze the journal clock at 2026-08-27 18:32:10 UTC (14:32 in America/New_York)."""
     instant = datetime(2026, 8, 27, 18, 32, 10, tzinfo=UTC)
     monkeypatch.setattr(server, "_now", lambda: instant)
     return instant
@@ -80,12 +84,9 @@ def data_root(tmp_path, monkeypatch):
     """A tmp ``/data`` tree with two persons, wired through ``JOSHUA_DATA_DIR``."""
     root = tmp_path / "data"
     (root / "wiki").mkdir(parents=True)
-    (root / "people" / "alex" / "blog").mkdir(parents=True)
-    (root / "people" / "mia" / "blog").mkdir(parents=True)
     (root / "people" / "alex" / "attachments" / "2026" / "08").mkdir(parents=True)
+    (root / "people" / "mia").mkdir(parents=True)
     (root / "shared").mkdir(parents=True)
-    (root / "people" / "alex" / "profile.md").write_text("# Alex\n")
-    (root / "people" / "alex" / "blog" / "2026-08-24.md").write_text("dear diary\n")
     (root / "wiki" / "note.md").write_text("hello wiki\ntodo item\n")
     (root / "shared" / "recipes.md").write_text("shared pizza\n")
     monkeypatch.setenv(server.DATA_ENV, str(root))
@@ -107,21 +108,9 @@ def result_json(res):
 # -- paths.resolve unit (property-style traversal) --------------------------
 
 
-ROSTER = ("alex", "mia")
-
-
-def roots(data_root, person="alex", wiki_write=True):
-    """The root set of a request. The role decides what is reachable.
-
-    ``person`` says who the request belongs to. It widens nothing; it decides
-    only whether a write below ``people`` has a person segment to land on.
-    """
-    return paths.roots(
-        data_root,
-        role="member" if wiki_write else "guest",
-        people=ROSTER,
-        person=person,
-    )
+def roots(data_root, wiki_write=True):
+    """The root set of a request. The role alone decides what is reachable."""
+    return paths.roots(data_root, role="member" if wiki_write else "guest")
 
 
 TRAVERSALS = [
@@ -130,7 +119,7 @@ TRAVERSALS = [
     "/data/people/mia/wiki/x.md",
     "wiki/../../../etc/passwd",
     "..",
-    "wiki/sub/../../blog/x.md",
+    "wiki/sub/../../people/x.md",
 ]
 
 
@@ -148,21 +137,9 @@ def test_traversal_message_hides_absolute_path(data_root, bad):
         assert str(data_root) not in exc.message
 
 
-def test_resolve_allows_blog_md_write(data_root):
-    root, abs_path = paths.resolve(
-        "people/alex/blog/2026-08-24-1200-note.md", roots(data_root), write=True
-    )
-    assert root.name == "people"
-    assert abs_path == data_root / "people" / "alex" / "blog" / "2026-08-24-1200-note.md"
-
-
-def test_resolve_rejects_non_md_blog_write(data_root):
-    with pytest.raises(paths.PathError):
-        paths.resolve("people/alex/blog/note.txt", roots(data_root), write=True)
-
-
-def test_resolve_rejects_write_to_attachments(data_root):
-    with pytest.raises(paths.PathError):
+def test_resolve_rejects_write_to_people(data_root):
+    """``people`` is read-only through this server, whatever the role."""
+    with pytest.raises(paths.PathError, match="read-only"):
         paths.resolve("people/alex/attachments/2026/08/a.md", roots(data_root), write=True)
 
 
@@ -186,6 +163,29 @@ def test_resolve_rejects_symlink_escape(data_root, tmp_path):
         paths.resolve("wiki/evil/secret.md", roots(data_root), write=False)
 
 
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        "wiki/.git/config",
+        "wiki/.trash/2026/x.md",
+        "people/alex/attachments/.trash/old.md",
+        "shared/.obsidian/workspace.md",
+    ],
+)
+def test_resolve_rejects_a_hidden_entry(data_root, hidden):
+    """A dot segment, anywhere below the root, is forbidden — not only at the
+    top: it is a frontend's own state, never content."""
+    with pytest.raises(paths.PathError):
+        paths.resolve(hidden, roots(data_root), write=False)
+
+
+def test_hidden_entry_message_hides_absolute_path(data_root):
+    try:
+        paths.resolve("wiki/.git/config", roots(data_root), write=False)
+    except paths.PathError as exc:
+        assert str(data_root) not in exc.message
+
+
 def test_wiki_write_gated_by_role(data_root):
     with pytest.raises(paths.PathError):
         paths.resolve("wiki/x.md", roots(data_root, wiki_write=False), write=True)
@@ -206,55 +206,35 @@ def test_a_request_with_no_role_writes_nothing(data_root):
         assert all(root.can_write is False for root in r.values())
 
 
-def test_a_member_writes_the_wiki_and_the_journal(data_root):
+def test_a_member_writes_the_wiki_only(data_root):
+    """``people`` and ``shared`` are read-only through this server for every role."""
     r = roots(data_root)
     assert r["wiki"].can_write is True
-    assert r["people"].can_write is True
+    assert r["people"].can_write is False
     assert r["shared"].can_write is False
 
 
-def test_reading_does_not_depend_on_a_person(data_root):
-    """Identity is a path lookup, and not a read permission."""
-    alex = paths.roots(data_root, role="member", people=ROSTER, person="alex")
-    mia = paths.roots(data_root, role="member", people=ROSTER, person="mia")
-    for name in ("wiki", "people", "shared"):
-        assert alex[name].base == mia[name].base
-        assert alex[name].can_write == mia[name].can_write
-
-
-def test_a_member_reads_the_journal_of_another_person(data_root):
-    """One corpus. The journal of mia is not walled off from alex."""
+def test_a_member_reads_the_attachments_of_another_person(data_root):
+    """One corpus. Another person's attachments are not walled off from alex."""
     r = roots(data_root)
-    root, resolved = paths.resolve("people/mia/blog/x.md", r, write=False)
+    root, resolved = paths.resolve("people/mia/attachments/x.jpg", r, write=False)
     assert root.name == "people"
-    assert resolved == data_root / "people" / "mia" / "blog" / "x.md"
-
-
-def test_the_write_domain_holds_below_people(data_root):
-    """The role says whether a write may happen; this says where it may land."""
-    r = roots(data_root)
-    paths.resolve("people/alex/blog/ok.md", r, write=True)
-    for denied in ("people/alex/profile.md", "people/alex/attachments/x.md"):
-        with pytest.raises(paths.PathError, match="may be written"):
-            paths.resolve(denied, r, write=True)
+    assert resolved == data_root / "people" / "mia" / "attachments" / "x.jpg"
 
 
 def test_a_retired_root_names_its_replacement(data_root):
-    """A skill can still name a retired root. Hand back the whole path.
-
-    The replacement carries the person id of the request, so the caller never
-    composes the segment itself.
-    """
-    with pytest.raises(paths.PathError, match=r"people/alex/blog/"):
-        paths.resolve("blog/x.md", roots(data_root), write=True)
+    """A skill can still name a retired top-level root. Hand back the new path."""
+    with pytest.raises(paths.PathError, match=r"wiki/people/"):
+        paths.resolve("profile.md", roots(data_root), write=False)
+    with pytest.raises(paths.PathError, match=r"people/.*/attachments/"):
+        paths.resolve("attachments/x.jpg", roots(data_root), write=False)
 
 
-def test_a_retired_root_asks_for_no_guess_with_no_person(data_root):
-    """With no person there is no id to name, and none is invented."""
-    r = roots(data_root, person=None)
-    with pytest.raises(paths.PathError) as excinfo:
-        paths.resolve("blog/x.md", r, write=True)
-    assert "<person>" not in excinfo.value.message
+def test_the_blog_root_has_no_special_message_now(data_root):
+    """The journal moved into a tool call, not a path, so there is no single
+    replacement path to hand back for the old ``blog`` root."""
+    with pytest.raises(paths.PathError, match="unknown or forbidden root"):
+        paths.resolve("blog/x.md", roots(data_root), write=False)
 
 
 # -- through the gateway ----------------------------------------------------
@@ -333,7 +313,6 @@ async def test_write_rejects_over_256kb(gateway, data_root):
 @pytest.mark.parametrize(
     "args",
     [
-        {"path": "people/alex/blog/2026-08-24.md", "content": "x\n", "mode": "overwrite"},
         {"path": "people/alex/attachments/2026/08/a.md", "content": "x\n"},
         {"path": "wiki/script.py", "content": "print(1)\n"},
         {"path": "../escape.md", "content": "x\n"},
@@ -350,6 +329,19 @@ async def test_write_rejections_hide_absolute_path(gateway, data_root, args):
     assert str(data_root) not in res.content[0].text
 
 
+async def test_a_write_to_people_is_refused_for_a_member_now(gateway, data_root):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "write_file",
+                {"path": "people/alex/attachments/2026/08/note.md", "content": "x\n"},
+            )
+    assert res.is_error is True and "read-only" in res.content[0].text
+    assert not (data_root / "people" / "alex" / "attachments" / "2026" / "08" / "note.md").exists()
+
+
 async def test_list_and_search(gateway, data_root):
     app = gateway(files_yaml())
     async with lifespan(app):
@@ -361,6 +353,30 @@ async def test_list_and_search(gateway, data_root):
             found = await session.call_tool("search_files", {"query": "todo", "root": "wiki"})
             hits = result_json(found)
     assert hits and hits[0]["path"] == "wiki/note.md" and hits[0]["line"] == 2
+
+
+async def test_list_and_search_ignore_dot_entries(gateway, data_root):
+    """A wiki frontend's own state (``.git``, ``.obsidian``, and so on), at any
+    depth, never shows up in a listing or a search — only ``.trash`` was hidden
+    before; now every dot entry is."""
+    (data_root / "wiki" / ".git" / "refs").mkdir(parents=True)
+    (data_root / "wiki" / ".git" / "config").write_text("not markdown\n")
+    (data_root / "wiki" / ".git" / "refs" / "todo.md").write_text("todo git internals\n")
+    (data_root / "wiki" / ".obsidian").mkdir()
+    (data_root / "wiki" / ".obsidian" / "todo.md").write_text("todo obsidian state\n")
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            flat = result_json(await session.call_tool("list_files", {"root": "wiki"}))
+            recursive = result_json(
+                await session.call_tool("list_files", {"root": "wiki", "recursive": True})
+            )
+            found = await session.call_tool("search_files", {"query": "todo", "root": "wiki"})
+    hits = result_json(found)
+    assert {e["path"] for e in flat} == {"wiki/note.md"}
+    assert {e["path"] for e in recursive} == {"wiki/note.md"}
+    assert {h["path"] for h in hits} == {"wiki/note.md"}
 
 
 async def test_read_image_returns_image_block(gateway, data_root):
@@ -394,18 +410,21 @@ async def test_read_heic_returns_metadata_only(gateway, data_root):
     assert "note" in payload
 
 
-async def test_read_blog_allowed_write_blog_denied(gateway, data_root):
+async def test_read_attachment_allowed_write_people_denied(gateway, data_root):
+    (data_root / "people" / "alex" / "attachments" / "2026" / "08" / "p.png").write_bytes(PNG_1PX)
     app = gateway(files_yaml())
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            read = await session.call_tool("read_file", {"path": "people/alex/blog/2026-08-24.md"})
-            assert read.content[0].text == "dear diary\n"
+            read = await session.call_tool(
+                "read_file", {"path": "people/alex/attachments/2026/08/p.png"}
+            )
             write = await session.call_tool(
                 "write_file",
-                {"path": "people/alex/blog/x.md", "content": "x\n", "mode": "overwrite"},
+                {"path": "people/alex/attachments/2026/08/new.md", "content": "x\n"},
             )
-    assert write.is_error is True
+    assert read.is_error is False
+    assert write.is_error is True and "read-only" in write.content[0].text
 
 
 async def test_wiki_is_one_for_everyone(gateway, data_root):
@@ -462,29 +481,15 @@ async def test_guest_reads_wiki_but_cannot_write_it(gateway, data_root, config_p
             rename = await session.call_tool(
                 "rename_file", {"path": "wiki/note.md", "new_name": "n2.md"}
             )
-            blog = await session.call_tool(
-                "write_file", {"path": "people/alex/blog/today.md", "content": "ok\n"}
+            journal = await session.call_tool(
+                "write_journal_entry", {"slug": "today", "markdown": "ok\n"}
             )
     assert read.content[0].text == "hello wiki\ntodo item\n"
     assert write.is_error is True and "read-only" in write.content[0].text
     assert rename.is_error is True
     # A guest writes nothing, the journal included.
-    assert blog.is_error is True and "read-only" in blog.content[0].text
+    assert journal.is_error is True and "read-only" in journal.content[0].text
     assert not (data_root / "wiki" / "g.md").exists()
-
-
-async def test_read_profile_allowed_write_denied(gateway, data_root):
-    app = gateway(files_yaml())
-    async with lifespan(app):
-        headers = {"X-Joshua-Person": "alex"}
-        async with gateway_session(app, "/files", "core", headers) as session:
-            read = await session.call_tool("read_file", {"path": "people/alex/profile.md"})
-            assert read.content[0].text == "# Alex\n"
-            write = await session.call_tool(
-                "write_file",
-                {"path": "people/alex/profile.md", "content": "x\n", "mode": "overwrite"},
-            )
-    assert write.is_error is True
 
 
 async def test_no_role_reads_the_corpus_and_writes_nothing(gateway, data_root):
@@ -495,12 +500,12 @@ async def test_no_role_reads_the_corpus_and_writes_nothing(gateway, data_root):
             assert shared.content[0].text == "shared pizza\n"
             listed = await session.call_tool("list_files", {"root": "wiki"})
             denied = await session.call_tool("write_file", {"path": "wiki/x.md", "content": "x\n"})
-            blog = await session.call_tool("list_files", {"root": "people"})
+            people = await session.call_tool("list_files", {"root": "people"})
     assert listed.is_error is False
     assert "wiki/note.md" in [i["path"] for i in result_json(listed)]
     assert denied.is_error is True
     # One corpus: a request with no role reads people/, and writes nothing.
-    assert blog.is_error is False
+    assert people.is_error is False
 
 
 async def test_shared_is_read_only_for_a_member(gateway, data_root):
@@ -541,6 +546,7 @@ async def test_inventory_shows_files_builtin(gateway, data_root):
         "rename_file",
         "search_files",
         "write_file",
+        "write_journal_entry",
     ]
 
 
@@ -549,134 +555,139 @@ def test_build_builtin_server_rejects_unknown_name():
         server.build_builtin_server("nope", {})
 
 
-# -- blog write -------------------------------------------------------------
+# -- write_journal_entry -----------------------------------------------------
 
 
-async def test_blog_write_stamps_name_and_frontmatter(gateway, data_root, fixed_clock):
+async def test_journal_entry_lands_with_frontmatter(gateway, data_root, fixed_clock):
     app = gateway(files_yaml())
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
             res = await session.call_tool(
-                "write_file", {"path": "people/alex/blog/new-fertilizer.md", "content": "# Notes\n"}
+                "write_journal_entry",
+                {
+                    "slug": "alex-breakfast",
+                    "markdown": "Alex had oatmeal.\n",
+                    "people": ["alex"],
+                },
             )
     assert res.is_error is False
-    assert result_json(res)["path"] == "people/alex/blog/2026-08-27-1432-new-fertilizer.md"
-    post = data_root / "people" / "alex" / "blog" / "2026-08-27-1432-new-fertilizer.md"
-    text = post.read_text()
+    payload = result_json(res)
+    assert payload["path"] == "wiki/journal/2026/08/27/alex-breakfast.md"
+    assert payload["overwritten"] is False
+    entry = data_root / "wiki" / "journal" / "2026" / "08" / "27" / "alex-breakfast.md"
+    text = entry.read_text()
     assert text.startswith("---\n")
-    assert "person: alex" in text and "source: chat" in text and "attachments: []" in text
-    assert "# Notes" in text
+    assert "date: '2026-08-27'" in text
+    assert "people:\n- alex" in text
+    assert "source: agent" in text
+    assert "Alex had oatmeal." in text
 
 
-async def test_blog_same_minute_slug_dedupes(gateway, data_root, fixed_clock):
-    app = gateway(files_yaml())
-    async with lifespan(app):
-        headers = {"X-Joshua-Person": "alex"}
-        async with gateway_session(app, "/files", "core", headers) as session:
-            await session.call_tool(
-                "write_file", {"path": "people/alex/blog/rue.md", "content": "one\n"}
-            )
-            second = await session.call_tool(
-                "write_file", {"path": "people/alex/blog/rue.md", "content": "two\n"}
-            )
-    assert result_json(second)["path"] == "people/alex/blog/2026-08-27-1432-rue-2.md"
-
-
-async def test_blog_digest_name_reserved(gateway, data_root, fixed_clock):
+async def test_journal_entry_defaults_to_no_people(gateway, data_root, fixed_clock):
     app = gateway(files_yaml())
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
             res = await session.call_tool(
-                "write_file", {"path": "people/alex/blog/2026-08-27.md", "content": "digest\n"}
+                "write_journal_entry", {"slug": "quiet-evening", "markdown": "Nothing much.\n"}
+            )
+    assert res.is_error is False
+    entry = data_root / "wiki" / "journal" / "2026" / "08" / "27" / "quiet-evening.md"
+    assert "people: []" in entry.read_text()
+
+
+async def test_journal_entry_custom_date(gateway, data_root, fixed_clock):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "write_journal_entry",
+                {"slug": "trip", "markdown": "x\n", "date": "2026-01-05"},
+            )
+    assert result_json(res)["path"] == "wiki/journal/2026/01/05/trip.md"
+    assert (data_root / "wiki" / "journal" / "2026" / "01" / "05" / "trip.md").is_file()
+
+
+async def test_journal_entry_bad_date_refused(gateway, data_root, fixed_clock):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "write_journal_entry", {"slug": "trip", "markdown": "x\n", "date": "not-a-date"}
+            )
+    assert res.is_error is True and "date" in res.content[0].text
+
+
+async def test_journal_entry_people_must_be_a_list(gateway, data_root, fixed_clock):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "write_journal_entry", {"slug": "trip", "markdown": "x\n", "people": "alex"}
+            )
+    assert res.is_error is True and "people" in res.content[0].text
+
+
+async def test_journal_entry_overwrite_says_so(gateway, data_root, fixed_clock):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            first = await session.call_tool(
+                "write_journal_entry", {"slug": "garden", "markdown": "one\n"}
+            )
+            second = await session.call_tool(
+                "write_journal_entry", {"slug": "garden", "markdown": "two\n"}
+            )
+    assert result_json(first)["overwritten"] is False
+    assert result_json(second)["overwritten"] is True
+    entry = data_root / "wiki" / "journal" / "2026" / "08" / "27" / "garden.md"
+    text = entry.read_text()
+    assert "two" in text
+    assert "one" not in text
+
+
+async def test_journal_entry_guest_refused(gateway, data_root, fixed_clock):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "guest"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "write_journal_entry", {"slug": "no-access", "markdown": "nope\n"}
+            )
+    assert res.is_error is True and "read-only" in res.content[0].text
+    assert not (data_root / "wiki" / "journal" / "2026" / "08" / "27" / "no-access.md").exists()
+
+
+async def test_journal_entry_bad_slug_refused(gateway, data_root, fixed_clock):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "write_journal_entry", {"slug": "Not A Slug!", "markdown": "x\n"}
             )
     assert res.is_error is True
-    assert "reserved" in res.content[0].text
+    assert "invalid journal slug" in res.content[0].text
     assert str(data_root) not in res.content[0].text
 
 
-async def test_blog_keeps_supplied_stamp_and_overwrite_denied(gateway, data_root, fixed_clock):
+@pytest.mark.parametrize("slug", ["..", ".hidden", "../escape"])
+async def test_journal_entry_traversal_slug_refused(gateway, data_root, fixed_clock, slug):
     app = gateway(files_yaml())
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            kept = await session.call_tool(
-                "write_file",
-                {
-                    "path": "people/alex/blog/2026-08-01-0900-trip.md",
-                    "content": "---\ndate: x\n---\nbody\n",
-                },
-            )
-            over = await session.call_tool(
-                "write_file",
-                {"path": "people/alex/blog/again.md", "content": "x\n", "mode": "overwrite"},
-            )
-    assert result_json(kept)["path"] == "people/alex/blog/2026-08-01-0900-trip.md"
-    assert over.is_error is True and "append-only" in over.content[0].text
+            res = await session.call_tool("write_journal_entry", {"slug": slug, "markdown": "x\n"})
+    assert res.is_error is True
+    assert str(data_root) not in res.content[0].text
 
 
-async def test_blog_frontmatter_attachments_validated(gateway, data_root, fixed_clock):
-    (data_root / "people" / "alex" / "attachments" / "2026" / "08" / "g.jpg").write_bytes(PNG_1PX)
-    app = gateway(files_yaml())
-    async with lifespan(app):
-        headers = {"X-Joshua-Person": "alex"}
-        async with gateway_session(app, "/files", "core", headers) as session:
-            good = await session.call_tool(
-                "write_file",
-                {
-                    "path": "people/alex/blog/garden.md",
-                    "content": (
-                        "---\nattachments:\n  - people/alex/attachments/2026/08/g.jpg\n---\nhi\n"
-                    ),
-                },
-            )
-            bad = await session.call_tool(
-                "write_file",
-                {
-                    "path": "people/alex/blog/garden.md",
-                    "content": (
-                        "---\nattachments:\n"
-                        "  - people/alex/attachments/2026/08/missing.jpg\n---\nhi\n"
-                    ),
-                },
-            )
-    assert good.is_error is False
-    assert bad.is_error is True and "attachment not found" in bad.content[0].text
-
-
-# -- rename_file ------------------------------------------------------------
-
-
-async def test_rename_attachment_keeps_timestamp_prefix(gateway, data_root):
-    src = (
-        data_root
-        / "people"
-        / "alex"
-        / "attachments"
-        / "2026"
-        / "08"
-        / "2026-08-27-143210-IMG_4471.jpg"
-    )
-    src.write_bytes(PNG_1PX)
-    app = gateway(files_yaml())
-    async with lifespan(app):
-        headers = {"X-Joshua-Person": "alex"}
-        async with gateway_session(app, "/files", "core", headers) as session:
-            res = await session.call_tool(
-                "rename_file",
-                {
-                    "path": "people/alex/attachments/2026/08/2026-08-27-143210-IMG_4471.jpg",
-                    "new_name": "garden-north-bed.jpg",
-                },
-            )
-    assert res.is_error is False
-    assert (
-        result_json(res)["path"]
-        == "people/alex/attachments/2026/08/2026-08-27-143210-garden-north-bed.jpg"
-    )
-    assert (src.parent / "2026-08-27-143210-garden-north-bed.jpg").exists()
-    assert not src.exists()
+# -- rename_file --------------------------------------------------------------
 
 
 async def test_rename_wiki_file(gateway, data_root):
@@ -691,14 +702,34 @@ async def test_rename_wiki_file(gateway, data_root):
     assert (data_root / "wiki" / "todo.md").exists()
 
 
+async def test_rename_in_people_is_refused(gateway, data_root):
+    """The write domain shrank to ``wiki/`` only; an attachment can no longer be
+    renamed through this server."""
+    src = data_root / "people" / "alex" / "attachments" / "2026" / "08" / "IMG_4471.jpg"
+    src.write_bytes(PNG_1PX)
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "rename_file",
+                {
+                    "path": "people/alex/attachments/2026/08/IMG_4471.jpg",
+                    "new_name": "garden-north-bed.jpg",
+                },
+            )
+    assert res.is_error is True
+    assert src.exists()
+
+
 @pytest.mark.parametrize(
     "args",
     [
-        {"path": "people/alex/attachments/2026/08/a.jpg", "new_name": "../x.jpg"},
-        {"path": "people/alex/attachments/2026/08/a.jpg", "new_name": "sub/x.jpg"},
+        {"path": "wiki/note.md", "new_name": "../x.md"},
+        {"path": "wiki/note.md", "new_name": "sub/x.md"},
         {"path": "/data/people/mia/wiki/x.md", "new_name": "y.md"},
-        {"path": "people/alex/attachments/2026/08/a.jpg", "new_name": "a.png"},
-        {"path": "people/alex/profile.md", "new_name": "other.md"},
+        {"path": "wiki/note.md", "new_name": "note.py"},
+        {"path": "people/alex/attachments/2026/08/a.jpg", "new_name": "other.jpg"},
     ],
 )
 async def test_rename_rejections_hide_absolute_path(gateway, data_root, args):
@@ -713,20 +744,13 @@ async def test_rename_rejections_hide_absolute_path(gateway, data_root, args):
 
 
 async def test_rename_refuses_existing_target(gateway, data_root):
-    base = data_root / "people" / "alex" / "attachments" / "2026" / "08"
-    (base / "2026-08-27-143210-a.jpg").write_bytes(PNG_1PX)
-    (base / "2026-08-27-143210-b.jpg").write_bytes(PNG_1PX)
+    (data_root / "wiki" / "a.md").write_text("a\n")
+    (data_root / "wiki" / "b.md").write_text("b\n")
     app = gateway(files_yaml())
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            res = await session.call_tool(
-                "rename_file",
-                {
-                    "path": "people/alex/attachments/2026/08/2026-08-27-143210-a.jpg",
-                    "new_name": "b.jpg",
-                },
-            )
+            res = await session.call_tool("rename_file", {"path": "wiki/a.md", "new_name": "b.md"})
     assert res.is_error is True and "exists" in res.content[0].text
 
 
@@ -890,79 +914,69 @@ async def test_an_unknown_role_is_refused_at_the_boundary(gateway):
                 await session.call_tool("read_file", {"path": "wiki/note.md"})
 
 
-# -- The person segment must name a person -------------------------------------
+# -- The wiki commit hook ----------------------------------------------------
+
+_GIT_MISSING = shutil.which("git") is None
 
 
-def test_a_write_to_a_person_who_does_not_exist_is_refused(data_root):
-    """A display name is not a person id, and a path built from one names nobody."""
-    with pytest.raises(paths.PathError) as excinfo:
-        paths.resolve("people/Alex Smith/blog/note.md", roots(data_root), write=True)
-    assert "names nobody" in excinfo.value.message
-    assert not (data_root / "people" / "Alex Smith").exists()
+def _git_log(wiki: Path) -> str:
+    """The one-line log, or "" when the repository has no commit yet (or the
+    call fails for any other reason)."""
+    result = subprocess.run(["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True)
+    return result.stdout if result.returncode == 0 else ""
 
 
-def test_the_refusal_names_the_path_that_works(data_root):
-    """The caller is handed the whole path, so it composes no segment of its own."""
-    with pytest.raises(paths.PathError) as excinfo:
-        paths.resolve("people/not-a-person/blog/note.md", roots(data_root), write=True)
-    message = excinfo.value.message
-    assert "people/alex/blog/" in message
-    assert str(data_root) not in message
-
-
-def test_a_turn_with_no_person_writes_no_journal(data_root):
-    """A post belongs to somebody. A turn that names nobody has no author."""
-    r = roots(data_root, person=None)
-    for segment in ("alex", "mia", "not-a-person"):
-        with pytest.raises(paths.PathError):
-            paths.resolve(f"people/{segment}/blog/x.md", r, write=True)
-
-
-def test_the_unknown_person_writes_no_journal(data_root):
-    """``unknown`` is the literal core sends for a turn it could not attribute."""
-    r = roots(data_root, person=paths.UNKNOWN)
-    with pytest.raises(paths.PathError):
-        paths.resolve("people/alex/blog/x.md", r, write=True)
-
-
-def test_a_real_person_still_writes_the_journal(data_root):
-    """The rule refuses a stranger and keeps the case that has to work."""
-    for person in ("alex", "mia"):
-        root, abs_path = paths.resolve(
-            f"people/{person}/blog/note.md", roots(data_root, person=person), write=True
-        )
-        assert abs_path == data_root / "people" / person / "blog" / "note.md"
-
-
-def test_a_person_who_does_not_exist_is_still_readable(data_root):
-    """The rule gates a write. Reading the corpus is unchanged."""
-    root, abs_path = paths.resolve("people/ghost/blog/x.md", roots(data_root), write=False)
-    assert abs_path == data_root / "people" / "ghost" / "blog" / "x.md"
-
-
-async def test_a_group_turn_writes_no_journal_through_the_gateway(gateway, data_root):
-    """A person-less turn reached a person's namespace and made a directory."""
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_a_member_write_produces_a_commit_naming_the_path(gateway, data_root):
+    wikigit.ensure_repo(data_root / "wiki")
     app = gateway(files_yaml())
     async with lifespan(app):
-        headers = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "member"}
+        headers = {"X-Joshua-Person": "alex"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            wrote = await session.call_tool(
-                "write_file",
-                {"path": "people/alex/blog/from-the-group.md", "content": "note\n"},
+            await session.call_tool(
+                "write_file", {"path": "wiki/recipes/pizza.md", "content": "# Pizza\n"}
             )
-    assert wrote.is_error is True
-    assert not list((data_root / "people" / "alex" / "blog").glob("*from-the-group*"))
+    log = _git_log(data_root / "wiki")
+    assert "write_file: recipes/pizza.md" in log
 
 
-async def test_a_display_name_makes_no_directory_through_the_gateway(gateway, data_root):
-    """The whole defect in one test: the second, parallel directory is never made."""
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_a_guests_refused_write_produces_no_commit(gateway, data_root):
+    wikigit.ensure_repo(data_root / "wiki")
     app = gateway(files_yaml())
     async with lifespan(app):
-        headers = {"X-Joshua-Person": "alex", "X-Joshua-Role": "member"}
+        headers = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "guest"}
         async with gateway_session(app, "/files", "core", headers) as session:
-            wrote = await session.call_tool(
-                "write_file", {"path": "people/Alex/blog/garden.md", "content": "note\n"}
-            )
-    assert wrote.is_error is True
-    assert "people/alex/blog/" in wrote.content[0].text
-    assert not (data_root / "people" / "Alex Smith").exists()
+            res = await session.call_tool("write_file", {"path": "wiki/nope.md", "content": "no\n"})
+    assert res.is_error is True
+    assert _git_log(data_root / "wiki") == ""
+
+
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_wiki_git_false_produces_no_commit(gateway, data_root):
+    wikigit.ensure_repo(data_root / "wiki")
+    app = gateway(files_yaml(), wiki_git=False)
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            written = await session.call_tool("write_file", {"path": "wiki/x.md", "content": "x\n"})
+    assert written.is_error is False
+    assert (data_root / "wiki" / "x.md").exists()
+    assert _git_log(data_root / "wiki") == ""
+
+
+async def test_a_failing_git_commit_does_not_fail_the_write_tool(gateway, data_root, monkeypatch):
+    """`wikigit.commit` never raises for real, but the call site must not
+    trust that: a monkeypatched raise must still leave the write intact."""
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(wikigit, "commit", _boom)
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool("write_file", {"path": "wiki/ok.md", "content": "ok\n"})
+    assert res.is_error is False
+    assert (data_root / "wiki" / "ok.md").read_text() == "ok\n"

@@ -7,14 +7,18 @@ root, with the viewer passwords set in the environment. The Starlette
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import textwrap
 from pathlib import Path
 
 import bcrypt
 import pytest
 from joshua_gateway import viewer
-from joshua_shared import config
+from joshua_shared import config, wikigit
 from starlette.testclient import TestClient
+
+_GIT_MISSING = shutil.which("git") is None
 
 ALEX_PW = "alex-secret"
 MIA_PW = "mia-secret"
@@ -48,10 +52,9 @@ def _tree(data: Path) -> None:
         data / "wiki/dated.md",
         "---\ndate: 2026-08-20\nauthor: alex\n---\n\n# Dated\n\nA page with frontmatter.\n",
     )
-    _write(data / "people/alex/profile.md", "# Alex\n\n## About\n\nA member.\n")
-    _write(data / "people/alex/blog/2026-08-20-1200-note.md", "# Note\n\nA journal post.\n")
-    _write(data / "people/mia/profile.md", "# Mia\n\n## About\n\nA guest.\n")
-    _write(data / "shared/profile.md", "# Home\n\nShared facts.\n")
+    _write(data / "wiki/people/alex.md", "# Alex\n\n## About\n\nA member.\n")
+    _write(data / "wiki/people/mia.md", "# Mia\n\n## About\n\nA guest.\n")
+    _write(data / "wiki/people/everyone.md", "# Home\n\nShared facts.\n")
     # A one-pixel PNG for the inline-image check.
     png = bytes.fromhex(
         "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
@@ -59,6 +62,8 @@ def _tree(data: Path) -> None:
     )
     (data / "people/alex/attachments/2026/08").mkdir(parents=True, exist_ok=True)
     (data / "people/alex/attachments/2026/08/pic.png").write_bytes(png)
+    (data / "shared/attachments").mkdir(parents=True, exist_ok=True)
+    (data / "shared/attachments/team.png").write_bytes(png)
 
 
 @pytest.fixture
@@ -86,7 +91,7 @@ MIA = ("mia", MIA_PW)
 
 
 def test_every_route_needs_auth(client):
-    for path in ("/", "/profile", "/blog/", "/wiki/pizza.md", "/shared/profile.md", "/search"):
+    for path in ("/", "/wiki/pizza.md", "/shared/attachments/team.png", "/search"):
         response = client.get(path)
         assert response.status_code == 401, path
         assert response.headers["WWW-Authenticate"].startswith("Basic")
@@ -130,16 +135,58 @@ def test_member_and_guest_both_read_the_wiki(client):
         assert client.get("/wiki/pizza.md", auth=creds).status_code == 200
 
 
-def test_home_lists_profile_journal_and_wiki(client):
+def test_home_lists_profile_link_wiki_and_attachments(client):
     text = client.get("/", auth=("alex", ALEX_PW)).text
+    assert "/wiki/people/alex.md" in text
     assert "/wiki/pizza.md" in text
-    assert "/blog/2026-08-20-1200-note.md" in text
-    assert "A member" in text
+    assert "/attachments/2026/08/pic.png" in text
 
 
-def test_shared_profile_reads(client):
-    text = client.get("/shared/profile.md", auth=("alex", ALEX_PW)).text
+def test_home_has_no_blog_route(client):
+    """The journal and the profile file left ``people/``; only the wiki route
+    to a person's profile page remains."""
+    assert client.get("/blog/", auth=("alex", ALEX_PW)).status_code == 404
+    assert client.get("/profile", auth=("alex", ALEX_PW)).status_code == 404
+
+
+def test_shared_profile_lives_in_the_wiki(client):
+    text = client.get("/wiki/people/everyone.md", auth=("alex", ALEX_PW)).text
     assert "Shared facts" in text
+
+
+def test_shared_attachment_reads(client):
+    response = client.get("/shared/attachments/team.png", auth=("alex", ALEX_PW))
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+
+def test_a_guest_reads_another_persons_profile_in_the_wiki(client):
+    """Profiles live in the shared wiki now: everyone reads every page."""
+    response = client.get("/wiki/people/alex.md", auth=MIA)
+    assert response.status_code == 200
+    assert "A member" in response.text
+
+
+# -- dot entries --------------------------------------------------------------
+
+
+def test_dot_entries_are_hidden_from_home_and_search(client, tmp_path):
+    """A wiki frontend's own state never shows up as content, at any depth."""
+    data = tmp_path / "data"
+    _write(data / "wiki/.git/config", "not markdown\n")
+    _write(data / "wiki/.obsidian/workspace.md", "# Workspace\n\nA note tool's own state.\n")
+    home = client.get("/", auth=("alex", ALEX_PW)).text
+    assert "/wiki/.git" not in home
+    assert "/wiki/.obsidian" not in home
+    hits = client.get("/search", params={"q": "Workspace"}, auth=("alex", ALEX_PW)).text
+    assert "/wiki/.obsidian" not in hits
+
+
+def test_reading_a_dot_path_directly_is_404(client, tmp_path):
+    data = tmp_path / "data"
+    _write(data / "wiki/.git/config", "secret\n")
+    response = client.get("/wiki/.git/config", auth=("alex", ALEX_PW))
+    assert response.status_code == 404
 
 
 # -- path safety ------------------------------------------------------------
@@ -155,13 +202,6 @@ def test_symlink_out_of_root_is_404(client, tmp_path):
     link.symlink_to("/etc/hostname")
     response = client.get("/wiki/evil.md", auth=("alex", ALEX_PW))
     assert response.status_code == 404
-
-
-def test_no_route_names_another_person(client):
-    # The URL space has no per-person segment, so a person cannot ask for another
-    # person's files. mia reads her own profile, never alex's.
-    assert client.get("/profile", auth=MIA).text.count("A guest") == 1
-    assert "A member" not in client.get("/profile", auth=MIA).text
 
 
 # -- rendering --------------------------------------------------------------
@@ -223,6 +263,26 @@ def test_member_deletes_a_wiki_page(client, tmp_path):
     assert trash[0].read_text().startswith("# Pizza")
 
 
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+def test_delete_commits_the_removal(client, tmp_path):
+    wiki = tmp_path / "data" / "wiki"
+    wikigit.ensure_repo(wiki)
+    wikigit.commit(wiki, None, "start: sync the wiki")  # tracks pizza.md first
+    path = "wiki/pizza.md"
+    token = viewer._csrf_token("alex", path)
+    response = client.post(
+        "/delete",
+        data={"path": path, "csrf": token},
+        auth=("alex", ALEX_PW),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True
+    ).stdout
+    assert "viewer: trash pizza.md" in log
+
+
 def test_guest_cannot_delete(client):
     path = "wiki/pizza.md"
     token = viewer._csrf_token("mia", path)
@@ -248,8 +308,8 @@ def test_missing_csrf_is_403(client):
 
 
 def test_delete_outside_wiki_is_refused(client):
-    # An absolute path escapes every root; a blog path is not under wiki.
-    for path in ("/etc/passwd", "blog/2026-08-20-1200-note.md"):
+    # An absolute path escapes every root; an attachment path is not under wiki.
+    for path in ("/etc/passwd", "people/alex/attachments/2026/08/pic.png"):
         token = viewer._csrf_token("alex", path)
         response = client.post(
             "/delete", data={"path": path, "csrf": token}, auth=("alex", ALEX_PW)

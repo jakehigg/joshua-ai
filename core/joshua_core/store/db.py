@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS kb_chunk (
     id           BIGSERIAL PRIMARY KEY,
     person_id    TEXT REFERENCES people(id) ON DELETE CASCADE,   -- NULL = shared/
     source       TEXT NOT NULL,
-    kind         TEXT NOT NULL DEFAULT '',   -- files → 'blog' | 'wiki' | 'shared'
+    kind         TEXT NOT NULL DEFAULT '',   -- files → 'journal' | 'profile' | 'wiki' | 'shared'
     path         TEXT NOT NULL,
     provenance   TEXT NOT NULL DEFAULT 'own',   -- 'own' | 'external'
     title        TEXT NOT NULL DEFAULT '',
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS kb_chunk (
     embedding    vector(384),
     file_mtime   TIMESTAMPTZ NOT NULL,
     file_sha256  TEXT NOT NULL,
-    doc_date     DATE,                       -- blog posts: the date in the name
+    doc_date     DATE,                       -- journal pages: the day the page belongs to
     indexed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- A NULL person_id does not dedupe under a plain UNIQUE, so key on COALESCE.

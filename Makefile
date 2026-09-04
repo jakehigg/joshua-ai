@@ -2,9 +2,16 @@
 
 MEMBERS := shared channels core gateway
 
+# The compose command line for a plain run: the base file, plus one `-f` for
+# each slot in enhancements.yaml whose `use` names a choice. scripts/
+# enhancements.sh reads that file; enhancements.example.yaml has the format.
+# Every target below runs $(COMPOSE), so `make down` also stops an enabled
+# choice.
+COMPOSE := docker compose -f docker-compose.yml $(shell sh scripts/enhancements.sh)
+
 # The developer file pair: docker-compose.yml names the released images, and
 # docker-compose.dev.yml replaces them with a build of this checkout.
-DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
+DEV := $(COMPOSE) -f docker-compose.dev.yml
 
 sync:
 	uv sync --all-packages
@@ -42,12 +49,12 @@ joshua.yaml:
 
 # Run Joshua. Set JOSHUA_VERSION in .env to take another release.
 up: joshua.yaml
-	docker compose up -d
+	$(COMPOSE) up -d
 	$(MAKE) --no-print-directory ps
 
 # Get a newer release of the images. `make up` then restarts on them.
 pull:
-	docker compose pull
+	$(COMPOSE) pull
 
 # Run your build of this checkout. Rebuilds what changed.
 up-dev: joshua.yaml
@@ -55,20 +62,20 @@ up-dev: joshua.yaml
 	$(MAKE) --no-print-directory ps
 
 down:
-	docker compose down
+	$(COMPOSE) down
 
 # Drop the volumes too. Asks first, because this deletes the database and data.
 nuke:
 	@printf 'This deletes the pgdata, data, and claude-config volumes. Continue? [y/N] '; \
 	read ans; [ "$$ans" = "y" ] || { echo aborted; exit 1; }; \
-	docker compose down -v
+	$(COMPOSE) down -v
 
 # Check joshua.yaml. The secrets in .env must be in the environment, because the
 # config file refers to them.
 # Runs in the core image, so the host needs no Python. The first run pulls the
 # image; `make up` reuses it. Compose passes the secrets from .env.
 validate: joshua.yaml
-	docker compose run --rm --no-deps -T --entrypoint joshua-config core validate /etc/joshua/joshua.yaml
+	$(COMPOSE) run --rm --no-deps -T --entrypoint joshua-config core validate /etc/joshua/joshua.yaml
 
 # Talk to Joshua. Set AS to a person id from joshua.yaml.
 #   make chat AS=alex              open a session
@@ -76,19 +83,19 @@ validate: joshua.yaml
 # This runs inside the core container, so it needs no Python on the host.
 chat:
 	@test -n "$(AS)" || { echo 'set AS to a person id, e.g. make chat AS=alex'; exit 1; }
-	@docker compose exec $(if $(MSG),-T,) core python -m joshua_core chat --as $(AS) $(if $(MSG),"$(MSG)",)
+	@$(COMPOSE) exec $(if $(MSG),-T,) core python -m joshua_core chat --as $(AS) $(if $(MSG),"$(MSG)",)
 
 logs:
-	docker compose logs -f
+	$(COMPOSE) logs -f
 
 ps:
-	docker compose ps
+	$(COMPOSE) ps
 
 shell-core:
-	docker compose exec core /bin/sh
+	$(COMPOSE) exec core /bin/sh
 
 psql:
-	docker compose exec postgres psql -U joshua -d joshua
+	$(COMPOSE) exec postgres psql -U joshua -d joshua
 
 # Create .env, pin the version, then mint each secret that .env does not
 # already set. Running it again changes nothing.
@@ -122,7 +129,7 @@ e2e:
 # postgres service with a host port, then runs the integration smoke suite from
 # the dev venv. Set SMOKE_PG_PORT to change the host port.
 smoke: joshua.yaml init-env
-	docker compose -f docker-compose.yml -f tests/e2e/compose.smoke.override.yml up -d postgres --wait
+	$(COMPOSE) -f tests/e2e/compose.smoke.override.yml up -d postgres --wait
 	set -a; . ./.env; set +a; \
 	DATABASE_URL="postgresql://joshua:$$POSTGRES_PASSWORD@127.0.0.1:$${SMOKE_PG_PORT:-5432}/joshua" \
 	  uv run --package joshua-core pytest core/tests/test_smoke_integration.py -m integration

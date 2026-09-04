@@ -1,0 +1,22 @@
+# An enhancement is an optional service from another project. It is not part
+# of Joshua, and it runs code that Joshua's authors did not write.
+#
+# The wiki at /data/wiki is a folder of Markdown files. Any tool that reads a
+# folder of Markdown files can be its frontend, so the wiki is the first
+# slot below.
+#
+# Copy this file to enhancements.yaml. Each key under `enhancements` is a
+# slot: a role an enhancement fills. Under a slot, `use` names the choice.
+# `make up` adds `enhancements/<slot>/<choice>/docker-compose.yml` for each
+# slot whose `use` is not `none`.
+#
+# `use: custom` means you supply the file yourself: copy
+# `enhancements/<slot>/custom/docker-compose.example.yml` to
+# `enhancements/<slot>/custom/docker-compose.yml` next to it, and edit it.
+# This is how you plug in a container this file does not name.
+#
+# docs/enhancements.md explains what each choice does on the Joshua side.
+enhancements:
+  # Choices: none, otterwiki, custom.
+  wiki:
+    use: none
