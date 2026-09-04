@@ -267,6 +267,25 @@ memory:
 A person below `min_chars_for_post` is skipped, and core logs the reason with
 the count. `POST /admin/reflect` runs or re-runs one day.
 
+## wiki
+
+`wiki.git` controls whether Joshua keeps `/data/wiki` as a git repository.
+The default is `true`.
+
+```yaml
+wiki:
+  git: true
+```
+
+When it is on, core makes the repository at its first start (`git init`,
+with a `.gitignore` that excludes `wiki/.trash/`), and commits at start, at
+each write the agent makes through the gateway, and at the nightly run. See
+[docs/data-layout.md](data-layout.md#the-wiki) for what gets committed and
+when, and [docs/operations.md](operations.md) for adding a remote.
+
+Set `git: false` to leave git to a wiki frontend, such as Otter Wiki, or to
+a sync tool of your own. Joshua then never touches `wiki/.git`.
+
 ## MCP servers
 
 The `mcp:` section lists the servers the gateway hosts. Add a server by adding one

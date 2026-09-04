@@ -27,7 +27,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from joshua_shared import layout
+from joshua_shared import layout, wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
@@ -242,6 +242,7 @@ class NightlyReflector:
             combined_chars = sum(b.chars for b in buckets.values()) + group.chars
 
         posts = profiles = errors = reflected = 0
+        written: list[Path] = []
         if combined_chars < self._min_chars:
             logger.info(
                 {
@@ -258,6 +259,8 @@ class NightlyReflector:
                     wrote, ok = await self._reflect_journal(target, ids, buckets, group, people)
                     posts = int(wrote)
                     errors += int(not ok)
+                    if wrote:
+                        written.append(layout.journal_day_page(target, self._data_dir))
                 except Exception as exc:  # noqa: BLE001 — a bad page must not stop the profiles
                     errors += 1
                     logger.error({"message": "journal reflection failed", "error": str(exc)})
@@ -272,6 +275,8 @@ class NightlyReflector:
                     )
                     profiles += int(wrote_profile)
                     errors += int(not ok)
+                    if wrote_profile:
+                        written.append(layout.profile_path(pid, self._data_dir))
                 except Exception as exc:  # noqa: BLE001 — one person must not stop the rest
                     errors += 1
                     logger.error(
@@ -282,9 +287,13 @@ class NightlyReflector:
         if person is None and group.chars >= self._min_chars:
             try:
                 shared_updated = await self._reflect_shared(group)
+                if shared_updated:
+                    written.append(layout.shared_profile_path(self._data_dir))
             except Exception as exc:  # noqa: BLE001 — the shared pass is isolated too
                 errors += 1
                 logger.error({"message": "shared profile reflection failed", "error": str(exc)})
+
+        self._commit_wiki(target, written)
 
         summary = {
             "date": target.isoformat(),
@@ -297,6 +306,16 @@ class NightlyReflector:
         }
         logger.info({"message": "nightly run complete", **summary})
         return summary
+
+    def _commit_wiki(self, target: date, written: list[Path]) -> None:
+        """Commit what this run wrote, then sync anything else that changed
+        during the day. Both only when `wiki.git` is enabled."""
+        if not wikigit.is_enabled(self._settings):
+            return
+        wiki_root = layout.wiki_root(self._data_dir)
+        if written:
+            wikigit.commit(wiki_root, written, f"nightly: {target.isoformat()}")
+        wikigit.commit(wiki_root, None, "nightly: sync the wiki")
 
     # --- journal, profile, and shared passes --------------------------------
 

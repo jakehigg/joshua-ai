@@ -89,10 +89,12 @@ settings page.
 
 Things to know:
 
-- Otter Wiki keeps its pages in a git repository. It runs `git init` in
-  `wiki/`, so a `.git` directory appears there. It commits only its own
-  edits, so a page the agent wrote shows a "not under version control"
-  notice until a person commits it from the edit page.
+- Otter Wiki keeps its pages in a git repository, and so does Joshua (see
+  `wiki.git` in [docs/config.md](config.md#wiki)): both run in `wiki/`, on
+  the same `.git`. Joshua commits its own writes and syncs anything else
+  that changed at start and at the nightly run, so the "not under version
+  control" banner shows only for an edit made outside Joshua, and only
+  until the next sync — never for a page the agent wrote.
 - Its front page is `Home`, and `wiki/Home.md` is that page, so `/` opens
   on it.
 - A delete in Otter Wiki is a real delete of the file. Otter Wiki keeps its
@@ -103,9 +105,14 @@ Things to know:
 
 `use: custom` means you supply
 `enhancements/wiki/custom/docker-compose.yml`. The repo ships
-`docker-compose.example.yml` next to it: copy that file and edit it. The
-example runs a small git auto-commit sidecar (`alpine/git`) that commits the
-wiki every five minutes.
+`docker-compose.example.yml` next to it: copy that file and edit it. Joshua
+already commits the wiki itself (`wiki.git`, see
+[docs/config.md](config.md#wiki)), so the example runs a push sidecar
+instead of a commit loop: `git push` to a remote you name, every
+`WIKI_GIT_PUSH_SECONDS` seconds (default 900). Set `WIKI_GIT_REMOTE` in
+`.env` to an `ssh` or `https` URL, with the credential in the URL or a
+mounted key — that credential is yours, never Joshua's. The sidecar adds the
+remote once, if it is not there yet, and makes no commit of its own.
 
 Rules for a custom overlay:
 

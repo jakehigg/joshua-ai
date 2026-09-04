@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
+import subprocess
 import textwrap
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx2
 import pytest
@@ -20,6 +23,7 @@ from conftest import bearer, gateway_session
 from joshua_gateway.files_mcp import paths, server
 from joshua_gateway.main import lifespan
 from joshua_gateway.observability import CALL_LOG
+from joshua_shared import wikigit
 
 # A 1x1 PNG, enough to prove an image read returns an ImageContent block.
 PNG_1PX = base64.b64decode(
@@ -908,3 +912,71 @@ async def test_an_unknown_role_is_refused_at_the_boundary(gateway):
         with pytest.raises(Exception):  # noqa: B017 — the transport surfaces the 400
             async with gateway_session(app, "/files", "core", headers) as session:
                 await session.call_tool("read_file", {"path": "wiki/note.md"})
+
+
+# -- The wiki commit hook ----------------------------------------------------
+
+_GIT_MISSING = shutil.which("git") is None
+
+
+def _git_log(wiki: Path) -> str:
+    """The one-line log, or "" when the repository has no commit yet (or the
+    call fails for any other reason)."""
+    result = subprocess.run(["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True)
+    return result.stdout if result.returncode == 0 else ""
+
+
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_a_member_write_produces_a_commit_naming_the_path(gateway, data_root):
+    wikigit.ensure_repo(data_root / "wiki")
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            await session.call_tool(
+                "write_file", {"path": "wiki/recipes/pizza.md", "content": "# Pizza\n"}
+            )
+    log = _git_log(data_root / "wiki")
+    assert "write_file: recipes/pizza.md" in log
+
+
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_a_guests_refused_write_produces_no_commit(gateway, data_root):
+    wikigit.ensure_repo(data_root / "wiki")
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "guest"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool("write_file", {"path": "wiki/nope.md", "content": "no\n"})
+    assert res.is_error is True
+    assert _git_log(data_root / "wiki") == ""
+
+
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_wiki_git_false_produces_no_commit(gateway, data_root):
+    wikigit.ensure_repo(data_root / "wiki")
+    app = gateway(files_yaml(), wiki_git=False)
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            written = await session.call_tool("write_file", {"path": "wiki/x.md", "content": "x\n"})
+    assert written.is_error is False
+    assert (data_root / "wiki" / "x.md").exists()
+    assert _git_log(data_root / "wiki") == ""
+
+
+async def test_a_failing_git_commit_does_not_fail_the_write_tool(gateway, data_root, monkeypatch):
+    """`wikigit.commit` never raises for real, but the call site must not
+    trust that: a monkeypatched raise must still leave the write intact."""
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(wikigit, "commit", _boom)
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool("write_file", {"path": "wiki/ok.md", "content": "ok\n"})
+    assert res.is_error is False
+    assert (data_root / "wiki" / "ok.md").read_text() == "ok\n"

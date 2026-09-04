@@ -21,6 +21,7 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from joshua_shared import wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
@@ -219,6 +220,7 @@ class ConversationManager:
                 server_names=server_names,
                 resume=resume,
                 data_dir=self._data_dir,
+                wiki_git=wikigit.is_enabled(self._settings),
             )
             return session, None, profile_name, mem_paths, mem_mtime
 

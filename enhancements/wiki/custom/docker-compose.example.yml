@@ -1,12 +1,17 @@
 # This is one example of a custom enhancement: a wiki slot filled by your
-# own container instead of a named choice. Any container that reads a
-# folder of Markdown files works here.
+# own container instead of a named choice. Any container that can push a
+# git repository works here.
 #
-# This example commits the wiki to a local git repository every few
-# minutes, so you get a history of edits with no server of its own.
+# Joshua already keeps /data/wiki under git and commits its own writes (see
+# `wiki.git` in docs/config.md). This example adds a copy outside the
+# volume: it pushes the wiki to a remote you name, every
+# WIKI_GIT_PUSH_SECONDS seconds, and makes no commit of its own.
 #
 # To use it: copy this file to docker-compose.yml in this same directory,
-# then edit it. `use: custom` in enhancements.yaml adds
+# then edit it. Set WIKI_GIT_REMOTE in .env to an ssh or https URL. The
+# credential for that remote is yours to manage — in the URL, or in a key
+# you mount into this service — Joshua never sees it and never uses it.
+# `use: custom` in enhancements.yaml adds
 # enhancements/wiki/custom/docker-compose.yml to the compose command line.
 # docker-compose.yml is gitignored, so your copy stays local; this example
 # stays tracked.
@@ -17,11 +22,17 @@
 #   - Never pass a Joshua fleet token or the Claude Agent SDK token. A
 #     custom container gets no Joshua credential.
 services:
-  wiki-git-sync:
+  wiki-git-push:
     image: alpine/git:2.47.2
     # The volume below is owned by uid 1000, like every Joshua container.
     user: "1000:1000"
     restart: unless-stopped
+    environment:
+      # An ssh or https URL. Put the credential in the URL, or mount an ssh
+      # key into this service and point the URL at it — either way, it is
+      # your credential, not Joshua's.
+      WIKI_GIT_REMOTE: ${WIKI_GIT_REMOTE:-}
+      WIKI_GIT_PUSH_SECONDS: ${WIKI_GIT_PUSH_SECONDS:-900}
     volumes:
       # Only the wiki, not all of /data.
       - type: volume
@@ -29,22 +40,23 @@ services:
         target: /wiki
         volume:
           subpath: wiki
-    # One pass commits what changed, then sleeps. WIKI_GIT_SYNC_SECONDS in
-    # .env sets the interval; the default is five minutes.
+      # Uncomment to push over ssh with a mounted deploy key:
+      # - ~/.ssh/joshua_wiki_deploy_key:/home/git/.ssh/id_ed25519:ro
+    # One pass adds the remote if it is missing, then pushes and sleeps.
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >
         cd /wiki;
-        git init -q 2>/dev/null;
-        git config user.email joshua@localhost;
-        git config user.name joshua;
+        if [ -z "$$WIKI_GIT_REMOTE" ]; then
+          echo "wiki-git-push: set WIKI_GIT_REMOTE in .env" >&2; exit 1;
+        fi;
+        git remote get-url origin >/dev/null 2>&1 || git remote add origin "$$WIKI_GIT_REMOTE";
         while :; do
-          git add -A;
-          git commit -qm "auto" || true;
-          sleep ${WIKI_GIT_SYNC_SECONDS:-300};
+          git push origin main || true;
+          sleep "$$WIKI_GIT_PUSH_SECONDS";
         done
-    # core makes wiki/ on the volume at its first start, and a subpath mount
-    # fails when the directory does not exist yet. Wait for core.
+    # core makes wiki/ on the volume, and its first commit, at its first
+    # start; a subpath mount fails when the directory does not exist yet.
     depends_on:
       core:
         condition: service_healthy

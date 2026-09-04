@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from joshua_shared import config as config_module
-from joshua_shared import layout
+from joshua_shared import layout, wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger, install_healthcheck_filter
 
@@ -272,6 +272,21 @@ def _bootstrap_layout(settings: JoshuaConfig) -> None:
         logger.info({"message": "repo docs published", "pages": pages})
     for person in settings.people:
         layout.bootstrap_person(person.id, person.name)
+    _sync_wiki_git(settings)
+
+
+def _sync_wiki_git(settings: JoshuaConfig) -> None:
+    """Keep `wiki/` a git repository Joshua commits. See `wiki.git`.
+
+    The first run on an existing wiki commits every page; a later start
+    commits whatever changed outside Joshua (a person's editor, a sync
+    tool). A no-op when `wiki.git` is off.
+    """
+    if not wikigit.is_enabled(settings):
+        return
+    wiki_root = layout.wiki_root()
+    wikigit.ensure_repo(wiki_root)
+    wikigit.commit(wiki_root, None, "start: sync the wiki")
 
 
 async def healthz() -> dict[str, bool]:

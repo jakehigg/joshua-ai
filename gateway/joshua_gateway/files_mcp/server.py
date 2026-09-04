@@ -30,7 +30,7 @@ import os
 import posixpath
 import re
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo
 import mcp_types as types
 import yaml
 from joshua_shared.layout import is_hidden, journal_entry_path
+from joshua_shared.log import get_logger
 from mcp.server.lowlevel import Server
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
@@ -54,6 +55,8 @@ from joshua_gateway.files_mcp.paths import (
     roots as roots_for_role,
 )
 from joshua_gateway.observability import person_ctx, role_ctx
+
+_logger = get_logger("files_mcp")
 
 # The data volume, fixed at /data in every container; overridable for tests.
 DATA_ENV = "JOSHUA_DATA_DIR"
@@ -373,6 +376,7 @@ def _write_file(
         raise FilesError("file exceeds 256 KB")
 
     _atomic_write(abs_path, data)
+    _commit_wiki(root, [abs_path], f"write_file: {_wiki_rel(root, abs_path)}")
     return _json({"path": path, "bytes": len(data)})
 
 
@@ -407,6 +411,11 @@ def _rename_file(
         raise FilesError("target exists")
 
     os.rename(src, dest)
+    _commit_wiki(
+        root,
+        [src, dest],
+        f"rename_file: {_wiki_rel(root, src)} -> {_wiki_rel(root, dest)}",
+    )
     return _json({"path": _rel_path(root, dest), "renamed_from": _rel_path(root, src)})
 
 
@@ -480,6 +489,7 @@ def _write_journal_entry(
         raise FilesError("file exceeds 256 KB")
 
     _atomic_write(abs_path, data)
+    _commit_wiki(root, [abs_path], f"write_journal_entry: {_wiki_rel(root, abs_path)}")
     return _json(
         {"path": _rel_path(root, abs_path), "bytes": len(data), "overwritten": overwritten}
     )
@@ -554,6 +564,30 @@ def _people_kind(path: str) -> str | None:
 def _rel_path(root: Root, abs_path: Path) -> str:
     """Return the root-relative path of ``abs_path`` for a listing or a result."""
     return f"{root.name}/{abs_path.relative_to(root.base).as_posix()}"
+
+
+def _wiki_rel(root: Root, abs_path: Path) -> str:
+    """``abs_path`` relative to the wiki repository itself, for a commit message."""
+    return abs_path.relative_to(root.base).as_posix()
+
+
+def _commit_wiki(root: Root, paths: Iterable[Path], message: str) -> None:
+    """Commit a write that landed in the wiki, when ``wiki.git`` is enabled.
+
+    Runs after the write already succeeded, so this never changes the tool's
+    result: any failure here, including a monkeypatched ``wikigit.commit``
+    that raises, is a WARNING only.
+    """
+    if root.name != "wiki":
+        return
+    try:
+        from joshua_shared import config, wikigit
+
+        if not wikigit.is_enabled(config.load()):
+            return
+        wikigit.commit(root.base, list(paths), message)
+    except Exception as exc:  # noqa: BLE001 — a commit must never fail the tool
+        _logger.warning({"message": "wiki commit failed", "error": str(exc)})
 
 
 def _sanitize_stem(raw: str) -> str:

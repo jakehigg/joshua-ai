@@ -203,6 +203,11 @@ The indexer picks up a new or changed journal page like any other wiki page,
 and chunks it into `kb_chunk` at shared scope. A later turn that asks about the
 same topic gets the entry back through per-turn injection or `search_memory`.
 
+Every write in this section also lands in the wiki's own git history: the
+gateway commits an entry when the agent writes it, and the nightly reflection
+commits the day page and each profile it wrote, then anything else that
+changed. See `wiki.git` in [docs/config.md](config.md#wiki).
+
 ## Source adapters
 
 The indexer reads through source adapters, not files directly. `files` is the

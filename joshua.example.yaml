@@ -109,6 +109,10 @@ memory:
   recency_bonus: 0.08
   recency_half_life_days: 14.0
 
+wiki:
+  git: true   # keep /data/wiki as a git repository Joshua commits; false leaves
+              # git to a frontend or a sync tool
+
 mcp:
   # Only servers the shipped gateway image can run belong here. The image has no
   # `uv` or node, so a `type: stdio` server that starts with `uvx` or `npx` does

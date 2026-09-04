@@ -444,7 +444,24 @@ def _move_to_trash(root: Root, abs_path: Path) -> Path:
     dest = root.base / ".trash" / stamp / under_wiki
     dest.parent.mkdir(parents=True, exist_ok=True)
     os.replace(abs_path, dest)
+    _commit_trash(root, abs_path)
     return dest
+
+
+def _commit_trash(root: Root, abs_path: Path) -> None:
+    """Commit the delete ``_move_to_trash`` just made, when ``wiki.git`` is
+    enabled. ``.trash/`` is gitignored, so the commit records the removal
+    only, never the trashed copy. A failure here is a WARNING; the delete
+    already happened."""
+    try:
+        from joshua_shared import wikigit
+
+        if not wikigit.is_enabled(config.load()):
+            return
+        rel = abs_path.relative_to(root.base).as_posix()
+        wikigit.commit(root.base, [abs_path], f"viewer: trash {rel}")
+    except Exception as exc:  # noqa: BLE001 — a commit must never fail the delete
+        logger.warning({"message": "wiki commit failed", "error": str(exc)})
 
 
 # -- routes -----------------------------------------------------------------

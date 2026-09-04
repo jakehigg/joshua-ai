@@ -307,6 +307,27 @@ curl -s -X POST -H "$auth" -H 'Content-Type: application/json' \
 
 `make nuke` deletes the volumes. It asks first.
 
+### The wiki is a git repository
+
+`wiki.git` (default `true`) keeps `/data/wiki` under git, committed at start,
+at each write, and at the nightly run — see
+[docs/data-layout.md](data-layout.md#the-wiki). The backup archive holds it
+like any other file, so a restore brings the history back too.
+
+To keep a history outside the volume, add a remote and push from the gateway
+container, which mounts the wiki at `/data/wiki`:
+
+```
+docker compose exec gateway git -C /data/wiki remote add origin <url>
+docker compose exec gateway git -C /data/wiki push -u origin main
+```
+
+To look at the history without pushing anywhere:
+
+```
+docker compose exec gateway git -C /data/wiki log --oneline | head
+```
+
 ## The embedding model
 
 On the first start, `core` downloads its embedding model, about 65 MB, from

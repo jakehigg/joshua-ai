@@ -25,6 +25,8 @@ already at the new path stays where it is. See [Migration](#migration).
 /data/wiki/people/everyone.md                    the shared profile
 /data/wiki/**.md                                 the rest of the wiki, incl. wiki/skills/*.md
 /data/wiki/.trash/<UTC timestamp>/**             pages the viewer deleted; the index skips it
+/data/wiki/.git/                                 the wiki's git repository; core makes it
+/data/wiki/.gitignore                            excludes .trash/; core writes it once
 /data/people/<person_id>/attachments/YYYY/MM/<file>
 /data/people/<person_id>/cli/outbox.jsonl        (the terminal channel's outbox)
 /data/shared/attachments/<group>/YYYY/MM/<file>  (files from a group chat)
@@ -98,6 +100,15 @@ The file tools, the viewer, and the index ignore any file or directory whose
 name starts with a dot, at any depth under `wiki/`. This is what lets a wiki
 frontend, such as Otter Wiki, keep its own state next to the pages: a `.git`
 directory is a common example. See [docs/enhancements.md](enhancements.md).
+
+`wiki/` is also Joshua's own git repository, so a frontend never shows a page
+as not under version control. Core makes it at the first start
+(`git init`), with `wiki/.gitignore` excluding `wiki/.trash/`. Core commits
+everything at each start, gateway commits each write the agent makes
+(`write_file`, `rename_file`, `write_journal_entry`) and each delete the
+viewer makes, and core commits the day page and the profiles at the nightly
+run, then anything else that changed. `wiki.git` turns this off; see
+[docs/config.md](config.md#wiki).
 
 ## Journal
 

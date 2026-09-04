@@ -11,6 +11,10 @@ RUN uv sync --frozen --no-dev --package joshua-gateway
 
 # Runtime stage: copy the venv and only the code this member needs.
 FROM python:3.13-slim AS runtime
+# git backs `joshua_shared.wikigit`: the files MCP and the viewer commit a
+# wiki write and a trash delete (see `wiki.git`).
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 RUN useradd --uid 1000 --create-home app
 # Own /data in the image, so docker initializes the named volume with this
 # ownership. The app runs as uid 1000 and writes under /data.

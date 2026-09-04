@@ -252,6 +252,18 @@ class Memory(_Model):
         return normalized
 
 
+class Wiki(_Model):
+    """Whether Joshua keeps `/data/wiki` as a git repository.
+
+    Joshua makes the first commit at launch, commits everything it writes,
+    and commits anything else that changed at each start and at the nightly
+    run, so a wiki frontend never shows a page as not under version control.
+    Set `git: false` to leave git to a frontend or a sync tool instead.
+    """
+
+    git: bool = True
+
+
 class McpToolPolicy(_Model):
     """Per-server tool filter. ``deny`` beats ``allow``; an absent ``allow`` means
     every tool. Patterns are ``fnmatch`` globs matched against the tool name."""
@@ -382,6 +394,7 @@ class JoshuaConfig(_Model):
     channels: Channels = Channels()
     core: Core = Core()
     memory: Memory = Memory()
+    wiki: Wiki = Wiki()
     mcp: dict[str, McpServer] = {}
     modules: list[str] = []
     viewer: Viewer = Viewer()

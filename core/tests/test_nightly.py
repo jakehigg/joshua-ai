@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
 from joshua_core.memory.nightly import NightlyReflector
 from joshua_core.store.models import Person
-from joshua_shared import layout
+from joshua_shared import layout, wikigit
 from nightly_fakes import (
     FakeIndexer,
     FakeManager,
@@ -18,6 +21,8 @@ from nightly_fakes import (
     make_settings,
     row,
 )
+
+_GIT_MISSING = shutil.which("git") is None
 
 NY = ZoneInfo("America/New_York")
 DAY = date(2026, 8, 26)
@@ -286,3 +291,57 @@ async def test_a_short_day_reports_why_it_was_skipped(tmp_path: Path) -> None:
     assert summary["people"] == 1
     assert summary["people_reflected"] == 0
     assert summary["posts_written"] == 0
+
+
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_nightly_commits_the_day_page(tmp_path: Path) -> None:
+    _bootstrap(tmp_path)
+    wiki = layout.wiki_root(tmp_path)
+    wikigit.ensure_repo(wiki)
+    wikigit.commit(wiki, None, "start: sync the wiki")
+    # An edit made outside Joshua during the day; the day-page commit only
+    # stages what the reflection wrote, so this is left for the broad sync.
+    (wiki / "note-by-a-person.md").write_text("hi\n")
+
+    repo = FakeReflectRepo(
+        people=PEOPLE,
+        rows=[row("c1", "in", LONG, T10), row("c1", "out", "Congratulations!", T11)],
+        conv_meta={
+            "c1": {"session_mode": "per_person", "person_id": "alex", "display_name": "Alex"}
+        },
+    )
+    reflector, _, _ = _reflector(tmp_path, repo)
+
+    await reflector.reflect(target_date=DAY)
+
+    log = subprocess.run(  # noqa: ASYNC221 — test assertion, not app code
+        ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True, check=True
+    ).stdout
+    assert f"nightly: {DAY.isoformat()}" in log
+    assert "nightly: sync the wiki" in log
+
+
+async def test_nightly_writes_nothing_to_git_when_wiki_git_is_off(tmp_path: Path) -> None:
+    _bootstrap(tmp_path)
+    repo = FakeReflectRepo(
+        people=PEOPLE,
+        rows=[row("c1", "in", LONG, T10), row("c1", "out", "Congratulations!", T11)],
+        conv_meta={
+            "c1": {"session_mode": "per_person", "person_id": "alex", "display_name": "Alex"}
+        },
+    )
+    calls: list[tuple] = []
+    import joshua_core.memory.nightly as nightly_module
+
+    orig_commit = nightly_module.wikigit.commit
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return orig_commit(*args, **kwargs)
+
+    reflector, _, _ = _reflector(tmp_path, repo, extra="wiki:\n  git: false\n")
+
+    await reflector.reflect(target_date=DAY)
+
+    assert calls == []
+    assert not (layout.wiki_root(tmp_path) / ".git").exists()

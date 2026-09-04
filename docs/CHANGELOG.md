@@ -21,6 +21,13 @@ with the images and the packaged chart, are at
 - A gateway tool, `write_journal_entry`, lets the agent write a dated entry
   to Joshua's own journal in the wiki. Joshua writes it, in its own voice,
   about a person, not for a person.
+- Joshua now keeps `/data/wiki` as a git repository: it makes the first
+  commit at launch, commits every write it makes, and commits anything else
+  that changed at each start and at the nightly run, so a wiki frontend such
+  as Otter Wiki never shows a page as not under version control. Set
+  `wiki.git: false` to leave git to a frontend or a sync tool. The custom
+  wiki enhancement example is now a push-to-remote sidecar; see
+  `docs/enhancements.md`.
 
 ### Changed
 

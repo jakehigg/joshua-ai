@@ -7,14 +7,18 @@ root, with the viewer passwords set in the environment. The Starlette
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import textwrap
 from pathlib import Path
 
 import bcrypt
 import pytest
 from joshua_gateway import viewer
-from joshua_shared import config
+from joshua_shared import config, wikigit
 from starlette.testclient import TestClient
+
+_GIT_MISSING = shutil.which("git") is None
 
 ALEX_PW = "alex-secret"
 MIA_PW = "mia-secret"
@@ -257,6 +261,26 @@ def test_member_deletes_a_wiki_page(client, tmp_path):
     trash = list((tmp_path / "data" / "wiki" / ".trash").rglob("pizza.md"))
     assert len(trash) == 1
     assert trash[0].read_text().startswith("# Pizza")
+
+
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+def test_delete_commits_the_removal(client, tmp_path):
+    wiki = tmp_path / "data" / "wiki"
+    wikigit.ensure_repo(wiki)
+    wikigit.commit(wiki, None, "start: sync the wiki")  # tracks pizza.md first
+    path = "wiki/pizza.md"
+    token = viewer._csrf_token("alex", path)
+    response = client.post(
+        "/delete",
+        data={"path": path, "csrf": token},
+        auth=("alex", ALEX_PW),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True
+    ).stdout
+    assert "viewer: trash pizza.md" in log
 
 
 def test_guest_cannot_delete(client):

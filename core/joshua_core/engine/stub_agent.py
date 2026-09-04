@@ -13,7 +13,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from joshua_shared import layout
+from joshua_shared import layout, wikigit
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
@@ -44,12 +44,14 @@ class StubAgentSession:
         server_names: list[str] | None = None,
         resume: str | None = None,
         data_dir: Path | str | None = None,
+        wiki_git: bool = True,
     ):
         self._system_prompt = system_prompt
         self._cwd = cwd
         self._session_id = f"stub-{conversation_id}"
         self._server_names = sorted(server_names or [])
         self._data_dir = Path(data_dir) if data_dir is not None else None
+        self._wiki_git = wiki_git
         # When built with a resume id, fail the first run once so the manager's
         # resume-retry path (rebuild without resume) is exercised offline.
         self._resume = resume
@@ -144,6 +146,10 @@ class StubAgentSession:
             lines.append(f"Photo: {attachments[0]}")
         entry.write_text("\n".join(lines) + "\n")
         self.journal_writes += 1
+        if self._wiki_git:
+            wiki_root = layout.wiki_root(self._data_dir)
+            rel = entry.relative_to(wiki_root).as_posix()
+            wikigit.commit(wiki_root, [entry], f"journal: {rel}")
 
     async def interrupt(self) -> None:
         logger.info({"message": "stub interrupt"})

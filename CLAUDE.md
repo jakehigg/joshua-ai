@@ -121,6 +121,7 @@ One volume mounts at `/data` in all three containers:
 /data/wiki/people/everyone.md                    the shared profile; core writes it (nightly)
 /data/wiki/**.md                                 the rest of the wiki; gateway writes it for a member
 /data/wiki/joshua-docs/*.md                      the repo docs; core rewrites them each start
+/data/wiki/.git                                  the wiki's git repository; core and gateway write it
 /data/people/<id>/attachments/YYYY/MM/<file>     channels writes it
 /data/people/<id>/cli/outbox.jsonl               channels writes it
 /data/shared/attachments/<group>/YYYY/MM/        channels writes it
@@ -167,6 +168,9 @@ if any, plus everything shared, and a group turn finds the shared scope only.
   gateway tool `write_journal_entry(slug, markdown, people)`. The `stub`
   backend does the same on a `[[journal]]` marker, so the flow is testable
   without the SDK.
+- `joshua_shared.wikigit` keeps `wiki/` a git repository: core commits at
+  start and at the nightly run, gateway commits each wiki write and each
+  trash delete. `wiki.git` (default true) turns this off.
 
 `docs/memory.md` documents every knob. The admin routes are
 `POST /admin/kb/reindex`, `GET /admin/kb/status`, `GET /admin/kb/events`, and
