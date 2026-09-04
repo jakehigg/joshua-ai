@@ -31,10 +31,6 @@ with the images and the packaged chart, are at
 
 ### Changed
 
-- Otter Wiki now asks a reader to sign in by default. Set
-  `OTTERWIKI_READ_ACCESS=ANONYMOUS` in `.env` (Compose) or
-  `enhancements.wiki.otterwiki.readAccess: ANONYMOUS` (Helm) to open the
-  wiki to anyone who reaches the host.
 - The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name
   says what it is. Core renames an existing `wiki/joshua/` at start.
 - The agent's file tools, the viewer, and the index now ignore any dot-file

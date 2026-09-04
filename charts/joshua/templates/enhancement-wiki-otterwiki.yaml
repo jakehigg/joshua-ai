@@ -77,9 +77,9 @@ spec:
             - name: READ_ACCESS
               value: {{ .Values.enhancements.wiki.otterwiki.readAccess | quote }}
             - name: WRITE_ACCESS
-              value: REGISTERED
+              value: {{ .Values.enhancements.wiki.otterwiki.writeAccess | quote }}
             - name: ATTACHMENT_ACCESS
-              value: REGISTERED
+              value: {{ .Values.enhancements.wiki.otterwiki.attachmentAccess | quote }}
             {{/* Otter Wiki writes its own SECRET_KEY into /app-data/settings.cfg
                  on first start. It needs no Secret from this chart. */}}
           resources:

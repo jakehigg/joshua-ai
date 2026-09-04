@@ -268,9 +268,13 @@ enhancements:
       image: redimp/otterwiki:2.24.0-slim
       pullPolicy: IfNotPresent
       siteName: Joshua wiki
-      # ANONYMOUS, REGISTERED, or APPROVED. See the Otter Wiki configuration
-      # reference: https://otterwiki.com/Configuration.
-      readAccess: REGISTERED
+      # Who may read, write, and attach: ANONYMOUS, REGISTERED, or APPROVED.
+      # Open by default, the same as Otter Wiki itself. The wiki holds
+      # Joshua's journal and the profiles, so set REGISTERED before the host
+      # is reachable by anyone but you. See https://otterwiki.com/Configuration.
+      readAccess: ANONYMOUS
+      writeAccess: ANONYMOUS
+      attachmentAccess: ANONYMOUS
       # Accounts, settings, and the search database live in /app-data, apart
       # from the wiki. The first account that registers is the admin.
       persistence:

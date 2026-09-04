@@ -22,12 +22,13 @@ services:
       SITE_NAME: ${OTTERWIKI_SITE_NAME:-Joshua wiki}
       RETAIN_PAGE_NAME_CASE: "True"
       COMMIT_MESSAGE: OPTIONAL
-      # The wiki holds Joshua's journal and the profiles, so a reader signs
-      # in by default. Set OTTERWIKI_READ_ACCESS=ANONYMOUS in .env for an
-      # open wiki on a host only you reach.
-      READ_ACCESS: ${OTTERWIKI_READ_ACCESS:-REGISTERED}
-      WRITE_ACCESS: REGISTERED
-      ATTACHMENT_ACCESS: REGISTERED
+      # Open by default, the same as Otter Wiki itself: anyone who reaches
+      # the port reads and edits, and the port is loopback only. The wiki
+      # holds Joshua's journal and the profiles, so before you expose the
+      # host, set these to REGISTERED in .env and register an account.
+      READ_ACCESS: ${OTTERWIKI_READ_ACCESS:-ANONYMOUS}
+      WRITE_ACCESS: ${OTTERWIKI_WRITE_ACCESS:-ANONYMOUS}
+      ATTACHMENT_ACCESS: ${OTTERWIKI_ATTACHMENT_ACCESS:-ANONYMOUS}
       # Otter Wiki has no SECRET_KEY variable here on purpose. It writes its
       # own into /app-data/settings.cfg on first start, so Joshua mints
       # nothing for it and never holds it.
