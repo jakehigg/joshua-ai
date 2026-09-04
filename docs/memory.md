@@ -192,9 +192,15 @@ than working from a list of subjects:
   time. A measurement, a reading, a dose, a score, a meal, a mood: anything
   stamped with a time is episodic.
 
-So Joshua never builds a wiki page that grows dated rows. A person who asks
+So Joshua does not invent a wiki page that grows dated rows. A person who asks
 Joshua to keep track of something has stated a preference about how Joshua
 works, which the profile holds; each occurrence is its own journal entry.
+
+A person can still ask for the page. Some histories are easier to read in one
+place than to search for: where a plant has lived, a changelog, a log somebody
+wants open in front of them. Ask for that page and Joshua makes it and keeps
+it current. The request decides, and Joshua goes on writing an entry for
+anything that matters on its own.
 
 ### The journal reaches a turn only through retrieval
 

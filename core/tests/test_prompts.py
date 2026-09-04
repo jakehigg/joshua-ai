@@ -126,7 +126,7 @@ def test_the_prompt_rules_where_a_dated_thing_is_stored() -> None:
     in the store meant for what stays true."""
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    assert "Never grow a wiki page of dated rows" in prompt
+    assert "Do not invent a wiki page of dated rows" in prompt
     assert "If keeping it current means rewriting" in prompt
     assert "adding another dated line, it is the journal" in prompt
 
@@ -144,6 +144,19 @@ def test_a_standing_request_to_track_is_a_preference_not_a_page() -> None:
     composer = PromptComposer()
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
     assert "not a page of its own" in prompt
+
+
+def test_asking_for_a_wiki_page_of_history_overrides_the_placement_rule() -> None:
+    """The rule stops the agent inventing a dated-rows page on its own. It must
+    not stop a person who wants that page: a plant's moves, a changelog, any
+    history easier to read in one place than to search for."""
+    composer = PromptComposer()
+    prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+    assert "Unless a person asks for the page." in prompt
+    assert "Their request decides" in prompt
+    # The rule bans inventing such a page, not making one that was asked for.
+    assert "Do not invent a wiki page of dated rows" in prompt
+    assert "Never grow a wiki page of dated rows" not in prompt
 
 
 def test_the_journal_keeps_a_selectivity_bar() -> None:
