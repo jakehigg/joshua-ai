@@ -53,6 +53,16 @@ def test_no_forbidden_terms(path: Path) -> None:
     assert not hits, f"{path.name} names non-kernel terms: {hits}"
 
 
+# Every kernel file stays short, because the whole set is prepended to every
+# turn. ``people.md`` carries the storage rules — which of the wiki, the
+# journal, and a profile a thing belongs in — and is the one file where an
+# extra line buys guidance the agent cannot work out for itself.
+_LINE_BUDGET = 80
+_BUDGETS = {"people.md": 90}
+
+
 @pytest.mark.parametrize("path", _FILES, ids=lambda p: p.name)
 def test_file_within_line_budget(path: Path) -> None:
-    assert len(path.read_text().splitlines()) <= 80, f"{path.name} is over 80 lines"
+    budget = _BUDGETS.get(path.name, _LINE_BUDGET)
+    lines = len(path.read_text().splitlines())
+    assert lines <= budget, f"{path.name} is {lines} lines, over its {budget}-line budget"

@@ -181,6 +181,21 @@ profile: what a person is reliably like, what they prefer, what they avoid.
 Transient state belongs in the journal: a timer, a plan for the day, a
 one-off reminder. Each prompt carries the rule that points to the other.
 
+### The test for the wiki against the journal
+
+One test decides which store a thing goes in, and Joshua applies it rather
+than working from a list of subjects:
+
+- If keeping it current means **rewriting the page**, it is the wiki. How
+  something works, a decision, a reference, what is set up where.
+- If it means **adding another dated line**, it is the journal, one entry each
+  time. A measurement, a reading, a dose, a score, a meal, a mood: anything
+  stamped with a time is episodic.
+
+So Joshua never builds a wiki page that grows dated rows. A person who asks
+Joshua to keep track of something has stated a preference about how Joshua
+works, which the profile holds; each occurrence is its own journal entry.
+
 ### The journal reaches a turn only through retrieval
 
 Nobody gets a journal block in the system prompt. The only way a journal entry

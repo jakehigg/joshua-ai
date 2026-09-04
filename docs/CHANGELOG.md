@@ -45,6 +45,13 @@ with the images and the packaged chart, are at
 - `people[].journal` (`auto`, `ask`, `off`) is unchanged in behaviour, but it
   is documented for what it does: whether Joshua's journal may record that
   person. It never gave a person a journal of their own.
+- Joshua now has one test for which store a thing goes in. If keeping it
+  current means rewriting a page, it is the wiki; if it means adding another
+  dated line, it is the journal, one entry each time. Joshua no longer builds
+  a wiki page that grows dated rows, so a reading, a dose, a score, a meal, or
+  a mood lands in the journal where it belongs. Asking Joshua to keep track of
+  something states a preference, which the profile holds; it does not make a
+  page. See `docs/memory.md`.
 - The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name
   says what it is. Core renames an existing `wiki/joshua/` at start.
 - The agent's file tools, the viewer, and the index now ignore any dot-file
