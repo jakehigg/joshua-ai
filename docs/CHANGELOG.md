@@ -52,8 +52,25 @@ with the images and the packaged chart, are at
   a mood lands in the journal where it belongs. Asking Joshua to keep track of
   something states a preference, which the profile holds; it does not make a
   page. Ask for the page and Joshua makes it: a history you would rather read
-  in one place, such as where a plant has lived or a changelog, is yours to
-  ask for. See `docs/memory.md`.
+  in one place, a changelog for example, is yours to ask for. See
+  `docs/memory.md`.
+- The prompts Joshua ships assume nothing about what a person keeps. The rule
+  that decides where a thing is stored names the shape of the thing, not its
+  subject, so it reaches a reading, a measurement, or one occurrence of
+  something that recurs without supposing anybody records any of them. The
+  examples that carried one deployment's habits are gone.
+- The prompts describe only what this repository builds. The identity
+  paragraph no longer offers voice as a way to know who is speaking, because
+  there is no voice channel. The guest prompt describes what a guest reaches
+  in terms of the tool list for the conversation, rather than naming systems
+  this repository does not build, and it no longer offers a guest notes of
+  their own: there is one wiki, and a guest reads it. The skill example now
+  uses the journal, which every instance has, in place of lights and a
+  television, which no shipped instance can reach.
+- The shipped prompts are written in Simplified Technical English, the
+  standard the documentation already follows. A semicolon joining two
+  instructions is the shape a reader most often splits wrongly, and the
+  prompts had twelve of them.
 - The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name
   says what it is. Core renames an existing `wiki/joshua/` at start.
 - The agent's file tools, the viewer, and the index now ignore any dot-file
