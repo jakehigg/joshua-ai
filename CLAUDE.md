@@ -40,16 +40,21 @@ Use one name for one thing, in code and in prose:
   **member** or a **guest**. The role is a trust tier, not a hosting concept.
 - **the wiki**: `/data/wiki/`, one wiki for everyone. There is no per-person
   wiki. A member writes it, a guest reads it.
-- **journal**: Joshua's own journal, at `wiki/journal/`. It is not a person's
-  blog. **profile**: `wiki/people/<id>.md`. **shared profile**:
-  `wiki/people/everyone.md`.
+- **journal**: Joshua's own journal, at `wiki/journal/`. It is episodic
+  memory: what happened. There is one journal, and it is Joshua's. A person is
+  named in an entry, never the owner of one. **profile**:
+  `wiki/people/<id>.md`, semantic memory: what a person is durably like.
+  **shared profile**: `wiki/people/everyone.md`.
 - **instance**: one deployment, one group of people, one database, one volume.
   There is no multi-tenant mode.
 - **channel**: a way to talk to Joshua. **destination**: a logical name that
   resolves to a channel.
 
 Do not use "household", "family", or "tenant" in identifiers, config keys,
-paths, prompts, or docs. Examples of who can share Joshua ("a family, friends,
+paths, prompts, or docs. Do not call the journal a "blog", and do not write
+"a person's journal" or "their journal": one journal, Joshua's. The word
+"blog" survives only in the `layout` helpers that read the layout from before
+the journal moved into the wiki. Examples of who can share Joshua ("a family, friends,
 a team") are fine in a sentence.
 
 ## Repo layout

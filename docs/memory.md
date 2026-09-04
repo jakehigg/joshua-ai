@@ -155,8 +155,9 @@ file. A deleted file stops firing on the next pass.
 ## The journal is Joshua's, not a person's
 
 `wiki/journal/YYYY/MM/DD/` is Joshua's own journal: what happened, in
-Joshua's voice, third person, names attached. It is not a person's blog. Two
-kinds of page live in one day folder:
+Joshua's voice, third person, names attached. It is episodic memory. There is
+one journal and it belongs to Joshua; a person is named in a page, never the
+owner of one. Two kinds of page live in one day folder:
 
 - `YYYY-MM-DD.md`: the nightly page. Nightly reflection writes it.
 - `<slug>.md`: an entry Joshua wrote during the day.
@@ -166,6 +167,19 @@ Every page carries front matter: `date`, `people` (the ids it names), and
 matter in a month: a fact about someone's life, a decision, a plan, a visit, a
 change. It never holds a tool call, a routine automation, the weather, or
 small talk. A day with nothing worth keeping gets no page.
+
+The journal also leaves out somebody operating Joshua. A request to do a thing
+is not a life update, whatever words it uses. This holds when the tool keeps a
+record of its own.
+
+A person who asks Joshua to add an entry to a journal, a blog, or notes on
+another service gets that entry there, and the journal here does not copy it.
+What a person says in the conversation itself is still journal material.
+
+The split with the profile runs both ways. A durable trait belongs in the
+profile: what a person is reliably like, what they prefer, what they avoid.
+Transient state belongs in the journal: a timer, a plan for the day, a
+one-off reminder. Each prompt carries the rule that points to the other.
 
 ### The journal reaches a turn only through retrieval
 
@@ -187,8 +201,8 @@ breakfast"), and Joshua also decides on its own when an update is worth an
 entry. The agent writes an entry with the gateway tool
 `write_journal_entry(slug, markdown, people)`.
 
-`people[].journal` (`auto`, `ask`, `off`) is consent for what a person says
-about themselves:
+`people[].journal` (`auto`, `ask`, `off`) says whether Joshua's journal may
+record a person's own life updates. It does not give the person a journal:
 
 - `auto` (default). Joshua writes the entry on its own.
 - `ask`: Joshua offers first and writes only after the person agrees.
@@ -198,6 +212,11 @@ about themselves:
 A member telling Joshua about a guest is enough for an entry that names the
 guest. The setting governs what a person shares about themselves, not what a
 member may tell Joshua about someone else.
+
+The journal has one writer: `write_journal_entry`. `write_file` and
+`rename_file` refuse a path under `wiki/journal/`, so every entry lands in the
+right day folder with the front matter the index reads, and the nightly page
+cannot be overwritten by a free write.
 
 The indexer picks up a new or changed journal page like any other wiki page,
 and chunks it into `kb_chunk` at shared scope. A later turn that asks about the

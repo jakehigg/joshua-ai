@@ -53,18 +53,46 @@ Rules:
 - Most days change nothing durable. Prefer to leave the profile as it is."""
 
 JOURNAL_SYSTEM = """\
-You are Joshua, writing today's page in your own journal: what happened with \
-the people you talked with, in the third person, naming each person. Return \
-ONE JSON object and nothing else:
+You are Joshua, writing today's page in your own journal. The journal is your \
+episodic memory: what happened. There is one journal and it is yours. A person \
+is named in a page, never the owner of one. Write in the third person, naming \
+each person. Return ONE JSON object and nothing else:
 
 {"post": "<markdown> or null}
 
 `post` is the day's page: what happened, what people told you, decisions and \
 plans they made, a visit, a change in someone's life. Never invent anything \
-that is not in the transcript. Be selective — keep only what would still \
-matter in a month. Skip tool calls, routine automations, weather, \
-pleasantries, and anything already in the wiki. Return `"post": null` when \
-nothing today is worth keeping. Keep it under 600 words."""
+that is not in the transcript.
+
+Be selective. Keep only what would still matter in a month, and return \
+`"post": null` when nothing today clears that bar. Most days do not.
+
+Leave out:
+
+- Anything that is somebody operating you. A person asking you to do a thing \
+is not a life update, however the request is worded. This holds even when the \
+tool you were asked to use keeps a record of its own: when a person asks you \
+to add an entry to their own journal, blog, or notes somewhere else, the thing \
+they wrote is theirs and it lives there. Your journal does not copy it. What \
+you may keep is what they told you in the conversation itself.
+- A durable trait: what a person is reliably like, what they prefer, what they \
+avoid. That belongs in their profile, not here. Keep the event; drop the \
+generalization.
+- Routine automations, the weather, small talk, and anything already written \
+in the wiki.
+
+Two worked examples.
+
+A day worth a page: Alex says their sister lands on Friday and they are taking \
+the week off; Alex asks you to turn the porch light on; Alex asks you to add \
+"ran 5 miles" to their training log. The page holds the sister's visit and the \
+week off. It does not hold the porch light, and it does not hold the run — \
+that one is already in the training log.
+
+A day worth no page: somebody asks the forecast, asks you to start the \
+dishwasher, and says good night. Return `"post": null`.
+
+Keep it under 600 words."""
 
 PROFILE_SYSTEM = f"""\
 You are Joshua, updating your profile of one person from your conversations \
@@ -164,6 +192,10 @@ class NightlyReflector:
         self._oneshot = oneshot or _default_oneshot
         self._task: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
+        # The summary of the last run, for `GET /admin/journal/status`. The
+        # object is the one `reflect` returns, so `run_once` adding
+        # `rolled_over` after the fact shows up here too.
+        self._last_run: dict[str, Any] | None = None
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -305,7 +337,33 @@ class NightlyReflector:
             "errors": errors,
         }
         logger.info({"message": "nightly run complete", **summary})
+        self._last_run = summary
         return summary
+
+    def journal_status(self) -> dict[str, Any]:
+        """What an operator needs to tell that the journal is alive.
+
+        ``last_run`` is the summary of the last reflection this process ran, or
+        None when it has run none yet: a restarted core reports None until
+        03:30, and the day folder is the ground truth in the meantime.
+        """
+        today = now_in(self._tz).date()
+        day_dir = layout.journal_day_dir(today, self._data_dir)
+        page = layout.journal_day_page(today, self._data_dir)
+        entries = 0
+        if day_dir.is_dir():
+            entries = sum(
+                1
+                for f in day_dir.iterdir()
+                if f.is_file() and f.suffix == ".md" and f.name != page.name
+            )
+        return {
+            "date": today.isoformat(),
+            "entries_today": entries,
+            "day_page_today": page.exists(),
+            "nightly_at": self._nightly_at,
+            "last_run": self._last_run,
+        }
 
     def _commit_wiki(self, target: date, written: list[Path]) -> None:
         """Commit what this run wrote, then sync anything else that changed

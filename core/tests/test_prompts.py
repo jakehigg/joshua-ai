@@ -150,13 +150,17 @@ def test_journal_auto_adds_no_preference_line() -> None:
     composer = PromptComposer(person_journal={})
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
     assert "turned off automatic journaling" not in prompt
-    assert "wants you to ask before you journal" not in prompt
+    assert "wants you to ask before your journal records" not in prompt
 
 
 def test_journal_ask_adds_ask_line() -> None:
+    """The setting gates what Joshua's journal records about a person. It does
+    not give the person a journal, and the line must not say that it does."""
     composer = PromptComposer(person_journal={"alex": "ask"})
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
-    assert "Alex wants you to ask before you journal about them." in prompt
+    assert "Alex wants you to ask before your journal records anything about them." in prompt
+    assert "in my journal?" in prompt
+    assert "your journal?" not in prompt
 
 
 def test_journal_off_adds_off_line() -> None:

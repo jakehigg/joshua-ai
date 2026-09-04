@@ -100,6 +100,7 @@ message text and no sender handle.
 | `POST /admin/kb/reindex` | reconcile the index. `{"full": true}` re-embeds everything. `{"person": "sam"}` limits it to one person. `{"background": true}` answers 202 at once and runs the pass after. |
 | `GET /admin/kb/events?limit=40` | what retrieval found for recent turns, and what it injected |
 | `POST /admin/reflect` | run the nightly reflection now. `{"date": "2026-08-27", "person": "sam"}` re-runs one day for one person. |
+| `GET /admin/journal/status` | today's journal: entries written, whether the nightly page landed, and the last nightly run |
 | `POST /admin/turn` | run one turn with no channel: `{"channel", "text", "person"}`. The reply comes back in the response and is not delivered. |
 
 Example:
@@ -353,6 +354,21 @@ session, so the next message starts a fresh one with the profile block as
 context. `memory.md` explains the rules.
 
 To run the reflection by hand, or to re-run one day, use `POST /admin/reflect`.
+
+To tell that the journal is alive without reading the logs, use
+`GET /admin/journal/status`:
+
+```
+curl -s -H "$auth" 127.0.0.1:8081/admin/journal/status
+```
+
+It answers with today's date, `entries_today` (the entries Joshua wrote during
+the day), `day_page_today` (whether today already has a nightly page), and
+`last_run`, the summary of the last reflection this core ran. Two things to
+know when you read it. The nightly page is dated for the day it covers, so the
+03:30 run writes yesterday's page and `day_page_today` stays false until
+tomorrow morning. And `last_run` is None after a restart, because it is held in
+the process; the day folders on the volume are the record that survives.
 
 ## The viewer
 

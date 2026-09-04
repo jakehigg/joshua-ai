@@ -26,7 +26,7 @@ def test_is_skill_path_exact_depth() -> None:
 def test_is_skill_path_rejects_deeper_or_other_trees() -> None:
     assert not is_skill_path("wiki/skills/sub/x.md")  # deeper: an ordinary page
     assert not is_skill_path("wiki/notes/x.md")
-    assert not is_skill_path("blog/skills/x.md")
+    assert not is_skill_path("journal/skills/x.md")
     assert not is_skill_path("wiki/skills/x.txt")
     assert not is_skill_path("wiki/skills/.md")  # empty slug
     assert not is_skill_path("wiki/skills/UPPER.md")  # slug is lower-case only

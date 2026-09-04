@@ -18,6 +18,8 @@ Routes:
 - ``GET /admin/kb/events`` — recent retrieval-audit rows (body ``{limit?}``).
 - ``POST /admin/reflect`` — run or re-run the nightly reflection for one day
   (body ``{person?, date?}``); re-running a date overwrites that day's post.
+- ``GET /admin/journal/status`` — today's journal: entries written, whether the
+  day page exists, and the summary of the last nightly run.
 - ``POST /admin/turn`` — run one turn as an operator and return the text. The
   reply is never delivered to a channel.
 """
@@ -234,6 +236,13 @@ def build_admin_router() -> APIRouter:
         limit = _parse_limit(request.query_params.get("limit"))
         rows = await request.app.state.ctx.repo.kb_events(limit)
         return JSONResponse({"events": [_json_safe_event(r) for r in rows]})
+
+    @router.get("/admin/journal/status")
+    async def journal_status(request: Request):  # type: ignore[no-untyped-def]
+        denied = _authorize(request)
+        if denied is not None:
+            return denied
+        return JSONResponse(request.app.state.ctx.reflector.journal_status())
 
     @router.post("/admin/reflect")
     async def post_reflect(request: Request):  # type: ignore[no-untyped-def]

@@ -73,9 +73,9 @@ _GUEST_WHO = (
 # Per-person journal preference, appended to the identity block when it is not
 # the ``auto`` default. ``auto`` needs no line — ``people.md`` covers it.
 _JOURNAL_ASK = (
-    "{name} wants you to ask before you journal about them. When something is "
-    'worth an entry, offer "want me to note that in your journal?" and write '
-    "it only after they agree."
+    "{name} wants you to ask before your journal records anything about them. "
+    'When something is worth an entry, offer "want me to note that in my '
+    'journal?" and write it only after they agree.'
 )
 _JOURNAL_OFF = (
     "{name} has turned off automatic journaling about them. Do not write a "
@@ -216,7 +216,11 @@ class PromptComposer:
         return f"{TRUST_PREAMBLE}\n\n{who}"
 
     def _journal_line(self, person: Person) -> str:
-        """A journal-preference sentence for a person whose setting is not ``auto``."""
+        """A consent sentence for a person whose ``journal`` setting is not ``auto``.
+
+        The setting gates what Joshua's own journal records about them. It does
+        not give the person a journal.
+        """
         mode = self._person_journal.get(person.id, "auto")
         if mode == "ask":
             return "\n\n" + _JOURNAL_ASK.format(name=person.display_name)

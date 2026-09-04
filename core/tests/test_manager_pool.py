@@ -79,7 +79,7 @@ def test_a_refused_write_is_not_reported_as_written() -> None:
 def test_a_mixed_turn_reports_the_write_that_landed() -> None:
     calls = [
         _call("mcp__files__write_file", "wiki/notes/ok.md", ok=True),
-        _call("mcp__files__write_file", "blog/retired.md", ok=False),
+        _call("mcp__files__write_file", "journal/retired.md", ok=False),
     ]
     assert manager.written_paths(calls) == ["wiki/notes/ok.md"]
     assert manager.failed_writes(calls) == 1

@@ -129,7 +129,7 @@ async def test_group_rejects_personal_attachment() -> None:
     async with _client(app) as client:
         resp = await client.post(
             "/v1/deliver",
-            json={"channel": "everyone", "text": "hi", "attachments": ["blog/x.md"]},
+            json={"channel": "everyone", "text": "hi", "attachments": ["journal/x.md"]},
             headers=_bearer(CORE_TOKEN),
         )
     assert resp.status_code == 400
@@ -154,12 +154,12 @@ async def test_dm_maps_person_attachment() -> None:
     async with _client(app) as client:
         resp = await client.post(
             "/v1/deliver",
-            json={"channel": "telegram:dm:alex", "text": "note", "attachments": ["blog/x.md"]},
+            json={"channel": "telegram:dm:alex", "text": "note", "attachments": ["journal/x.md"]},
             headers=_bearer(CORE_TOKEN),
         )
     assert resp.status_code == 200
     assert telegram.sent[0][0] == "998877"
-    assert telegram.sent[0][2] == [Path("/data/people/alex/blog/x.md")]
+    assert telegram.sent[0][2] == [Path("/data/people/alex/journal/x.md")]
 
 
 async def test_unsafe_attachment_is_rejected() -> None:

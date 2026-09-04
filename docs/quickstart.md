@@ -207,11 +207,12 @@ address only. See [operations.md](operations.md#the-viewer).
 Everything Joshua writes is Markdown on one volume:
 
 ```
-/data/people/<id>/profile.md      who you are
-/data/people/<id>/blog/           what happened, one file per post
 /data/wiki/                       the wiki: reference pages for everyone
+/data/wiki/journal/               Joshua's journal: what happened, one folder per day
+/data/wiki/people/<id>.md         Joshua's profile of you
 /data/wiki/joshua-docs/           Joshua's own documentation
-/data/shared/                     the shared profile and group-chat files
+/data/people/<id>/attachments/    the files you sent Joshua
+/data/shared/attachments/         the files a group chat sent Joshua
 ```
 
 Read them with `docker compose exec core ls /data/wiki`.

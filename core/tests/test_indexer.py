@@ -327,8 +327,8 @@ class RefusingStore(FakeStore):
 
 async def test_a_document_that_breaks_a_constraint_is_not_retried(_count_embeds) -> None:
     """The revision is never stored, so every pass saw it as changed and failed it."""
-    docs = [_doc("ghost", "blog/x.md", "r1"), _doc("alice", "wiki/a.md", "r1")]
-    store = RefusingStore("blog/x.md")
+    docs = [_doc("ghost", "journal/x.md", "r1"), _doc("alice", "wiki/a.md", "r1")]
+    store = RefusingStore("journal/x.md")
     indexer = _indexer(store, docs)
 
     first = (await indexer.reindex())["files"]
@@ -338,45 +338,45 @@ async def test_a_document_that_breaks_a_constraint_is_not_retried(_count_embeds)
     second = (await indexer.reindex())["files"]
     assert second["failed"] == 0
     assert second["skipped"] == 1
-    assert store.attempts.count("blog/x.md") == 1
+    assert store.attempts.count("journal/x.md") == 1
 
 
 async def test_a_held_document_is_retried_when_its_revision_changes(_count_embeds) -> None:
-    docs = [_doc("ghost", "blog/x.md", "r1")]
-    store = RefusingStore("blog/x.md")
+    docs = [_doc("ghost", "journal/x.md", "r1")]
+    store = RefusingStore("journal/x.md")
     indexer = _indexer(store, docs)
     await indexer.reindex()
 
-    docs[0] = _doc("ghost", "blog/x.md", "r2")
+    docs[0] = _doc("ghost", "journal/x.md", "r2")
     await indexer.reindex()
-    assert store.attempts.count("blog/x.md") == 2
+    assert store.attempts.count("journal/x.md") == 2
 
 
 async def test_a_full_reindex_tries_a_held_document_again(_count_embeds) -> None:
     """An operator asking for the whole source is asking for this one too."""
-    docs = [_doc("ghost", "blog/x.md", "r1")]
-    store = RefusingStore("blog/x.md")
+    docs = [_doc("ghost", "journal/x.md", "r1")]
+    store = RefusingStore("journal/x.md")
     indexer = _indexer(store, docs)
     await indexer.reindex()
     await indexer.reindex(full=True)
-    assert store.attempts.count("blog/x.md") == 2
+    assert store.attempts.count("journal/x.md") == 2
 
 
 async def test_the_status_names_the_condition_and_the_count(_count_embeds) -> None:
-    docs = [_doc("ghost", "blog/x.md", "r1")]
-    indexer = _indexer(RefusingStore("blog/x.md"), docs)
+    docs = [_doc("ghost", "journal/x.md", "r1")]
+    indexer = _indexer(RefusingStore("journal/x.md"), docs)
     await indexer.reindex()
 
     held = indexer.status()["files"]["unindexable"]
     assert held["count"] == 1
-    assert held["paths"] == ["blog/x.md"]
+    assert held["paths"] == ["journal/x.md"]
     assert indexer.status()["files"]["empty"]["count"] == 0
 
 
 async def test_a_held_document_logs_one_line_and_not_one_a_pass(_count_embeds, caplog) -> None:
     """Roughly 2,880 identical lines a day is the shape this replaces."""
-    docs = [_doc("ghost", "blog/x.md", "r1")]
-    indexer = _indexer(RefusingStore("blog/x.md"), docs)
+    docs = [_doc("ghost", "journal/x.md", "r1")]
+    indexer = _indexer(RefusingStore("journal/x.md"), docs)
     with caplog.at_level("WARNING"):
         await indexer.reindex()
         await indexer.reindex()
@@ -407,8 +407,8 @@ async def test_a_fault_of_the_run_is_retried(_count_embeds, monkeypatch) -> None
 
 
 async def test_a_document_that_vanishes_leaves_no_entry_behind(_count_embeds) -> None:
-    docs = [_doc("ghost", "blog/x.md", "r1")]
-    indexer = _indexer(RefusingStore("blog/x.md"), docs)
+    docs = [_doc("ghost", "journal/x.md", "r1")]
+    indexer = _indexer(RefusingStore("journal/x.md"), docs)
     await indexer.reindex()
     assert indexer.status()["files"]["unindexable"]["count"] == 1
 
@@ -449,7 +449,7 @@ async def test_an_empty_document_is_not_reindexed_every_pass(_count_embeds) -> N
     failed: 0` on every pass, once a minute, for days, and nothing in the index
     to show for it.
     """
-    docs = [_empty_doc("alice", "blog/empty.md", "r1"), _doc("alice", "wiki/a.md", "r1")]
+    docs = [_empty_doc("alice", "journal/empty.md", "r1"), _doc("alice", "wiki/a.md", "r1")]
     store = EmptyStore()
     indexer = _indexer(store, docs)
 
@@ -464,29 +464,29 @@ async def test_an_empty_document_is_not_reindexed_every_pass(_count_embeds) -> N
 
 
 async def test_an_empty_document_is_retried_when_it_gains_content(_count_embeds) -> None:
-    docs = [_empty_doc("alice", "blog/empty.md", "r1")]
+    docs = [_empty_doc("alice", "journal/empty.md", "r1")]
     store = EmptyStore()
     indexer = _indexer(store, docs)
     await indexer.reindex()
 
-    docs[0] = _doc("alice", "blog/empty.md", "r2")
+    docs[0] = _doc("alice", "journal/empty.md", "r2")
     stats = (await indexer.reindex())["files"]
     assert stats["changed"] == 1 and stats["indexed"] == 1
     assert indexer.status()["files"]["empty"]["count"] == 0
-    assert ("alice", "blog/empty.md") in store.replaced
+    assert ("alice", "journal/empty.md") in store.replaced
 
 
 async def test_the_status_names_an_empty_document(_count_embeds) -> None:
-    indexer = _indexer(EmptyStore(), [_empty_doc("alice", "blog/empty.md", "r1")])
+    indexer = _indexer(EmptyStore(), [_empty_doc("alice", "journal/empty.md", "r1")])
     await indexer.reindex()
     empty = indexer.status()["files"]["empty"]
     assert empty["count"] == 1
-    assert empty["paths"] == ["blog/empty.md"]
+    assert empty["paths"] == ["journal/empty.md"]
     assert indexer.status()["files"]["unindexable"]["count"] == 0
 
 
 async def test_an_empty_document_logs_one_line_and_not_one_a_pass(_count_embeds, caplog) -> None:
-    indexer = _indexer(EmptyStore(), [_empty_doc("alice", "blog/empty.md", "r1")])
+    indexer = _indexer(EmptyStore(), [_empty_doc("alice", "journal/empty.md", "r1")])
     with caplog.at_level("INFO"):
         await indexer.reindex()
         await indexer.reindex()

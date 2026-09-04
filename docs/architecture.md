@@ -8,7 +8,7 @@ and on Kubernetes.
 
 ```
                 inbound trust boundary                 outbound trust boundary
-Telegram ─┐                                                       ┌─ files MCP (wiki/blog/attachments)
+Telegram ─┐                                                       ┌─ files MCP (wiki/journal/attachments)
 iMessage ─┤   ┌──────────┐   POST /v1/turns   ┌──────────┐  MCP   │  weather, user-added MCPs …
 Terminal ─┤──►│ channels │ ────────────────► │   core   │ ──────►│ gateway ├─ per-person upstreams
 Webhooks ─┘   └──────────┘ ◄──────────────── └────┬─────┘        └─────────┘
@@ -90,9 +90,9 @@ own part of it:
 | Path | Writer |
 |---|---|
 | `people/<id>/attachments/`, `inbox/` | channels |
-| `people/<id>/blog/YYYY-MM-DD.md`, `people/<id>/profile.md`, `shared/profile.md` | core |
+| `wiki/journal/YYYY/MM/DD/YYYY-MM-DD.md`, `wiki/people/<id>.md`, `wiki/people/everyone.md` | core, at the nightly run |
 | `wiki/` | gateway, for a member |
-| `people/<id>/blog/<dated post>` | gateway, for the person |
+| `wiki/journal/YYYY/MM/DD/<slug>.md` | gateway, for a member |
 | `wiki/joshua-docs/` | core, at each start |
 
 `data-layout.md` describes the tree. `memory.md` describes what `core` does with
