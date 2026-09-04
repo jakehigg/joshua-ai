@@ -85,6 +85,25 @@ async def test_writes_page_and_profile(tmp_path: Path) -> None:
     assert summary["profiles_updated"] == 1
 
 
+async def test_no_page_when_the_day_is_not_worth_one(tmp_path: Path) -> None:
+    """A day of chatter clears ``min_chars_for_post`` but is still worth no
+    page. ``"post": null`` writes no file, and the run is not an error."""
+    _bootstrap(tmp_path)
+    chatter = "Turn the porch light on, start the dishwasher, and good night. " * 4
+    repo = FakeReflectRepo(
+        people=PEOPLE,
+        rows=[row("c1", "in", chatter, T10), row("c1", "out", "Done, good night.", T11)],
+        conv_meta={
+            "c1": {"session_mode": "per_person", "person_id": "alex", "display_name": "Alex"}
+        },
+    )
+    reflector, _, _ = _reflector(tmp_path, repo, oneshot=canned_oneshot(post=None))
+    summary = await reflector.reflect(target_date=DAY)
+    assert summary["posts_written"] == 0
+    assert summary["errors"] == 0
+    assert not _page(tmp_path).exists()
+
+
 async def test_short_day_writes_nothing(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     before = layout.profile_path("alex", tmp_path).read_text()
@@ -345,3 +364,45 @@ async def test_nightly_writes_nothing_to_git_when_wiki_git_is_off(tmp_path: Path
 
     assert calls == []
     assert not (layout.wiki_root(tmp_path) / ".git").exists()
+
+
+async def test_journal_status_counts_today(tmp_path: Path) -> None:
+    """Entries the agent wrote today, and whether the nightly page landed. The
+    day page is not counted as an entry."""
+    _bootstrap(tmp_path)
+    reflector, _, _ = _reflector(tmp_path, FakeReflectRepo(people=PEOPLE, rows=[], conv_meta={}))
+    today = date.fromisoformat(reflector.journal_status()["date"])
+    day_dir = layout.journal_day_dir(today, tmp_path)
+    day_dir.mkdir(parents=True, exist_ok=True)
+    (day_dir / "garden.md").write_text("beans\n")
+    (day_dir / "visit.md").write_text("sister\n")
+    layout.journal_day_page(today, tmp_path).write_text("the day\n")
+
+    status = reflector.journal_status()
+    assert status["entries_today"] == 2
+    assert status["day_page_today"] is True
+    assert status["nightly_at"] == "03:30"
+
+
+async def test_journal_status_last_run_is_none_before_a_run(tmp_path: Path) -> None:
+    """A restarted core reports None until the next nightly, so the day folder
+    is the ground truth in the meantime."""
+    _bootstrap(tmp_path)
+    reflector, _, _ = _reflector(tmp_path, FakeReflectRepo(people=PEOPLE, rows=[], conv_meta={}))
+    assert reflector.journal_status()["last_run"] is None
+
+
+async def test_journal_status_keeps_the_last_run(tmp_path: Path) -> None:
+    _bootstrap(tmp_path)
+    repo = FakeReflectRepo(
+        people=PEOPLE,
+        rows=[row("c1", "in", LONG, T10), row("c1", "out", "Congratulations!", T11)],
+        conv_meta={
+            "c1": {"session_mode": "per_person", "person_id": "alex", "display_name": "Alex"}
+        },
+    )
+    reflector, _, _ = _reflector(tmp_path, repo)
+    await reflector.reflect(target_date=DAY)
+    last = reflector.journal_status()["last_run"]
+    assert last["date"] == DAY.isoformat()
+    assert last["posts_written"] == 1

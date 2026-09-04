@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 
 import mcp_types as types
 import yaml
-from joshua_shared.layout import is_hidden, journal_entry_path
+from joshua_shared.layout import is_hidden, journal_entry_path, journal_root
 from joshua_shared.log import get_logger
 from mcp.server.lowlevel import Server
 from pypdf import PdfReader
@@ -160,9 +160,9 @@ TOOLS = [
         name="write_file",
         description=(
             "Write one .md file under wiki/. mode create fails if the file "
-            "exists; overwrite replaces it; append adds to it. Max 256 KB. To "
-            "add an entry to Joshua's own journal, use write_journal_entry "
-            "instead."
+            "exists; overwrite replaces it; append adds to it. Max 256 KB. A "
+            "path under wiki/journal/ is refused: the journal has one writer, "
+            "write_journal_entry."
         ),
         input_schema={
             "type": "object",
@@ -212,16 +212,23 @@ TOOLS = [
     types.Tool(
         name="write_journal_entry",
         description=(
-            "Add one entry to Joshua's own journal, at wiki/journal/. One "
-            "folder holds a day; an entry is one page in it, member only. "
-            "Write it in the third person, as Joshua's own record of the day, "
-            "not a message to a person. Add an entry only for something worth "
-            "Joshua remembering later, not every turn. Name the people the "
-            "entry is about in people; leave it empty for an entry about "
-            "nobody in particular. slug is a short filename word, such as "
-            "alex-breakfast; the server places it in the right day's folder. "
-            "date defaults to today and is YYYY-MM-DD. An entry that already "
-            "exists at that day and slug is overwritten."
+            "Add one entry to Joshua's own journal, at wiki/journal/. There "
+            "is one journal and it is Joshua's: a person is named in an entry, "
+            "never the owner of one. One folder holds a day; an entry is one "
+            "page in it, member only. Write it in the third person, as "
+            "Joshua's own record of what happened, not a message to a person. "
+            "Add an entry only for a life update worth remembering in a month "
+            "— a visit, a plan, a change — never for a question, for small "
+            "talk, or for a request to operate a tool. A person who asks "
+            "Joshua to write in a journal, blog, or notes of their own on "
+            "another service gets it there; this journal does not copy it. "
+            "One entry per event: to correct one already written today, send "
+            "the same slug again rather than adding a second entry. Name the "
+            "people the entry is about in people; leave it empty for an entry "
+            "about nobody in particular. slug is a short filename word, such "
+            "as alex-breakfast; the server places it in the right day's "
+            "folder. date defaults to today and is YYYY-MM-DD. An entry that "
+            "already exists at that day and slug is overwritten."
         ),
         input_schema={
             "type": "object",
@@ -356,6 +363,16 @@ def _read_file(
     return _text(text)
 
 
+def _in_journal(abs_path: Path, root_dir: Path) -> bool:
+    """True when ``abs_path`` is inside ``wiki/journal/``.
+
+    The journal has one writer, ``write_journal_entry``, so that every entry
+    lands in the right day folder with the frontmatter the index reads, and so
+    that the nightly page cannot be overwritten by a free write.
+    """
+    return abs_path == journal_root(root_dir) or journal_root(root_dir) in abs_path.parents
+
+
 def _write_file(
     roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo, root_dir: Path
 ) -> types.CallToolResult:
@@ -365,6 +382,8 @@ def _write_file(
         raise FilesError("mode must be create, overwrite, or append")
     path = args.get("path", "")
     root, abs_path = resolve(path, roots, write=True)
+    if _in_journal(abs_path, root_dir):
+        raise FilesError("the journal is written with write_journal_entry")
 
     _check_frontmatter(content)
     data = content.encode("utf-8")
@@ -389,6 +408,8 @@ def _rename_file(
         raise FilesError(f"cannot rename in {root.name}")
     if not root.can_write:
         raise FilesError(f"{root.name} is read-only for a guest")
+    if _in_journal(src, root_dir):
+        raise FilesError("a journal entry cannot be renamed")
     if not src.is_file():
         raise FilesError("file not found")
 

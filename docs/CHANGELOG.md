@@ -28,9 +28,49 @@ with the images and the packaged chart, are at
   `wiki.git: false` to leave git to a frontend or a sync tool. The custom
   wiki enhancement example is now a push-to-remote sidecar; see
   `docs/enhancements.md`.
+- `GET /admin/journal/status` reports today's journal: the entries Joshua
+  wrote during the day, whether today has a nightly page, and the summary of
+  the last nightly run. `docs/operations.md` shows how to read it.
 
 ### Changed
 
+- The journal is Joshua's episodic memory, and only that. There is one
+  journal and it belongs to Joshua; a person is named in an entry, never the
+  owner of one. The nightly page now leaves out anything that is somebody
+  operating Joshua: a request to do a thing is not a life update, however it
+  is worded. When you ask Joshua to write in a journal, a blog, or notes of
+  your own on another service, that entry lives there and Joshua's journal
+  does not copy it. A durable trait stays in your profile, where it was
+  always meant to be.
+- `people[].journal` (`auto`, `ask`, `off`) is unchanged in behaviour, but it
+  is documented for what it does: whether Joshua's journal may record that
+  person. It never gave a person a journal of their own.
+- Joshua now has one test for which store a thing goes in. If keeping it
+  current means rewriting a page, it is the wiki; if it means adding another
+  dated line, it is the journal, one entry each time. Joshua no longer invents
+  a wiki page that grows dated rows, so a reading, a dose, a score, a meal, or
+  a mood lands in the journal where it belongs. Asking Joshua to keep track of
+  something states a preference, which the profile holds; it does not make a
+  page. Ask for the page and Joshua makes it: a history you would rather read
+  in one place, a changelog for example, is yours to ask for. See
+  `docs/memory.md`.
+- The prompts Joshua ships assume nothing about what a person keeps. The rule
+  that decides where a thing is stored names the shape of the thing, not its
+  subject, so it reaches a reading, a measurement, or one occurrence of
+  something that recurs without supposing anybody records any of them. The
+  examples that carried one deployment's habits are gone.
+- The prompts describe only what this repository builds. The identity
+  paragraph no longer offers voice as a way to know who is speaking, because
+  there is no voice channel. The guest prompt describes what a guest reaches
+  in terms of the tool list for the conversation, rather than naming systems
+  this repository does not build, and it no longer offers a guest notes of
+  their own: there is one wiki, and a guest reads it. The skill example now
+  uses the journal, which every instance has, in place of lights and a
+  television, which no shipped instance can reach.
+- The shipped prompts are written in Simplified Technical English, the
+  standard the documentation already follows. A semicolon joining two
+  instructions is the shape a reader most often splits wrongly, and the
+  prompts had twelve of them.
 - The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name
   says what it is. Core renames an existing `wiki/joshua/` at start.
 - The agent's file tools, the viewer, and the index now ignore any dot-file
@@ -50,6 +90,23 @@ with the images and the packaged chart, are at
 - `wiki/Home.md` is the wiki's front page. Core makes it once, from a
   template, and never rewrites it after that. Core also removes the old
   `wiki/README.md` and `shared/README.md`, which `Home.md` replaces.
+
+### Fixed
+
+- A turn that wrote a journal entry reported writing nothing. The turn log
+  names the files a turn wrote, and it built that list from each call's
+  `path` argument, which `write_journal_entry` does not have: the tool takes a
+  slug and the gateway places the file. The entry landed correctly, and only
+  the record of it was missing. The path is now rebuilt the way the gateway
+  builds it.
+- The journal has one writer. `write_file` and `rename_file` now refuse a path
+  under `wiki/journal/`, so an entry cannot land outside its day folder
+  without the frontmatter the index reads, and the nightly page cannot be
+  overwritten or renamed by the agent. Use `write_journal_entry`.
+- `docs/architecture.md`, `docs/quickstart.md`, and `docs/config.md` described
+  the layout from before the journal moved into the wiki: a per-person
+  `blog/` folder, a profile at `people/<id>/profile.md`, and a shared profile
+  under `shared/`. They now describe the wiki.
 
 ## 0.0.4 - 2026-09-01
 

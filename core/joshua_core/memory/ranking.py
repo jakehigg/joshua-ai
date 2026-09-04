@@ -1,12 +1,12 @@
 """Retrieval ranking — blends cosine similarity with kind temporality.
 
-Wiki pages are static reference: their age says nothing about relevance. Blog
-posts (the nightly digest and agent posts) are temporal: for "where do we
-stand" questions, a fresh post beats a slightly-better-matching post from last
-month. So temporal kinds get a recency bonus that DECAYS (half-life, default 2
-weeks) — a fresh post is lifted past static content, a stale post competes on
-similarity alone. The caller signals time-intent per query via ``prefer_recent``,
-which doubles the bonus.
+Wiki pages are static reference: their age says nothing about relevance.
+Journal pages (the nightly page and the entries Joshua writes during the day)
+are temporal: for "where do we stand" questions, a fresh page beats a
+slightly-better-matching page from last month. So temporal kinds get a recency
+bonus that DECAYS (half-life, default 2 weeks) — a fresh page is lifted past
+static content, a stale page competes on similarity alone. The caller signals
+time-intent per query via ``prefer_recent``, which doubles the bonus.
 
 Also enforces a per-document cap so one strong document can't monopolize the
 result slots and crowd out every other document.

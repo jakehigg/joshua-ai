@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -74,14 +74,43 @@ class _Managed:
     memory_mtime: float = 0.0
 
 
+JOURNAL_TOOL = "mcp__files__write_journal_entry"
+
 WRITE_TOOLS = (
     "mcp__files__write_file",
     "mcp__files__rename_file",
-    "mcp__files__write_journal_entry",
+    JOURNAL_TOOL,
 )
 
 
-def written_paths(tool_calls: list[dict[str, Any]]) -> list[str]:
+def _journal_path(data: dict[str, Any], today: date | None) -> str | None:
+    """Where ``write_journal_entry`` put its entry, from the call's arguments.
+
+    The tool takes a ``slug``, never a path: the gateway places the file. So
+    the path is rebuilt the way the gateway builds it, from ``date`` when the
+    call carried one and from ``today`` otherwise. Both containers read the
+    same ``timezone``, so both agree on the day.
+
+    Returns None when the day cannot be known, which keeps a guess out of the
+    log.
+    """
+    slug = data.get("slug")
+    if not isinstance(slug, str) or not slug:
+        return None
+    raw = data.get("date")
+    if isinstance(raw, str) and raw:
+        try:
+            day = date.fromisoformat(raw)
+        except ValueError:
+            return None
+    elif today is not None:
+        day = today
+    else:
+        return None
+    return f"wiki/journal/{day:%Y/%m/%d}/{slug}.md"
+
+
+def written_paths(tool_calls: list[dict[str, Any]], *, today: date | None = None) -> list[str]:
     """The paths a turn actually wrote, in call order, without duplicates.
 
     A write the gateway refused is not here, so an operator reading the log
@@ -91,14 +120,20 @@ def written_paths(tool_calls: list[dict[str, Any]]) -> list[str]:
     and naming a file that does not exist is the fault this guards.
 
     A ``rename_file`` reports its destination, because that is where the content
-    ends up.
+    ends up. A ``write_journal_entry`` reports the path the gateway built for
+    it; pass ``today`` in the instance timezone so an entry with no explicit
+    date can be named.
     """
     paths: list[str] = []
     for call in tool_calls:
-        if call.get("name") not in WRITE_TOOLS or not call.get("ok", False):
+        name = call.get("name")
+        if name not in WRITE_TOOLS or not call.get("ok", False):
             continue
         data = call.get("input") or {}
-        path = data.get("to") or data.get("path")
+        if name == JOURNAL_TOOL:
+            path = _journal_path(data, today)
+        else:
+            path = data.get("to") or data.get("path")
         if isinstance(path, str) and path and path not in paths:
             paths.append(path)
     return paths
@@ -477,7 +512,10 @@ class ConversationManager:
                 "tools": result.tools_used,
                 # Paths the agent wrote this turn. The nightly reflection reads
                 # these to tell a skill file from a journal entry.
-                "written": written_paths(result.tool_calls),
+                "written": written_paths(
+                    result.tool_calls,
+                    today=datetime.now(ZoneInfo(self._settings.timezone)).date(),
+                ),
                 **(
                     {"write_failed": failed} if (failed := failed_writes(result.tool_calls)) else {}
                 ),

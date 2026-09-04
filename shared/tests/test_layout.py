@@ -508,24 +508,24 @@ def test_migrate_to_one_wiki_names_an_old_digest_by_person(tmp_path) -> None:
     root = tmp_path / "data"
     _write(
         root / "people" / "alex" / "blog" / "2026-08-29.md",
-        "---\nperson: alex\n---\n# 2026-08-29\njake's day\n",
+        "---\nperson: alex\n---\n# 2026-08-29\nalex's day\n",
     )
-    _write(root / "people" / "mia" / "blog" / "2026-08-29.md", "# 2026-08-29\nlauren's day\n")
+    _write(root / "people" / "mia" / "blog" / "2026-08-29.md", "# 2026-08-29\nmia's day\n")
 
     counts = layout.migrate_to_one_wiki(root)
 
     day_dir = root / "wiki" / "journal" / "2026" / "08" / "29"
-    jake_page = day_dir / "alex.md"
-    lauren_page = day_dir / "mia.md"
-    assert jake_page.is_file()
-    assert lauren_page.is_file()
+    alex_page = day_dir / "alex.md"
+    mia_page = day_dir / "mia.md"
+    assert alex_page.is_file()
+    assert mia_page.is_file()
     assert not (day_dir / "2026-08-29.md").exists()
 
-    jake_text = jake_page.read_text()
-    assert "person: alex" in jake_text  # an existing key survives untouched
-    assert "people: [alex]" in jake_text
-    assert "date: 2026-08-29" in jake_text
-    assert "people: [mia]" in lauren_page.read_text()
+    alex_text = alex_page.read_text()
+    assert "person: alex" in alex_text  # an existing key survives untouched
+    assert "people: [alex]" in alex_text
+    assert "date: 2026-08-29" in alex_text
+    assert "people: [mia]" in mia_page.read_text()
 
     assert counts["journal_moved"] == 2
     assert counts["skipped"] == 0
@@ -567,12 +567,12 @@ def test_migrate_to_one_wiki_does_not_replace_an_edited_shared_profile(tmp_path)
     layout.bootstrap_wiki(root)
     layout.bootstrap_shared_profile("Test House", root)
     edited = layout.shared_profile_path(root)
-    edited.write_text("# Test House\n## About\nJake and Mia live here.\n")
+    edited.write_text("# Test House\n## About\nAlex and Mia live here.\n")
     _write(root / "shared" / "profile.md", "# Test House\nsomething else\n")
 
     counts = layout.migrate_to_one_wiki(root)
 
-    assert edited.read_text() == "# Test House\n## About\nJake and Mia live here.\n"
+    assert edited.read_text() == "# Test House\n## About\nAlex and Mia live here.\n"
     assert (root / "shared" / "profile.md").is_file()
     assert counts["shared_profile_moved"] == 0
     assert counts["skipped"] == 1

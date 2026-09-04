@@ -37,9 +37,10 @@ Each `people[]` entry takes:
 - `role`: `member` (default) or `guest`.
 - `handles`: a map of channel to handle id.
 - `prompt`: a path to an extra prompt snippet for this person.
-- `journal`: consent for what Joshua's journal says about this person's own
-  life updates: `auto` (default, write an entry on its own), `ask` (offer
-  first), or `off` (write an entry only when asked). See [memory.md](memory.md).
+- `journal`: whether Joshua's own journal may record this person's life
+  updates: `auto` (default, write an entry on its own), `ask` (offer first), or
+  `off` (write an entry only when asked). It does not give the person a
+  journal; there is one journal and it is Joshua's. See [memory.md](memory.md).
 
 ## Helpers
 
@@ -363,26 +364,26 @@ mcp:
 `files` is a builtin. It is the agent's only file interface. It lists, reads,
 searches, writes, and renames files. Every path is confined to a root.
 
-The corpus is one corpus. The wiki is what Joshua knows, a journal records when
-something happened, and an attachment is the artifact. No root is keyed on a
-person: the role of the request decides the write, and `people/<id>/` records
-whose episode a journal entry holds. The role comes from the request, never from
-a tool argument.
+The corpus is one corpus. The wiki is what Joshua knows, the journal records
+when something happened, and an attachment is the artifact. No root is keyed on
+a person, and no root belongs to a person: the role of the request decides the
+write. The role comes from the request, never from a tool argument.
 
 Three roots under `/data`:
 
 | Root | Path | Read | Write |
 |---|---|---|---|
 | `wiki/` | `wiki/` | everyone | a member, `.md` only |
-| `people/` | `people/` | everyone | a member, `people/<id>/blog/` only, `.md` only, create or append |
+| `people/` | `people/` | everyone | no |
 | `shared/` | `shared/` | everyone | no |
 
-A member writes the wiki and a journal post. A guest reads and writes nothing.
-A request with no role is a guest.
+A member writes the wiki, and the journal inside it. A guest reads and writes
+nothing. A request with no role is a guest.
 
-The write rule below `people/` is the write domain of a container, and not a
-wall between people: `channels` owns `people/<id>/attachments/` and `core` owns
-`people/<id>/profile.md`, so the agent reads both and writes neither.
+`people/` and `shared/` are read-only through this server because another
+container owns them: `channels` writes `people/<id>/attachments/` and the
+terminal outbox, and `core` writes the shared attachments. The agent reads both
+and writes neither.
 
 `wiki/joshua-docs/` holds the documentation that the repo ships. Core
 replaces it at each start.
@@ -394,19 +395,18 @@ clock, so the name reads naturally. The message frontmatter and the index keep
 UTC. A second file with the same name in the same second gets `-2`, `-3`, and so
 on before the extension.
 
-A journal write is create or append only. Overwrite is refused. The server
-names the post: `write_file` to `people/<id>/blog/<slug>.md` lands as
-`people/<id>/blog/YYYY-MM-DD-HHMM-<slug>.md`, stamped with the gateway clock in
-`timezone`. A name that already carries a valid `YYYY-MM-DD-HHMM-`
-prefix is kept. A second write with the same slug in the same minute gets `-2`,
-`-3`, and so on. The digest name `people/<id>/blog/YYYY-MM-DD.md` (no time part) is reserved
-for core and is refused. `write_file` injects frontmatter (`date`, `person`,
-`source: chat`, `attachments: []`) when the post has none. When the post lists
-`attachments`, the server checks each path names a stored attachment under
-`people/<id>/attachments/`.
+A journal entry has its own tool, `write_journal_entry(slug, markdown, people,
+date)`, and `write_file` refuses a path under `wiki/journal/`. The server places
+the entry: `slug` is a short name (`^[a-z0-9][a-z0-9-]{0,63}$`, never a date),
+and the file lands at `wiki/journal/YYYY/MM/DD/<slug>.md` for `date` or for
+today in `timezone`. The server writes the frontmatter (`date`, `people`,
+`source: agent`). A slug that already exists in that day is overwritten, and the
+result says `overwritten: true`, so Joshua corrects an entry by writing the same
+slug again rather than adding a second one. The nightly page,
+`YYYY-MM-DD.md`, is core's and the slug pattern cannot name it.
 
-Tools: `list_files`, `read_file`, `write_file`, `rename_file`, and
-`search_files`. `read_file` returns an image block for a `.jpg`, `.jpeg`, `.png`,
+Tools: `list_files`, `read_file`, `write_file`, `rename_file`,
+`search_files`, and `write_journal_entry`. `read_file` returns an image block for a `.jpg`, `.jpeg`, `.png`,
 `.gif`, or `.webp` under `people/<id>/attachments/`. A `.pdf` returns its extracted text (the
 first 20 pages, capped at 256 KB). Another attachment returns text when it is
 UTF-8 and 256 KB or less, else metadata only. `write_file` writes `.md` only, at

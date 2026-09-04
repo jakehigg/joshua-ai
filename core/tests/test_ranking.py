@@ -2,7 +2,7 @@
 
 The kernel drops the enrichment chunk types, so ranking keeps only the raw
 per-document cap and the recency bonus. Recency keys off the document ``kind``
-(``blog`` is temporal; ``wiki``/``shared`` are static) and the ``doc_date``.
+(``journal`` is temporal; ``wiki``/``shared`` are static) and the ``doc_date``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from joshua_core.memory.models import KbChunk
 from joshua_core.memory.ranking import rank_chunks
 
 NOW = datetime(2026, 7, 3, 18, 0, tzinfo=UTC)
-KW = dict(min_sim=0.55, now=NOW, temporal_kinds=("blog",), bonus=0.08, half_life_days=14.0)
+KW = dict(min_sim=0.55, now=NOW, temporal_kinds=("journal",), bonus=0.08, half_life_days=14.0)
 
 
 def _chunk(kind: str, path: str, idx: int, sim: float, age_days: int | None = None) -> KbChunk:
@@ -29,36 +29,36 @@ def _chunk(kind: str, path: str, idx: int, sim: float, age_days: int | None = No
     )
 
 
-def test_prefer_recent_lifts_fresh_blog() -> None:
+def test_prefer_recent_lifts_fresh_journal() -> None:
     pool = [
         _chunk("wiki", "wiki/p1.md", 0, 0.79),
-        _chunk("blog", "blog/m1.md", 0, 0.70, age_days=0),
+        _chunk("journal", "journal/m1.md", 0, 0.70, age_days=0),
     ]
     top = rank_chunks(pool, limit=2, prefer_recent=False, **KW)
     assert top[0][1].kind == "wiki"
     top = rank_chunks(pool, limit=2, prefer_recent=True, **KW)
-    assert top[0][1].kind == "blog"
+    assert top[0][1].kind == "journal"
 
 
-def test_stale_blog_competes_on_similarity() -> None:
+def test_stale_journal_competes_on_similarity() -> None:
     pool = [
         _chunk("wiki", "wiki/p1.md", 0, 0.72),
-        _chunk("blog", "blog/old.md", 0, 0.70, age_days=90),
+        _chunk("journal", "journal/old.md", 0, 0.70, age_days=90),
     ]
     top = rank_chunks(pool, limit=2, prefer_recent=True, **KW)
     assert top[0][1].kind == "wiki"
 
 
 def test_floor_applies_to_raw_similarity() -> None:
-    pool = [_chunk("blog", "blog/fresh.md", 0, 0.50, age_days=0)]
+    pool = [_chunk("journal", "journal/fresh.md", 0, 0.50, age_days=0)]
     assert rank_chunks(pool, limit=5, prefer_recent=True, **KW) == []
 
 
 def test_per_document_cap() -> None:
     pool = [_chunk("wiki", "wiki/big.md", i, 0.80 - i * 0.01) for i in range(4)]
-    pool.append(_chunk("blog", "blog/m1.md", 0, 0.60, age_days=1))
+    pool.append(_chunk("journal", "journal/m1.md", 0, 0.60, age_days=1))
     top = rank_chunks(pool, limit=3, prefer_recent=False, per_doc_cap=2, **KW)
-    assert [c.path for _, c in top] == ["wiki/big.md", "wiki/big.md", "blog/m1.md"]
+    assert [c.path for _, c in top] == ["wiki/big.md", "wiki/big.md", "journal/m1.md"]
 
 
 def test_static_kinds_never_boosted() -> None:
@@ -96,12 +96,12 @@ def test_shared_and_own_share_the_slots() -> None:
 
 
 def test_recency_bonus_uses_doc_date() -> None:
-    # A blog post dated today outranks one dated a year ago at equal similarity.
+    # A journal page dated today outranks one dated a year ago at equal similarity.
     old = KbChunk(
         person_id="alice",
         source="files",
-        kind="blog",
-        path="blog/old.md",
+        kind="journal",
+        path="journal/old.md",
         chunk_index=0,
         similarity=0.70,
         doc_date=date(2025, 7, 3),
@@ -109,11 +109,11 @@ def test_recency_bonus_uses_doc_date() -> None:
     new = KbChunk(
         person_id="alice",
         source="files",
-        kind="blog",
-        path="blog/new.md",
+        kind="journal",
+        path="journal/new.md",
         chunk_index=0,
         similarity=0.70,
         doc_date=NOW.date(),
     )
     top = rank_chunks([old, new], limit=2, prefer_recent=False, **KW)
-    assert top[0][1].path == "blog/new.md"
+    assert top[0][1].path == "journal/new.md"

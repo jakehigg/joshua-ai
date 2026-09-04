@@ -75,8 +75,10 @@ class Person(_Model):
     role: str = "member"
     handles: dict[str, str] = {}
     prompt: str | None = None
-    # How the agent journals this person's life updates: ``auto`` writes a post
-    # on its own, ``ask`` offers first, ``off`` never posts unless asked.
+    # Consent for what Joshua's own journal records about this person's life
+    # updates. There is no journal belonging to a person; this gates whether
+    # Joshua writes an entry naming them. ``auto`` writes on its own, ``ask``
+    # offers first, ``off`` writes one only when the person asks.
     journal: str = "auto"
 
     @field_validator("id")

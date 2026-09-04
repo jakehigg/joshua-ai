@@ -225,3 +225,43 @@ def test_kb_status_reports_a_lost_embedding_model(monkeypatch) -> None:
     """A healthy container with no memory must be visible on an admin route."""
     body = _kb_client(monkeypatch, False).get("/admin/kb/status", headers=_laptop()).json()
     assert body["embed"] is False
+
+
+# -- GET /admin/journal/status ----------------------------------------------
+
+
+def _journal_client(monkeypatch, status: dict[str, Any]) -> TestClient:
+    monkeypatch.setenv("JOSHUA_TOKEN_LAPTOP", LAPTOP)
+    monkeypatch.delenv("ADMIN_CALLERS", raising=False)
+
+    class FakeReflector:
+        def journal_status(self) -> dict[str, Any]:
+            return status
+
+    app = FastAPI()
+    app.state.ctx = SimpleNamespace(reflector=FakeReflector())
+    app.include_router(build_admin_router())
+    return TestClient(app)
+
+
+def test_journal_status_reports_today(monkeypatch) -> None:
+    """An operator must be able to tell the journal is alive without reading
+    the logs."""
+    status = {
+        "date": "2026-09-04",
+        "entries_today": 2,
+        "day_page_today": False,
+        "nightly_at": "03:30",
+        "last_run": {"date": "2026-09-03", "posts_written": 1, "errors": 0},
+    }
+    body = (
+        _journal_client(monkeypatch, status).get("/admin/journal/status", headers=_laptop()).json()
+    )
+    assert body["entries_today"] == 2
+    assert body["last_run"]["posts_written"] == 1
+
+
+def test_journal_status_needs_an_admin_caller(monkeypatch) -> None:
+    """Every /admin route is gated, with no exception."""
+    client = _journal_client(monkeypatch, {})
+    assert client.get("/admin/journal/status").status_code == 401

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from engine_fakes import (
     FakeComposer,
     FakeRepo,
@@ -79,7 +81,7 @@ def test_a_refused_write_is_not_reported_as_written() -> None:
 def test_a_mixed_turn_reports_the_write_that_landed() -> None:
     calls = [
         _call("mcp__files__write_file", "wiki/notes/ok.md", ok=True),
-        _call("mcp__files__write_file", "blog/retired.md", ok=False),
+        _call("mcp__files__write_file", "journal/retired.md", ok=False),
     ]
     assert manager.written_paths(calls) == ["wiki/notes/ok.md"]
     assert manager.failed_writes(calls) == 1
@@ -98,3 +100,50 @@ def test_a_call_with_no_outcome_counts_as_failed() -> None:
     calls = [{"id": "t-1", "name": "mcp__files__write_file", "input": {"path": "wiki/x.md"}}]
     assert manager.written_paths(calls) == []
     assert manager.failed_writes(calls) == 1
+
+
+# -- write_journal_entry names no path, so its path is rebuilt ---------------
+
+
+def _journal_call(*, ok: bool = True, **args) -> dict:
+    return {"id": "t-j", "name": "mcp__files__write_journal_entry", "input": args, "ok": ok}
+
+
+def test_a_journal_entry_is_reported_under_todays_day_folder() -> None:
+    """The tool takes a slug, never a path. Before this was handled, a turn
+    that wrote an entry reported writing nothing at all."""
+    calls = [_journal_call(slug="rain-gauge-reading", markdown="0.8 inches")]
+    assert manager.written_paths(calls, today=date(2026, 9, 4)) == [
+        "wiki/journal/2026/09/04/rain-gauge-reading.md"
+    ]
+
+
+def test_a_journal_entry_with_a_date_uses_that_day() -> None:
+    calls = [_journal_call(slug="backdated", date="2026-08-30")]
+    assert manager.written_paths(calls, today=date(2026, 9, 4)) == [
+        "wiki/journal/2026/08/30/backdated.md"
+    ]
+
+
+def test_a_refused_journal_entry_is_not_reported() -> None:
+    """A path in the log that names no file is the fault this guards."""
+    calls = [_journal_call(slug="denied", ok=False)]
+    assert manager.written_paths(calls, today=date(2026, 9, 4)) == []
+    assert manager.failed_writes(calls) == 1
+
+
+def test_a_journal_entry_with_no_knowable_day_is_left_out() -> None:
+    """With no date on the call and no today from the caller, the day is a
+    guess. A guess does not go in the log."""
+    calls = [_journal_call(slug="undated")]
+    assert manager.written_paths(calls) == []
+
+
+def test_a_journal_entry_with_a_bad_date_is_left_out() -> None:
+    calls = [_journal_call(slug="bad", date="not-a-date")]
+    assert manager.written_paths(calls, today=date(2026, 9, 4)) == []
+
+
+def test_a_journal_call_with_no_slug_is_left_out() -> None:
+    calls = [_journal_call(markdown="body only")]
+    assert manager.written_paths(calls, today=date(2026, 9, 4)) == []

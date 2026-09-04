@@ -14,7 +14,7 @@ people:
   - id: alex
     name: Alex
     role: member
-    journal: auto                 # auto | ask | off — how the agent journals life updates (default auto)
+    journal: auto                 # auto | ask | off — may Joshua's journal record this person (default auto)
     handles:
       telegram: "998877"
       imessage: "+15551234567"

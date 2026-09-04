@@ -651,6 +651,60 @@ async def test_journal_entry_overwrite_says_so(gateway, data_root, fixed_clock):
     assert "one" not in text
 
 
+async def test_write_file_refuses_the_journal(gateway, data_root, fixed_clock):
+    """The journal has one writer. A free write would skip the day folder and
+    the frontmatter the index reads."""
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "write_file",
+                {"path": "wiki/journal/2026/08/27/sneaky.md", "content": "no frontmatter\n"},
+            )
+    assert res.is_error is True and "write_journal_entry" in res.content[0].text
+    assert not (data_root / "wiki" / "journal" / "2026" / "08" / "27" / "sneaky.md").exists()
+
+
+async def test_write_file_cannot_overwrite_the_nightly_page(gateway, data_root, fixed_clock):
+    """The nightly page is core's. The agent must not be able to replace it."""
+    page = data_root / "wiki" / "journal" / "2026" / "08" / "27" / "2026-08-27.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text("---\ndate: '2026-08-27'\npeople: []\nsource: nightly\n---\n\nThe day.\n")
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "write_file",
+                {
+                    "path": "wiki/journal/2026/08/27/2026-08-27.md",
+                    "content": "clobbered\n",
+                    "mode": "overwrite",
+                },
+            )
+    assert res.is_error is True and "write_journal_entry" in res.content[0].text
+    assert "The day." in page.read_text()
+
+
+async def test_rename_file_refuses_a_journal_entry(gateway, data_root, fixed_clock):
+    """A rename would move an entry out of the slug its day folder indexes."""
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            await session.call_tool(
+                "write_journal_entry", {"slug": "garden", "markdown": "Planted beans.\n"}
+            )
+            res = await session.call_tool(
+                "rename_file",
+                {"path": "wiki/journal/2026/08/27/garden.md", "new_name": "beans.md"},
+            )
+    assert res.is_error is True and "cannot be renamed" in res.content[0].text
+    day = data_root / "wiki" / "journal" / "2026" / "08" / "27"
+    assert (day / "garden.md").exists() and not (day / "beans.md").exists()
+
+
 async def test_journal_entry_guest_refused(gateway, data_root, fixed_clock):
     app = gateway(files_yaml())
     async with lifespan(app):
