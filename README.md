@@ -90,7 +90,9 @@ make logs        # follow the logs
 `make init-env` writes `JOSHUA_VERSION` into your `.env`, so your installation
 stays on one release. A `git pull` does not move it. To update, put the version
 you want in `.env`, then `make pull && make up`. The releases are at
-<https://github.com/jakehigg/joshua-ai/releases>.
+<https://github.com/jakehigg/joshua-ai/releases>. To run the newest `main`
+instead of a release, see "Run the newest main" in
+[`docs/operations.md`](docs/operations.md).
 
 **Run your own build.** `make up-dev` builds the three images from your
 checkout and starts those instead. Use it when you change the code.

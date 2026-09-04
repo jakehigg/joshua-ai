@@ -8,9 +8,12 @@ with the images and the packaged chart, are at
 
 ### Added
 
-- A push to a branch builds the three images and tags them with the commit
-  SHA. An ArgoCD Application can follow a branch and run each push, for a
-  test instance. The chart README has the Application.
+- A push to any branch, `main` included, builds the three images and tags
+  them with the commit SHA and `branch-<name>`, so `branch-main` always
+  names the newest commit on `main`. An ArgoCD Application can follow `main`
+  or a branch and run each push. The chart README has the Application, and
+  `docs/operations.md` has the Compose side. A weekly job removes the old
+  SHA-tagged builds and untagged layers from the registry.
 - Enhancements: optional services that run beside the three containers, off
   by default. The `enhancements.yaml` file picks a choice for each slot.
   Otter Wiki is the first wiki frontend, and a custom slot lets you plug in
@@ -21,6 +24,10 @@ with the images and the packaged chart, are at
 
 ### Changed
 
+- Otter Wiki now asks a reader to sign in by default. Set
+  `OTTERWIKI_READ_ACCESS=ANONYMOUS` in `.env` (Compose) or
+  `enhancements.wiki.otterwiki.readAccess: ANONYMOUS` (Helm) to open the
+  wiki to anyone who reaches the host.
 - The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name
   says what it is. Core renames an existing `wiki/joshua/` at start.
 - The agent's file tools, the viewer, and the index now ignore any dot-file

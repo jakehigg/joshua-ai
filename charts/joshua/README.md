@@ -283,34 +283,45 @@ the visibility of the repository. Check the package page after the first
 release. When the package is private, name a pull secret in
 `imagePullSecrets`.
 
-## Run a branch
+## Run main, or a branch
 
-A push to a branch that is not `main` builds the three images for amd64 and
+A push to any branch, `main` included, builds the three images for amd64 and
 tags them with the full commit SHA, as
 `<registry>/<repository>/joshua-ai-<component>:<sha>`. A second tag,
-`branch-<name>`, moves with each push. A branch build is not a release: it has
-no release page and no packaged chart.
+`branch-<name>`, moves with each push, so `branch-main` is always the newest
+commit on `main`. A branch build is not a release: it has no release page and
+no packaged chart.
 
-To follow a branch with ArgoCD, point the chart source at the branch and take
-the image tag from the commit ArgoCD resolved:
+To follow `main` with ArgoCD, point the chart source at `main` and take the
+image tag from the commit ArgoCD resolved:
 
 ```yaml
 spec:
   sources:
     - repoURL: https://github.com/jakehigg/joshua-ai.git
       path: charts/joshua
-      targetRevision: my-branch
+      targetRevision: main
       helm:
         parameters:
           - name: image.tag
             value: $ARGOCD_APP_REVISION
 ```
 
-Each push then renders the chart of the new commit with the images of the same
+A feature branch works the same way: set `targetRevision` to its name. Each
+push then renders the chart of the new commit with the images of the same
 commit. ArgoCD can see a commit before its build ends. The new pod waits in
-`ImagePullBackOff` until the images arrive, and a container with the `Recreate`
-strategy is down for that time. Use this on an instance that you test, not on
-one that people use.
+`ImagePullBackOff` until the images arrive, and a container with the
+`Recreate` strategy is down for that time. Use this on an instance that you
+test, not on one that people use.
+
+Without ArgoCD, the simple mutable option is `image.tag: branch-main`. It
+moves to the newest commit on `main` at your next `helm upgrade`, with no
+parameter to compute.
+
+The chart version on `main` still carries the last release's version, while
+its templates are newer. An empty `image.tag` against a chart from `main`
+pulls that release's images, which may not match your templates. A release
+tag is the only place the chart and its images are guaranteed to agree.
 
 ## Versions
 

@@ -195,6 +195,21 @@ is replaced at each start.
 Read `CHANGELOG.md` before an update. It names every change that a person who
 runs Joshua can see.
 
+### Run the newest main
+
+Set `JOSHUA_VERSION=branch-main` in `.env`, then:
+
+```
+make pull
+make up
+```
+
+This tracks every merge to `main`, not a tested release. The images are amd64
+only, so on an Apple Silicon host, run `make up-dev` from a checkout of `main`
+instead: it builds the images locally. A release is the tested, multi-arch,
+versioned build, and the default. To go back to one, put its version back in
+`JOSHUA_VERSION` and run `make pull && make up` again.
+
 ## Back up and restore
 
 A backup is three things: the database, the `/data` volume, and the two config

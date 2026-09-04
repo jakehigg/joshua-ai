@@ -1,17 +1,19 @@
-# A push to a branch builds the three images and tags them with the commit
-# SHA, so a cluster can run the branch before it is released. Point the ArgoCD
-# Application at the branch and set image.tag to $ARGOCD_APP_REVISION: each
-# push then deploys the images of the commit it resolved. charts/joshua/README.md
-# has the Application.
+# A push to any branch, main included, builds the three images for amd64 and
+# tags them with the commit SHA and branch-<name>. branch-main is always the
+# newest commit on main, so ArgoCD can follow main the same way it follows any
+# other branch. Point the ArgoCD Application at the branch and set image.tag
+# to $ARGOCD_APP_REVISION: each push then deploys the images of the commit it
+# resolved. charts/joshua/README.md has the Application.
 #
-# Nothing here releases. A release is a v* tag, in release.yml. A branch build
-# is amd64 only, because the emulated arm64 build of the core image is slow and
-# a test cluster is one architecture.
+# Nothing here releases. A release is a v* tag, in release.yml, and is the
+# only multi-arch build with a packaged chart. A branch build is amd64 only,
+# because the emulated arm64 build of the core image is slow and a test
+# cluster is one architecture.
 name: dev-images
 
 on:
   push:
-    branches-ignore: [main]
+    branches: ["**"]
 
 permissions:
   contents: read

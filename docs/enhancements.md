@@ -80,6 +80,9 @@ no secret: Otter Wiki writes its own secret key into its settings on first
 start. The port is `127.0.0.1:8083`. Put a reverse proxy with TLS in front
 before you expose it.
 
+A reader signs in by default, and `OTTERWIKI_READ_ACCESS=ANONYMOUS` in `.env`
+opens the wiki to anyone who reaches the host.
+
 First start: open `http://127.0.0.1:8083/` and register an account. The
 first account becomes the admin, and it can turn registration off from the
 settings page.

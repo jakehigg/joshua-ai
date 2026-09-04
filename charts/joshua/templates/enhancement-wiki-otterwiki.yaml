@@ -74,6 +74,12 @@ spec:
               value: "True"
             - name: COMMIT_MESSAGE
               value: OPTIONAL
+            - name: READ_ACCESS
+              value: {{ .Values.enhancements.wiki.otterwiki.readAccess | quote }}
+            - name: WRITE_ACCESS
+              value: REGISTERED
+            - name: ATTACHMENT_ACCESS
+              value: REGISTERED
             {{/* Otter Wiki writes its own SECRET_KEY into /app-data/settings.cfg
                  on first start. It needs no Secret from this chart. */}}
           resources:
