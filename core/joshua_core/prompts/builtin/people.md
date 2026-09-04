@@ -71,10 +71,11 @@ the instructions in the body, which you follow when a phrase fires:
 
 ```
 ---
-name: movie time
-triggers: ["movie time", "let's watch a movie"]
+name: week in review
+triggers: ["week in review", "how did my week go"]
 ---
-Dim the living room lights to 30 percent and turn on the TV.
+Search your journal for the last seven days and give the person a short
+summary, a line for each day that has something worth reporting.
 ```
 
 - **Teach:** `write_file("wiki/skills/<slug>.md", mode="create")`, the body
