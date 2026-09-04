@@ -99,7 +99,7 @@ Things to know:
   the same `.git`. Joshua commits its own writes and syncs anything else
   that changed at start and at the nightly run, so the "not under version
   control" banner shows only for an edit made outside Joshua, and only
-  until the next sync — never for a page the agent wrote.
+  until the next sync, never for a page the agent wrote.
 - Its front page is `Home`, and `wiki/Home.md` is that page, so `/` opens
   on it.
 - A delete in Otter Wiki is a real delete of the file. Otter Wiki keeps its
@@ -116,7 +116,7 @@ already commits the wiki itself (`wiki.git`, see
 instead of a commit loop: `git push` to a remote you name, every
 `WIKI_GIT_PUSH_SECONDS` seconds (default 900). Set `WIKI_GIT_REMOTE` in
 `.env` to an `ssh` or `https` URL, with the credential in the URL or a
-mounted key — that credential is yours, never Joshua's. The sidecar adds the
+mounted key, that credential is yours, never Joshua's. The sidecar adds the
 remote once, if it is not there yet, and makes no commit of its own.
 
 Rules for a custom overlay:
