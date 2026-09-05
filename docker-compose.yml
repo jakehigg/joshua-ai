@@ -62,7 +62,7 @@ services:
     # Not published on the host. Only `core` connects, over the compose network.
 
   gateway:
-    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.4}
+    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.5}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *runtime-vars]
@@ -74,7 +74,7 @@ services:
     healthcheck: *app-healthcheck
 
   core:
-    image: ghcr.io/jakehigg/joshua-ai-core:${JOSHUA_VERSION:-0.0.4}
+    image: ghcr.io/jakehigg/joshua-ai-core:${JOSHUA_VERSION:-0.0.5}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *runtime-vars]
@@ -110,7 +110,7 @@ services:
     healthcheck: *app-healthcheck
 
   channels:
-    image: ghcr.io/jakehigg/joshua-ai-channels:${JOSHUA_VERSION:-0.0.4}
+    image: ghcr.io/jakehigg/joshua-ai-channels:${JOSHUA_VERSION:-0.0.5}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *config-vars, *runtime-vars]
@@ -139,7 +139,7 @@ services:
   # beside the rest of the stack and nothing off the host reaches it. Put the
   # reverse proxy in front of 127.0.0.1:8082.
   viewer:
-    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.4}
+    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.5}
     profiles: ["viewer"]
     restart: unless-stopped
     # The gateway image entrypoint runs the gateway app; the viewer is the

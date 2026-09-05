@@ -13,7 +13,7 @@ The chart ships as a package on each release. Take it from the release page,
 then install it:
 
 ```
-VERSION=0.0.4
+VERSION=0.0.5
 curl -LO https://github.com/jakehigg/joshua-ai/releases/download/v$VERSION/joshua-$VERSION.tgz
 helm install joshua ./joshua-$VERSION.tgz \
   --namespace joshua --create-namespace \
