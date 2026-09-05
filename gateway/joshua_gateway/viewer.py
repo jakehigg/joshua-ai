@@ -50,6 +50,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Route
 
 from joshua_gateway import viewer_journal as journal
+from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
 from joshua_gateway.files_mcp.server import IMAGE_MIME, MAX_BYTES, _atomic_write, data_root
 
@@ -119,6 +120,17 @@ form.delete { margin-top: 2rem; padding-top: 1rem;
   border-top: 1px solid var(--line); }
 form.delete button { padding: .4rem .75rem; cursor: pointer; }
 .snippet { color: var(--muted); }
+p.crumbs { color: var(--muted); font-size: .9rem; margin: 0 0 .5rem; }
+p.meta { color: var(--muted); font-size: .85rem; margin: 0 0 1rem; }
+p.meta .k { font-weight: 600; }
+.count { color: var(--muted); font-size: .85rem; }
+ul.tree ul { list-style: none; padding-left: 1.25rem; }
+ul.tree details > summary { cursor: pointer; padding: .15rem 0; }
+ul.tree details > summary::marker { color: var(--muted); }
+section.siblings { margin-top: 2rem; padding-top: 1rem;
+  border-top: 1px solid var(--line); }
+section.siblings h2 { font-size: 1rem; color: var(--muted); }
+section.siblings ul { columns: 2; column-gap: 2rem; }
 table { border-collapse: collapse; margin: .75rem 0; max-width: 100%;
   display: block; overflow-x: auto; }
 th, td { border: 1px solid var(--line); padding: .3rem .6rem;
@@ -344,7 +356,7 @@ def _page(title: str, body: str, *, status: int = 200, nav: bool = True) -> HTML
 
 
 _NAV = (
-    '<nav><a href="/">home</a><a href="/journal">journal</a>'
+    '<nav><a href="/">home</a><a href="/wiki/">wiki</a><a href="/journal">journal</a>'
     '<form action="/search" method="get">'
     '<input name="q" placeholder="search" aria-label="search"></form></nav>'
 )
@@ -392,10 +404,21 @@ def _serve(roots: dict[str, Root], rel: str, person: Person, *, allow_delete: bo
         if text is None:
             return _download(abs_path)
         front, body_md = _split_frontmatter(text)
-        body = _frontmatter_html(front) + f'<article class="md">{_MD.render(body_md)}</article>'
+        title = rel
+        body = ""
+        under_wiki = abs_path.relative_to(root.base).as_posix() if root.name == "wiki" else ""
+        if root.name == "wiki":
+            # A wiki page gets its title, the crumbs above it, and the other
+            # pages of its folder below it.
+            title = wiki.page_title(text, wiki.stem_title(abs_path.stem))
+            folder_rel = under_wiki.rsplit("/", 1)[0] if "/" in under_wiki else ""
+            body += wiki.crumbs_html(root.base, folder_rel, leaf=title)
+        body += wiki.meta_html(front or {}) + f'<article class="md">{_MD.render(body_md)}</article>'
+        if root.name == "wiki":
+            body += wiki.siblings_html(root.base, under_wiki)
         if allow_delete and root.name == "wiki" and person.role == "member":
             body += _delete_form(person, rel)
-        return _page(rel, body)
+        return _page(title, body)
 
     return _download(abs_path)
 
@@ -527,13 +550,53 @@ async def index(request: Request, person: Person) -> Response:
             ],
         )
     )
-    body.append(_section("wiki", [(f"/wiki/{rel}", rel) for rel in _list_markdown(roots["wiki"])]))
+    tree = wiki.build_tree(roots["wiki"].base)
+    body.append("<h2>wiki</h2>")
+    body.append(wiki.tree_html(tree) if tree else "<p class=snippet>nothing yet.</p>")
     return _page(person.name, "".join(body))
 
 
 async def wiki_page(request: Request, person: Person) -> Response:
-    rel = "wiki/" + request.path_params["path"]
-    return _serve(_roots_for(person), rel, person, allow_delete=True)
+    """A wiki page, or a folder page for a path that ends in ``/`` or names
+    a directory. ``/wiki/`` is the root folder: the front page and the tree."""
+    path = request.path_params["path"]
+    roots = _roots_for(person)
+    if path == "" or path.endswith("/"):
+        return _folder_page(roots, path.rstrip("/"))
+    rel = "wiki/" + path
+    try:
+        _, abs_path = resolve(rel, roots, write=False)
+    except PathError:
+        return _not_found()
+    if abs_path.is_dir():
+        return RedirectResponse(f"/wiki/{path}/", status_code=302)
+    return _serve(roots, rel, person, allow_delete=True)
+
+
+async def wiki_root(request: Request, person: Person) -> Response:
+    return RedirectResponse("/wiki/", status_code=302)
+
+
+def _folder_page(roots: dict[str, Root], rel: str) -> Response:
+    """The page for one folder: its index page's text, then what is in it."""
+    try:
+        root, abs_path = resolve("wiki/" + rel if rel else "wiki", roots, write=False)
+    except PathError:
+        return _not_found()
+    if not abs_path.is_dir():
+        return _not_found()
+    folder = wiki.build_tree(root.base, rel)
+    if folder is None:
+        return _not_found()
+    index_html = ""
+    if folder.index is not None:
+        text = _read_text(root.base / folder.index.rel) or ""
+        _, body_md = _split_frontmatter(text)
+        _, body_md = wiki.first_heading(body_md)  # the folder title is the h1
+        index_html = _MD.render(body_md)
+    body = wiki.crumbs_html(root.base, rel, leaf=None) if rel else ""
+    body += wiki.folder_html(folder, index_html)
+    return _page(folder.title, body)
 
 
 async def shared_page(request: Request, person: Person) -> Response:
@@ -575,9 +638,10 @@ def _search(roots: dict[str, Root], query: str) -> list[tuple[str, str, str]]:
                 continue
             for line in text.splitlines():
                 if needle in line.lower():
-                    hits.append(
-                        (_search_url(name, rel), _search_label(name, rel), line.strip()[:200])
-                    )
+                    label = _search_label(name, rel)
+                    if name == "wiki":
+                        label = wiki.page_title(text, wiki.stem_title(abs_path.stem))
+                    hits.append((_search_url(name, rel), label, line.strip()[:200]))
                     break
             if len(hits) >= SEARCH_MAX_RESULTS:
                 return hits
@@ -820,6 +884,7 @@ def build_app() -> Starlette:
             Route("/readyz", readyz),
             Route("/style.css", _require_auth(style)),
             Route("/", _require_auth(index)),
+            Route("/wiki", _require_auth(wiki_root)),
             Route("/journal", _require_auth(journal_feed)),
             Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
             Route("/journal/edit/{path:path}", _require_auth(journal_edit)),
