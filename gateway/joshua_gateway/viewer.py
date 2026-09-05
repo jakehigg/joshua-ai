@@ -39,7 +39,7 @@ import uvicorn
 import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
-from joshua_shared.layout import is_hidden, journal_day_from_path
+from joshua_shared.layout import is_hidden, journal_day_from_path, journal_root
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from markdown_it import MarkdownIt
 from starlette.applications import Starlette
@@ -49,6 +49,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
 from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
@@ -169,6 +170,14 @@ form.edit input[name=people], form.edit textarea { width: 100%;
 form.edit textarea { font-family: ui-monospace, monospace; font-size: .95rem;
   line-height: 1.5; }
 form.edit button { padding: .4rem .75rem; cursor: pointer; }
+form.edit input[name=name] { width: 100%; padding: .4rem .5rem; font: inherit;
+  color: var(--fg); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 4px; }
+details.kept { margin: 1rem 0; font-size: .85rem; color: var(--muted); }
+details.kept pre { background: var(--code); padding: .5rem .75rem;
+  border-radius: 4px; overflow-x: auto; }
+p.error { color: #c33; }
+p.actions { margin-top: 2rem; font-size: .9rem; }
 """
 
 
@@ -417,6 +426,7 @@ def _serve(roots: dict[str, Root], rel: str, person: Person, *, allow_delete: bo
         if root.name == "wiki":
             body += wiki.siblings_html(root.base, under_wiki)
         if allow_delete and root.name == "wiki" and person.role == "member":
+            body += f'<p class="actions">{edit.edit_link(under_wiki)}</p>'
             body += _delete_form(person, rel)
         return _page(title, body)
 
@@ -562,7 +572,7 @@ async def wiki_page(request: Request, person: Person) -> Response:
     path = request.path_params["path"]
     roots = _roots_for(person)
     if path == "" or path.endswith("/"):
-        return _folder_page(roots, path.rstrip("/"))
+        return _folder_page(roots, path.rstrip("/"), person)
     rel = "wiki/" + path
     try:
         _, abs_path = resolve(rel, roots, write=False)
@@ -577,7 +587,7 @@ async def wiki_root(request: Request, person: Person) -> Response:
     return RedirectResponse("/wiki/", status_code=302)
 
 
-def _folder_page(roots: dict[str, Root], rel: str) -> Response:
+def _folder_page(roots: dict[str, Root], rel: str, person: Person) -> Response:
     """The page for one folder: its index page's text, then what is in it."""
     try:
         root, abs_path = resolve("wiki/" + rel if rel else "wiki", roots, write=False)
@@ -596,6 +606,8 @@ def _folder_page(roots: dict[str, Root], rel: str) -> Response:
         index_html = _MD.render(body_md)
     body = wiki.crumbs_html(root.base, rel, leaf=None) if rel else ""
     body += wiki.folder_html(folder, index_html)
+    if person.role == "member":
+        body += f'<p class="actions">{edit.new_link(rel)}</p>'
     return _page(folder.title, body)
 
 
@@ -737,101 +749,192 @@ async def journal_day(request: Request, person: Person) -> Response:
     return _page(day.isoformat(), body)
 
 
-def _journal_target(person: Person, rel: str) -> tuple[Root, Path] | None:
-    """Resolve a wiki-relative journal path for a write, or None when it is
-    not a journal file under a day folder, is hidden, or is not there."""
+# -- edit -------------------------------------------------------------------
+#
+# One editor for a wiki page and a journal entry. ``viewer_edit`` says how the
+# path decides the shape of the form and of the saved file. Every write here
+# goes through ``_edit_target`` and ``save``: the same member check, the same
+# resolver with ``write=True``, the same CSRF token and origin check, the same
+# atomic write and commit.
+
+
+def _edit_target(
+    person: Person, rel: str, *, create: bool
+) -> tuple[Root, Path, date | None] | Response:
+    """Resolve a wiki-relative path for a write, or the response that refuses
+    it. The third value is the journal day when the path is an entry under a
+    day folder. A path under the journal that is not such an entry, and a
+    new page anywhere under the journal, are refused: the journal has one
+    writer."""
+    if person.role != "member":
+        return _forbidden()
     try:
         root, abs_path = resolve("wiki/" + rel, _roots_for(person), write=True)
     except PathError:
-        return None
-    if root.name != "wiki" or not abs_path.is_file() or abs_path.suffix != ".md":
-        return None
-    if journal_day_from_path(abs_path, data_root()) is None:
-        return None
-    return root, abs_path
-
-
-async def journal_edit(request: Request, person: Person) -> Response:
-    if person.role != "member":
-        return _forbidden()
-    rel = request.path_params["path"]
-    target = _journal_target(person, rel)
-    if target is None:
         return _not_found()
-    _, abs_path = target
+    if root.name != "wiki" or abs_path.suffix != ".md":
+        return _not_found()
+    day = journal_day_from_path(abs_path, data_root())
+    in_journal = (
+        abs_path == journal_root(data_root()) or journal_root(data_root()) in abs_path.parents
+    )
+    if create:
+        if in_journal:
+            return _forbidden()
+        if abs_path.exists():
+            return _page(
+                "exists",
+                "<h1>exists</h1><p>A page with that name is already there.</p>",
+                status=409,
+            )
+    else:
+        if not abs_path.is_file():
+            return _not_found()
+        if in_journal and day is None:
+            return _not_found()
+    return root, abs_path, day
+
+
+def _under_wiki(root: Root, abs_path: Path) -> str:
+    return abs_path.relative_to(root.base).as_posix()
+
+
+async def edit_page(request: Request, person: Person) -> Response:
+    """The edit form for a wiki page or a journal entry."""
+    rel = request.path_params["path"]
+    target = _edit_target(person, rel, create=False)
+    if isinstance(target, Response):
+        return target
+    root, abs_path, day = target
     text = _read_text(abs_path)
     if text is None:
         return _not_found()
-    day = journal_day_from_path(abs_path, data_root())
-    assert day is not None
-    entry = journal.parse_entry(rel, day, text)
-    return _page(
-        f"edit {entry.title}",
-        journal.edit_html(entry, path=rel, csrf=_csrf_token(person.id, "wiki/" + rel)),
+    csrf = _csrf_token(person.id, "wiki/" + rel)
+    if day is not None:
+        entry = journal.parse_entry(rel, day, text)
+        form = edit.form_html(
+            title=f"edit: {entry.title}",
+            subtitle=f"{day.strftime('%A %-d %B %Y')} · {entry.source} · {rel}",
+            csrf=csrf,
+            path=rel,
+            body=entry.body,
+            people=entry.people,
+            cancel_url=entry.day_url,
+        )
+        return _page(f"edit {entry.title}", form)
+    front, body = edit.split_raw_frontmatter(text)
+    title = wiki.page_title(text, wiki.stem_title(abs_path.stem))
+    form = edit.form_html(
+        title=f"edit: {title}",
+        subtitle=rel,
+        csrf=csrf,
+        path=rel,
+        body=body,
+        kept_front=front,
+        cancel_url=f"/wiki/{rel}",
+    )
+    return _page(f"edit {title}", form)
+
+
+async def new_page(request: Request, person: Person) -> Response:
+    """The form for a new wiki page in a folder."""
+    if person.role != "member":
+        return _forbidden()
+    folder = (request.query_params.get("folder") or "").strip("/")
+    roots = _roots_for(person)
+    try:
+        _, abs_dir = resolve("wiki/" + folder if folder else "wiki", roots, write=False)
+    except PathError:
+        return _not_found()
+    if not abs_dir.is_dir():
+        return _not_found()
+    return _page("new page", _new_form(person, folder, name="", body="", error=""))
+
+
+def _new_form(person: Person, folder: str, *, name: str, body: str, error: str) -> str:
+    return edit.form_html(
+        title="new page",
+        subtitle=f"in {folder or 'the wiki'}",
+        csrf=_csrf_token(person.id, "new:" + folder),
+        folder=folder,
+        name=name,
+        body=body,
+        error=error,
+        cancel_url=f"/wiki/{folder}/" if folder else "/wiki/",
     )
 
 
-async def journal_save(request: Request, person: Person) -> Response:
-    """Write the edited text and people back. The day, the source, and every
-    other frontmatter key stay as they were. Commits when ``wiki.git`` is on."""
+async def save(request: Request, person: Person) -> Response:
+    """Write a page or an entry from the form. One path for both, and for a
+    new page: the CSRF token, the origin, the target, the composed text, the
+    size cap, the atomic write, the commit."""
     if person.role != "member":
         return _forbidden()
     form = await request.form()
-    rel = str(form.get("path", ""))
     token = str(form.get("csrf", ""))
-    if not _csrf_valid(person.id, "wiki/" + rel, token) or not _origin_ok(request):
-        return _forbidden()
-    target = _journal_target(person, rel)
-    if target is None:
-        return _not_found()
-    root, abs_path = target
-    text = _read_text(abs_path)
-    if text is None:
-        return _not_found()
+    body = str(form.get("body", ""))
+    create = "folder" in form
+    if create:
+        folder = str(form.get("folder", "")).strip("/")
+        if not _csrf_valid(person.id, "new:" + folder, token) or not _origin_ok(request):
+            return _forbidden()
+        try:
+            rel = edit.new_page_rel(folder, str(form.get("name", "")))
+        except edit.EditError as exc:
+            return _page(
+                "new page",
+                _new_form(
+                    person, folder, name=str(form.get("name", "")), body=body, error=str(exc)
+                ),
+                status=400,
+            )
+    else:
+        rel = str(form.get("path", ""))
+        if not _csrf_valid(person.id, "wiki/" + rel, token) or not _origin_ok(request):
+            return _forbidden()
+    target = _edit_target(person, rel, create=create)
+    if isinstance(target, Response):
+        return target
+    root, abs_path, day = target
     try:
-        people = journal.parse_people_field(str(form.get("people", "")))
-    except ValueError:
-        return _page(
-            "edit", "<h1>edit</h1><p>A person id is letters, digits and hyphens.</p>", status=400
-        )
-    front, _ = journal.split_frontmatter(text)
-    front["people"] = list(people)
-    body = str(form.get("body", "")).replace("\r\n", "\n").strip("\n")
-    day = journal_day_from_path(abs_path, data_root())
-    assert day is not None
-    entry = journal.parse_entry(rel, day, text)
-    heading = (
-        f"# {entry.title}\n\n"
-        if entry.title and not entry.is_day_page and _had_heading(text)
-        else ""
-    )
-    data = (journal.render_frontmatter(front) + heading + body + "\n").encode()
-    if len(data) > MAX_BYTES:
-        return _page("edit", "<h1>edit</h1><p>The entry exceeds 256 KB.</p>", status=400)
-    _atomic_write(abs_path, data)
-    _commit_edit(root, abs_path)
-    logger.info({"message": "viewer journal edit", "root": "wiki"})
-    return RedirectResponse(f"{journal.day_url(day)}#{entry.slug}", status_code=303)
+        if create:
+            data = edit.compose_new(body)
+            after = f"/wiki/{rel}"
+            what = "new"
+        elif day is not None:
+            text = _read_text(abs_path)
+            if text is None:
+                return _not_found()
+            data = edit.compose_journal(text, rel, day, str(form.get("people", "")), body)
+            after = f"{journal.day_url(day)}#{abs_path.stem}"
+            what = "edit"
+        else:
+            text = _read_text(abs_path)
+            if text is None:
+                return _not_found()
+            data = edit.compose_wiki(text, body)
+            after = f"/wiki/{rel}"
+            what = "edit"
+    except edit.EditError as exc:
+        return _page("edit", f"<h1>edit</h1><p>{escape(str(exc))}</p>", status=400)
+    raw = data.encode("utf-8")
+    if len(raw) > MAX_BYTES:
+        return _page("edit", "<h1>edit</h1><p>The page exceeds 256 KB.</p>", status=400)
+    _atomic_write(abs_path, raw)
+    _commit_write(root, abs_path, what)
+    logger.info({"message": "viewer write", "root": "wiki", "what": what})
+    return RedirectResponse(after, status_code=303)
 
 
-def _had_heading(text: str) -> bool:
-    """True when the file's body opens with a ``# `` heading, which the edit
-    form does not show and the save writes back."""
-    _, body = journal.split_frontmatter(text)
-    heading, _ = journal._first_heading(body)
-    return bool(heading)
-
-
-def _commit_edit(root: Root, abs_path: Path) -> None:
-    """Commit a journal edit when ``wiki.git`` is on. A failure is a WARNING;
-    the write already happened."""
+def _commit_write(root: Root, abs_path: Path, what: str) -> None:
+    """Commit a write when ``wiki.git`` is on. A failure is a WARNING; the
+    write already happened."""
     try:
         from joshua_shared import wikigit
 
         if not wikigit.is_enabled(config.load()):
             return
-        rel = abs_path.relative_to(root.base).as_posix()
-        wikigit.commit(root.base, [abs_path], f"viewer: edit {rel}")
+        wikigit.commit(root.base, [abs_path], f"viewer: {what} {_under_wiki(root, abs_path)}")
     except Exception as exc:  # noqa: BLE001 — a commit must never fail the write
         logger.warning({"message": "wiki commit failed", "error": str(exc)})
 
@@ -887,8 +990,9 @@ def build_app() -> Starlette:
             Route("/wiki", _require_auth(wiki_root)),
             Route("/journal", _require_auth(journal_feed)),
             Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
-            Route("/journal/edit/{path:path}", _require_auth(journal_edit)),
-            Route("/journal/save", _require_auth(journal_save), methods=["POST"]),
+            Route("/edit/{path:path}", _require_auth(edit_page)),
+            Route("/new", _require_auth(new_page)),
+            Route("/save", _require_auth(save), methods=["POST"]),
             Route("/wiki/{path:path}", _require_auth(wiki_page)),
             Route("/shared/{path:path}", _require_auth(shared_page)),
             Route("/attachments/{path:path}", _require_auth(attachments)),

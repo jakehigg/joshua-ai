@@ -63,7 +63,7 @@ class Entry:
 
     @property
     def edit_url(self) -> str:
-        return "/journal/edit/" + quote(self.rel)
+        return "/edit/" + quote(self.rel)
 
 
 # -- files ------------------------------------------------------------------
@@ -361,24 +361,6 @@ def day_html(
         parts.append("<p class=snippet>Nothing on this day.</p>")
     parts.append("".join(entry_html(e, names, can_edit=can_edit) for e in entries))
     return "".join(parts)
-
-
-def edit_html(entry: Entry, *, path: str, csrf: str) -> str:
-    """The edit form: the people, then the text. The frontmatter the person
-    does not edit travels with the file, not with the form."""
-    return (
-        f"<h1>edit: {escape(entry.title)}</h1>"
-        f"<p class=snippet>{escape(_day_label(entry.day))} · {escape(entry.source)} · "
-        f"{escape(entry.rel)}</p>"
-        '<form class="edit" action="/journal/save" method="post">'
-        f'<input type="hidden" name="path" value="{escape(path, quote=True)}">'
-        f'<input type="hidden" name="csrf" value="{escape(csrf, quote=True)}">'
-        '<label>people (ids, comma separated)<br><input name="people" '
-        f'value="{escape(", ".join(entry.people), quote=True)}"></label>'
-        f'<label>text<br><textarea name="body" rows="18">{escape(entry.body)}</textarea></label>'
-        f'<p><button type=submit>save</button> <a href="{entry.day_url}">cancel</a></p>'
-        "</form>"
-    )
 
 
 def parse_people_field(value: str) -> tuple[str, ...]:
