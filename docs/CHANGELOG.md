@@ -6,50 +6,65 @@ with the images and the packaged chart, are at
 
 ## 0.0.5 - 2026-09-05
 
+### Upgrading from 0.0.4
+
+Core moves your memory into one wiki the first time it starts, and then
+re-embeds all of it. The journal moves to `wiki/journal/`, each profile to
+`wiki/people/<id>.md`, and the shared profile to `wiki/people/everyone.md`.
+Every path changes, so every document is indexed again. On a large corpus that
+first start takes minutes and holds a CPU while it runs. Nothing is lost: the
+move never writes over a file it finds already there, and running it twice
+changes nothing.
+
+Watch it with `GET /admin/kb/status`, which reports the pass, and
+`GET /admin/journal/status`, which is new in this release.
+
 ### Added
 
-- A push to any branch, `main` included, builds the three images and tags
-  them with the commit SHA and `branch-<name>`, so `branch-main` always
-  names the newest commit on `main`. An ArgoCD Application can follow `main`
-  or a branch and run each push. The chart README has the Application, and
-  `docs/operations.md` has the Compose side. A weekly job removes the old
-  SHA-tagged builds and untagged layers from the registry.
 - Enhancements: optional services that run beside the three containers, off
   by default. The `enhancements.yaml` file picks a choice for each slot.
   Otter Wiki is the first wiki frontend, and a custom slot lets you plug in
   your own container. See `docs/enhancements.md`.
+- Joshua keeps `/data/wiki` as a git repository: it makes the first commit at
+  launch, commits every write it makes, and commits anything else that
+  changed at each start and at the nightly run, so a wiki frontend such as
+  Otter Wiki never shows a page as not under version control. Set
+  `wiki.git: false` to leave git to a frontend or a sync tool. The custom wiki
+  enhancement example is a container that pushes to a remote.
 - A gateway tool, `write_journal_entry`, lets the agent write a dated entry
-  to Joshua's own journal in the wiki. Joshua writes it, in its own voice,
-  about a person, not for a person.
-- Joshua now keeps `/data/wiki` as a git repository: it makes the first
-  commit at launch, commits every write it makes, and commits anything else
-  that changed at each start and at the nightly run, so a wiki frontend such
-  as Otter Wiki never shows a page as not under version control. Set
-  `wiki.git: false` to leave git to a frontend or a sync tool. The custom
-  wiki enhancement example is now a container that pushes to a remote; see
-  `docs/enhancements.md`.
+  to Joshua's own journal in the wiki.
 - `GET /admin/journal/status` reports today's journal: the entries Joshua
   wrote during the day, whether today has a nightly page, and the summary of
   the last nightly run. `docs/operations.md` shows how to read it.
+- A push to any branch, `main` included, builds the three images and tags
+  them with the commit SHA and `branch-<name>`, so `branch-main` always names
+  the newest commit on `main`. An ArgoCD Application can follow `main` or a
+  branch and run each push. A weekly job removes the old SHA-tagged builds and
+  untagged layers from the registry.
 
 ### Changed
 
-- The journal is Joshua's episodic memory, and only that. There is one
-  journal and it belongs to Joshua; a person is named in an entry, never the
-  owner of one. The nightly page now leaves out anything that is somebody
-  operating Joshua: a request to do a thing is not a life update, however it
-  is worded. When you ask Joshua to write in a journal, a blog, or notes of
-  your own on another service, that entry lives there and Joshua's journal
-  does not copy it. A durable trait stays in your profile, where it was
-  always meant to be.
-- `people[].journal` (`auto`, `ask`, `off`) is unchanged in behaviour, but it
-  is documented for what it does: whether Joshua's journal may record that
-  person. It never gave a person a journal of their own.
-- Joshua now has one test for which store a thing goes in. If keeping it
-  current means rewriting a page, it is the wiki; if it means adding another
-  dated line, it is the journal, one entry each time. Joshua no longer invents
-  a wiki page that grows dated rows, so a reading, a dose, a score, a meal, or
-  a mood lands in the journal where it belongs. Asking Joshua to keep track of
+- Joshua keeps its whole memory in one wiki. The journal, every profile and
+  the shared profile all live under `wiki/`, so whatever frontend you point at
+  the wiki shows all of it, and one search covers the lot. See "Upgrading"
+  above for what the first start does.
+- The journal is Joshua's episodic memory, and only that. There is one journal
+  and it belongs to Joshua: a person is named in an entry, never the owner of
+  one. It holds what happened, it is selective, and it reaches a turn only
+  through search, either the confidence-gated injection or the `search_memory`
+  tool. No turn gets a journal block in the system prompt any more, so
+  `memory.recent_posts` and `memory.recent_max_chars` still load and nothing
+  reads them. The nightly page leaves out anything that is somebody operating
+  Joshua: a request to do a thing is not a life update, however it is worded,
+  and that holds when the tool keeps a record of its own. Ask Joshua to write
+  in a journal, a blog, or notes of your own on another service, and that
+  entry lives there rather than being copied here. A durable trait stays in
+  your profile.
+- Joshua has one test for which store a thing goes in. If keeping it current
+  means rewriting a page, it is the wiki; if it means adding another dated
+  line, it is the journal, one entry each time. Joshua no longer invents a
+  wiki page that grows dated rows, so a reading, a dose, a score, a meal or a
+  mood lands in the journal where it belongs. Asking Joshua to keep track of
   something states a preference, which the profile holds; it does not make a
   page. Ask for the page and Joshua makes it: a history you would rather read
   in one place, a changelog for example, is yours to ask for. See
@@ -60,42 +75,23 @@ with the images and the packaged chart, are at
   them. An edit to an enrolled person in `joshua.yaml` therefore changes
   nothing, which `docs/config.md` now says plainly, along with how to hand a
   person back to the file.
-- The prompts Joshua ships assume nothing about what a person keeps. The rule
-  that decides where a thing is stored names the shape of the thing, not its
-  subject, so it reaches a reading, a measurement, or one occurrence of
-  something that recurs without supposing anybody records any of them. The
-  examples that carried one deployment's habits are gone.
-- The prompts describe only what this repository builds. The identity
-  paragraph no longer offers voice as a way to know who is speaking, because
-  there is no voice channel. The guest prompt describes what a guest reaches
-  in terms of the tool list for the conversation, rather than naming systems
-  this repository does not build, and it no longer offers a guest notes of
-  their own: there is one wiki, and a guest reads it. The skill example now
-  uses the journal, which every instance has, in place of lights and a
-  television, which no shipped instance can reach.
-- The shipped prompts are written in Simplified Technical English, the
-  standard the documentation already follows. A semicolon joining two
-  instructions is the shape a reader most often splits wrongly, and the
-  prompts had twelve of them.
-- The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name
-  says what it is. Core renames an existing `wiki/joshua/` at start.
-- The agent's file tools, the viewer, and the index now ignore any dot-file
-  or dot-directory at any depth, so a wiki frontend can keep its own state
-  in the folder.
-- Joshua now keeps its whole memory in one wiki. The journal moves to
-  `wiki/journal/`, a profile moves to `wiki/people/<id>.md`, and the shared
-  profile moves to `wiki/people/everyone.md`. On the first start after the
-  upgrade, core moves each person's files onto these paths and leaves no
-  target it finds already there. Every moved path changes, so the whole
-  corpus re-embeds once.
-- The journal is Joshua's own record of what happened, not a person's blog.
-  It reaches a turn only through search: the confidence-gated injection or
-  the `search_memory` tool. No turn gets a journal block in the system
-  prompt any more. The `memory.recent_posts` and `memory.recent_max_chars`
-  settings still load, but nothing reads them now.
+- `people[].journal` (`auto`, `ask`, `off`) is unchanged in behaviour, and is
+  now documented for what it does: whether Joshua's journal may record that
+  person. It never gave a person a journal of their own.
 - `wiki/Home.md` is the wiki's front page. Core makes it once, from a
-  template, and never rewrites it after that. Core also removes the old
-  `wiki/README.md` and `shared/README.md`, which `Home.md` replaces.
+  template, and never rewrites it. Core also removes the old `wiki/README.md`
+  and `shared/README.md`, which `Home.md` replaces.
+- The shipped docs folder in the wiki is `wiki/joshua-docs/`, so its name says
+  what it is. Core renames an existing `wiki/joshua/` at start.
+- The agent's file tools, the viewer and the index ignore any dot-file or
+  dot-directory at any depth, so a wiki frontend can keep its own state in the
+  folder.
+- The prompts Joshua ships describe only what this repository builds, and
+  assume nothing about what any person keeps. Identity no longer offers voice
+  as a way to know who is speaking, because there is no voice channel; the
+  guest prompt describes what a guest reaches in terms of the tool list rather
+  than naming systems that are not here; and the rule that decides where a
+  thing is stored names the shape of the thing, not its subject.
 
 ### Fixed
 
@@ -109,20 +105,18 @@ with the images and the packaged chart, are at
 - The chart README told you to install from an OCI registry that holds no
   chart, so the command answered 403. The chart ships as a package attached to
   each release; the README now takes it from there, or from a checkout.
-- A turn that wrote a journal entry reported writing nothing. The turn log
-  names the files a turn wrote, and it built that list from each call's
-  `path` argument, which `write_journal_entry` does not have: the tool takes a
-  slug and the gateway places the file. The entry landed correctly, and only
-  the record of it was missing. The path is now rebuilt the way the gateway
-  builds it.
-- The journal has one writer. `write_file` and `rename_file` now refuse a path
+- The journal has one writer. `write_file` and `rename_file` refuse a path
   under `wiki/journal/`, so an entry cannot land outside its day folder
   without the frontmatter the index reads, and the nightly page cannot be
   overwritten or renamed by the agent. Use `write_journal_entry`.
-- `docs/architecture.md`, `docs/quickstart.md`, and `docs/config.md` described
-  the layout from before the journal moved into the wiki: a per-person
-  `blog/` folder, a profile at `people/<id>/profile.md`, and a shared profile
-  under `shared/`. They now describe the wiki.
+- A turn that wrote a journal entry reported writing nothing. The turn log
+  names the files a turn wrote, and it built that list from each call's `path`
+  argument, which `write_journal_entry` does not have: the tool takes a slug
+  and the gateway places the file. The entry landed correctly, and only the
+  record of it was missing.
+- `docs/architecture.md`, `docs/quickstart.md` and `docs/config.md` described
+  the layout from before the journal moved into the wiki. They now describe
+  the wiki.
 
 ## 0.0.4 - 2026-09-01
 
