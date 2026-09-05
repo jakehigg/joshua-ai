@@ -54,6 +54,12 @@ with the images and the packaged chart, are at
   page. Ask for the page and Joshua makes it: a history you would rather read
   in one place, a changelog for example, is yours to ask for. See
   `docs/memory.md`.
+- `joshua.yaml` starts the roster; Joshua keeps it. The file is where you name
+  the first person, so somebody can talk to Joshua at all. Everyone after that
+  is enrolled through Joshua, and the sidecar at `/data/people.yaml` holds
+  them. An edit to an enrolled person in `joshua.yaml` therefore changes
+  nothing, which `docs/config.md` now says plainly, along with how to hand a
+  person back to the file.
 - The prompts Joshua ships assume nothing about what a person keeps. The rule
   that decides where a thing is stored names the shape of the thing, not its
   subject, so it reaches a reading, a measurement, or one occurrence of
@@ -93,6 +99,16 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- A turn slower than 15 seconds no longer dies part way through. One timeout
+  covered both an ordinary request and a streamed turn, and a streamed turn
+  holds its body open for as long as the turn runs, so the number was a cap on
+  how long the agent could think. `make chat` failed on a cold first turn,
+  which is the first thing anybody runs after `make up`. A request keeps its
+  deadline; a stream reads without one and keeps the connect timeout, so an
+  unreachable container still fails in seconds.
+- The chart README told you to install from an OCI registry that holds no
+  chart, so the command answered 403. The chart ships as a package attached to
+  each release; the README now takes it from there, or from a checkout.
 - A turn that wrote a journal entry reported writing nothing. The turn log
   names the files a turn wrote, and it built that list from each call's
   `path` argument, which `write_journal_entry` does not have: the tool takes a

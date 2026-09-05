@@ -53,9 +53,11 @@ The loaded model has these lookups:
 
 ## Runtime people (the people.yaml sidecar)
 
-`joshua.yaml` is the source of truth for the roster at boot. The app can also
-enroll people at runtime with no edit to `joshua.yaml`. A runtime change is written
-to two places:
+`joshua.yaml` starts the roster. It is where you name the first person, the one
+who sets Joshua up, so that somebody can talk to it at all. After that, people
+are added through Joshua, and `joshua.yaml` does not need another edit.
+
+A runtime change is written to two places:
 
 - the database roster cache, and
 - a sidecar file `<data_dir>/people.yaml` (default `/data/people.yaml`), in the
@@ -64,8 +66,18 @@ to two places:
 The loader reads the sidecar and merges it over `people` at load time. A
 sidecar entry with the same id as a `joshua.yaml` person replaces that person. A
 new id is appended. An entry with `role: removed` drops that id from the merged
-roster. This is how a removed person's handle stops resolving. So `joshua.yaml`
-stays human-owned while the app enrolls people.
+roster. This is how a removed person's handle stops resolving.
+
+**The sidecar wins, so `joshua.yaml` is a starting point and not a control
+panel.** Once a person is enrolled, an edit to that person in `joshua.yaml`
+changes nothing: the sidecar entry replaces it at every load. Change an
+enrolled person the same way you added them, with the agent tool, the CLI, or
+the admin route below. This holds for a deployment that renders `joshua.yaml`
+from a git repository too: the merge request is reviewed, merged and synced,
+and the enrolled person is unchanged.
+
+To hand the roster back to `joshua.yaml`, remove the person's entry from the
+sidecar. The next load reads `joshua.yaml` for that id again.
 
 The data dir comes from `JOSHUA_DATA_DIR` (default `/data`), the same variable all
 three containers read.

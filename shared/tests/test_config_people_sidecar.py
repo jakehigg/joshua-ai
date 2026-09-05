@@ -147,3 +147,64 @@ def test_load_sees_a_removal_from_the_sidecar(tmp_path, monkeypatch) -> None:
     sidecar.write_text("people:\n  - id: mia\n    name: Mia\n    role: removed\n")
     os.utime(sidecar, (1, 1))
     assert config_module.load().people_by_handle("telegram", "123456789") is None
+
+
+# -- joshua.yaml starts the roster; the sidecar keeps it ---------------------
+
+
+def test_an_edit_to_an_enrolled_person_in_joshua_yaml_does_nothing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`joshua.yaml` names the first person so somebody can talk to Joshua at
+    all. Everyone after that is enrolled through Joshua, and the sidecar keeps
+    them. So an edit to an enrolled person in `joshua.yaml` is not the way to
+    change them, and a deployment that renders the file from git does not get a
+    different answer. Pinning this stops the merge quietly flipping later."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "people.yaml").write_text(
+        "people:\n  - id: alex\n    name: Alex\n    role: member\n"
+    )
+    config_path = tmp_path / "joshua.yaml"
+    # The operator demotes alex to a guest in the file they think is the roster.
+    config_path.write_text(BASE.replace("role: member", "role: guest"))
+    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data_dir))
+
+    cfg = config_module.reload(config_path)
+
+    assert cfg.person("alex").role == "member", "the sidecar keeps an enrolled person"
+
+
+def test_removing_the_sidecar_entry_hands_the_person_back_to_joshua_yaml(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The documented way to put a person back under the file's control."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    sidecar = data_dir / "people.yaml"
+    sidecar.write_text("people:\n  - id: alex\n    name: Alex\n    role: member\n")
+    config_path = tmp_path / "joshua.yaml"
+    config_path.write_text(BASE.replace("role: member", "role: guest"))
+    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data_dir))
+    assert config_module.reload(config_path).person("alex").role == "member"
+
+    sidecar.write_text("")  # an empty sidecar, as a removal leaves it
+
+    assert config_module.reload(config_path).person("alex").role == "guest"
+
+
+def test_a_person_enrolled_through_joshua_needs_no_joshua_yaml_edit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The point of the sidecar: setup names one person, Joshua adds the rest."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "people.yaml").write_text("people:\n  - id: mia\n    name: Mia\n    role: guest\n")
+    config_path = tmp_path / "joshua.yaml"
+    config_path.write_text(BASE)
+    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data_dir))
+
+    cfg = config_module.reload(config_path)
+
+    assert {p.id for p in cfg.people} == {"alex", "mia"}
+    assert cfg.person("mia").role == "guest"
