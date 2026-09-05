@@ -26,7 +26,9 @@ from joshua_shared.layout import is_hidden
 from markdown_it import MarkdownIt
 
 # Raw HTML is disabled, so a ``<script>`` in an entry renders as text.
-_MD = MarkdownIt("commonmark", {"html": False, "linkify": False})
+# The commonmark preset has no tables; the table and strikethrough rules are
+# turned on, with no new dependency.
+_MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table", "strikethrough"])
 _H1 = re.compile(r"^#\s+(.+?)\s*#*\s*$")
 
 # The title of a nightly page that carries no heading of its own.

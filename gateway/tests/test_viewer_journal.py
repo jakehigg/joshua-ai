@@ -358,3 +358,15 @@ def test_save_commits_the_edit(client, tmp_path):
         ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True
     ).stdout
     assert f"viewer: edit {rel}" in log
+
+
+def test_a_table_renders_in_an_entry_and_a_wiki_page(client, tmp_path):
+    table = "| reading | inches |\n|---|---|\n| morning | 0.8 |\n"
+    _write(
+        tmp_path / "data/wiki/journal/2026/09/04/rain.md",
+        "---\ndate: 2026-09-04\npeople: [alex]\nsource: agent\n---\n\n" + table,
+    )
+    _write(tmp_path / "data/wiki/table.md", "# Table\n\n" + table)
+    for url in ("/journal", "/wiki/table.md"):
+        html = client.get(url, auth=ALEX).text
+        assert "<table>" in html and "<th>reading</th>" in html and "<td>0.8</td>" in html, url

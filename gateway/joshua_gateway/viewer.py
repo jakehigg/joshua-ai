@@ -79,7 +79,9 @@ _META_SUFFIX = ".meta.json"
 _CSRF_SECRET = secrets.token_bytes(32)
 
 # Raw HTML is disabled, so a ``<script>`` in a markdown file renders as text.
-_MD = MarkdownIt("commonmark", {"html": False, "linkify": False})
+# The commonmark preset has no tables; the table and strikethrough rules are
+# turned on, with no new dependency.
+_MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table", "strikethrough"])
 
 # Which viewer route serves each root, for a search hit link.
 _ROUTE_PREFIX = {"wiki": "/wiki/", "shared": "/shared/"}
@@ -117,6 +119,11 @@ form.delete { margin-top: 2rem; padding-top: 1rem;
   border-top: 1px solid var(--line); }
 form.delete button { padding: .4rem .75rem; cursor: pointer; }
 .snippet { color: var(--muted); }
+table { border-collapse: collapse; margin: .75rem 0; max-width: 100%;
+  display: block; overflow-x: auto; }
+th, td { border: 1px solid var(--line); padding: .3rem .6rem;
+  text-align: left; vertical-align: top; }
+th { background: var(--code); }
 p.months { color: var(--muted); }
 p.filters { display: flex; flex-wrap: wrap; gap: .4rem; }
 .chip { display: inline-block; padding: .05rem .6rem; border-radius: 999px;
