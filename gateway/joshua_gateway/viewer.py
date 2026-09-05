@@ -1,15 +1,17 @@
-"""Read-only web viewer for the wiki and a person's own attachments.
+"""Web viewer for the wiki, the journal, and a person's own attachments.
 
 A person opens a browser, signs in with HTTP basic, and reads the one wiki
 (which carries Joshua's own journal and its profile of each person), their own
-attachments, and the shared attachments. The viewer never calls core and the
-agent never calls the viewer. It reads the data volume through the same
-resolver as the files MCP (``files_mcp.paths``), so the two never drift on who
-reads what.
+attachments, and the shared attachments. ``/journal`` shows the journal as a
+feed, newest day first, because the wiki tree is the wrong shape for reading
+what happened. The viewer never calls core and the agent never calls the
+viewer. It reads the data volume through the same resolver as the files MCP
+(``files_mcp.paths``), so the two never drift on who reads what.
 
-The one write action is a delete. A member moves a wiki page to the trash under
-``wiki/.trash/``; it is never a hard delete. A guest cannot delete. Deletion
-stays a human action in a browser, so the agent gets no way to remove a file.
+A member has two write actions, both human actions in a browser that the
+agent never gets: a delete, which moves a wiki page to the trash under
+``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
+text and people. A guest reads.
 
 Start it with ``python -m joshua_gateway.viewer``. It refuses to start when
 ``viewer.enabled`` is false. Put a reverse proxy in front for TLS; the viewer
@@ -26,7 +28,7 @@ import os
 import secrets
 import sys
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -37,7 +39,7 @@ import uvicorn
 import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
-from joshua_shared.layout import is_hidden
+from joshua_shared.layout import is_hidden, journal_day_from_path
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from markdown_it import MarkdownIt
 from starlette.applications import Starlette
@@ -47,8 +49,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+from joshua_gateway import viewer_journal as journal
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
-from joshua_gateway.files_mcp.server import IMAGE_MIME, data_root
+from joshua_gateway.files_mcp.server import IMAGE_MIME, MAX_BYTES, _atomic_write, data_root
 
 logger = get_logger("viewer")
 
@@ -114,6 +117,39 @@ form.delete { margin-top: 2rem; padding-top: 1rem;
   border-top: 1px solid var(--line); }
 form.delete button { padding: .4rem .75rem; cursor: pointer; }
 .snippet { color: var(--muted); }
+p.months { color: var(--muted); }
+p.filters { display: flex; flex-wrap: wrap; gap: .4rem; }
+.chip { display: inline-block; padding: .05rem .6rem; border-radius: 999px;
+  border: 1px solid var(--line); font-size: .85rem; color: var(--fg); }
+.chip.on { background: var(--link); border-color: var(--link); color: #fff; }
+.chip:hover { text-decoration: none; border-color: var(--link); }
+.badge { display: inline-block; padding: .05rem .5rem; border-radius: 4px;
+  font-size: .75rem; text-transform: uppercase; letter-spacing: .04em;
+  background: var(--code); color: var(--muted); }
+.badge.nightly { background: var(--link); color: #fff; }
+section.day { margin: 2rem 0; }
+section.day h2 { font-size: 1.1rem; color: var(--muted); font-weight: 600;
+  border-bottom: 1px solid var(--line); padding-bottom: .25rem; }
+section.day h2 a { color: inherit; }
+article.entry { padding: .75rem 0 .75rem 1rem; margin: .5rem 0 1rem;
+  border-left: 3px solid var(--line); }
+article.entry header { display: flex; flex-wrap: wrap; gap: .5rem;
+  align-items: baseline; }
+article.entry h3 { margin: 0; font-size: 1.05rem; }
+article.entry h3 a { color: var(--fg); }
+article.entry .md > :first-child { margin-top: .5rem; }
+article.entry .md img { max-width: 100%; height: auto; }
+article.entry .md pre, article.entry .md code { background: var(--code);
+  border-radius: 4px; }
+article.entry .md pre { padding: .75rem; overflow-x: auto; }
+article.entry footer { font-size: .85rem; color: var(--muted); }
+form.edit label { display: block; margin: 1rem 0; }
+form.edit input[name=people], form.edit textarea { width: 100%;
+  padding: .4rem .5rem; font: inherit; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+form.edit textarea { font-family: ui-monospace, monospace; font-size: .95rem;
+  line-height: 1.5; }
+form.edit button { padding: .4rem .75rem; cursor: pointer; }
 """
 
 
@@ -301,7 +337,7 @@ def _page(title: str, body: str, *, status: int = 200, nav: bool = True) -> HTML
 
 
 _NAV = (
-    '<nav><a href="/">home</a>'
+    '<nav><a href="/">home</a><a href="/journal">journal</a>'
     '<form action="/search" method="get">'
     '<input name="q" placeholder="search" aria-label="search"></form></nav>'
 )
@@ -472,7 +508,8 @@ async def index(request: Request, person: Person) -> Response:
     profile_url = f"/wiki/people/{person.id}.md"
     body = [
         f"<h1>{escape(person.name)}</h1>",
-        f'<p><a href="{escape(profile_url, quote=True)}">profile</a></p>',
+        f'<p><a href="{escape(profile_url, quote=True)}">profile</a> · '
+        '<a href="/journal">journal</a></p>',
     ]
     body.append(
         _section(
@@ -570,6 +607,164 @@ async def delete(request: Request, person: Person) -> Response:
     return RedirectResponse("/", status_code=303)
 
 
+# -- journal ----------------------------------------------------------------
+
+
+def _people_list() -> list[tuple[str, str]]:
+    """``(id, name)`` for every person, for the filter and the chips."""
+    return [(p.id, p.name) for p in config.load().people]
+
+
+async def journal_feed(request: Request, person: Person) -> Response:
+    """The journal for one month, newest day first. ``month=YYYY-MM`` picks the
+    month; the default is the newest month with an entry. ``person=<id>``
+    keeps only the entries that name that person."""
+    entries = journal.load_entries(data_root())
+    person_id = (request.query_params.get("person") or "").strip() or None
+    if person_id is not None and person_id not in {pid for pid, _ in _people_list()}:
+        person_id = None
+    scoped = journal.for_person(entries, person_id)
+    available = journal.months(scoped)
+    month = journal.parse_month(request.query_params.get("month"))
+    if month is None:
+        today = datetime.now(UTC).date()
+        month = available[0] if available else (today.year, today.month)
+    body = journal.feed_html(
+        journal.for_month(scoped, month),
+        month=month,
+        available=available,
+        people=_people_list(),
+        person_id=person_id,
+        can_edit=person.role == "member",
+    )
+    return _page("journal", body)
+
+
+async def journal_day(request: Request, person: Person) -> Response:
+    """One day of the journal, with the nearest older and newer day that
+    holds an entry."""
+    try:
+        day = date(
+            int(request.path_params["year"]),
+            int(request.path_params["month"]),
+            int(request.path_params["day"]),
+        )
+    except ValueError:
+        return _not_found()
+    entries = journal.load_entries(data_root())
+    all_days = journal.days(entries)  # newest first
+    older = next((d for d in all_days if d < day), None)
+    newer = next((d for d in reversed(all_days) if d > day), None)
+    body = journal.day_html(
+        day,
+        journal.for_day(entries, day),
+        older=older,
+        newer=newer,
+        people=_people_list(),
+        can_edit=person.role == "member",
+    )
+    return _page(day.isoformat(), body)
+
+
+def _journal_target(person: Person, rel: str) -> tuple[Root, Path] | None:
+    """Resolve a wiki-relative journal path for a write, or None when it is
+    not a journal file under a day folder, is hidden, or is not there."""
+    try:
+        root, abs_path = resolve("wiki/" + rel, _roots_for(person), write=True)
+    except PathError:
+        return None
+    if root.name != "wiki" or not abs_path.is_file() or abs_path.suffix != ".md":
+        return None
+    if journal_day_from_path(abs_path, data_root()) is None:
+        return None
+    return root, abs_path
+
+
+async def journal_edit(request: Request, person: Person) -> Response:
+    if person.role != "member":
+        return _forbidden()
+    rel = request.path_params["path"]
+    target = _journal_target(person, rel)
+    if target is None:
+        return _not_found()
+    _, abs_path = target
+    text = _read_text(abs_path)
+    if text is None:
+        return _not_found()
+    day = journal_day_from_path(abs_path, data_root())
+    assert day is not None
+    entry = journal.parse_entry(rel, day, text)
+    return _page(
+        f"edit {entry.title}",
+        journal.edit_html(entry, path=rel, csrf=_csrf_token(person.id, "wiki/" + rel)),
+    )
+
+
+async def journal_save(request: Request, person: Person) -> Response:
+    """Write the edited text and people back. The day, the source, and every
+    other frontmatter key stay as they were. Commits when ``wiki.git`` is on."""
+    if person.role != "member":
+        return _forbidden()
+    form = await request.form()
+    rel = str(form.get("path", ""))
+    token = str(form.get("csrf", ""))
+    if not _csrf_valid(person.id, "wiki/" + rel, token) or not _origin_ok(request):
+        return _forbidden()
+    target = _journal_target(person, rel)
+    if target is None:
+        return _not_found()
+    root, abs_path = target
+    text = _read_text(abs_path)
+    if text is None:
+        return _not_found()
+    try:
+        people = journal.parse_people_field(str(form.get("people", "")))
+    except ValueError:
+        return _page(
+            "edit", "<h1>edit</h1><p>A person id is letters, digits and hyphens.</p>", status=400
+        )
+    front, _ = journal.split_frontmatter(text)
+    front["people"] = list(people)
+    body = str(form.get("body", "")).replace("\r\n", "\n").strip("\n")
+    day = journal_day_from_path(abs_path, data_root())
+    assert day is not None
+    entry = journal.parse_entry(rel, day, text)
+    heading = (
+        f"# {entry.title}\n\n"
+        if entry.title and not entry.is_day_page and _had_heading(text)
+        else ""
+    )
+    data = (journal.render_frontmatter(front) + heading + body + "\n").encode()
+    if len(data) > MAX_BYTES:
+        return _page("edit", "<h1>edit</h1><p>The entry exceeds 256 KB.</p>", status=400)
+    _atomic_write(abs_path, data)
+    _commit_edit(root, abs_path)
+    logger.info({"message": "viewer journal edit", "root": "wiki"})
+    return RedirectResponse(f"{journal.day_url(day)}#{entry.slug}", status_code=303)
+
+
+def _had_heading(text: str) -> bool:
+    """True when the file's body opens with a ``# `` heading, which the edit
+    form does not show and the save writes back."""
+    _, body = journal.split_frontmatter(text)
+    heading, _ = journal._first_heading(body)
+    return bool(heading)
+
+
+def _commit_edit(root: Root, abs_path: Path) -> None:
+    """Commit a journal edit when ``wiki.git`` is on. A failure is a WARNING;
+    the write already happened."""
+    try:
+        from joshua_shared import wikigit
+
+        if not wikigit.is_enabled(config.load()):
+            return
+        rel = abs_path.relative_to(root.base).as_posix()
+        wikigit.commit(root.base, [abs_path], f"viewer: edit {rel}")
+    except Exception as exc:  # noqa: BLE001 — a commit must never fail the write
+        logger.warning({"message": "wiki commit failed", "error": str(exc)})
+
+
 async def style(request: Request, person: Person) -> Response:
     return Response(_CSS, media_type="text/css")
 
@@ -618,6 +813,10 @@ def build_app() -> Starlette:
             Route("/readyz", readyz),
             Route("/style.css", _require_auth(style)),
             Route("/", _require_auth(index)),
+            Route("/journal", _require_auth(journal_feed)),
+            Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
+            Route("/journal/edit/{path:path}", _require_auth(journal_edit)),
+            Route("/journal/save", _require_auth(journal_save), methods=["POST"]),
             Route("/wiki/{path:path}", _require_auth(wiki_page)),
             Route("/shared/{path:path}", _require_auth(shared_page)),
             Route("/attachments/{path:path}", _require_auth(attachments)),
