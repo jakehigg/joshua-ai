@@ -16,7 +16,7 @@ name. ``doc_date`` is the journal day a path belongs to
 (``layout.journal_day_from_path``), else a frontmatter ``date``, else None.
 Frontmatter ``date``/``tags``/``provenance`` are honored when present. A dot
 entry (``.trash/``, ``.git/``, and so on, at any depth) and a ``*.meta.json``
-sidecar are ignored.
+metadata file are ignored.
 """
 
 from __future__ import annotations

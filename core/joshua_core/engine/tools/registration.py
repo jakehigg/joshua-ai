@@ -5,7 +5,7 @@ Both tools gate on the current speaker being a member; a guest or an
 unidentified caller gets a "not available" reply and nothing changes. ``add_user``
 enrolls a person: it derives an id from the name, refuses to re-point a handle that
 already belongs to someone, writes the DB roster cache, appends the person to the
-``/data/people.yaml`` sidecar that the config loader merges over ``joshua.yaml``,
+``/data/people.yaml`` people file that the config loader merges over ``joshua.yaml``,
 and creates the person's data directories. ``recent_senders`` names the handles
 the channels guard turned away, so a member can say "add the person who just
 messaged you" without reading a handle off a terminal.
@@ -27,7 +27,7 @@ from joshua_core.people import (
     display_from_name,
     infer_channel_type,
     normalize_handle,
-    sidecar_entry,
+    people_entry,
     slugify_id,
 )
 from joshua_core.store import people_file
@@ -135,7 +135,7 @@ async def do_add_user(
     await deps.repo.upsert_person(pid, name, role)
     await deps.repo.upsert_person_handle(ctype, norm, pid)
     people_file.upsert_person(
-        Path(data_dir) / "people.yaml", sidecar_entry(pid, name, role, ctype, norm)
+        Path(data_dir) / "people.yaml", people_entry(pid, name, role, ctype, norm)
     )
     layout.bootstrap_person(pid, name, root=data_dir)
 

@@ -27,7 +27,15 @@ _RETRY_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
 
 
 class FleetClient:
-    """Async HTTP client that sends this container's fleet token on every call."""
+    """Async HTTP client that sends this container's fleet token on every call.
+
+    ``timeout`` covers an ordinary request: a slow container must not hold a
+    caller open. It does NOT cap a stream. A streamed turn keeps its body open
+    for as long as the turn runs, so a read timeout there is a limit on how
+    long the agent may think, which is not a thing this class should decide.
+    :meth:`stream` therefore reads without a deadline and keeps the connect
+    timeout, so an unreachable container still fails fast.
+    """
 
     def __init__(
         self,
@@ -37,9 +45,12 @@ class FleetClient:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        self._timeout = httpx.Timeout(timeout)
+        # Connect fast, then wait: the body arrives as the turn produces it.
+        self._stream_timeout = httpx.Timeout(timeout, read=None, pool=None)
         self._client = httpx.AsyncClient(
             base_url=base_url,
-            timeout=timeout,
+            timeout=self._timeout,
             headers={"Authorization": f"Bearer {identity_token}"},
             transport=transport,
         )
@@ -69,7 +80,13 @@ class FleetClient:
 
         The bearer header still rides on the request. Connection retries do not
         apply to a stream; the caller consumes the body over the open response.
+
+        The read deadline is off, so a turn that takes minutes still arrives.
+        The connect timeout stands, so a container that is not there still
+        fails in seconds. A caller that wants its own deadline passes
+        ``timeout``.
         """
+        kwargs.setdefault("timeout", self._stream_timeout)
         return self._client.stream(method, url, **kwargs)
 
     async def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:

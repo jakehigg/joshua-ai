@@ -9,11 +9,28 @@ first, and name them in that file.
 
 ## Install
 
+The chart ships as a package on each release. Take it from the release page,
+then install it:
+
 ```
-helm install joshua oci://ghcr.io/jakehigg/charts/joshua \
+VERSION=0.0.4
+curl -LO https://github.com/jakehigg/joshua-ai/releases/download/v$VERSION/joshua-$VERSION.tgz
+helm install joshua ./joshua-$VERSION.tgz \
   --namespace joshua --create-namespace \
   --values my-values.yaml
 ```
+
+Or install the chart straight from a checkout, which is what a deployment that
+renders from git does:
+
+```
+helm install joshua ./charts/joshua \
+  --namespace joshua --create-namespace \
+  --values my-values.yaml
+```
+
+The chart is not in an OCI registry yet, so there is no `helm install
+oci://...` for it. The images are, and the chart pulls them from there.
 
 ## What you must set
 

@@ -26,7 +26,7 @@ with the images and the packaged chart, are at
   that changed at each start and at the nightly run, so a wiki frontend such
   as Otter Wiki never shows a page as not under version control. Set
   `wiki.git: false` to leave git to a frontend or a sync tool. The custom
-  wiki enhancement example is now a push-to-remote sidecar; see
+  wiki enhancement example is now a container that pushes to a remote; see
   `docs/enhancements.md`.
 - `GET /admin/journal/status` reports today's journal: the entries Joshua
   wrote during the day, whether today has a nightly page, and the summary of
@@ -54,6 +54,12 @@ with the images and the packaged chart, are at
   page. Ask for the page and Joshua makes it: a history you would rather read
   in one place, a changelog for example, is yours to ask for. See
   `docs/memory.md`.
+- `joshua.yaml` starts the roster; Joshua keeps it. The file is where you name
+  the first person, so somebody can talk to Joshua at all. Everyone after that
+  is enrolled through Joshua, and the people file at `/data/people.yaml` holds
+  them. An edit to an enrolled person in `joshua.yaml` therefore changes
+  nothing, which `docs/config.md` now says plainly, along with how to hand a
+  person back to the file.
 - The prompts Joshua ships assume nothing about what a person keeps. The rule
   that decides where a thing is stored names the shape of the thing, not its
   subject, so it reaches a reading, a measurement, or one occurrence of
@@ -93,6 +99,16 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- A turn slower than 15 seconds no longer dies part way through. One timeout
+  covered both an ordinary request and a streamed turn, and a streamed turn
+  holds its body open for as long as the turn runs, so the number was a cap on
+  how long the agent could think. `make chat` failed on a cold first turn,
+  which is the first thing anybody runs after `make up`. A request keeps its
+  deadline; a stream reads without one and keeps the connect timeout, so an
+  unreachable container still fails in seconds.
+- The chart README told you to install from an OCI registry that holds no
+  chart, so the command answered 403. The chart ships as a package attached to
+  each release; the README now takes it from there, or from a checkout.
 - A turn that wrote a journal entry reported writing nothing. The turn log
   names the files a turn wrote, and it built that list from each call's
   `path` argument, which `write_journal_entry` does not have: the tool takes a
@@ -316,11 +332,12 @@ The first release.
   It is now visible instead of silent.
 - A lost embedding model writes one log line for each index pass, and not one
   for each document.
-- Channels writes a `<file>.meta.json` sidecar next to a stored attachment. The
-  sidecar holds the sender's filename, so the files tool reports the original
-  name. Channels logs one line for each sidecar write, so the logs show whether
-  the sidecar landed. A stored attachment with no sidecar still appears in the
-  files list, without the original name. The retention sweep removes the sidecar
+- Channels writes a `<file>.meta.json` metadata file next to a stored
+  attachment. It holds the sender's filename, so the files tool reports the
+  original name. Channels logs one line for each write, so the logs show
+  whether the file landed. A stored attachment with no metadata file still
+  appears in the files list, without the original name. The retention sweep
+  removes the metadata file
   with its file and counts attachments only.
 
 - `/readyz` clears the Telegram channel after a transient poll error. A

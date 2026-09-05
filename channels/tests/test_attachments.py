@@ -269,10 +269,10 @@ async def test_keep_originals_stores_pre_transform_file(tmp_path: Path) -> None:
     assert len(originals) == 1
 
 
-# ── sidecar ───────────────────────────────────────────────────────────────────
+# ── metadata file ───────────────────────────────────────────────────────────────────
 
 
-async def test_sidecar_holds_original_name_mime_and_received_at(tmp_path: Path) -> None:
+async def test_metadata_holds_original_name_mime_and_received_at(tmp_path: Path) -> None:
     inbox = tmp_path / "inbox" / "s1"
     _write(inbox, "photo.png", _png((32, 32)))
 
@@ -280,19 +280,19 @@ async def test_sidecar_holds_original_name_mime_and_received_at(tmp_path: Path) 
 
     att = stored[0]
     dest = tmp_path / "people" / "alex" / att.path
-    sidecar = dest.parent / f"{dest.name}{META_SUFFIX}"
-    assert sidecar.exists()
-    meta = json.loads(sidecar.read_text(encoding="utf-8"))
+    metadata = dest.parent / f"{dest.name}{META_SUFFIX}"
+    assert metadata.exists()
+    meta = json.loads(metadata.read_text(encoding="utf-8"))
     assert meta == {
         "original_name": "photo.png",
         "mime": "image/png",
         "received_at": "2026-08-27T00:00:00+00:00",
     }
-    # The sidecar name equals the returned original_name on the Attachment.
+    # The metadata file name equals the returned original_name on the Attachment.
     assert meta["original_name"] == att.original_name
 
 
-async def test_sidecar_follows_the_deduped_stored_name(tmp_path: Path) -> None:
+async def test_metadata_follows_the_deduped_stored_name(tmp_path: Path) -> None:
     pipeline = _pipeline(tmp_path)
 
     inbox1 = tmp_path / "inbox" / "d1"
@@ -306,25 +306,25 @@ async def test_sidecar_follows_the_deduped_stored_name(tmp_path: Path) -> None:
     att = second[0]
     assert att.name == "2026-08-27-000000-photo-2.png"
     dest = tmp_path / "people" / "alex" / att.path
-    sidecar = dest.parent / f"{att.name}{META_SUFFIX}"
-    assert sidecar.exists()
+    metadata = dest.parent / f"{att.name}{META_SUFFIX}"
+    assert metadata.exists()
 
 
-async def test_sidecar_stays_in_the_attachment_directory(tmp_path: Path) -> None:
+async def test_metadata_stays_in_the_attachment_directory(tmp_path: Path) -> None:
     # A platform can hand back a traversal name. The stored name is one segment,
-    # so the sidecar sits next to the file, never above the attachment root.
+    # so the metadata file sits next to the file, never above the attachment root.
     pipeline = _pipeline(tmp_path)
     name = safe_filename("../../etc/passwd", ".png", now=pipeline._now_local())
     rel, dest = pipeline._destination("alex", None, name)
-    sidecar = dest.parent / f"{dest.name}{META_SUFFIX}"
+    metadata = dest.parent / f"{dest.name}{META_SUFFIX}"
 
     attachments = tmp_path / "people" / "alex" / "attachments"
-    assert ".." not in sidecar.parts
-    assert attachments in sidecar.parents
-    assert sidecar.name == "2026-08-27-000000-passwd.png.meta.json"
+    assert ".." not in metadata.parts
+    assert attachments in metadata.parents
+    assert metadata.name == "2026-08-27-000000-passwd.png.meta.json"
 
 
-async def test_sidecar_write_failure_keeps_the_attachment(
+async def test_metadata_write_failure_keeps_the_attachment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     inbox = tmp_path / "inbox" / "sf"
@@ -343,27 +343,27 @@ async def test_sidecar_write_failure_keeps_the_attachment(
     dest = tmp_path / "people" / "alex" / stored[0].path
     assert dest.read_bytes() == data
     assert not (dest.parent / f"{dest.name}{META_SUFFIX}").exists()
-    warnings = [r.msg["message"] for r in _sidecar_records(caplog) if r.levelno == logging.WARNING]
-    assert "attachment sidecar write failed" in warnings
+    warnings = [r.msg["message"] for r in _metadata_records(caplog) if r.levelno == logging.WARNING]
+    assert "attachment metadata file write failed" in warnings
 
 
-async def test_sidecar_write_logs_a_confirmation_line(
+async def test_metadata_write_logs_a_confirmation_line(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # A stored sidecar logs one info line, at the same logger as "attachment
+    # A stored metadata file logs one info line, at the same logger as "attachment
     # stored". A silent success hid a real production bug, so the confirmation
-    # keeps the sidecar write visible in the logs.
+    # keeps the metadata file write visible in the logs.
     inbox = tmp_path / "inbox" / "sl"
     _write(inbox, "photo.png", _png((32, 32)))
 
     with caplog.at_level(logging.INFO, logger="channels.attachments"):
         await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
 
-    messages = [r.msg["message"] for r in _sidecar_records(caplog)]
-    assert "attachment sidecar written" in messages
+    messages = [r.msg["message"] for r in _metadata_records(caplog)]
+    assert "attachment metadata file written" in messages
 
 
-def _sidecar_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+def _metadata_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     """Records from the channels.attachments logger that carry a dict message."""
     return [
         r for r in caplog.records if r.name == "channels.attachments" and isinstance(r.msg, dict)
@@ -412,24 +412,24 @@ def test_sweep_retention_deletes_old_files(tmp_path: Path) -> None:
     assert (recent / "new.jpg").exists()
 
 
-def test_sweep_retention_removes_sidecar_and_counts_attachments(tmp_path: Path) -> None:
+def test_sweep_retention_removes_metadata_and_counts_attachments(tmp_path: Path) -> None:
     attachments = tmp_path / "people" / "alex" / "attachments" / "2020" / "01"
     attachments.mkdir(parents=True)
     stored = attachments / "2020-01-01-000000-old.jpg"
     stored.write_bytes(b"x")
-    sidecar = attachments / f"{stored.name}{META_SUFFIX}"
-    sidecar.write_text(json.dumps({"original_name": "old.jpg"}), encoding="utf-8")
+    metadata = attachments / f"{stored.name}{META_SUFFIX}"
+    metadata.write_text(json.dumps({"original_name": "old.jpg"}), encoding="utf-8")
     old = time.time() - 400 * 86400
     import os
 
     os.utime(stored, (old, old))
-    os.utime(sidecar, (old, old))
+    os.utime(metadata, (old, old))
 
     removed = AttachmentPipeline(data_dir=tmp_path, retention_days=365).sweep_retention()
 
     assert removed == 1
     assert not stored.exists()
-    assert not sidecar.exists()
+    assert not metadata.exists()
 
 
 def test_sweep_retention_zero_keeps_forever(tmp_path: Path) -> None:

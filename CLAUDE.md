@@ -54,7 +54,10 @@ Do not use "household", "family", or "tenant" in identifiers, config keys,
 paths, prompts, or docs. Do not call the journal a "blog", and do not write
 "a person's journal" or "their journal": one journal, Joshua's. The word
 "blog" survives only in the `layout` helpers that read the layout from before
-the journal moved into the wiki. Examples of who can share Joshua ("a family, friends,
+the journal moved into the wiki. Do not use "sidecar": it named three
+different things here, and a reader had to guess which. `/data/people.yaml` is
+**the people file**, a `.meta.json` beside an attachment is **the metadata
+file**, and a container beside another container is **a container**. Examples of who can share Joshua ("a family, friends,
 a team") are fine in a sentence.
 
 ## Repo layout

@@ -830,13 +830,13 @@ async def test_list_files_adds_original_name(gateway, data_root):
     assert entry["original_name"] == "IMG_4471.HEIC"
 
 
-async def test_list_files_reports_the_attachment_sidecar(gateway, data_root):
-    """``list_files`` carries the sender's filename and hides the sidecar itself.
+async def test_list_files_reports_the_attachment_metadata(gateway, data_root):
+    """``list_files`` carries the sender's filename and hides the metadata file itself.
 
-    The sidecar is written here in the shape ``docs/data-layout.md`` documents,
+    The metadata file is written here in the shape ``docs/data-layout.md`` documents,
     and not through the channels pipeline: a gateway test must not import
     another container. ``channels`` pins the writer side in
-    ``test_sidecar_holds_original_name_mime_and_received_at``.
+    ``test_metadata_holds_original_name_mime_and_received_at``.
     """
     base = data_root / "people" / "alex" / "attachments" / "2026" / "08"
     stored = base / "2026-08-27-143210-IMG_0001.png"
@@ -863,13 +863,13 @@ async def test_list_files_reports_the_attachment_sidecar(gateway, data_root):
     assert entry["original_name"] == "IMG_0001.png"
 
 
-async def test_list_files_includes_attachment_without_sidecar(gateway, data_root):
-    # A missing or failed sidecar degrades to "no original_name", never to a
+async def test_list_files_includes_attachment_without_metadata(gateway, data_root):
+    # A missing or failed metadata file degrades to "no original_name", never to a
     # stored file that drops out of the listing. This locks the graceful path:
-    # the bytes are the product; the sidecar is optional metadata.
+    # the bytes are the product; the metadata file is optional metadata.
     base = data_root / "people" / "alex" / "attachments" / "2026" / "08"
     stored = base / "2026-08-27-143210-IMG_9999.jpg"
-    stored.write_bytes(PNG_1PX)  # no .meta.json sidecar next to it
+    stored.write_bytes(PNG_1PX)  # no .meta.json metadata file next to it
     app = gateway(files_yaml())
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}

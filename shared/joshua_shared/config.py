@@ -29,12 +29,12 @@ from joshua_shared.log import CREDENTIAL_PREFIXES
 DEFAULT_CONFIG_PATH = "/etc/joshua/joshua.yaml"
 CONFIG_ENV_VAR = "JOSHUA_CONFIG"
 
-# The runtime roster sidecar. ``add_user`` and the people CLI write it; the loader
-# merges it over ``people`` at load time (see ``_merge_sidecar``). It
+# The runtime roster people. ``add_user`` and the people CLI write it; the loader
+# merges it over ``people`` at load time (see ``_merge_people_file``). It
 # lives under the data volume, so the config file stays human-owned.
 DATA_DIR_ENV = "JOSHUA_DATA_DIR"
 DEFAULT_DATA_DIR = "/data"
-PEOPLE_SIDECAR_NAME = "people.yaml"
+PEOPLE_FILE_NAME = "people.yaml"
 
 _PERSON_ID_RE = PERSON_ID_RE
 
@@ -572,11 +572,11 @@ def parse(
     env: dict[str, str] | None = None,
     *,
     source: str = "<string>",
-    sidecar_people: list[dict[str, Any]] | None = None,
+    file_people: list[dict[str, Any]] | None = None,
 ) -> JoshuaConfig:
     """Expand, scan, and validate config ``text`` into a ``JoshuaConfig``.
 
-    ``sidecar_people`` is the runtime roster from ``read_people_sidecar``; the
+    ``file_people`` is the runtime roster from ``read_people_file``; the
     loader merges it over ``people`` before validation. Raises
     ``ConfigError`` on any failure, with a message that names the source and the
     YAML path.
@@ -595,25 +595,25 @@ def parse(
             "and groups at the top level."
         )
     _refuse_literal_credentials(data, text, source=source)
-    if sidecar_people:
-        _merge_sidecar(data, sidecar_people)
+    if file_people:
+        _merge_people_file(data, file_people)
     try:
         return JoshuaConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(_format_validation_error(exc, source=source)) from exc
 
 
-# --- people sidecar --------------------------------------------------------
+# --- people file --------------------------------------------------------
 
 
-def people_sidecar_path(env: Mapping[str, str] | None = None) -> Path:
-    """The path of the runtime roster sidecar, ``<data_dir>/people.yaml``."""
+def people_file_path(env: Mapping[str, str] | None = None) -> Path:
+    """The path of the runtime roster people, ``<data_dir>/people.yaml``."""
     source = os.environ if env is None else env
-    return Path(source.get(DATA_DIR_ENV, DEFAULT_DATA_DIR)) / PEOPLE_SIDECAR_NAME
+    return Path(source.get(DATA_DIR_ENV, DEFAULT_DATA_DIR)) / PEOPLE_FILE_NAME
 
 
-def read_people_sidecar(path: Path) -> list[dict[str, Any]]:
-    """Return the ``people`` list from the sidecar file.
+def read_people_file(path: Path) -> list[dict[str, Any]]:
+    """Return the ``people`` list from the people file.
 
     Returns [] when the file is absent or empty. Raises ``ConfigError`` when the
     file is present but not valid YAML.
@@ -634,17 +634,17 @@ def read_people_sidecar(path: Path) -> list[dict[str, Any]]:
     return people if isinstance(people, list) else []
 
 
-def _apply_sidecar_people(
-    base: list[dict[str, Any]], sidecar: list[dict[str, Any]]
+def _apply_people_file(
+    base: list[dict[str, Any]], people: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Merge ``sidecar`` people over ``base`` by id.
+    """Merge ``people file`` people over ``base`` by id.
 
-    A sidecar entry replaces the base entry with the same id, or appends a new
+    A people file entry replaces the base entry with the same id, or appends a new
     one. An entry with ``role: removed`` drops that id from the roster.
     """
     result: list[dict[str, Any] | None] = [dict(person) for person in base]
     index = {p["id"]: i for i, p in enumerate(result) if isinstance(p, dict) and "id" in p}
-    for entry in sidecar:
+    for entry in people:
         pid = entry.get("id")
         if pid is None:
             continue
@@ -657,18 +657,18 @@ def _apply_sidecar_people(
     return [person for person in result if person is not None]
 
 
-def _merge_sidecar(data: dict[str, Any], sidecar: list[dict[str, Any]]) -> None:
+def _merge_people_file(data: dict[str, Any], people: list[dict[str, Any]]) -> None:
     base = data.get("people")
-    data["people"] = _apply_sidecar_people(base if isinstance(base, list) else [], sidecar)
+    data["people"] = _apply_people_file(base if isinstance(base, list) else [], people)
 
 
 # --- load / cache ----------------------------------------------------------
 
 _cache: JoshuaConfig | None = None
 _cache_path: Path | None = None
-# The sidecar mtime the cache was built from. `add_user` writes the sidecar from
+# The people file mtime the cache was built from. `add_user` writes the people file from
 # core, and every other container has to notice without a restart.
-_cache_sidecar_mtime: float | None = None
+_cache_people_file_mtime: float | None = None
 
 
 def _resolve_path(path: Path | str | None) -> Path:
@@ -677,10 +677,10 @@ def _resolve_path(path: Path | str | None) -> Path:
     return Path(os.environ.get(CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH))
 
 
-def _sidecar_mtime() -> float | None:
-    """The sidecar's modification time, or None when it is not there."""
+def _people_file_mtime() -> float | None:
+    """The people file's modification time, or None when it is not there."""
     try:
-        return people_sidecar_path().stat().st_mtime
+        return people_file_path().stat().st_mtime
     except OSError:
         return None
 
@@ -690,8 +690,8 @@ def _read(path: Path) -> JoshuaConfig:
         text = path.read_text()
     except FileNotFoundError as exc:
         raise ConfigError(f"config file not found: {path}") from exc
-    sidecar = read_people_sidecar(people_sidecar_path())
-    return parse(text, source=str(path), sidecar_people=sidecar)
+    people = read_people_file(people_file_path())
+    return parse(text, source=str(path), file_people=people)
 
 
 def load(path: Path | str | None = None) -> JoshuaConfig:
@@ -700,30 +700,30 @@ def load(path: Path | str | None = None) -> JoshuaConfig:
     The path comes from ``path``, else the ``JOSHUA_CONFIG`` env var, else
     ``/etc/joshua/joshua.yaml``. Raises ``ConfigError`` on any failure.
     """
-    global _cache, _cache_path, _cache_sidecar_mtime
+    global _cache, _cache_path, _cache_people_file_mtime
     if _cache is None:
         resolved = _resolve_path(path)
         _cache = _read(resolved)
         _cache_path = resolved
-        _cache_sidecar_mtime = _sidecar_mtime()
+        _cache_people_file_mtime = _people_file_mtime()
         return _cache
-    # A person added or removed at run time writes the sidecar. Every container
+    # A person added or removed at run time writes the people. Every container
     # reads the roster from its own cache, so each one has to see that write. A
     # `stat` per call is cheap; the file is re-read only when it changed.
-    current = _sidecar_mtime()
-    if current != _cache_sidecar_mtime:
+    current = _people_file_mtime()
+    if current != _cache_people_file_mtime:
         _cache = _read(_cache_path or _resolve_path(path))
-        _cache_sidecar_mtime = current
+        _cache_people_file_mtime = current
     return _cache
 
 
 def reload(path: Path | str | None = None) -> JoshuaConfig:
     """Clear the cache and read the config again."""
-    global _cache, _cache_path, _cache_sidecar_mtime
+    global _cache, _cache_path, _cache_people_file_mtime
     resolved = _resolve_path(path if path is not None else _cache_path)
     _cache = _read(resolved)
     _cache_path = resolved
-    _cache_sidecar_mtime = _sidecar_mtime()
+    _cache_people_file_mtime = _people_file_mtime()
     return _cache
 
 

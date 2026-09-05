@@ -1,4 +1,4 @@
-"""Unit tests for the registration tool, the people helpers, and the sidecar."""
+"""Unit tests for the registration tool, the people helpers, and the people."""
 
 from __future__ import annotations
 
@@ -82,9 +82,9 @@ async def test_add_user_member_creates_person(tmp_path: Path) -> None:
     assert "Added Sam" in _text(result)
     assert repo.people["sam"].role == "member"
     assert repo.handles[("telegram", "998877")] == "sam"
-    # sidecar written and the data dirs created.
-    sidecar = config_module.read_people_sidecar(tmp_path / "people.yaml")
-    assert sidecar == [
+    # people file written and the data dirs created.
+    people = config_module.read_people_file(tmp_path / "people.yaml")
+    assert people == [
         {"id": "sam", "name": "Sam", "role": "member", "handles": {"telegram": "998877"}}
     ]
     assert (tmp_path / "people" / "sam" / "attachments").is_dir()
@@ -179,7 +179,7 @@ async def test_operator_add_person(tmp_path: Path) -> None:
 
     assert result["handles"] == {"telegram": "555"}
     assert repo.people["remy"].role == "member"
-    assert config_module.read_people_sidecar(tmp_path / "people.yaml")[0]["id"] == "remy"
+    assert config_module.read_people_file(tmp_path / "people.yaml")[0]["id"] == "remy"
 
 
 async def test_operator_add_person_bad_id(tmp_path: Path) -> None:
@@ -203,7 +203,7 @@ async def test_operator_remove_person(tmp_path: Path) -> None:
 
     assert repo.people["alex"].role == "removed"
     assert repo.handles == {}
-    tomb = config_module.read_people_sidecar(tmp_path / "people.yaml")
+    tomb = config_module.read_people_file(tmp_path / "people.yaml")
     assert tomb == [{"id": "alex", "role": "removed"}]
 
 
@@ -219,10 +219,10 @@ async def test_operator_roster_excludes_removed(tmp_path: Path) -> None:
     assert [r["id"] for r in rows] == ["alex"]
 
 
-# --- sidecar file ----------------------------------------------------------
+# --- people file file ----------------------------------------------------------
 
 
-def test_sidecar_upsert_merges_handles(tmp_path: Path) -> None:
+def test_people_file_upsert_merges_handles(tmp_path: Path) -> None:
     path = tmp_path / "people.yaml"
     people_file.upsert_person(
         path, {"id": "sam", "name": "Sam", "role": "member", "handles": {"telegram": "1"}}
@@ -232,20 +232,20 @@ def test_sidecar_upsert_merges_handles(tmp_path: Path) -> None:
         {"id": "sam", "name": "Sam", "role": "member", "handles": {"imessage": "+15551234567"}},
     )
 
-    entry = config_module.read_people_sidecar(path)[0]
+    entry = config_module.read_people_file(path)[0]
     assert entry["handles"] == {"telegram": "1", "imessage": "+15551234567"}
 
 
-def test_sidecar_mark_removed_clears_on_readd(tmp_path: Path) -> None:
+def test_people_file_mark_removed_clears_on_readd(tmp_path: Path) -> None:
     path = tmp_path / "people.yaml"
     people_file.upsert_person(
         path, {"id": "sam", "name": "Sam", "role": "member", "handles": {"telegram": "1"}}
     )
     people_file.mark_removed(path, "sam")
-    assert config_module.read_people_sidecar(path) == [{"id": "sam", "role": "removed"}]
+    assert config_module.read_people_file(path) == [{"id": "sam", "role": "removed"}]
 
     people_file.upsert_person(
         path, {"id": "sam", "name": "Sam", "role": "guest", "handles": {"telegram": "1"}}
     )
-    entry = config_module.read_people_sidecar(path)[0]
+    entry = config_module.read_people_file(path)[0]
     assert entry["role"] == "guest"

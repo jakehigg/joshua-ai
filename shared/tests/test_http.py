@@ -93,3 +93,77 @@ async def test_does_not_retry_4xx() -> None:
         resp = await client.post_json("/thing", json={})
     assert resp.status_code == 404
     assert attempts["n"] == 1
+
+
+# -- a stream is not capped by the request timeout --------------------------
+
+
+async def test_a_stream_reads_without_a_deadline() -> None:
+    """A streamed turn holds its body open for as long as the turn runs, so a
+    read deadline there caps how long the agent may think. One hard-coded 15
+    seconds used to do exactly that, and any turn slower than it was killed
+    part way through."""
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["timeout"] = request.extensions.get("timeout")
+        return httpx.Response(200, text="event: done\ndata: 1\n\n")
+
+    client = http.FleetClient("http://svc", "tok", transport=httpx.MockTransport(handler))
+    async with client:
+        async with client.stream("POST", "/sse", json={}) as response:
+            [line async for line in response.aiter_lines()]
+
+    assert isinstance(seen["timeout"], dict)
+    assert seen["timeout"]["read"] is None, "a stream must not carry a read deadline"
+
+
+async def test_a_stream_still_has_a_connect_deadline() -> None:
+    """An unreachable container must fail in seconds, not hang for ever."""
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["timeout"] = request.extensions.get("timeout")
+        return httpx.Response(200, text="")
+
+    client = http.FleetClient(
+        "http://svc", "tok", timeout=7.0, transport=httpx.MockTransport(handler)
+    )
+    async with client:
+        async with client.stream("GET", "/sse") as response:
+            await response.aread()
+
+    assert seen["timeout"]["connect"] == 7.0
+
+
+async def test_an_ordinary_request_keeps_its_read_deadline() -> None:
+    """The cap belongs on a normal call: a slow container must not hold a
+    caller open."""
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["timeout"] = request.extensions.get("timeout")
+        return httpx.Response(200, json={"ok": True})
+
+    client = http.FleetClient(
+        "http://svc", "tok", timeout=9.0, transport=httpx.MockTransport(handler)
+    )
+    async with client:
+        await client.get_json("/thing")
+
+    assert seen["timeout"]["read"] == 9.0
+
+
+async def test_a_caller_may_set_its_own_stream_deadline() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["timeout"] = request.extensions.get("timeout")
+        return httpx.Response(200, text="")
+
+    client = http.FleetClient("http://svc", "tok", transport=httpx.MockTransport(handler))
+    async with client:
+        async with client.stream("GET", "/sse", timeout=httpx.Timeout(3.0)) as response:
+            await response.aread()
+
+    assert seen["timeout"]["read"] == 3.0

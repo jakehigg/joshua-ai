@@ -65,8 +65,8 @@ def test_post_people_adds(client) -> None:
     assert resp.status_code == 201
     assert resp.json()["person"]["id"] == "remy"
     assert client.repo.people["remy"].role == "guest"
-    sidecar = config_module.read_people_sidecar(client.data_dir / "people.yaml")
-    assert sidecar[0]["id"] == "remy"
+    people = config_module.read_people_file(client.data_dir / "people.yaml")
+    assert people[0]["id"] == "remy"
 
 
 def test_post_people_conflict_is_400(client) -> None:
