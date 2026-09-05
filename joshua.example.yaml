@@ -46,6 +46,18 @@ channels:
     reconcile_interval_s: 60      # poll BlueBubbles for missed webhooks this often; 0 disables
     reconcile_lookback_s: 300     # how far back the poll watermark starts at boot
     send_chunk_chars: 4000        # split an outbound reply into chunks of this size
+  # An OpenAI-compatible route for any voice front end. Remove the block and
+  # there is no voice route. `people[].handles.voice` names each speaker.
+  # voice:
+  #   allowed_callers:
+  #     - voice                  # the fleet identity the front end sends
+  #   thread: person             # person: one conversation across devices; device: one for each
+  #   min_confidence: 0.6        # below this, the speaker name is not trusted
+  #   identity_hold_s: 120       # how long a device keeps its last trusted identity
+  #   unknown_sender: drop       # drop | reply, for a speaker Joshua cannot name
+  #   max_text_chars: 4000       # a spoken turn is short
+  #   model: claude-sonnet-5     # a spoken turn must answer fast
+  #   idle_ttl_s: 300            # a voice session closes sooner than a chat
   webhooks:
     allowed_callers:
       - laptop

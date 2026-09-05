@@ -39,7 +39,7 @@ subscription. You do not need Python, and you do not need a Telegram bot.
 ## Documentation
 
 - [docs/quickstart.md](docs/quickstart.md): from nothing to a conversation.
-- [docs/channels.md](docs/channels.md): the terminal, Telegram, iMessage, webhooks.
+- [docs/channels.md](docs/channels.md): the terminal, Telegram, iMessage, voice, webhooks.
 - [docs/config.md](docs/config.md): every setting in `joshua.yaml`.
 - [docs/memory.md](docs/memory.md): notes, journal, profiles, retrieval.
 - [docs/operations.md](docs/operations.md): health, logs, updates, backup, the viewer.

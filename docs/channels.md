@@ -4,9 +4,10 @@ A channel is a way to talk to Joshua. `channels` is the container that owns
 every channel. It receives a message, checks the sender, stores any file, and
 posts one turn to `core`. It also sends every reply.
 
-Four channels exist: the terminal, Telegram, iMessage, and webhooks. The
+Five channels exist: the terminal, Telegram, iMessage, voice, and webhooks. The
 terminal is always on. Telegram and iMessage are on when their credential is
-set. A channel with an empty credential is off, and the stack starts without it.
+set. Voice is on when `channels.voice` is in the config. A channel with an empty
+credential is off, and the stack starts without it.
 
 ## Who gets a reply
 
@@ -238,6 +239,113 @@ groups:
 `/readyz` reports whether BlueBubbles answers a ping. A Mac that sleeps makes
 that `false` for a while. Joshua does not stop for it, and the poll picks up
 the messages when the Mac wakes.
+
+## Voice
+
+Joshua answers a spoken turn on an OpenAI-compatible route, so the voice front
+end is yours to choose. Anything that can point an OpenAI client at a base URL
+works: a Pipecat bot, a phone app, a smart speaker, `curl`. Joshua does the
+listening and the speaking on no device of its own; it is the model behind
+whatever does.
+
+```yaml
+channels:
+  voice:
+    allowed_callers:             # the fleet identities that may send a turn
+      - voice
+    thread: person               # person | device
+    min_confidence: 0.6          # below this, do not trust the speaker name
+    identity_hold_s: 120         # how long a device keeps its last identity
+    unknown_sender: drop         # drop | reply
+    max_text_chars: 4000
+    model: claude-sonnet-5       # a spoken turn must answer fast
+    idle_ttl_s: 300              # a voice session closes sooner than a chat
+```
+
+Give each person a voice handle. The value is whatever name your front end
+sends for that person, such as the name of a speaker profile:
+
+```yaml
+people:
+  - id: alex
+    name: Alex
+    handles:
+      voice: alex
+```
+
+Each caller in `allowed_callers` needs its own `JOSHUA_TOKEN_<NAME>` in the
+channels environment: the default `voice` caller reads `JOSHUA_TOKEN_VOICE`.
+Then point the front end at `<channels>/v1/voice`, with that token as the API
+key. `docs/contracts.md` has every field of the request and the reply.
+
+```
+curl -N http://localhost:8080/v1/voice/chat/completions \
+  -H "Authorization: Bearer $JOSHUA_TOKEN_VOICE" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "joshua", "stream": true, "user": "voice:office",
+       "speaker": "person:alex", "speaker_confidence": 0.9,
+       "messages": [{"role": "user", "content": "what is the weather"}]}'
+```
+
+### Who is speaking
+
+One microphone in a room hears everybody, so the front end says who it thinks
+is speaking and how sure it is. Joshua matches the name against
+`people[].handles.voice`.
+
+- A name with a score at or above `min_confidence` is that person. Joshua also
+  remembers them as that device's identity for `identity_hold_s` seconds.
+- A name with a lower score is not trusted. The device then keeps the identity
+  it holds, so a short "yes" in the middle of a conversation stays with the
+  person who was already talking.
+- With no name and nothing held, `unknown_sender` applies: `drop` speaks
+  nothing, `reply` says one sentence and ends the call. Nothing reaches the
+  agent, and the refusal is in `GET /admin/guard/recent` with the name the front
+  end sent, so you can add that person to `people`.
+
+Joshua never adds a person from a voice turn. A name that the config does not
+know stays a stranger.
+
+### One conversation, or one for each room
+
+With `thread: person` a member keeps one conversation wherever they speak: ask a
+question in the office, walk to the kitchen, and carry on. The room still
+reaches the agent, as framing on each turn, so "set a timer" sets it where you
+are standing.
+
+With `thread: device` each device holds its own conversation.
+
+A guest always stays on their device, whichever setting you use: a guest device
+is a place, not a person.
+
+### How a spoken reply differs
+
+A spoken turn takes the session profile it would take anyway, and adds two more
+kernel prompt files to it. Nothing is taken away: a guest on a call still gets
+the guest prompt, and a group still gets the group prompt.
+
+The two files ship in the core image, so a deployment that turns the voice
+channel on writes no prompt of its own:
+
+- `voice.md`: answer in one or two sentences, write speech and not a page, and
+  use the two call markers.
+- `voice-speech.md`: punctuate for the ear, and write a number, a time, a
+  temperature, a symbol or an abbreviation the way a person says it, because the
+  voice reads what you wrote.
+
+They load after the ordinary prompt, so where the two disagree about formatting,
+the spoken rule is the one that stands. On any other channel neither file is
+loaded.
+
+A voice session also runs on `channels.voice.model`, and it closes after
+`idle_ttl_s` instead of `core.session_idle_seconds`.
+
+### What voice does not do yet
+
+Joshua cannot start a call. A reminder scheduled inside a voice conversation has
+no device to reach, so it is not delivered; `POST /v1/deliver` answers
+`404 unknown_channel` for a `voice:` target. Give the agent an MCP server that
+speaks on your devices, and it can announce through that instead.
 
 ## Webhooks
 

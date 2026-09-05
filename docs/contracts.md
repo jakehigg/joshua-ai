@@ -73,7 +73,7 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | Route | Callers | Request | Reply |
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
-| `GET /readyz` | open | | `{"ok": bool, "checks": {<channel>: {"ok": bool, …}}}`. Always `200`; `ok` reports the pollers, not readiness. |
+| `GET /readyz` | open | | `{"ok": bool, "checks": {<channel>: {"ok": bool, …}}}`. Always `200`; `ok` reports the pollers, not readiness. The `voice` entry reports `thread` and a count of held identities. |
 | `POST /v1/deliver` | `core` | DeliverRequest | `200 {"delivered": true, "parts": n}`, `400 bad_request` or `invalid_attachment`, `404 unknown_channel`, `502 send_failed` |
 | `GET /v1/channels/resolve?ref=` | `core` | | `200` ResolveResponse, `404 unknown_channel` |
 | `GET /v1/channels/refusals?limit=` | `core` | | `200 {"refusals": [{"channel_type", "address", "chat_id", "reason", "at"}]}`. The handle and the channel, never a message body. |
@@ -81,6 +81,8 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `POST /webhook/imessage/{secret}` | none, the path secret | BlueBubbles payload | always `200`. A wrong secret gets `404`. |
 | `POST /v1/cli/turns/stream` | `channels.webhooks.allowed_callers` | `{"person": id, "text": str}` | SSE, or `400`, `403 {"reason": <guard reason>}`, `503 core_unavailable` |
 | `GET /v1/cli/outbox?person=&ack=true` | `channels.webhooks.allowed_callers` | | `{"messages": [{"ts", "text", "attachments"}]}`, `403 unknown_person` |
+| `POST /v1/voice/chat/completions` | `channels.voice.allowed_callers` | OpenAI chat completions, plus `speaker` and `speaker_confidence` | SSE of `chat.completion.chunk`, or one `chat.completion` for `stream: false`. `400 bad_request`, `404 not_found` with no voice section, `503 core_unavailable` |
+| `GET /v1/models` | `channels.voice.allowed_callers` | | `{"object": "list", "data": [{"id": "joshua", …}]}`, `404 not_found` with no voice section |
 | `GET /admin/guard/stats` | `ADMIN_CALLERS` | | counters: `unknown_sender`, `rate_limited`, `truncated`, `refused_total` |
 | `GET /admin/guard/recent` | `ADMIN_CALLERS` | | `{"recent": [{"channel_type", "address", "chat_id", "reason", "at"}]}` |
 | `GET /admin/chats/unconfigured` | `ADMIN_CALLERS` | | `{"groups": [{"channel_type", "chat_id", "chat_title", "at"}]}` |
@@ -125,6 +127,46 @@ same `message_id` inside 15 minutes is a duplicate. Core refuses new turns with
 | `delta` | `{"text": "<chunk>"}` |
 | `done` | `{"turn_id", "text", "tools"}`, the full text and the tools used |
 | `error` | `{"message": "<what failed>"}` |
+
+### The voice route
+
+`POST /v1/voice/chat/completions` speaks the OpenAI chat-completions protocol,
+so a voice front end reaches Joshua with a base URL and a bearer token. Point an
+OpenAI client at `<channels>/v1/voice` and it works.
+
+The request is an ordinary OpenAI body. Joshua reads four fields and ignores the
+rest (`model`, `temperature`, `max_tokens`, and so on):
+
+| Field | Meaning |
+|---|---|
+| `messages` | The last `user` message is the spoken turn. Joshua holds its own history, so the earlier messages are not read. |
+| `user` | The device: `voice:<device>` or the bare `<device>`. It becomes the room in the turn's framing. Default `default`. |
+| `speaker` | Who the front end thinks is speaking: `person:<name>` or `<name>`. Joshua matches the name against `people[].handles.voice`. |
+| `speaker_confidence` | The score for that name, 0 to 1. Below `channels.voice.min_confidence` the name is not trusted. |
+| `stream` | `true` for SSE chunks, `false` for one completion object. |
+
+The reply is OpenAI-shaped. In stream mode the first chunk carries
+`delta.role`, each following chunk carries `delta.content`, the last carries
+`finish_reason: "stop"`, and the body ends with `data: [DONE]`. Core's `delta`
+frames become content chunks. Core's `done` frame ends the reply, and it sends
+that frame's text only when no delta arrived. Core's `error` frame becomes one
+short spoken sentence. The cause goes to the log and never to the speaker.
+
+Two markers ride inside the reply **text**, and the front end removes them
+before it speaks:
+
+| Marker | The front end does |
+|---|---|
+| `[DONE]` | End the call. The conversation is over. |
+| `[IGNORE]` | Speak nothing, stay open. The words were not addressed to Joshua. |
+
+They are not the SSE terminator `data: [DONE]`, which ends the HTTP body of
+every streamed reply.
+
+A speaker Joshua cannot identify never reaches core. `channels.voice.unknown_sender`
+picks what they hear: `drop` answers `[IGNORE]`, `reply` answers one sentence
+that ends the call. Either way the refusal is in `GET /admin/guard/recent` with
+the name the front end sent, so an operator can add that person.
 
 ## gateway
 

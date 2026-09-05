@@ -153,6 +153,45 @@ class IMessageChannel(_Model):
         return _check_unknown_sender(value)
 
 
+class VoiceChannel(_Model):
+    """The voice channel: one OpenAI-compatible route that any voice front end can use.
+
+    ``allowed_callers`` are the fleet identities that may speak for a person on
+    this channel. ``thread`` picks what a conversation follows: ``person`` keeps
+    one conversation for a person as they move between devices, ``device`` keeps
+    one conversation per device. ``min_confidence`` is the speaker score below
+    which the front end's identification is not trusted; the device then keeps
+    its last identity for ``identity_hold_s`` seconds. ``unknown_sender`` says
+    what an unidentified speaker hears.
+
+    ``model``, ``max_turns`` and ``idle_ttl_s`` are the ceilings for a voice
+    session. A spoken turn must answer fast, so the defaults are a quicker model
+    and a shorter session life than the text channels use.
+    """
+
+    allowed_callers: list[str] = ["voice"]
+    thread: str = "person"
+    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    identity_hold_s: int = Field(default=120, ge=0)
+    unknown_sender: str = "drop"
+    max_text_chars: int = Field(default=4000, gt=0)
+    model: str = "claude-sonnet-5"
+    max_turns: int | None = Field(default=None, gt=0)
+    idle_ttl_s: int = Field(default=300, ge=0)
+
+    @field_validator("thread")
+    @classmethod
+    def _check_thread(cls, value: str) -> str:
+        if value not in ("person", "device"):
+            raise ValueError("thread must be 'person' or 'device'")
+        return value
+
+    @field_validator("unknown_sender")
+    @classmethod
+    def _check_unknown_sender(cls, value: str) -> str:
+        return _check_unknown_sender(value)
+
+
 class Webhooks(_Model):
     allowed_callers: list[str] = ["laptop", "ci"]
 
@@ -168,6 +207,7 @@ class Limits(_Model):
 class Channels(_Model):
     telegram: TelegramChannel | None = None
     imessage: IMessageChannel | None = None
+    voice: VoiceChannel | None = None
     webhooks: Webhooks = Webhooks()
     destinations: dict[str, str] = {}
     limits: Limits = Limits()

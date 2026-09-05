@@ -4,6 +4,47 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- **A voice channel.** Joshua answers a spoken turn on
+  `POST /v1/voice/chat/completions`, which speaks the OpenAI chat-completions
+  protocol. Any voice front end that can point an OpenAI client at a base URL
+  works: a Pipecat bot, a phone app, a smart speaker, `curl`. Turn it on with a
+  `channels.voice` block and a `voice` handle for each person. With no block
+  there is no route.
+
+  The front end says who is speaking and how sure it is. Joshua matches the name
+  against `people[].handles.voice`, and it never adds a person from a voice
+  turn. A name with a low score falls back to the identity the device already
+  holds, so a short "yes" stays with the person who was already talking. A
+  speaker Joshua cannot name reaches no agent and lands in
+  `GET /admin/guard/recent`, so you can enroll them.
+
+  With `thread: person` a member keeps one conversation as they move between
+  devices, and the room reaches the agent as framing on each turn. A guest stays
+  on their device.
+
+  A spoken turn takes the session profile it would take anyway, and adds two
+  more prompt files: `voice.md` (short replies, write speech and not a page,
+  the `[DONE]` and `[IGNORE]` call markers) and
+  `voice-speech.md` (punctuate for the ear, and write a number, a time or a
+  symbol the way a person says it). Both ship in the core image, so none of it
+  is yours to write. Nothing is taken away either: a guest on a call keeps the
+  guest prompt. A voice session also runs on `channels.voice.model` and closes
+  after `channels.voice.idle_ttl_s`. `docs/channels.md` and `docs/contracts.md`
+  have the detail.
+
+  Joshua cannot start a call yet. A reminder scheduled inside a voice
+  conversation has no device to reach.
+
+### Changed
+
+- A session closes on the deadline its profile names, and on
+  `core.session_idle_seconds` when the profile names none. Only voice names one
+  today, so nothing else changes.
+
 ## 0.0.5 - 2026-09-05
 
 ### Upgrading from 0.0.4

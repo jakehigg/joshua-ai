@@ -11,6 +11,7 @@ import os
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -205,7 +206,7 @@ def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> Co
         repo=repo,
         settings=settings,
         composer=composer,
-        derive_profile=derive_profile,
+        derive_profile=partial(derive_profile, voice=settings.channels.voice),
         gateway_url=os.environ.get(GATEWAY_URL_ENV, ""),
         gateway_token=os.environ.get(CORE_TOKEN_ENV, ""),
         agent_backend=agent_backend,

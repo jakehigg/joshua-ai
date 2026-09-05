@@ -10,7 +10,8 @@ share it. Three containers ship from this one repository and one
 `docker-compose.yml`:
 
 - `channels` is the inbound trust boundary: Telegram, iMessage, the terminal,
-  webhooks. It checks the sender, stores files, and posts one turn to `core`.
+  voice, webhooks. It checks the sender, stores files, and posts one turn to
+  `core`.
 - `core` is the agent, the memory, and the scheduler. It owns the database and
   the data volume.
 - `gateway` is the outbound trust boundary. It holds every upstream credential
@@ -106,6 +107,9 @@ Route allowlists, by default:
 - channels `POST /v1/deliver`, `GET /v1/channels/resolve`: `core`.
 - channels `POST /v1/events`, `POST /v1/cli/*`, `GET /v1/cli/*`:
   `channels.webhooks.allowed_callers` (default `laptop`, `ci`).
+- channels `POST /v1/voice/chat/completions`, `GET /v1/models`:
+  `channels.voice.allowed_callers` (default `voice`). Both answer 404 with no
+  `channels.voice` section.
 - channels `POST /webhook/imessage/{secret}`: no bearer. The path secret is the
   credential. A wrong secret gets 404, never 401. The handler always answers
   200 fast, because BlueBubbles never retries.

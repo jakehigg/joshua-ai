@@ -186,6 +186,18 @@ class Guard:
         # An attachment over the cap is skipped by the pipeline; the message stays.
         return Verdict(allowed=True, person_id=person_id, group_id=group_id, reason=reason)
 
+    def refuse(
+        self, *, channel_type: str, address: str, chat_id: str, reason: str = REASON_UNKNOWN
+    ) -> Verdict:
+        """Record a refusal that the caller decided, and return the verdict.
+
+        A channel that resolves the sender itself calls this instead of
+        :meth:`check`. The voice channel is the case: it must not hand a name it
+        does not trust back to the roster lookup, so it decides, and the refusal
+        still reaches the counters, the log, and ``/admin/guard/recent``.
+        """
+        return self._refuse(channel_type, address, chat_id, reason)
+
     def _group_for(
         self, cfg: JoshuaConfig, channel_type: str, chat_id: str, chat_kind: str, sender_handle: str
     ) -> str | None:

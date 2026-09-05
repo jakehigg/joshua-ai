@@ -65,6 +65,8 @@ class _Managed:
     last_used: float
     deps: Any = None  # live ToolDeps for the SDK backend, else None
     profile: str = ""  # the derived profile name for this session
+    # The profile's own idle deadline. None takes ``core.session_idle_seconds``.
+    idle_ttl_s: int | None = None
     had_success: bool = False
     built_at: float = 0.0
     build_ms: int = 0
@@ -223,18 +225,18 @@ class ConversationManager:
 
     async def _build_session(
         self, channel: Channel, conversation: Conversation, resume: str | None
-    ) -> tuple[Any, Any, str, list[Path], float]:
+    ) -> tuple[Any, Any, Any, list[Path], float]:
         """Build a session for a conversation. Returns
         ``(session, deps, profile, memory_paths, memory_mtime)`` — deps is the live
         ToolDeps for the SDK backend (so the manager rebinds its channel and speaker
-        per turn), or None for the stub; profile is the derived profile name; the
+        per turn), or None for the stub; profile is the derived profile, which
+        carries the session's name and its ceilings; the
         memory fields let ``_get_or_create`` rebuild after a nightly profile
         rewrite."""
         person = (
             await self._repo.get_person(conversation.person_id) if conversation.person_id else None
         )
         profile = self._derive_profile(person, channel)
-        profile_name = getattr(profile, "name", "") or ""
         memory = self._memory_block(person, channel)
         system_prompt = self._composer.compose(profile, person, channel, memory)
         mem_paths = memory_prompt.source_paths(person, channel, self._data_dir)
@@ -257,7 +259,7 @@ class ConversationManager:
                 data_dir=self._data_dir,
                 wiki_git=wikigit.is_enabled(self._settings),
             )
-            return session, None, profile_name, mem_paths, mem_mtime
+            return session, None, profile, mem_paths, mem_mtime
 
         from joshua_core.engine.agent import AgentSession, build_options
 
@@ -286,7 +288,7 @@ class ConversationManager:
             max_turns=getattr(profile, "max_turns", 0) or self._settings.core.max_turns,
             resume=resume,
         )
-        return AgentSession(options), deps, profile_name, mem_paths, mem_mtime
+        return AgentSession(options), deps, profile, mem_paths, mem_mtime
 
     def _conversation_role(self, channel: Channel, conversation: Conversation) -> str:
         """The role this conversation carries, for the gateway file policy.
@@ -325,7 +327,8 @@ class ConversationManager:
                 lock=asyncio.Lock(),
                 last_used=monotonic(),
                 deps=deps,
-                profile=profile,
+                profile=getattr(profile, "name", "") or "",
+                idle_ttl_s=getattr(profile, "idle_ttl_s", None),
                 built_at=monotonic(),
                 memory_paths=mem_paths,
                 memory_mtime=mem_mtime,
@@ -349,7 +352,8 @@ class ConversationManager:
         )
         mc.session = session
         mc.deps = deps
-        mc.profile = profile
+        mc.profile = getattr(profile, "name", "") or ""
+        mc.idle_ttl_s = getattr(profile, "idle_ttl_s", None)
         mc.memory_paths = mem_paths
         mc.memory_mtime = mem_mtime
         mc.built_at = monotonic()
@@ -598,18 +602,24 @@ class ConversationManager:
             await mc.session.interrupt()
 
     async def _reap_idle(self) -> int:
-        """Close every unlocked session idle past ``core.session_idle_seconds``.
-        A TTL of 0 or less disables the reaper — the pool cap is the only guard."""
-        ttl = self._settings.core.session_idle_seconds
-        if ttl <= 0:
-            return 0
+        """Close every unlocked session that is idle past its own deadline.
+
+        A session takes the deadline from its profile, and ``core.session_idle_seconds``
+        when the profile names none. A voice session names a short one: a person
+        who stops talking has left the room, and a warm session there holds a
+        conversation open that nobody is in. A TTL of 0 or less turns the reaper
+        off for that session — the pool cap is then the only guard.
+        """
+        default_ttl = self._settings.core.session_idle_seconds
         now = monotonic()
         async with self._pool_lock:
-            stale = [
-                mc
-                for mc in self._pool.values()
-                if not mc.lock.locked() and (now - mc.last_used) > ttl
-            ]
+            stale = []
+            for mc in self._pool.values():
+                ttl = default_ttl if mc.idle_ttl_s is None else mc.idle_ttl_s
+                if ttl <= 0 or mc.lock.locked():
+                    continue
+                if (now - mc.last_used) > ttl:
+                    stale.append(mc)
             for mc in stale:
                 await mc.session.close()
                 self._pool.pop(mc.conversation.id, None)

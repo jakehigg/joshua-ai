@@ -141,6 +141,27 @@ Each channel sets its own reply policy with `unknown_sender`:
 Both policies log the refusal at INFO with the `channel_type`, the `address`, and
 the `chat_id`. The `address` is the handle an operator enrolls.
 
+### The voice channel
+
+`channels.voice` turns on the OpenAI-compatible voice route. With no section
+there is no route, and the two paths answer `404`. `channels.md` shows how to
+use it; this is what the block holds.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `allowed_callers` | `voice` | The fleet identities that may send a spoken turn. Each one needs its own `JOSHUA_TOKEN_<NAME>`. |
+| `thread` | `person` | `person` keeps one conversation for a member across devices. `device` keeps one for each device. A guest always stays on their device. |
+| `min_confidence` | `0.6` | The speaker score at or above which the front end's name is trusted. |
+| `identity_hold_s` | `120` | How long a device keeps its last trusted identity, for turns that score too low. `0` holds nothing. |
+| `unknown_sender` | `drop` | What an unidentified speaker hears. `drop` speaks nothing; `reply` says one sentence and ends the call. |
+| `max_text_chars` | `4000` | A longer turn is truncated. A spoken turn is short. |
+| `model` | `claude-sonnet-5` | The model for a voice session. A spoken turn must answer fast. |
+| `max_turns` | unset | The agent turn ceiling for a voice session. Unset takes `core.max_turns`. |
+| `idle_ttl_s` | `300` | How long a voice session stays warm with nothing said. `0` leaves the session to the pool cap. |
+
+The voice channel needs no credential of its own. The front end presents a fleet
+token, so the section alone turns the route on.
+
 ### Group attribution
 
 A group in `groups` with no `members` treats anyone in that chat as the
@@ -588,7 +609,7 @@ The core image ships its system prompt as Markdown files in two directories unde
 The composer loads every `.md` file in `user/`. It sorts the files by name and
 appends them to each session's prompt, after the kernel files and before the
 identity block. The snippets apply to every profile (dm, group, guest, event,
-scheduled). You do not edit any Python code or `Profile.prompt_files`.
+scheduled, voice). You do not edit any Python code or `Profile.prompt_files`.
 
 Use `user/` for house rules, guidance for a custom MCP server you added to the
 `mcp:` section, or any other instruction.

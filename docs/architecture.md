@@ -31,7 +31,7 @@ Every design choice serves these goals, in this order:
 ## channels
 
 `channels` talks to the messaging platforms. It receives a message from
-Telegram, iMessage, the terminal, or a webhook. It checks the sender against the
+Telegram, iMessage, the terminal, voice, or a webhook. It checks the sender against the
 `people` and `groups` lists, applies the rate limit, and stores any attachment.
 Then it posts one normalized turn to `core`. A reply comes back the same way:
 `core` calls `channels`, and `channels` sends the text to the platform.
