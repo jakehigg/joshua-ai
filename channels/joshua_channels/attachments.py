@@ -64,7 +64,7 @@ INBOX_MAX_AGE_S = 3600
 # How often the retention sweep runs.
 RETENTION_INTERVAL_S = 86400
 
-# The sidecar suffix a stored attachment carries: ``<stored-name>.meta.json``.
+# The metadata file suffix a stored attachment carries: ``<stored-name>.meta.json``.
 # The files MCP reads it for the sender's filename, so the two sides must agree.
 META_SUFFIX = ".meta.json"
 
@@ -370,44 +370,44 @@ class AttachmentPipeline:
         name = _dedupe_name(dest.parent, name, ext)
         rel, dest = self._destination(person_id, group_id, name)
         dest.write_bytes(data)
-        self._write_sidecar(dest, original_name=src.name, mime=mime)
+        self._write_metadata(dest, original_name=src.name, mime=mime)
         if self._keep_originals and data is not original:
             self._store_original(dest, src.name, original)
         logger.info({"message": "attachment stored", "path": rel, "mime": mime})
         return Attachment(path=rel, mime=mime, name=name, original_name=src.name)
 
-    def _write_sidecar(self, dest: Path, *, original_name: str, mime: str) -> None:
+    def _write_metadata(self, dest: Path, *, original_name: str, mime: str) -> None:
         """Write ``<dest>.meta.json`` next to a stored attachment.
 
-        The sidecar holds the sender's filename, the sniffed MIME of the stored
+        The metadata file holds the sender's filename, the sniffed MIME of the stored
         bytes, and the arrival time in UTC. Only ``channels`` sees the
         platform-supplied name, so only ``channels`` can record it; the files
-        MCP reads the sidecar to report ``original_name``.
+        MCP reads the metadata file to report ``original_name``.
 
         A failed write does not fail the attachment. The stored bytes are the
-        product. The sidecar is metadata, so a failure logs a warning and the
+        product. The metadata file is metadata, so a failure logs a warning and the
         ingest still returns the ``Attachment``. Both the success and the
         failure log one line at a visible level, so production logs always show
-        whether the sidecar landed next to the stored bytes.
+        whether the metadata file landed next to the stored bytes.
         """
-        sidecar = dest.parent / f"{dest.name}{META_SUFFIX}"
+        metadata = dest.parent / f"{dest.name}{META_SUFFIX}"
         meta = {
             "original_name": original_name,
             "mime": mime,
             "received_at": self._now().astimezone(UTC).isoformat(),
         }
         try:
-            sidecar.write_text(json.dumps(meta), encoding="utf-8")
-        except Exception as exc:  # noqa: BLE001 - the sidecar is metadata, never fatal
+            metadata.write_text(json.dumps(meta), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001 - the metadata file is metadata, never fatal
             logger.warning(
                 {
-                    "message": "attachment sidecar write failed",
-                    "path": str(sidecar),
+                    "message": "attachment metadata file write failed",
+                    "path": str(metadata),
                     "error": str(exc),
                 }
             )
             return
-        logger.info({"message": "attachment sidecar written", "path": str(sidecar)})
+        logger.info({"message": "attachment metadata file written", "path": str(metadata)})
 
     def _destination(
         self, person_id: str | None, group_id: str | None, name: str
@@ -465,7 +465,7 @@ class AttachmentPipeline:
     def sweep_retention(self) -> int:
         """Delete stored attachments older than the retention window.
 
-        A retention of ``0`` keeps files forever. A sidecar shares its file's
+        A retention of ``0`` keeps files forever. A metadata file shares its file's
         modification time, so the sweep removes the pair, but the count reports
         attachments only. Returns the count deleted.
         """

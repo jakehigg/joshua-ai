@@ -80,7 +80,7 @@ def client(monkeypatch, tmp_path) -> TestClient:
     monkeypatch.setenv("VIEWER_PW_MIA", MIA_PW)
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
-    monkeypatch.setattr(config, "_cache_sidecar_mtime", None)
+    monkeypatch.setattr(config, "_cache_people_file_mtime", None)
     return TestClient(viewer.build_app())
 
 
@@ -121,7 +121,7 @@ def test_bcrypt_hash_reference(monkeypatch, tmp_path):
     monkeypatch.setenv("VIEWER_PW_MIA", MIA_PW)
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
-    monkeypatch.setattr(config, "_cache_sidecar_mtime", None)
+    monkeypatch.setattr(config, "_cache_people_file_mtime", None)
     client = TestClient(viewer.build_app())
     assert client.get("/", auth=("alex", "hunter2")).status_code == 200
     assert client.get("/", auth=("alex", "nope")).status_code == 401
@@ -390,7 +390,7 @@ def env_client(monkeypatch, tmp_path):
             monkeypatch.setenv(name, value)
         monkeypatch.setattr(config, "_cache", None)
         monkeypatch.setattr(config, "_cache_path", None)
-        monkeypatch.setattr(config, "_cache_sidecar_mtime", None)
+        monkeypatch.setattr(config, "_cache_people_file_mtime", None)
         return TestClient(viewer.build_app())
 
     return build

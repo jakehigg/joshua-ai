@@ -88,7 +88,7 @@ def slugify_id(name: str) -> str:
     return slug[:32].rstrip("-")
 
 
-def sidecar_entry(person_id: str, name: str, role: str, channel_type: str, handle: str) -> dict:
+def people_entry(person_id: str, name: str, role: str, channel_type: str, handle: str) -> dict:
     return {"id": person_id, "name": name, "role": role, "handles": {channel_type: handle}}
 
 
@@ -130,7 +130,7 @@ async def add_person(
     await repo.upsert_person(person_id, name, role)
     await repo.upsert_person_handle(ctype, norm, person_id)
     people_file.upsert_person(
-        Path(data_dir) / "people.yaml", sidecar_entry(person_id, name, role, ctype, norm)
+        Path(data_dir) / "people.yaml", people_entry(person_id, name, role, ctype, norm)
     )
     layout.bootstrap_person(person_id, name, root=data_dir)
     return {"id": person_id, "name": name, "role": role, "handles": {ctype: norm}}

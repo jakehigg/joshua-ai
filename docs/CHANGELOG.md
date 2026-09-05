@@ -26,7 +26,7 @@ with the images and the packaged chart, are at
   that changed at each start and at the nightly run, so a wiki frontend such
   as Otter Wiki never shows a page as not under version control. Set
   `wiki.git: false` to leave git to a frontend or a sync tool. The custom
-  wiki enhancement example is now a push-to-remote sidecar; see
+  wiki enhancement example is now a container that pushes to a remote; see
   `docs/enhancements.md`.
 - `GET /admin/journal/status` reports today's journal: the entries Joshua
   wrote during the day, whether today has a nightly page, and the summary of
@@ -56,7 +56,7 @@ with the images and the packaged chart, are at
   `docs/memory.md`.
 - `joshua.yaml` starts the roster; Joshua keeps it. The file is where you name
   the first person, so somebody can talk to Joshua at all. Everyone after that
-  is enrolled through Joshua, and the sidecar at `/data/people.yaml` holds
+  is enrolled through Joshua, and the people file at `/data/people.yaml` holds
   them. An edit to an enrolled person in `joshua.yaml` therefore changes
   nothing, which `docs/config.md` now says plainly, along with how to hand a
   person back to the file.
@@ -332,11 +332,12 @@ The first release.
   It is now visible instead of silent.
 - A lost embedding model writes one log line for each index pass, and not one
   for each document.
-- Channels writes a `<file>.meta.json` sidecar next to a stored attachment. The
-  sidecar holds the sender's filename, so the files tool reports the original
-  name. Channels logs one line for each sidecar write, so the logs show whether
-  the sidecar landed. A stored attachment with no sidecar still appears in the
-  files list, without the original name. The retention sweep removes the sidecar
+- Channels writes a `<file>.meta.json` metadata file next to a stored
+  attachment. It holds the sender's filename, so the files tool reports the
+  original name. Channels logs one line for each write, so the logs show
+  whether the file landed. A stored attachment with no metadata file still
+  appears in the files list, without the original name. The retention sweep
+  removes the metadata file
   with its file and counts attachments only.
 
 - `/readyz` clears the Telegram channel after a transient poll error. A

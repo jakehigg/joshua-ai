@@ -67,7 +67,7 @@ VIEWER_PW_PREFIX = "VIEWER_PW_"
 HOME_ATTACHMENTS_MAX = 30
 SEARCH_MAX_RESULTS = 50
 
-# The sidecar a channels-stored attachment carries: ``<file>.meta.json``. Never
+# The metadata file a channels-stored attachment carries: ``<file>.meta.json``. Never
 # a piece of content on its own, so a listing hides it.
 _META_SUFFIX = ".meta.json"
 
@@ -385,7 +385,7 @@ def _list_markdown(root: Root) -> list[str]:
 
 def _list_attachments(root: Root) -> list[str]:
     """Every stored attachment under a person's own ``attachments/``, newest
-    first, skipping a dot entry and the ``.meta.json`` sidecar next to a file."""
+    first, skipping a dot entry and the ``.meta.json`` metadata file next to a file."""
     if not root.base.is_dir():
         return []
     names = [

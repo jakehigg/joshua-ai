@@ -1,7 +1,7 @@
 """``python -m joshua_core people {add,list,remove}`` — operator roster management.
 
 Runs with ``DATABASE_URL`` set. Writes the DB roster cache and the
-``/data/people.yaml`` sidecar the loader merges over ``joshua.yaml``. ``remove``
+``/data/people.yaml`` people file the loader merges over ``joshua.yaml``. ``remove``
 marks a person removed and drops their handles; it keeps the data dirs and the
 transcripts, so removal of data stays a human action.
 """

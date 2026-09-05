@@ -73,7 +73,7 @@ PDF_MAX_PAGES = 20
 # ``safe_filename``). Everything else becomes ``_``.
 _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 
-# The sidecar a channels-stored attachment carries: ``<file>.meta.json``.
+# The metadata file a channels-stored attachment carries: ``<file>.meta.json``.
 _META_SUFFIX = ".meta.json"
 
 # Attachment suffixes returned as an ``ImageContent`` block; channels converts HEIC
@@ -618,12 +618,12 @@ def _sanitize_stem(raw: str) -> str:
 
 
 def _original_name(item: Path) -> str | None:
-    """Return the ``original_name`` from a ``<file>.meta.json`` sidecar, or None."""
-    sidecar = item.parent / f"{item.name}{_META_SUFFIX}"
-    if not sidecar.is_file():
+    """Return the ``original_name`` from a ``<file>.meta.json`` metadata, or None."""
+    metadata = item.parent / f"{item.name}{_META_SUFFIX}"
+    if not metadata.is_file():
         return None
     try:
-        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        meta = json.loads(metadata.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     name = meta.get("original_name") if isinstance(meta, dict) else None

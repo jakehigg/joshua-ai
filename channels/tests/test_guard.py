@@ -38,8 +38,8 @@ channels:
 """
 
 
-def _settings(sidecar=None):
-    return config_module.parse(CONFIG, env={}, source="<test>", sidecar_people=sidecar)
+def _settings(metadata=None):
+    return config_module.parse(CONFIG, env={}, source="<test>", file_people=metadata)
 
 
 def _guard(settings=None, *, clock=None, config_provider=None) -> Guard:
@@ -158,7 +158,7 @@ def test_attachment_over_cap_keeps_the_message() -> None:
 def test_runtime_enrollment_is_honored_without_restart() -> None:
     base = _settings()
     enrolled = _settings(
-        sidecar=[{"id": "sam", "name": "Sam", "role": "member", "handles": {"telegram": "555"}}]
+        metadata=[{"id": "sam", "name": "Sam", "role": "member", "handles": {"telegram": "555"}}]
     )
     current = {"cfg": base}
     guard = _guard(base, config_provider=lambda: current["cfg"])

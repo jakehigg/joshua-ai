@@ -51,7 +51,7 @@ The loaded model has these lookups:
 - `groups_by_chat(channel, chat_id)`: the group, or None.
 - `destination(name)`: the channel address for a destination alias.
 
-## Runtime people (the people.yaml sidecar)
+## Runtime people (the people file)
 
 `joshua.yaml` starts the roster. It is where you name the first person, the one
 who sets Joshua up, so that somebody can talk to it at all. After that, people
@@ -60,29 +60,29 @@ are added through Joshua, and `joshua.yaml` does not need another edit.
 A runtime change is written to two places:
 
 - the database roster cache, and
-- a sidecar file `<data_dir>/people.yaml` (default `/data/people.yaml`), in the
-  same schema as `people`.
+- the people file, `<data_dir>/people.yaml` (default `/data/people.yaml`), in
+  the same schema as `people`.
 
-The loader reads the sidecar and merges it over `people` at load time. A
-sidecar entry with the same id as a `joshua.yaml` person replaces that person. A
+The loader reads the people file and merges it over `people` at load time. An
+entry with the same id as a `joshua.yaml` person replaces that person. A
 new id is appended. An entry with `role: removed` drops that id from the merged
 roster. This is how a removed person's handle stops resolving.
 
-**The sidecar wins, so `joshua.yaml` is a starting point and not a control
+**The people file wins, so `joshua.yaml` is a starting point and not a control
 panel.** Once a person is enrolled, an edit to that person in `joshua.yaml`
-changes nothing: the sidecar entry replaces it at every load. Change an
+changes nothing: the people file entry replaces it at every load. Change an
 enrolled person the same way you added them, with the agent tool, the CLI, or
 the admin route below. This holds for a deployment that renders `joshua.yaml`
 from a git repository too: the merge request is reviewed, merged and synced,
 and the enrolled person is unchanged.
 
 To hand the roster back to `joshua.yaml`, remove the person's entry from the
-sidecar. The next load reads `joshua.yaml` for that id again.
+people file. The next load reads `joshua.yaml` for that id again.
 
 The data dir comes from `JOSHUA_DATA_DIR` (default `/data`), the same variable all
 three containers read.
 
-Three paths write the sidecar:
+Three paths write the people file:
 
 - The agent's `registration` tool (`add_user`, `list_users`). Only a
   member can add people. A guest or an unidentified caller gets "not available".
@@ -428,7 +428,7 @@ one file in place under `wiki/`, a journal, or an attachments directory.
 filename and the extension must not change. An attachment keeps its date-time
 prefix, so the person renames the descriptive part only. `search_files` is a
 substring or regex search over markdown text, not semantic search. `list_files`
-adds `original_name` for an attachment when a `<file>.meta.json` sidecar records
+adds `original_name` for an attachment when a `<file>.meta.json` metadata file records
 the sender's filename.
 
 There is no `delete_file`. Deletion is a human action through the viewer or a

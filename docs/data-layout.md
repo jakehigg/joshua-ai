@@ -143,7 +143,7 @@ writes it. Every member reads it in their own system prompt.
 ## Attachments
 
 An attachment file has the name `YYYY-MM-DD-HHMMSS-<stem>.<ext>`. A
-`.meta.json` sidecar next to it holds the original name and the source
+`.meta.json` metadata file next to it holds the original name and the source
 metadata.
 
 ## Bootstrap

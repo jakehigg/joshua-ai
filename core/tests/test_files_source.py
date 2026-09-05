@@ -28,7 +28,7 @@ def _tree(root: Path) -> None:
     _write(root / "wiki/people/alice.md", "# Alice\n\nJoshua's profile of Alice.\n")
     _write(root / "wiki/people/everyone.md", "# Home\n\nThe shared profile.\n")
     _write(root / "shared/house.md", "# House\n\nA compatibility-only shared page.\n")
-    # Ignored: trash, a non-markdown sidecar, and inbound attachments (not a
+    # Ignored: trash, a non-markdown metadata, and inbound attachments (not a
     # retrieval kind).
     _write(root / "wiki/.trash/old.md", "# Old\n\nDeleted content still on disk.\n")
     _write(root / "wiki/pizza.meta.json", '{"x": 1}')
