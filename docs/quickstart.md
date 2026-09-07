@@ -166,7 +166,7 @@ you> how do I update you?
 This is the fastest way to learn the rest. Joshua reads the same pages that you
 find under `docs/`:
 
-- [channels.md](channels.md): Telegram, iMessage, the terminal, and webhooks.
+- [channels.md](channels.md): Telegram, iMessage, the terminal, voice, and webhooks.
 - [config.md](config.md): every setting in `joshua.yaml`, and how to add a
   person or a tool.
 - [memory.md](memory.md): notes, journal, profiles, and retrieval.

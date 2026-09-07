@@ -305,3 +305,17 @@ async def test_the_ring_is_bounded() -> None:
     for n in range(UNCONFIGURED_RING_SIZE + 5):
         _check(guard, "998877", chat_id=f"-100{n:04d}", chat_kind="group")
     assert len(guard.unconfigured()) == UNCONFIGURED_RING_SIZE
+
+
+def test_refuse_records_a_decision_the_caller_made() -> None:
+    """A channel that resolves the sender itself still writes to the audit ring."""
+    cfg = config_module.parse(CONFIG, env={}, source="<test>")
+    guard = Guard(cfg, cfg.channels.limits)
+
+    verdict = guard.refuse(channel_type="voice", address="unrecognized", chat_id="office")
+
+    assert verdict.allowed is False
+    assert verdict.reason == "unknown_sender"
+    assert guard.stats()["unknown_sender"] == 1
+    assert guard.recent()[-1]["address"] == "unrecognized"
+    assert guard.recent()[-1]["channel_type"] == "voice"

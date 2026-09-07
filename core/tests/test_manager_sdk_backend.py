@@ -54,7 +54,7 @@ async def test_build_session_wires_gateway_and_builtins(tmp_path, monkeypatch):
     session, deps, profile, _paths, _mtime = await manager._build_session(
         channel, conversation, resume=None
     )
-    assert profile == "default"
+    assert profile.name == "default"
 
     options = session._options
     assert set(options.mcp_servers) == {"files", "scheduling"}

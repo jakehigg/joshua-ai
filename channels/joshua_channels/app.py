@@ -22,6 +22,7 @@ from joshua_channels import deliver, webhooks
 from joshua_channels.adapters.cli import CliAdapter
 from joshua_channels.adapters.imessage import IMessageAdapter, build_webhook_router
 from joshua_channels.adapters.telegram import TelegramAdapter
+from joshua_channels.adapters.voice import IdentityHold
 from joshua_channels.admin import build_admin_router
 from joshua_channels.attachments import AttachmentPipeline, retention_loop
 from joshua_channels.cli_routes import build_cli_router
@@ -29,6 +30,7 @@ from joshua_channels.core_client import CoreClient, build_core_client
 from joshua_channels.deliver import DEFAULT_DATA_DIR, ChannelsContext
 from joshua_channels.guard import Guard
 from joshua_channels.registry import AdapterRegistry
+from joshua_channels.voice_routes import build_voice_router
 
 logger = get_logger("channels")
 
@@ -47,6 +49,15 @@ def imessage_enabled(settings: JoshuaConfig) -> bool:
     if imessage is None:
         return False
     return bool(imessage.bluebubbles_password.strip() and imessage.webhook_path_secret.strip())
+
+
+def voice_enabled(settings: JoshuaConfig) -> bool:
+    """True when the voice section is present.
+
+    The voice channel holds no credential of its own: the front end presents a
+    fleet token, so the section alone turns the route on.
+    """
+    return settings.channels.voice is not None
 
 
 def configured_channel_types(settings: JoshuaConfig) -> list[str]:
@@ -72,7 +83,7 @@ def build_context() -> tuple[ChannelsContext, CoreClient | None]:
     """
     settings = config_module.load()
     registry = AdapterRegistry()
-    if not configured_channel_types(settings):
+    if not configured_channel_types(settings) and not voice_enabled(settings):
         logger.warning(
             {"message": "no platform channel configured; the terminal channel still works"}
         )
@@ -171,7 +182,10 @@ async def lifespan(app: FastAPI):
             )
         await context.registry.start_all()
         started = True
-        logger.info({"message": "joshua-channels up", "channels": context.registry.types()})
+        names = list(context.registry.types())
+        if voice_enabled(context.settings):
+            names.append("voice")
+        logger.info({"message": "joshua-channels up", "channels": names})
     try:
         yield
     finally:
@@ -220,7 +234,28 @@ async def readyz(request: Request) -> JSONResponse:
             checks[channel_type] = health.as_dict()
             if not health.ok:
                 ok = False
+        voice_check = _voice_check(request, ctx)
+        if voice_check is not None:
+            checks["voice"] = voice_check
     return JSONResponse({"ok": ok, "checks": checks})
+
+
+def _voice_check(request: Request, ctx) -> dict[str, object] | None:  # type: ignore[no-untyped-def]
+    """The voice channel's readiness entry, or None when the channel is off.
+
+    The voice channel has no poller to fail: it answers a request or it does not.
+    So the entry reports what it is set to do, plus a count of the devices that
+    hold an identity. No device name and no person name.
+    """
+    voice = ctx.settings.channels.voice
+    if voice is None:
+        return None
+    identities = getattr(request.app.state, "voice_identities", None)
+    return {
+        "ok": True,
+        "thread": voice.thread,
+        "held_identities": identities.count() if identities is not None else 0,
+    }
 
 
 def build_app(context: ChannelsContext | None = None) -> FastAPI:
@@ -232,6 +267,9 @@ def build_app(context: ChannelsContext | None = None) -> FastAPI:
     app.include_router(webhooks.build_events_router())
     app.include_router(build_webhook_router())
     app.include_router(build_cli_router())
+    identities = IdentityHold()
+    app.state.voice_identities = identities
+    app.include_router(build_voice_router(identities))
     app.include_router(build_admin_router())
     if context is not None:
         app.state.ctx = context
