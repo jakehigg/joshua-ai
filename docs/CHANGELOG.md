@@ -4,10 +4,45 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
-## Unreleased
+## 0.0.6 - 2026-09-07
+
+### Upgrading from 0.0.5
+
+The viewer is no longer read-only. A member who signs in can now edit any wiki
+page, make a new one, and correct a journal entry. A guest still only reads,
+and the agent still never reaches the viewer. Nothing in your config changes,
+so check `viewer.users`: everybody listed there who is a member gains the
+ability to write.
+
+Nothing else needs an action. The voice channel is off until you add a
+`channels.voice` section.
 
 ### Added
 
+- **The viewer reads the journal as a feed, and a member writes in it.** The
+  wiki tree keeps the journal as `YYYY/MM/DD` folders, which is the wrong shape
+  for reading what happened, so the viewer has a `/journal` route: the newest
+  month first, one section per day, the nightly page and then the entries, each
+  with the people it names and whether the nightly run or the agent wrote it. A
+  month link and a person filter narrow it, and a day has a page of its own with
+  the nearest older and newer day.
+
+  A member edits any wiki page through one editor, makes a new page from a
+  folder, and corrects the text and the people of a journal entry. Frontmatter
+  is kept: a journal entry keeps its day, its source and its file name, and any
+  other page keeps its frontmatter byte for byte. The journal has one writer, so
+  a new page under it is refused. Every write runs the same member check, CSRF
+  token, origin check, size cap, atomic write and git commit as the delete. A
+  guest sees no edit link and gets 403 on the routes.
+- **The wiki is navigable in the viewer.** The home page was one flat list of
+  every file, which stops working past a few dozen pages. It is now a tree of
+  collapsible folders with a count on each, pages listed by title instead of
+  path, and a page of its own for every folder at `/wiki/<folder>/`. A page
+  beside a folder of the same name becomes that folder's index, so
+  `/wiki/recipes/` shows the text of `recipes.md` and then what is under it. A
+  page gets crumbs, its title in the browser tab, its frontmatter as one muted
+  line, and the other pages of its folder below it. A small folder starts open;
+  the shipped docs and a large folder start closed.
 - **A voice channel.** Joshua answers a spoken turn on
   `POST /v1/voice/chat/completions`, which speaks the OpenAI chat-completions
   protocol. Any voice front end that can point an OpenAI client at a base URL
@@ -44,6 +79,13 @@ with the images and the packaged chart, are at
 - A session closes on the deadline its profile names, and on
   `core.session_idle_seconds` when the profile names none. Only voice names one
   today, so nothing else changes.
+
+### Fixed
+
+- The viewer renders a Markdown table. The preset it used has no table rule, so
+  a table in a wiki page or a journal entry showed as pipe characters. Tables
+  and strikethrough are on for both renderers, with no new dependency, and a
+  table scrolls inside its own box on a narrow screen.
 
 ## 0.0.5 - 2026-09-05
 

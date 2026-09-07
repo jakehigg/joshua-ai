@@ -372,10 +372,12 @@ the process; the day folders on the volume are the record that survives.
 
 ## The viewer
 
-The viewer is a read-only web page for the wiki, which holds the journal and
-every profile, and a person's own attachments. A signed-in person gets a
-profile link for a quick jump to their own page. It is off by default. To
-turn it on:
+The viewer is a web page for the wiki, which holds the journal and every
+profile, and a person's own attachments. Everybody who signs in reads. A
+member also writes: they edit any wiki page, make a new one, correct a journal
+entry, and move a page to the trash. A guest reads and nothing more. A
+signed-in person gets a profile link for a quick jump to their own page. It is
+off by default. To turn it on:
 
 1. Put every password in `VIEWER_PASSWORDS` in `.env`, as a comma-separated
    list of `<person-id>=<value>` pairs. One variable carries all of them, so

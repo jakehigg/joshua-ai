@@ -543,11 +543,12 @@ has no effect. The loader accepts it and validates its shape.
 
 ## viewer
 
-`viewer` runs a read-only web viewer for the wiki and a person's own files. A
-person opens a browser, signs in with a password, and reads the wiki, their own
-profile, their own journal, their own attachments, and the shared profile. A
-member can also delete a wiki page, which moves it to `wiki/.trash/`. A guest
-cannot. The agent never reaches the viewer, and the viewer never calls core.
+`viewer` runs a web viewer for the wiki and a person's own files. A person
+opens a browser, signs in with a password, and reads the wiki, their own
+profile, the journal, their own attachments, and the shared profile. A member
+also writes: they edit any wiki page, make a new one, correct a journal entry,
+and delete a page, which moves it to `wiki/.trash/`. A guest reads and nothing
+more. The agent never reaches the viewer, and the viewer never calls core.
 
 The viewer is off by default. Start it with `docker compose --profile viewer
 up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a

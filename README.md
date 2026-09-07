@@ -109,11 +109,11 @@ when you change from one to the other.
 ## Read your notes in a browser
 
 Joshua writes Markdown to a volume, so a text editor is enough to read it. The
-optional **viewer** is a small read-only web page for the same files: the
-wiki, which holds the journal and every profile, and your attachments. A
-person signs in with a password and reads; a member can also move a wiki page
-to the trash, which is the only way to delete a page, because the agent has no
-delete tool.
+optional **viewer** is a small web page for the same files: the wiki, which
+holds the journal and every profile, and your attachments. A person signs in
+with a password and reads. A member also writes: they edit any wiki page, make
+a new one, correct a journal entry, and move a page to the trash, which is the
+only way to delete a page, because the agent has no delete tool.
 
 It is off by default, and it holds no credential of its own. To turn it on,
 see [docs/operations.md](docs/operations.md#the-viewer).

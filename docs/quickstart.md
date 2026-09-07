@@ -171,7 +171,7 @@ find under `docs/`:
   person or a tool.
 - [memory.md](memory.md): notes, journal, profiles, and retrieval.
 - [operations.md](operations.md): logs, health, updates, backup, and the
-  viewer, which is a read-only web page for your notes.
+  viewer, which is a web page for your notes.
 - [architecture.md](architecture.md) and [security.md](security.md): how the
   three containers divide the work, and what the agent cannot do.
 
@@ -188,9 +188,10 @@ make nuke           stop, and delete the data (it asks first)
 `make down` keeps your database and your files. `make nuke` deletes them.
 
 To read your notes in a browser instead of the terminal, turn on the viewer.
-It is a read-only web page for the wiki, your profile, your journal, and your
-attachments. It is off until you turn it on, and it listens on the loopback
-address only. See [operations.md](operations.md#the-viewer).
+It shows the wiki, your profile, the journal, and your attachments, and a
+member can edit a page or write a new one. It is off until you turn it on, and
+it listens on the loopback address only. See
+[operations.md](operations.md#the-viewer).
 
 ## If something is wrong
 

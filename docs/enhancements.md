@@ -33,8 +33,8 @@ Joshua code at all. The contract:
   Joshua leaves alone anything that is not a `.md` file.
 
 Any tool that reads a folder of Markdown files can be the wiki's frontend.
-The built-in viewer stays as the read-only floor: it needs no setup and
-holds no risk.
+The built-in viewer stays as the floor: it needs no setup, it holds no
+credential of its own, and it reaches nothing but the volume.
 
 ## Choose a frontend
 
