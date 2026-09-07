@@ -1,15 +1,17 @@
-"""Read-only web viewer for the wiki and a person's own attachments.
+"""Web viewer for the wiki, the journal, and a person's own attachments.
 
 A person opens a browser, signs in with HTTP basic, and reads the one wiki
 (which carries Joshua's own journal and its profile of each person), their own
-attachments, and the shared attachments. The viewer never calls core and the
-agent never calls the viewer. It reads the data volume through the same
-resolver as the files MCP (``files_mcp.paths``), so the two never drift on who
-reads what.
+attachments, and the shared attachments. ``/journal`` shows the journal as a
+feed, newest day first, because the wiki tree is the wrong shape for reading
+what happened. The viewer never calls core and the agent never calls the
+viewer. It reads the data volume through the same resolver as the files MCP
+(``files_mcp.paths``), so the two never drift on who reads what.
 
-The one write action is a delete. A member moves a wiki page to the trash under
-``wiki/.trash/``; it is never a hard delete. A guest cannot delete. Deletion
-stays a human action in a browser, so the agent gets no way to remove a file.
+A member has two write actions, both human actions in a browser that the
+agent never gets: a delete, which moves a wiki page to the trash under
+``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
+text and people. A guest reads.
 
 Start it with ``python -m joshua_gateway.viewer``. It refuses to start when
 ``viewer.enabled`` is false. Put a reverse proxy in front for TLS; the viewer
@@ -26,7 +28,7 @@ import os
 import secrets
 import sys
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -37,7 +39,7 @@ import uvicorn
 import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
-from joshua_shared.layout import is_hidden
+from joshua_shared.layout import is_hidden, journal_day_from_path, journal_root
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from markdown_it import MarkdownIt
 from starlette.applications import Starlette
@@ -47,8 +49,11 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+from joshua_gateway import viewer_edit as edit
+from joshua_gateway import viewer_journal as journal
+from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
-from joshua_gateway.files_mcp.server import IMAGE_MIME, data_root
+from joshua_gateway.files_mcp.server import IMAGE_MIME, MAX_BYTES, _atomic_write, data_root
 
 logger = get_logger("viewer")
 
@@ -76,7 +81,9 @@ _META_SUFFIX = ".meta.json"
 _CSRF_SECRET = secrets.token_bytes(32)
 
 # Raw HTML is disabled, so a ``<script>`` in a markdown file renders as text.
-_MD = MarkdownIt("commonmark", {"html": False, "linkify": False})
+# The commonmark preset has no tables; the table and strikethrough rules are
+# turned on, with no new dependency.
+_MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table", "strikethrough"])
 
 # Which viewer route serves each root, for a search hit link.
 _ROUTE_PREFIX = {"wiki": "/wiki/", "shared": "/shared/"}
@@ -114,6 +121,63 @@ form.delete { margin-top: 2rem; padding-top: 1rem;
   border-top: 1px solid var(--line); }
 form.delete button { padding: .4rem .75rem; cursor: pointer; }
 .snippet { color: var(--muted); }
+p.crumbs { color: var(--muted); font-size: .9rem; margin: 0 0 .5rem; }
+p.meta { color: var(--muted); font-size: .85rem; margin: 0 0 1rem; }
+p.meta .k { font-weight: 600; }
+.count { color: var(--muted); font-size: .85rem; }
+ul.tree ul { list-style: none; padding-left: 1.25rem; }
+ul.tree details > summary { cursor: pointer; padding: .15rem 0; }
+ul.tree details > summary::marker { color: var(--muted); }
+section.siblings { margin-top: 2rem; padding-top: 1rem;
+  border-top: 1px solid var(--line); }
+section.siblings h2 { font-size: 1rem; color: var(--muted); }
+section.siblings ul { columns: 2; column-gap: 2rem; }
+table { border-collapse: collapse; margin: .75rem 0; max-width: 100%;
+  display: block; overflow-x: auto; }
+th, td { border: 1px solid var(--line); padding: .3rem .6rem;
+  text-align: left; vertical-align: top; }
+th { background: var(--code); }
+p.months { color: var(--muted); }
+p.filters { display: flex; flex-wrap: wrap; gap: .4rem; }
+.chip { display: inline-block; padding: .05rem .6rem; border-radius: 999px;
+  border: 1px solid var(--line); font-size: .85rem; color: var(--fg); }
+.chip.on { background: var(--link); border-color: var(--link); color: #fff; }
+.chip:hover { text-decoration: none; border-color: var(--link); }
+.badge { display: inline-block; padding: .05rem .5rem; border-radius: 4px;
+  font-size: .75rem; text-transform: uppercase; letter-spacing: .04em;
+  background: var(--code); color: var(--muted); }
+.badge.nightly { background: var(--link); color: #fff; }
+section.day { margin: 2rem 0; }
+section.day h2 { font-size: 1.1rem; color: var(--muted); font-weight: 600;
+  border-bottom: 1px solid var(--line); padding-bottom: .25rem; }
+section.day h2 a { color: inherit; }
+article.entry { padding: .75rem 0 .75rem 1rem; margin: .5rem 0 1rem;
+  border-left: 3px solid var(--line); }
+article.entry header { display: flex; flex-wrap: wrap; gap: .5rem;
+  align-items: baseline; }
+article.entry h3 { margin: 0; font-size: 1.05rem; }
+article.entry h3 a { color: var(--fg); }
+article.entry .md > :first-child { margin-top: .5rem; }
+article.entry .md img { max-width: 100%; height: auto; }
+article.entry .md pre, article.entry .md code { background: var(--code);
+  border-radius: 4px; }
+article.entry .md pre { padding: .75rem; overflow-x: auto; }
+article.entry footer { font-size: .85rem; color: var(--muted); }
+form.edit label { display: block; margin: 1rem 0; }
+form.edit input[name=people], form.edit textarea { width: 100%;
+  padding: .4rem .5rem; font: inherit; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+form.edit textarea { font-family: ui-monospace, monospace; font-size: .95rem;
+  line-height: 1.5; }
+form.edit button { padding: .4rem .75rem; cursor: pointer; }
+form.edit input[name=name] { width: 100%; padding: .4rem .5rem; font: inherit;
+  color: var(--fg); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 4px; }
+details.kept { margin: 1rem 0; font-size: .85rem; color: var(--muted); }
+details.kept pre { background: var(--code); padding: .5rem .75rem;
+  border-radius: 4px; overflow-x: auto; }
+p.error { color: #c33; }
+p.actions { margin-top: 2rem; font-size: .9rem; }
 """
 
 
@@ -301,7 +365,7 @@ def _page(title: str, body: str, *, status: int = 200, nav: bool = True) -> HTML
 
 
 _NAV = (
-    '<nav><a href="/">home</a>'
+    '<nav><a href="/">home</a><a href="/wiki/">wiki</a><a href="/journal">journal</a>'
     '<form action="/search" method="get">'
     '<input name="q" placeholder="search" aria-label="search"></form></nav>'
 )
@@ -349,10 +413,22 @@ def _serve(roots: dict[str, Root], rel: str, person: Person, *, allow_delete: bo
         if text is None:
             return _download(abs_path)
         front, body_md = _split_frontmatter(text)
-        body = _frontmatter_html(front) + f'<article class="md">{_MD.render(body_md)}</article>'
+        title = rel
+        body = ""
+        under_wiki = abs_path.relative_to(root.base).as_posix() if root.name == "wiki" else ""
+        if root.name == "wiki":
+            # A wiki page gets its title, the crumbs above it, and the other
+            # pages of its folder below it.
+            title = wiki.page_title(text, wiki.stem_title(abs_path.stem))
+            folder_rel = under_wiki.rsplit("/", 1)[0] if "/" in under_wiki else ""
+            body += wiki.crumbs_html(root.base, folder_rel, leaf=title)
+        body += wiki.meta_html(front or {}) + f'<article class="md">{_MD.render(body_md)}</article>'
+        if root.name == "wiki":
+            body += wiki.siblings_html(root.base, under_wiki)
         if allow_delete and root.name == "wiki" and person.role == "member":
+            body += f'<p class="actions">{edit.edit_link(under_wiki)}</p>'
             body += _delete_form(person, rel)
-        return _page(rel, body)
+        return _page(title, body)
 
     return _download(abs_path)
 
@@ -472,7 +548,8 @@ async def index(request: Request, person: Person) -> Response:
     profile_url = f"/wiki/people/{person.id}.md"
     body = [
         f"<h1>{escape(person.name)}</h1>",
-        f'<p><a href="{escape(profile_url, quote=True)}">profile</a></p>',
+        f'<p><a href="{escape(profile_url, quote=True)}">profile</a> · '
+        '<a href="/journal">journal</a></p>',
     ]
     body.append(
         _section(
@@ -483,13 +560,55 @@ async def index(request: Request, person: Person) -> Response:
             ],
         )
     )
-    body.append(_section("wiki", [(f"/wiki/{rel}", rel) for rel in _list_markdown(roots["wiki"])]))
+    tree = wiki.build_tree(roots["wiki"].base)
+    body.append("<h2>wiki</h2>")
+    body.append(wiki.tree_html(tree) if tree else "<p class=snippet>nothing yet.</p>")
     return _page(person.name, "".join(body))
 
 
 async def wiki_page(request: Request, person: Person) -> Response:
-    rel = "wiki/" + request.path_params["path"]
-    return _serve(_roots_for(person), rel, person, allow_delete=True)
+    """A wiki page, or a folder page for a path that ends in ``/`` or names
+    a directory. ``/wiki/`` is the root folder: the front page and the tree."""
+    path = request.path_params["path"]
+    roots = _roots_for(person)
+    if path == "" or path.endswith("/"):
+        return _folder_page(roots, path.rstrip("/"), person)
+    rel = "wiki/" + path
+    try:
+        _, abs_path = resolve(rel, roots, write=False)
+    except PathError:
+        return _not_found()
+    if abs_path.is_dir():
+        return RedirectResponse(f"/wiki/{path}/", status_code=302)
+    return _serve(roots, rel, person, allow_delete=True)
+
+
+async def wiki_root(request: Request, person: Person) -> Response:
+    return RedirectResponse("/wiki/", status_code=302)
+
+
+def _folder_page(roots: dict[str, Root], rel: str, person: Person) -> Response:
+    """The page for one folder: its index page's text, then what is in it."""
+    try:
+        root, abs_path = resolve("wiki/" + rel if rel else "wiki", roots, write=False)
+    except PathError:
+        return _not_found()
+    if not abs_path.is_dir():
+        return _not_found()
+    folder = wiki.build_tree(root.base, rel)
+    if folder is None:
+        return _not_found()
+    index_html = ""
+    if folder.index is not None:
+        text = _read_text(root.base / folder.index.rel) or ""
+        _, body_md = _split_frontmatter(text)
+        _, body_md = wiki.first_heading(body_md)  # the folder title is the h1
+        index_html = _MD.render(body_md)
+    body = wiki.crumbs_html(root.base, rel, leaf=None) if rel else ""
+    body += wiki.folder_html(folder, index_html)
+    if person.role == "member":
+        body += f'<p class="actions">{edit.new_link(rel)}</p>'
+    return _page(folder.title, body)
 
 
 async def shared_page(request: Request, person: Person) -> Response:
@@ -531,9 +650,10 @@ def _search(roots: dict[str, Root], query: str) -> list[tuple[str, str, str]]:
                 continue
             for line in text.splitlines():
                 if needle in line.lower():
-                    hits.append(
-                        (_search_url(name, rel), _search_label(name, rel), line.strip()[:200])
-                    )
+                    label = _search_label(name, rel)
+                    if name == "wiki":
+                        label = wiki.page_title(text, wiki.stem_title(abs_path.stem))
+                    hits.append((_search_url(name, rel), label, line.strip()[:200]))
                     break
             if len(hits) >= SEARCH_MAX_RESULTS:
                 return hits
@@ -568,6 +688,255 @@ async def delete(request: Request, person: Person) -> Response:
     _move_to_trash(root, abs_path)
     logger.info({"message": "viewer delete", "root": "wiki"})
     return RedirectResponse("/", status_code=303)
+
+
+# -- journal ----------------------------------------------------------------
+
+
+def _people_list() -> list[tuple[str, str]]:
+    """``(id, name)`` for every person, for the filter and the chips."""
+    return [(p.id, p.name) for p in config.load().people]
+
+
+async def journal_feed(request: Request, person: Person) -> Response:
+    """The journal for one month, newest day first. ``month=YYYY-MM`` picks the
+    month; the default is the newest month with an entry. ``person=<id>``
+    keeps only the entries that name that person."""
+    entries = journal.load_entries(data_root())
+    person_id = (request.query_params.get("person") or "").strip() or None
+    if person_id is not None and person_id not in {pid for pid, _ in _people_list()}:
+        person_id = None
+    scoped = journal.for_person(entries, person_id)
+    available = journal.months(scoped)
+    month = journal.parse_month(request.query_params.get("month"))
+    if month is None:
+        today = datetime.now(UTC).date()
+        month = available[0] if available else (today.year, today.month)
+    body = journal.feed_html(
+        journal.for_month(scoped, month),
+        month=month,
+        available=available,
+        people=_people_list(),
+        person_id=person_id,
+        can_edit=person.role == "member",
+    )
+    return _page("journal", body)
+
+
+async def journal_day(request: Request, person: Person) -> Response:
+    """One day of the journal, with the nearest older and newer day that
+    holds an entry."""
+    try:
+        day = date(
+            int(request.path_params["year"]),
+            int(request.path_params["month"]),
+            int(request.path_params["day"]),
+        )
+    except ValueError:
+        return _not_found()
+    entries = journal.load_entries(data_root())
+    all_days = journal.days(entries)  # newest first
+    older = next((d for d in all_days if d < day), None)
+    newer = next((d for d in reversed(all_days) if d > day), None)
+    body = journal.day_html(
+        day,
+        journal.for_day(entries, day),
+        older=older,
+        newer=newer,
+        people=_people_list(),
+        can_edit=person.role == "member",
+    )
+    return _page(day.isoformat(), body)
+
+
+# -- edit -------------------------------------------------------------------
+#
+# One editor for a wiki page and a journal entry. ``viewer_edit`` says how the
+# path decides the shape of the form and of the saved file. Every write here
+# goes through ``_edit_target`` and ``save``: the same member check, the same
+# resolver with ``write=True``, the same CSRF token and origin check, the same
+# atomic write and commit.
+
+
+def _edit_target(
+    person: Person, rel: str, *, create: bool
+) -> tuple[Root, Path, date | None] | Response:
+    """Resolve a wiki-relative path for a write, or the response that refuses
+    it. The third value is the journal day when the path is an entry under a
+    day folder. A path under the journal that is not such an entry, and a
+    new page anywhere under the journal, are refused: the journal has one
+    writer."""
+    if person.role != "member":
+        return _forbidden()
+    try:
+        root, abs_path = resolve("wiki/" + rel, _roots_for(person), write=True)
+    except PathError:
+        return _not_found()
+    if root.name != "wiki" or abs_path.suffix != ".md":
+        return _not_found()
+    day = journal_day_from_path(abs_path, data_root())
+    in_journal = (
+        abs_path == journal_root(data_root()) or journal_root(data_root()) in abs_path.parents
+    )
+    if create:
+        if in_journal:
+            return _forbidden()
+        if abs_path.exists():
+            return _page(
+                "exists",
+                "<h1>exists</h1><p>A page with that name is already there.</p>",
+                status=409,
+            )
+    else:
+        if not abs_path.is_file():
+            return _not_found()
+        if in_journal and day is None:
+            return _not_found()
+    return root, abs_path, day
+
+
+def _under_wiki(root: Root, abs_path: Path) -> str:
+    return abs_path.relative_to(root.base).as_posix()
+
+
+async def edit_page(request: Request, person: Person) -> Response:
+    """The edit form for a wiki page or a journal entry."""
+    rel = request.path_params["path"]
+    target = _edit_target(person, rel, create=False)
+    if isinstance(target, Response):
+        return target
+    root, abs_path, day = target
+    text = _read_text(abs_path)
+    if text is None:
+        return _not_found()
+    csrf = _csrf_token(person.id, "wiki/" + rel)
+    if day is not None:
+        entry = journal.parse_entry(rel, day, text)
+        form = edit.form_html(
+            title=f"edit: {entry.title}",
+            subtitle=f"{day.strftime('%A %-d %B %Y')} · {entry.source} · {rel}",
+            csrf=csrf,
+            path=rel,
+            body=entry.body,
+            people=entry.people,
+            cancel_url=entry.day_url,
+        )
+        return _page(f"edit {entry.title}", form)
+    front, body = edit.split_raw_frontmatter(text)
+    title = wiki.page_title(text, wiki.stem_title(abs_path.stem))
+    form = edit.form_html(
+        title=f"edit: {title}",
+        subtitle=rel,
+        csrf=csrf,
+        path=rel,
+        body=body,
+        kept_front=front,
+        cancel_url=f"/wiki/{rel}",
+    )
+    return _page(f"edit {title}", form)
+
+
+async def new_page(request: Request, person: Person) -> Response:
+    """The form for a new wiki page in a folder."""
+    if person.role != "member":
+        return _forbidden()
+    folder = (request.query_params.get("folder") or "").strip("/")
+    roots = _roots_for(person)
+    try:
+        _, abs_dir = resolve("wiki/" + folder if folder else "wiki", roots, write=False)
+    except PathError:
+        return _not_found()
+    if not abs_dir.is_dir():
+        return _not_found()
+    return _page("new page", _new_form(person, folder, name="", body="", error=""))
+
+
+def _new_form(person: Person, folder: str, *, name: str, body: str, error: str) -> str:
+    return edit.form_html(
+        title="new page",
+        subtitle=f"in {folder or 'the wiki'}",
+        csrf=_csrf_token(person.id, "new:" + folder),
+        folder=folder,
+        name=name,
+        body=body,
+        error=error,
+        cancel_url=f"/wiki/{folder}/" if folder else "/wiki/",
+    )
+
+
+async def save(request: Request, person: Person) -> Response:
+    """Write a page or an entry from the form. One path for both, and for a
+    new page: the CSRF token, the origin, the target, the composed text, the
+    size cap, the atomic write, the commit."""
+    if person.role != "member":
+        return _forbidden()
+    form = await request.form()
+    token = str(form.get("csrf", ""))
+    body = str(form.get("body", ""))
+    create = "folder" in form
+    if create:
+        folder = str(form.get("folder", "")).strip("/")
+        if not _csrf_valid(person.id, "new:" + folder, token) or not _origin_ok(request):
+            return _forbidden()
+        try:
+            rel = edit.new_page_rel(folder, str(form.get("name", "")))
+        except edit.EditError as exc:
+            return _page(
+                "new page",
+                _new_form(
+                    person, folder, name=str(form.get("name", "")), body=body, error=str(exc)
+                ),
+                status=400,
+            )
+    else:
+        rel = str(form.get("path", ""))
+        if not _csrf_valid(person.id, "wiki/" + rel, token) or not _origin_ok(request):
+            return _forbidden()
+    target = _edit_target(person, rel, create=create)
+    if isinstance(target, Response):
+        return target
+    root, abs_path, day = target
+    try:
+        if create:
+            data = edit.compose_new(body)
+            after = f"/wiki/{rel}"
+            what = "new"
+        elif day is not None:
+            text = _read_text(abs_path)
+            if text is None:
+                return _not_found()
+            data = edit.compose_journal(text, rel, day, str(form.get("people", "")), body)
+            after = f"{journal.day_url(day)}#{abs_path.stem}"
+            what = "edit"
+        else:
+            text = _read_text(abs_path)
+            if text is None:
+                return _not_found()
+            data = edit.compose_wiki(text, body)
+            after = f"/wiki/{rel}"
+            what = "edit"
+    except edit.EditError as exc:
+        return _page("edit", f"<h1>edit</h1><p>{escape(str(exc))}</p>", status=400)
+    raw = data.encode("utf-8")
+    if len(raw) > MAX_BYTES:
+        return _page("edit", "<h1>edit</h1><p>The page exceeds 256 KB.</p>", status=400)
+    _atomic_write(abs_path, raw)
+    _commit_write(root, abs_path, what)
+    logger.info({"message": "viewer write", "root": "wiki", "what": what})
+    return RedirectResponse(after, status_code=303)
+
+
+def _commit_write(root: Root, abs_path: Path, what: str) -> None:
+    """Commit a write when ``wiki.git`` is on. A failure is a WARNING; the
+    write already happened."""
+    try:
+        from joshua_shared import wikigit
+
+        if not wikigit.is_enabled(config.load()):
+            return
+        wikigit.commit(root.base, [abs_path], f"viewer: {what} {_under_wiki(root, abs_path)}")
+    except Exception as exc:  # noqa: BLE001 — a commit must never fail the write
+        logger.warning({"message": "wiki commit failed", "error": str(exc)})
 
 
 async def style(request: Request, person: Person) -> Response:
@@ -618,6 +987,12 @@ def build_app() -> Starlette:
             Route("/readyz", readyz),
             Route("/style.css", _require_auth(style)),
             Route("/", _require_auth(index)),
+            Route("/wiki", _require_auth(wiki_root)),
+            Route("/journal", _require_auth(journal_feed)),
+            Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
+            Route("/edit/{path:path}", _require_auth(edit_page)),
+            Route("/new", _require_auth(new_page)),
+            Route("/save", _require_auth(save), methods=["POST"]),
             Route("/wiki/{path:path}", _require_auth(wiki_page)),
             Route("/shared/{path:path}", _require_auth(shared_page)),
             Route("/attachments/{path:path}", _require_auth(attachments)),
