@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from joshua_shared.ids import PERSON_ID_PATTERN, PERSON_ID_RE
 from joshua_shared.log import CREDENTIAL_PREFIXES
+from joshua_shared.mcp_package import PackageError, parse_package
 
 DEFAULT_CONFIG_PATH = "/etc/joshua/joshua.yaml"
 CONFIG_ENV_VAR = "JOSHUA_CONFIG"
@@ -353,6 +354,11 @@ class McpServer(_Model):
     env: dict[str, str] = {}
     url: str | None = None
     headers: dict[str, str] = {}
+    # A stdio server the gateway installs itself. See joshua_shared.mcp_package.
+    package: str | None = None
+    sha256: str | None = None
+    registry: str | None = None
+    allow_scripts: bool = False
     allow: str | list[str] = "all"
     tools: McpToolPolicy | None = None
     identities: dict[str, McpIdentity] = {}
@@ -398,12 +404,30 @@ class McpServer(_Model):
             return self
         if self.type is None:
             raise ValueError("server must set 'kind' (builtin) or 'type' (stdio|http|sse)")
-        if self.type == "stdio" and not self.command:
-            raise ValueError("a stdio server requires 'command'")
+        if self.type == "stdio" and not self.command and not self.package:
+            raise ValueError("a stdio server requires 'command' or 'package'")
         if self.type in ("http", "sse") and not self.url:
             raise ValueError(f"a {self.type} server requires 'url'")
+        self._check_package()
         self._check_identity_shapes()
         return self
+
+    def _check_package(self) -> None:
+        """A ``package`` belongs to a stdio server and must pin an exact version."""
+        if self.package is None:
+            if self.sha256 is not None:
+                raise ValueError("sha256 applies only to a package server")
+            if self.registry is not None:
+                raise ValueError("registry applies only to a package server")
+            if self.allow_scripts:
+                raise ValueError("allow_scripts applies only to a package server")
+            return
+        if self.type != "stdio":
+            raise ValueError("package applies only to a stdio server")
+        try:
+            parse_package(self.package, self.sha256)
+        except PackageError as exc:
+            raise ValueError(str(exc)) from exc
 
     def _check_identity_shapes(self) -> None:
         """A stdio identity overrides ``command``/``args``/``env``; an http or sse

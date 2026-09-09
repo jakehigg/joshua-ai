@@ -126,14 +126,27 @@ wiki:
               # git to a frontend or a sync tool
 
 mcp:
-  # Only servers the shipped gateway image can run belong here. The image has no
-  # `uv` or node, so a `type: stdio` server that starts with `uvx` or `npx` does
-  # not start and the gateway retries it forever. To add such a server, build it
-  # into your own gateway image, or run it as its own container and reach it with
-  # `type: http`. See docs/config.md.
   files:                          # builtin, always available in the image
     kind: builtin
     allow: all
+
+  # Add a server by naming its package. The gateway installs it into its store
+  # volume at start, so you never build an image. Every kind must pin an exact
+  # version: npm:<name>@1.2.3, pypi:<name>==1.2.3, git+https://<url>@<commit>,
+  # or an https:// file with its sha256.
+  #
+  # Put each credential in `.env.gateway` and refer to it with ${VAR:-}. An
+  # entry whose credential is empty is turned off, not retried.
+  #
+  # docs/mcp-servers.md has tested entries for weather, Home Assistant, GitLab
+  # and Trello. docs/config.md explains the field.
+  #
+  # weather:
+  #   type: stdio
+  #   package: npm:@dangahagan/weather-mcp@1.6.1
+  #   env:
+  #     ENABLED_TOOLS: standard
+  #   allow: all
 
 modules:                        # reserved; no code reads this list yet
   - scheduling

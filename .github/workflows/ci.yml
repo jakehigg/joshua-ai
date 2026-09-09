@@ -112,3 +112,17 @@ jobs:
       # The three Dockerfiles must still build from the tree. The base compose
       # file names released images, so the build needs the developer override.
       - run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+      # The gateway image carries Node, npm, uv and git, because it installs a
+      # `package:` MCP server itself. That is worth the size, and a jump beyond
+      # it is not: raise the limit here on purpose, never by accident.
+      - name: The gateway image stays under its size limit
+        env:
+          LIMIT_MB: 700
+        run: |
+          bytes=$(docker image inspect joshua-ai-gateway:dev --format '{{.Size}}')
+          mb=$((bytes / 1024 / 1024))
+          echo "gateway image: ${mb} MB (limit ${LIMIT_MB} MB)"
+          if [ "$mb" -gt "$LIMIT_MB" ]; then
+            echo "::error::the gateway image grew to ${mb} MB, over the ${LIMIT_MB} MB limit"
+            exit 1
+          fi

@@ -328,15 +328,14 @@ under different names and tool filters (the "view" pattern below).
 
 Each name must match `^[a-z][a-z0-9-]{0,31}$`. An entry is a builtin
 (`kind: builtin`, run in-process) or an external upstream (`type: stdio|http|sse`).
-A `stdio` entry needs `command`. An `http` or `sse` entry needs `url`.
+A `stdio` entry needs `command` or `package`. An `http` or `sse` entry needs `url`.
 
-The shipped gateway image runs only the builtins and any `type: http` or `type:
-sse` server it can reach over the network. It has no `uv` or node, so a `type:
-stdio` server that starts with `uvx` or `npx` does not start. The gateway retries
-it forever and `/readyz` reports it errored. To run such a server, build its runtime
-into your own gateway image, or run it as its own container and reach it with `type:
-http`. The `stdio` examples below show the config shape, not servers the shipped
-image can run.
+A `stdio` entry with a `package` is the usual way to add a server: you name the
+package and the gateway installs it. See
+[Servers the gateway installs](#servers-the-gateway-installs) below, and
+[docs/mcp-servers.md](mcp-servers.md) for tested entries. A `stdio` entry with a
+plain `command` and no `package` runs an executable that is already in the image,
+which is the builtins and nothing else.
 
 `allow` is `all` or a list of person ids. Person ids must exist in
 `people`. `all` means every person, including a request with no person.
@@ -364,13 +363,11 @@ mcp:
   files:                                  # builtin, run in-process
     kind: builtin
     allow: all
-  weather:                                # external, stdio
+  weather:                                # external, stdio, installed by gateway
     type: stdio
-    command: uvx
-    args:
-      - mcp-weather
+    package: npm:weather-mcp@1.6.1
     env:
-      WEATHER_KEY: ${WEATHER_KEY}
+      WEATHER_KEY: ${WEATHER_KEY:-}
     allow: all
     tools:
       allow:
@@ -391,6 +388,156 @@ mcp:
         headers:
           Authorization: "Bearer ${SPOTIFY_TOKEN_MIA}"
 ```
+
+### Servers the gateway installs
+
+Most MCP servers ship as a package, not as a container. Give a `stdio` entry a
+`package` and the gateway installs it at start. You do not build an image.
+
+[docs/mcp-servers.md](mcp-servers.md) has the steps to add one, and a tested
+entry for two servers. This section is the reference for the fields.
+
+```yaml
+mcp:
+  weather:
+    type: stdio
+    package: npm:weather-mcp@1.6.1
+    env:
+      ENABLED_TOOLS: standard
+    allow: all
+  ha:
+    type: stdio
+    package: pypi:ha-mcp==7.8.1
+    env:
+      HOMEASSISTANT_URL: https://home-assistant.example.net
+      HOMEASSISTANT_TOKEN: ${HOMEASSISTANT_TOKEN:-}
+    allow: all
+    tools:
+      allow:
+        - ha_get_state
+        - ha_search_entities
+        - ha_call_service
+  wikiserver:
+    type: stdio
+    package: git+https://github.com/example/wiki-mcp@3f2a9c1
+    command: python
+    args:
+      - -m
+      - wiki_mcp
+  weather-bin:
+    type: stdio
+    package: https://github.com/example/weather-mcp/releases/download/v1.2.0/weather-mcp-linux-amd64
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+```
+
+#### The four kinds
+
+| Kind | Form | Pin |
+|---|---|---|
+| npm | `npm:<name>@<version>` | an exact version, such as `1.6.1` |
+| PyPI | `pypi:<name>==<version>` | an exact version, with `==` |
+| git | `git+https://<url>@<ref>` | a commit, or a release tag such as `v1.2.0` |
+| file | `https://<url>` plus `sha256` | the sha256 of the file |
+
+Every kind must pin. `latest`, a bare name, a range (`^1.6`, `>=7.8`), and a
+branch name (`main`) all fail the config load, and the message says how to pin.
+The reason is repeatability: your Joshua must get the same code on the next
+install as on this one.
+
+#### The command
+
+`command` is optional. With no `command`, the gateway takes the executable the
+install left behind: the one it holds, or the one named after the package.
+Set `command` when the install holds several and none is named after the
+package; the load message names them when that happens.
+
+A `command` you do set is looked up inside that entry's install first, then on
+the image PATH. That is why `command: python` on a git package finds the
+project's own interpreter.
+
+A `package` entry never runs `npx` or `uvx` at turn time. The install happens
+once, and the start is the installed executable.
+
+#### The store
+
+Installs go to `/opt/joshua-mcp/<entry name>/`, one directory per entry, on
+their own volume:
+
+- compose: the `mcp-store` volume, in `docker-compose.yml` already.
+- Kubernetes: `gateway.mcpStore` in the chart values, a 2Gi claim by default.
+  Set `gateway.mcpStore.existingClaim` to bind your own.
+
+It is derived data, not the data volume. It is not backed up, and losing it
+costs one reinstall. Do not put it on the `/data` export: `node_modules` on NFS
+is slow.
+
+Each directory holds an `installed.json` with the spec, the resolved version,
+and the install time. An entry whose store matches its spec is not installed
+again, so a restart with no network still starts the server. A changed spec
+installs again, with the install you are running moved aside and put back when
+the new one fails, so a version bump that cannot install leaves the version you
+have. The download caches sit beside the entries and survive a reinstall, so a
+version bump does not download the world again.
+
+The child process runs with its working directory inside its own store
+directory. Its stdout is the MCP transport; every line it writes to stderr
+becomes one gateway log record with the entry name.
+
+#### While an install runs
+
+The gateway serves the entries that are ready. `/readyz` counts an entry that is
+installing in `installing`, not in `connected` and not in `errored`. A failed
+install counts in `errored`, and the reason is one line in the log and in
+`GET /admin/inventory`. The other entries keep serving.
+
+#### Supply chain
+
+- An install reaches npmjs.org, pypi.org, and the https git and download URLs
+  you name. Set `registry:` on an entry for a private mirror.
+- `npm install` runs with `--ignore-scripts`, so a package's `postinstall` does
+  not run. Set `allow_scripts: true` on the entry for a package that needs it.
+- The install command gets no fleet token, no other entry's credential, and no
+  database URL.
+
+[docs/security.md](security.md#package-mcp-servers) says what you accept when
+you add a package entry.
+
+#### Credentials
+
+A credential is a `${VAR:-}` reference, as everywhere else in this file.
+
+- compose: put the variable in `.env.gateway`, one `NAME=value` per line. The
+  `gateway` service reads that file, and it is optional, so a stack with no
+  upstream credential starts without it. `.env` is for the fleet, and
+  `.env.gateway` is for the upstreams; only the gateway may hold an upstream
+  credential.
+- Kubernetes: add the key to `secrets.gateway.keys` in your values file. See the
+  chart README.
+
+An entry whose `env` value or `headers` value expanded to nothing is turned off:
+`/readyz` counts it in `disabled`, the log says which key is empty, and nothing
+starts. It is not an error and it is not retried. Set the value and reload, and
+the entry comes up. This is the same rule as an empty channel credential, and it
+is why a header of `Bearer ` (with no token) no longer kills a connection over
+and over.
+
+#### Installing by hand
+
+Before a restart, from a shell:
+
+```
+docker compose exec gateway python -m joshua_gateway mcp check
+docker compose exec gateway python -m joshua_gateway mcp install
+docker compose exec gateway python -m joshua_gateway mcp install weather --reinstall
+```
+
+`check` says, for each `package` entry, whether the store holds it, and exits
+non-zero when one is missing. `install` installs what the store does not hold
+and prints what it resolved.
+
+On a running gateway, `POST /admin/mcp/install` with `{"server": "<name>"}`
+installs one entry and reconnects it. Add `"reinstall": true` to install again
+even when the store matches. See [docs/contracts.md](contracts.md).
 
 ### The files MCP
 
@@ -482,7 +629,7 @@ route. Give each a different filter to expose a different view of the same serve
 mcp:
   tracker-readonly:
     type: stdio
-    command: mcp-tracker
+    package: npm:mcp-tracker@3.1.0
     env:
       TRACKER_TOKEN: ${TRACKER_TOKEN_RO}
     allow:
@@ -494,7 +641,7 @@ mcp:
         - "search_*"
   tracker-full:
     type: stdio
-    command: mcp-tracker
+    package: npm:mcp-tracker@3.1.0
     env:
       TRACKER_TOKEN: ${TRACKER_TOKEN}
     allow:
@@ -514,9 +661,7 @@ them. The proxy does not act on them yet.
 mcp:
   weather:
     type: stdio
-    command: uvx
-    args:
-      - mcp-weather
+    package: npm:weather-mcp@1.6.1
     allow: all
     url_args: none
     tools:

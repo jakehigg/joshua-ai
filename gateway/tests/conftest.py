@@ -8,6 +8,7 @@ environment. The catalog comes from the ``mcp:`` section of that file.
 from __future__ import annotations
 
 import contextlib
+import logging
 import sys
 import textwrap
 from pathlib import Path
@@ -100,6 +101,21 @@ async def gateway_session(
                 yield session
     finally:
         await client.aclose()
+
+
+@pytest.fixture(autouse=True)
+def keep_root_logging():
+    """Put the root logger back after a test that configures logging.
+
+    ``joshua_shared.log.configure`` clears the root handlers, which is right for
+    a process and wrong for a test session: it would drop pytest's own capture
+    handler for every test that follows.
+    """
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    root.handlers[:] = handlers
+    root.setLevel(level)
 
 
 @pytest.fixture

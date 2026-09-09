@@ -17,6 +17,9 @@ from joshua_shared.config import JoshuaConfig, McpServer
 # Sentinel: the server is open to every person (``allow: all``).
 ALL = frozenset({"*"})
 
+# An Authorization value that is only a scheme carries no credential.
+_AUTH_SCHEMES = ("bearer", "basic", "token", "apikey")
+
 
 @dataclass(frozen=True)
 class ToolFilter:
@@ -66,6 +69,16 @@ class ServerSpec:
         """True when the entry is open to every person (``allow: all``)."""
         return self.allow_persons is ALL
 
+    @property
+    def package(self) -> str | None:
+        """The ``package:`` spec the gateway installs for this entry, or None."""
+        return self.connect_cfg.get("package")
+
+    @property
+    def disabled_reason(self) -> str | None:
+        """Why this instance must not start, or None. See ``blank_credential``."""
+        return blank_credential(self.connect_cfg)
+
     def permits_person(self, person: str | None) -> bool:
         """True when ``person`` may reach this server.
 
@@ -104,11 +117,40 @@ def _connect_cfg(server: McpServer) -> dict[str, Any]:
         }
         if server.env:
             cfg["env"] = dict(server.env)
+        if server.package:
+            # The installer reads these. They are part of the connect config, so
+            # a version bump is a connect change and the entry restarts.
+            cfg["package"] = server.package
+            if server.sha256:
+                cfg["sha256"] = server.sha256
+            if server.registry:
+                cfg["registry"] = server.registry
+            if server.allow_scripts:
+                cfg["allow_scripts"] = True
         return cfg
     cfg = {"type": server.type, "url": server.url}
     if server.headers:
         cfg["headers"] = dict(server.headers)
     return cfg
+
+
+def blank_credential(cfg: dict[str, Any]) -> str | None:
+    """Name the first credential in ``cfg`` that expanded to nothing, or None.
+
+    A ``${VAR:-}`` reference in a container without the variable expands to the
+    empty string. Starting the server anyway is worse than not starting it: an
+    empty ``env`` value reaches the upstream as no credential, and a header of
+    ``Bearer `` is an illegal HTTP header that kills the connection and retries
+    forever. An entry like this is turned off instead, with one log line.
+    """
+    for key, value in (cfg.get("env") or {}).items():
+        if not value.strip():
+            return f"env {key}"
+    for key, value in (cfg.get("headers") or {}).items():
+        text = value.strip()
+        if not text or text.lower() in _AUTH_SCHEMES:
+            return f"header {key}"
+    return None
 
 
 def _identity_overrides(server: McpServer) -> dict[str, dict[str, Any]]:

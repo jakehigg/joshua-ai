@@ -33,7 +33,14 @@ def test_readyz_reports_counts_only(gateway):
     with TestClient(gateway()) as client:
         response = client.get("/readyz")
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "connected": 1, "errored": 0, "total": 1}
+    assert response.json() == {
+        "ok": True,
+        "connected": 1,
+        "errored": 0,
+        "installing": 0,
+        "disabled": 0,
+        "total": 1,
+    }
 
 
 def test_readyz_counts_an_errored_upstream_and_is_not_ok():
@@ -43,6 +50,21 @@ def test_readyz_counts_an_errored_upstream_and_is_not_ok():
         "ok": False,
         "connected": 1,
         "errored": 1,
+        "installing": 0,
+        "disabled": 0,
+        "total": 3,
+    }
+
+
+def test_readyz_counts_installing_and_disabled_apart_from_errored():
+    """An install that is still running and an entry with no credential are
+    neither connected nor errored, so an operator can tell them apart."""
+    assert _readyz_body("connected", "installing", "disabled") == {
+        "ok": False,
+        "connected": 1,
+        "errored": 0,
+        "installing": 1,
+        "disabled": 1,
         "total": 3,
     }
 

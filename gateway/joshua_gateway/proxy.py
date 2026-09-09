@@ -12,6 +12,8 @@ and call-log path applies to it. Only this module, ``upstream.py``, and
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import time
 from collections.abc import Callable
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -36,9 +38,94 @@ log = get_logger("gateway.proxy")
 OnError = Callable[[Exception], None]
 OnCall = Callable[[str, float, str, str | None], None]
 
+# The only variables a stdio child inherits from the gateway. It never sees a
+# fleet token, another entry's credential, or the database URL: the child's
+# environment is this base plus the entry's own ``env`` block.
+CHILD_BASE_VARS = ("PATH", "HOME", "LANG")
+
+# A stderr line longer than this is truncated in the log.
+_STDERR_LINE_MAX = 500
+# Enough for a long startup banner; a child that writes more than this without a
+# newline is not writing lines, so the buffer is dropped rather than grown.
+_STDERR_BUFFER_MAX = 64 * 1024
+
+
+def child_env(cfg: dict[str, Any]) -> dict[str, str]:
+    """The environment for a stdio child: a minimal base plus the entry's ``env``.
+
+    ``path_prepend`` puts the entry's own install directories ahead of the image
+    PATH, so a package server runs its own executable and not another entry's.
+    """
+    env = {name: os.environ[name] for name in CHILD_BASE_VARS if name in os.environ}
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    prepend = [str(p) for p in cfg.get("path_prepend") or []]
+    if prepend:
+        env["PATH"] = os.pathsep.join([*prepend, env["PATH"]])
+    env.update(cfg.get("env") or {})
+    return env
+
+
+class _StderrProtocol(asyncio.Protocol):
+    """Turn a child's stderr bytes into one log record per line."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self._buffer = b""
+
+    def data_received(self, data: bytes) -> None:
+        self._buffer += data
+        *lines, self._buffer = self._buffer.split(b"\n")
+        for line in lines:
+            self._emit(line)
+        if len(self._buffer) > _STDERR_BUFFER_MAX:
+            self._emit(self._buffer)
+            self._buffer = b""
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        if self._buffer:  # a last line with no newline
+            self._emit(self._buffer)
+            self._buffer = b""
+
+    def _emit(self, raw: bytes) -> None:
+        text = raw.decode("utf-8", "replace").rstrip()
+        if text:
+            log.info(
+                {"message": "upstream stderr", "server": self.name, "line": text[:_STDERR_LINE_MAX]}
+            )
+
 
 @asynccontextmanager
-async def upstream_streams(cfg: dict[str, Any]):
+async def stderr_to_log(name: str):
+    """Yield a write end for a child's stderr; each line reaches the gateway log.
+
+    The reader is an event-loop transport, not a thread, so closing it releases
+    the pipe at once and a child that never exits cannot leak a blocked reader.
+    The log formatter redacts a bearer and a credential prefix, so a server that
+    prints its own configuration does not leak it.
+
+    An event loop that cannot read a pipe falls back to the gateway's own stderr,
+    which is where a stdio child's stderr went before.
+    """
+    read_fd, write_fd = os.pipe()
+    loop = asyncio.get_running_loop()
+    try:
+        transport, _ = await loop.connect_read_pipe(
+            lambda: _StderrProtocol(name), os.fdopen(read_fd, "rb", 0)
+        )
+    except NotImplementedError:  # pragma: no cover — not POSIX
+        os.close(read_fd)
+        os.close(write_fd)
+        yield sys.stderr
+        return
+    try:
+        with os.fdopen(write_fd, "w", buffering=1) as errlog:
+            yield errlog
+    finally:
+        transport.close()
+
+
+@asynccontextmanager
+async def upstream_streams(cfg: dict[str, Any], name: str = "upstream"):
     """Open read/write streams to an upstream MCP server by transport type."""
     typ = cfg.get("type", "stdio")
     if typ == "builtin":
@@ -51,10 +138,12 @@ async def upstream_streams(cfg: dict[str, Any]):
         params = StdioServerParameters(
             command=cfg["command"],
             args=cfg.get("args", []),
-            env=cfg.get("env") or None,
+            env=child_env(cfg),
+            cwd=cfg.get("cwd"),
         )
-        async with stdio_client(params) as (read, write):
-            yield read, write
+        async with stderr_to_log(name) as errlog:
+            async with stdio_client(params, errlog=errlog) as (read, write):
+                yield read, write
     elif typ in ("http", "streamable-http"):
         headers = cfg.get("headers")
         async with AsyncExitStack() as stack:

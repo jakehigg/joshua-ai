@@ -17,6 +17,7 @@ upstream.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from contextlib import asynccontextmanager
 
 from joshua_shared import config
@@ -27,7 +28,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from joshua_gateway.admin import admin_calls, admin_inventory, admin_reload
+from joshua_gateway.admin import (
+    admin_calls,
+    admin_inventory,
+    admin_mcp_install,
+    admin_reload,
+)
 from joshua_gateway.catalog import ServerSpec, build_catalog, instance_name, instance_specs
 from joshua_gateway.routes import UpstreamRoute, make_asgi, make_multi_asgi
 from joshua_gateway.upstream import Upstream
@@ -38,6 +44,11 @@ logger = get_logger("gateway")
 # through core, never directly. Per-person access is the person gate on the
 # server spec.
 MCP_ROUTE_CALLERS = frozenset({"core"})
+
+# How long a boot, and a reload that starts a new instance, waits for the first
+# connection before it moves on. The supervisor keeps retrying in the background
+# either way, so this only decides how long the caller holds.
+BOOT_CONNECT_TIMEOUT_S = 30.0
 
 
 def _new_instances(app: Starlette, name: str, spec: ServerSpec) -> list[Upstream]:
@@ -173,12 +184,18 @@ async def _reconcile_server(
             new = Upstream(want, name=iname, label=name, person=person)
             upstreams[new.name] = new
             new.start()
-            if await new.wait_connected(30.0):
+            if want.disabled_reason is not None:
+                outcomes[person] = {"disabled": want.disabled_reason}
+            elif await new.wait_connected(BOOT_CONNECT_TIMEOUT_S):
                 outcomes[person] = {"tools": new.tool_count}
             else:
                 failed[iname] = new.error or "did not connect"
         elif targeted or up.restart_needed(want):
             up.update_spec(want)
+            if want.disabled_reason is not None:
+                await up.disable()  # drop the session; the instance stays, turned off
+                outcomes[person] = {"disabled": want.disabled_reason}
+                return
             try:
                 await up.reload()
                 outcomes[person] = {"tools": up.tool_count}
@@ -210,7 +227,7 @@ async def lifespan(app: Starlette):
     ups = _install_catalog(app)
     # Give initial connections a moment so /readyz reflects reality at boot;
     # stragglers keep retrying in the background (503 until connected).
-    await asyncio.gather(*(u.wait_connected(30.0) for u in ups))
+    await asyncio.gather(*(u.wait_connected(BOOT_CONNECT_TIMEOUT_S) for u in ups))
     logger.info({"message": "gateway up", "hosted": sorted(app.state.specs)})
     try:
         yield
@@ -229,10 +246,14 @@ async def readyz(request: Request) -> JSONResponse:
     """Readiness with counts only — no server names, tool names, or inventory. The
     full inventory is ``/admin/inventory`` (admin only).
 
-    ``errored`` counts the upstreams whose last connect failed. It separates a
-    misconfigured server that never connects (for example a ``stdio`` server the
-    image cannot run) from one that is still warming up, so the fault is visible
-    without a name.
+    ``errored`` counts the upstreams whose last connect or package install
+    failed. It separates a misconfigured server that never connects from one that
+    is still warming up, so the fault is visible without a name. ``installing``
+    counts the package entries whose install is still running, and ``disabled``
+    the entries turned off because a configured credential is empty. Neither is
+    an error, and neither is connected. The reason for a failed install is in
+    the log and in ``/admin/inventory``, never here: this body carries no name
+    and no text from a config.
 
     **The status code stays 200, and it is not an oversight.** ``ok`` here says
     that every upstream connected, and that is not what readiness means. The
@@ -243,10 +264,19 @@ async def readyz(request: Request) -> JSONResponse:
     carries whether this container can serve."""
     upstreams: dict[str, Upstream] = getattr(request.app.state, "upstreams", {})
     total = len(upstreams)
-    connected = sum(1 for up in upstreams.values() if up.status == "connected")
-    errored = sum(1 for up in upstreams.values() if up.status == "error")
+    counts = Counter(up.status for up in upstreams.values())
+    connected = counts["connected"]
     ok = total > 0 and connected == total
-    return JSONResponse({"ok": ok, "connected": connected, "errored": errored, "total": total})
+    return JSONResponse(
+        {
+            "ok": ok,
+            "connected": connected,
+            "errored": counts["error"],
+            "installing": counts["installing"],
+            "disabled": counts["disabled"],
+            "total": total,
+        }
+    )
 
 
 def build_app() -> Starlette:
@@ -264,6 +294,7 @@ def build_app() -> Starlette:
             Route("/admin/reload", admin_reload, methods=["POST"]),
             Route("/admin/calls", admin_calls),
             Route("/admin/inventory", admin_inventory),
+            Route("/admin/mcp/install", admin_mcp_install, methods=["POST"]),
         ],
     )
 

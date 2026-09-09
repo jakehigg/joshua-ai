@@ -170,10 +170,47 @@ domain.
 
 Compose gives each container only the variables it needs. `core` gets the
 Claude token and the database password. `channels` gets the platform
-credentials. `gateway` gets the upstream credentials through `mcp:` entries.
-This works because `joshua.yaml` references a secret as `${VAR:-}`: a
-container without the variable expands it to the empty string and never holds
-the credential.
+credentials. `gateway` gets the upstream credentials, from its own
+`.env.gateway` file, which no other service reads. This works because
+`joshua.yaml` references a secret as `${VAR:-}`: a container without the
+variable expands it to the empty string and never holds the credential.
+
+An entry whose credential expanded to nothing is turned off, not started with an
+empty credential and not retried. `/readyz` counts it in `disabled` and the log
+names the empty key.
+
+## Package MCP servers
+
+A `stdio` entry with a `package` field is another author's code, installed by
+the gateway and run in the gateway's container. Read what that means before you
+add one.
+
+**What you accept.** You trust the author of that package and everyone who can
+publish to it. The pin is what limits this: an exact version, commit, or file
+hash means the code cannot change under you, and a version bump is a change you
+made and can review.
+
+**What the gateway does to limit it.**
+
+- The spec must pin. `latest`, a range, and a branch fail the config load.
+- `npm install` runs with `--ignore-scripts`, so a `postinstall` does not run
+  unless the entry sets `allow_scripts: true`. Set that only for a package you
+  have read.
+- The install command gets a minimal environment: no fleet token, no other
+  entry's credential, and no database URL.
+- The server process gets its entry's own `env` block and a minimal base
+  (`PATH`, `HOME`, `LANG`) and nothing else. It cannot read another entry's
+  credential, a fleet token, or the Claude token. A test starts a server that
+  prints its environment and proves this.
+- It runs with its working directory in its own store directory, as uid 1000,
+  and the gateway's tool filter and `allow` list apply to it exactly as to an
+  `http` server.
+
+**What the gateway does not do.** A stdio child is not sandboxed from the
+gateway process. It runs as the same user in the same container, so it can read
+the data volume the gateway mounts and reach the network the gateway reaches.
+A package you would not run on your own machine does not belong here. Sandboxing
+a stdio child is later work.
 
 ## What a compromised session can reach
 
@@ -220,3 +257,5 @@ other's shared files on one instance.
   long and rotate it when a log leaks.
 - The `laptop` token can call every admin route. It is the operator's root
   credential. Keep `.env` private.
+- A `package` MCP server runs in the gateway's container with no sandbox. See
+  [Package MCP servers](#package-mcp-servers).

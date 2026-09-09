@@ -7,7 +7,13 @@
 #   data.tar.gz      the /data volume, without inbox/ and .trash/
 #   joshua.yaml      the config file
 #   env              a copy of .env. It holds secrets. Keep the directory private.
+#   env.gateway      a copy of .env.gateway, the upstream MCP credentials, when
+#                    that file exists. It holds secrets too.
 #   manifest.json    when, from which commit, with which images
+#
+# The mcp-store volume is not here on purpose. It holds the MCP servers the
+# gateway installed, which is derived data: a lost store costs one reinstall at
+# the next start, and the credentials those servers need are in env.gateway.
 #
 # Retention is yours. A cron line that keeps 14 days:
 #   0 3 * * * cd /path/to/joshua && scripts/backup.sh /backups && find /backups -maxdepth 1 -name 'joshua-*' -mtime +14 -exec rm -r {} +
@@ -57,6 +63,13 @@ if [ -f .env ]; then
   cp .env "$dest/env"
   chmod 600 "$dest/env"
   echo "backup: copied .env to $dest/env. It holds secrets. Keep this directory private."
+fi
+# The gateway's own credentials for its `mcp:` upstreams. Optional: a stack with
+# no upstream credential has no such file.
+if [ -f .env.gateway ]; then
+  cp .env.gateway "$dest/env.gateway"
+  chmod 600 "$dest/env.gateway"
+  echo "backup: copied .env.gateway to $dest/env.gateway. It holds secrets."
 fi
 
 commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"

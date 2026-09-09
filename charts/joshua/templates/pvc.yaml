@@ -23,3 +23,23 @@ spec:
     requests:
       storage: {{ .Values.persistence.size }}
 {{- end }}
+{{- if and .Values.gateway.mcpStore.enabled (not .Values.gateway.mcpStore.existingClaim) }}
+{{/* The MCP package store. Only the gateway mounts it, so ReadWriteOnce is
+     right, and it holds derived data that a reinstall rebuilds. */}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: joshua-mcp-store
+  labels:
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if not (eq .Values.gateway.mcpStore.storageClass "unset") }}
+  storageClassName: {{ .Values.gateway.mcpStore.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.gateway.mcpStore.size }}
+{{- end }}

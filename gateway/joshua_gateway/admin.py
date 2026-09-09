@@ -1,4 +1,4 @@
-"""Admin routes: reload, call log, inventory.
+"""Admin routes: reload, package install, call log, inventory.
 
 Every ``/admin/*`` route requires an identity in ``ADMIN_CALLERS`` (env, default
 ``laptop,ci``) — checked on every route with no exception. A missing or invalid
@@ -21,6 +21,7 @@ from joshua_shared.log import get_logger
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from joshua_gateway import mcp_store
 from joshua_gateway.catalog import ServerSpec
 from joshua_gateway.observability import CALL_LOG, CALLERS, SESSIONS
 from joshua_gateway.upstream import Upstream
@@ -69,6 +70,62 @@ async def admin_reload(request: Request) -> JSONResponse:
     return JSONResponse(result, status_code=200 if not result["failed"] else 502)
 
 
+async def admin_mcp_install(request: Request) -> JSONResponse:
+    """Install one ``package`` entry now, then reconnect it.
+
+    Body: ``{"server": "<name>", "reinstall": true}``. Without ``reinstall`` the
+    store is used as it is when it already holds the pinned spec, so this is a
+    cheap way to bring up an entry whose install failed at boot. An unknown or
+    non-package server is 404; a failed install is 502 with a one-line reason.
+    """
+    denied = _authorize(request)
+    if denied is not None:
+        return denied
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 — an absent body is a missing server name
+        body = {}
+    name = (body or {}).get("server")
+    specs: dict[str, ServerSpec] = request.app.state.specs
+    spec = specs.get(name) if name else None
+    if spec is None or spec.package is None:
+        known = sorted(n for n, s in specs.items() if s.package is not None)
+        return JSONResponse(
+            {"error": f"unknown package server: {name}", "known": known}, status_code=404
+        )
+
+    upstreams: dict[str, Upstream] = request.app.state.upstreams
+    instances = [up for up in upstreams.values() if up.label == name]
+    req = mcp_store.InstallRequest.from_connect_cfg(name, spec.connect_cfg)
+    try:
+        record = await mcp_store.ensure_async(req, reinstall=bool((body or {}).get("reinstall")))
+    except Exception as exc:  # noqa: BLE001 — the reason is for the operator
+        logger.error({"message": "mcp install failed", "server": name, "error": str(exc)})
+        return JSONResponse({"server": name, "error": str(exc)}, status_code=502)
+
+    # The install is in the store; restart the entry's sessions onto it.
+    for up in instances:
+        up.install = record
+    reconnected: list[str] = []
+    for up in instances:
+        try:
+            await up.reload()
+            reconnected.append(up.name)
+        except Exception as exc:  # noqa: BLE001 — report per instance, keep going
+            logger.warning(
+                {"message": "reconnect after install failed", "server": up.name, "error": str(exc)}
+            )
+    return JSONResponse(
+        {
+            "server": name,
+            "package": spec.package,
+            "resolved": record.get("resolved"),
+            "installed_at": record.get("installed_at"),
+            "reconnected": reconnected,
+        }
+    )
+
+
 async def admin_calls(request: Request) -> JSONResponse:
     """Recent proxied tool calls, newest first. Query params: ``identity`` and
     ``tool`` (case-insensitive substring filters), ``limit`` (default 200)."""
@@ -88,14 +145,28 @@ async def admin_calls(request: Request) -> JSONResponse:
 
 def _server_status(instances: list[Upstream]) -> str:
     """Aggregate an identity server's status from its instances: ``connected``
-    only when every instance is connected, ``error`` when any has failed, else
-    ``connecting``."""
+    only when every instance is connected, then the worst state any instance is
+    in (``error``, ``installing``, ``disabled``), else ``connecting``."""
     statuses = {up.status for up in instances}
     if statuses == {"connected"}:
         return "connected"
-    if "error" in statuses:
-        return "error"
+    for state in ("error", "installing", "disabled"):
+        if state in statuses:
+            return state
     return "connecting"
+
+
+def _package_fields(spec: ServerSpec, instances: list[Upstream]) -> dict[str, Any]:
+    """The install view of a ``package`` entry: what was asked for and what is in
+    the store. An entry with no ``package`` adds nothing."""
+    if spec.package is None:
+        return {}
+    record = next((up.install for up in instances if up.install), None) or {}
+    return {
+        "package": spec.package,
+        "resolved": record.get("resolved"),
+        "installed_at": record.get("installed_at"),
+    }
 
 
 async def admin_inventory(request: Request) -> JSONResponse:
@@ -126,7 +197,10 @@ async def admin_inventory(request: Request) -> JSONResponse:
                 {"person": up.person, "status": up.status, "tool_count": up.tool_count}
                 for up in instances
             ],
+            **_package_fields(spec, instances),
         }
+        if spec.disabled_reason is not None:
+            entry["disabled_reason"] = spec.disabled_reason
         if spec.is_builtin:
             up = instances[0]  # the single in-process instance
             entry.update(

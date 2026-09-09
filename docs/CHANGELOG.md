@@ -4,6 +4,57 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- **The gateway installs an MCP server for you, so you no longer build an
+  image.** Give a `stdio` entry a `package:` field and the gateway installs it
+  at start: `npm:<name>@1.2.3`, `pypi:<name>==1.2.3`,
+  `git+https://<url>@<commit>`, or an `https://` file with its `sha256`. Every
+  kind must pin an exact version, and an unpinned spec fails the config load
+  with a message that says how to pin. The gateway image now carries Node, npm,
+  `uv`, and git for this.
+
+  Installs go to `/opt/joshua-mcp`, on their own volume: the `mcp-store` volume
+  on compose, and `gateway.mcpStore` in the chart. An entry whose store already
+  holds its pinned spec is not installed again, so a restart with no network
+  starts the server as it is. A version bump that cannot install leaves the
+  version you are running in place, and the other entries keep serving while
+  one installs.
+
+  `docs/mcp-servers.md` is new: the steps to add a server, and a tested entry
+  for the weather and for Home Assistant, each with a pinned version.
+  `docs/config.md` has the field, the store, and the rules.
+- **A pre-flight for a package server.**
+  `docker compose exec gateway python -m joshua_gateway mcp check` says which
+  entries the store holds, and `mcp install` installs the rest and prints what
+  it resolved. On a running gateway, `POST /admin/mcp/install` installs one
+  entry and reconnects it.
+- **`/readyz` separates an install from a fault.** It now counts `installing`
+  and `disabled` beside `connected` and `errored`, so an entry that is still
+  installing does not read as broken. `GET /admin/inventory` adds `package`,
+  `resolved`, and `installed_at` for a package entry.
+- **Upstream credentials have their own file on compose.** Put each variable an
+  `mcp:` entry names in `.env.gateway`, one `NAME=value` per line. The gateway
+  service reads it, no other service does, and it is optional. Before this there
+  was no way to get an upstream credential into the gateway container without
+  editing `docker-compose.yml`.
+
+### Changed
+
+- **An entry with an empty credential is turned off, not retried.** A
+  `${VAR:-}` reference in a container without the variable expands to nothing.
+  Such an entry now reports `disabled` with one log line that names the key,
+  and starts on the reload after you set the value. Before this an empty
+  `Authorization: "Bearer ${TOKEN:-}"` header sent `Bearer ` with no token,
+  which is an illegal HTTP header, and the connection failed and retried
+  forever.
+- **A stdio server's environment is explicit.** It gets its entry's own `env`
+  block plus `PATH`, `HOME`, and `LANG`, and nothing else: no fleet token, no
+  other entry's credential, no database URL. Its stderr now reaches the gateway
+  log, one record per line, with the entry name.
+
 ## 0.0.6 - 2026-09-07
 
 ### Upgrading from 0.0.5

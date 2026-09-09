@@ -149,7 +149,32 @@ next message reaches Joshua, and nothing restarts.
 `member` sees everything and can add people. `guest` sees less. See
 [channels.md](channels.md#adding-someone-from-chat).
 
-## 8. Ask Joshua what to do next
+## 8. Give Joshua a new capability
+
+Joshua starts with your notes and your files. An MCP server adds more: the
+weather, your house, your issue tracker. Name a package under `mcp:` in
+`joshua.yaml`, and the gateway installs it at the next start. You do not build
+an image.
+
+```yaml
+mcp:
+  weather:                        # no account and no key
+    type: stdio
+    package: npm:@dangahagan/weather-mcp@1.6.1
+    env:
+      ENABLED_TOOLS: standard
+    allow: all
+```
+
+Then run `make validate` and `docker compose restart gateway`. The first start
+is slow, because the gateway installs the package. Ask Joshua for the weather
+to see that it works.
+
+You choose the servers. Joshua cannot add one.
+[mcp-servers.md](mcp-servers.md) has the steps, and a tested entry for Home
+Assistant.
+
+## 9. Ask Joshua what to do next
 
 Joshua holds its own documentation and can search it. Ask it:
 
@@ -169,6 +194,8 @@ find under `docs/`:
 - [channels.md](channels.md): Telegram, iMessage, the terminal, voice, and webhooks.
 - [config.md](config.md): every setting in `joshua.yaml`, and how to add a
   person or a tool.
+- [mcp-servers.md](mcp-servers.md): how to add a tool, and a tested entry for
+  the weather and for Home Assistant.
 - [memory.md](memory.md): notes, journal, profiles, and retrieval.
 - [operations.md](operations.md): logs, health, updates, backup, and the
   viewer, which is a web page for your notes.
@@ -201,6 +228,7 @@ it listens on the loopback address only. See
 | `Joshua does not know "<id>"` | The id is not in `joshua.yaml`. Add the person, then run `docker compose restart core`. |
 | `channels refused the message (rate_limited)` | Wait one minute. The limit is `channels.limits.per_handle_per_minute`. |
 | A container restarts again and again | `make logs` prints the reason on the first line. |
+| Joshua does not have a tool you added | Run `docker compose logs gateway`. [mcp-servers.md](mcp-servers.md#if-a-server-does-not-start) has a table of causes. |
 | An answer is wrong or out of date | Read what Joshua found: `curl -s -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" 127.0.0.1:8081/admin/kb/events` |
 
 ## Where your data lives
