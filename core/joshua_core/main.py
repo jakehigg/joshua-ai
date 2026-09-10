@@ -248,7 +248,7 @@ def _build_memory(
     )
     recall.register(manager, store, settings)
     injection.register(manager, store, settings, repo)
-    taught_skills.register(manager, store, settings, repo)
+    taught_skills.register(manager, store, settings, repo, indexer.skills)
     return indexer, IndexerLoop(indexer, intervals)
 
 

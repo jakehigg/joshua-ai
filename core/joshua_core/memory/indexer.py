@@ -36,7 +36,15 @@ from joshua_shared.log import get_logger
 
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.chunker import chunk_markdown
-from joshua_core.memory.skills import SKILL_KIND, is_skill_path, parse_skill, skill_slug
+from joshua_core.memory.skill_registry import SkillRegistry
+from joshua_core.memory.skills import (
+    KIND_CONVENTION,
+    SKILL_KIND,
+    Skill,
+    is_skill_path,
+    parse_skill,
+    skill_slug,
+)
 from joshua_core.memory.sources import Document, Source
 from joshua_core.memory.store import MemoryStore
 
@@ -99,11 +107,16 @@ class Indexer:
         *,
         embed_model: str,
         chunk_chars: int,
+        skills: SkillRegistry | None = None,
     ):
         self._store = store
         self._sources = sources
         self._embed_model = embed_model
         self._chunk_chars = chunk_chars
+        # The phrase matcher reads this. It is rebuilt from every skill file on
+        # each pass over ``files``, changed or not, because a phrase match needs
+        # the whole set and parsing a few dozen small files costs nothing.
+        self._skills = skills if skills is not None else SkillRegistry()
         self._locks = {name: asyncio.Lock() for name in sources}
         self._status: dict[str, dict[str, Any]] = {
             name: {"last_run": None, "last_result": None, "last_error": None, "running": False}
@@ -119,6 +132,10 @@ class Indexer:
     @property
     def sources(self) -> dict[str, Source]:
         return self._sources
+
+    @property
+    def skills(self) -> SkillRegistry:
+        return self._skills
 
     def status(self) -> dict[str, Any]:
         """Per-source last run, result counts, last error, and what is held back.
@@ -137,9 +154,31 @@ class Indexer:
             }
         return out
 
+    def _rebuild_skill_registry(self, docs: list[Document]) -> None:
+        """Parse every skill file on the volume and replace the registry.
+
+        Every document is parsed, changed or not: the phrase matcher needs the
+        whole set, and the diff that drives indexing says nothing about the
+        files it decided to skip. A file that does not parse is left out, and
+        the pass that indexes it logs why.
+        """
+        parsed: list[Skill] = []
+        for doc in docs:
+            if not is_skill_path(doc.uri):
+                continue
+            skill = parse_skill(doc.frontmatter, doc.text, path=doc.uri)
+            if skill is not None:
+                parsed.append(skill)
+        self._skills.replace(parsed)
+
     async def _index_document(self, doc: Document) -> int:
         if doc.source == "files" and is_skill_path(doc.uri):
-            return await self._index_skill(doc)
+            rows = await self._index_skill(doc)
+            if rows is not None:
+                return rows
+            # A convention page holds no trigger. It is reference material, so
+            # it is indexed as an ordinary wiki page and a turn reaches it
+            # through recall.
         chunks = chunk_markdown(doc.text, self._chunk_chars)
         embedded: list[tuple[str, str, list[float]]] = []
         for c in chunks:
@@ -162,19 +201,29 @@ class Indexer:
             chunks=embedded,
         )
 
-    async def _index_skill(self, doc: Document) -> int:
-        """Index a taught skill: one ``kind='skill'`` row per trigger phrase.
+    async def _index_skill(self, doc: Document) -> int | None:
+        """Index a command skill: one ``kind='skill'`` row per trigger phrase.
 
-        The trigger phrase alone is embedded (no title breadcrumb — the match is
-        phrase against phrase); the row text is the full instructions. A file
-        that does not parse is skipped with one warning, and its rows are cleared
-        so a broken edit stops firing. An empty trigger list writes no rows.
+        Returns the row count, or None when the page is a convention and the
+        caller must index it as an ordinary wiki page instead.
+
+        The trigger phrase alone is embedded; the row text is the full
+        instructions. A file that does not parse is skipped with one warning,
+        and its rows are cleared so a broken edit stops firing. An empty trigger
+        list writes no rows.
+
+        A row is written for every command page, whatever its match mode. The
+        phrase matcher does not read these rows, but writing them means
+        ``match: semantic`` starts working the moment a person sets it, with no
+        reindex.
         """
         skill = parse_skill(doc.frontmatter, doc.text, path=doc.uri)
         if skill is None:
             logger.warning({"message": "taught skill unparseable; skipped", "path": doc.uri})
             await self._store.kb_delete_item(doc.source, doc.person_id, doc.uri)
             return 0
+        if skill.kind == KIND_CONVENTION:
+            return None
         embedded: list[tuple[str, str, list[float]]] = []
         for trigger in skill.triggers:
             vec = await asyncio.to_thread(embed_module.embed, trigger, self._embed_model)
@@ -233,6 +282,8 @@ class Indexer:
                 docs = [doc async for doc in source.list_documents()]
                 if person is not None:
                     docs = [d for d in docs if d.person_id == person]
+                if name == "files" and person is None:
+                    self._rebuild_skill_registry(docs)
                 state = await self._store.kb_index_state(name)
                 live_keys = {(d.person_id, d.uri) for d in docs}
                 changed = [d for d in docs if full or state.get((d.person_id, d.uri)) != d.rev]

@@ -92,9 +92,17 @@ memory:
     top_k: 2           # chunks injected on a `full` decision
     max_chars: 1200    # per-chunk text cap in the note and the audit row
   skills:
-    enabled: true      # match each turn against taught skills (wiki/skills/<slug>.md)
-    min_sim: 0.62      # similarity floor for a trigger match
-    top_k: 1           # most skills one turn can fire; raise it to fire two
+    enabled: true        # match each turn against taught skills (wiki/skills/<slug>.md)
+    # A skill is matched by phrase: the turn must open with the trigger. This
+    # is how many extra words that carry meaning the turn may hold inside the
+    # match. 2 allows one inserted object ("add MILK to the shopping list").
+    # 0 demands the words exactly.
+    max_extra_words: 2
+    # Only for a page that sets `match: semantic`. Similarity over short
+    # phrases has a high floor: two unrelated triggers measure about 0.62 with
+    # the default model, so this has to sit well above that.
+    min_sim: 0.80
+    top_k: 1             # most skills one turn can fire; raise it to fire two
   embed_model: BAAI/bge-small-en-v1.5
   # In-core RAG over the data volume. `files` is the kernel source and always
   # runs; other adapters are optional. An adapter with no options takes an empty

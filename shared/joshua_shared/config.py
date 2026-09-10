@@ -238,13 +238,22 @@ class Skills(_Model):
     # Taught skills: a member writes ``wiki/skills/<slug>.md`` with trigger
     # phrases; a matching turn fires the instructions.
     #
-    # ``top_k`` is 1 because only the trigger phrase is embedded. Two skills
-    # that answer the same shape of message sit close together: "here's a
-    # plant" and "here's a receipt" measure 0.72, above ``min_sim``. A second
-    # skill then rides in below the one that was asked for, and the agent gets
-    # two sets of instructions. Raise it when you want two.
+    # A command skill is matched by phrase, not by meaning. The turn must open
+    # with the trigger and may hold at most ``max_extra_words`` extra words
+    # that carry meaning inside the matched span. Two is enough for one
+    # inserted object ("add MILK to the shopping list") and few enough that a
+    # sentence which merely mentions the words does not fire.
+    #
+    # ``min_sim`` applies only to a page that asks for ``match: semantic``.
+    # Cosine similarity over short phrases has a high floor: two unrelated
+    # triggers measure 0.62 on average with the default model, so the number
+    # has to sit well above that to mean anything.
+    #
+    # ``top_k`` is 1 because a turn asks for one behaviour. Raise it when you
+    # want a second skill to ride in below the one that was asked for.
     enabled: bool = True
-    min_sim: float = Field(default=0.62, ge=0.0, le=1.0)
+    max_extra_words: int = Field(default=2, ge=0)
+    min_sim: float = Field(default=0.80, ge=0.0, le=1.0)
     top_k: int = Field(default=1, ge=1)
 
 

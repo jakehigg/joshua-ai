@@ -49,6 +49,10 @@ class TurnCtx:
     person_id: str | None
     turn_id: str
     profile: str = ""
+    # The role this conversation carries: "member" or "guest". A taught skill
+    # whose ``for`` names a role is matched against it. A guest is the safe
+    # default, as it is everywhere else.
+    role: str = "guest"
     # The message embedding, computed once and shared between providers (the
     # injection provider fills it; the taught-skill provider reuses it).
     embedding: list[float] | None = None
@@ -439,6 +443,7 @@ class ConversationManager:
             person_id=turn_person_id,
             turn_id=turn_id,
             profile=mc.profile,
+            role=self._conversation_role(channel, conversation),
         )
         provider_notes: list[str] = []
         for provider in self._context_providers:

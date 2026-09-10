@@ -1,11 +1,24 @@
-"""Taught skills — parsing for ``wiki/skills/<slug>.md``.
+"""Taught skills — parsing and phrase matching for ``wiki/skills/<slug>.md``.
 
 A taught skill is a Markdown file a member writes to the shared wiki. The
-frontmatter holds a display ``name`` and a list of trigger phrases; the body is
-the instructions the agent follows when a phrase fires. The indexer turns each
-trigger into one ``kb_chunk`` row with ``kind = 'skill'`` (see
-``memory/indexer.py``), and the taught-skill provider matches a turn against
-those rows (see ``engine/taught_skills.py``).
+frontmatter says what the page is, who it is for, and how it is matched; the
+body is the instructions the agent follows.
+
+Two kinds of page live in the folder:
+
+- ``kind: command`` is a behaviour a person asks for by name. It holds trigger
+  phrases and it fires when one of them matches the turn. It can change the
+  state of the world, so it must fire only when a person asks for it.
+- ``kind: convention`` is reference material for a domain. It holds no
+  triggers and it never fires from a phrase. The wiki index still holds it, so
+  a turn reaches it through ordinary recall.
+
+A command page is matched by phrase, not by meaning. ``match: phrase`` (the
+default) is near-exact: the turn must open with the trigger, and it may hold
+only a small number of extra words. ``match: semantic`` opts the page in to the
+vector match for an intent that is genuinely said many ways. Match strictness
+follows the cost of a wrong fire: a page that only shapes an answer can be
+loose, a page that calls a device must not be.
 
 This module is dependency-light (stdlib only) so the offline parser tests import
 it without psycopg.
@@ -15,7 +28,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from joshua_shared.log import get_logger
@@ -25,30 +38,135 @@ logger = get_logger("memory.skills")
 # The kind stored on every trigger row. It is filtered out of ordinary recall.
 SKILL_KIND = "skill"
 
+# Page kinds. ``command`` fires from a trigger phrase; ``convention`` never does.
+KIND_COMMAND = "command"
+KIND_CONVENTION = "convention"
+KINDS = (KIND_COMMAND, KIND_CONVENTION)
+
+# Match modes. ``phrase`` is the near-exact lexical match in this module;
+# ``semantic`` is the vector match in ``engine/taught_skills.py``.
+MATCH_PHRASE = "phrase"
+MATCH_SEMANTIC = "semantic"
+MATCH_MODES = (MATCH_PHRASE, MATCH_SEMANTIC)
+
+# Audience words that name a role instead of one person.
+AUDIENCE_EVERYONE = "everyone"
+AUDIENCE_MEMBERS = "members"
+AUDIENCE_GUESTS = "guests"
+_ROLE_WORDS = {AUDIENCE_MEMBERS: "member", AUDIENCE_GUESTS: "guest"}
+
 # A skill file is ``wiki/skills/<slug>.md`` at that exact depth. A file deeper in
 # the tree (``wiki/skills/sub/x.md``) is an ordinary wiki page — the slug pattern
 # forbids a slash, so a deeper path never matches.
 _SKILL_PREFIX = "wiki/skills/"
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
+# A person id is the same slug the config uses.
+_PERSON_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+
 # One trigger phrase is capped at this many characters; a file keeps at most this
 # many phrases. A phrase past the cap is dropped with one warning.
 MAX_TRIGGER_CHARS = 200
 MAX_TRIGGERS = 20
 
+# A trigger must hold at least this many words. One word is not a trigger: it
+# fires on every turn that mentions it.
+MIN_TRIGGER_WORDS = 2
+
+# A trigger must not end with one of these. An article or a conjunction demands
+# a word that the trigger does not name, so the phrase is the front half of a
+# sentence: "turn on the" is a fragment, "turn on the lights" is a phrase.
+#
+# A preposition is NOT here on purpose. "remind me to", "are we out of", and
+# "put some music on" end with one and are complete triggers: the object of the
+# request follows, and the person supplies it ("remind me to *call the
+# dentist*"). Refusing those would refuse the way people speak.
+_FRAGMENT_TAILS = frozenset(
+    {
+        "a", "an", "the", "my", "your", "our", "their", "his", "her", "its",
+        "and", "or", "but",
+    }
+)  # fmt: skip
+
+# Words a turn may open with before the trigger starts. The list is short and
+# deliberate: it holds address and politeness only. A word that carries meaning
+# ("did", "is", "what", "have") is not here, so a turn that talks *about* a
+# behaviour does not fire it.
+_LEAD_FILLERS = frozenset(
+    {
+        "hey", "hi", "hello", "ok", "okay", "yeah", "yes",
+        "please", "can", "could", "would", "will", "you", "joshua",
+        "just", "now", "i", "we", "want", "need", "wanna", "gonna",
+        "to", "a", "an", "the", "my", "our", "lets",
+    }
+)  # fmt: skip
+
+# Words that do not count against the extra-word budget. They carry no request.
+_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "my", "your", "our", "their", "his", "her", "its",
+        "to", "of", "in", "on", "at", "for", "with", "and", "or", "from", "by",
+        "is", "are", "was", "were", "be", "been", "am",
+        "please", "just", "now", "some", "any", "that", "this", "these", "those",
+        "it", "me", "him", "them", "us", "you", "i", "we", "they",
+        "up", "down", "out", "over", "there", "here",
+    }
+)  # fmt: skip
+
+# A turn that opens with one of these asks for the opposite of the behaviour.
+# The anchor rule already stops most of them, because none of these is a lead
+# filler. The check is kept because a denied negation is security-relevant and
+# a test must be able to name it.
+_NEGATIONS = frozenset({"dont", "don't", "do", "never", "stop", "cancel", "without", "not"})
+
+_WORD = re.compile(r"[a-z0-9']+")
+
+
+def normalize(text: str) -> tuple[str, ...]:
+    """Split text into comparable words: lower case, no punctuation.
+
+    Both sides of a match go through this, so a trigger and a turn are compared
+    the same way. The curly apostrophe folds to the straight one, because a
+    phone writes one and a wiki page writes the other.
+    """
+    folded = (text or "").lower().replace("’", "'").replace("ʼ", "'")
+    return tuple(_WORD.findall(folded))
+
+
+def _content_words(words: Iterable[str]) -> list[str]:
+    return [w for w in words if w not in _STOPWORDS]
+
 
 @dataclass(frozen=True)
-class Skill:
-    """One parsed taught skill.
+class Audience:
+    """Who a skill fires for.
 
-    ``name`` is the display name (empty when the frontmatter omits it; the
-    indexer then falls back to the slug). ``triggers`` is the cleaned tuple of
-    phrases — empty means the skill is off. ``instructions`` is the body.
+    ``everyone`` is the default and allows every person. Otherwise a skill
+    allows a person named in ``people``, or a person whose role is in
+    ``roles``. An audience that names nobody allows nobody.
     """
 
-    name: str
-    triggers: tuple[str, ...]
-    instructions: str
+    everyone: bool = True
+    people: frozenset[str] = frozenset()
+    roles: frozenset[str] = frozenset()
+
+    def allows(self, person_id: str | None, role: str | None) -> bool:
+        """True when this skill may fire for the given person and role."""
+        if self.everyone:
+            return True
+        if person_id and person_id in self.people:
+            return True
+        return bool(role) and role in self.roles
+
+    def describe(self) -> str:
+        """A short, stable rendering, for a log line and an audit row."""
+        if self.everyone:
+            return AUDIENCE_EVERYONE
+        parts = sorted(self.roles) + sorted(self.people)
+        return ",".join(parts) if parts else "nobody"
+
+
+EVERYONE = Audience()
 
 
 def is_skill_path(uri: str) -> bool:
@@ -68,13 +186,12 @@ def skill_slug(uri: str) -> str:
     return uri[len(_SKILL_PREFIX) : -len(".md")]
 
 
-def _parse_trigger_list(raw: str) -> list[str] | None:
-    """Read the frontmatter ``triggers`` value as a list of phrases, or None.
+def _parse_list(raw: str) -> list[str] | None:
+    """Read a frontmatter value as a list, or None when it is not a list.
 
-    The value is a raw string such as ``["movie time", "let's watch a movie"]``.
-    A value that is not a bracketed list does not parse as a list and returns
-    None. An empty list ``[]`` returns an empty list — a valid, switched-off
-    skill.
+    The value is a raw string such as ``["movie time", "start the film"]``. A
+    value that is not a bracketed list returns None. An empty list ``[]``
+    returns an empty list.
     """
     raw = raw.strip()
     if not (raw.startswith("[") and raw.endswith("]")):
@@ -91,21 +208,95 @@ def _parse_trigger_list(raw: str) -> list[str] | None:
     return [part.strip().strip("'\"") for part in inner.split(",")]
 
 
-def clean_triggers(triggers: Iterable[str], *, path: str = "") -> tuple[str, ...]:
-    """Strip, lower-case, drop empties and duplicates, cap length and count.
+def parse_audience(raw: str | None, *, path: str = "") -> Audience:
+    """Read the frontmatter ``for`` value.
 
-    Logs one warning that names ``path`` when the count cap drops a phrase.
+    Accepts ``everyone``, ``members``, ``guests``, one person id, or a list that
+    mixes person ids and those words. An absent or empty value is
+    ``everyone``. A value that names nothing usable logs one warning and
+    returns an audience that allows nobody, because a skill whose audience
+    cannot be read must not fall open.
+    """
+    if raw is None:
+        return EVERYONE
+    text = raw.strip().strip("\"'")
+    if not text:
+        return EVERYONE
+    items = _parse_list(raw)
+    if items is None:
+        items = [text]
+
+    people: set[str] = set()
+    roles: set[str] = set()
+    unknown: list[str] = []
+    for item in items:
+        word = item.strip().strip("\"'").lower()
+        if not word:
+            continue
+        if word == AUDIENCE_EVERYONE:
+            return EVERYONE
+        if word in _ROLE_WORDS:
+            roles.add(_ROLE_WORDS[word])
+        elif _PERSON_ID.match(word):
+            people.add(word)
+        else:
+            unknown.append(word)
+
+    if unknown:
+        logger.warning(
+            {
+                "message": "taught skill audience has unreadable names",
+                "path": path,
+                "names": unknown,
+            }
+        )
+    if not people and not roles:
+        logger.warning({"message": "taught skill audience allows nobody", "path": path})
+    return Audience(everyone=False, people=frozenset(people), roles=frozenset(roles))
+
+
+def trigger_problem(phrase: str) -> str | None:
+    """Say why a trigger phrase is unusable, or None when it is good.
+
+    A trigger must be something a person says. A single word fires on every
+    turn that mentions it, and a phrase that ends with an article is the front
+    half of a sentence.
+
+    A trigger made only of small words is allowed. "are we out of" carries no
+    word the stop list would keep, and it is still exactly what a person says.
+    """
+    words = normalize(phrase)
+    if len(words) < MIN_TRIGGER_WORDS:
+        return "fewer than two words"
+    if words[-1] in _FRAGMENT_TAILS:
+        return f"ends with {words[-1]!r}, so it is a fragment"
+    return None
+
+
+def clean_triggers(triggers: Iterable[str], *, path: str = "") -> tuple[str, ...]:
+    """Strip, lower-case, drop empties, duplicates, and unusable phrases.
+
+    Logs one warning per rejected phrase that names ``path`` and the reason, so
+    a person who writes a bad trigger can find out why it never fires.
     """
     out: list[str] = []
     seen: set[str] = set()
     for raw in triggers:
-        phrase = raw.strip().lower()
-        if not phrase:
-            continue
-        phrase = phrase[:MAX_TRIGGER_CHARS]
-        if phrase in seen:
+        phrase = raw.strip().lower()[:MAX_TRIGGER_CHARS]
+        if not phrase or phrase in seen:
             continue
         seen.add(phrase)
+        problem = trigger_problem(phrase)
+        if problem:
+            logger.warning(
+                {
+                    "message": "taught skill trigger rejected",
+                    "path": path,
+                    "trigger": phrase,
+                    "reason": problem,
+                }
+            )
+            continue
         out.append(phrase)
     if len(out) > MAX_TRIGGERS:
         logger.warning(
@@ -120,23 +311,213 @@ def clean_triggers(triggers: Iterable[str], *, path: str = "") -> tuple[str, ...
     return tuple(out)
 
 
+@dataclass(frozen=True)
+class Skill:
+    """One parsed taught skill.
+
+    ``name`` is the display name (empty when the frontmatter omits it; the
+    caller then falls back to the slug). ``triggers`` is the cleaned tuple of
+    phrases — empty means the skill never fires. ``instructions`` is the body.
+    """
+
+    name: str
+    triggers: tuple[str, ...]
+    instructions: str
+    kind: str = KIND_COMMAND
+    audience: Audience = EVERYONE
+    match: str = MATCH_PHRASE
+    path: str = ""
+
+    @property
+    def fires_from_phrase(self) -> bool:
+        return self.kind == KIND_COMMAND and self.match == MATCH_PHRASE and bool(self.triggers)
+
+    @property
+    def fires_from_meaning(self) -> bool:
+        return self.kind == KIND_COMMAND and self.match == MATCH_SEMANTIC and bool(self.triggers)
+
+    def display_name(self) -> str:
+        return self.name or skill_slug(self.path) or "skill"
+
+
+def _one_of(raw: str | None, allowed: Sequence[str], default: str, *, field: str, path: str) -> str:
+    if raw is None:
+        return default
+    word = raw.strip().strip("\"'").lower()
+    if not word:
+        return default
+    if word in allowed:
+        return word
+    logger.warning(
+        {
+            "message": f"taught skill {field} not understood; using the default",
+            "path": path,
+            "value": word,
+            "default": default,
+        }
+    )
+    return default
+
+
 def parse_skill(frontmatter: Mapping[str, str], body: str, *, path: str = "") -> Skill | None:
     """Parse a taught skill, or None when the file is not a usable skill.
 
-    Returns None when the frontmatter is missing, when ``triggers`` does not
-    parse as a list, or when the body is empty. ``path`` names the file in the
-    trigger-cap warning.
+    Returns None when the frontmatter is missing or the body is empty. A
+    command page with no readable ``triggers`` key is not a skill. A convention
+    page needs no triggers and drops any it holds.
     """
     if not frontmatter:
         return None
     instructions = (body or "").strip()
     if not instructions:
         return None
+
+    kind = _one_of(frontmatter.get("kind"), KINDS, KIND_COMMAND, field="kind", path=path)
+    match = _one_of(frontmatter.get("match"), MATCH_MODES, MATCH_PHRASE, field="match", path=path)
+    audience = parse_audience(frontmatter.get("for"), path=path)
+    name = (frontmatter.get("name") or "").strip().strip("\"'")
+
+    if kind == KIND_CONVENTION:
+        if frontmatter.get("triggers"):
+            logger.warning(
+                {"message": "convention page holds triggers; ignoring them", "path": path}
+            )
+        return Skill(
+            name=name,
+            triggers=(),
+            instructions=instructions,
+            kind=kind,
+            audience=audience,
+            match=match,
+            path=path,
+        )
+
     if "triggers" not in frontmatter:
         return None
-    parsed = _parse_trigger_list(frontmatter["triggers"])
+    parsed = _parse_list(frontmatter["triggers"])
     if parsed is None:
         return None
-    triggers = clean_triggers(parsed, path=path)
-    name = (frontmatter.get("name") or "").strip()
-    return Skill(name=name, triggers=triggers, instructions=instructions)
+    return Skill(
+        name=name,
+        triggers=clean_triggers(parsed, path=path),
+        instructions=instructions,
+        kind=kind,
+        audience=audience,
+        match=match,
+        path=path,
+    )
+
+
+@dataclass(frozen=True)
+class PhraseMatch:
+    """One trigger that matched a turn, and how closely."""
+
+    trigger: str
+    # How many words of the trigger were matched. A longer trigger is more
+    # specific, so it wins over a shorter one.
+    length: int
+    # Extra words the turn held inside the matched span. Fewer is closer.
+    extra: int
+
+
+def match_trigger(turn: str, trigger: str, *, max_extra: int) -> PhraseMatch | None:
+    """Match one trigger against one turn, near-exact. None when it does not.
+
+    Three rules make this near-exact and not merely "contains":
+
+    1. **Anchor.** The turn must open with the trigger. Only address and
+       politeness words may come first ("please", "can you"). A turn that says
+       something else first talks *about* the behaviour and does not ask for
+       it, so "what does the movie time skill do" does not fire "movie time".
+    2. **Order.** Every word of the trigger that carries the request must
+       appear, in order. An article or a pronoun the person left out does not
+       break the match, so the trigger "turn on the reading lights" still fires
+       on "turn on reading lights".
+    3. **Budget.** Between the first and the last matched word the turn may
+       hold at most ``max_extra`` words that carry meaning. Articles and
+       pronouns are free, so "turn on THE good day lights" still matches, and
+       one inserted object still matches ("add MILK to the shopping list"),
+       but a sentence that merely contains the words does not.
+
+    Words after the last matched word are free. A person may ask for a
+    behaviour and then ask for something else in the same message.
+    """
+    t_words = normalize(trigger)
+    m_words = normalize(turn)
+    if not t_words or not m_words:
+        return None
+
+    # Rule 2: the trigger words, in order. A stop word the person left out is
+    # skipped; a word that carries the request is not.
+    matched: list[int] = []
+    pos = -1
+    for word in t_words:
+        try:
+            found = m_words.index(word, pos + 1)
+        except ValueError:
+            if word in _STOPWORDS:
+                continue
+            return None
+        matched.append(found)
+        pos = found
+    if not matched:
+        return None
+
+    # Rule 1: refuse anything but address and politeness before the trigger.
+    lead = m_words[: matched[0]]
+    if any(w in _NEGATIONS for w in lead):
+        return None
+    if any(w not in _LEAD_FILLERS for w in lead):
+        return None
+
+    # Rule 3: the extra-word budget, inside the matched span only.
+    span = set(range(matched[0], matched[-1] + 1))
+    inside = span - set(matched)
+    extra = len(_content_words(m_words[i] for i in sorted(inside)))
+    if extra > max_extra:
+        return None
+    return PhraseMatch(trigger=trigger, length=len(matched), extra=extra)
+
+
+def match_skill(turn: str, skill: Skill, *, max_extra: int) -> PhraseMatch | None:
+    """The closest trigger of one skill that matches the turn, or None.
+
+    A skill fires once. When two of its triggers match, the longer one is the
+    better description of what the person said.
+    """
+    best: PhraseMatch | None = None
+    for trigger in skill.triggers:
+        found = match_trigger(turn, trigger, max_extra=max_extra)
+        if found is None:
+            continue
+        if best is None or (found.length, -found.extra) > (best.length, -best.extra):
+            best = found
+    return best
+
+
+def match_skills(
+    turn: str,
+    skills: Iterable[Skill],
+    *,
+    person_id: str | None,
+    role: str | None,
+    max_extra: int,
+    top_k: int = 1,
+) -> list[tuple[Skill, PhraseMatch]]:
+    """Every phrase skill the person may run that matches the turn, best first.
+
+    "Best" is the most specific trigger: the one that matched the most words,
+    and then the one that needed the fewest extra words. A skill the audience
+    denies never reaches the list.
+    """
+    hits: list[tuple[Skill, PhraseMatch]] = []
+    for skill in skills:
+        if not skill.fires_from_phrase:
+            continue
+        if not skill.audience.allows(person_id, role):
+            continue
+        found = match_skill(turn, skill, max_extra=max_extra)
+        if found is not None:
+            hits.append((skill, found))
+    hits.sort(key=lambda pair: (-pair[1].length, pair[1].extra, pair[0].path))
+    return hits[:top_k]

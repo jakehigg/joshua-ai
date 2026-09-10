@@ -78,6 +78,12 @@ Search your journal for the last seven days and give the person a short
 summary, a line for each day that has something worth reporting.
 ```
 
+Write the trigger **as the person said it**: "when I say *turn on the reading
+lights*" makes it `turn on the reading lights`, not `reading lights`. The match
+is by phrase, so a shortened one fires on turns nobody meant. Set `for:` —
+`everyone` (the default), `members`, `guests`, a person id, or a list — when a
+skill holds one person's own choices; ask when it is not obvious.
+
 - **Teach:** `write_file("wiki/skills/<slug>.md", mode="create")`, the body
   imperative and complete on its own. A slug is lower-case letters, digits,
   and hyphens.
@@ -88,3 +94,5 @@ summary, a line for each day that has something worth reporting.
 
 Only a member teaches or changes a skill. A skill starts after the next index
 pass (about a minute), never on the turn that taught it, so say to wait.
+Standing guidance for a domain is not a skill: give it `kind: convention` and
+no triggers, and recall brings it back when the subject comes up.

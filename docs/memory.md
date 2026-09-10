@@ -109,48 +109,93 @@ docker compose restart core
 ## Taught skills
 
 A person can teach Joshua a skill: "when I say X, do Y". A taught skill is one
-Markdown file at `wiki/skills/<slug>.md`. The trigger phrases sit in the
-frontmatter; the body is the instructions Joshua follows when a phrase matches.
+Markdown file at `wiki/skills/<slug>.md`. The frontmatter says what the page
+is, who it is for, and how it is matched; the body is the instructions.
 
 ```
 ---
 name: movie time
-triggers: ["movie time", "let's watch a movie"]
+kind: command
+for: everyone
+match: phrase
+triggers: ["movie time", "start movie night"]
 ---
 Dim the living room lights to 30 percent and turn on the TV.
 ```
 
-- `name` is the display name. It falls back to the slug when it is absent.
-- `triggers` is a list of phrases. An empty list turns the skill off.
-- The body is the instructions.
+| key | value | default |
+| --- | --- | --- |
+| `name` | the display name | the slug |
+| `kind` | `command` or `convention` | `command` |
+| `for` | `everyone`, `members`, `guests`, a person id, or a list | `everyone` |
+| `match` | `phrase` or `semantic` | `phrase` |
+| `triggers` | the phrases that fire it | none |
 
-The indexer turns each trigger into one row in the index, with the row kind
-`skill`. Before each turn, core matches the message against those rows. A match
-above `memory.skills.min_sim` (0.62) puts the instructions in front of the
-agent, best first, up to `memory.skills.top_k` (1) skills. The match is by
-meaning, so a paraphrase of a trigger still fires.
+### Two kinds of page
 
-One turn fires one skill, because only the trigger is embedded. Two skills that
-answer the same shape of message sit close together: "here's a plant" and
-"here's a receipt" measure 0.72. A higher `top_k` lets the second one ride in
-below the skill that was asked for. Raise it when you want two.
+A **command** page is a behaviour a person asks for by name. It holds triggers
+and it fires when one matches.
+
+A **convention** page is standing guidance for a domain: how to choose a device
+entity, how the task lists are laid out. It holds no triggers and it never
+fires from a phrase. It is indexed as an ordinary wiki page, so a turn reaches
+it through recall when the subject comes up. Give a page of guidance
+`kind: convention`: a trigger invented for it fires it on turns nobody meant.
+
+### How a phrase is matched
+
+A command page is matched by phrase, not by meaning. Three rules make the match
+near-exact:
+
+1. **The turn opens with the trigger.** Only address and politeness may come
+   first, so "can you start movie night please" fires and "what does movie
+   time do" does not. A turn that says something else first is talking about
+   the behaviour, not asking for it.
+2. **Every word that carries the request appears, in order.** An article the
+   person left out does not break the match.
+3. **Up to `memory.skills.max_extra_words` extra words** that carry meaning may
+   sit inside the match. Two is enough for one inserted object ("add *milk* to
+   the shopping list") and few enough that a sentence which merely holds the
+   words does not fire.
+
+Set `match: semantic` for an intent that is genuinely said many ways, and the
+page is matched by meaning instead, above `memory.skills.min_sim`. Choose it by
+the cost of a wrong fire: a page that only shapes an answer can be loose, a
+page that turns on a device must not be. Similarity over short phrases has a
+high floor — two unrelated triggers measure about 0.62 with the default model —
+so `min_sim` is 0.80 and a lower value means very little.
+
+One turn fires one skill. Raise `memory.skills.top_k` to fire more. When two
+skills match, the one whose trigger matched more words wins: a page for one
+room beats a page for the whole house.
+
+### What makes a usable trigger
+
+A trigger is refused, with a warning that names the file and the reason, when
+it holds fewer than two words, or when it ends with an article, a preposition,
+or an auxiliary. `announce` fires on every turn that mentions it, and
+`turn on the` is the front half of a sentence. Write the phrase the way a
+person says it, and keep the verb.
+
+### Who can teach, who can fire
+
+A member writes `wiki/skills/<slug>.md` through the files MCP. The wiki is
+read-only for a guest, so a guest cannot teach a skill or change one.
+
+`for` says who a skill fires for. It is a match rule, not a permission: a guest
+can still read any page of the wiki. Use it when a skill holds one person's own
+choices, so that two people can teach the same words and each get their own
+result.
 
 A trigger row is an instruction, not a note. It never appears in the per-turn
 injection note and never comes back from `search_memory`.
-
-### Who can teach, who can trigger
-
-A member writes `wiki/skills/<slug>.md` through the files MCP. The wiki is
-read-only for a guest, so a guest cannot teach a skill or change one. There is
-one wiki, so a taught skill is shared: it fires for every person, a guest
-included. A guest can already read the file, so a guest match adds no access.
 
 ### The index delay
 
 A skill starts to work after the next index pass
 (`memory.index_interval_s`, 60 seconds by default). A skill never fires on the
-turn that taught it. To stop a skill, a member sets `triggers: []` or deletes the
-file. A deleted file stops firing on the next pass.
+turn that taught it. To stop a skill, a member sets `triggers: []` or deletes
+the file. A deleted file stops firing on the next pass.
 
 ## The journal is Joshua's, not a person's
 
