@@ -66,7 +66,7 @@ down:
 
 # Drop the volumes too. Asks first, because this deletes the database and data.
 nuke:
-	@printf 'This deletes the pgdata, data, and claude-config volumes. Continue? [y/N] '; \
+	@printf 'This deletes the pgdata, data, claude-config, model-cache, and mcp-store volumes. Continue? [y/N] '; \
 	read ans; [ "$$ans" = "y" ] || { echo aborted; exit 1; }; \
 	$(COMPOSE) down -v
 

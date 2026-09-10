@@ -146,6 +146,32 @@ two subdirectories writable for uid 1000. An NFS export usually arrives owned by
 root, and Kubernetes does not apply `fsGroup` to an NFS volume. Leave it on
 unless you know your storage arrives with the right owner.
 
+## The MCP package store
+
+An `mcp:` entry with a `package:` field is a server the gateway installs itself
+(see docs/config.md). The install goes to `/opt/joshua-mcp` on a second volume,
+which only the gateway mounts:
+
+```yaml
+gateway:
+  mcpStore:
+    enabled: true
+    size: 2Gi
+    storageClass: ""
+    existingClaim: ""
+```
+
+It is `ReadWriteOnce`, because one pod mounts it, and it must not go on the
+`/data` export: `node_modules` on NFS is slow, and this is derived data. Nothing
+here is backed up. A lost volume costs one reinstall at the next start.
+
+Turn it off only when no entry has a `package:` field. Without it an install
+writes into the pod filesystem and runs again on every restart.
+
+Each upstream credential is a key in `secrets.gateway`, as `${VAR:-}` in your
+`joshua.yaml`. An entry whose credential is empty is turned off, and `/readyz`
+counts it in `disabled`.
+
 ## The viewer
 
 The chart can also run the read-only web viewer, which is the gateway image

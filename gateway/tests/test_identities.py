@@ -199,4 +199,11 @@ async def test_readyz_counts_each_instance(monkeypatch, config_path):
     app = build(monkeypatch, config_path, both())
     async with lifespan(app):
         body = (await _get(app, "/readyz", "core")).json()
-    assert body == {"ok": True, "connected": 2, "errored": 0, "total": 2}
+    assert body == {
+        "ok": True,
+        "connected": 2,
+        "errored": 0,
+        "installing": 0,
+        "disabled": 0,
+        "total": 2,
+    }

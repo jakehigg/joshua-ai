@@ -66,6 +66,12 @@ spec:
             - name: data
               mountPath: /data
             {{- end }}
+            {{- if .Values.gateway.mcpStore.enabled }}
+            {{/* The MCP package store. The gateway installs each `package:`
+                 entry here at start and reuses it on the next start. */}}
+            - name: mcp-store
+              mountPath: /opt/joshua-mcp
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -74,6 +80,11 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Values.persistence.existingClaim | default "joshua-data" }}
+        {{- end }}
+        {{- if .Values.gateway.mcpStore.enabled }}
+        - name: mcp-store
+          persistentVolumeClaim:
+            claimName: {{ .Values.gateway.mcpStore.existingClaim | default "joshua-mcp-store" }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}

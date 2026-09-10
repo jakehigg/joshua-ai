@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
+from typing import Any
 
 from joshua_shared.log import get_logger
 from mcp import ClientSession
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
+from joshua_gateway import mcp_store
 from joshua_gateway.catalog import ServerSpec
 from joshua_gateway.observability import (
     CALL_LOG,
@@ -60,12 +62,21 @@ class Upstream:
         self.error: str | None = None
         self.tool_count: int | None = None
         self.tools: list[str] = []
+        # A `package` entry: the install record once it is in the store, and the
+        # two transient states the supervisor passes through.
+        self.install: dict[str, Any] | None = None
+        self.installing = False
+        self.disabled: str | None = None
         # Serializes forwarded upstream calls (stdio is not safe interleaved) and
         # doubles as the drain barrier during a reload.
         self._lock = asyncio.Lock()
         self._reload = asyncio.Event()
         self._stop = asyncio.Event()
         self._connected = asyncio.Event()
+        # Set whenever no session is live. `disable` waits on it, so a reload
+        # that turns an entry off returns with the entry already off.
+        self._idle = asyncio.Event()
+        self._idle.set()
         self._task: asyncio.Task | None = None
 
     # -- public control surface ---------------------------------------------
@@ -87,6 +98,23 @@ class Upstream:
             or spec.tool_filter != self.spec.tool_filter
         )
 
+    async def disable(self, timeout: float = _DRAIN_TIMEOUT_S) -> None:  # noqa: ASYNC109
+        """Turn this instance off and return once its session is gone.
+
+        For a spec that cannot connect at all, such as an entry whose credential
+        is now empty. The supervisor keeps the instance and picks it up again on
+        the reload after the credential is set.
+        """
+        self.disabled = self.spec.disabled_reason
+        self._connected.clear()
+        self._reload.set()
+        try:
+            await asyncio.wait_for(self._idle.wait(), timeout)
+        except TimeoutError:
+            logger.warning(
+                {"message": "disable timed out; session still closing", "server": self.name}
+            )
+
     async def stop(self) -> None:
         self._stop.set()
         self._reload.set()  # wake whichever wait the supervisor is in
@@ -102,13 +130,21 @@ class Upstream:
         """Coarse state for ``/readyz`` and ``/admin/inventory``.
 
         ``connecting`` = never up yet (no mgr, no error), the warm-up state;
-        ``connected`` = a live session; ``error`` = the last connect failed.
+        ``connected`` = a live session; ``error`` = the last connect or install
+        failed; ``installing`` = the package install is running; ``disabled`` =
+        a configured credential is empty, so the entry never starts.
         """
         if self.connected:
             return "connected"
+        if self.disabled is not None:
+            return "disabled"
+        if self.installing:
+            return "installing"
         return "error" if self.error else "connecting"
 
     async def wait_connected(self, timeout: float) -> bool:  # noqa: ASYNC109 — control surface
+        if self.spec.disabled_reason is not None:
+            return False  # it will never connect, so do not hold the boot open
         try:
             await asyncio.wait_for(self._connected.wait(), timeout)
             return True
@@ -160,11 +196,65 @@ class Upstream:
 
     # -- supervisor ----------------------------------------------------------
 
+    async def _ensure_installed(self) -> None:
+        """Install this entry's package, unless the store already holds this spec.
+
+        Runs before the first connect and again after a spec change. The install
+        is off the event loop, so the other entries keep serving while it runs.
+        """
+        request = mcp_store.InstallRequest.from_connect_cfg(self.label, self.spec.connect_cfg)
+        if request is None:
+            self.install = None
+            return
+        # Read the store first, so a start on a store that already holds this
+        # spec neither logs an install nor reports `installing` in /readyz.
+        record = self.install or mcp_store.read_record(self.label)
+        if mcp_store.is_current(request, record):
+            self.install = record
+            return
+        self.installing = True
+        logger.info(
+            {"message": "installing mcp package", "server": self.name, "package": request.spec.raw}
+        )
+        try:
+            self.install = await mcp_store.ensure_async(request)
+        finally:
+            self.installing = False
+
+    def _resolved_cfg(self) -> dict[str, Any]:
+        """The connect config with the install's own command and PATH filled in."""
+        cfg = dict(self.spec.connect_cfg)
+        if self.install is None:
+            return cfg
+        cfg["command"] = mcp_store.resolve_command(self.label, self.install, cfg.get("command"))
+        cfg["cwd"] = str(mcp_store.entry_dir(self.label))
+        cfg["path_prepend"] = [str(p) for p in mcp_store.bin_paths(self.label, self.install)]
+        return cfg
+
     async def _supervise(self) -> None:
         failures = 0
         while not self._stop.is_set():
             self._reload.clear()
+            self._idle.set()
+            reason = self.spec.disabled_reason
+            if reason is not None:
+                # Not an error and not a retry: the entry has no credential to
+                # use. It starts on the next reload, when the value is set.
+                if self.disabled != reason:
+                    logger.warning(
+                        {
+                            "message": "upstream disabled: the credential is empty",
+                            "server": self.name,
+                            "detail": reason,
+                        }
+                    )
+                self.disabled = reason
+                self.error = None
+                await self._reload.wait()
+                continue
+            self.disabled = None
             try:
+                await self._ensure_installed()
                 await self._serve_once()
                 failures = 0
             except Exception as exc:  # noqa: BLE001 — reconnect, never die
@@ -188,7 +278,9 @@ class Upstream:
     async def _serve_once(self) -> None:
         spec = self.spec
         async with AsyncExitStack() as stack:
-            read, write = await stack.enter_async_context(upstream_streams(spec.connect_cfg))
+            read, write = await stack.enter_async_context(
+                upstream_streams(self._resolved_cfg(), name=self.name)
+            )
             session = await stack.enter_async_context(ClientSession(read, write))
             init = await session.initialize()
             server = build_upstream_server(
@@ -225,6 +317,7 @@ class Upstream:
 
             self.mgr = mgr
             self.error = None
+            self._idle.clear()
             self._connected.set()
             logger.info(
                 {"message": "upstream connected", "server": self.name, "tools": self.tool_count}
@@ -234,6 +327,7 @@ class Upstream:
             finally:
                 self._connected.clear()
                 self.mgr = None
+                self._idle.set()
                 # The bound sessions belong to the manager that is closing; drop
                 # them so a reconnect starts each caller fresh.
                 SESSIONS.clear_server(self.name)

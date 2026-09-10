@@ -68,9 +68,21 @@ services:
       <<: [*fleet-tokens, *runtime-vars]
       JOSHUA_CONFIG: /etc/joshua/joshua.yaml
       ADMIN_CALLERS: laptop
+    # Every upstream credential an `mcp:` entry names with `${VAR:-}`: one
+    # `NAME=value` line per variable in `.env.gateway`, which is yours and is
+    # gitignored. It is optional, so a stack with no upstream credential starts
+    # without it. This file, not `.env`, is where an MCP server's token goes:
+    # the gateway is the only container that may hold one.
+    env_file:
+      - path: .env.gateway
+        required: false
     volumes:
       - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
       - data:/data
+      # The MCP package store. Derived data: the gateway installs each
+      # `package:` entry here at start. It is not backed up, and `make nuke`
+      # drops it; the next start installs everything again.
+      - mcp-store:/opt/joshua-mcp
     healthcheck: *app-healthcheck
 
   core:
@@ -166,3 +178,4 @@ volumes:
   data:
   claude-config:
   model-cache:
+  mcp-store:

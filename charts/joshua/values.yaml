@@ -169,6 +169,22 @@ gateway:
   image: ""
   strategy: Recreate
   adminCallers: laptop,ci
+  # The store for the MCP servers the gateway installs itself (an `mcp:` entry
+  # with a `package:` field). It is derived data, not the data volume: nothing
+  # here is backed up, and a lost volume costs one reinstall at the next start.
+  # It is ReadWriteOnce and gateway-only, so it never goes on the NFS export
+  # that carries /data: node_modules on NFS is slow.
+  #
+  # Turn it off only when no entry has a `package:` field. Without it an install
+  # writes into the pod's own filesystem and runs again on every restart.
+  mcpStore:
+    enabled: true
+    # Bind an existing claim instead of making one.
+    existingClaim: ""
+    size: 2Gi
+    # An empty string disables dynamic provisioning. Leave it unset to use the
+    # default class.
+    storageClass: ""
   resources:
     requests:
       cpu: 100m
