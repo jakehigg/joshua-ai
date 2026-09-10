@@ -155,8 +155,8 @@ near-exact:
    person left out does not break the match.
 3. **Up to `memory.skills.max_extra_words` extra words** that carry meaning may
    sit inside the match. Two is enough for one inserted object ("add *milk* to
-   the shopping list") and few enough that a sentence which merely holds the
-   words does not fire.
+   the list") and few enough that a sentence which merely holds the words does
+   not fire.
 
 Set `match: semantic` for an intent that is genuinely said many ways, and the
 page is matched by meaning instead, above `memory.skills.min_sim`. Choose it by

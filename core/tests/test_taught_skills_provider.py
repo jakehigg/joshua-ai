@@ -319,12 +319,12 @@ async def test_a_near_miss_does_not_fall_through_to_a_wrong_semantic_hit() -> No
 
 async def test_a_semantic_page_still_fires_by_meaning() -> None:
     registry = _registry(
-        _skill("wiki/skills/dinner.md", ("dinner ideas",), match=MATCH_SEMANTIC, name="Dinner")
+        _skill("wiki/skills/evening.md", ("evening ideas",), match=MATCH_SEMANTIC, name="Evening")
     )
-    store = FakeStore([_row(0.9, "wiki/skills/dinner.md", "dinner ideas", "Suggest.", "Dinner")])
-    note = await _run(_ctx("i have no idea what to cook"), store, FakeRepo(), registry=registry)
+    store = FakeStore([_row(0.9, "wiki/skills/evening.md", "evening ideas", "Suggest.", "Evening")])
+    note = await _run(_ctx("something for this evening"), store, FakeRepo(), registry=registry)
     assert note is not None
-    assert '"Dinner"' in note
+    assert '"Evening"' in note
 
 
 # --- the audience gate -------------------------------------------------------
@@ -333,8 +333,8 @@ async def test_a_semantic_page_still_fires_by_meaning() -> None:
 async def test_a_skill_for_another_person_never_fires() -> None:
     registry = _registry(
         _skill(
-            "wiki/skills/music.md",
-            ("play some music",),
+            "wiki/skills/mix.md",
+            ("start my mix",),
             match=MATCH_PHRASE,
             audience=Audience(everyone=False, people=frozenset({"bo"})),
             name="Music",
@@ -342,7 +342,7 @@ async def test_a_skill_for_another_person_never_fires() -> None:
     )
     repo = FakeRepo()
     assert (
-        await _run(_ctx("play some music", person_id="ada"), FakeStore([]), repo, registry=registry)
+        await _run(_ctx("start my mix", person_id="ada"), FakeStore([]), repo, registry=registry)
         is None
     )
     assert repo.events[0]["decision"] == "none"
@@ -381,14 +381,14 @@ async def test_a_members_skill_never_fires_for_a_guest() -> None:
 async def test_the_audience_gate_also_covers_the_semantic_path() -> None:
     registry = _registry(
         _skill(
-            "wiki/skills/music.md",
-            ("play some music",),
+            "wiki/skills/mix.md",
+            ("start my mix",),
             match=MATCH_SEMANTIC,
             audience=Audience(everyone=False, people=frozenset({"bo"})),
             name="Music",
         )
     )
-    store = FakeStore([_row(0.99, "wiki/skills/music.md", "play some music", "Play.", "Music")])
+    store = FakeStore([_row(0.99, "wiki/skills/mix.md", "start my mix", "Play.", "Mix")])
     repo = FakeRepo()
     assert (
         await _run(_ctx("put on a record", person_id="ada"), store, repo, registry=registry) is None

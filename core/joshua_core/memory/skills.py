@@ -77,10 +77,10 @@ MIN_TRIGGER_WORDS = 2
 # a word that the trigger does not name, so the phrase is the front half of a
 # sentence: "turn on the" is a fragment, "turn on the lights" is a phrase.
 #
-# A preposition is NOT here on purpose. "remind me to", "are we out of", and
-# "put some music on" end with one and are complete triggers: the object of the
-# request follows, and the person supplies it ("remind me to *call the
-# dentist*"). Refusing those would refuse the way people speak.
+# A preposition is NOT here on purpose. "add a note for", "set the timer to",
+# and "turn the lamp on" end with one and are complete triggers: the object of
+# the request follows, and the person supplies it ("add a note for *the
+# plumber*"). Refusing those would refuse the way people speak.
 _FRAGMENT_TAILS = frozenset(
     {
         "a", "an", "the", "my", "your", "our", "their", "his", "her", "its",
@@ -262,8 +262,8 @@ def trigger_problem(phrase: str) -> str | None:
     turn that mentions it, and a phrase that ends with an article is the front
     half of a sentence.
 
-    A trigger made only of small words is allowed. "are we out of" carries no
-    word the stop list would keep, and it is still exactly what a person says.
+    A trigger made only of small words is allowed. "have we run out of" carries
+    no word the stop list would keep, and it is still what a person says.
     """
     words = normalize(phrase)
     if len(words) < MIN_TRIGGER_WORDS:
@@ -435,8 +435,8 @@ def match_trigger(turn: str, trigger: str, *, max_extra: int) -> PhraseMatch | N
        on "turn on reading lights".
     3. **Budget.** Between the first and the last matched word the turn may
        hold at most ``max_extra`` words that carry meaning. Articles and
-       pronouns are free, so "turn on THE good day lights" still matches, and
-       one inserted object still matches ("add MILK to the shopping list"),
+       pronouns are free, so "turn on THE reading lights" still matches, and
+       one inserted object still matches ("add MILK to the list"),
        but a sentence that merely contains the words does not.
 
     Words after the last matched word are free. A person may ask for a

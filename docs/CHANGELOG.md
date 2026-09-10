@@ -48,13 +48,13 @@ with the images and the packaged chart, are at
   every word that carries the request must appear in order, and at most
   `memory.skills.max_extra_words` (2) extra words may sit inside the match. An
   article the person left out is still fine, and so is one inserted object
-  ("add *milk* to the shopping list").
+  ("add *milk* to the list").
 
   Before this the match was a similarity score with a floor of 0.62. Similarity
   over short phrases has a high floor — two unrelated triggers measure about
   0.62 with the default model — so a skill fired on turns that only shared a
-  register with it. On one instance, "good morning" measured 0.9090 against the
-  trigger "good day" and turned on the lights.
+  register with it. A plain greeting measured 0.9090 against a trigger that
+  shared one word with it, and fired a skill that switches a device on.
 
   Set `match: semantic` on a page to keep the old behaviour for an intent that
   is genuinely said many ways. `memory.skills.min_sim` now applies to those

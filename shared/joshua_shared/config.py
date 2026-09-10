@@ -241,7 +241,7 @@ class Skills(_Model):
     # A command skill is matched by phrase, not by meaning. The turn must open
     # with the trigger and may hold at most ``max_extra_words`` extra words
     # that carry meaning inside the matched span. Two is enough for one
-    # inserted object ("add MILK to the shopping list") and few enough that a
+    # inserted object ("add MILK to the list") and few enough that a
     # sentence which merely mentions the words does not fire.
     #
     # ``min_sim`` applies only to a page that asks for ``match: semantic``.

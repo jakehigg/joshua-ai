@@ -132,20 +132,20 @@ def test_trigger_problem_accepts_a_phrase_that_expects_an_object() -> None:
     """A trailing preposition is how a person opens a request.
 
     The object follows and the person supplies it. Refusing these would refuse
-    "remind me to call the dentist".
+    "add a note for the plumber".
     """
     for template in (
-        "remind me to",
-        "are we out of",
-        "put some music on",
-        "tell the house that",
-        "make a project for",
+        "add a note for",
+        "set the timer to",
+        "turn the lamp on",
+        "tell the room that",
+        "make a list for",
     ):
         assert trigger_problem(template) is None, template
 
 
 def test_trigger_problem_accepts_a_real_phrase() -> None:
-    for good in ("movie time", "turn on the lights", "reset the fan", "what's for dinner"):
+    for good in ("movie time", "turn on the lights", "reset the timer", "what's on tonight"):
         assert trigger_problem(good) is None, good
 
 
@@ -224,7 +224,7 @@ def test_parse_skill_defaults_to_a_phrase_command_for_everyone() -> None:
 
 def test_parse_skill_reads_kind_for_and_match() -> None:
     skill = parse_skill(
-        _fm(triggers="[dinner ideas]", kind="command", match="semantic"),
+        _fm(triggers="[evening ideas]", kind="command", match="semantic"),
         "Suggest something.",
         path="wiki/skills/d.md",
     )

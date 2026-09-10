@@ -95,7 +95,7 @@ memory:
     enabled: true        # match each turn against taught skills (wiki/skills/<slug>.md)
     # A skill is matched by phrase: the turn must open with the trigger. This
     # is how many extra words that carry meaning the turn may hold inside the
-    # match. 2 allows one inserted object ("add MILK to the shopping list").
+    # match. 2 allows one inserted object ("add MILK to the list").
     # 0 demands the words exactly.
     max_extra_words: 2
     # Only for a page that sets `match: semantic`. Similarity over short

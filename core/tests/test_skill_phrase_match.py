@@ -44,13 +44,13 @@ def fired(turn: str, trigger: str) -> bool:
         ("can you turn on the reading lights please", "turn on the reading lights"),
         ("i want to turn on the reading lights", "turn on the reading lights"),
         # One object inserted.
-        ("add milk to the shopping list", "add to the shopping list"),
+        ("add milk to the list", "add to the list"),
         # Words after the trigger are free: a person may ask for two things.
         ("movie time and tell me the forecast", "movie time"),
         # A trailing word of detail.
-        ("what's for dinner tonight", "what's for dinner"),
+        ("what's on tonight then", "what's on tonight"),
         # The curly apostrophe a phone writes.
-        ("what’s for dinner", "what's for dinner"),
+        ("what’s on tonight", "what's on tonight"),
     ],
 )
 def test_fires_when_the_person_asked_for_it(turn: str, trigger: str) -> None:
@@ -60,13 +60,14 @@ def test_fires_when_the_person_asked_for_it(turn: str, trigger: str) -> None:
 @pytest.mark.parametrize(
     "turn,trigger,why",
     [
-        # A greeting is not a command. This one fired before the match was
-        # lexical: "good morning" measured 0.9090 against "good day".
-        ("good morning", "good day", "a greeting that shares a word"),
+        # Before the match was lexical, a plain greeting measured 0.9090
+        # against a trigger that shared one word with it, and fired a skill
+        # that switches a device on.
+        ("bright night", "bright day", "shares a word, misses another"),
         # The turn mentions the words but asks something else.
-        ("is today a good day to plant tomatoes?", "good day", "the words, mid-sentence"),
-        ("did you have a good day?", "good day", "a question about the past"),
-        ("how are you doing today?", "good day", "no trigger word at all"),
+        ("is it a bright day outside?", "bright day", "the words, mid-sentence"),
+        ("did we get a bright day?", "bright day", "a question about the past"),
+        ("how warm is it today?", "bright day", "no trigger word at all"),
         # Asking ABOUT a behaviour must not run it.
         ("what does the movie time skill do?", "movie time", "a question about the skill"),
         ("remind me what movie time does", "movie time", "a question about the skill"),
@@ -76,8 +77,8 @@ def test_fires_when_the_person_asked_for_it(turn: str, trigger: str) -> None:
         ("don't turn on the reading lights", "turn on the reading lights", "negated"),
         ("do not turn on the reading lights", "turn on the reading lights", "negated"),
         # Not the trigger at all.
-        ("what is the weather?", "good day", "unrelated"),
-        ("the music festival was fun", "put on some music", "unrelated, shares a word"),
+        ("what is the weather?", "bright day", "unrelated"),
+        ("the mix tape was fun", "start the mix", "unrelated, shares a word"),
     ],
 )
 def test_does_not_fire_when_the_person_did_not_ask(turn: str, trigger: str, why: str) -> None:
@@ -90,19 +91,16 @@ def test_order_matters() -> None:
 
 def test_the_extra_word_budget_is_enforced() -> None:
     # One inserted object is fine.
-    assert fired("add milk to the shopping list", "add to the shopping list")
+    assert fired("add milk to the list", "add to the list")
     # A sentence that buries the trigger is not.
     assert not fired(
-        "add milk and eggs and bread and cheese to the shopping list",
-        "add to the shopping list",
+        "add milk and eggs and bread and cheese to the list",
+        "add to the list",
     )
 
 
 def test_budget_of_zero_demands_the_words_exactly() -> None:
-    assert (
-        match_trigger("add milk to the shopping list", "add to the shopping list", max_extra=0)
-        is None
-    )
+    assert match_trigger("add milk to the list", "add to the list", max_extra=0) is None
     # Stop words stay free even at zero: they carry no request.
     assert (
         match_trigger("turn on the reading lights", "turn on reading lights", max_extra=0)
@@ -161,10 +159,10 @@ def test_one_skill_fires_once_even_when_two_triggers_match() -> None:
 
 
 def test_a_semantic_skill_never_fires_from_a_phrase() -> None:
-    skill = _skill("d.md", ("dinner ideas",), match=MATCH_SEMANTIC)
+    skill = _skill("d.md", ("evening ideas",), match=MATCH_SEMANTIC)
     assert (
         match_skills(
-            "dinner ideas", [skill], person_id="ada", role="member", max_extra=MAX_EXTRA, top_k=1
+            "evening ideas", [skill], person_id="ada", role="member", max_extra=MAX_EXTRA, top_k=1
         )
         == []
     )
@@ -180,26 +178,26 @@ def test_a_skill_for_one_person_does_not_fire_for_another() -> None:
     them apart. This is why ``for`` exists.
     """
     for_ada = _skill(
-        "ada.md", ("play some music",), audience=Audience(everyone=False, people=frozenset({"ada"}))
+        "ada.md", ("start my mix",), audience=Audience(everyone=False, people=frozenset({"ada"}))
     )
     for_bo = _skill(
-        "bo.md", ("play some music",), audience=Audience(everyone=False, people=frozenset({"bo"}))
+        "bo.md", ("start my mix",), audience=Audience(everyone=False, people=frozenset({"bo"}))
     )
     both = [for_ada, for_bo]
 
     hits = match_skills(
-        "play some music", both, person_id="ada", role="member", max_extra=MAX_EXTRA, top_k=5
+        "start my mix", both, person_id="ada", role="member", max_extra=MAX_EXTRA, top_k=5
     )
     assert [s.path for s, _ in hits] == ["ada.md"]
 
     hits = match_skills(
-        "play some music", both, person_id="bo", role="member", max_extra=MAX_EXTRA, top_k=5
+        "start my mix", both, person_id="bo", role="member", max_extra=MAX_EXTRA, top_k=5
     )
     assert [s.path for s, _ in hits] == ["bo.md"]
 
     # A third person gets neither.
     hits = match_skills(
-        "play some music", both, person_id="cass", role="member", max_extra=MAX_EXTRA, top_k=5
+        "start my mix", both, person_id="cass", role="member", max_extra=MAX_EXTRA, top_k=5
     )
     assert hits == []
 
