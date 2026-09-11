@@ -102,16 +102,23 @@ _FRAGMENT_TAILS = frozenset(
     }
 )  # fmt: skip
 
-# Words a turn may open with before the trigger starts. The list is short and
-# deliberate: it holds address and politeness only. A word that carries meaning
-# ("did", "is", "what", "have") is not here, so a turn that talks *about* a
-# behaviour does not fire it.
+# Words a turn may open with before the trigger starts. The list holds address
+# and politeness, and nothing else. A word that carries meaning ("did", "is",
+# "what", "have") is not here, so a turn that talks *about* a behaviour does
+# not fire it.
+#
+# A verb of intent is NOT here, and neither is the subject in front of one.
+# "i", "need", "want" and "to" look like filler, but "I need to <trigger>" is a
+# person saying something about themselves, not asking for the behaviour: "I
+# need to wind down after this week" fired a device skill while these were on
+# the list. The cost is that "I want to <trigger>" no longer fires either. That
+# is the safe direction for a page that can change the state of the world, and
+# the person can say the trigger on its own.
 _LEAD_FILLERS = frozenset(
     {
         "hey", "hi", "hello", "ok", "okay", "yeah", "yes",
         "please", "can", "could", "would", "will", "you", "joshua",
-        "just", "now", "i", "we", "want", "need", "wanna", "gonna",
-        "to", "a", "an", "the", "my", "our", "lets",
+        "just", "now", "a", "an", "the", "my", "our",
     }
 )  # fmt: skip
 

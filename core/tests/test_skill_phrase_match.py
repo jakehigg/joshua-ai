@@ -42,7 +42,6 @@ def fired(turn: str, trigger: str) -> bool:
         # Address and politeness in front.
         ("hey joshua, movie time", "movie time"),
         ("can you turn on the reading lights please", "turn on the reading lights"),
-        ("i want to turn on the reading lights", "turn on the reading lights"),
         # One object inserted.
         ("add milk to the list", "add to the list"),
         # Words after the trigger are free: a person may ask for two things.
@@ -79,6 +78,14 @@ def test_fires_when_the_person_asked_for_it(turn: str, trigger: str) -> None:
         # Not the trigger at all.
         ("what is the weather?", "bright day", "unrelated"),
         ("the mix tape was fun", "start the mix", "unrelated, shares a word"),
+        # A verb of intent is a statement about the speaker, not a request.
+        # "I need to wind down after this week" fired a device skill on the
+        # instance while "i", "need" and "to" counted as lead filler.
+        ("i need to wind down after this week", "wind down", "a statement, not a request"),
+        ("i want to wind down", "wind down", "intent, not a request"),
+        ("we need to start the mix", "start the mix", "intent, not a request"),
+        # The cost of the rule above: this phrasing no longer fires either.
+        ("i want to turn on the reading lights", "turn on the reading lights", "intent"),
     ],
 )
 def test_does_not_fire_when_the_person_did_not_ask(turn: str, trigger: str, why: str) -> None:
