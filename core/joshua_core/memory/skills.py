@@ -110,7 +110,7 @@ _FRAGMENT_TAILS = frozenset(
 # A verb of intent is NOT here, and neither is the subject in front of one.
 # "i", "need", "want" and "to" look like filler, but "I need to <trigger>" is a
 # person saying something about themselves, not asking for the behaviour: "I
-# need to wind down after this week" fired a device skill while these were on
+# need to settle in after this week" fired a device skill while these were on
 # the list. The cost is that "I want to <trigger>" no longer fires either. That
 # is the safe direction for a page that can change the state of the world, and
 # the person can say the trigger on its own.
@@ -133,12 +133,6 @@ _STOPWORDS = frozenset(
         "up", "down", "out", "over", "there", "here",
     }
 )  # fmt: skip
-
-# A turn that opens with one of these asks for the opposite of the behaviour.
-# The anchor rule already stops most of them, because none of these is a lead
-# filler. The check is kept because a denied negation is security-relevant and
-# a test must be able to name it.
-_NEGATIONS = frozenset({"dont", "don't", "do", "never", "stop", "cancel", "without", "not"})
 
 _WORD = re.compile(r"[a-z0-9']+")
 
@@ -467,46 +461,63 @@ def parse_skill(
     )
 
 
+# How closely a turn matched a trigger. This is a description, not a verdict:
+# the agent reads it and decides what the person meant.
+CLOSENESS_EXACT = "exact"  # the turn is the trigger and nothing else
+CLOSENESS_OPENING = "opening"  # the turn opens with it, then says more
+CLOSENESS_MENTIONED = "mentioned"  # the words appear somewhere in a longer turn
+
+
 @dataclass(frozen=True)
 class PhraseMatch:
     """One trigger that matched a turn, and how closely."""
 
     trigger: str
     # How many words of the trigger were matched. A longer trigger is more
-    # specific, so it wins over a shorter one.
+    # specific, so it sorts above a shorter one.
     length: int
     # Extra words the turn held inside the matched span. Fewer is closer.
     extra: int
+    # ``exact``, ``opening`` or ``mentioned``. The agent uses this to tell a
+    # request from a passing reference.
+    closeness: str = CLOSENESS_MENTIONED
 
 
 def match_trigger(turn: str, trigger: str, *, max_extra: int) -> PhraseMatch | None:
-    """Match one trigger against one turn, near-exact. None when it does not.
+    """Match one trigger against one turn. None when the words are not there.
 
-    Three rules make this near-exact and not merely "contains":
+    This decides **relevance**, not intent. A match means the skill is worth
+    putting in front of the agent; whether the person was asking for it is the
+    agent's judgement, on the whole turn, not a rule in here. Pattern rules
+    cannot tell "light the fire" from "I am going to light the fire with my
+    friends on Saturday", and every rule that tried made the match fit one
+    person's phrasing a little tighter.
 
-    1. **Anchor.** The turn must open with the trigger. Only address and
-       politeness words may come first ("please", "can you"). A turn that says
-       something else first talks *about* the behaviour and does not ask for
-       it, so "what does the movie time skill do" does not fire "movie time".
-    2. **Order.** Every word of the trigger that carries the request must
-       appear, in order. An article or a pronoun the person left out does not
-       break the match, so the trigger "turn on the reading lights" still fires
-       on "turn on reading lights".
-    3. **Budget.** Between the first and the last matched word the turn may
+    Two rules decide relevance:
+
+    1. **Order.** Every word of the trigger that carries the request must
+       appear, in order. An article the person left out does not break it, so
+       "turn on the reading lights" still matches "turn on reading lights".
+    2. **Budget.** Between the first and the last matched word the turn may
        hold at most ``max_extra`` words that carry meaning. Articles and
-       pronouns are free, so "turn on THE reading lights" still matches, and
-       one inserted object still matches ("add MILK to the list"),
-       but a sentence that merely contains the words does not.
+       pronouns are free. This keeps a match to a turn that really does use the
+       phrase, instead of one that happens to hold the words far apart.
 
-    Words after the last matched word are free. A person may ask for a
-    behaviour and then ask for something else in the same message.
+    ``closeness`` records how the phrase sat in the turn. It is a description
+    for the agent to read, never a filter:
+
+    - ``exact``: the turn is the trigger and nothing else. "settle in".
+    - ``opening``: the turn opens with it, then says more. Only address and
+      politeness may come first ("please settle in and then...").
+    - ``mentioned``: the words are somewhere in a longer turn. "I really need
+      to settle in after this week".
     """
     t_words = normalize(trigger)
     m_words = normalize(turn)
     if not t_words or not m_words:
         return None
 
-    # Rule 2: the trigger words, in order. A stop word the person left out is
+    # Rule 1: the trigger words, in order. A stop word the person left out is
     # skipped; a word that carries the request is not.
     matched: list[int] = []
     pos = -1
@@ -522,20 +533,31 @@ def match_trigger(turn: str, trigger: str, *, max_extra: int) -> PhraseMatch | N
     if not matched:
         return None
 
-    # Rule 1: refuse anything but address and politeness before the trigger.
-    lead = m_words[: matched[0]]
-    if any(w in _NEGATIONS for w in lead):
-        return None
-    if any(w not in _LEAD_FILLERS for w in lead):
-        return None
-
-    # Rule 3: the extra-word budget, inside the matched span only.
+    # Rule 2: the extra-word budget, inside the matched span only.
     span = set(range(matched[0], matched[-1] + 1))
     inside = span - set(matched)
     extra = len(_content_words(m_words[i] for i in sorted(inside)))
     if extra > max_extra:
         return None
-    return PhraseMatch(trigger=trigger, length=len(matched), extra=extra)
+
+    lead = m_words[: matched[0]]
+    trailing = m_words[matched[-1] + 1 :]
+    opens = all(w in _LEAD_FILLERS for w in lead)
+    if opens and not _content_words(trailing):
+        closeness = CLOSENESS_EXACT
+    elif opens:
+        closeness = CLOSENESS_OPENING
+    else:
+        closeness = CLOSENESS_MENTIONED
+    return PhraseMatch(trigger=trigger, length=len(matched), extra=extra, closeness=closeness)
+
+
+_CLOSENESS_RANK = {CLOSENESS_EXACT: 2, CLOSENESS_OPENING: 1, CLOSENESS_MENTIONED: 0}
+
+
+def _rank(match: PhraseMatch) -> tuple[int, int, int]:
+    """Sort key: the closer reading first, then the longer trigger."""
+    return (_CLOSENESS_RANK[match.closeness], match.length, -match.extra)
 
 
 def match_skill(turn: str, skill: Skill, *, max_extra: int) -> PhraseMatch | None:
@@ -549,7 +571,7 @@ def match_skill(turn: str, skill: Skill, *, max_extra: int) -> PhraseMatch | Non
         found = match_trigger(turn, trigger, max_extra=max_extra)
         if found is None:
             continue
-        if best is None or (found.length, -found.extra) > (best.length, -best.extra):
+        if best is None or _rank(found) > _rank(best):
             best = found
     return best
 
@@ -578,5 +600,5 @@ def match_skills(
         found = match_skill(turn, skill, max_extra=max_extra)
         if found is not None:
             hits.append((skill, found))
-    hits.sort(key=lambda pair: (-pair[1].length, pair[1].extra, pair[0].path))
+    hits.sort(key=lambda pair: (-_rank(pair[1])[0], -pair[1].length, pair[1].extra, pair[0].path))
     return hits[:top_k]

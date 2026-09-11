@@ -159,7 +159,11 @@ async def test_match_returns_block_and_audit() -> None:
     repo = FakeRepo()
     note = await _run(_ctx("let's watch a movie"), store, repo)
     assert note is not None
-    assert note.startswith('[Taught skill "Movie time" matches this request')
+    # The block is framed as a note, not an order: the agent decides whether
+    # the person asked for it.
+    assert note.startswith("[Taught skills that may be relevant")
+    assert "Never run one because the words appear." in note
+    assert '## Taught skill "Movie time"' in note
     assert "Dim the lights." in note
     assert store.calls[0]["kinds"] == ("skill",)
     event = repo.events[0]
@@ -186,8 +190,8 @@ async def test_top_k_limits_and_dedups_by_skill() -> None:
     store = FakeStore(rows)
     note = await _run(_ctx("start a movie"), store, FakeRepo(), top_k=2)
     assert note is not None
-    # Two distinct skills, best first; the duplicate movie trigger fires once.
-    assert note.count("Taught skill") == 2
+    # Two distinct skills, best first; the duplicate movie trigger appears once.
+    assert note.count("## Taught skill") == 2
     assert '"Movie"' in note and '"Party"' in note
     assert '"Coffee"' not in note
 
@@ -275,7 +279,7 @@ async def test_default_top_k_fires_the_best_skill_alone() -> None:
     ]
     note = await _run(_ctx("here's a receipt"), FakeStore(rows), FakeRepo(), top_k=1)
     assert note is not None
-    assert note.count("Taught skill") == 1
+    assert note.count("## Taught skill") == 1
     assert '"Receipt"' in note and '"Plant"' not in note
 
 
@@ -299,21 +303,33 @@ async def test_a_phrase_skill_fires_without_touching_the_vector_search() -> None
     assert event["results"][0]["heading"] == "movie time"
 
 
-async def test_a_near_miss_does_not_fall_through_to_a_wrong_semantic_hit() -> None:
-    """The turn mentions the words but did not ask. Nothing fires.
+async def test_a_passing_mention_is_surfaced_and_labelled() -> None:
+    """The turn holds the words but asks *about* the skill, not for it.
 
-    A phrase page is not in the semantic corpus, so the fallback cannot fire it
-    by meaning after the phrase rules refused it.
+    The block still reaches the agent: it needs to know what the skill is to
+    answer the question. What it carries is the note that the words were only
+    mentioned, so the agent does not run it.
     """
+    registry = _registry(
+        _skill("wiki/skills/movie.md", ("movie time",), match=MATCH_PHRASE, name="Movie")
+    )
+    repo = FakeRepo()
+    note = await _run(
+        _ctx("what does the movie time skill do?"), FakeStore([]), repo, registry=registry
+    )
+    assert note is not None
+    assert "these words appear somewhere in a longer turn" in note
+    assert repo.events[0]["results"][0]["closeness"] == "mentioned"
+
+
+async def test_a_phrase_page_is_never_reached_by_the_semantic_fallback() -> None:
+    """A page that did not ask for the vector match cannot be found by it."""
     registry = _registry(
         _skill("wiki/skills/movie.md", ("movie time",), match=MATCH_PHRASE, name="Movie")
     )
     store = FakeStore([_row(0.99, "wiki/skills/movie.md", "movie time", "Dim.", "Movie")])
     repo = FakeRepo()
-    assert (
-        await _run(_ctx("what does the movie time skill do?"), store, repo, registry=registry)
-        is None
-    )
+    assert await _run(_ctx("something else entirely"), store, repo, registry=registry) is None
     assert repo.events[0]["decision"] == "none"
 
 

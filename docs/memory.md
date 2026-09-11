@@ -142,32 +142,59 @@ fires from a phrase. It is indexed as an ordinary wiki page, so a turn reaches
 it through recall when the subject comes up. Give a page of guidance
 `kind: convention`: a trigger invented for it fires it on turns nobody meant.
 
-### How a phrase is matched
+### A match is a hint, not a trigger
 
-A command page is matched by phrase, not by meaning. Three rules make the match
-near-exact:
+A skill that matches is put in front of the agent as a note, with the page's
+instructions and one line saying how the phrase sat in the turn. The agent
+reads the turn and decides what to do:
 
-1. **The turn opens with the trigger.** Only address and politeness may come
-   first, so "can you start movie night please" fires and "what does movie
-   time do" does not. A turn that says something else first is talking about
-   the behaviour, not asking for it.
-2. **Every word that carries the request appears, in order.** An article the
-   person left out does not break the match.
-3. **Up to `memory.skills.max_extra_words` extra words** that carry meaning may
-   sit inside the match. Two is enough for one inserted object ("add *milk* to
-   the list") and few enough that a sentence which merely holds the words does
-   not fire.
+- The person is asking for it: do it.
+- The person used the words while describing, remembering or planning
+  something: do not run it, and offer only when the offer helps.
+- It is not clear: ask first.
+
+This split is deliberate. No pattern can tell "light the fire" from "on
+Saturday I am going to light the fire with my friends", and the agent reads
+the whole turn anyway. A matcher that had to make that call needed a new rule
+for each way a person can mention a phrase without asking for it, and each rule
+fitted one person's way of speaking a little more tightly.
+
+So "I really need to settle in after this week" now reaches the agent with the
+`settle in` page attached and the note that the words were only mentioned. The
+agent can answer the person and offer to dim the lights, instead of dimming
+them.
+
+### How a phrase is found
+
+Two rules decide whether a skill is relevant:
+
+1. **Order.** Every word of the trigger that carries the request must appear,
+   in order. An article the person left out does not break it, so the trigger
+   "turn on the reading lights" still matches "turn on reading lights".
+2. **Budget.** Between the first and the last matched word the turn may hold at
+   most `memory.skills.max_extra_words` words that carry meaning. Articles and
+   pronouns are free. Two is enough for one inserted object ("add *milk* to the
+   list") and few enough that a turn holding the words far apart is not a
+   match.
+
+Each match carries a `closeness`, which is a description and never a filter:
+
+| closeness | what it means |
+| --- | --- |
+| `exact` | the turn is the trigger and nothing else |
+| `opening` | the turn opens with it, then says more |
+| `mentioned` | the words are somewhere in a longer turn |
 
 Set `match: semantic` for an intent that is genuinely said many ways, and the
-page is matched by meaning instead, above `memory.skills.min_sim`. Choose it by
-the cost of a wrong fire: a page that only shapes an answer can be loose, a
-page that turns on a device must not be. Similarity over short phrases has a
-high floor — two unrelated triggers measure about 0.62 with the default model —
-so `min_sim` is 0.80 and a lower value means very little.
+page is found by meaning instead, above `memory.skills.min_sim`. Similarity
+over short phrases has a high floor — two unrelated triggers measure about 0.62
+with the default model — so `min_sim` is 0.80 and a lower value means very
+little.
 
-One turn fires one skill. Raise `memory.skills.top_k` to fire more. When two
-skills match, the one whose trigger matched more words wins: a page for one
-room beats a page for the whole house.
+`memory.skills.top_k` caps how many skills one turn carries. It is 3: a note is
+not an instruction, so the agent is better off seeing two neighbouring skills
+than being handed the winner of a tie it never sees. When two match, the closer
+reading sorts first, then the one whose trigger matched more words.
 
 ### What makes a usable trigger
 
@@ -177,13 +204,15 @@ or an auxiliary. `announce` fires on every turn that mentions it, and
 `turn on the` is the front half of a sentence. Write the phrase the way a
 person says it, and keep the verb.
 
-### Who can teach, who can fire
+### Who can teach, who a skill reaches
 
 A member writes `wiki/skills/<slug>.md` through the files MCP. The wiki is
 read-only for a guest, so a guest cannot teach a skill or change one.
 
-`for` says who a skill fires for. It is a match rule, not a permission: a guest
-can still read any page of the wiki. Use it when a skill holds one person's own
+`for` says who a skill reaches. It is the one hard rule in the match: a skill
+the audience does not name is never put in front of that person, so it is not
+the agent's to weigh. It is still not a permission, because a guest can read
+any page of the wiki. Use it when a skill holds one person's own
 choices, so that two people can teach the same words and each get their own
 result.
 

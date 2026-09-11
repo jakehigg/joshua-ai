@@ -102,7 +102,7 @@ memory:
     # phrases has a high floor: two unrelated triggers measure about 0.62 with
     # the default model, so this has to sit well above that.
     min_sim: 0.80
-    top_k: 1             # most skills one turn can fire; raise it to fire two
+    top_k: 3             # most skills one turn can carry as notes
   embed_model: BAAI/bge-small-en-v1.5
   # In-core RAG over the data volume. `files` is the kernel source and always
   # runs; other adapters are optional. An adapter with no options takes an empty

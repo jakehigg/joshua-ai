@@ -43,6 +43,27 @@ with the images and the packaged chart, are at
 
 ### Changed
 
+- **A taught skill is a note to the agent, not a trigger.** A skill that
+  matches is put in front of Joshua with its instructions and one line saying
+  how the phrase sat in the turn: the person said it and nothing else, opened
+  with it, or only mentioned it. Joshua reads the turn and decides. If you
+  asked, it acts. If you used the words while describing or planning something,
+  it answers you and offers, rather than acting.
+
+  So "I really need to settle in after this week" now gets you an answer and an
+  offer, where before it either dimmed the lights or ignored the skill
+  entirely. And "on Saturday I am going to light the fire with friends" no
+  longer starts the music.
+
+  Before this, a match was an instruction to run the skill, so the match had to
+  be certain, so it needed a new rule for every way a person can say a phrase
+  without asking for it: a question, a memory, a plan, a negation. Each rule
+  fitted one household's way of speaking more tightly than the last. Deciding
+  what a person meant is the agent's job, and it reads the whole turn.
+
+  `memory.skills.top_k` rises from 1 to 3: a note is not an instruction, so
+  seeing two neighbouring skills is better than being handed the winner of a
+  tie.
 - **A taught skill fires only when a person asks for it.** A skill is now
   matched by phrase and not by meaning: the turn must open with the trigger,
   every word that carries the request must appear in order, and at most

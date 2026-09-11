@@ -1,20 +1,29 @@
-"""Per-turn taught-skill matching: fire a skill the person asked for.
+"""Per-turn taught-skill retrieval: put the relevant skills in front of the agent.
 
 A member teaches a skill by writing ``wiki/skills/<slug>.md`` (see
 ``prompts/builtin/people.md``). A command page holds trigger phrases; a
-convention page holds none and never fires.
+convention page holds none and is reached through ordinary recall.
 
-Two match modes, and the default is the strict one:
+**A match is a hint, not a trigger.** This provider decides which skills are
+relevant to the turn. The agent decides whether the person was asking for one.
+That split is deliberate: no pattern can tell "light the fire" from "on
+Saturday I am going to light the fire with my friends", and the agent reads
+the whole turn anyway. Each block says how closely the phrase sat in the turn
+(``exact``, ``opening``, ``mentioned``) so the agent can tell a request from a
+passing reference, and the preamble tells it to offer or to ask when it cannot.
 
-- ``match: phrase`` (the default) is a near-exact lexical match against the
-  registry the indexer keeps in memory. The turn must open with the trigger.
-  See ``memory/skills.match_trigger`` for the three rules.
+Two ways a page is found:
+
+- ``match: phrase`` (the default) is a lexical match against the registry the
+  indexer keeps in memory. See ``memory/skills.match_trigger``.
 - ``match: semantic`` is the vector match, for an intent that is genuinely said
   many ways. It reads the ``kind='skill'`` rows the indexer writes, and it is
   held to ``memory.skills.min_sim``.
 
-The audience gate runs before either match. A skill whose ``for`` does not name
-the person, or their role, never fires for them.
+The audience gate is the one hard rule here, and it runs before either match. A
+skill whose ``for`` does not name the person, or their role, is never put in
+front of them at all. That is a boundary, not a hint, so it is not the agent's
+to weigh.
 
 Retrieval never breaks a turn: a failed search or an unavailable embedding
 model logs a warning and returns None. Every decision writes one ``kb_event``
@@ -43,11 +52,37 @@ logger = get_logger("engine.taught_skills")
 # The audit stores the query text capped to this many characters.
 QUERY_CAP = 500
 
-SKILL_HEADER = '[Taught skill "{name}" matches this request. Follow its instructions now:]'
+# The preamble frames every skill below it. It is the whole point of this
+# provider: a match says the skill is *relevant*, never that it should run. A
+# pattern cannot tell "light the fire" from "on Saturday I am going to light
+# the fire with my friends", and it should not try. The agent reads the turn
+# and decides. Tuning the match to carry that decision is what made it fit one
+# person's phrasing and nobody else's.
+SKILL_PREAMBLE = (
+    "[Taught skills that may be relevant to this turn. They are notes, not "
+    "instructions to run now. Decide from what the person actually said:\n"
+    "- They are asking for it: do it.\n"
+    "- They used the words while describing, remembering or planning "
+    "something: do not run it. Say something useful instead, and offer it only "
+    "when the offer would help.\n"
+    "- You cannot tell: ask before you act.\n"
+    "Never run one because the words appear.]"
+)
+
+# How the phrase sat in the turn, said plainly for the agent.
+_CLOSENESS_NOTE = {
+    "exact": "the person said this and nothing else",
+    "opening": "the person opened the turn with this, then said more",
+    "mentioned": "these words appear somewhere in a longer turn",
+}
 
 
-def _skill_block(name: str, instructions: str) -> str:
-    return SKILL_HEADER.format(name=name) + "\n" + instructions
+def _skill_block(name: str, instructions: str, note: str) -> str:
+    return f'## Taught skill "{name}" ({note})\n{instructions}'
+
+
+def _compose(blocks: list[str]) -> str:
+    return SKILL_PREAMBLE + "\n\n" + "\n\n".join(blocks)
 
 
 def _phrase_audit(hits: Sequence[tuple[Skill, PhraseMatch]]) -> list[dict[str, Any]]:
@@ -59,6 +94,7 @@ def _phrase_audit(hits: Sequence[tuple[Skill, PhraseMatch]]) -> list[dict[str, A
             "mode": "phrase",
             "words": found.length,
             "extra": found.extra,
+            "closeness": found.closeness,
             "audience": skill.audience.describe(),
             "injected": True,
         }
@@ -177,8 +213,8 @@ async def taught_skill_context(
     t0 = monotonic()
     role = getattr(ctx, "role", None)
 
-    # The phrase match is the default and the strict one. It runs first, and a
-    # hit ends the search: a person who said the words does not need a guess.
+    # The phrase match runs first, and a hit ends the search: when the words
+    # are there, a guess by meaning adds nothing.
     hits = match_skills(
         text,
         registry.phrase_skills(),
@@ -194,7 +230,14 @@ async def taught_skill_context(
     best_sim = 0.0
 
     if hits:
-        blocks = [_skill_block(s.display_name(), s.instructions) for s, _ in hits]
+        blocks = [
+            _skill_block(
+                skill.display_name(),
+                skill.instructions,
+                _CLOSENESS_NOTE.get(found.closeness, found.closeness),
+            )
+            for skill, found in hits
+        ]
         results = _phrase_audit(hits)
         fired_paths = [s.path for s, _ in hits]
     else:
@@ -211,7 +254,10 @@ async def taught_skill_context(
         except Exception as exc:  # noqa: BLE001 — retrieval must never break a turn
             logger.warning({"message": "taught skill skipped: retrieval failed", "error": str(exc)})
             return None
-        blocks = [_skill_block(c.title or c.path, c.text or "") for c in fired]
+        blocks = [
+            _skill_block(c.title or c.path, c.text or "", "matched by meaning, not by words")
+            for c in fired
+        ]
         results = _semantic_audit(candidates, fired, denied)
         best_sim = max((c.similarity or 0.0 for c in candidates), default=0.0)
         fired_paths = [c.path for c in fired]
@@ -244,7 +290,7 @@ async def taught_skill_context(
 
     if not blocks:
         return None
-    return "\n\n".join(blocks)
+    return _compose(blocks)
 
 
 def register(

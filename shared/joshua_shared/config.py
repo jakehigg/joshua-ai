@@ -236,25 +236,29 @@ class Inject(_Model):
 
 class Skills(_Model):
     # Taught skills: a member writes ``wiki/skills/<slug>.md`` with trigger
-    # phrases; a matching turn fires the instructions.
+    # phrases, and a turn that uses one of them puts the page in front of the
+    # agent as a note. The agent decides whether the person was asking for it.
     #
-    # A command skill is matched by phrase, not by meaning. The turn must open
-    # with the trigger and may hold at most ``max_extra_words`` extra words
-    # that carry meaning inside the matched span. Two is enough for one
-    # inserted object ("add MILK to the list") and few enough that a
-    # sentence which merely mentions the words does not fire.
+    # A command page is found by phrase. The trigger's words must appear in the
+    # turn, in order, with at most ``max_extra_words`` words that carry meaning
+    # between the first and the last of them. Two is enough for one inserted
+    # object ("add MILK to the list") and few enough that a turn holding the
+    # words far apart is not a match.
     #
     # ``min_sim`` applies only to a page that asks for ``match: semantic``.
     # Cosine similarity over short phrases has a high floor: two unrelated
     # triggers measure 0.62 on average with the default model, so the number
     # has to sit well above that to mean anything.
     #
-    # ``top_k`` is 1 because a turn asks for one behaviour. Raise it when you
-    # want a second skill to ride in below the one that was asked for.
+    # ``top_k`` caps how many skills one turn carries. A match is a note and
+    # not an instruction, so more than one is useful: the agent can weigh two
+    # neighbouring skills instead of being handed the winner of a tie it never
+    # sees. On one corpus a turn surfaced 0.59 skills on average, so this rarely
+    # binds.
     enabled: bool = True
     max_extra_words: int = Field(default=2, ge=0)
     min_sim: float = Field(default=0.80, ge=0.0, le=1.0)
-    top_k: int = Field(default=1, ge=1)
+    top_k: int = Field(default=3, ge=1)
 
 
 class Memory(_Model):

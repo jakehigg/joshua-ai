@@ -1,9 +1,16 @@
-"""The near-exact phrase match (``memory/skills.match_trigger``).
+"""The phrase match (``memory/skills.match_trigger``).
 
-These are the acceptance cases for the matcher. A command skill can change the
-state of the world, so the negatives matter as much as the positives: each one
-below is a turn that must NOT fire a skill, and several of them are turns that
-fired one before the match became lexical.
+The match decides **relevance**, not intent: a hit means the skill is worth
+putting in front of the agent, and the agent decides whether the person was
+asking for it. So there are two kinds of case here.
+
+- A turn whose words do not hold the trigger surfaces nothing at all.
+- A turn that does hold it surfaces it with a ``closeness``, which is how the
+  phrase sat in the turn. The agent reads that to tell "settle in" from "I
+  really need to settle in after this week".
+
+The one hard rule is the audience: a skill the person may not run is never put
+in front of them, whatever they said.
 
 Pure functions, no database and no embedding.
 """
@@ -12,11 +19,15 @@ from __future__ import annotations
 
 import pytest
 from joshua_core.memory.skills import (
+    CLOSENESS_EXACT,
+    CLOSENESS_MENTIONED,
+    CLOSENESS_OPENING,
     KIND_COMMAND,
     MATCH_PHRASE,
     MATCH_SEMANTIC,
     Audience,
     Skill,
+    _rank,
     match_skills,
     match_trigger,
 )
@@ -52,44 +63,79 @@ def fired(turn: str, trigger: str) -> bool:
         ("what’s on tonight", "what's on tonight"),
     ],
 )
-def test_fires_when_the_person_asked_for_it(turn: str, trigger: str) -> None:
+def test_surfaces_when_the_turn_uses_the_phrase(turn: str, trigger: str) -> None:
     assert fired(turn, trigger)
 
 
 @pytest.mark.parametrize(
     "turn,trigger,why",
     [
-        # Before the match was lexical, a plain greeting measured 0.9090
-        # against a trigger that shared one word with it, and fired a skill
-        # that switches a device on.
+        # A word of the trigger is missing, so the turn is not about it.
         ("bright night", "bright day", "shares a word, misses another"),
-        # The turn mentions the words but asks something else.
-        ("is it a bright day outside?", "bright day", "the words, mid-sentence"),
-        ("did we get a bright day?", "bright day", "a question about the past"),
         ("how warm is it today?", "bright day", "no trigger word at all"),
-        # Asking ABOUT a behaviour must not run it.
-        ("what does the movie time skill do?", "movie time", "a question about the skill"),
-        ("remind me what movie time does", "movie time", "a question about the skill"),
-        # Reported speech.
-        ("i told them to turn on the reading lights", "turn on the reading lights", "reported"),
-        # The opposite of the behaviour.
-        ("don't turn on the reading lights", "turn on the reading lights", "negated"),
-        ("do not turn on the reading lights", "turn on the reading lights", "negated"),
-        # Not the trigger at all.
         ("what is the weather?", "bright day", "unrelated"),
         ("the mix tape was fun", "start the mix", "unrelated, shares a word"),
-        # A verb of intent is a statement about the speaker, not a request.
-        # "I need to wind down after this week" fired a device skill on the
-        # instance while "i", "need" and "to" counted as lead filler.
-        ("i need to wind down after this week", "wind down", "a statement, not a request"),
-        ("i want to wind down", "wind down", "intent, not a request"),
-        ("we need to start the mix", "start the mix", "intent, not a request"),
-        # The cost of the rule above: this phrasing no longer fires either.
-        ("i want to turn on the reading lights", "turn on the reading lights", "intent"),
+        ("good morning", "movie time", "nothing in common"),
     ],
 )
-def test_does_not_fire_when_the_person_did_not_ask(turn: str, trigger: str, why: str) -> None:
+def test_surfaces_nothing_when_the_words_are_not_there(turn: str, trigger: str, why: str) -> None:
     assert not fired(turn, trigger), why
+
+
+# --- closeness: how the phrase sat in the turn -------------------------------
+#
+# These turns all hold the trigger, so they all surface. What changes is the
+# note the agent reads. Every "mentioned" case below used to be refused by a
+# rule in the matcher, and each rule was another guess at intent: whether the
+# turn was a question, a memory, a plan, or a negation. The agent reads the
+# turn, so it does not need the guess.
+
+
+@pytest.mark.parametrize(
+    "turn,trigger,closeness",
+    [
+        # The person said the trigger and nothing else.
+        ("movie time", "movie time", CLOSENESS_EXACT),
+        ("please settle in", "settle in", CLOSENESS_EXACT),
+        ("hey joshua, movie time", "movie time", CLOSENESS_EXACT),
+        (
+            "can you turn on the reading lights please",
+            "turn on the reading lights",
+            CLOSENESS_EXACT,
+        ),
+        # The turn opens with it and then says more.
+        ("movie time and tell me the forecast", "movie time", CLOSENESS_OPENING),
+        ("what's on tonight then", "what's on tonight", CLOSENESS_OPENING),
+        # The words are in there, but the person is doing something else with
+        # them. The agent decides; the matcher only reports.
+        ("i really need to settle in after this week", "settle in", CLOSENESS_MENTIONED),
+        (
+            "on saturday i am going to light the fire with friends",
+            "light the fire",
+            CLOSENESS_MENTIONED,
+        ),
+        ("what does the movie time skill do?", "movie time", CLOSENESS_MENTIONED),
+        (
+            "i told them to turn on the reading lights",
+            "turn on the reading lights",
+            CLOSENESS_MENTIONED,
+        ),
+        ("don't turn on the reading lights", "turn on the reading lights", CLOSENESS_MENTIONED),
+        ("is it a bright day outside?", "bright day", CLOSENESS_MENTIONED),
+    ],
+)
+def test_reports_how_close_the_phrase_was(turn: str, trigger: str, closeness: str) -> None:
+    match = match_trigger(turn, trigger, max_extra=MAX_EXTRA)
+    assert match is not None, turn
+    assert match.closeness == closeness
+
+
+def test_an_exact_turn_outranks_a_passing_mention() -> None:
+    """A skill fires once, and the closer reading is the better description."""
+    exact = match_trigger("settle in", "settle in", max_extra=MAX_EXTRA)
+    mention = match_trigger("i need to settle in later", "settle in", max_extra=MAX_EXTRA)
+    assert exact is not None and mention is not None
+    assert _rank(exact) > _rank(mention)
 
 
 def test_order_matters() -> None:
