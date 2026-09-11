@@ -230,13 +230,16 @@ def test_example_channel_secrets_are_optional() -> None:
     assert cfg.channels.imessage.webhook_path_secret == ""
 
 
-def test_skills_top_k_defaults_to_one() -> None:
-    """One turn fires one skill. See the comment on Skills in config.py."""
-    assert config.Skills().top_k == 1
+def test_skills_top_k_carries_a_few_notes() -> None:
+    """A match is a note, not an instruction, so a turn may carry more than one.
+
+    See the comment on Skills in config.py.
+    """
+    assert config.Skills().top_k == 3
 
 
-def test_skills_top_k_can_be_raised() -> None:
-    assert config.Skills(top_k=2).top_k == 2
+def test_skills_top_k_can_be_changed() -> None:
+    assert config.Skills(top_k=1).top_k == 1
 
 
 # -- The derived role of a group ----------------------------------------------

@@ -43,6 +43,62 @@ with the images and the packaged chart, are at
 
 ### Changed
 
+- **A taught skill is a note to the agent, not a trigger.** A skill that
+  matches is put in front of Joshua with its instructions and one line saying
+  how the phrase sat in the turn: the person said it and nothing else, opened
+  with it, or only mentioned it. Joshua reads the turn and decides. If you
+  asked, it acts. If you used the words while describing or planning something,
+  it answers you and offers, rather than acting.
+
+  So "I really need to settle in after this week" now gets you an answer and an
+  offer, where before it either dimmed the lights or ignored the skill
+  entirely. And "on Saturday I am going to light the fire with friends" no
+  longer starts the music.
+
+  Before this, a match was an instruction to run the skill, so the match had to
+  be certain, so it needed a new rule for every way a person can say a phrase
+  without asking for it: a question, a memory, a plan, a negation. Each rule
+  fitted one household's way of speaking more tightly than the last. Deciding
+  what a person meant is the agent's job, and it reads the whole turn.
+
+  `memory.skills.top_k` rises from 1 to 3: a note is not an instruction, so
+  seeing two neighbouring skills is better than being handed the winner of a
+  tie.
+- **A taught skill fires only when a person asks for it.** A skill is now
+  matched by phrase and not by meaning: the turn must open with the trigger,
+  every word that carries the request must appear in order, and at most
+  `memory.skills.max_extra_words` (2) extra words may sit inside the match. An
+  article the person left out is still fine, and so is one inserted object
+  ("add *milk* to the list").
+
+  Before this the match was a similarity score with a floor of 0.62. Similarity
+  over short phrases has a high floor — two unrelated triggers measure about
+  0.62 with the default model — so a skill fired on turns that only shared a
+  register with it. A plain greeting measured 0.9090 against a trigger that
+  shared one word with it, and fired a skill that switches a device on.
+
+  Set `match: semantic` on a page to keep the old behaviour for an intent that
+  is genuinely said many ways. `memory.skills.min_sim` now applies to those
+  pages only, and its default rises from 0.62 to 0.80.
+- **A skill can belong to one person.** `for:` in the frontmatter takes
+  `everyone` (the default), `members`, `guests`, a person id, or a list of ids.
+  A skill the audience does not name never fires for that person, so two people
+  can teach the same words and each get their own result. `for` is a match
+  rule, not a permission: the wiki page itself stays readable.
+- **A page of guidance is no longer a command.** `kind: convention` marks a
+  page that holds standing guidance for a domain instead of a behaviour. It
+  takes no triggers and never fires from a phrase; it is indexed as an ordinary
+  wiki page and comes back through recall. Before this the only way to ship
+  such a page was to invent trigger phrases for it, which fired it on turns
+  nobody meant.
+- **A trigger that cannot work is refused when the file is read.** A phrase of
+  fewer than two words, or one that ends with an article, a preposition, or an
+  auxiliary, is dropped with a warning that names the file and the reason.
+  `announce` fires on every turn that mentions it, and `turn on the` is the
+  front half of a sentence.
+- **When two skills match, the more specific one wins.** The winner is the one
+  whose trigger matched more words, so a page for one room is no longer beaten
+  by a page for the whole house.
 - **An entry with an empty credential is turned off, not retried.** A
   `${VAR:-}` reference in a container without the variable expands to nothing.
   Such an entry now reports `disabled` with one log line that names the key,

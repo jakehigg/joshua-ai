@@ -7,12 +7,19 @@ rules are pure — no database, no embedding.
 from __future__ import annotations
 
 from joshua_core.memory.skills import (
+    EVERYONE,
+    KIND_COMMAND,
+    KIND_CONVENTION,
+    MATCH_PHRASE,
+    MATCH_SEMANTIC,
     MAX_TRIGGER_CHARS,
     MAX_TRIGGERS,
     clean_triggers,
     is_skill_path,
+    parse_audience,
     parse_skill,
     skill_slug,
+    trigger_problem,
 )
 
 # --- is_skill_path / skill_slug ---------------------------------------------
@@ -84,14 +91,14 @@ def test_parse_skill_single_quoted_yaml_list() -> None:
 
 
 def test_clean_triggers_strips_lowercases_dedupes() -> None:
-    assert clean_triggers(["  Movie Time ", "movie time", "", "Party"]) == (
+    assert clean_triggers(["  Movie Time ", "movie time", "", "Party Mode"]) == (
         "movie time",
-        "party",
+        "party mode",
     )
 
 
 def test_clean_triggers_caps_phrase_length() -> None:
-    long = "x" * (MAX_TRIGGER_CHARS + 50)
+    long = "movie " * (MAX_TRIGGER_CHARS // 3)
     (only,) = clean_triggers([long])
     assert len(only) == MAX_TRIGGER_CHARS
 
@@ -102,3 +109,226 @@ def test_clean_triggers_caps_count_and_warns(caplog) -> None:
         cleaned = clean_triggers(phrases, path="wiki/skills/big.md")
     assert len(cleaned) == MAX_TRIGGERS
     assert any("wiki/skills/big.md" in r.getMessage() for r in caplog.records)
+
+
+# --- trigger validation ------------------------------------------------------
+
+
+def test_trigger_problem_rejects_a_single_word() -> None:
+    # One word fires on every turn that mentions it.
+    assert trigger_problem("announce") is not None
+    assert trigger_problem("lights") is not None
+
+
+def test_trigger_problem_rejects_a_fragment() -> None:
+    # A phrase that stops at an article is the front half of a sentence. These
+    # are the shapes a prompt-to-skill migration produces.
+    assert trigger_problem("turn on the") is not None
+    assert trigger_problem("turn off the") is not None
+    assert trigger_problem("dim the lights and") is not None
+
+
+def test_trigger_problem_accepts_a_phrase_that_expects_an_object() -> None:
+    """A trailing preposition is how a person opens a request.
+
+    The object follows and the person supplies it. Refusing these would refuse
+    "add a note for the plumber".
+    """
+    for template in (
+        "add a note for",
+        "set the timer to",
+        "turn the lamp on",
+        "tell the room that",
+        "make a list for",
+    ):
+        assert trigger_problem(template) is None, template
+
+
+def test_trigger_problem_accepts_a_real_phrase() -> None:
+    for good in ("movie time", "turn on the lights", "reset the timer", "what's on tonight"):
+        assert trigger_problem(good) is None, good
+
+
+def test_clean_triggers_drops_the_unusable_and_says_why(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        kept = clean_triggers(["movie time", "announce", "turn on the"], path="wiki/skills/a.md")
+    assert kept == ("movie time",)
+    assert "rejected" in caplog.text
+
+
+# --- audience ----------------------------------------------------------------
+
+
+def test_audience_defaults_to_everyone() -> None:
+    assert parse_audience(None) is EVERYONE
+    assert parse_audience("").everyone
+    assert parse_audience("everyone").allows("anyone", "guest")
+
+
+def test_audience_names_one_person() -> None:
+    audience = parse_audience("ada")
+    assert audience.allows("ada", "member")
+    assert not audience.allows("bo", "member")
+    # A role does not stand in for a name.
+    assert not audience.allows(None, "member")
+
+
+def test_audience_names_several_people() -> None:
+    audience = parse_audience("[ada, bo]")
+    assert audience.allows("ada", "guest")
+    assert audience.allows("bo", "guest")
+    assert not audience.allows("cass", "member")
+
+
+def test_audience_names_a_role() -> None:
+    members = parse_audience("members")
+    assert members.allows("ada", "member")
+    assert not members.allows("ada", "guest")
+
+    guests = parse_audience("guests")
+    assert guests.allows("bo", "guest")
+    assert not guests.allows("bo", "member")
+
+
+def test_audience_mixes_a_role_and_a_name() -> None:
+    audience = parse_audience("[members, bo]")
+    assert audience.allows("ada", "member")  # by role
+    assert audience.allows("bo", "guest")  # by name
+    assert not audience.allows("cass", "guest")
+
+
+def test_audience_that_cannot_be_read_allows_nobody(caplog) -> None:
+    # A skill whose audience is unreadable must not fall open.
+    with caplog.at_level("WARNING"):
+        audience = parse_audience("Someone Else", path="wiki/skills/a.md")
+    assert not audience.allows("ada", "member")
+    assert not audience.allows(None, "guest")
+    assert audience.describe() == "nobody"
+
+
+# --- frontmatter: kind, for, match -------------------------------------------
+
+
+def _fm(**kw: str) -> dict[str, str]:
+    return {"name": "a skill", **kw}
+
+
+def test_parse_skill_defaults_to_a_phrase_command_for_everyone() -> None:
+    skill = parse_skill(_fm(triggers="[movie time]"), "Dim the lights.", path="wiki/skills/m.md")
+    assert skill is not None
+    assert skill.kind == KIND_COMMAND
+    assert skill.match == MATCH_PHRASE
+    assert skill.audience.everyone
+    assert skill.fires_from_phrase
+
+
+def test_parse_skill_reads_kind_for_and_match() -> None:
+    skill = parse_skill(
+        _fm(triggers="[evening ideas]", kind="command", match="semantic"),
+        "Suggest something.",
+        path="wiki/skills/d.md",
+    )
+    assert skill is not None
+    assert skill.match == MATCH_SEMANTIC
+    assert skill.fires_from_meaning
+    assert not skill.fires_from_phrase
+
+
+def test_convention_page_holds_no_trigger_and_never_fires(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        skill = parse_skill(
+            _fm(kind="convention", triggers="[turn on the]"),
+            "Prefer the switch domain.",
+            path="wiki/skills/c.md",
+        )
+    assert skill is not None
+    assert skill.kind == KIND_CONVENTION
+    assert skill.triggers == ()
+    assert not skill.fires_from_phrase
+    assert not skill.fires_from_meaning
+
+
+def test_convention_page_needs_no_triggers_key() -> None:
+    skill = parse_skill(_fm(kind="convention"), "Reference text.", path="wiki/skills/c.md")
+    assert skill is not None
+    assert skill.kind == KIND_CONVENTION
+
+
+def test_command_page_without_triggers_key_is_not_a_skill() -> None:
+    assert parse_skill(_fm(), "Body.", path="wiki/skills/x.md") is None
+
+
+def test_unknown_kind_or_match_falls_back_to_the_strict_default(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        skill = parse_skill(
+            _fm(triggers="[movie time]", kind="whatever", match="fuzzy"),
+            "Body.",
+            path="wiki/skills/x.md",
+        )
+    assert skill is not None
+    assert skill.kind == KIND_COMMAND
+    assert skill.match == MATCH_PHRASE
+
+
+# --- the audience as the agent writes it -------------------------------------
+#
+# A skill is normally taught by talking to Joshua, so the agent writes this
+# value. It does not always write the form in the documentation, and a value
+# that cannot be read gives a skill which never fires and never says why.
+
+
+def test_audience_reads_a_bare_list() -> None:
+    """`for: ada, bo` means the same as `for: [ada, bo]`."""
+    for raw in ("ada, bo", "[ada, bo]", "ada and bo", "ada & bo"):
+        audience = parse_audience(raw)
+        assert audience.people == frozenset({"ada", "bo"}), raw
+        assert not audience.everyone
+
+
+def test_audience_reads_the_words_that_mean_everyone() -> None:
+    # Without these, "all" parses as a person id, matches nobody, and the skill
+    # dies quietly with no warning.
+    for raw in ("everyone", "all", "anyone", "anybody", "everybody", "Everyone"):
+        assert parse_audience(raw).everyone, raw
+
+
+def test_audience_reads_a_role_in_either_number() -> None:
+    assert parse_audience("member").roles == frozenset({"member"})
+    assert parse_audience("members").roles == frozenset({"member"})
+    assert parse_audience("guest").roles == frozenset({"guest"})
+
+
+def test_audience_mixes_a_role_and_names_in_a_bare_list() -> None:
+    audience = parse_audience("members and bo")
+    assert audience.roles == frozenset({"member"})
+    assert audience.people == frozenset({"bo"})
+
+
+def test_audience_warns_when_a_name_is_on_no_roster(caplog) -> None:
+    """A well-formed id that belongs to nobody is a typo.
+
+    The skill never fires for that name, and without this warning nothing
+    anywhere says why.
+    """
+    with caplog.at_level("WARNING"):
+        audience = parse_audience("adaa", path="wiki/skills/x.md", known_people=["ada", "bo"])
+    assert audience.people == frozenset({"adaa"})
+    assert "roster" in caplog.text
+
+
+def test_audience_is_quiet_when_every_name_is_on_the_roster(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        parse_audience("ada, bo", path="wiki/skills/x.md", known_people=["ada", "bo"])
+    assert caplog.text == ""
+
+
+def test_parse_skill_forwards_the_roster(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        skill = parse_skill(
+            {"name": "s", "triggers": "[movie time]", "for": "nobody-real"},
+            "Body.",
+            path="wiki/skills/s.md",
+            known_people=["ada"],
+        )
+    assert skill is not None
+    assert "roster" in caplog.text

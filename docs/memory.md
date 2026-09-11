@@ -109,48 +109,130 @@ docker compose restart core
 ## Taught skills
 
 A person can teach Joshua a skill: "when I say X, do Y". A taught skill is one
-Markdown file at `wiki/skills/<slug>.md`. The trigger phrases sit in the
-frontmatter; the body is the instructions Joshua follows when a phrase matches.
+Markdown file at `wiki/skills/<slug>.md`. The frontmatter says what the page
+is, who it is for, and how it is matched; the body is the instructions.
 
 ```
 ---
 name: movie time
-triggers: ["movie time", "let's watch a movie"]
+kind: command
+for: everyone
+match: phrase
+triggers: ["movie time", "start movie night"]
 ---
 Dim the living room lights to 30 percent and turn on the TV.
 ```
 
-- `name` is the display name. It falls back to the slug when it is absent.
-- `triggers` is a list of phrases. An empty list turns the skill off.
-- The body is the instructions.
+| key | value | default |
+| --- | --- | --- |
+| `name` | the display name | the slug |
+| `kind` | `command` or `convention` | `command` |
+| `for` | `everyone`, `members`, `guests`, a person id, or a list | `everyone` |
+| `match` | `phrase` or `semantic` | `phrase` |
+| `triggers` | the phrases that fire it | none |
 
-The indexer turns each trigger into one row in the index, with the row kind
-`skill`. Before each turn, core matches the message against those rows. A match
-above `memory.skills.min_sim` (0.62) puts the instructions in front of the
-agent, best first, up to `memory.skills.top_k` (1) skills. The match is by
-meaning, so a paraphrase of a trigger still fires.
+### Two kinds of page
 
-One turn fires one skill, because only the trigger is embedded. Two skills that
-answer the same shape of message sit close together: "here's a plant" and
-"here's a receipt" measure 0.72. A higher `top_k` lets the second one ride in
-below the skill that was asked for. Raise it when you want two.
+A **command** page is a behaviour a person asks for by name. It holds triggers
+and it fires when one matches.
+
+A **convention** page is standing guidance for a domain: how to choose a device
+entity, how the task lists are laid out. It holds no triggers and it never
+fires from a phrase. It is indexed as an ordinary wiki page, so a turn reaches
+it through recall when the subject comes up. Give a page of guidance
+`kind: convention`: a trigger invented for it fires it on turns nobody meant.
+
+### A match is a hint, not a trigger
+
+A skill that matches is put in front of the agent as a note, with the page's
+instructions and one line saying how the phrase sat in the turn. The agent
+reads the turn and decides what to do:
+
+- The person is asking for it: do it.
+- The person used the words while describing, remembering or planning
+  something: do not run it, and offer only when the offer helps.
+- It is not clear: ask first.
+
+This split is deliberate. No pattern can tell "light the fire" from "on
+Saturday I am going to light the fire with my friends", and the agent reads
+the whole turn anyway. A matcher that had to make that call needed a new rule
+for each way a person can mention a phrase without asking for it, and each rule
+fitted one person's way of speaking a little more tightly.
+
+So "I really need to settle in after this week" now reaches the agent with the
+`settle in` page attached and the note that the words were only mentioned. The
+agent can answer the person and offer to dim the lights, instead of dimming
+them.
+
+### How a phrase is found
+
+Two rules decide whether a skill is relevant:
+
+1. **Order.** Every word of the trigger that carries the request must appear,
+   in order. An article the person left out does not break it, so the trigger
+   "turn on the reading lights" still matches "turn on reading lights".
+2. **Budget.** Between the first and the last matched word the turn may hold at
+   most `memory.skills.max_extra_words` words that carry meaning. Articles and
+   pronouns are free. Two is enough for one inserted object ("add *milk* to the
+   list") and few enough that a turn holding the words far apart is not a
+   match.
+
+Each match carries a `closeness`, which is a description and never a filter:
+
+| closeness | what it means |
+| --- | --- |
+| `exact` | the turn is the trigger and nothing else |
+| `opening` | the turn opens with it, then says more |
+| `mentioned` | the words are somewhere in a longer turn |
+
+Set `match: semantic` for an intent that is genuinely said many ways, and the
+page is found by meaning instead, above `memory.skills.min_sim`. Similarity
+over short phrases has a high floor — two unrelated triggers measure about 0.62
+with the default model — so `min_sim` is 0.80 and a lower value means very
+little.
+
+`memory.skills.top_k` caps how many skills one turn carries. It is 3: a note is
+not an instruction, so the agent is better off seeing two neighbouring skills
+than being handed the winner of a tie it never sees. When two match, the closer
+reading sorts first, then the one whose trigger matched more words.
+
+### What makes a usable trigger
+
+A trigger is refused, with a warning that names the file and the reason, when
+it holds fewer than two words, or when it ends with an article, a preposition,
+or an auxiliary. `announce` fires on every turn that mentions it, and
+`turn on the` is the front half of a sentence. Write the phrase the way a
+person says it, and keep the verb.
+
+### Who can teach, who a skill reaches
+
+A member writes `wiki/skills/<slug>.md` through the files MCP. The wiki is
+read-only for a guest, so a guest cannot teach a skill or change one.
+
+`for` says who a skill reaches. It is the one hard rule in the match: a skill
+the audience does not name is never put in front of that person, so it is not
+the agent's to weigh. It is still not a permission, because a guest can read
+any page of the wiki. Use it when a skill holds one person's own
+choices, so that two people can teach the same words and each get their own
+result.
+
+A skill is usually taught by talking to Joshua, so `for` is read the way it is
+written: `for: ada, bo`, `for: [ada, bo]` and `for: ada and bo` all mean the
+same two people, and `all`, `anyone` and `everybody` all mean `everyone`. A
+value that still names nobody logs a warning with the file, because the skill
+then never fires. A name that is a well-formed id but belongs to no person on
+the roster logs a warning of its own: that is a typo, and nothing else would
+report it.
 
 A trigger row is an instruction, not a note. It never appears in the per-turn
 injection note and never comes back from `search_memory`.
-
-### Who can teach, who can trigger
-
-A member writes `wiki/skills/<slug>.md` through the files MCP. The wiki is
-read-only for a guest, so a guest cannot teach a skill or change one. There is
-one wiki, so a taught skill is shared: it fires for every person, a guest
-included. A guest can already read the file, so a guest match adds no access.
 
 ### The index delay
 
 A skill starts to work after the next index pass
 (`memory.index_interval_s`, 60 seconds by default). A skill never fires on the
-turn that taught it. To stop a skill, a member sets `triggers: []` or deletes the
-file. A deleted file stops firing on the next pass.
+turn that taught it. To stop a skill, a member sets `triggers: []` or deletes
+the file. A deleted file stops firing on the next pass.
 
 ## The journal is Joshua's, not a person's
 

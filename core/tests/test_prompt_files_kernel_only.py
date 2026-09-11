@@ -34,7 +34,11 @@ def test_kernel_prompt_files_exist() -> None:
 # journal, and a profile a thing belongs in — and is the one file where an
 # extra line buys guidance the agent cannot work out for itself.
 _LINE_BUDGET = 80
-_BUDGETS = {"people.md": 90}
+# people.md carries the skill format the agent writes: the trigger, ``for``,
+# and ``kind``. The format grew when a skill gained an audience and a kind, so
+# the budget grew with it. Every line here is paid on every turn: cut before
+# you raise this again.
+_BUDGETS = {"people.md": 98}
 
 
 @pytest.mark.parametrize("path", _FILES, ids=lambda p: p.name)
