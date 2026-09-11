@@ -244,7 +244,11 @@ def _build_memory(
             continue
         logger.warning({"message": "memory source adapter not available yet", "source": name})
     indexer = Indexer(
-        store, sources, embed_model=memory.embed_model, chunk_chars=memory.chunk_chars
+        store,
+        sources,
+        embed_model=memory.embed_model,
+        chunk_chars=memory.chunk_chars,
+        known_people=[p.id for p in settings.people],
     )
     recall.register(manager, store, settings)
     injection.register(manager, store, settings, repo)

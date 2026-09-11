@@ -187,6 +187,14 @@ can still read any page of the wiki. Use it when a skill holds one person's own
 choices, so that two people can teach the same words and each get their own
 result.
 
+A skill is usually taught by talking to Joshua, so `for` is read the way it is
+written: `for: ada, bo`, `for: [ada, bo]` and `for: ada and bo` all mean the
+same two people, and `all`, `anyone` and `everybody` all mean `everyone`. A
+value that still names nobody logs a warning with the file, because the skill
+then never fires. A name that is a well-formed id but belongs to no person on
+the roster logs a warning of its own: that is a typo, and nothing else would
+report it.
+
 A trigger row is an instruction, not a note. It never appears in the per-turn
 injection note and never comes back from `search_memory`.
 

@@ -268,3 +268,67 @@ def test_unknown_kind_or_match_falls_back_to_the_strict_default(caplog) -> None:
     assert skill is not None
     assert skill.kind == KIND_COMMAND
     assert skill.match == MATCH_PHRASE
+
+
+# --- the audience as the agent writes it -------------------------------------
+#
+# A skill is normally taught by talking to Joshua, so the agent writes this
+# value. It does not always write the form in the documentation, and a value
+# that cannot be read gives a skill which never fires and never says why.
+
+
+def test_audience_reads_a_bare_list() -> None:
+    """`for: ada, bo` means the same as `for: [ada, bo]`."""
+    for raw in ("ada, bo", "[ada, bo]", "ada and bo", "ada & bo"):
+        audience = parse_audience(raw)
+        assert audience.people == frozenset({"ada", "bo"}), raw
+        assert not audience.everyone
+
+
+def test_audience_reads_the_words_that_mean_everyone() -> None:
+    # Without these, "all" parses as a person id, matches nobody, and the skill
+    # dies quietly with no warning.
+    for raw in ("everyone", "all", "anyone", "anybody", "everybody", "Everyone"):
+        assert parse_audience(raw).everyone, raw
+
+
+def test_audience_reads_a_role_in_either_number() -> None:
+    assert parse_audience("member").roles == frozenset({"member"})
+    assert parse_audience("members").roles == frozenset({"member"})
+    assert parse_audience("guest").roles == frozenset({"guest"})
+
+
+def test_audience_mixes_a_role_and_names_in_a_bare_list() -> None:
+    audience = parse_audience("members and bo")
+    assert audience.roles == frozenset({"member"})
+    assert audience.people == frozenset({"bo"})
+
+
+def test_audience_warns_when_a_name_is_on_no_roster(caplog) -> None:
+    """A well-formed id that belongs to nobody is a typo.
+
+    The skill never fires for that name, and without this warning nothing
+    anywhere says why.
+    """
+    with caplog.at_level("WARNING"):
+        audience = parse_audience("adaa", path="wiki/skills/x.md", known_people=["ada", "bo"])
+    assert audience.people == frozenset({"adaa"})
+    assert "roster" in caplog.text
+
+
+def test_audience_is_quiet_when_every_name_is_on_the_roster(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        parse_audience("ada, bo", path="wiki/skills/x.md", known_people=["ada", "bo"])
+    assert caplog.text == ""
+
+
+def test_parse_skill_forwards_the_roster(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        skill = parse_skill(
+            {"name": "s", "triggers": "[movie time]", "for": "nobody-real"},
+            "Body.",
+            path="wiki/skills/s.md",
+            known_people=["ada"],
+        )
+    assert skill is not None
+    assert "roster" in caplog.text

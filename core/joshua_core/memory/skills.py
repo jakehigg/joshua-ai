@@ -53,7 +53,21 @@ MATCH_MODES = (MATCH_PHRASE, MATCH_SEMANTIC)
 AUDIENCE_EVERYONE = "everyone"
 AUDIENCE_MEMBERS = "members"
 AUDIENCE_GUESTS = "guests"
-_ROLE_WORDS = {AUDIENCE_MEMBERS: "member", AUDIENCE_GUESTS: "guest"}
+# The words that mean "everyone". A skill is usually taught by talking, so the
+# agent writes this value and it does not always write the one word in the
+# documentation. Each of these is unambiguous, and reading them costs nothing.
+# Without them "all" parses as a person id, matches nobody, and the skill dies
+# quietly with no warning to say why.
+_EVERYONE_WORDS = frozenset({AUDIENCE_EVERYONE, "all", "anyone", "anybody", "everybody", "any"})
+_ROLE_WORDS = {
+    AUDIENCE_MEMBERS: "member",
+    "member": "member",
+    AUDIENCE_GUESTS: "guest",
+    "guest": "guest",
+}
+# "a and b", written out. A person id cannot hold a space, so this never splits
+# one in half.
+_AND_RE = re.compile(r"\s+and\s+|\s*&\s*")
 
 # A skill file is ``wiki/skills/<slug>.md`` at that exact depth. A file deeper in
 # the tree (``wiki/skills/sub/x.md``) is an ordinary wiki page — the slug pattern
@@ -208,37 +222,59 @@ def _parse_list(raw: str) -> list[str] | None:
     return [part.strip().strip("'\"") for part in inner.split(",")]
 
 
-def parse_audience(raw: str | None, *, path: str = "") -> Audience:
+def _audience_items(raw: str, text: str) -> list[str]:
+    """Split a ``for`` value into words, however it was written.
+
+    A skill is usually taught by talking to Joshua, so this value is written by
+    the agent and not by a person editing YAML. It arrives as a bracketed list
+    (``[a, b]``), but just as often as a bare list (``a, b``) or as English
+    (``a and b``). All three mean the same thing, so all three are read.
+    """
+    items = _parse_list(raw)
+    if items is not None:
+        return items
+    return [part for chunk in text.split(",") for part in _AND_RE.split(chunk)]
+
+
+def parse_audience(
+    raw: str | None, *, path: str = "", known_people: Iterable[str] | None = None
+) -> Audience:
     """Read the frontmatter ``for`` value.
 
-    Accepts ``everyone``, ``members``, ``guests``, one person id, or a list that
-    mixes person ids and those words. An absent or empty value is
-    ``everyone``. A value that names nothing usable logs one warning and
-    returns an audience that allows nobody, because a skill whose audience
-    cannot be read must not fall open.
+    Accepts ``everyone`` (and the words that mean it), ``members``, ``guests``,
+    one person id, or a list of those in any of the forms above. An absent or
+    empty value is ``everyone``.
+
+    A value that names nothing usable logs one warning and allows nobody: a
+    skill whose audience cannot be read must not fall open. That is the safe
+    direction, but it is also a skill that silently never fires, so every way
+    of getting there logs why. ``known_people`` is the roster, when the caller
+    has it: a name that is a well-formed id but belongs to nobody is a typo,
+    and it is worth a warning of its own.
     """
     if raw is None:
         return EVERYONE
     text = raw.strip().strip("\"'")
     if not text:
         return EVERYONE
-    items = _parse_list(raw)
-    if items is None:
-        items = [text]
 
+    roster = {p.lower() for p in known_people} if known_people is not None else None
     people: set[str] = set()
     roles: set[str] = set()
     unknown: list[str] = []
-    for item in items:
+    strangers: list[str] = []
+    for item in _audience_items(raw, text):
         word = item.strip().strip("\"'").lower()
         if not word:
             continue
-        if word == AUDIENCE_EVERYONE:
+        if word in _EVERYONE_WORDS:
             return EVERYONE
         if word in _ROLE_WORDS:
             roles.add(_ROLE_WORDS[word])
         elif _PERSON_ID.match(word):
             people.add(word)
+            if roster is not None and word not in roster:
+                strangers.append(word)
         else:
             unknown.append(word)
 
@@ -248,6 +284,16 @@ def parse_audience(raw: str | None, *, path: str = "") -> Audience:
                 "message": "taught skill audience has unreadable names",
                 "path": path,
                 "names": unknown,
+            }
+        )
+    if strangers:
+        # Well-formed, but nobody on the roster. The skill will never fire for
+        # them, and nothing else would say so.
+        logger.warning(
+            {
+                "message": "taught skill audience names nobody on the roster",
+                "path": path,
+                "names": strangers,
             }
         )
     if not people and not roles:
@@ -359,7 +405,13 @@ def _one_of(raw: str | None, allowed: Sequence[str], default: str, *, field: str
     return default
 
 
-def parse_skill(frontmatter: Mapping[str, str], body: str, *, path: str = "") -> Skill | None:
+def parse_skill(
+    frontmatter: Mapping[str, str],
+    body: str,
+    *,
+    path: str = "",
+    known_people: Iterable[str] | None = None,
+) -> Skill | None:
     """Parse a taught skill, or None when the file is not a usable skill.
 
     Returns None when the frontmatter is missing or the body is empty. A
@@ -374,7 +426,7 @@ def parse_skill(frontmatter: Mapping[str, str], body: str, *, path: str = "") ->
 
     kind = _one_of(frontmatter.get("kind"), KINDS, KIND_COMMAND, field="kind", path=path)
     match = _one_of(frontmatter.get("match"), MATCH_MODES, MATCH_PHRASE, field="match", path=path)
-    audience = parse_audience(frontmatter.get("for"), path=path)
+    audience = parse_audience(frontmatter.get("for"), path=path, known_people=known_people)
     name = (frontmatter.get("name") or "").strip().strip("\"'")
 
     if kind == KIND_CONVENTION:

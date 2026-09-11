@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -108,6 +109,7 @@ class Indexer:
         embed_model: str,
         chunk_chars: int,
         skills: SkillRegistry | None = None,
+        known_people: Sequence[str] | None = None,
     ):
         self._store = store
         self._sources = sources
@@ -117,6 +119,10 @@ class Indexer:
         # each pass over ``files``, changed or not, because a phrase match needs
         # the whole set and parsing a few dozen small files costs nothing.
         self._skills = skills if skills is not None else SkillRegistry()
+        # The roster, so a skill whose ``for`` names nobody is reported. A
+        # well-formed id that belongs to no person is a typo, and the skill
+        # would otherwise never fire and never say why.
+        self._known_people = tuple(known_people or ())
         self._locks = {name: asyncio.Lock() for name in sources}
         self._status: dict[str, dict[str, Any]] = {
             name: {"last_run": None, "last_result": None, "last_error": None, "running": False}
@@ -166,7 +172,9 @@ class Indexer:
         for doc in docs:
             if not is_skill_path(doc.uri):
                 continue
-            skill = parse_skill(doc.frontmatter, doc.text, path=doc.uri)
+            skill = parse_skill(
+                doc.frontmatter, doc.text, path=doc.uri, known_people=self._known_people
+            )
             if skill is not None:
                 parsed.append(skill)
         self._skills.replace(parsed)
