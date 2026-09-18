@@ -9,8 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from joshua_channels.attachments import (
     safe_filename,
     sniff_mime,
 )
+from joshua_shared import layout
 from joshua_shared.attachments import read_meta
 from PIL import Image
 
@@ -539,3 +541,25 @@ async def test_a_decompression_bomb_is_skipped(tmp_path: Path, monkeypatch) -> N
     stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
 
     assert stored == []
+
+
+async def test_the_retention_sweep_never_reaches_a_wiki_attachment(tmp_path: Path) -> None:
+    """A page keeps its picture. Retention deletes evidence, never the wiki."""
+    wiki = layout.month_dir(layout.wiki_attachments_root(tmp_path), date(2026, 9, 16))
+    wiki.mkdir(parents=True)
+    kept = wiki / "2026-09-16-140509-grocery-receipt.jpg"
+    kept.write_bytes(_png((16, 16)))
+
+    evidence = tmp_path / "people" / "alex" / "attachments" / "2026" / "09"
+    evidence.mkdir(parents=True)
+    gone = evidence / "2026-09-16-140509-IMG.jpg"
+    gone.write_bytes(_png((16, 16)))
+
+    for path in (kept, gone):
+        os.utime(path, (0.0, 0.0))
+
+    removed = AttachmentPipeline(data_dir=tmp_path, retention_days=1).sweep_retention()
+
+    assert removed == 1
+    assert kept.is_file()
+    assert not gone.exists()

@@ -82,3 +82,29 @@ async def test_a_well_adapter_also_gives_the_200() -> None:
         response = await client.get("/readyz")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_the_text_cap_comes_from_the_config(monkeypatch, tmp_path) -> None:
+    """A self-hoster sets how much text one attachment keeps."""
+    from joshua_channels.attachments import AttachmentPipeline
+    from joshua_shared import config as config_module
+
+    settings = config_module.parse(
+        """
+name: Test House
+timezone: UTC
+people:
+  - id: alex
+    name: Alex
+attachments:
+  extract:
+    max_chars: 25
+""",
+        env={},
+        source="<test>",
+    )
+    pipeline = AttachmentPipeline(
+        data_dir=tmp_path, max_text_chars=settings.attachments.extract.max_chars
+    )
+
+    assert pipeline._max_text_chars == 25
