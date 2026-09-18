@@ -422,7 +422,10 @@ def _serve(roots: dict[str, Root], rel: str, person: Person, *, allow_delete: bo
             title = wiki.page_title(text, wiki.stem_title(abs_path.stem))
             folder_rel = under_wiki.rsplit("/", 1)[0] if "/" in under_wiki else ""
             body += wiki.crumbs_html(root.base, folder_rel, leaf=title)
-        body += wiki.meta_html(front or {}) + f'<article class="md">{_MD.render(body_md)}</article>'
+        rendered = _MD.render(body_md)
+        if root.name == "wiki":
+            rendered = _wiki_attachment_links(rendered)
+        body += wiki.meta_html(front or {}) + f'<article class="md">{rendered}</article>'
         if root.name == "wiki":
             body += wiki.siblings_html(root.base, under_wiki)
         if allow_delete and root.name == "wiki" and person.role == "member":
@@ -431,6 +434,19 @@ def _serve(roots: dict[str, Root], rel: str, person: Person, *, allow_delete: bo
         return _page(title, body)
 
     return _download(abs_path)
+
+
+def _wiki_attachment_links(html: str) -> str:
+    """Point a page's `/attachments/…` links at the wiki folder of this viewer.
+
+    A page stores the link the way a wiki frontend that serves the wiki at its
+    root reads it: `/attachments/YYYY/MM/name`. This viewer serves the wiki
+    under `/wiki/`, and `/attachments/` here is the person's own files, so the
+    link is rewritten as the page is rendered. The stored page is not changed.
+    """
+    return html.replace('src="/attachments/', 'src="/wiki/attachments/').replace(
+        'href="/attachments/', 'href="/wiki/attachments/'
+    )
 
 
 def _download(abs_path: Path) -> Response:
