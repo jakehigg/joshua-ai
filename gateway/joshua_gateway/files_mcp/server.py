@@ -32,13 +32,13 @@ import re
 import tempfile
 from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import mcp_types as types
 import yaml
-from joshua_shared.layout import is_hidden, journal_entry_path, journal_root
+from joshua_shared.layout import attachment_area, is_hidden, journal_entry_path, journal_root
 from joshua_shared.log import get_logger
 from mcp.server.lowlevel import Server
 from pypdf import PdfReader
@@ -345,7 +345,7 @@ def _read_file(
         rel = _rel_path(root, abs_path)
         return _read_pdf(abs_path, rel)
 
-    if _people_kind(args.get("path", "")) == "attachments":
+    if attachment_area(args.get("path", "")) is not None:
         mime = IMAGE_MIME.get(abs_path.suffix.lower())
         if mime is not None:
             data = base64.b64encode(abs_path.read_bytes()).decode("ascii")
@@ -567,19 +567,6 @@ def _read_pdf(abs_path: Path, rel: str) -> types.CallToolResult:
 
 
 # -- helpers ----------------------------------------------------------------
-
-
-def _people_kind(path: str) -> str | None:
-    """The kind a ``people/<person>/<kind>/...`` path names, or None.
-
-    The corpus is one tree, so a handler asks what a path *is* rather than
-    which root it came from. ``people/alex/attachments/2026/08/a.jpg`` gives
-    ``attachments``; ``people/alex/cli/outbox.jsonl`` gives ``cli``.
-    """
-    parts = PurePosixPath(path.strip()).parts
-    if len(parts) >= 3 and parts[0] == "people":
-        return parts[2]
-    return None
 
 
 def _rel_path(root: Root, abs_path: Path) -> str:

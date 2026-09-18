@@ -30,8 +30,9 @@ ECHO_TOOLS_MARKER = "[[echo-tools]]"
 # without the SDK.
 JOURNAL_MARKER = "[[journal]]"
 
-# The files-MCP-relative attachment paths cited in a turn's attach note.
-_ATTACHMENT_RE = re.compile(r"attachments/[^\s)]+")
+# The files-MCP-relative attachment paths cited in a turn's attach note:
+# ``wiki/attachments/…``, ``people/<id>/attachments/…``, or ``shared/attachments/…``.
+_ATTACHMENT_RE = re.compile(r"(?:wiki|shared|people/[a-z0-9][a-z0-9-]{0,31})/attachments/[^\s)]+")
 
 
 class StubAgentSession:

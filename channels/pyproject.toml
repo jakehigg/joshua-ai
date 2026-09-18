@@ -12,6 +12,7 @@ dependencies = [
     "cachetools>=5.3",
     "pillow>=11",
     "pillow-heif>=0.18",
+    "pypdf>=5.1",
 ]
 
 [tool.uv.sources]

@@ -394,6 +394,38 @@ async def test_read_image_returns_image_block(gateway, data_root):
     assert base64.b64decode(block.data) == PNG_1PX
 
 
+async def test_read_a_group_image_returns_an_image_block(gateway, data_root):
+    """A picture sent in a group chat is a picture, the same as one in a direct chat."""
+    shared = data_root / "shared" / "attachments" / "everyone" / "2026" / "09"
+    shared.mkdir(parents=True, exist_ok=True)
+    (shared / "p.png").write_bytes(PNG_1PX)
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "read_file", {"path": "shared/attachments/everyone/2026/09/p.png"}
+            )
+    block = res.content[0]
+    assert block.type == "image"
+    assert block.mime_type == "image/png"
+
+
+async def test_read_a_wiki_attachment_returns_an_image_block(gateway, data_root):
+    """A picture a page uses reads the same way as one from a chat."""
+    folder = data_root / "wiki" / "attachments" / "2026" / "09"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "p.png").write_bytes(PNG_1PX)
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool("read_file", {"path": "wiki/attachments/2026/09/p.png"})
+    block = res.content[0]
+    assert block.type == "image"
+    assert block.mime_type == "image/png"
+
+
 async def test_read_heic_returns_metadata_only(gateway, data_root):
     heic = data_root / "people" / "alex" / "attachments" / "2026" / "08" / "a.heic"
     # Real HEIC magic plus a 0xff byte, which is never valid UTF-8.

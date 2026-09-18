@@ -366,7 +366,10 @@ class EventService:
 
     def _engine_attachments(self, event: TurnEvent) -> list[EngineAttachment]:
         return [
-            EngineAttachment(path=a.path, mime=a.mime, name=a.name or "") for a in event.attachments
+            EngineAttachment(
+                path=a.path, mime=a.mime, name=a.name or "", original_name=a.original_name
+            )
+            for a in event.attachments
         ]
 
     def _inject_framing(self) -> str:

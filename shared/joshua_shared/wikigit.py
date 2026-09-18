@@ -29,7 +29,10 @@ from joshua_shared.log import get_logger
 logger = get_logger("wikigit")
 
 _TIMEOUT_S = 30
-_GITIGNORE_BODY = ".trash/\n"
+# The lines Joshua keeps in `wiki/.gitignore`. `.trash/` is the viewer's
+# trash. `/attachments/` is the binary files of the wiki: the volume backup
+# holds them, and the repository stays small.
+_GITIGNORE_LINES = (".trash/", "/attachments/")
 # Retries for a transient `index.lock` from a frontend committing at the same
 # moment: up to five, with a growing sleep (0.2s, 0.4s, ...).
 _LOCK_RETRIES = 5
@@ -53,8 +56,8 @@ def is_enabled(settings: Any) -> bool:
 def ensure_repo(wiki: Path) -> bool:
     """Make `wiki` a git repository if it is not one yet. Idempotent.
 
-    Writes `wiki/.gitignore` with `.trash/` when the file is absent, and
-    never overwrites one that is already there. Returns True when this call
+    Makes sure `wiki/.gitignore` holds `.trash/` and `/attachments/`. It adds a
+    missing line and keeps every other line in the file. Returns True when this call
     created the repository, False when one was already there or `git`
     failed (logged as a WARNING).
     """
@@ -125,9 +128,19 @@ def _ensure_repo(wiki: Path) -> bool:
 
 
 def _write_gitignore(wiki: Path) -> None:
+    """Add each line of `_GITIGNORE_LINES` that `wiki/.gitignore` does not hold.
+
+    Keeps every line a person or a frontend wrote.
+    """
     gitignore = wiki / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text(_GITIGNORE_BODY)
+    text = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    present = {line.strip() for line in text.splitlines()}
+    missing = [line for line in _GITIGNORE_LINES if line not in present]
+    if not missing:
+        return
+    if text and not text.endswith("\n"):
+        text += "\n"
+    gitignore.write_text(text + "".join(f"{line}\n" for line in missing), encoding="utf-8")
 
 
 def _commit(wiki: Path, rel_paths: list[str] | None, message: str) -> bool:

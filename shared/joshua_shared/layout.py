@@ -17,6 +17,8 @@ There is one wiki, at `<data>/wiki/`. It is Joshua's memory:
   episodic memory now, not a person's.
 - `people/<id>.md` is Joshua's profile of a person. `people/everyone.md` is
   the shared profile. `everyone` is reserved: no person may use it as an id.
+- `attachments/YYYY/MM/` holds the attachments the wiki keeps. Core moves a
+  file here. The wiki repository ignores this folder.
 
 Every person reads the wiki and a member writes it. A person's own files
 outside the wiki are `attachments/` and, for the terminal channel, `cli/`,
@@ -35,7 +37,7 @@ import re
 import shutil
 from datetime import date
 from importlib import resources
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from joshua_shared.fs import is_writable
 from joshua_shared.ids import PERSON_ID_RE
@@ -56,7 +58,18 @@ DEFAULT_DOCS_DIR = "/app/docs"
 _PERSON_DIRS = ("attachments",)
 
 # The directories `bootstrap_wiki` creates under the wiki.
-_WIKI_DIRS = ("skills", "journal", "people")
+_WIKI_DIRS = ("skills", "journal", "people", "attachments")
+
+# The folder name of every attachment tree: `wiki/attachments/`,
+# `people/<id>/attachments/`, and `shared/attachments/`.
+ATTACHMENTS = "attachments"
+
+# The group segment under `shared/attachments/`. It is a folder name and never
+# a path, so it may not hold a slash or start with a dot.
+_GROUP_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
+
+# The bucket under `shared/attachments/` for a file with no person and no group.
+EVENTS_BUCKET = "events"
 
 # `everyone` names the shared profile page, so no person id may use it.
 SHARED_PROFILE_NAME = "everyone"
@@ -236,6 +249,75 @@ def inbox_root(root: Path | str | None = None) -> Path:
     return _root(root) / "inbox"
 
 
+def person_attachments_root(pid: str, root: Path | str | None = None) -> Path:
+    """`<data>/people/<pid>/attachments`, what a person sent in a direct chat."""
+    return person_dir(pid, ATTACHMENTS, root)
+
+
+def shared_attachments_root(root: Path | str | None = None) -> Path:
+    """`<data>/shared/attachments`, what was sent in a group chat or by an event."""
+    return shared_root(root) / ATTACHMENTS
+
+
+def group_attachments_root(group_id: str, root: Path | str | None = None) -> Path:
+    """`<data>/shared/attachments/<group_id>`. Raises `ValueError` for a bad id."""
+    if not _GROUP_SEGMENT_RE.match(group_id) or ".." in group_id:
+        raise ValueError(f"invalid group id: {group_id!r}")
+    return shared_attachments_root(root) / group_id
+
+
+def wiki_attachments_root(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/attachments`, the attachments the wiki keeps.
+
+    Retention never deletes a file here, and the wiki repository ignores the
+    folder, so the volume backup is the only copy.
+    """
+    return wiki_root(root) / ATTACHMENTS
+
+
+def month_dir(base: Path, when: date) -> Path:
+    """`<base>/YYYY/MM` for the month of `when`."""
+    return base / f"{when:%Y}" / f"{when:%m}"
+
+
+def attachment_roots(root: Path | str | None = None) -> list[Path]:
+    """Every attachment tree that exists: the wiki, the shared, and each person's."""
+    roots = [wiki_attachments_root(root), shared_attachments_root(root)]
+    people = _root(root) / "people"
+    if people.is_dir():
+        roots.extend(sorted(p / ATTACHMENTS for p in people.iterdir() if p.is_dir()))
+    return [r for r in roots if r.is_dir()]
+
+
+def data_relative(path: Path, root: Path | str | None = None) -> str:
+    """The path of `path` relative to the data root, in POSIX form.
+
+    This is the form the files MCP and the turn contract use, because their
+    root names (`wiki`, `people`, `shared`) are the top folders of the volume.
+    Raises `ValueError` when `path` is not under the data root.
+    """
+    return Path(path).relative_to(_root(root)).as_posix()
+
+
+def attachment_area(rel: str) -> str | None:
+    """Which attachment tree a data-relative path is in, or `None`.
+
+    Returns `wiki` for `wiki/attachments/...`, `person` for
+    `people/<id>/attachments/...`, and `shared` for `shared/attachments/...`.
+    The check reads the path only. It does not look at the disk.
+    """
+    parts = PurePosixPath(rel).parts
+    if ".." in parts:
+        return None
+    if len(parts) >= 3 and parts[0] == "wiki" and parts[1] == ATTACHMENTS:
+        return "wiki"
+    if len(parts) >= 4 and parts[0] == "people" and parts[2] == ATTACHMENTS:
+        return "person"
+    if len(parts) >= 3 and parts[0] == "shared" and parts[1] == ATTACHMENTS:
+        return "shared"
+    return None
+
+
 def _template(name: str) -> str:
     return resources.files("joshua_shared").joinpath("templates", name).read_text()
 
@@ -257,7 +339,8 @@ def bootstrap_person(pid: str, display_name: str, root: Path | str | None = None
 
 
 def bootstrap_wiki(root: Path | str | None = None) -> None:
-    """Create `wiki/`, its `skills/`, `journal/`, and `people/`, and the front page. Idempotent.
+    """Create `wiki/`, its `skills/`, `journal/`, `people/`, and `attachments/`, and
+    the front page. Idempotent.
 
     Writes `Home.md` from the template only when it is absent, and never
     touches it again, so a person's edits to their own front page survive

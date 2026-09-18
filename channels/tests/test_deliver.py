@@ -9,7 +9,8 @@ import httpx
 import pytest
 from adapter_fakes import FakeAdapter
 from joshua_channels.app import build_app
-from joshua_channels.deliver import ChannelsContext
+from joshua_channels.deliver import AttachmentError, ChannelsContext, map_attachments
+from joshua_channels.destinations import Resolved
 from joshua_channels.registry import AdapterRegistry
 from joshua_shared import config as config_module
 
@@ -224,3 +225,58 @@ async def test_resolve_requires_core_identity() -> None:
             "/v1/channels/resolve", params={"ref": "everyone"}, headers=_bearer(LAPTOP_TOKEN)
         )
     assert resp.status_code == 403
+
+
+# ── attachment path mapping ──────────────────────────────────────────────────
+
+
+def _resolved(kind: str, person_id: str | None) -> Resolved:
+    return Resolved(
+        channel="imessage:+15551234567",
+        channel_type="imessage",
+        chat_id="+15551234567",
+        kind=kind,
+        title=None,
+        person_id=person_id,
+        adapter=FakeAdapter("imessage"),
+    )
+
+
+def test_a_person_path_maps_to_that_person_directory() -> None:
+    """The path core sends is the one the files MCP uses."""
+    mapped = map_attachments(
+        "/data", _resolved("dm", "alex"), ["people/alex/attachments/2026/09/a.jpg"]
+    )
+    assert mapped == [Path("/data/people/alex/attachments/2026/09/a.jpg")]
+
+
+def test_a_wiki_attachment_maps_to_the_wiki() -> None:
+    mapped = map_attachments("/data", _resolved("dm", "alex"), ["wiki/attachments/2026/09/a.jpg"])
+    assert mapped == [Path("/data/wiki/attachments/2026/09/a.jpg")]
+
+
+def test_another_person_attachment_is_refused_in_a_direct_chat() -> None:
+    """One person's file never reaches another person's chat."""
+    with pytest.raises(AttachmentError):
+        map_attachments("/data", _resolved("dm", "alex"), ["people/mia/attachments/2026/09/a.jpg"])
+
+
+def test_a_person_attachment_is_refused_in_a_group_chat() -> None:
+    with pytest.raises(AttachmentError):
+        map_attachments(
+            "/data", _resolved("group", None), ["people/alex/attachments/2026/09/a.jpg"]
+        )
+
+
+def test_a_wiki_attachment_is_allowed_in_a_group_chat() -> None:
+    mapped = map_attachments("/data", _resolved("group", None), ["wiki/attachments/2026/09/a.jpg"])
+    assert mapped == [Path("/data/wiki/attachments/2026/09/a.jpg")]
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/etc/passwd", "../../etc/passwd", "people/../../etc/passwd", ""],
+)
+def test_an_unsafe_path_is_refused(path: str) -> None:
+    with pytest.raises(AttachmentError):
+        map_attachments("/data", _resolved("dm", "alex"), [path])

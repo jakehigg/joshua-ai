@@ -711,6 +711,7 @@ dependencies = [
     { name = "joshua-shared" },
     { name = "pillow" },
     { name = "pillow-heif" },
+    { name = "pypdf" },
     { name = "python-telegram-bot" },
     { name = "uvicorn" },
 ]
@@ -723,6 +724,7 @@ requires-dist = [
     { name = "joshua-shared", editable = "shared" },
     { name = "pillow", specifier = ">=11" },
     { name = "pillow-heif", specifier = ">=0.18" },
+    { name = "pypdf", specifier = ">=5.1" },
     { name = "python-telegram-bot", specifier = "==22.8" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]

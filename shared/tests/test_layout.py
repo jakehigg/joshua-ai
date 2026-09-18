@@ -648,3 +648,73 @@ def test_validate_layout_leaves_no_probe_file(data_dir: Path) -> None:
     layout.bootstrap_shared()
     layout.validate_layout()
     assert [p.name for p in data_dir.iterdir() if p.name.startswith(".joshua-write-probe")] == []
+
+
+# -- attachment trees --------------------------------------------------------
+
+
+def test_the_wiki_gets_an_attachments_folder(tmp_path: Path) -> None:
+    layout.bootstrap_wiki(tmp_path)
+    assert layout.wiki_attachments_root(tmp_path).is_dir()
+
+
+def test_each_attachment_root_is_built_by_the_layout(tmp_path: Path) -> None:
+    assert layout.person_attachments_root("jake", tmp_path) == (
+        tmp_path / "people" / "jake" / "attachments"
+    )
+    assert layout.shared_attachments_root(tmp_path) == tmp_path / "shared" / "attachments"
+    assert layout.group_attachments_root("everyone", tmp_path) == (
+        tmp_path / "shared" / "attachments" / "everyone"
+    )
+    assert layout.wiki_attachments_root(tmp_path) == tmp_path / "wiki" / "attachments"
+
+
+@pytest.mark.parametrize("group_id", ["../escape", "a/b", ".hidden", "", "x" * 65])
+def test_a_bad_group_id_is_refused(group_id: str, tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        layout.group_attachments_root(group_id, tmp_path)
+
+
+def test_month_dir_reads_the_date(tmp_path: Path) -> None:
+    assert layout.month_dir(tmp_path, date(2026, 9, 5)) == tmp_path / "2026" / "09"
+
+
+def test_attachment_roots_lists_only_the_folders_that_exist(tmp_path: Path) -> None:
+    layout.bootstrap_wiki(tmp_path)
+    layout.bootstrap_shared(tmp_path)
+    (tmp_path / "people" / "jake" / "attachments").mkdir(parents=True)
+    (tmp_path / "people" / "mia").mkdir(parents=True)
+
+    roots = layout.attachment_roots(tmp_path)
+
+    assert layout.wiki_attachments_root(tmp_path) in roots
+    assert layout.shared_attachments_root(tmp_path) in roots
+    assert tmp_path / "people" / "jake" / "attachments" in roots
+    assert tmp_path / "people" / "mia" / "attachments" not in roots
+
+
+def test_data_relative_gives_the_files_mcp_form(tmp_path: Path) -> None:
+    path = layout.wiki_attachments_root(tmp_path) / "2026" / "09" / "a.jpg"
+    assert layout.data_relative(path, tmp_path) == "wiki/attachments/2026/09/a.jpg"
+
+
+def test_data_relative_refuses_a_path_outside_the_volume(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        layout.data_relative(Path("/etc/passwd"), tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("rel", "area"),
+    [
+        ("wiki/attachments/2026/09/a.jpg", "wiki"),
+        ("people/jake/attachments/2026/09/a.jpg", "person"),
+        ("shared/attachments/everyone/2026/09/a.jpg", "shared"),
+        ("wiki/recipes/pizza.md", None),
+        ("people/jake/cli/outbox.jsonl", None),
+        ("wiki/attachments", None),
+        ("../wiki/attachments/a.jpg", None),
+        ("", None),
+    ],
+)
+def test_attachment_area_reads_the_path(rel: str, area: str | None) -> None:
+    assert layout.attachment_area(rel) == area
