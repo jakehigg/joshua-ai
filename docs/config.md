@@ -312,13 +312,59 @@ wiki:
 ```
 
 When it is on, core makes the repository at its first start (`git init`,
-with a `.gitignore` that excludes `wiki/.trash/`), and commits at start, at
+with a `.gitignore` that excludes `wiki/.trash/` and `wiki/attachments/`),
+and commits at start, at
 each write the agent makes through the gateway, and at the nightly run. See
 [docs/data-layout.md](data-layout.md#the-wiki) for what gets committed and
 when, and [docs/operations.md](operations.md) for adding a remote.
 
 Set `git: false` to leave git to a wiki frontend, such as Otter Wiki, or to
 a sync tool of your own. Joshua then never touches `wiki/.git`.
+
+## attachments
+
+What happens to a file a person sends.
+
+```yaml
+attachments:
+  auto_save: false
+  describe:
+    enabled: true
+    model: claude-haiku-4-5
+    timeout_seconds: 20
+  extract:
+    max_chars: 100000
+    embed: true
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `auto_save` | `false` | `true` moves a file a member sends into `wiki/attachments/` as the turn starts. It is then out of reach of the retention sweep, so a page keeps its picture. A guest's file never moves. |
+| `describe.enabled` | `true` | A worker looks at each picture, and at a PDF with no text layer, before the turn is matched. |
+| `describe.model` | `claude-haiku-4-5` | The model the worker uses. It must read images. |
+| `describe.timeout_seconds` | `20` | How long a turn waits for the worker. A timeout leaves the turn as it was. |
+| `extract.max_chars` | `100000` | How much text one attachment keeps in its metadata file. |
+| `extract.embed` | `true` | Put that text in the search index, so a person can ask about what a document says. |
+
+**What the describer is for.** A photo with no caption carries one fixed
+sentence, so every such turn looks the same to a taught skill and to the
+memory search. The worker gives the turn real words: a kind from a closed
+list, a subject, and a slug that names the file. The turn uses the subject
+only when the person wrote no caption of their own.
+
+**What it costs.** One call for each new file, about a fifth of a cent for a
+picture. The answer is stored beside the file and keyed by the digest of the
+bytes, so the same file is never described twice, however often it comes up.
+
+**What the worker may do.** Nothing but answer. It reaches no tool and no
+file, and it sees no message of the conversation. See
+[docs/security.md](security.md).
+
+**The text of a file.** Channels reads a PDF with a text layer and a text file
+when it arrives. The worker reads the words on a picture, and on a scan. The
+text goes in the metadata file, so a later question about a receipt or a bill
+needs no second read. With `extract.embed` on, the text is in the search
+index too, marked as external.
 
 ## MCP servers
 
@@ -563,7 +609,9 @@ nothing. A request with no role is a guest.
 `people/` and `shared/` are read-only through this server because another
 container owns them: `channels` writes `people/<id>/attachments/` and the
 terminal outbox, and `core` writes the shared attachments. The agent reads both
-and writes neither.
+and writes neither. The one write the agent makes to an attachment is
+`save_attachment`, which copies a file into `wiki/attachments/` and leaves the
+file that arrived where it is.
 
 `wiki/joshua-docs/` holds the documentation that the repo ships. Core
 replaces it at each start.
@@ -573,7 +621,9 @@ Channels stores an inbound attachment under `people/<id>/attachments/YYYY/MM/` w
 The timestamp is the arrival time in `timezone`, the person's wall
 clock, so the name reads naturally. The message frontmatter and the index keep
 UTC. A second file with the same name in the same second gets `-2`, `-3`, and so
-on before the extension.
+on before the extension. When the describer has looked at the file, core
+replaces the stem with the slug of the description. See
+[docs/data-layout.md](data-layout.md).
 
 A journal entry has its own tool, `write_journal_entry(slug, markdown, people,
 date)`, and `write_file` refuses a path under `wiki/journal/`. The server places
@@ -586,18 +636,28 @@ slug again rather than adding a second one. The nightly page,
 `YYYY-MM-DD.md`, is core's and the slug pattern cannot name it.
 
 Tools: `list_files`, `read_file`, `write_file`, `rename_file`,
-`search_files`, and `write_journal_entry`. `read_file` returns an image block for a `.jpg`, `.jpeg`, `.png`,
-`.gif`, or `.webp` under `people/<id>/attachments/`. A `.pdf` returns its extracted text (the
-first 20 pages, capped at 256 KB). Another attachment returns text when it is
-UTF-8 and 256 KB or less, else metadata only. `write_file` writes `.md` only, at
-most 256 KB, and `mode: create` fails when the file exists. `rename_file` renames
-one file in place under `wiki/`, a journal, or an attachments directory.
-`new_name` is a bare
-filename and the extension must not change. An attachment keeps its date-time
-prefix, so the person renames the descriptive part only. `search_files` is a
-substring or regex search over markdown text, not semantic search. `list_files`
-adds `original_name` for an attachment when a `<file>.meta.json` metadata file records
-the sender's filename.
+`search_files`, `save_attachment`, and `write_journal_entry`.
+
+`read_file` gives back the text of an attachment when the text was already
+read, so a question about a receipt or a bill costs no second read of the
+picture. That text is wrapped and named as content that somebody sent, never as
+an instruction. Pass `view: image` to see the picture itself. An attachment
+with no such text returns an image block for a `.jpg`, `.jpeg`, `.png`, `.gif`,
+or `.webp`; a `.pdf` returns its extracted text (the first 20 pages, capped at
+256 KB); another type returns text when it is UTF-8 and 256 KB or less, else
+metadata only.
+
+`save_attachment(path)` copies a file from `people/<id>/attachments/` or
+`shared/attachments/` into `wiki/attachments/YYYY/MM/`, and returns the wiki
+path and a markdown link for the page. Member only. The file that arrived is
+never moved and never changed. A file over 50 MB is refused.
+
+`write_file` writes `.md` only, at most 256 KB, and `mode: create` fails when
+the file exists. `rename_file` renames one file in place under `wiki/`.
+`new_name` is a bare filename and the extension must not change.
+`search_files` is a substring or regex search over markdown text, not semantic
+search. `list_files` adds `original_name` for an attachment when a
+`<file>.meta.json` metadata file records the sender's filename.
 
 There is no `delete_file`. Deletion is a human action through the viewer or a
 shell.
