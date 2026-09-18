@@ -33,6 +33,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from joshua_shared.attachments import NO_CAPTION_TEXT
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.contracts import Attachment as TurnAttachment
 from joshua_shared.contracts import Chat, Handle, TurnEvent
@@ -55,8 +56,6 @@ logger = get_logger("channels.imessage.forwarder")
 
 CHANNEL_TYPE = "imessage"
 
-# The text a message with an attachment and no caption carries to core.
-NO_CAPTION_TEXT = "(file attached — no caption)"
 
 # The reply an unknown sender gets when the iMessage policy is ``reply``.
 UNKNOWN_SENDER_REPLY = "Sorry, I do not know you, so I cannot help here."

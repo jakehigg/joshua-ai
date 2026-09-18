@@ -421,3 +421,35 @@ async def test_a_convention_page_never_fires() -> None:
     )
     store = FakeStore([_row(0.99, "wiki/skills/c.md", "turn on the", "Reference.", "Rules")])
     assert await _run(_ctx("turn on the lights"), store, FakeRepo(), registry=registry) is None
+
+
+# ── a file with no caption ───────────────────────────────────────────────────
+
+
+async def test_a_file_with_no_caption_fires_no_skill() -> None:
+    """Every such turn carries the same words, so a match on them means nothing.
+
+    Measured on a real instance, a photo with no caption fired the same skill
+    whatever the picture was. The describer gives the turn real words; a turn
+    that reaches here without them runs with no skill at all.
+    """
+    from joshua_shared.attachments import NO_CAPTION_TEXT
+
+    store = FakeStore([_row(0.99, "wiki/skills/receipt.md", "here's a receipt", "File it.")])
+    repo = FakeRepo()
+
+    note = await _run(_ctx(NO_CAPTION_TEXT), store, repo)
+
+    assert note is None
+    assert store.calls == []
+
+
+async def test_a_caption_still_matches_a_skill() -> None:
+    """The guard stops the placeholder alone, never a person's own words."""
+    store = FakeStore([_row(0.99, "wiki/skills/receipt.md", "here's a receipt", "File it.")])
+    repo = FakeRepo()
+
+    note = await _run(_ctx("here's a receipt from the market"), store, repo)
+
+    assert note is not None
+    assert store.calls != []

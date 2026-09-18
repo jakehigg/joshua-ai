@@ -30,6 +30,21 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+# The text a message carries when it holds a file and no words of its own.
+# `channels` sends it and `core` reads it, so the two sides must agree.
+NO_CAPTION_TEXT = "(file attached — no caption)"
+
+
+def is_no_caption(text: str) -> bool:
+    """True when `text` is the placeholder and holds nothing a person wrote.
+
+    A turn like this says nothing about the file, so a match against it means
+    nothing. The describer gives the turn real words; until then, a skill match
+    and a memory search on this text are skipped.
+    """
+    return text.strip() == NO_CAPTION_TEXT
+
+
 # The suffix of the metadata file: `<stored-name>.meta.json`.
 META_SUFFIX = ".meta.json"
 

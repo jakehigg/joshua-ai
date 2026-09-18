@@ -37,6 +37,7 @@ from collections.abc import Sequence
 from time import monotonic
 from typing import Any
 
+from joshua_shared.attachments import is_no_caption
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
@@ -208,6 +209,22 @@ async def taught_skill_context(
     """
     text = (ctx.text or "").strip()
     if not text:
+        return None
+    if is_no_caption(text):
+        # A file with no caption says nothing about itself. Every such turn
+        # carries the same words, so the skill that wins is the one nearest to
+        # a fixed sentence and never the one the file calls for. The describer
+        # replaces this text when it can; a failed or disabled describer lands
+        # here and the turn runs with no skill.
+        logger.info(
+            {
+                "message": "taught skill",
+                "conversation_id": ctx.conversation.id,
+                "decision": "none",
+                "mode": "no_caption",
+                "fired": [],
+            }
+        )
         return None
 
     t0 = monotonic()

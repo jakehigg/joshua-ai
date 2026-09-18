@@ -73,3 +73,32 @@ def test_assertion_fires_when_tools_widened(fake_sdk, monkeypatch):
     monkeypatch.setattr(agent, "_NO_TOOLS", ["Bash"])
     with pytest.raises(AssertionError):
         _build()
+
+
+# ── the worker options ───────────────────────────────────────────────────────
+
+
+def test_a_worker_asks_for_a_schema_and_still_gets_no_tools(fake_sdk):
+    """A worker answers with an object, and it reaches no tool to do it."""
+    options = _build(
+        output_format={"type": "json_schema", "schema": {"type": "object"}},
+        max_turns=1,
+    )
+    assert options.tools == []
+    assert options.output_format == {"type": "json_schema", "schema": {"type": "object"}}
+    assert options.max_turns == 1
+
+
+def test_a_turn_with_no_output_format_sets_none(fake_sdk):
+    options = _build()
+    assert not hasattr(options, "output_format")
+
+
+def test_a_worker_carries_no_mcp_server_and_no_session(fake_sdk):
+    """No server, and no resume: the worker sees nothing of the conversation."""
+    options = _build(
+        output_format={"type": "json_schema", "schema": {}}, mcp_servers={}, resume=None
+    )
+    assert options.mcp_servers == {}
+    assert not hasattr(options, "resume")
+    assert options.setting_sources == []

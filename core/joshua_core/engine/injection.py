@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from time import monotonic
 from typing import Any
 
+from joshua_shared.attachments import is_no_caption
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
@@ -144,7 +145,9 @@ async def kb_context(
     proceeds without a note).
     """
     text = (ctx.text or "").strip()
-    if len(text) < MIN_QUERY_CHARS:
+    if len(text) < MIN_QUERY_CHARS or is_no_caption(text):
+        # The no-caption placeholder is the same words on every such turn, so a
+        # search with it returns whatever sits nearest that sentence.
         return None
 
     t0 = monotonic()

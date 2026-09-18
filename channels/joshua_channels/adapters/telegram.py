@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
+from joshua_shared.attachments import NO_CAPTION_TEXT
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.contracts import Attachment, Chat, Handle, TurnEvent
 from joshua_shared.log import get_logger
@@ -52,8 +53,6 @@ TURN_FAILED = "Sorry, something went wrong handling that."
 # The reply an unknown sender gets when the channel policy is ``reply``.
 UNKNOWN_SENDER_REPLY = "Sorry, I do not know you, so I cannot help here."
 
-# The text a message with an attachment and no caption carries to core.
-NO_CAPTION_TEXT = "(file attached — no caption)"
 
 _DM_PREFIX = "dm:"
 _GROUP_PREFIX = "group:"

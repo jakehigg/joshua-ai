@@ -12,6 +12,8 @@ The SDK spawns the bundled Claude Code CLI and authenticates with
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import shutil
 import tempfile
 import time
@@ -56,6 +58,7 @@ __all__ = [
     "build_options",
     "create_sdk_mcp_server",
     "run_oneshot",
+    "run_structured",
     "tool",
 ]
 
@@ -91,6 +94,7 @@ def build_options(
     model: str | None,
     max_turns: int,
     resume: str | None,
+    output_format: dict[str, Any] | None = None,
 ) -> Any:
     """Construct ``ClaudeAgentOptions`` for one conversation.
 
@@ -115,6 +119,8 @@ def build_options(
         kwargs["model"] = model
     if resume:
         kwargs["resume"] = resume
+    if output_format:
+        kwargs["output_format"] = output_format
     options = ClaudeAgentOptions(**kwargs)
     assert options.tools == [], "core agent must expose no SDK built-in tools"
     return options
@@ -140,6 +146,111 @@ async def run_oneshot(*, system_prompt: str, user_prompt: str, model: str | None
     finally:
         await session.close()
         shutil.rmtree(cwd, ignore_errors=True)
+
+
+async def run_structured(
+    *,
+    system_prompt: str,
+    user_text: str,
+    schema: dict[str, Any],
+    model: str | None,
+    timeout_s: float,
+    image: tuple[bytes, str] | None = None,
+    document: bytes | None = None,
+) -> dict[str, Any] | None:
+    """Run one tool-less turn that answers with JSON matching ``schema``.
+
+    The turn carries ``user_text`` and, when given, one image (bytes and media
+    type) or one PDF. There is no conversation history: the CLI starts in an
+    empty directory, runs one query, and is torn down. Returns the structured
+    answer, or None when the call fails or passes ``timeout_s``.
+
+    This is the only way a worker reaches the model. The options come from
+    ``build_options``, so the tool list is empty here too.
+    """
+    cwd = Path(tempfile.mkdtemp(prefix="joshua-worker-"))
+    options = build_options(
+        system_prompt=system_prompt,
+        cwd=cwd,
+        mcp_servers={},
+        model=model,
+        max_turns=1,
+        resume=None,
+        output_format={"type": "json_schema", "schema": schema},
+    )
+    client = ClaudeSDKClient(options=options)
+    try:
+        return await asyncio.wait_for(
+            _structured_turn(client, user_text, image, document), timeout=timeout_s
+        )
+    except TimeoutError:
+        logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
+        return None
+    except Exception as exc:  # noqa: BLE001 — a worker failure never breaks the turn
+        logger.warning({"message": "worker failed", "error": str(exc)})
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:  # noqa: BLE001 — teardown is best effort
+            pass
+        shutil.rmtree(cwd, ignore_errors=True)
+
+
+async def _structured_turn(
+    client: Any,
+    user_text: str,
+    image: tuple[bytes, str] | None,
+    document: bytes | None,
+) -> dict[str, Any] | None:
+    """Send one user message with its file and return the structured answer."""
+    content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
+    if image is not None:
+        data, media_type = image
+        content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": base64.b64encode(data).decode("ascii"),
+                },
+            }
+        )
+    elif document is not None:
+        content.append(
+            {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": base64.b64encode(document).decode("ascii"),
+                },
+            }
+        )
+
+    async def _one_message() -> Any:
+        yield {
+            "type": "user",
+            "message": {"role": "user", "content": content},
+            "parent_tool_use_id": None,
+            "session_id": "default",
+        }
+
+    await client.connect()
+    await client.query(_one_message())
+    async for msg in client.receive_response():
+        structured = getattr(msg, "structured_output", None)
+        if isinstance(structured, dict):
+            return structured
+        result = getattr(msg, "result", None)
+        if isinstance(result, str) and result.strip().startswith("{"):
+            try:
+                parsed = json.loads(result)
+            except ValueError:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 def _extract_text_delta(msg: Any) -> str | None:
