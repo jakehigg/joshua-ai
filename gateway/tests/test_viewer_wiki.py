@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from joshua_gateway import viewer, viewer_wiki
 from joshua_shared import config
+from joshua_shared.attachments import AttachmentMeta, write_meta
 from starlette.testclient import TestClient
 
 ALEX = ("alex", "alex-secret")
@@ -203,3 +204,49 @@ def test_frontmatter_is_one_line_not_a_box(client):
 def test_search_shows_titles(client):
     html = client.get("/search", params={"q": "Citrus"}, auth=ALEX).text
     assert ">Ponzu Sauce</a>" in html
+
+
+# ── the files the wiki keeps ─────────────────────────────────────────────────
+
+
+def test_a_folder_lists_the_files_it_holds(tmp_path: Path) -> None:
+    """An attachment is not a page, so it is listed apart from the pages."""
+    wiki = tmp_path / "wiki"
+    (wiki / "attachments" / "2026" / "09").mkdir(parents=True)
+    picture = wiki / "attachments" / "2026" / "09" / "grocery-receipt-d7e122.jpg"
+    picture.write_bytes(b"\xff\xd8\xff" * 700)
+    write_meta(picture, AttachmentMeta(mime="image/jpeg"))
+
+    folder = viewer_wiki.build_tree(wiki, "attachments/2026/09")
+
+    assert folder is not None
+    assert [f.name for f in folder.files] == ["grocery-receipt-d7e122.jpg"]
+    assert folder.pages == []
+    html = viewer_wiki.folder_html(folder, "")
+    assert "grocery-receipt-d7e122.jpg" in html
+    assert "2 KB" in html
+    # The metadata file is never shown: it is the record of the file, not a file.
+    assert "meta.json" not in html
+
+
+def test_a_folder_of_pages_lists_no_files(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    (wiki / "recipes").mkdir(parents=True)
+    (wiki / "recipes" / "pizza.md").write_text("# Pizza\n")
+
+    folder = viewer_wiki.build_tree(wiki, "recipes")
+
+    assert folder is not None
+    assert folder.files == []
+    assert [p.title for p in folder.pages] == ["Pizza"]
+
+
+def test_a_file_counts_toward_the_folder_count(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    (wiki / "attachments").mkdir(parents=True)
+    (wiki / "attachments" / "a.jpg").write_bytes(b"x")
+
+    root = viewer_wiki.build_tree(wiki)
+
+    assert root is not None
+    assert root.count() == 1

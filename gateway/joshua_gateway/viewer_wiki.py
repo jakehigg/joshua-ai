@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from joshua_shared.attachments import is_meta
 from joshua_shared.layout import is_hidden
 
 from joshua_gateway.viewer_journal import split_frontmatter
@@ -47,12 +48,26 @@ class Page:
         return "/wiki/" + quote(self.rel)
 
 
+@dataclass(frozen=True)
+class File:
+    """A file in the wiki that is not a page: a picture, a PDF, a text file."""
+
+    rel: str  # wiki-relative posix path
+    name: str
+    size: int
+
+    @property
+    def url(self) -> str:
+        return "/wiki/" + quote(self.rel)
+
+
 @dataclass
 class Folder:
     rel: str  # wiki-relative posix path, "" for the root
     name: str
     index: Page | None = None
     pages: list[Page] = field(default_factory=list)
+    files: list[File] = field(default_factory=list)
     folders: list[Folder] = field(default_factory=list)
 
     @property
@@ -66,7 +81,11 @@ class Folder:
         return "/wiki/" + (quote(self.rel) + "/" if self.rel else "")
 
     def count(self) -> int:
-        return len(self.pages) + sum(f.count() + (1 if f.index else 0) for f in self.folders)
+        return (
+            len(self.pages)
+            + len(self.files)
+            + sum(f.count() + (1 if f.index else 0) for f in self.folders)
+        )
 
 
 # -- titles -----------------------------------------------------------------
@@ -114,6 +133,14 @@ def _page(wiki: Path, file: Path) -> Page:
     return Page(file.relative_to(wiki).as_posix(), page_title(text, stem_title(file.stem)))
 
 
+def _file(wiki: Path, file: Path) -> File:
+    try:
+        size = file.stat().st_size
+    except OSError:
+        size = 0
+    return File(file.relative_to(wiki).as_posix(), file.name, size)
+
+
 # -- the tree ---------------------------------------------------------------
 
 
@@ -144,8 +171,14 @@ def _fill(wiki: Path, directory: Path, folder: Folder) -> None:
         return
     subdirs = [e for e in entries if e.is_dir() and not is_hidden(e, wiki)]
     subdir_names = {d.name for d in subdirs}
-    files = [e for e in entries if e.is_file() and e.suffix == ".md" and not is_hidden(e, wiki)]
-    for file in files:
+    visible = [e for e in entries if e.is_file() and not is_hidden(e, wiki)]
+    for file in visible:
+        if file.suffix != ".md":
+            # A wiki attachment: the picture a page shows, or a document. It is
+            # not a page, so it is listed apart from them and never titled.
+            if not is_meta(file):
+                folder.files.append(_file(wiki, file))
+            continue
         if file.stem in subdir_names:
             continue  # the index page of a subfolder; it is listed with the folder
         if folder.rel == "" and file.name == "Home.md":
@@ -188,6 +221,22 @@ def tree_html(root: Folder, *, journal_pages: int | None = None) -> str:
 
 def _page_item(page: Page) -> str:
     return f'<li><a href="{page.url}">{escape(page.title)}</a></li>'
+
+
+def _file_item(file: File) -> str:
+    return (
+        f'<li><a href="{file.url}">{escape(file.name)}</a>'
+        f" <span class=count>{_size(file.size)}</span></li>"
+    )
+
+
+def _size(size: int) -> str:
+    """A file size a person reads: `4 KB`, `1.2 MB`."""
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{round(size / 1024)} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
 
 
 def _folder_item(folder: Folder, *, depth: int) -> str:
@@ -268,11 +317,14 @@ def folder_html(folder: Folder, index_body_html: str) -> str:
     if any(f.name == JOURNAL_DIR for f in folder.folders) and not folder.rel:
         subfolders = '<li><a href="/journal">journal</a></li>' + subfolders
     pages = "".join(_page_item(p) for p in folder.pages)
+    files = "".join(_file_item(f) for f in folder.files)
     if subfolders:
         parts.append(f'<h2>folders</h2><ul class="tree">{subfolders}</ul>')
     if pages:
         parts.append(f'<h2>pages</h2><ul class="tree">{pages}</ul>')
-    if not subfolders and not pages:
+    if files:
+        parts.append(f'<h2>files</h2><ul class="tree">{files}</ul>')
+    if not subfolders and not pages and not files:
         parts.append("<p class=snippet>nothing here yet.</p>")
     return "".join(parts)
 

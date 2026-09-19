@@ -112,6 +112,10 @@ no change.
   wiki as it arrives. A guest's file never moves, because a guest does not
   write the wiki. The wiki repository ignores the folder, so these files stay
   out of git and the volume backup holds them.
+- **The wiki browser lists the files a folder holds.** A folder page showed
+  its pages only, so `wiki/attachments/` looked empty even when it held the
+  picture a page shows. Each file is now listed under the pages, with its size,
+  and the metadata file beside it stays out of the list.
 - **A search reaches what a document says.** The text of an attachment is in
   the index, so "what number do I call if I am late for pickup" finds the page
   of the school PDF that holds it. The text came from outside, so the row is
