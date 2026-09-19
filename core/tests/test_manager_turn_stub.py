@@ -154,7 +154,7 @@ async def test_journal_marker_writes_post_for_the_speaker(tmp_path):
     manager = make_journal_manager(repo, tmp_path)
     channel, conversation = make_channel(), make_conversation(person_id="alex")
     att = Attachment(
-        path="attachments/2026/08/2026-08-27-090000-IMG.jpg",
+        path="people/alex/attachments/2026/08/2026-08-27-090000-IMG.jpg",
         mime="image/jpeg",
         name="2026-08-27-090000-IMG.jpg",
         original_name="garden.jpg",
@@ -168,7 +168,7 @@ async def test_journal_marker_writes_post_for_the_speaker(tmp_path):
     assert len(entries) == 1
     body = entries[0].read_text()
     assert "people: [alex]" in body
-    assert "attachments/2026/08/2026-08-27-090000-IMG.jpg" in body
+    assert "people/alex/attachments/2026/08/2026-08-27-090000-IMG.jpg" in body
     assert manager._pool["c1"].session.journal_writes == 1
 
 

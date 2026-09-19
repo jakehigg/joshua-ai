@@ -30,8 +30,9 @@ ECHO_TOOLS_MARKER = "[[echo-tools]]"
 # without the SDK.
 JOURNAL_MARKER = "[[journal]]"
 
-# The files-MCP-relative attachment paths cited in a turn's attach note.
-_ATTACHMENT_RE = re.compile(r"attachments/[^\s)]+")
+# The files-MCP-relative attachment paths cited in a turn's attach note:
+# ``wiki/attachments/…``, ``people/<id>/attachments/…``, or ``shared/attachments/…``.
+_ATTACHMENT_RE = re.compile(r"(?:wiki|shared|people/[a-z0-9][a-z0-9-]{0,31})/attachments/[^\s)]+")
 
 
 class StubAgentSession:
@@ -62,6 +63,9 @@ class StubAgentSession:
         self._journal_mode = "auto"
         # How many journal posts this session has written; a test asserts on it.
         self.journal_writes = 0
+        # Every prompt this session was given, in order. A test reads it to see
+        # what the manager put in front of the agent.
+        self.prompts: list[str] = []
 
     @property
     def connected(self) -> bool:
@@ -76,6 +80,7 @@ class StubAgentSession:
         self._connected = True
 
     async def run(self, prompt: str, on_delta: OnDelta | None = None) -> TurnResult:
+        self.prompts.append(prompt)
         if not self._connected:
             await self.connect()
 

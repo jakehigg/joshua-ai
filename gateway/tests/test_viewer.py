@@ -443,3 +443,28 @@ def test_the_per_person_variable_still_works(env_client):
 def test_the_config_entry_wins_over_the_environment(client):
     """The first fixture still resolves through ${VIEWER_PW_<ID>} in joshua.yaml."""
     assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
+
+
+def test_a_page_shows_a_wiki_attachment(client, tmp_path):
+    """A picture a page uses is served, and the link is corrected for this viewer."""
+    data = tmp_path / "data"
+    png = (data / "people/alex/attachments/2026/08/pic.png").read_bytes()
+    folder = data / "wiki" / "attachments" / "2026" / "09"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "plant.png").write_bytes(png)
+    _write(data / "wiki/plants.md", "# Plants\n\n![plant](/attachments/2026/09/plant.png)\n")
+
+    rendered = client.get("/wiki/plants.md", auth=("alex", ALEX_PW))
+    assert rendered.status_code == 200
+    assert 'src="/wiki/attachments/2026/09/plant.png"' in rendered.text
+
+    image = client.get("/wiki/attachments/2026/09/plant.png", auth=("alex", ALEX_PW))
+    assert image.status_code == 200
+    assert image.headers["content-type"] == "image/png"
+
+
+def test_one_person_still_reaches_their_own_files_at_attachments(client):
+    """The rewrite changes a page's links only, never the viewer's own root."""
+    response = client.get("/attachments/2026/08/pic.png", auth=("alex", ALEX_PW))
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"

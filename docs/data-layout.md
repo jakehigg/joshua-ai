@@ -26,7 +26,8 @@ already at the new path stays where it is. See [Migration](#migration).
 /data/wiki/**.md                                 the rest of the wiki, incl. wiki/skills/*.md
 /data/wiki/.trash/<UTC timestamp>/**             pages the viewer deleted; the index skips it
 /data/wiki/.git/                                 the wiki's git repository; core makes it
-/data/wiki/.gitignore                            excludes .trash/; core writes it once
+/data/wiki/.gitignore                            excludes .trash/ and attachments/; core writes it
+/data/wiki/attachments/YYYY/MM/<file>            the files the wiki keeps; core and gateway write them
 /data/people/<person_id>/attachments/YYYY/MM/<file>
 /data/people/<person_id>/cli/outbox.jsonl        (the terminal channel's outbox)
 /data/shared/attachments/<group>/YYYY/MM/<file>  (files from a group chat)
@@ -51,11 +52,14 @@ may write comes from their role, never from the path. See `security.md`.
 
 - channels writes `people/<id>/attachments/`, `shared/attachments/`,
   `people/<id>/cli/`, and `inbox/`.
-- core writes `wiki/journal/`, `wiki/people/`, `wiki/joshua-docs/`, and
-  `inbox/sessions/`.
+- core writes `wiki/journal/`, `wiki/people/`, `wiki/joshua-docs/`,
+  `wiki/attachments/`, and `inbox/sessions/`. Core also writes the metadata
+  file of an attachment, and renames an attachment after the description.
+  Core never writes the bytes of a file that a person sent.
 - gateway (files MCP) writes the rest of `wiki/` for a member, and
   `wiki/people/<id>.md` for that person. The `<id>` must be a person on the
-  roster, so a write makes no page beside a real one.
+  roster, so a write makes no page beside a real one. `save_attachment` copies
+  a file into `wiki/attachments/` for a member.
 
 Nobody else writes. `/data/wiki/**` and `/data/shared/**` are readable by
 everyone.
@@ -142,16 +146,71 @@ writes it. Every member reads it in their own system prompt.
 
 ## Attachments
 
-An attachment file has the name `YYYY-MM-DD-HHMMSS-<stem>.<ext>`. A
-`.meta.json` metadata file next to it holds the original name and the source
-metadata.
+An attachment arrives with the name `YYYY-MM-DD-HHMMSS-<stem>.<ext>`, which
+channels builds from the name the sender's device gave the file. When the
+describer has looked at it, core renames it `<slug>-<digest>.<ext>`:
+`grocery-receipt-d7e122.jpg`. The folder above it is `YYYY/MM` and the
+metadata file holds the arrival time to the second, so the name carries no
+date of its own.
+
+`<digest>` is the first six characters of the `sha256` of the bytes. It is
+what keeps two files apart, because `core` and `gateway` both write into
+`wiki/attachments/` and no check for a free name holds across two containers.
+It also makes the name idempotent: the same bytes always give the same name,
+so a file that is filed or copied twice is one file in the wiki, not two. A
+name taken by other bytes gets `-2`, `-3`, and so on, and nothing is ever
+overwritten.
+
+There are two kinds of attachment, and they have different lives:
+
+- **What a person sent**, in `people/<id>/attachments/` and
+  `shared/attachments/`. This is the record of a chat. The retention sweep
+  deletes it after `channels.limits.attachment_retention_days`.
+- **What the wiki keeps**, in `wiki/attachments/YYYY/MM/`. A page points at
+  these, so they stay for as long as the page. Retention never touches them,
+  and a test proves it. The wiki repository ignores the folder, so the volume
+  backup is what holds them.
+
+A file moves from the first kind to the second in two ways. With
+`attachments.auto_save` on, core moves a member's file there as the turn
+starts. With it off, the agent copies one there with the files MCP tool
+`save_attachment`, and the file the person sent stays where it is. A guest's
+file never moves, because a guest does not write the wiki.
+
+A page points at a wiki attachment with `/attachments/YYYY/MM/<file>`, which
+is the path a frontend that serves the wiki at its root reads. The viewer in
+this repository serves the wiki under `/wiki/`, so it corrects such a link as
+it renders the page.
+
+### The metadata file
+
+A `.meta.json` metadata file sits next to each attachment.
+`joshua_shared.attachments.AttachmentMeta` is the one model for it, and
+`read_meta` is how each container reads it. A file that is too large, that is
+not JSON, or that holds a value outside the model reads as nothing.
+
+| Field | Who writes it | What it is |
+|---|---|---|
+| `original_name` | channels | the name the sender's device gave the file |
+| `mime` | channels | the type sniffed from the bytes |
+| `received_at` | channels | when the file arrived, in UTC |
+| `sha256`, `size_bytes` | channels | the digest and the size of the stored bytes |
+| `sent_by` | channels | the person who sent it, when there is one |
+| `extracted_text` | channels, core | the words in the file |
+| `text_source` | channels, core | `pdf`, `text`, or `vision` |
+| `text_truncated`, `pages` | channels, core | whether the text is cut, and the page count |
+| `description` | core | the kind, the subject, and the slug from the describer |
+| `saved_from` | core, gateway | the path the file was copied from |
+
+The text of a file is what somebody else wrote. It is data, never an
+instruction. See `security.md`.
 
 ## Bootstrap
 
 `layout.bootstrap_person(pid, display_name)` creates `attachments/` under
 `people/<pid>/`, then writes the profile at `wiki/people/<pid>.md` from a
 template if it is absent. `layout.bootstrap_wiki()` creates `wiki/` with
-`skills/`, `journal/`, `people/`, and `Home.md`, and removes a stale
+`skills/`, `journal/`, `people/`, `attachments/`, and `Home.md`, and removes a stale
 `wiki/README.md` left by an older layout. `layout.bootstrap_shared()` creates
 `shared/attachments/`. `layout.bootstrap_shared_profile(name)` writes the
 shared profile at `wiki/people/everyone.md` from a template if it is absent.

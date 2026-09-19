@@ -14,7 +14,8 @@ for every file, whatever adapter it came from:
 5. Keep a PDF or text file as is when it is at most 25 MB.
 6. Build a timestamped filename in the configured timezone, then store the file
    under ``/data/people/<person_id>/attachments/YYYY/MM/`` (a DM) or
-   ``/data/shared/attachments/<group_id>/YYYY/MM/`` (a group).
+   ``/data/shared/attachments/<group_id>/YYYY/MM/`` (a group). Every path comes
+   from ``joshua_shared.layout``.
 
 The returned ``Attachment.path`` is files-MCP relative, so core passes paths to
 the agent and never touches bytes. The inbox directory is deleted after ingest.
@@ -28,7 +29,6 @@ the inbox purge at startup and the retention sweep once a day.
 from __future__ import annotations
 
 import asyncio
-import json
 import posixpath
 import re
 import shutil
@@ -39,8 +39,19 @@ from io import BytesIO
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from joshua_shared import layout
+from joshua_shared.attachments import (
+    MAX_TEXT_CHARS,
+    META_SUFFIX,
+    AttachmentMeta,
+    meta_path,
+    sha256_bytes,
+    write_meta,
+)
 from joshua_shared.contracts import Attachment
 from joshua_shared.log import get_logger
+
+from joshua_channels import extract
 
 logger = get_logger("channels.attachments")
 
@@ -58,15 +69,16 @@ QUALITY_STEP = 5
 # A PDF or text file is kept as is up to this size.
 MAX_DOC_BYTES = 25 * 1024 * 1024
 
+# An image with more pixels than this is not decoded. A small file can hold a
+# very large image ("a decompression bomb"), and decoding it would use all the
+# memory of the container.
+MAX_PIXELS = 80_000_000
+
 # Inbox scratch older than this is purged at startup.
 INBOX_MAX_AGE_S = 3600
 
 # How often the retention sweep runs.
 RETENTION_INTERVAL_S = 86400
-
-# The metadata file suffix a stored attachment carries: ``<stored-name>.meta.json``.
-# The files MCP reads it for the sender's filename, so the two sides must agree.
-META_SUFFIX = ".meta.json"
 
 # Skip reasons (stable strings — they show up in logs and tests).
 SKIP_DISALLOWED = "disallowed_type"
@@ -257,6 +269,17 @@ def _fit_long_edge(image: object):  # type: ignore[no-untyped-def]
     return image.resize(size, Image.LANCZOS)  # type: ignore[attr-defined]
 
 
+def _check_pixels(size: tuple[int, int]) -> None:
+    """Raise when an image holds more pixels than ``MAX_PIXELS``.
+
+    ``Image.open`` reads the header only, so this runs before any decode. The
+    caller skips the attachment, and the container keeps its memory.
+    """
+    width, height = size
+    if width * height > MAX_PIXELS:
+        raise ValueError(f"image too large to decode: {width}x{height}")
+
+
 def process_image(data: bytes, mime: str) -> tuple[bytes, str]:
     """Normalize an image to the agent bound. Returns ``(bytes, mime)``.
 
@@ -268,10 +291,12 @@ def process_image(data: bytes, mime: str) -> tuple[bytes, str]:
 
     if mime == "image/heic":
         with Image.open(BytesIO(data)) as heic:
+            _check_pixels(heic.size)
             data = _encode_jpeg(heic, JPEG_QUALITY)
         mime = "image/jpeg"
 
     with Image.open(BytesIO(data)) as image:
+        _check_pixels(image.size)
         width, height = image.size
         if max(width, height) <= LONG_EDGE and len(data) <= BYTE_BUDGET:
             return data, mime
@@ -292,11 +317,13 @@ class AttachmentPipeline:
         retention_days: int = 365,
         keep_originals: bool = False,
         timezone: str = "UTC",
+        max_text_chars: int = MAX_TEXT_CHARS,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._root = Path(data_dir)
         self._retention_days = retention_days
         self._keep_originals = keep_originals
+        self._max_text_chars = max_text_chars
         self._tz = ZoneInfo(timezone)
         self._now = clock or (lambda: datetime.now(UTC))
 
@@ -370,19 +397,31 @@ class AttachmentPipeline:
         name = _dedupe_name(dest.parent, name, ext)
         rel, dest = self._destination(person_id, group_id, name)
         dest.write_bytes(data)
-        self._write_metadata(dest, original_name=src.name, mime=mime)
+        self._write_metadata(
+            dest, original_name=src.name, mime=mime, data=data, person_id=person_id
+        )
         if self._keep_originals and data is not original:
             self._store_original(dest, src.name, original)
         logger.info({"message": "attachment stored", "path": rel, "mime": mime})
         return Attachment(path=rel, mime=mime, name=name, original_name=src.name)
 
-    def _write_metadata(self, dest: Path, *, original_name: str, mime: str) -> None:
+    def _write_metadata(
+        self,
+        dest: Path,
+        *,
+        original_name: str,
+        mime: str,
+        data: bytes,
+        person_id: str | None,
+    ) -> None:
         """Write ``<dest>.meta.json`` next to a stored attachment.
 
-        The metadata file holds the sender's filename, the sniffed MIME of the stored
-        bytes, and the arrival time in UTC. Only ``channels`` sees the
-        platform-supplied name, so only ``channels`` can record it; the files
-        MCP reads the metadata file to report ``original_name``.
+        The metadata file holds the sender's filename, the sniffed MIME of the
+        stored bytes, the arrival time in UTC, the digest and the size of the
+        bytes, who sent them, and the text of a PDF or a text file. Only
+        ``channels`` sees the platform-supplied name, so only ``channels`` can
+        record it. ``core`` adds the description later, and the digest is the
+        key it caches that description by.
 
         A failed write does not fail the attachment. The stored bytes are the
         product. The metadata file is metadata, so a failure logs a warning and the
@@ -390,45 +429,59 @@ class AttachmentPipeline:
         failure log one line at a visible level, so production logs always show
         whether the metadata file landed next to the stored bytes.
         """
-        metadata = dest.parent / f"{dest.name}{META_SUFFIX}"
-        meta = {
-            "original_name": original_name,
-            "mime": mime,
-            "received_at": self._now().astimezone(UTC).isoformat(),
-        }
+        meta = AttachmentMeta(
+            original_name=original_name,
+            mime=mime,
+            received_at=self._now().astimezone(UTC).isoformat(),
+            sha256=sha256_bytes(data),
+            size_bytes=len(data),
+            sent_by=person_id,
+        )
+        found = extract.extract(data, mime, dest, max_chars=self._max_text_chars)
+        if found is not None:
+            meta.extracted_text = found.text
+            meta.text_source = found.source
+            meta.pages = found.pages
+            meta.text_truncated = found.truncated
         try:
-            metadata.write_text(json.dumps(meta), encoding="utf-8")
+            path = write_meta(dest, meta)
         except Exception as exc:  # noqa: BLE001 - the metadata file is metadata, never fatal
             logger.warning(
                 {
                     "message": "attachment metadata file write failed",
-                    "path": str(metadata),
+                    "path": str(meta_path(dest)),
                     "error": str(exc),
                 }
             )
             return
-        logger.info({"message": "attachment metadata file written", "path": str(metadata)})
+        logger.info(
+            {
+                "message": "attachment metadata file written",
+                "path": str(path),
+                "text_source": meta.text_source,
+                "text_chars": len(meta.extracted_text or ""),
+            }
+        )
 
     def _destination(
         self, person_id: str | None, group_id: str | None, name: str
     ) -> tuple[str, Path]:
         """Return the ``(files-MCP relative path, absolute path)`` for a file.
 
-        A DM stores under its person and returns a person-relative path. A group
-        stores under the shared root and returns a ``shared/`` path. A file with
-        no person and no group (a destination-less event) uses a shared bucket.
+        A DM stores under its person, a group under its group, and a file with
+        no person and no group (a destination-less event) in the events bucket.
+        The relative path is the one the files MCP accepts, so the agent reads
+        the file at the path the turn names.
         """
-        year_month = self._now_local().strftime("%Y/%m")
+        day = self._now_local().date()
         if person_id:
-            rel = f"attachments/{year_month}/{name}"
-            dest = self._root / "people" / person_id / "attachments" / year_month / name
+            base = layout.person_attachments_root(person_id, self._root)
         elif group_id:
-            rel = f"shared/attachments/{group_id}/{year_month}/{name}"
-            dest = self._root / "shared" / "attachments" / group_id / year_month / name
+            base = layout.group_attachments_root(group_id, self._root)
         else:
-            rel = f"shared/attachments/events/{year_month}/{name}"
-            dest = self._root / "shared" / "attachments" / "events" / year_month / name
-        return rel, dest
+            base = layout.shared_attachments_root(self._root) / layout.EVENTS_BUCKET
+        dest = layout.month_dir(base, day) / name
+        return layout.data_relative(dest, self._root), dest
 
     def _store_original(self, dest: Path, raw_name: str, data: bytes) -> None:
         """Store the pre-transform bytes next to the stored file, for archival."""
@@ -487,17 +540,13 @@ class AttachmentPipeline:
         return removed
 
     def _attachment_roots(self) -> list[Path]:
-        roots: list[Path] = []
-        shared = self._root / "shared" / "attachments"
-        if shared.exists():
-            roots.append(shared)
-        people = self._root / "people"
-        if people.exists():
-            for person in people.iterdir():
-                attachments = person / "attachments"
-                if attachments.exists():
-                    roots.append(attachments)
-        return roots
+        """The trees the retention sweep deletes from.
+
+        The wiki is not one of them. A file in ``wiki/attachments/`` belongs to
+        a page, and a page keeps its picture for as long as it lives.
+        """
+        wiki = layout.wiki_attachments_root(self._root)
+        return [root for root in layout.attachment_roots(self._root) if root != wiki]
 
 
 def _remove_path(path: Path) -> None:

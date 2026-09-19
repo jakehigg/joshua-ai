@@ -31,6 +31,7 @@ DEFAULT_DATA_DIR = "/data"
 
 _SHARED_ROOT = "shared"
 _WIKI_ROOT = "wiki"
+_PEOPLE_ROOT = "people"
 
 
 @runtime_checkable
@@ -67,11 +68,12 @@ def map_attachments(data_dir: str, resolved: Resolved, paths: list[str]) -> list
     """Map files-MCP relative paths to absolute data-volume paths.
 
     A ``wiki/…`` path maps to ``/data/wiki/…`` and a ``shared/…`` path to
-    ``/data/shared/…``; both are readable by everyone. Any other path maps to
-    the DM person's ``/data/people/<pid>/…``. A group chat, and a DM with no
-    known person, accept only ``wiki/`` and ``shared/`` paths, so one person's
-    files never reach another chat. Raises ``AttachmentError``
-    for an unsafe or disallowed path.
+    ``/data/shared/…``; both are readable by everyone. A ``people/<pid>/…``
+    path is that person's own file, so it is delivered to a direct chat with
+    that person alone. A group chat, and a direct chat with no known person,
+    accept only ``wiki/`` and ``shared/`` paths, so one person's files never
+    reach another chat. Raises ``AttachmentError`` for an unsafe or disallowed
+    path.
     """
     root = Path(data_dir)
     result: list[Path] = []
@@ -87,6 +89,11 @@ def map_attachments(data_dir: str, resolved: Resolved, paths: list[str]) -> list
             raise AttachmentError(f"group chat accepts only wiki/ and shared/ attachments: {raw!r}")
         if resolved.person_id is None:
             raise AttachmentError(f"no known person for attachment: {raw!r}")
+        if parts[0] == _PEOPLE_ROOT:
+            if len(parts) < 2 or parts[1] != resolved.person_id:
+                raise AttachmentError(f"attachment belongs to another person: {raw!r}")
+            result.append(root / Path(*parts))
+            continue
         result.append(root / "people" / resolved.person_id / Path(*parts))
     return result
 

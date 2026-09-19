@@ -401,17 +401,30 @@ Every file that arrives goes through one pipeline:
    skipped. The message still goes through.
 4. It converts an image to JPEG when needed and scales it to at most 1568 px
    on the long edge and about 600 KB.
-5. It stores the file as `YYYY-MM-DD-HHMMSS-<name>.<ext>` in the configured
+5. It refuses an image with more pixels than it can safely decode, so a small
+   file cannot exhaust the memory of the container.
+6. It stores the file as `YYYY-MM-DD-HHMMSS-<name>.<ext>` in the configured
    timezone. A file from a direct message goes to
    `people/<id>/attachments/YYYY/MM/`. A file from a group goes to
    `shared/attachments/<group>/YYYY/MM/`.
+7. It reads the text of a PDF that has a text layer, and of a text file, and
+   writes it to the metadata file beside the attachment. A PDF is untrusted,
+   so the parse runs in a process of its own with a memory limit, a CPU limit,
+   and a timeout. A PDF that holds no text layer gives nothing here: the
+   describer in core reads that one.
 
-The agent reads a stored file with the `files` tool. It can cite a file in a
-journal post by its `people/<id>/attachments/…` path.
+Core then describes the file and names it after what it holds. See
+`attachments` in [docs/config.md](config.md) and
+[docs/data-layout.md](data-layout.md).
+
+The agent reads a stored file with the `files` tool. A file whose text was
+already read gives that text back, so the picture is read one time. The agent
+cites a file in a journal post by its full path.
 
 `channels.limits.attachment_retention_days` (default `365`) deletes stored
 files older than that. `0` keeps every file. `keep_originals: true` also
-stores the untouched original next to the stored file.
+stores the untouched original next to the stored file. Retention never reaches
+`wiki/attachments/`, so a picture a page uses is kept for as long as the page.
 
 ## Limits
 

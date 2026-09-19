@@ -308,6 +308,58 @@ class Memory(_Model):
         return normalized
 
 
+class Describe(_Model):
+    """The worker that describes an attachment before the turn is matched.
+
+    A file with no caption says nothing about itself, so a skill and a memory
+    search have nothing to work with. The worker looks at the file and gives
+    the turn real words. It has no tool and sees no message of the
+    conversation. A failure or a timeout leaves the turn as it was.
+
+    The call runs while the person waits, so `timeout_seconds` is short. It is
+    not as short as it looks: a receipt read off a picture measured 15 seconds,
+    because the worker writes out every word it can see. The default leaves
+    room above that, and a longer file is worth more room. The answer is stored
+    beside the file and keyed by the digest of the bytes, so the same file
+    costs one call however often it comes up.
+    """
+
+    enabled: bool = True
+    model: str = "claude-haiku-4-5"
+    timeout_seconds: float = Field(default=30.0, gt=0)
+
+
+class Extract(_Model):
+    """The text of an attachment: how much is kept, and whether it is indexed.
+
+    `channels` reads a PDF and a text file at the boundary, and the describer
+    reads an image. The text goes in the metadata file, so a later question
+    about the file needs no second read.
+
+    `embed` puts that text in the search index, so a person can ask "what
+    number do I call if I am late for pickup" and reach the page of a PDF.
+    The text comes from outside, so the index marks it external.
+    """
+
+    max_chars: int = Field(default=100_000, gt=0)
+    embed: bool = True
+
+
+class Attachments(_Model):
+    """What happens to a file a person sends.
+
+    `auto_save` moves the file a member sends into `wiki/attachments/`, where
+    it keeps its name and retention never deletes it. With it off, the file
+    stays in the evidence tree and the agent copies it into the wiki when a
+    page needs it. A guest's file is never moved: a guest does not write the
+    wiki.
+    """
+
+    auto_save: bool = False
+    describe: Describe = Describe()
+    extract: Extract = Extract()
+
+
 class Wiki(_Model):
     """Whether Joshua keeps `/data/wiki` as a git repository.
 
@@ -473,6 +525,7 @@ class JoshuaConfig(_Model):
     channels: Channels = Channels()
     core: Core = Core()
     memory: Memory = Memory()
+    attachments: Attachments = Attachments()
     wiki: Wiki = Wiki()
     mcp: dict[str, McpServer] = {}
     modules: list[str] = []

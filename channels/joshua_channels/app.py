@@ -95,6 +95,7 @@ def build_context() -> tuple[ChannelsContext, CoreClient | None]:
         retention_days=settings.channels.limits.attachment_retention_days,
         keep_originals=settings.channels.limits.keep_originals,
         timezone=settings.timezone,
+        max_text_chars=settings.attachments.extract.max_chars,
     )
     register_adapters(registry, settings, guard, core_client, data_dir, pipeline)
     context = ChannelsContext(

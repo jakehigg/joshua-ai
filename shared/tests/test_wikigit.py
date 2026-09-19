@@ -29,7 +29,7 @@ def test_ensure_repo_creates_repo_and_gitignore(tmp_path: Path) -> None:
     wiki.mkdir()
     assert wikigit.ensure_repo(wiki) is True
     assert (wiki / ".git").is_dir()
-    assert (wiki / ".gitignore").read_text() == ".trash/\n"
+    assert (wiki / ".gitignore").read_text() == ".trash/\n/attachments/\n"
 
 
 def test_ensure_repo_is_idempotent(tmp_path: Path) -> None:
@@ -38,8 +38,36 @@ def test_ensure_repo_is_idempotent(tmp_path: Path) -> None:
     wikigit.ensure_repo(wiki)
     (wiki / ".gitignore").write_text("mine\n")
     assert wikigit.ensure_repo(wiki) is False
-    # A second call never overwrites an existing .gitignore.
-    assert (wiki / ".gitignore").read_text() == "mine\n"
+    # A second call keeps every line already there and adds the missing ones.
+    assert (wiki / ".gitignore").read_text() == "mine\n.trash/\n/attachments/\n"
+
+
+def test_ensure_repo_keeps_a_line_it_already_wrote(tmp_path: Path) -> None:
+    """A line that is already there is never added twice."""
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    wikigit.ensure_repo(wiki)
+    first = (wiki / ".gitignore").read_text()
+    wikigit.ensure_repo(wiki)
+    assert (wiki / ".gitignore").read_text() == first
+
+
+def test_the_wiki_repository_ignores_an_attachment(tmp_path: Path) -> None:
+    """A binary under wiki/attachments/ never reaches a commit."""
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    wikigit.ensure_repo(wiki)
+    (wiki / "attachments" / "2026" / "09").mkdir(parents=True)
+    (wiki / "attachments" / "2026" / "09" / "receipt.jpg").write_bytes(b"\xff\xd8\xff")
+    (wiki / "page.md").write_text("page\n")
+
+    wikigit.commit(wiki, None, "everything")
+
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=wiki, capture_output=True, text=True, check=True
+    ).stdout
+    assert "page.md" in tracked
+    assert "receipt.jpg" not in tracked
 
 
 def test_commit_of_one_path_records_only_that_path(tmp_path: Path) -> None:

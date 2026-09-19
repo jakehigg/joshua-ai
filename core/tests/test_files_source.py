@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from joshua_core.memory.sources.files import FilesSource
+from joshua_shared.attachments import AttachmentMeta, Description, read_meta, write_meta
 
 
 def _write(path: Path, text: str) -> None:
@@ -162,3 +163,108 @@ async def test_no_wiki_or_shared_tree_yields_nothing(tmp_path: Path) -> None:
     """A brand-new data dir with neither tree yet is a plain empty listing, not
     an error."""
     assert await _docs(tmp_path) == []
+
+
+# ── attachments ──────────────────────────────────────────────────────────────
+
+
+def _attachment(root: Path, rel: str, *, text: str, described: bool = True) -> Path:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xff\xd8\xff")
+    description = (
+        Description(kind="bill", subject="a water bill for the quarter", slug="water-bill")
+        if described
+        else None
+    )
+    write_meta(
+        path,
+        AttachmentMeta(
+            mime="image/jpeg",
+            original_name="bill.pdf",
+            received_at="2026-09-16T14:05:09+00:00",
+            extracted_text=text,
+            text_source="vision",
+            description=description,
+        ),
+    )
+    return path
+
+
+async def test_an_attachment_with_text_is_indexed(tmp_path: Path) -> None:
+    """A parent asks about the words on a page of a PDF and the search finds it."""
+    _attachment(
+        tmp_path,
+        "wiki/attachments/2026/09/water-bill.jpg",
+        text="Account 12345. Call 555-0100 if you are late for pickup.",
+    )
+
+    docs = [d async for d in FilesSource(tmp_path).list_documents()]
+
+    assert len(docs) == 1
+    doc = docs[0]
+    assert doc.uri == "wiki/attachments/2026/09/water-bill.jpg"
+    assert "555-0100" in doc.text
+    assert doc.title == "a water bill for the quarter"
+    assert doc.tags == ("bill",)
+    # The text came from outside, so it is never Joshua's own words.
+    assert doc.provenance == "external"
+    assert doc.doc_date == date(2026, 9, 16)
+
+
+async def test_an_attachment_in_a_person_folder_is_indexed(tmp_path: Path) -> None:
+    """A file stays out of the wiki with auto-save off, and is still searchable."""
+    _attachment(tmp_path, "people/alex/attachments/2026/09/note.jpg", text="pick up at 3pm")
+
+    docs = [d async for d in FilesSource(tmp_path).list_documents()]
+
+    assert [d.uri for d in docs] == ["people/alex/attachments/2026/09/note.jpg"]
+
+
+async def test_an_attachment_with_no_text_is_not_indexed(tmp_path: Path) -> None:
+    _attachment(tmp_path, "wiki/attachments/2026/09/plant.jpg", text="")
+
+    assert [d async for d in FilesSource(tmp_path).list_documents()] == []
+
+
+async def test_the_metadata_file_itself_is_never_a_document(tmp_path: Path) -> None:
+    _attachment(tmp_path, "wiki/attachments/2026/09/a.jpg", text="words")
+
+    docs = [d async for d in FilesSource(tmp_path).list_documents()]
+
+    assert all(not d.uri.endswith(".meta.json") for d in docs)
+
+
+async def test_indexing_attachments_can_be_turned_off(tmp_path: Path) -> None:
+    _attachment(tmp_path, "wiki/attachments/2026/09/a.jpg", text="words")
+
+    source = FilesSource(tmp_path, index_attachments=False)
+
+    assert [d async for d in source.list_documents()] == []
+    assert await source.fetch("wiki/attachments/2026/09/a.jpg") is None
+
+
+async def test_a_new_description_re_indexes_the_file(tmp_path: Path) -> None:
+    """The revision follows the metadata file, so a new reading is picked up."""
+    path = _attachment(tmp_path, "wiki/attachments/2026/09/a.jpg", text="one")
+    source = FilesSource(tmp_path)
+    first = await source.fetch("wiki/attachments/2026/09/a.jpg")
+
+    meta = read_meta(path)
+    assert meta is not None
+    meta.extracted_text = "two"
+    write_meta(path, meta)
+    second = await source.fetch("wiki/attachments/2026/09/a.jpg")
+
+    assert first is not None and second is not None
+    assert first.rev != second.rev
+    assert "two" in second.text
+
+
+async def test_fetch_reads_one_attachment_by_path(tmp_path: Path) -> None:
+    _attachment(tmp_path, "shared/attachments/everyone/2026/09/a.jpg", text="team words")
+
+    doc = await FilesSource(tmp_path).fetch("shared/attachments/everyone/2026/09/a.jpg")
+
+    assert doc is not None
+    assert "team words" in doc.text

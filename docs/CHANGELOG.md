@@ -8,6 +8,58 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Joshua looks at a picture before it answers, so a taught skill fires on the
+  right one.** A photo with no caption used to carry one fixed sentence, so
+  every such photo matched the same skill, whatever it showed. A small model
+  (`claude-haiku-4-5`) now looks at each new picture, and at a PDF with no text
+  layer, and gives the turn real words: what the file is, a short subject, and
+  a name for the file. The file is then renamed after what it holds, so
+  `2026-09-16-140509-IMG_4471.jpg` becomes `grocery-receipt-d7e122.jpg`. The
+  folder is already `YYYY/MM`, so the name carries no date; the six characters
+  at the end are the digest of the bytes, which keeps two files apart and makes
+  the same file land on one name however often it is filed.
+
+  The words in a file are kept too: the total on a receipt, the account number
+  on a bill, the pages of a PDF from school. Ask about any of it months later
+  and Joshua answers from what it read at the time. It reads a file one time:
+  the answer is stored beside the file and keyed by the digest of the bytes.
+
+  The worker has no tool, sees no message of the conversation, and answers with
+  a fixed set of fields. So an instruction written on a picture reaches nothing.
+  `docs/security.md` says how that is held.
+
+  New `attachments:` settings: `describe.enabled`, `describe.model`,
+  `describe.timeout_seconds` (30 seconds, because reading a receipt off a
+  picture measured 15), `extract.max_chars`, and `extract.embed`. A failure or
+  a timeout leaves the turn as it was.
+- **A picture in a page stays in the page.** A page used to point at the record
+  of a chat, which is deleted after a year, so the page kept the link and lost
+  the picture. The wiki keeps its own files now, in `wiki/attachments/`, and
+  the retention sweep never touches them. Joshua puts one there with the new
+  `save_attachment` tool, which copies the file and leaves what the person sent
+  where it is. At the next start, every picture a page already points at is
+  copied into the wiki and the link is rewritten, one time.
+
+  Set `attachments.auto_save: true` and every file a member sends goes to the
+  wiki as it arrives. A guest's file never moves, because a guest does not
+  write the wiki. The wiki repository ignores the folder, so these files stay
+  out of git and the volume backup holds them.
+- **A search reaches what a document says.** The text of an attachment is in
+  the index, so "what number do I call if I am late for pickup" finds the page
+  of the school PDF that holds it. The text came from outside, so the row is
+  marked external. `attachments.extract.embed: false` turns it off.
+
+### Fixed
+
+- **An attachment turn no longer costs a failed tool call.** Channels named a
+  file `attachments/YYYY/MM/x.jpg` and the files MCP refused that path, so
+  Joshua had to guess again with `people/<id>/attachments/...`. Every container
+  uses the second form now. A reply that carries a person's file no longer
+  builds a path of `people/<id>/people/<id>/...`.
+- **A picture sent in a group chat is a picture.** `read_file` returned
+  metadata for it, and not the image.
+- **A file that arrives through a webhook keeps the name the sender gave it.**
+
 - **The gateway installs an MCP server for you, so you no longer build an
   image.** Give a `stdio` entry a `package:` field and the gateway installs it
   at start: `npm:<name>@1.2.3`, `pypi:<name>==1.2.3`,

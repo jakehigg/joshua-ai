@@ -35,6 +35,7 @@ from joshua_core.memory.nightly import NightlyReflector
 from joshua_core.memory.sources.files import FilesSource
 from joshua_core.memory.sources.memos import build_memos_source, schedule_seconds
 from joshua_core.memory.store import MemoryStore
+from joshua_core.migrate_links import migrate_page_links
 from joshua_core.scheduler import Scheduler
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
@@ -228,7 +229,9 @@ def _build_memory(
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     memory = settings.memory
 
-    sources: dict[str, Any] = {"files": FilesSource(data_dir)}
+    sources: dict[str, Any] = {
+        "files": FilesSource(data_dir, index_attachments=settings.attachments.extract.embed)
+    }
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
     for name, options in memory.sources.items():
         if name == "files":
@@ -265,13 +268,16 @@ def _bootstrap_layout(settings: JoshuaConfig) -> None:
     otherwise shadow the real profile forever. Idempotent: a second boot
     finds the wiki and its pages already settled and leaves them.
     `migrate_to_one_wiki` logs its own counts, so this function does not log
-    them again. The shipped documentation under `wiki/joshua-docs/` is
-    rewritten each boot, because the repo owns it.
+    them again. `migrate_page_links` then copies every picture a page points
+    at into the wiki, so retention cannot take a picture off a page. The
+    shipped documentation under `wiki/joshua-docs/` is rewritten each boot,
+    because the repo owns it.
     """
     layout.bootstrap_wiki()
     layout.bootstrap_shared()
     layout.migrate_to_one_wiki()
     layout.bootstrap_shared_profile(settings.name)
+    migrate_page_links()
     pages = layout.bootstrap_docs()
     if pages:
         logger.info({"message": "repo docs published", "pages": pages})

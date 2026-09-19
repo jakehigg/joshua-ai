@@ -315,3 +315,10 @@ def test_a_handle_that_names_nobody_derives_guest() -> None:
     """A handle with no person carries no role to trust."""
     cfg = _roles_cfg()
     assert cfg.group_role(_group(cfg, "stranger")) == ("guest", "999")
+
+
+def test_the_describer_timeout_leaves_room_for_a_real_file() -> None:
+    """A receipt read off a picture measured 15 seconds on a real instance."""
+    settings = config.JoshuaConfig(name="x", timezone="UTC", people=[])
+
+    assert settings.attachments.describe.timeout_seconds >= 30

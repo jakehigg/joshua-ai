@@ -6,10 +6,12 @@ Fixtures are generated with Pillow in the test, apart from one real HEIC file
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -20,11 +22,14 @@ from joshua_channels.attachments import (
     MAX_DOC_BYTES,
     META_SUFFIX,
     AttachmentPipeline,
+    _check_pixels,
     classify,
     is_heic_bytes,
     safe_filename,
     sniff_mime,
 )
+from joshua_shared import layout
+from joshua_shared.attachments import read_meta
 from PIL import Image
 
 FIXTURES = Path(__file__).parent / "attachment_fixtures"
@@ -115,8 +120,8 @@ async def test_heic_becomes_bounded_jpeg(tmp_path: Path) -> None:
     assert len(stored) == 1
     att = stored[0]
     assert att.mime == "image/jpeg"
-    assert att.path == f"attachments/2026/08/{att.name}"
-    abs_path = tmp_path / "people" / "alex" / att.path
+    assert att.path == f"people/alex/attachments/2026/08/{att.name}"
+    abs_path = tmp_path / att.path
     assert abs_path.exists()
     assert abs_path.stat().st_size <= BYTE_BUDGET
     with Image.open(abs_path) as image:
@@ -130,7 +135,7 @@ async def test_large_png_is_downscaled(tmp_path: Path) -> None:
     stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
 
     assert len(stored) == 1
-    abs_path = tmp_path / "people" / "alex" / stored[0].path
+    abs_path = tmp_path / stored[0].path
     assert abs_path.stat().st_size <= BYTE_BUDGET
     with Image.open(abs_path) as image:
         assert max(image.size) <= LONG_EDGE
@@ -146,7 +151,7 @@ async def test_small_png_kept_untouched(tmp_path: Path) -> None:
     assert len(stored) == 1
     att = stored[0]
     assert att.mime == "image/png"
-    abs_path = tmp_path / "people" / "alex" / att.path
+    abs_path = tmp_path / att.path
     assert abs_path.read_bytes() == data
 
 
@@ -226,7 +231,7 @@ async def test_same_second_same_name_gets_counter_suffix(tmp_path: Path) -> None
 
     assert first[0].name == "2026-08-27-000000-photo.png"
     assert second[0].name == "2026-08-27-000000-photo-2.png"
-    assert (tmp_path / "people" / "alex" / second[0].path).exists()
+    assert (tmp_path / second[0].path).exists()
 
 
 async def test_stored_name_uses_configured_timezone(tmp_path: Path) -> None:
@@ -244,7 +249,7 @@ async def test_stored_name_uses_configured_timezone(tmp_path: Path) -> None:
     # 02:30 UTC is the day before at 22:30 in New York (EDT, UTC-4).
     assert att.name == "2026-08-26-223000-sunset.png"
     assert att.original_name == "sunset.png"
-    assert att.path == "attachments/2026/08/2026-08-26-223000-sunset.png"
+    assert att.path == "people/alex/attachments/2026/08/2026-08-26-223000-sunset.png"
 
 
 async def test_inbox_is_deleted_after_ingest(tmp_path: Path) -> None:
@@ -264,7 +269,7 @@ async def test_keep_originals_stores_pre_transform_file(tmp_path: Path) -> None:
         inbox, person_id="alex", group_id=None
     )
 
-    dest = tmp_path / "people" / "alex" / stored[0].path
+    dest = tmp_path / stored[0].path
     originals = list((dest.parent / "originals").glob("*-big.png"))
     assert len(originals) == 1
 
@@ -279,15 +284,17 @@ async def test_metadata_holds_original_name_mime_and_received_at(tmp_path: Path)
     stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
 
     att = stored[0]
-    dest = tmp_path / "people" / "alex" / att.path
+    dest = tmp_path / att.path
     metadata = dest.parent / f"{dest.name}{META_SUFFIX}"
     assert metadata.exists()
     meta = json.loads(metadata.read_text(encoding="utf-8"))
-    assert meta == {
-        "original_name": "photo.png",
-        "mime": "image/png",
-        "received_at": "2026-08-27T00:00:00+00:00",
-    }
+    assert meta["original_name"] == "photo.png"
+    assert meta["mime"] == "image/png"
+    assert meta["received_at"] == "2026-08-27T00:00:00+00:00"
+    assert meta["sha256"] == hashlib.sha256(dest.read_bytes()).hexdigest()
+    assert meta["size_bytes"] == dest.stat().st_size
+    assert meta["sent_by"] == "alex"
+    assert "description" not in meta
     # The metadata file name equals the returned original_name on the Attachment.
     assert meta["original_name"] == att.original_name
 
@@ -305,7 +312,7 @@ async def test_metadata_follows_the_deduped_stored_name(tmp_path: Path) -> None:
 
     att = second[0]
     assert att.name == "2026-08-27-000000-photo-2.png"
-    dest = tmp_path / "people" / "alex" / att.path
+    dest = tmp_path / att.path
     metadata = dest.parent / f"{att.name}{META_SUFFIX}"
     assert metadata.exists()
 
@@ -331,16 +338,16 @@ async def test_metadata_write_failure_keeps_the_attachment(
     data = _png((32, 32))
     _write(inbox, "photo.png", data)
 
-    def boom(self: Path, *args: object, **kwargs: object) -> int:
+    def boom(*args: object, **kwargs: object) -> Path:
         raise OSError("disk full")
 
-    monkeypatch.setattr(Path, "write_text", boom)
+    monkeypatch.setattr("joshua_channels.attachments.write_meta", boom)
 
     with caplog.at_level(logging.WARNING, logger="channels.attachments"):
         stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
 
     assert len(stored) == 1
-    dest = tmp_path / "people" / "alex" / stored[0].path
+    dest = tmp_path / stored[0].path
     assert dest.read_bytes() == data
     assert not (dest.parent / f"{dest.name}{META_SUFFIX}").exists()
     warnings = [r.msg["message"] for r in _metadata_records(caplog) if r.levelno == logging.WARNING]
@@ -458,3 +465,101 @@ async def test_broken_or_unrecognized_files_are_skipped(tmp_path: Path, bad: byt
     stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
 
     assert stored == []
+
+
+# ── extracted text ───────────────────────────────────────────────────────────
+
+
+async def test_a_pdf_stores_its_text_in_the_metadata_file(tmp_path: Path) -> None:
+    """The file is parsed one time, at the boundary, and the text is kept."""
+    from pdf_fixtures import pdf_with_text
+
+    inbox = tmp_path / "inbox" / "p1"
+    _write(inbox, "bill.pdf", pdf_with_text(["Water bill", "Call 555-0100 if late"]))
+
+    stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
+
+    meta = read_meta(tmp_path / stored[0].path)
+    assert meta is not None
+    assert meta.text_source == "pdf"
+    assert "555-0100" in (meta.extracted_text or "")
+    assert meta.pages == 1
+
+
+async def test_a_text_file_stores_its_text(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox" / "p2"
+    _write(inbox, "note.txt", b"pick up at 3pm\n")
+
+    stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
+
+    meta = read_meta(tmp_path / stored[0].path)
+    assert meta is not None
+    assert meta.text_source == "text"
+    assert meta.extracted_text == "pick up at 3pm\n"
+
+
+async def test_an_image_stores_no_text(tmp_path: Path) -> None:
+    """A picture carries no text here. The describer in core reads it."""
+    inbox = tmp_path / "inbox" / "p3"
+    _write(inbox, "photo.png", _png((32, 32)))
+
+    stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
+
+    meta = read_meta(tmp_path / stored[0].path)
+    assert meta is not None
+    assert meta.extracted_text is None
+    assert meta.text_source is None
+
+
+async def test_extracted_text_is_capped(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox" / "p4"
+    _write(inbox, "long.txt", b"x" * 5000)
+
+    pipeline = _pipeline(tmp_path, max_text_chars=100)
+    stored = await pipeline.process(inbox, person_id="alex", group_id=None)
+
+    meta = read_meta(tmp_path / stored[0].path)
+    assert meta is not None
+    assert len(meta.extracted_text or "") == 100
+    assert meta.text_truncated
+
+
+# ── an image that is too large to decode ─────────────────────────────────────
+
+
+def test_a_picture_with_too_many_pixels_is_refused() -> None:
+    """A small file can hold a huge image. Decoding it would take the memory."""
+    with pytest.raises(ValueError):
+        _check_pixels((100_000, 100_000))
+
+
+async def test_a_decompression_bomb_is_skipped(tmp_path: Path, monkeypatch) -> None:
+    inbox = tmp_path / "inbox" / "bomb"
+    _write(inbox, "bomb.png", _png((32, 32)))
+    monkeypatch.setattr("joshua_channels.attachments.MAX_PIXELS", 4)
+
+    stored = await _pipeline(tmp_path).process(inbox, person_id="alex", group_id=None)
+
+    assert stored == []
+
+
+async def test_the_retention_sweep_never_reaches_a_wiki_attachment(tmp_path: Path) -> None:
+    """A page keeps its picture. Retention deletes evidence, never the wiki."""
+    wiki = layout.month_dir(layout.wiki_attachments_root(tmp_path), date(2026, 9, 16))
+    wiki.mkdir(parents=True)
+    kept = wiki / "2026-09-16-140509-grocery-receipt.jpg"
+    kept.write_bytes(_png((16, 16)))
+
+    evidence = tmp_path / "people" / "alex" / "attachments" / "2026" / "09"
+    evidence.mkdir(parents=True)
+    gone = evidence / "2026-09-16-140509-IMG.jpg"
+    gone.write_bytes(_png((16, 16)))
+
+    for path in (kept, gone):
+        os.utime(path, (0.0, 0.0))
+
+    removed = AttachmentPipeline(data_dir=tmp_path, retention_days=1).sweep_retention()
+
+    assert removed == 1
+    assert kept.is_file()
+    assert not gone.exists()

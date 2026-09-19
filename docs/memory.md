@@ -30,7 +30,21 @@ names the person it happened to, whoever asks.
 A group chat searches the same corpus as a direct message. A guest searches it
 too: reading is not what separates a guest from a member. Writing is.
 
-`.trash/` directories and `*.meta.json` files are not indexed.
+`.trash/` directories are not indexed, and a `*.meta.json` file is never a
+document of its own.
+
+The index also holds the text of an attachment. A PDF with a text layer and a
+text file are read when they arrive; the words on a picture and on a scan come
+from the describer. That text lives in the metadata file beside the
+attachment, and the indexer reads it from there and never opens the file
+itself. So a person can ask what a document says months later:
+
+> what number do I call if I am late for pickup?
+
+reaches the page of the school handbook that holds it. The row carries the
+description as its title, and the words came from outside, so its provenance
+is `external`. `attachments.extract.embed: false` turns this off. A file with
+no text in it is not indexed at all.
 
 The indexer re-reads the volume every `memory.index_interval_s` seconds (60 by
 default). It compares each file against the index by content, so a file that did

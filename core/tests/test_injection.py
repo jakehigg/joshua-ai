@@ -264,3 +264,16 @@ def test_register_skips_when_disabled() -> None:
     manager = FakeManager()
     injection.register(manager, FakeStore([]), _settings(False), FakeRepo())
     assert manager.providers == []
+
+
+async def test_a_file_with_no_caption_injects_nothing() -> None:
+    """The placeholder is the same words every time, so a search with it means nothing."""
+    from joshua_shared.attachments import NO_CAPTION_TEXT
+
+    store = FakeStore([])
+    repo = FakeRepo()
+
+    note = await _run(_ctx(NO_CAPTION_TEXT), store, repo)
+
+    assert note is None
+    assert store.seen == []

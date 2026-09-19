@@ -451,3 +451,26 @@ def test_skill_registry_default_resolves_to_the_packaged_prompts() -> None:
     expected = Path(joshua_core.events.__file__).parent / "prompts" / "skills"
     assert registry._dir == expected
     assert registry.get("anything") is None
+
+
+async def test_an_event_attachment_keeps_the_sender_filename(tmp_path) -> None:
+    """The name the sender gave the file reaches the agent, the same as in a chat."""
+    repo = EventsFakeRepo()
+    repo.channels["telegram:998877"] = Channel(
+        id="telegram:998877", channel_type="telegram", session_mode="per_person"
+    )
+    service, repo, manager, received = build_service(tmp_path, repo=repo)
+
+    attach = Attachment(
+        path="shared/attachments/events/2026/08/x.jpg",
+        mime="image/jpeg",
+        name="2026-08-27-000000-porch.jpg",
+        original_name="porch.jpg",
+    )
+    resp = await service.handle(addressed_event(attachments=[attach]))
+    assert resp.status_code == 202
+    await service.drain()
+
+    sent = manager.calls[0].attachments[0]
+    assert sent.original_name == "porch.jpg"
+    assert sent.name == "2026-08-27-000000-porch.jpg"

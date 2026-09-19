@@ -73,3 +73,111 @@ def test_assertion_fires_when_tools_widened(fake_sdk, monkeypatch):
     monkeypatch.setattr(agent, "_NO_TOOLS", ["Bash"])
     with pytest.raises(AssertionError):
         _build()
+
+
+# ── the worker options ───────────────────────────────────────────────────────
+
+
+def test_a_worker_asks_for_a_schema_and_still_gets_no_tools(fake_sdk):
+    """A worker answers with an object, and it reaches no tool to do it."""
+    options = _build(
+        output_format={"type": "json_schema", "schema": {"type": "object"}},
+        max_turns=1,
+    )
+    assert options.tools == []
+    assert options.output_format == {"type": "json_schema", "schema": {"type": "object"}}
+    assert options.max_turns == 1
+
+
+def test_a_turn_with_no_output_format_sets_none(fake_sdk):
+    options = _build()
+    assert not hasattr(options, "output_format")
+
+
+def test_a_worker_carries_no_mcp_server_and_no_session(fake_sdk):
+    """No server, and no resume: the worker sees nothing of the conversation."""
+    options = _build(
+        output_format={"type": "json_schema", "schema": {}}, mcp_servers={}, resume=None
+    )
+    assert options.mcp_servers == {}
+    assert not hasattr(options, "resume")
+    assert options.setting_sources == []
+
+
+# ── the message a worker sends ───────────────────────────────────────────────
+
+
+class FakeClient:
+    """Stands in for the SDK client: records the message, returns one result."""
+
+    def __init__(self, result):
+        self._result = result
+        self.sent: list[dict] = []
+        self.connected = False
+
+    async def connect(self):
+        self.connected = True
+
+    async def query(self, prompt):
+        async for message in prompt:
+            self.sent.append(message)
+
+    async def receive_response(self):
+        yield self._result
+
+
+class FakeResult:
+    def __init__(self, structured=None, result=None):
+        self.structured_output = structured
+        self.result = result
+
+
+async def test_a_picture_is_sent_as_an_image_block():
+    """The bytes reach the model as base64, with the type the file has."""
+    import base64
+
+    client = FakeClient(FakeResult(structured={"kind": "receipt"}))
+
+    answer = await agent._structured_turn(
+        client, "Describe this file.", (b"bytes", "image/png"), None
+    )
+
+    assert answer == {"kind": "receipt"}
+    content = client.sent[0]["message"]["content"]
+    assert content[0] == {"type": "text", "text": "Describe this file."}
+    assert content[1]["type"] == "image"
+    assert content[1]["source"]["media_type"] == "image/png"
+    assert base64.b64decode(content[1]["source"]["data"]) == b"bytes"
+    assert client.sent[0]["message"]["role"] == "user"
+
+
+async def test_a_pdf_is_sent_as_a_document_block():
+    client = FakeClient(FakeResult(structured={"kind": "bill"}))
+
+    await agent._structured_turn(client, "Describe this file.", None, b"%PDF-1.7")
+
+    content = client.sent[0]["message"]["content"]
+    assert content[1]["type"] == "document"
+    assert content[1]["source"]["media_type"] == "application/pdf"
+
+
+async def test_one_message_and_no_history_is_sent():
+    client = FakeClient(FakeResult(structured={}))
+
+    await agent._structured_turn(client, "Describe this file.", None, None)
+
+    assert len(client.sent) == 1
+    assert client.sent[0]["parent_tool_use_id"] is None
+
+
+async def test_a_json_answer_in_the_text_is_read():
+    """A model that answers in text, not in the structured field, still counts."""
+    client = FakeClient(FakeResult(result='{"kind": "photo"}'))
+
+    assert await agent._structured_turn(client, "u", None, None) == {"kind": "photo"}
+
+
+async def test_an_answer_that_is_not_json_gives_none():
+    client = FakeClient(FakeResult(result="I am sorry, I cannot do that."))
+
+    assert await agent._structured_turn(client, "u", None, None) is None
