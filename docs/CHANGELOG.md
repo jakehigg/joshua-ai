@@ -4,10 +4,78 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
-## Unreleased
+## 0.0.7 - 2026-09-19
+
+### Upgrading from 0.0.6
+
+**Joshua now looks at each picture and each scanned PDF that somebody sends.**
+A small model reads it, names the file for what it holds, and keeps the words
+it can read. This is on by default. It costs about a fifth of a cent for each
+new file and adds a few seconds to the first turn that carries one. The same
+file is never read twice. Turn it off with:
+
+```yaml
+attachments:
+  describe:
+    enabled: false
+```
+
+**The wiki keeps its own files now, in `wiki/attachments/`.** Nothing is moved
+without you asking: a file a person sends stays in the record of the chat, and
+Joshua copies one into the wiki when a page uses it. Set
+`attachments.auto_save: true` if you would rather every file a member sends go
+straight to the wiki and never be deleted.
+
+At the first start, every picture a wiki page already points at is copied into
+`wiki/attachments/` and the link in the page is rewritten, one time. The file
+the person sent is left where it is. `wiki/.gitignore` gains `/attachments/`,
+so the files stay out of the wiki repository and your volume backup is what
+holds them.
+
+**A taught skill is matched by its words now, not by meaning.** A page whose
+trigger is a phrase people really say keeps working. A page that relied on a
+similar-sounding turn does not, and that is the point: the old match fired on
+a plain greeting. Read `docs/memory.md` and check your `wiki/skills/` pages.
+Add `match: semantic` to a page that genuinely needs the old behaviour.
+
+**An MCP server can install itself from a package.** If you want that, give
+the entry a `package:` field and add the store: the `mcp-store` volume on
+compose, or `gateway.mcpStore` in the chart. An existing `mcp:` section needs
+no change.
 
 ### Added
+- **The gateway installs an MCP server for you, so you no longer build an
+  image.** Give a `stdio` entry a `package:` field and the gateway installs it
+  at start: `npm:<name>@1.2.3`, `pypi:<name>==1.2.3`,
+  `git+https://<url>@<commit>`, or an `https://` file with its `sha256`. Every
+  kind must pin an exact version, and an unpinned spec fails the config load
+  with a message that says how to pin. The gateway image now carries Node, npm,
+  `uv`, and git for this.
 
+  Installs go to `/opt/joshua-mcp`, on their own volume: the `mcp-store` volume
+  on compose, and `gateway.mcpStore` in the chart. An entry whose store already
+  holds its pinned spec is not installed again, so a restart with no network
+  starts the server as it is. A version bump that cannot install leaves the
+  version you are running in place, and the other entries keep serving while
+  one installs.
+
+  `docs/mcp-servers.md` is new: the steps to add a server, and a tested entry
+  for the weather and for Home Assistant, each with a pinned version.
+  `docs/config.md` has the field, the store, and the rules.
+- **A pre-flight for a package server.**
+  `docker compose exec gateway python -m joshua_gateway mcp check` says which
+  entries the store holds, and `mcp install` installs the rest and prints what
+  it resolved. On a running gateway, `POST /admin/mcp/install` installs one
+  entry and reconnects it.
+- **`/readyz` separates an install from a fault.** It now counts `installing`
+  and `disabled` beside `connected` and `errored`, so an entry that is still
+  installing does not read as broken. `GET /admin/inventory` adds `package`,
+  `resolved`, and `installed_at` for a package entry.
+- **Upstream credentials have their own file on compose.** Put each variable an
+  `mcp:` entry names in `.env.gateway`, one `NAME=value` per line. The gateway
+  service reads it, no other service does, and it is optional. Before this there
+  was no way to get an upstream credential into the gateway container without
+  editing `docker-compose.yml`.
 - **Joshua looks at a picture before it answers, so a taught skill fires on the
   right one.** A photo with no caption used to carry one fixed sentence, so
   every such photo matched the same skill, whatever it showed. A small model
@@ -49,52 +117,7 @@ with the images and the packaged chart, are at
   of the school PDF that holds it. The text came from outside, so the row is
   marked external. `attachments.extract.embed: false` turns it off.
 
-### Fixed
-
-- **An attachment turn no longer costs a failed tool call.** Channels named a
-  file `attachments/YYYY/MM/x.jpg` and the files MCP refused that path, so
-  Joshua had to guess again with `people/<id>/attachments/...`. Every container
-  uses the second form now. A reply that carries a person's file no longer
-  builds a path of `people/<id>/people/<id>/...`.
-- **A picture sent in a group chat is a picture.** `read_file` returned
-  metadata for it, and not the image.
-- **A file that arrives through a webhook keeps the name the sender gave it.**
-
-- **The gateway installs an MCP server for you, so you no longer build an
-  image.** Give a `stdio` entry a `package:` field and the gateway installs it
-  at start: `npm:<name>@1.2.3`, `pypi:<name>==1.2.3`,
-  `git+https://<url>@<commit>`, or an `https://` file with its `sha256`. Every
-  kind must pin an exact version, and an unpinned spec fails the config load
-  with a message that says how to pin. The gateway image now carries Node, npm,
-  `uv`, and git for this.
-
-  Installs go to `/opt/joshua-mcp`, on their own volume: the `mcp-store` volume
-  on compose, and `gateway.mcpStore` in the chart. An entry whose store already
-  holds its pinned spec is not installed again, so a restart with no network
-  starts the server as it is. A version bump that cannot install leaves the
-  version you are running in place, and the other entries keep serving while
-  one installs.
-
-  `docs/mcp-servers.md` is new: the steps to add a server, and a tested entry
-  for the weather and for Home Assistant, each with a pinned version.
-  `docs/config.md` has the field, the store, and the rules.
-- **A pre-flight for a package server.**
-  `docker compose exec gateway python -m joshua_gateway mcp check` says which
-  entries the store holds, and `mcp install` installs the rest and prints what
-  it resolved. On a running gateway, `POST /admin/mcp/install` installs one
-  entry and reconnects it.
-- **`/readyz` separates an install from a fault.** It now counts `installing`
-  and `disabled` beside `connected` and `errored`, so an entry that is still
-  installing does not read as broken. `GET /admin/inventory` adds `package`,
-  `resolved`, and `installed_at` for a package entry.
-- **Upstream credentials have their own file on compose.** Put each variable an
-  `mcp:` entry names in `.env.gateway`, one `NAME=value` per line. The gateway
-  service reads it, no other service does, and it is optional. Before this there
-  was no way to get an upstream credential into the gateway container without
-  editing `docker-compose.yml`.
-
 ### Changed
-
 - **A taught skill is a note to the agent, not a trigger.** A skill that
   matches is put in front of Joshua with its instructions and one line saying
   how the phrase sat in the turn: the person said it and nothing else, opened
@@ -162,6 +185,16 @@ with the images and the packaged chart, are at
   block plus `PATH`, `HOME`, and `LANG`, and nothing else: no fleet token, no
   other entry's credential, no database URL. Its stderr now reaches the gateway
   log, one record per line, with the entry name.
+
+### Fixed
+- **An attachment turn no longer costs a failed tool call.** Channels named a
+  file `attachments/YYYY/MM/x.jpg` and the files MCP refused that path, so
+  Joshua had to guess again with `people/<id>/attachments/...`. Every container
+  uses the second form now. A reply that carries a person's file no longer
+  builds a path of `people/<id>/people/<id>/...`.
+- **A picture sent in a group chat is a picture.** `read_file` returned
+  metadata for it, and not the image.
+- **A file that arrives through a webhook keeps the name the sender gave it.**
 
 ## 0.0.6 - 2026-09-07
 
