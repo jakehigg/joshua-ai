@@ -99,7 +99,7 @@ async def test_journal_entry_is_written_indexed_and_recalled(
     manager = _manager(repo, _settings(), tmp_path)
 
     att = Attachment(
-        path="attachments/2026/08/2026-08-27-143210-IMG_4471.jpg",
+        path="people/alex/attachments/2026/08/2026-08-27-143210-IMG_4471.jpg",
         mime="image/jpeg",
         name="2026-08-27-143210-IMG_4471.jpg",
         original_name="garden.jpg",
@@ -114,7 +114,7 @@ async def test_journal_entry_is_written_indexed_and_recalled(
     entries = _today_entries(tmp_path)
     assert len(entries) == 1
     body = entries[0].read_text()
-    assert "attachments/2026/08/2026-08-27-143210-IMG_4471.jpg" in body
+    assert "people/alex/attachments/2026/08/2026-08-27-143210-IMG_4471.jpg" in body
     assert "people: [alex]" in body
 
     store = await _index(db.pool, tmp_path)
