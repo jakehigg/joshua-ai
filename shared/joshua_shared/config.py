@@ -316,14 +316,17 @@ class Describe(_Model):
     the turn real words. It has no tool and sees no message of the
     conversation. A failure or a timeout leaves the turn as it was.
 
-    The call runs while the person waits, so `timeout_seconds` is short. The
-    answer is stored beside the file and keyed by the digest of the bytes, so
-    the same file costs one call however often it comes up.
+    The call runs while the person waits, so `timeout_seconds` is short. It is
+    not as short as it looks: a receipt read off a picture measured 15 seconds,
+    because the worker writes out every word it can see. The default leaves
+    room above that, and a longer file is worth more room. The answer is stored
+    beside the file and keyed by the digest of the bytes, so the same file
+    costs one call however often it comes up.
     """
 
     enabled: bool = True
     model: str = "claude-haiku-4-5"
-    timeout_seconds: float = Field(default=20.0, gt=0)
+    timeout_seconds: float = Field(default=30.0, gt=0)
 
 
 class Extract(_Model):

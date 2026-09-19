@@ -331,7 +331,7 @@ attachments:
   describe:
     enabled: true
     model: claude-haiku-4-5
-    timeout_seconds: 20
+    timeout_seconds: 30
   extract:
     max_chars: 100000
     embed: true
@@ -342,7 +342,7 @@ attachments:
 | `auto_save` | `false` | `true` moves a file a member sends into `wiki/attachments/` as the turn starts. It is then out of reach of the retention sweep, so a page keeps its picture. A guest's file never moves. |
 | `describe.enabled` | `true` | A worker looks at each picture, and at a PDF with no text layer, before the turn is matched. |
 | `describe.model` | `claude-haiku-4-5` | The model the worker uses. It must read images. |
-| `describe.timeout_seconds` | `20` | How long a turn waits for the worker. A timeout leaves the turn as it was. |
+| `describe.timeout_seconds` | `30` | How long a turn waits for the worker. A receipt read off a picture measured 15 seconds, because the worker writes out every word it sees. A timeout leaves the turn as it was. |
 | `extract.max_chars` | `100000` | How much text one attachment keeps in its metadata file. |
 | `extract.embed` | `true` | Put that text in the search index, so a person can ask about what a document says. |
 
@@ -353,8 +353,10 @@ list, a subject, and a slug that names the file. The turn uses the subject
 only when the person wrote no caption of their own.
 
 **What it costs.** One call for each new file, about a fifth of a cent for a
-picture. The answer is stored beside the file and keyed by the digest of the
-bytes, so the same file is never described twice, however often it comes up.
+picture, and 15 seconds of the turn for a receipt. The words on the file are
+what take the time, because the worker writes out each one. The answer is
+stored beside the file and keyed by the digest of the bytes, so the same file
+is never described twice, however often it comes up.
 
 **What the worker may do.** Nothing but answer. It reaches no tool and no
 file, and it sees no message of the conversation. See

@@ -144,7 +144,7 @@ attachments:
     # sees no message of the conversation. A failure leaves the turn as it was.
     enabled: true
     model: claude-haiku-4-5
-    timeout_seconds: 20   # the person is waiting, so this is short
+    timeout_seconds: 30   # a receipt read off a picture measured 15 seconds
   extract:
     max_chars: 100000     # how much text one attachment keeps
     embed: true           # put that text in the search index, marked as external

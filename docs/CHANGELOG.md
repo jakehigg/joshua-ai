@@ -27,8 +27,9 @@ with the images and the packaged chart, are at
   `docs/security.md` says how that is held.
 
   New `attachments:` settings: `describe.enabled`, `describe.model`,
-  `describe.timeout_seconds`, `extract.max_chars`, and `extract.embed`. A
-  failure or a timeout leaves the turn as it was.
+  `describe.timeout_seconds` (30 seconds, because reading a receipt off a
+  picture measured 15), `extract.max_chars`, and `extract.embed`. A failure or
+  a timeout leaves the turn as it was.
 - **A picture in a page stays in the page.** A page used to point at the record
   of a chat, which is deleted after a year, so the page kept the link and lost
   the picture. The wiki keeps its own files now, in `wiki/attachments/`, and
