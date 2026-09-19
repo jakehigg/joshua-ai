@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import shutil
 import subprocess
 import textwrap
@@ -28,6 +29,7 @@ from joshua_shared.attachments import (
     AttachmentMeta,
     Description,
     read_meta,
+    sha256_file,
     write_meta,
 )
 
@@ -1157,8 +1159,10 @@ async def test_a_member_copies_an_attachment_into_the_wiki(gateway, data_root):
             )
     payload = result_json(res)
     assert payload["path"].startswith("wiki/attachments/")
-    assert payload["path"].endswith("plant.png")
-    assert payload["link"].startswith("![plant](/attachments/")
+    # The copy carries the short digest of its bytes, so two files never
+    # take one name in a folder that core writes to as well.
+    assert re.search(r"/plant-[0-9a-f]{6}\.png$", payload["path"])
+    assert payload["link"].startswith("![plant-")
     assert (data_root / payload["path"]).is_file()
     # Evidence is never moved.
     assert source.is_file()
@@ -1210,11 +1214,14 @@ async def test_save_attachment_refuses_a_path_that_is_not_an_attachment(gateway,
     assert str(data_root) not in res.content[0].text
 
 
-async def test_a_second_copy_of_one_name_keeps_both(gateway, data_root):
+async def test_two_files_of_one_name_and_different_bytes_both_survive(gateway, data_root):
+    """One name, two files: the digest keeps them apart and neither is lost."""
     first = data_root / "people" / "alex" / "attachments" / "2026" / "09" / "a.png"
     second = data_root / "people" / "mia" / "attachments" / "2026" / "09" / "a.png"
     _with_text(first, "")
     _with_text(second, "")
+    second.write_bytes(PNG_1PX + b"\n")  # same name, other bytes
+    write_meta(second, AttachmentMeta(mime="image/png", sha256=sha256_file(second)))
     app = gateway(files_yaml())
     async with lifespan(app):
         headers = {"X-Joshua-Person": "alex"}
@@ -1230,5 +1237,27 @@ async def test_a_second_copy_of_one_name_keeps_both(gateway, data_root):
                 )
             )
     assert one["path"] != two["path"]
-    assert (data_root / one["path"]).is_file()
-    assert (data_root / two["path"]).is_file()
+    assert (data_root / one["path"]).read_bytes() == PNG_1PX
+    assert (data_root / two["path"]).read_bytes() == PNG_1PX + b"\n"
+
+
+async def test_the_same_file_copied_twice_makes_one_copy(gateway, data_root):
+    """The name is the bytes, so the wiki keeps one copy of one picture."""
+    source = data_root / "people" / "alex" / "attachments" / "2026" / "09" / "a.png"
+    _with_text(source, "")
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            one = result_json(
+                await session.call_tool(
+                    "save_attachment", {"path": "people/alex/attachments/2026/09/a.png"}
+                )
+            )
+            two = result_json(
+                await session.call_tool(
+                    "save_attachment", {"path": "people/alex/attachments/2026/09/a.png"}
+                )
+            )
+    assert one["path"] == two["path"]
+    assert len(list((data_root / "wiki" / "attachments").rglob("*.png"))) == 1

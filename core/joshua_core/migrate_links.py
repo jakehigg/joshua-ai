@@ -22,7 +22,14 @@ import shutil
 from pathlib import Path
 
 from joshua_shared import layout
-from joshua_shared.attachments import AttachmentMeta, is_meta, read_meta, write_meta
+from joshua_shared.attachments import (
+    AttachmentMeta,
+    digest_tag,
+    is_meta,
+    read_meta,
+    sha256_file,
+    write_meta,
+)
 from joshua_shared.log import get_logger
 
 logger = get_logger("migrate_links")
@@ -34,14 +41,23 @@ _LINK_RE = re.compile(
 )
 
 
-def _target_name(source: Path) -> str:
-    return source.name
+def _target_name(source: Path, sha256: str | None) -> str:
+    """The name of the copy: the name it has, plus the short digest of its bytes."""
+    tag = digest_tag(sha256)
+    if not tag or source.stem.endswith(f"-{tag}"):
+        return source.name
+    return f"{source.stem}-{tag}{source.suffix}"
 
 
-def _free_path(directory: Path, name: str) -> Path:
+def _free_path(directory: Path, name: str, sha256: str | None = None) -> Path:
+    """The path to write at. A name held by the same bytes is used again."""
     candidate = directory / name
     if not candidate.exists():
         return candidate
+    if sha256 is not None:
+        current = read_meta(candidate)
+        if current is not None and current.sha256 == sha256:
+            return candidate
     stem, suffix = Path(name).stem, Path(name).suffix
     counter = 2
     while (directory / f"{stem}-{counter}{suffix}").exists():
@@ -74,9 +90,11 @@ def _copy_into_wiki(rel: str, data_root: Path, done: dict[str, str]) -> str | No
     target_dir = target_dir / month[0] / month[1] if month else target_dir
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
-        target = _free_path(target_dir, _target_name(source))
-        shutil.copy2(source, target)
         meta = read_meta(source) or AttachmentMeta(mime="application/octet-stream")
+        if not meta.sha256:
+            meta.sha256 = sha256_file(source)
+        target = _free_path(target_dir, _target_name(source, meta.sha256), meta.sha256)
+        shutil.copy2(source, target)
         meta.saved_from = rel
         write_meta(target, meta)
     except OSError as exc:

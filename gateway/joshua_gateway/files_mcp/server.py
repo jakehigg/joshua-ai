@@ -39,7 +39,13 @@ from zoneinfo import ZoneInfo
 
 import mcp_types as types
 import yaml
-from joshua_shared.attachments import AttachmentMeta, read_meta, write_meta
+from joshua_shared.attachments import (
+    AttachmentMeta,
+    digest_tag,
+    read_meta,
+    sha256_file,
+    write_meta,
+)
 from joshua_shared.layout import (
     attachment_area,
     is_hidden,
@@ -456,10 +462,12 @@ def _save_attachment(
         raise FilesError("file is too large to copy into the wiki")
 
     meta = read_meta(source) or AttachmentMeta(mime="application/octet-stream")
+    if not meta.sha256:
+        meta.sha256 = sha256_file(source)
     meta.saved_from = path
     target_dir = month_dir(wiki_attachments_root(root_dir), _now().date())
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = _free_name(target_dir, source.name)
+    target = _free_name(target_dir, _digest_name(source.name, meta.sha256), meta.sha256)
 
     shutil.copy2(source, target)
     write_meta(target, meta)
@@ -469,11 +477,34 @@ def _save_attachment(
     return _json({"path": rel, "link": f"![{target.stem}]({link})"})
 
 
-def _free_name(directory: Path, name: str) -> Path:
-    """``directory/name``, with ``-2``, ``-3``, … added on a clash."""
+def _digest_name(name: str, sha256: str | None) -> str:
+    """``name`` with the short digest of its bytes before the extension.
+
+    The digest is what keeps two files apart in the wiki folder, which ``core``
+    writes to as well. A name that already ends with the tag is left as it is,
+    so a file that core has filed is not tagged twice.
+    """
+    tag = digest_tag(sha256)
+    path = Path(name)
+    if not tag or path.stem.endswith(f"-{tag}"):
+        return name
+    return f"{path.stem}-{tag}{path.suffix}"
+
+
+def _free_name(directory: Path, name: str, sha256: str | None = None) -> Path:
+    """The path to write ``name`` at, without ever losing another file.
+
+    A name taken by a file of the same bytes is used again: the digest is in
+    the name, so that file is this file. Any other clash gets ``-2``, ``-3``,
+    and so on.
+    """
     candidate = directory / name
     if not candidate.exists():
         return candidate
+    if sha256 is not None:
+        current = read_meta(candidate)
+        if current is not None and current.sha256 == sha256:
+            return candidate
     stem, suffix = Path(name).stem, Path(name).suffix
     counter = 2
     while (directory / f"{stem}-{counter}{suffix}").exists():

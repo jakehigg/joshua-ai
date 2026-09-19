@@ -6,9 +6,11 @@ there is a better name, and for a member there may be a better place.
 
 Two things happen here, both in code and never by the agent:
 
-- **The name.** The timestamp stays, because it sorts and it keeps two files of
-  one second apart. The stem becomes the slug of the description:
-  `2026-09-16-140509-grocery-receipt.jpg`.
+- **The name.** The slug of the description and the short digest of the bytes:
+  `grocery-receipt-d7e122.jpg`. The folder is `YYYY/MM` and the metadata file
+  holds the arrival time, so the name carries no date. The digest is what makes
+  the name unique, because `core` and `gateway` both write into the wiki folder
+  and no check for a free name holds across two containers.
 - **The place.** With `attachments.auto_save` on, a member's file moves to
   `wiki/attachments/YYYY/MM/`. It belongs to the wiki then: retention never
   deletes it, and a page can point at it for as long as the page lives. With
@@ -26,31 +28,52 @@ from datetime import date, datetime
 from pathlib import Path
 
 from joshua_shared import layout
-from joshua_shared.attachments import AttachmentMeta, meta_path, write_meta
+from joshua_shared.attachments import (
+    AttachmentMeta,
+    digest_tag,
+    meta_path,
+    read_meta,
+    write_meta,
+)
 from joshua_shared.log import get_logger
 
 logger = get_logger("attachments")
 
 
-def stored_name(current: str, slug: str) -> str:
-    """Return the filename `current` with its stem replaced by `slug`.
+def stored_name(current: str, slug: str, sha256: str | None = None) -> str:
+    """Return the name for a described file: the slug, the digest, the extension.
 
-    The leading timestamp of the stored name is kept, so the file still sorts
-    by arrival and two files from one second stay apart. A name with no
-    timestamp gets the slug alone.
+    `grocery-receipt-d7e122.jpg`. The folder above it is `YYYY/MM`, and the
+    metadata file holds the arrival time to the second, so a date in the name
+    says nothing the path does not.
+
+    The short digest of the bytes is what keeps two files apart. `core` and
+    `gateway` both write into `wiki/attachments/`, and no check for a free name
+    holds across two containers, so the name itself has to be unique. It also
+    makes the name idempotent: the same bytes give the same name, so a file
+    that is filed twice is one file. The counter in `_free_path` is the
+    backstop for the rest.
     """
-    path = Path(current)
-    parts = path.stem.split("-")
-    stamp = parts[:4] if len(parts) >= 5 and parts[3].isdigit() else []
-    stem = "-".join([*stamp, slug]) if stamp else slug
-    return f"{stem}{path.suffix}"
+    tag = digest_tag(sha256)
+    stem = f"{slug}-{tag}" if tag else slug
+    return f"{stem}{Path(current).suffix}"
 
 
-def _free_path(directory: Path, name: str) -> Path:
-    """Return `directory/name`, with `-2`, `-3`, … added on a clash."""
+def _free_path(directory: Path, name: str, sha256: str | None = None) -> Path:
+    """Return the path to write `name` at, without ever losing another file.
+
+    A free name is used as it is. A name taken by a file of the same bytes is
+    used too: the digest is in the name, so the file that is there is the file
+    that is arriving, and writing it again loses nothing. Any other clash gets
+    `-2`, `-3`, and so on.
+    """
     candidate = directory / name
     if not candidate.exists():
         return candidate
+    if sha256 is not None:
+        current = read_meta(candidate)
+        if current is not None and current.sha256 == sha256:
+            return candidate
     stem, suffix = Path(name).stem, Path(name).suffix
     counter = 2
     while (directory / f"{stem}-{counter}{suffix}").exists():
@@ -94,7 +117,7 @@ def file_attachment(
     if not source.is_file():
         return rel, meta
 
-    name = stored_name(source.name, meta.description.slug)
+    name = stored_name(source.name, meta.description.slug, meta.sha256)
     to_wiki = auto_save and is_member and area != "wiki"
     if to_wiki:
         target_dir = layout.month_dir(layout.wiki_attachments_root(data_root), _day_of(meta))
@@ -105,7 +128,7 @@ def file_attachment(
 
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
-        target = _free_path(target_dir, name)
+        target = _free_path(target_dir, name, meta.sha256)
         if to_wiki:
             meta.saved_from = rel
         source.replace(target)

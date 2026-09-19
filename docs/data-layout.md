@@ -146,10 +146,20 @@ writes it. Every member reads it in their own system prompt.
 
 ## Attachments
 
-An attachment has the name `YYYY-MM-DD-HHMMSS-<stem>.<ext>`. Channels writes
-the first name from the name the sender's device gave the file. When the
-describer has looked at the file, core replaces the stem with the slug of the
-description, and the name becomes `2026-09-16-140509-grocery-receipt.jpg`.
+An attachment arrives with the name `YYYY-MM-DD-HHMMSS-<stem>.<ext>`, which
+channels builds from the name the sender's device gave the file. When the
+describer has looked at it, core renames it `<slug>-<digest>.<ext>`:
+`grocery-receipt-d7e122.jpg`. The folder above it is `YYYY/MM` and the
+metadata file holds the arrival time to the second, so the name carries no
+date of its own.
+
+`<digest>` is the first six characters of the `sha256` of the bytes. It is
+what keeps two files apart, because `core` and `gateway` both write into
+`wiki/attachments/` and no check for a free name holds across two containers.
+It also makes the name idempotent: the same bytes always give the same name,
+so a file that is filed or copied twice is one file in the wiki, not two. A
+name taken by other bytes gets `-2`, `-3`, and so on, and nothing is ever
+overwritten.
 
 There are two kinds of attachment, and they have different lives:
 

@@ -20,7 +20,13 @@ from joshua_core.engine import describe as describe_module
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.types import Attachment
 from joshua_shared import config as config_module
-from joshua_shared.attachments import NO_CAPTION_TEXT, AttachmentMeta, Description, write_meta
+from joshua_shared.attachments import (
+    NO_CAPTION_TEXT,
+    AttachmentMeta,
+    Description,
+    sha256_file,
+    write_meta,
+)
 
 CONFIG = """
 name: Test House
@@ -73,6 +79,7 @@ def described(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         meta = AttachmentMeta(
             mime=kwargs["mime"],
             original_name="IMG_4471.jpg",
+            sha256=sha256_file(abs_path),
             extracted_text="MARKET TOTAL 12.40",
             text_source="vision",
             description=RECEIPT,
@@ -151,10 +158,10 @@ async def test_the_file_is_renamed_and_the_agent_is_told_the_new_path(
         person_id="alex",
     )
 
-    renamed = tmp_path / "people/alex/attachments/2026/09/2026-09-16-140509-grocery-receipt.jpg"
+    renamed = next((tmp_path / "people/alex/attachments/2026/09").glob("grocery-receipt-*.jpg"))
     assert renamed.is_file()
     prompt = manager._pool["c1"].session.prompts[-1]
-    assert "people/alex/attachments/2026/09/2026-09-16-140509-grocery-receipt.jpg" in prompt
+    assert f"people/alex/attachments/2026/09/{renamed.name}" in prompt
     assert "receipt: a grocery receipt from a supermarket" in prompt
 
 
@@ -173,12 +180,9 @@ async def test_auto_save_moves_a_member_file_into_the_wiki(
         person_id="alex",
     )
 
-    moved = tmp_path / "wiki/attachments/2026/09/2026-09-16-140509-grocery-receipt.jpg"
+    moved = next((tmp_path / "wiki/attachments/2026/09").glob("grocery-receipt-*.jpg"))
     assert moved.is_file()
-    assert (
-        "wiki/attachments/2026/09/2026-09-16-140509-grocery-receipt.jpg"
-        in (manager._pool["c1"].session.prompts[-1])
-    )
+    assert f"wiki/attachments/2026/09/{moved.name}" in manager._pool["c1"].session.prompts[-1]
 
 
 async def test_the_note_never_quotes_the_words_on_the_file(

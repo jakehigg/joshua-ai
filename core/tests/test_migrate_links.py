@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from joshua_core.migrate_links import migrate_page_links
@@ -37,8 +38,9 @@ def test_a_page_keeps_its_picture(tmp_path: Path) -> None:
     counts = migrate_page_links(tmp_path)
 
     assert counts == {"pages": 1, "files": 1}
-    assert "(/attachments/2026/08/plant.jpg)" in page.read_text()
-    copied = tmp_path / "wiki" / "attachments" / "2026" / "08" / "plant.jpg"
+    body = page.read_text()
+    assert re.search(r"\(/attachments/2026/08/plant-[0-9a-f]{6}\.jpg\)", body)
+    copied = next((tmp_path / "wiki" / "attachments" / "2026" / "08").glob("plant-*.jpg"))
     assert copied.read_bytes() == JPEG
     # The evidence is never moved.
     assert (tmp_path / "people/alex/attachments/2026/08/plant.jpg").is_file()
@@ -50,7 +52,8 @@ def test_the_copy_says_where_it_came_from(tmp_path: Path) -> None:
 
     migrate_page_links(tmp_path)
 
-    meta = read_meta(tmp_path / "wiki/attachments/2026/08/plant.jpg")
+    copied = next((tmp_path / "wiki" / "attachments" / "2026" / "08").glob("plant-*.jpg"))
+    meta = read_meta(copied)
     assert meta is not None
     assert meta.saved_from == "people/alex/attachments/2026/08/plant.jpg"
     assert meta.original_name == "plant.jpg"
@@ -62,7 +65,7 @@ def test_a_shared_attachment_moves_too(tmp_path: Path) -> None:
 
     migrate_page_links(tmp_path)
 
-    assert "(/attachments/2026/08/team.jpg)" in page.read_text()
+    assert re.search(r"\(/attachments/2026/08/team-[0-9a-f]{6}\.jpg\)", page.read_text())
 
 
 def test_running_it_again_changes_nothing(tmp_path: Path) -> None:
@@ -86,8 +89,10 @@ def test_two_pages_that_use_one_picture_share_the_copy(tmp_path: Path) -> None:
     counts = migrate_page_links(tmp_path)
 
     assert counts == {"pages": 2, "files": 1}
-    assert "(/attachments/2026/08/plant.jpg)" in one.read_text()
-    assert "(/attachments/2026/08/plant.jpg)" in two.read_text()
+    link = re.search(r"\(/attachments/2026/08/plant-[0-9a-f]{6}\.jpg\)", one.read_text())
+    assert link
+    # Both pages point at the one copy.
+    assert link.group(0) in two.read_text()
 
 
 def test_a_link_to_a_file_that_is_gone_is_left_alone(tmp_path: Path) -> None:

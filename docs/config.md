@@ -624,7 +624,7 @@ The timestamp is the arrival time in `timezone`, the person's wall
 clock, so the name reads naturally. The message frontmatter and the index keep
 UTC. A second file with the same name in the same second gets `-2`, `-3`, and so
 on before the extension. When the describer has looked at the file, core
-replaces the stem with the slug of the description. See
+renames it `<slug>-<digest>.<ext>`, such as `grocery-receipt-d7e122.jpg`. See
 [docs/data-layout.md](data-layout.md).
 
 A journal entry has its own tool, `write_journal_entry(slug, markdown, people,

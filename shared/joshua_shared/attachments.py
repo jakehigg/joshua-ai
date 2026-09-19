@@ -223,6 +223,25 @@ class AttachmentMeta(_Model):
         return bool(self.extracted_text and self.extracted_text.strip())
 
 
+# How much of the digest goes in a filename. Six hex characters are 16 million
+# values, which is far more than one month folder ever holds, and they keep the
+# name readable.
+DIGEST_TAG_CHARS = 6
+
+
+def digest_tag(sha256: str | None) -> str:
+    """The short tag of a digest for a filename, or `""` when there is none.
+
+    The tag is the file itself, not a random value. The same bytes always give
+    the same name, so a file that is filed twice lands on one name and the
+    second write is the same bytes. A random tag would make a second copy.
+    """
+    if not sha256:
+        return ""
+    tag = sha256.strip().lower()[:DIGEST_TAG_CHARS]
+    return tag if tag.isalnum() else ""
+
+
 def meta_path(file: Path) -> Path:
     """The metadata file of `file`: `<file>.meta.json` in the same directory."""
     return file.parent / f"{file.name}{META_SUFFIX}"

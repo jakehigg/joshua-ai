@@ -14,8 +14,10 @@ with the images and the packaged chart, are at
   (`claude-haiku-4-5`) now looks at each new picture, and at a PDF with no text
   layer, and gives the turn real words: what the file is, a short subject, and
   a name for the file. The file is then renamed after what it holds, so
-  `2026-09-16-140509-IMG_4471.jpg` becomes
-  `2026-09-16-140509-grocery-receipt.jpg`.
+  `2026-09-16-140509-IMG_4471.jpg` becomes `grocery-receipt-d7e122.jpg`. The
+  folder is already `YYYY/MM`, so the name carries no date; the six characters
+  at the end are the digest of the bytes, which keeps two files apart and makes
+  the same file land on one name however often it is filed.
 
   The words in a file are kept too: the total on a receipt, the account number
   on a bill, the pages of a PDF from school. Ask about any of it months later

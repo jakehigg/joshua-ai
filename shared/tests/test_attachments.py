@@ -174,3 +174,28 @@ def test_write_meta_replaces_an_earlier_file(tmp_path: Path) -> None:
     assert meta.mime == "image/png"
     assert meta.sent_by == "mia"
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+# ── the digest tag in a filename ─────────────────────────────────────────────
+
+
+def test_the_tag_is_the_first_six_characters_of_the_digest() -> None:
+    assert attachments.digest_tag("d7e12240828455dd" + "0" * 48) == "d7e122"
+
+
+def test_the_tag_of_the_same_bytes_is_always_the_same() -> None:
+    """The name is the file, so a file that is stored twice keeps one name."""
+    digest = attachments.sha256_bytes(b"the same bytes")
+    assert attachments.digest_tag(digest) == attachments.digest_tag(digest)
+
+
+def test_two_files_get_two_tags() -> None:
+    one = attachments.digest_tag(attachments.sha256_bytes(b"one"))
+    two = attachments.digest_tag(attachments.sha256_bytes(b"two"))
+    assert one != two
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", "../../etc"])
+def test_a_digest_that_is_not_one_gives_no_tag(value: str | None) -> None:
+    """Nothing but hex reaches a filename."""
+    assert attachments.digest_tag(value) == ""
