@@ -4,6 +4,46 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- **Joshua can look something up.** Ask for a recipe, a price, an opening time,
+  or anything that changed after the model was trained, and Joshua searches the
+  open web and answers with its sources. Before this it answered from memory,
+  confidently, and sometimes wrongly.
+
+  The agent still has no web tool and never will. It asks a worker, and that
+  worker holds one question and nothing else: no wiki, no journal, no profile,
+  and no message of the conversation. So a page that tells it to look up
+  something private has nothing to look up. It has no file tool, no shell, and
+  no MCP server, so nothing it reads can make it act. What comes back reaches
+  Joshua marked as content from the open web, never as an instruction.
+
+  A search runs on Anthropic's side and makes no connection from your machine.
+  Reading a page does make one, from your machine, so **every fetch is checked
+  against a block list first**. Every private network, the loopback, and the
+  address that carries cloud credentials are refused before your own list is
+  read. Add your own hosts:
+
+  ```yaml
+  research:
+    fetch:
+      blocked_extra:
+        - example.net          # the domain, and every host under it
+        - "*.example.net"      # the same, written as a pattern
+        - 192.168.50.0/24     # a network
+  ```
+
+  `research.fetch.enabled: false` turns page reading off and leaves searching,
+  which makes no connection from your machine at all.
+  A block list entry may be a pattern: `*.example.net` covers the hosts under
+  a domain and the domain itself.
+
+  `research.enabled: false` removes the whole thing, and Joshua then says it
+  cannot look something up rather than answering as though it had.
+  `docs/security.md` says what the block list does not stop.
+
 ## 0.0.7 - 2026-09-19
 
 ### Upgrading from 0.0.6

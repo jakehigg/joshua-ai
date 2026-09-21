@@ -27,7 +27,7 @@ from joshua_core.engine import injection, taught_skills
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
-from joshua_core.engine.tools import recall, registration, scheduling
+from joshua_core.engine.tools import recall, registration, research, scheduling
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
 from joshua_core.memory import embed
 from joshua_core.memory.indexer import Indexer, IndexerLoop
@@ -254,6 +254,8 @@ def _build_memory(
         known_people=[p.id for p in settings.people],
     )
     recall.register(manager, store, settings)
+    if settings.research.enabled:
+        research.register(manager, settings)
     injection.register(manager, store, settings, repo)
     taught_skills.register(manager, store, settings, repo, indexer.skills)
     return indexer, IndexerLoop(indexer, intervals)

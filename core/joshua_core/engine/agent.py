@@ -28,12 +28,14 @@ try:  # The SDK is absent in stub mode and in the offline test run.
     from claude_agent_sdk import (
         ClaudeAgentOptions,
         ClaudeSDKClient,
+        HookMatcher,
         create_sdk_mcp_server,
         tool,
     )
 except ModuleNotFoundError:  # pragma: no cover - exercised only without the SDK
     ClaudeAgentOptions = None  # type: ignore[assignment,misc]
     ClaudeSDKClient = None  # type: ignore[assignment,misc]
+    HookMatcher = None  # type: ignore[assignment,misc]
     create_sdk_mcp_server = None  # type: ignore[assignment]
     tool = None  # type: ignore[assignment]
 
@@ -52,13 +54,22 @@ _MAX_BUFFER_SIZE = 32 * 1024 * 1024
 # core has no direct web egress).
 _NO_TOOLS: list[str] = []
 
+# The only built-in tools a worker may hold, and the only place in this repo
+# where a tool list is not empty. ``WebSearch`` runs on Anthropic's side.
+# ``WebFetch`` runs here, so it is gated by a PreToolUse hook over a block
+# list; see ``joshua_shared.netblock``. A worker still gets no file tool, no
+# shell, and no MCP server.
+WORKER_TOOLS: frozenset[str] = frozenset({"WebSearch", "WebFetch"})
+
 __all__ = [
     "AgentSession",
     "TurnResult",
     "build_options",
     "create_sdk_mcp_server",
+    "build_worker_options",
     "run_oneshot",
     "run_structured",
+    "run_worker_session",
     "tool",
 ]
 
@@ -124,6 +135,136 @@ def build_options(
     options = ClaudeAgentOptions(**kwargs)
     assert options.tools == [], "core agent must expose no SDK built-in tools"
     return options
+
+
+def build_worker_options(
+    *,
+    system_prompt: str,
+    cwd: Path,
+    model: str | None,
+    max_turns: int,
+    tools: list[str],
+    output_format: dict[str, Any] | None = None,
+    hooks: dict[str, Any] | None = None,
+) -> Any:
+    """Construct ``ClaudeAgentOptions`` for one ephemeral worker.
+
+    A worker is not the agent. It holds one objective, no conversation, and no
+    MCP server, so it may hold a built-in tool that the agent may not: a
+    ``research`` worker searches the web. The assert below is the boundary. It
+    names what a worker may hold, so a file tool, a shell, or anything else
+    fails here rather than in production.
+    """
+    unknown = sorted(set(tools) - WORKER_TOOLS)
+    assert not unknown, f"a worker may not hold these tools: {unknown}"
+
+    kwargs: dict[str, Any] = dict(
+        system_prompt=system_prompt,
+        cwd=str(cwd),
+        mcp_servers={},
+        tools=list(tools),
+        allowed_tools=list(tools),
+        permission_mode="bypassPermissions",
+        setting_sources=[],
+        max_turns=max_turns,
+        max_buffer_size=_MAX_BUFFER_SIZE,
+    )
+    if model:
+        kwargs["model"] = model
+    if output_format:
+        kwargs["output_format"] = output_format
+    if hooks:
+        kwargs["hooks"] = _hook_matchers(hooks)
+    options = ClaudeAgentOptions(**kwargs)
+    assert set(options.tools) <= WORKER_TOOLS, "a worker may hold only the web tools"
+    assert options.mcp_servers == {}, "a worker reaches no MCP server"
+    return options
+
+
+def _hook_matchers(hooks: dict[str, Any]) -> dict[str, Any]:
+    """Wrap ``{event: [callback]}`` in the ``HookMatcher`` the SDK expects.
+
+    The SDK takes a list of matchers for each event, not a list of functions. A
+    bare function is accepted and then never called, which is silent and, for a
+    hook that guards a fetch, dangerous. Callers pass plain functions and this
+    is the one place that knows the SDK's shape.
+    """
+    wrapped: dict[str, Any] = {}
+    for event, callbacks in hooks.items():
+        matchers = []
+        for callback in callbacks:
+            if HookMatcher is not None and isinstance(callback, HookMatcher):
+                matchers.append(callback)
+            else:
+                matchers.append(HookMatcher(hooks=[callback]))
+        wrapped[event] = matchers
+    return wrapped
+
+
+async def run_worker_session(
+    *,
+    system_prompt: str,
+    user_text: str,
+    schema: dict[str, Any],
+    model: str | None,
+    timeout_s: float,
+    max_turns: int,
+    tools: list[str],
+    hooks: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Run one worker that may use a tool, and answer with JSON matching ``schema``.
+
+    Unlike ``run_structured``, this worker takes several turns: it searches, it
+    reads, and then it answers. It still holds no conversation and no MCP
+    server. Returns the structured answer, or None on a failure or a timeout.
+    """
+    cwd = Path(tempfile.mkdtemp(prefix="joshua-worker-"))
+    options = build_worker_options(
+        system_prompt=system_prompt,
+        cwd=cwd,
+        model=model,
+        max_turns=max_turns,
+        tools=tools,
+        output_format={"type": "json_schema", "schema": schema},
+        hooks=hooks,
+    )
+    client = ClaudeSDKClient(options=options)
+    try:
+        return await asyncio.wait_for(_worker_turn(client, user_text), timeout=timeout_s)
+    except TimeoutError:
+        logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
+        return None
+    except Exception as exc:  # noqa: BLE001 — a worker failure never breaks the turn
+        logger.warning({"message": "worker failed", "error": str(exc)})
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:  # noqa: BLE001 — teardown is best effort
+            pass
+        shutil.rmtree(cwd, ignore_errors=True)
+
+
+async def _worker_turn(client: Any, user_text: str) -> dict[str, Any] | None:
+    """Send the objective, let the worker use its tools, return the answer."""
+    await client.connect()
+    await client.query(user_text)
+    async for msg in client.receive_response():
+        for block in getattr(msg, "content", None) or []:
+            name = getattr(block, "name", None)
+            if name:
+                logger.info({"message": "worker tool", "tool": str(name)})
+        structured = getattr(msg, "structured_output", None)
+        if isinstance(structured, dict):
+            return structured
+        result = getattr(msg, "result", None)
+        if isinstance(result, str) and result.strip().startswith("{"):
+            try:
+                parsed = json.loads(result)
+            except ValueError:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 async def run_oneshot(*, system_prompt: str, user_prompt: str, model: str | None) -> str:

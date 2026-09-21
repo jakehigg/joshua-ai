@@ -149,6 +149,34 @@ attachments:
     max_chars: 100000     # how much text one attachment keeps
     embed: true           # put that text in the search index, marked as external
 
+research:
+  # Joshua answers a question it has no page for by searching the open web: a
+  # recipe, a specification, an opening time. A worker does the searching, and
+  # it holds nothing else: no wiki, no journal, no profile, and no message of
+  # the conversation. What comes back reaches Joshua as content from outside,
+  # never as an instruction.
+  enabled: true
+  model: claude-sonnet-5
+  timeout_seconds: 120     # a search, a read, and an answer take time
+  max_turns: 12            # the ceiling on what one question costs
+  fetch:
+    # A search runs on Anthropic's side and makes no connection from this
+    # container. Reading a page does make one, from here. So a page Joshua
+    # reads could name a host on your own network, and the block list below is
+    # what stops that. Set enabled: false to allow searching only, which makes
+    # no connection from this container at all.
+    enabled: true
+    # Every private network, the loopback, and the address that carries cloud
+    # credentials are blocked already. Put YOUR OWN hosts here: the router, the
+    # NAS, the wiki, anything on the home network.
+    # Uncomment and add your own:
+    # blocked_extra:
+    #   - example.net          # the domain, and every host under it
+    #   - "*.example.net"      # the same, written as a pattern
+    #   - 192.168.50.0/24     # a network
+    #   - nas                 # a plain word, looked for in the whole URL
+    resolve_hosts: true      # refuse a public name that points at a private address
+
 wiki:
   git: true   # keep /data/wiki as a git repository Joshua commits; false leaves
               # git to a frontend or a sync tool

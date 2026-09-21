@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from joshua_shared.ids import PERSON_ID_PATTERN, PERSON_ID_RE
 from joshua_shared.log import CREDENTIAL_PREFIXES
 from joshua_shared.mcp_package import PackageError, parse_package
+from joshua_shared.netblock import DEFAULT_BLOCKED
 
 DEFAULT_CONFIG_PATH = "/etc/joshua/joshua.yaml"
 CONFIG_ENV_VAR = "JOSHUA_CONFIG"
@@ -360,6 +361,57 @@ class Attachments(_Model):
     extract: Extract = Extract()
 
 
+class Fetch(_Model):
+    """Whether Joshua may read a web page, and what it may not reach.
+
+    `WebSearch` runs on Anthropic's side, so it makes no connection from this
+    container. `WebFetch` does not: the container itself fetches the page. A
+    page Joshua reads can name a host on your own network, so a block list says
+    what a fetch may never reach.
+
+    An entry is a CIDR (`10.0.0.0/8`), a domain (`example.net`, which also
+    covers `hub.example.net`), a host, or plain text to look for in the URL.
+    The defaults hold every private network, the loopback, and the link-local
+    range that carries cloud credentials. `blocked` replaces the defaults;
+    `blocked_extra` adds to them, which is what most people want.
+
+    `resolve_hosts` looks the host up and refuses a name that points at a
+    private address. It costs one lookup for each fetch and it is what stops a
+    public name aimed inside.
+    """
+
+    enabled: bool = True
+    blocked: list[str] = Field(default_factory=lambda: list(DEFAULT_BLOCKED))
+    blocked_extra: list[str] = []
+    resolve_hosts: bool = True
+
+    def block_list(self) -> list[str]:
+        """The entries a fetch is checked against."""
+        return [*self.blocked, *self.blocked_extra]
+
+
+class Research(_Model):
+    """Research on the open web, in a worker that holds nothing else.
+
+    A person asks for a recipe or a fact, and a worker searches for it. The
+    worker gets the question and no part of the conversation: no wiki, no
+    journal, no profile, no message. So a page that tells it to look up a
+    private thing has nothing to look up.
+
+    What comes back is data from outside. It reaches the agent wrapped and
+    named as content, never as an instruction, and the agent decides what it
+    means for what the person asked.
+    """
+
+    enabled: bool = True
+    model: str = "claude-sonnet-5"
+    timeout_seconds: float = Field(default=120.0, gt=0)
+    # How many turns the worker may take. Each turn is a search or a fetch and
+    # then a thought, so this is the ceiling on what one question costs.
+    max_turns: int = Field(default=12, ge=1)
+    fetch: Fetch = Fetch()
+
+
 class Wiki(_Model):
     """Whether Joshua keeps `/data/wiki` as a git repository.
 
@@ -526,6 +578,7 @@ class JoshuaConfig(_Model):
     core: Core = Core()
     memory: Memory = Memory()
     attachments: Attachments = Attachments()
+    research: Research = Research()
     wiki: Wiki = Wiki()
     mcp: dict[str, McpServer] = {}
     modules: list[str] = []

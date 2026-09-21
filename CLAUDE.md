@@ -202,10 +202,19 @@ links the platform binary, so the install passes
 
 Never add `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebSearch`, or
 `WebFetch` to the agent's tool list. `engine/agent.py` passes `tools=[]` and
-asserts it. Every capability is an MCP server: `recall`, `scheduling`, and
-`registration` inside `core`, and `files` plus every configured upstream behind
-`gateway`. If a task seems to need a built-in tool, the task is wrong. Open an
-issue.
+asserts it. Every capability is an MCP server: `recall`, `research`,
+`scheduling`, and `registration` inside `core`, and `files` plus every
+configured upstream behind `gateway`. If a task seems to need a built-in tool,
+the task is wrong. Open an issue.
+
+**One exception, and it is not the agent.** An ephemeral worker may hold a web
+tool, because it holds nothing else: one objective, no conversation, no MCP
+server, and no file tool. `build_worker_options` asserts that a worker's tools
+are a subset of `WORKER_TOOLS` (`WebSearch` and `WebFetch`), so a file tool or
+a shell fails to build. `WebSearch` runs on Anthropic's side; `WebFetch` runs
+in the container, so it is gated by a `PreToolUse` hook over the block list in
+`joshua_shared.netblock`. Never widen `WORKER_TOOLS`, and never give a worker
+the conversation.
 
 ## Coding rules
 
@@ -299,3 +308,11 @@ Never add the detail of one installation to this repository: no hostname, IP
 address, roster, credential, or manifest for a particular deployment. Every
 such value belongs in a values file or an environment file that the person who
 runs Joshua keeps.
+
+**This repository is public, and `scripts/check_public_repo.py` holds the
+line.** It runs in `make lint` and in CI. Every host inside a URL must be a
+reserved name (`example.com`, `example.net`, `example.org` and anything under
+them, or `.example`, `.test`, `.invalid`, `.local`, `.internal`), a name with
+no dot (a container), a private or documentation address, or an upstream on
+the allow list in that script, each with the reason it is there. Use a reserved
+name in a doc, an example, a comment, and a test.
