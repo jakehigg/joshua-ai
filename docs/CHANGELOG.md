@@ -22,23 +22,22 @@ with the images and the packaged chart, are at
 
   A search runs on Anthropic's side and makes no connection from your machine.
   Reading a page does make one, from your machine, so **every fetch is checked
-  against a block list first**. Every private network, the loopback, and the
-  address that carries cloud credentials are refused before your own list is
-  read. Add your own hosts:
+  against a block list first**, and that list is yours: it lives in
+  `joshua.yaml`, nothing is blocked in the code, and an empty list blocks
+  nothing. `joshua.example.yaml` ships a list a careful person would start
+  from — every private network, the loopback, and the address that carries
+  cloud credentials — and every line of it can go, because letting Joshua read
+  a page on your own network is a choice you are allowed to make.
 
   ```yaml
   research:
     fetch:
-      blocked_extra:
-        - example.net          # the domain, and every host under it
-        - "*.example.net"      # the same, written as a pattern
-        - 192.168.50.0/24     # a network
+      blocked:
+        - 10.0.0.0/8
+        - 192.168.0.0/16
+        - example.net         # the domain, and every host under it
+        - "*.example.net"     # the same, written as a pattern
   ```
-
-  `research.fetch.enabled: false` turns page reading off and leaves searching,
-  which makes no connection from your machine at all.
-  A block list entry may be a pattern: `*.example.net` covers the hosts under
-  a domain and the domain itself.
 
   `research.enabled: false` removes the whole thing, and Joshua then says it
   cannot look something up rather than answering as though it had.

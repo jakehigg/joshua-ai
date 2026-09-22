@@ -284,12 +284,18 @@ This distinction decides the whole design, and it was measured, not assumed:
   It upgrades to HTTPS, which is what an internal service behind an ingress
   speaks.
 
-So every fetch goes through a `PreToolUse` hook first, over the block list in
-`joshua_shared.netblock`. It refuses a scheme that is not `http` or `https`, an
-address on a private network, a host on the operator's list, and a name that
-resolves to a private address. `research.fetch.blocked_extra` is where a person
-puts their own hosts. `research.fetch.enabled: false` removes the fetch tool,
-and the worker then makes no connection from the container at all.
+So every fetch goes through a `PreToolUse` hook first, over the block list of
+`research.fetch.blocked`. **That list is the whole policy, and it belongs to
+the person who runs Joshua.** Nothing is blocked in the code, an empty list
+blocks nothing, and `joshua.example.yaml` ships a list a careful person would
+start from: every private network, the loopback, and the address that carries
+cloud credentials. A person who wants Joshua to read a page on their own
+network deletes the line that stops it. `research.fetch.enabled: false`
+removes the fetch tool, and the worker then makes no connection from the
+container at all.
+
+One rule is not the list's: a scheme that is not `http` or `https` is always
+refused.
 
 **What the block list does not stop.** A redirect: the hook reads the URL the
 worker asked for, and a page that answers `302` to a private address is

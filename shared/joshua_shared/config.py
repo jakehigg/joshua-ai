@@ -26,7 +26,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from joshua_shared.ids import PERSON_ID_PATTERN, PERSON_ID_RE
 from joshua_shared.log import CREDENTIAL_PREFIXES
 from joshua_shared.mcp_package import PackageError, parse_package
-from joshua_shared.netblock import DEFAULT_BLOCKED
 
 DEFAULT_CONFIG_PATH = "/etc/joshua/joshua.yaml"
 CONFIG_ENV_VAR = "JOSHUA_CONFIG"
@@ -366,28 +365,32 @@ class Fetch(_Model):
 
     `WebSearch` runs on Anthropic's side, so it makes no connection from this
     container. `WebFetch` does not: the container itself fetches the page. A
-    page Joshua reads can name a host on your own network, so a block list says
+    page Joshua reads can name a host on your own network, so `blocked` says
     what a fetch may never reach.
 
-    An entry is a CIDR (`10.0.0.0/8`), a domain (`example.net`, which also
-    covers `hub.example.net`), a host, or plain text to look for in the URL.
-    The defaults hold every private network, the loopback, and the link-local
-    range that carries cloud credentials. `blocked` replaces the defaults;
-    `blocked_extra` adds to them, which is what most people want.
+    **The list is yours and it is the whole policy.** Nothing is blocked that
+    it does not name, and an empty list blocks nothing: a person who wants
+    Joshua to read a page on their own network may have it.
+    `joshua.example.yaml` ships a list to start from, and every line of it can
+    go. One rule is not the list's: a scheme that is not `http` or `https` is
+    always refused.
 
-    `resolve_hosts` looks the host up and refuses a name that points at a
-    private address. It costs one lookup for each fetch and it is what stops a
-    public name aimed inside.
+    An entry is a CIDR (`10.0.0.0/8`), a domain (`example.net`, which also
+    covers `hub.example.net`), a pattern (`*.example.net`), a host, or plain
+    text to look for in the URL.
+
+    `resolve_hosts` looks the host up and refuses a name that resolves into a
+    CIDR on the list. It costs one lookup for each fetch and it is what catches
+    a public name aimed inside.
     """
 
     enabled: bool = True
-    blocked: list[str] = Field(default_factory=lambda: list(DEFAULT_BLOCKED))
-    blocked_extra: list[str] = []
+    blocked: list[str] = []
     resolve_hosts: bool = True
 
     def block_list(self) -> list[str]:
         """The entries a fetch is checked against."""
-        return [*self.blocked, *self.blocked_extra]
+        return list(self.blocked)
 
 
 class Research(_Model):

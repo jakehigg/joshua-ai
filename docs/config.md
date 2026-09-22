@@ -393,9 +393,8 @@ research:
 | `timeout_seconds` | `120` | How long one question may take. A search, a read, and an answer are several calls. |
 | `max_turns` | `12` | The ceiling on what one question costs. |
 | `fetch.enabled` | `true` | `false` leaves the worker with search alone, which makes no connection from the container. |
-| `fetch.blocked` | every private network | The block list. Replaces the defaults. |
-| `fetch.blocked_extra` | empty | Added to the defaults. This is the one most people want. |
-| `fetch.resolve_hosts` | `true` | Look the host up, and refuse a name that points at a private address. |
+| `fetch.blocked` | empty in code | What a fetch may never reach. `joshua.example.yaml` ships a list to start from. |
+| `fetch.resolve_hosts` | `true` | Look the host up, and refuse a name that resolves into a CIDR on the list. |
 
 **The worker holds one question and nothing else.** No wiki, no journal, no
 profile, and no message of the conversation. A page that tells it to look up
@@ -412,11 +411,31 @@ reason the block list exists. See [docs/security.md](security.md).
 
 ### The block list
 
-An entry is one of four things:
+**The list is yours and it is the whole policy.** Nothing is blocked that it
+does not name, and an empty list blocks nothing: Joshua will read a page on
+your own network if you let it. That is a real choice, and it is yours.
+Nothing is hard-coded, so what you can see in the file is what is enforced.
+
+`joshua.example.yaml` ships a list a careful person would start from: every
+private network (RFC 1918), the loopback, the IPv6 equivalents, and
+`169.254.0.0/16`, which carries cloud credentials. Delete any line you do not
+want. Add the names of your own network:
+
+```yaml
+research:
+  fetch:
+    blocked:
+      - 10.0.0.0/8
+      - 192.168.0.0/16
+      - example.net         # the domain, and every host under it
+      - nas.example
+```
+
+An entry is one of:
 
 | Entry | Matches |
 |---|---|
-| `10.0.0.0/8` | a host whose address is in that network |
+| `10.0.0.0/8` | a host whose address is in that network, and a name that resolves into it |
 | `example.net` | that host and every host under it, and nothing else |
 | `*.example.net` | the same: the hosts under the domain, and the domain itself |
 | `hub.*` | that host on any domain |
@@ -430,17 +449,8 @@ A pattern (`*` or `?`) is matched against the host, never the path, so
 itself: a block list that quietly misses the apex is worse than one that says
 no twice.
 
-Every private network (RFC 1918), the loopback, the IPv6 equivalents, and
-`169.254.0.0/16` (which carries cloud credentials) are blocked before your list
-is read. Add the names of your own network:
-
-```yaml
-research:
-  fetch:
-    blocked_extra:
-      - example.net
-      - nas.example
-```
+One rule is not the list's: a scheme that is not `http` or `https` is always
+refused, so no entry can turn `file://` into something a fetch may open.
 
 ## MCP servers
 

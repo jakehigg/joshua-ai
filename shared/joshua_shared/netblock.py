@@ -1,31 +1,36 @@
-"""The block list that keeps a web fetch off the private network.
+"""Decide whether one URL may be fetched, from the operator's block list.
 
 `WebFetch` runs in the container, not on Anthropic's side. So a page that
-Joshua reads can name a host on your own network, and Joshua would be the one
-to fetch it. That is the confused deputy: the agent has no reason to reach your
-house, but it sits where it can.
+Joshua reads can name a host on the operator's own network, and Joshua would be
+the one to fetch it. `research.fetch.blocked` in `joshua.yaml` says what a
+fetch may never reach.
 
-This module decides whether one URL may be fetched. `block_reason` returns the
-reason to refuse, or `None` to allow. The rules, in order:
+**The list is the whole policy.** Nothing is blocked here that the list does
+not name, and an empty list blocks nothing at all. That is deliberate: a person
+who wants Joshua to read a page on their own network may have it, and the
+shipped `joshua.example.yaml` carries a list that a careful person would start
+from. It is theirs to edit.
 
-1. A scheme that is not `http` or `https` is refused.
-2. A host that is an IP address in a private, loopback, link-local, or
-   otherwise reserved range is refused. `169.254.169.254`, the address that
-   holds cloud credentials, is in that set.
-3. A host that matches an entry of the block list is refused. An entry is a
-   CIDR (`10.0.0.0/8`), a domain (`example.net`, which also refuses
-   `hub.example.net`), a pattern (`*.example.net`), a host, or plain text to
-   look for in the URL.
-4. With `resolve` on, the host is looked up, and a name that resolves to a
-   private address is refused. This is what stops a public name that points
-   inside.
+An entry is one of:
 
-**What this does not stop.** A redirect: the hook sees the URL the model asked
-for, and a page that answers with `302` to a private address is followed by the
-fetch itself. A name that resolves to a public address at the check and a
-private one at the fetch (DNS rebinding) also gets through. Treat the block
-list as the fence around a mistake, not as a wall against an attacker who
-already runs a server. `docs/security.md` says the same.
+* a CIDR, `10.0.0.0/8`, matched against the address of the host, and against
+  every address the host resolves to when `resolve_hosts` is on;
+* a domain, `example.net`, which covers the host and every host under it;
+* a pattern, `*.example.net` or `hub.*`, matched against the host;
+* a host with no dot, `localhost`;
+* plain text, looked for anywhere in the URL.
+
+One rule is not the list's: a scheme that is not `http` or `https` is always
+refused. That is about the protocol, not about a place, and no entry can turn
+`file://` into something a fetch may open.
+
+**What a block list cannot do.** A redirect: this reads the URL the model
+asked for, and a page that answers `302` to an address inside is followed by
+the fetch itself. A name that resolves to a public address at the check and a
+private one at the fetch gets through the same way. Treat the list as the fence
+around a mistake, not as a wall against somebody who already runs a server and
+aims it at you. A person who needs that wall gives the container egress to the
+open web alone, which the network decides and this code cannot.
 """
 
 from __future__ import annotations
@@ -37,25 +42,6 @@ from urllib.parse import urlsplit
 
 # The schemes a fetch may use. Everything else (file, gopher, ftp) is refused.
 ALLOWED_SCHEMES = frozenset({"http", "https"})
-
-# The entries a person gets without writing any. Each is a network a fetch has
-# no business reaching from inside a home or an office.
-DEFAULT_BLOCKED: tuple[str, ...] = (
-    "10.0.0.0/8",  # RFC 1918
-    "172.16.0.0/12",  # RFC 1918
-    "192.168.0.0/16",  # RFC 1918
-    "127.0.0.0/8",  # loopback
-    "169.254.0.0/16",  # link local, and the cloud metadata address
-    "::1/128",  # loopback, IPv6
-    "fc00::/7",  # unique local, IPv6
-    "fe80::/10",  # link local, IPv6
-    "localhost",
-    ".local",  # mDNS
-    ".internal",
-    ".home.arpa",
-    ".svc",  # a service inside Kubernetes
-    ".cluster.local",
-)
 
 
 def _host_of(url: str) -> str:
@@ -71,18 +57,6 @@ def _as_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
         return None
 
 
-def _is_private(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """True for an address that belongs to a network, not to the open web."""
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
-
-
 def _resolved(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     """Every address `host` resolves to. An empty list when it resolves to none."""
     try:
@@ -96,6 +70,17 @@ def _resolved(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
         if ip is not None:
             found.append(ip)
     return found
+
+
+def _network(entry: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network | None:
+    """The network an entry names, or `None` when it names something else."""
+    entry = entry.strip().lower()
+    if "/" not in entry:
+        return None
+    try:
+        return ipaddress.ip_network(entry, strict=False)
+    except ValueError:
+        return None
 
 
 def _matches(entry: str, url: str, host: str) -> bool:
@@ -122,9 +107,8 @@ def _matches(entry: str, url: str, host: str) -> bool:
         return fnmatch(host, entry)
 
     if "/" in entry:
-        try:
-            network = ipaddress.ip_network(entry, strict=False)
-        except ValueError:
+        network = _network(entry)
+        if network is None:
             return entry in url.lower()
         ip = _as_ip(host)
         return ip is not None and ip.version == network.version and ip in network
@@ -151,14 +135,15 @@ def _matches(entry: str, url: str, host: str) -> bool:
 
 def block_reason(
     url: str,
-    blocked: list[str] | tuple[str, ...] = DEFAULT_BLOCKED,
+    blocked: list[str] | tuple[str, ...],
     *,
     resolve: bool = True,
 ) -> str | None:
     """Why `url` may not be fetched, or `None` when it may.
 
-    The reason names the rule and never the whole URL, so a log line holds no
-    page a person visited.
+    `blocked` is the operator's list and it is the whole policy: an empty list
+    refuses nothing but a scheme that is not `http` or `https`. The reason names
+    the rule and never the whole URL, so a log line holds no page a person read.
     """
     raw = (url or "").strip()
     if not raw:
@@ -172,17 +157,16 @@ def block_reason(
     if not host:
         return "the URL names no host"
 
-    ip = _as_ip(host)
-    if ip is not None and _is_private(ip):
-        return "the URL names an address on a private network"
-
     for entry in blocked:
         if _matches(entry, raw, host):
             return f"the host is covered by the blocked entry {entry!r}"
 
-    if resolve and ip is None:
-        for found in _resolved(host):
-            if _is_private(found):
-                return "the host resolves to an address on a private network"
+    if resolve and _as_ip(host) is None:
+        networks = [n for n in (_network(e) for e in blocked) if n is not None]
+        if networks:
+            for found in _resolved(host):
+                for network in networks:
+                    if found.version == network.version and found in network:
+                        return f"the host resolves into the blocked entry {str(network)!r}"
 
     return None

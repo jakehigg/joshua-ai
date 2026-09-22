@@ -156,18 +156,16 @@ async def _decide(url: str, settings: Research, tool_name: str = "WebFetch") -> 
 
 
 async def test_the_hook_denies_a_url_on_the_private_network() -> None:
-    settings = _settings(fetch=Fetch(resolve_hosts=False))
+    settings = _settings(fetch=Fetch(blocked=["192.168.0.0/16"], resolve_hosts=False))
 
     out = await _decide("http://192.168.1.10/admin", settings)
 
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "private network" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "192.168.0.0/16" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 async def test_the_hook_denies_a_host_the_person_blocked() -> None:
-    settings = _settings(
-        fetch=Fetch(blocked_extra=["example.net"], resolve_hosts=False),
-    )
+    settings = _settings(fetch=Fetch(blocked=["example.net"], resolve_hosts=False))
 
     out = await _decide("https://hub.example.net/api/states", settings)
 
@@ -200,7 +198,7 @@ async def test_the_hook_reads_an_object_payload_as_well_as_a_dict() -> None:
     """The SDK may hand the hook a typed object instead of a dict."""
     from types import SimpleNamespace
 
-    settings = _settings(fetch=Fetch(resolve_hosts=False))
+    settings = _settings(fetch=Fetch(blocked=["10.0.0.0/8"], resolve_hosts=False))
     hook = research.fetch_hook(settings)
     payload = SimpleNamespace(tool_name="WebFetch", tool_input={"url": "http://10.0.0.1/"})
 
@@ -209,13 +207,10 @@ async def test_the_hook_reads_an_object_payload_as_well_as_a_dict() -> None:
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_the_person_can_replace_the_defaults_or_add_to_them() -> None:
-    added = Fetch(blocked_extra=["example.net"])
-    assert "10.0.0.0/8" in added.block_list()
-    assert "example.net" in added.block_list()
-
-    replaced = Fetch(blocked=["only.example"])
-    assert replaced.block_list() == ["only.example"]
+def test_the_list_is_the_persons_own_and_starts_empty() -> None:
+    """Nothing is blocked in code. joshua.example.yaml ships a list to start from."""
+    assert Fetch().block_list() == []
+    assert Fetch(blocked=["only.example"]).block_list() == ["only.example"]
 
 
 @pytest.mark.parametrize("tool", ["Read", "Write", "Edit", "Bash", "Glob", "Grep"])

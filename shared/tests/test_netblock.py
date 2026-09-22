@@ -7,13 +7,32 @@ router, a cluster service, or the address that holds cloud credentials.
 from __future__ import annotations
 
 import pytest
-from joshua_shared.netblock import DEFAULT_BLOCKED, block_reason
+from joshua_shared.netblock import block_reason
 
 HOUSE = ["example.net", "10.0.0.0/8"]
 
+# What `joshua.example.yaml` ships. It is a starting point in a file a person
+# owns, not a rule in the code, so these tests name it themselves.
+EXAMPLE = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "::1/128",
+    "fc00::/7",
+    "fe80::/10",
+    "localhost",
+    ".local",
+    ".internal",
+    ".home.arpa",
+    ".svc",
+    ".cluster.local",
+]
+
 
 def _blocked(url: str, blocked: list[str] | None = None, resolve: bool = False) -> bool:
-    return block_reason(url, blocked or list(DEFAULT_BLOCKED), resolve=resolve) is not None
+    return block_reason(url, EXAMPLE if blocked is None else blocked, resolve=resolve) is not None
 
 
 @pytest.mark.parametrize(
@@ -104,19 +123,50 @@ def test_the_case_of_the_host_does_not_matter() -> None:
     assert _blocked("https://HUB.Example.NET/api", HOUSE)
 
 
-def test_a_name_that_resolves_inside_is_refused() -> None:
+def test_a_name_that_resolves_into_a_blocked_network_is_refused() -> None:
     """A public name can point at a private address. That is the real attack."""
-    assert block_reason("https://localtest.me/", [], resolve=True) is not None
+    assert block_reason("https://localtest.me/", ["127.0.0.0/8"], resolve=True) is not None
 
 
 def test_resolution_can_be_turned_off() -> None:
-    assert block_reason("https://localtest.me/", [], resolve=False) is None
+    assert block_reason("https://localtest.me/", ["127.0.0.0/8"], resolve=False) is None
+
+
+def test_resolution_refuses_nothing_when_the_list_names_no_network() -> None:
+    """The list is the policy. With no CIDR in it, a lookup decides nothing."""
+    assert block_reason("https://localtest.me/", ["example.net"], resolve=True) is None
 
 
 def test_a_host_that_does_not_resolve_is_allowed_by_the_lookup() -> None:
     """A lookup that fails is not a reason to refuse; the fetch will fail anyway."""
     url = "https://this-name-does-not-exist-91731.example/"
-    assert block_reason(url, [], resolve=True) is None
+    assert block_reason(url, ["10.0.0.0/8"], resolve=True) is None
+
+
+# ── the list is the whole policy ─────────────────────────────────────────────
+
+
+def test_an_empty_list_blocks_nothing() -> None:
+    """A person may let Joshua read their own network. That is their call."""
+    for url in (
+        "http://10.0.0.5/",
+        "http://127.0.0.1:8000/",
+        "http://169.254.169.254/latest/meta-data/",
+        "https://hub.example.net/",
+        "http://localhost/",
+    ):
+        assert block_reason(url, [], resolve=True) is None, url
+
+
+def test_a_scheme_that_is_not_http_is_refused_even_with_an_empty_list() -> None:
+    """That rule is about the protocol, not about a place, so no entry moves it."""
+    assert block_reason("file:///etc/passwd", []) is not None
+    assert block_reason("ftp://example.com/", []) is not None
+
+
+def test_one_entry_blocks_only_what_it_names() -> None:
+    assert block_reason("http://10.0.0.5/", ["10.0.0.0/8"]) is not None
+    assert block_reason("http://192.168.1.1/", ["10.0.0.0/8"], resolve=False) is None
 
 
 def test_the_reason_never_holds_the_whole_url() -> None:
@@ -127,9 +177,10 @@ def test_the_reason_never_holds_the_whole_url() -> None:
     assert "token=abc" not in reason
 
 
-def test_the_defaults_cover_every_private_range() -> None:
-    for entry in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"):
-        assert entry in DEFAULT_BLOCKED
+def test_the_example_list_covers_every_private_range() -> None:
+    """The file a person starts from refuses the networks they live on."""
+    for url in ("http://10.1.1.1/", "http://172.20.0.1/", "http://192.168.1.1/"):
+        assert _blocked(url)
 
 
 def test_a_bad_entry_does_not_break_the_check() -> None:
