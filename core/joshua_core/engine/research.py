@@ -140,6 +140,7 @@ async def research(
     question: str,
     *,
     settings: ResearchConfig,
+    urls: list[str] | None = None,
     runner: Runner | None = None,
 ) -> ResearchAnswer | None:
     """Research `question` and return the answer, or `None` when there is none.
@@ -150,6 +151,11 @@ async def research(
     text = clean_text(question, limit=2000).strip()
     if not text:
         return None
+    if urls:
+        # The caller has checked that a person gave these, or that research
+        # found them. They are pages to read, never instructions to follow.
+        lines = "\n".join(f"- {clean_text(u, limit=2000)}" for u in urls[:MAX_SOURCES])
+        text = f"{text}\n\nRead these pages, which the person gave you:\n{lines}"
 
     tools = ["WebSearch"]
     if settings.fetch.enabled:

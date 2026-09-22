@@ -36,6 +36,7 @@ from joshua_core.engine.describe import (
 from joshua_core.engine.mcp import allowed_gateway_servers, gateway_servers
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.types import Attachment, OnDelta, TurnResult
+from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.memory import prompt as memory_prompt
 from joshua_core.store.models import Channel, Conversation
 from joshua_core.store.repo import Repo
@@ -191,6 +192,7 @@ class ConversationManager:
         agent_backend: str = "sdk",
         data_dir: Path | str = "/data",
         builtin_factories: dict[str, BuiltinFactory] | None = None,
+        url_grants: UrlGrants | None = None,
     ):
         self._repo = repo
         self._settings = settings
@@ -202,12 +204,20 @@ class ConversationManager:
         self._gateway_token = gateway_token
         self._agent_backend = agent_backend
         self._data_dir = Path(data_dir)
+        # A URL a person wrote may be handed to the research worker. One the
+        # agent read somewhere may not. See ``engine/url_grants.py``.
+        self._url_grants = url_grants
         # scheduling / registration builders, injected by their tickets.
         self._builtin_factories: dict[str, BuiltinFactory] = dict(builtin_factories or {})
         # Iterated before assembling each turn's prompt; empty until phase 4.
         self._context_providers: list[ContextProvider] = []
         self._pool: dict[str, _Managed] = {}
         self._pool_lock = asyncio.Lock()
+
+    @property
+    def url_grants(self) -> UrlGrants | None:
+        """The URLs each conversation may ask the research worker to read."""
+        return self._url_grants
 
     def register_builtin(self, name: str, factory: BuiltinFactory) -> None:
         """Wire an in-process MCP server builder (scheduling, registration)."""
@@ -518,6 +528,9 @@ class ConversationManager:
         # A shared conversation labels the message with who sent it.
         body = f"{speaker}: {text}" if speaker else text
         role = self._conversation_role(channel, conversation)
+        if self._url_grants is not None and direction == "in":
+            # What the person wrote, and nothing the agent found for itself.
+            self._url_grants.grant_from_text(conversation.id, text)
         attachments, described = await self._prepare_attachments(attachments, role=role)
         attach_note = self._attach_note(attachments, described)
         # A turn with a file and no words of its own borrows the subject of the

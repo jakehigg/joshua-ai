@@ -39,6 +39,12 @@ with the images and the packaged chart, are at
         - "*.example.net"     # the same, written as a pattern
   ```
 
+  **Send Joshua a link** and it reads that page: "save this recipe for me". Ask
+  about a source it cited and it goes back to it. A URL it found somewhere
+  else, on a page it read or in the text of a file somebody sent, is refused.
+  Those words are content, and a link in them is the shortest way to send
+  something out of your instance. Joshua asks you for the link instead.
+
   `research.enabled: false` removes the whole thing, and Joshua then says it
   cannot look something up rather than answering as though it had.
   `docs/security.md` says what the block list does not stop.

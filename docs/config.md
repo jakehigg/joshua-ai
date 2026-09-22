@@ -401,9 +401,11 @@ profile, and no message of the conversation. A page that tells it to look up
 something private has nothing to look up. It has no file tool, no shell, and no
 MCP server, so nothing it reads can make it act.
 
-**The agent still has no web tool.** It calls `research_web(question)`, and it
-writes that question itself, so it must put in what the worker needs and leave
-out what it does not. What comes back reaches the agent wrapped and named as
+**The agent still has no web tool.** It calls `research_web(question, urls)`,
+and it writes that question itself, so it must put in what the worker needs and
+leave out what it does not. It may pass a URL a person sent, or a source from
+earlier research in that conversation; a URL it read on a page or in a file is
+refused. See [docs/security.md](security.md). What comes back reaches the agent wrapped and named as
 content from the open web, and the agent reads it for the person.
 
 **A search runs on Anthropic's side. A fetch runs here.** That is the whole
