@@ -368,6 +368,92 @@ text goes in the metadata file, so a later question about a receipt or a bill
 needs no second read. With `extract.embed` on, the text is in the search
 index too, marked as external.
 
+## research
+
+Joshua answers a question it holds no page for by searching the open web.
+
+```yaml
+research:
+  enabled: true
+  model: claude-sonnet-5
+  timeout_seconds: 120
+  max_turns: 12
+  fetch:
+    enabled: true
+    # blocked_extra:
+    #   - example.net
+    #   - 192.168.50.0/24
+    resolve_hosts: true
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `true` | `false` removes the `research` tool. Joshua then says it cannot look something up, instead of answering from memory as though it had. |
+| `model` | `claude-sonnet-5` | The model the worker uses. |
+| `timeout_seconds` | `120` | How long one question may take. A search, a read, and an answer are several calls. |
+| `max_turns` | `12` | The ceiling on what one question costs. |
+| `fetch.enabled` | `true` | `false` leaves the worker with search alone, which makes no connection from the container. |
+| `fetch.blocked` | empty in code | What a fetch may never reach. `joshua.example.yaml` ships a list to start from. |
+| `fetch.resolve_hosts` | `true` | Look the host up, and refuse a name that resolves into a CIDR on the list. |
+
+**The worker holds one question and nothing else.** No wiki, no journal, no
+profile, and no message of the conversation. A page that tells it to look up
+something private has nothing to look up. It has no file tool, no shell, and no
+MCP server, so nothing it reads can make it act.
+
+**The agent still has no web tool.** It calls `research_web(question, urls)`,
+and it writes that question itself, so it must put in what the worker needs and
+leave out what it does not. It may pass a URL a person sent, or a source from
+earlier research in that conversation; a URL it read on a page or in a file is
+refused. See [docs/security.md](security.md). What comes back reaches the agent wrapped and named as
+content from the open web, and the agent reads it for the person.
+
+**A search runs on Anthropic's side. A fetch runs here.** That is the whole
+reason the block list exists. See [docs/security.md](security.md).
+
+### The block list
+
+**The list is yours and it is the whole policy.** Nothing is blocked that it
+does not name, and an empty list blocks nothing: Joshua will read a page on
+your own network if you let it. That is a real choice, and it is yours.
+Nothing is hard-coded, so what you can see in the file is what is enforced.
+
+`joshua.example.yaml` ships a list a careful person would start from: every
+private network (RFC 1918), the loopback, the IPv6 equivalents, and
+`169.254.0.0/16`, which carries cloud credentials. Delete any line you do not
+want. Add the names of your own network:
+
+```yaml
+research:
+  fetch:
+    blocked:
+      - 10.0.0.0/8
+      - 192.168.0.0/16
+      - example.net         # the domain, and every host under it
+      - nas.example
+```
+
+An entry is one of:
+
+| Entry | Matches |
+|---|---|
+| `10.0.0.0/8` | a host whose address is in that network, and a name that resolves into it |
+| `example.net` | that host and every host under it, and nothing else |
+| `*.example.net` | the same: the hosts under the domain, and the domain itself |
+| `hub.*` | that host on any domain |
+| `nas?.example.com` | `nas1.example.com`, and not `nas12.example.com` |
+| `.local` | that domain and every host under it |
+| `nas` | the host `nas`, and the text `nas` anywhere in the URL |
+
+A pattern (`*` or `?`) is matched against the host, never the path, so
+`*.example.net` refuses `https://hub.example.net/x` and allows
+`https://example.com/hub.example.net`. `*.example.net` covers `example.net`
+itself: a block list that quietly misses the apex is worse than one that says
+no twice.
+
+One rule is not the list's: a scheme that is not `http` or `https` is always
+refused, so no entry can turn `file://` into something a fetch may open.
+
 ## MCP servers
 
 The `mcp:` section lists the servers the gateway hosts. Add a server by adding one

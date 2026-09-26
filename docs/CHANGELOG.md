@@ -4,6 +4,51 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- **Joshua can look something up.** Ask for a recipe, a price, an opening time,
+  or anything that changed after the model was trained, and Joshua searches the
+  open web and answers with its sources. Before this it answered from memory,
+  confidently, and sometimes wrongly.
+
+  The agent still has no web tool and never will. It asks a worker, and that
+  worker holds one question and nothing else: no wiki, no journal, no profile,
+  and no message of the conversation. So a page that tells it to look up
+  something private has nothing to look up. It has no file tool, no shell, and
+  no MCP server, so nothing it reads can make it act. What comes back reaches
+  Joshua marked as content from the open web, never as an instruction.
+
+  A search runs on Anthropic's side and makes no connection from your machine.
+  Reading a page does make one, from your machine, so **every fetch is checked
+  against a block list first**, and that list is yours: it lives in
+  `joshua.yaml`, nothing is blocked in the code, and an empty list blocks
+  nothing. `joshua.example.yaml` ships a list a careful person would start
+  from — every private network, the loopback, and the address that carries
+  cloud credentials — and every line of it can go, because letting Joshua read
+  a page on your own network is a choice you are allowed to make.
+
+  ```yaml
+  research:
+    fetch:
+      blocked:
+        - 10.0.0.0/8
+        - 192.168.0.0/16
+        - example.net         # the domain, and every host under it
+        - "*.example.net"     # the same, written as a pattern
+  ```
+
+  **Send Joshua a link** and it reads that page: "save this recipe for me". Ask
+  about a source it cited and it goes back to it. A URL it found somewhere
+  else, on a page it read or in the text of a file somebody sent, is refused.
+  Those words are content, and a link in them is the shortest way to send
+  something out of your instance. Joshua asks you for the link instead.
+
+  `research.enabled: false` removes the whole thing, and Joshua then says it
+  cannot look something up rather than answering as though it had.
+  `docs/security.md` says what the block list does not stop.
+
 ## 0.0.7 - 2026-09-19
 
 ### Upgrading from 0.0.6

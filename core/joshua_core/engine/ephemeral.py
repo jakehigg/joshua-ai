@@ -41,6 +41,12 @@ def _default_runner() -> Runner:
     return run_structured
 
 
+def _default_tool_runner() -> Runner:
+    from joshua_core.engine.agent import run_worker_session
+
+    return run_worker_session
+
+
 async def run_worker[T: BaseModel](
     *,
     name: str,
@@ -52,6 +58,9 @@ async def run_worker[T: BaseModel](
     image: tuple[bytes, str] | None = None,
     document: bytes | None = None,
     runner: Runner | None = None,
+    tools: list[str] | None = None,
+    max_turns: int = 1,
+    hooks: dict[str, Any] | None = None,
 ) -> T | None:
     """Run one worker and return its answer, or `None`.
 
@@ -59,21 +68,39 @@ async def run_worker[T: BaseModel](
     the model is asked for. `image` is `(bytes, media type)` and `document` is a
     PDF. Give one or neither.
 
+    A worker with no `tools` answers in one turn from what it was given. A
+    worker with `tools` may take up to `max_turns` to search and read first, and
+    `hooks` gates what a tool may do. `agent.build_worker_options` decides which
+    tools a worker may hold at all.
+
     This never raises. Every failure is a warning and a `None`, because the turn
     that called it must continue.
     """
-    call = runner or _default_runner()
     started = monotonic()
     try:
-        raw = await call(
-            system_prompt=system_prompt,
-            user_text=user_text,
-            schema=answer.model_json_schema(),
-            model=model,
-            timeout_s=timeout_s,
-            image=image,
-            document=document,
-        )
+        if tools:
+            call = runner or _default_tool_runner()
+            raw = await call(
+                system_prompt=system_prompt,
+                user_text=user_text,
+                schema=answer.model_json_schema(),
+                model=model,
+                timeout_s=timeout_s,
+                tools=tools,
+                max_turns=max_turns,
+                hooks=hooks,
+            )
+        else:
+            call = runner or _default_runner()
+            raw = await call(
+                system_prompt=system_prompt,
+                user_text=user_text,
+                schema=answer.model_json_schema(),
+                model=model,
+                timeout_s=timeout_s,
+                image=image,
+                document=document,
+            )
     except Exception as exc:  # noqa: BLE001 — a worker never breaks its caller
         logger.warning({"message": "worker call failed", "worker": name, "error": str(exc)})
         return None

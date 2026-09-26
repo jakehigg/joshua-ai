@@ -249,6 +249,83 @@ reaching the agent's context. It makes that instruction content, the same as a
 message from a person the agent has no reason to obey. The controls that
 bound what any turn can do are the ones below.
 
+## Research, and the one tool that reaches out
+
+Joshua can search the open web. That is the third leg of the lethal trifecta:
+private data, content somebody else wrote, and a way to act. The design keeps
+the three apart.
+
+**The worker holds nothing.** Research runs in an ephemeral worker
+(`core/joshua_core/engine/research.py`). It gets one question. It does not get
+the wiki, the journal, a profile, or any message of the conversation, so a page
+that tells it to look up a private thing has nothing to look up. A search query
+is the one channel out of that worker, and the worker has nothing to put in it.
+
+**The worker cannot act.** Its tool list holds `WebSearch` and `WebFetch` and
+nothing else. No file tool, no shell, no MCP server, so nothing it reads can
+reach the house, the wiki, or an upstream.
+`agent.build_worker_options` asserts that list, and a test proves that a file
+tool fails to build. The agent itself still has no built-in tool at all, and
+that test still passes.
+
+**What comes back is content.** The research reaches the agent wrapped and
+named as what it is: text from the open web, not an instruction, possibly
+wrong. This is the same rule the text of an attachment follows.
+
+### Which URLs the agent may pass
+
+A person sends a link and says "save this recipe". Research answers with its
+sources, and the person asks about one of them. Both need the agent to name a
+URL, so `research_web` takes them.
+
+That is also the shortest way out of this instance: a page the worker read, the
+text of an attachment, or a tool result can all carry words that tell the agent
+to fetch `https://somewhere/?data=<something private>`. The block list does not
+stop that, because the host is on the open web, where a fetch is allowed to go.
+
+So a URL must be granted before the agent may pass it. A URL is granted when a
+person wrote it in a message of that conversation, or when earlier research in
+that conversation returned it as a source. Nothing else is, and a URL the agent
+read somewhere is refused with a line that tells it to ask the person for the
+link. The grants are per conversation, bounded, and held in memory only:
+`core/joshua_core/engine/url_grants.py`.
+
+The text of an attachment is content, so a URL in it is not granted, and a test
+proves that.
+
+### Where a search runs, and where a fetch runs
+
+This distinction decides the whole design, and it was measured, not assumed:
+
+- **`WebSearch` runs on Anthropic's servers.** The container makes no
+  connection. Nothing on your network is reachable that way.
+- **`WebFetch` runs in the container.** A fetch of `http://127.0.0.1:8477/`
+  reached a server on the machine that ran the CLI. So a page Joshua reads can
+  name a host on your own network, and Joshua is the one that would fetch it.
+  It upgrades to HTTPS, which is what an internal service behind an ingress
+  speaks.
+
+So every fetch goes through a `PreToolUse` hook first, over the block list of
+`research.fetch.blocked`. **That list is the whole policy, and it belongs to
+the person who runs Joshua.** Nothing is blocked in the code, an empty list
+blocks nothing, and `joshua.example.yaml` ships a list a careful person would
+start from: every private network, the loopback, and the address that carries
+cloud credentials. A person who wants Joshua to read a page on their own
+network deletes the line that stops it. `research.fetch.enabled: false`
+removes the fetch tool, and the worker then makes no connection from the
+container at all.
+
+One rule is not the list's: a scheme that is not `http` or `https` is always
+refused.
+
+**What the block list does not stop.** A redirect: the hook reads the URL the
+worker asked for, and a page that answers `302` to a private address is
+followed by the fetch itself. A name that resolves to a public address at the
+check and a private one at the fetch gets through the same way. The block list
+is the fence around a mistake, not a wall against somebody who already runs a
+server and aims it at you. A person who needs that wall runs the container with
+egress to the open web alone, which the network, not this code, decides.
+
 ## What a compromised session can reach
 
 A prompt injection is the realistic attack: a message, a file, or a tool result
@@ -261,6 +338,9 @@ that tells the agent to do something. This is what it can do at most:
 - Call the MCP servers the speaker is allowed, with the speaker's identity.
 - Reply on the channel the turn came from, and to any destination through a
   scheduled task.
+- Ask the research worker a question, which reaches the open web. The worker
+  answers with text and can do nothing else, and what it is asked is one
+  question with no private data in it.
 
 It cannot read a token. It cannot run a command. It cannot fetch a URL, because no tool does that. A server that acts
 on the world, such as home automation, is exactly as exposed as its `allow`

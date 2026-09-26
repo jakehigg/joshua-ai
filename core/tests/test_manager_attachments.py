@@ -266,3 +266,64 @@ def test_the_describer_module_is_the_only_caller_of_the_worker() -> None:
     source = Path(describe_module.__file__).read_text()
     assert "run_worker" in source
     assert "ClaudeSDKClient" not in source
+
+
+# ── URLs a person wrote ──────────────────────────────────────────────────────
+
+
+async def test_a_link_in_a_message_is_granted_for_that_conversation(tmp_path: Path) -> None:
+    """ "Save this recipe" has to reach the research worker."""
+    from joshua_core.engine.url_grants import UrlGrants
+
+    grants = UrlGrants()
+    repo = FakeRepo()
+    settings = config_module.parse(CONFIG.format(auto_save="false"), env={}, source="<test>")
+    manager = ConversationManager(
+        repo=repo,
+        settings=settings,
+        composer=FakeComposer(),
+        derive_profile=fake_derive_profile,
+        agent_backend="stub",
+        data_dir=tmp_path,
+        url_grants=grants,
+    )
+
+    await manager.run_turn(
+        make_channel(),
+        make_conversation(person_id="alex"),
+        "save this recipe for me https://example.com/ribs",
+        person_id="alex",
+    )
+
+    assert grants.is_granted("c1", "https://example.com/ribs")
+
+
+async def test_a_url_in_the_text_of_an_attachment_is_not_granted(
+    tmp_path: Path, described: list[dict[str, Any]]
+) -> None:
+    """The words on a file are content. They cannot hand the agent a URL."""
+    from joshua_core.engine.url_grants import UrlGrants
+
+    grants = UrlGrants()
+    repo = FakeRepo()
+    settings = config_module.parse(CONFIG.format(auto_save="false"), env={}, source="<test>")
+    manager = ConversationManager(
+        repo=repo,
+        settings=settings,
+        composer=FakeComposer(),
+        derive_profile=fake_derive_profile,
+        agent_backend="stub",
+        data_dir=tmp_path,
+        url_grants=grants,
+    )
+    attachment = _stored(tmp_path, "people/alex/attachments/2026/09/2026-09-16-140509-IMG.jpg")
+
+    await manager.run_turn(
+        make_channel(),
+        make_conversation(person_id="alex"),
+        NO_CAPTION_TEXT,
+        attachments=[attachment],
+        person_id="alex",
+    )
+
+    assert grants.granted("c1") == []

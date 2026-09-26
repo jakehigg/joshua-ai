@@ -181,3 +181,83 @@ async def test_an_answer_that_is_not_json_gives_none():
     client = FakeClient(FakeResult(result="I am sorry, I cannot do that."))
 
     assert await agent._structured_turn(client, "u", None, None) is None
+
+
+# ── the worker boundary ──────────────────────────────────────────────────────
+
+
+def _worker(**overrides):
+    kwargs = dict(
+        system_prompt="research one question",
+        cwd=Path("/tmp/worker"),
+        model="claude-sonnet-5",
+        max_turns=12,
+        tools=["WebSearch"],
+    )
+    kwargs.update(overrides)
+    return agent.build_worker_options(**kwargs)
+
+
+def test_a_worker_may_hold_the_web_tools(fake_sdk):
+    options = _worker(tools=["WebSearch", "WebFetch"])
+    assert options.tools == ["WebSearch", "WebFetch"]
+    assert options.allowed_tools == ["WebSearch", "WebFetch"]
+
+
+def test_a_worker_reaches_no_mcp_server_and_no_settings(fake_sdk):
+    """It holds one objective. Nothing of this instance reaches it."""
+    options = _worker()
+    assert options.mcp_servers == {}
+    assert options.setting_sources == []
+    assert not hasattr(options, "resume")
+
+
+@pytest.mark.parametrize("tool", ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task"])
+def test_a_worker_with_a_file_or_shell_tool_fails_to_build(fake_sdk, tool):
+    """The assert is the boundary: a file tool never reaches a worker."""
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=["WebSearch", tool])
+
+
+def test_the_agent_itself_still_gets_no_tool_at_all(fake_sdk):
+    """The worker's tools change nothing about the agent."""
+    assert _build().tools == []
+
+
+def test_a_worker_carries_its_hook(fake_sdk):
+    async def hook(payload, tool_use_id, context):
+        return {}
+
+    options = _worker(tools=["WebSearch", "WebFetch"], hooks={"PreToolUse": [hook]})
+
+    assert "PreToolUse" in options.hooks
+
+
+def test_a_hook_is_wrapped_in_the_matcher_the_sdk_expects(fake_sdk):
+    """A bare function is accepted by the SDK and then never called.
+
+    That is silent, and for the hook that guards a fetch it means every URL is
+    allowed. Measured once against the real SDK; pinned here.
+    """
+    from claude_agent_sdk import HookMatcher
+
+    async def hook(payload, tool_use_id, context):
+        return {}
+
+    options = _worker(tools=["WebSearch", "WebFetch"], hooks={"PreToolUse": [hook]})
+
+    matchers = options.hooks["PreToolUse"]
+    assert matchers and all(isinstance(m, HookMatcher) for m in matchers)
+    assert matchers[0].hooks == [hook]
+
+
+def test_a_matcher_that_is_already_built_is_left_alone(fake_sdk):
+    from claude_agent_sdk import HookMatcher
+
+    async def hook(payload, tool_use_id, context):
+        return {}
+
+    matcher = HookMatcher(matcher="WebFetch", hooks=[hook])
+    options = _worker(tools=["WebFetch"], hooks={"PreToolUse": [matcher]})
+
+    assert options.hooks["PreToolUse"] == [matcher]
