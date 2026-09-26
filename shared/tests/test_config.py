@@ -62,28 +62,26 @@ def test_viewer_users_unknown_person_fails() -> None:
         config.parse(text, ENV, source="test.yaml")
 
 
-def test_viewer_anonymous_defaults_to_unset() -> None:
+def test_viewer_anonymous_defaults_to_false() -> None:
     cfg = config.parse(GOOD, ENV, source="test.yaml")
-    assert cfg.viewer.anonymous is None
+    assert cfg.viewer.anonymous is False
 
 
-def test_viewer_anonymous_naming_a_guest_passes() -> None:
-    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: mia\n"
+def test_viewer_anonymous_true_passes() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: true\n"
     cfg = config.parse(text, ENV, source="test.yaml")
-    assert cfg.viewer.anonymous == "mia"
+    assert cfg.viewer.anonymous is True
 
 
-def test_viewer_anonymous_naming_a_member_fails() -> None:
-    """An open viewer must never be able to write, so `anonymous` cannot name
-    a member."""
-    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: alex\n"
-    with pytest.raises(config.ConfigError, match="viewer.anonymous"):
-        config.parse(text, ENV, source="test.yaml")
+def test_viewer_anonymous_false_passes() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: false\n"
+    cfg = config.parse(text, ENV, source="test.yaml")
+    assert cfg.viewer.anonymous is False
 
 
-def test_viewer_anonymous_naming_nobody_fails() -> None:
-    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: ghost\n"
-    with pytest.raises(config.ConfigError, match="viewer.anonymous: unknown person id 'ghost'"):
+def test_viewer_anonymous_a_string_fails() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: member\n"
+    with pytest.raises(config.ConfigError, match="anonymous"):
         config.parse(text, ENV, source="test.yaml")
 
 

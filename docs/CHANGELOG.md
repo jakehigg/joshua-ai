@@ -9,11 +9,12 @@ with the images and the packaged chart, are at
 ### Added
 
 - **The viewer can open with no sign-in, for a household on a trusted
-  network.** Set `viewer.anonymous` to a guest's person id, and a browser
-  with no password reads the wiki as that person. A member can still sign in
-  with a password on the same viewer and edit. The network is then the only
-  boundary, so keep this off on an open network, and keep TLS at your reverse
-  proxy.
+  network.** Set `viewer.anonymous: true`, and a browser with no password gets
+  full access: it reads and writes the wiki, the same as a signed-in member.
+  A member can still sign in with a password on the same viewer. Set
+  `viewer.users` to add restrictions back. The network is then the only
+  boundary, and the wiki holds the journal and every profile, so keep this off
+  on an open network, and keep TLS at your reverse proxy.
 
 ## 0.0.8 - 2026-09-26
 

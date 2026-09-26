@@ -251,7 +251,8 @@ viewer:                         # a read-only web viewer for the wiki and a
   # users:
   #   alex: ""
   #
-  # On a trusted private network, a household can skip sign-in: name a guest
-  # here and a request with no password reads as that person. The person must
-  # be a guest, so an open viewer can never write. Uncomment to turn it on:
-  # anonymous: mia
+  # On a trusted private network, a household can skip sign-in entirely: a
+  # request with no password then gets full access, read and write, the same
+  # as a member. Add `users` above to bring restrictions back. Uncomment to
+  # turn it on:
+  # anonymous: true
