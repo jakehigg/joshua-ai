@@ -12,8 +12,8 @@ read the container's environment, so it cannot read a token.
 
 Every ability the agent has is an MCP server:
 
-- Inside `core`: `search_memory`, the scheduling tools, and `add_user` and
-  `list_users`.
+- Inside `core`: `search_memory`, the scheduling tools, `add_user` and
+  `list_users`, and `use_internet`, which asks the internet agent one question.
 - Behind `gateway`: the `files` server and every server you add in `mcp:`.
 
 If a task seems to need a built-in tool, the task is wrong. Add an MCP server
@@ -32,7 +32,9 @@ policy on every call, both when it lists the tools and when a tool runs. A
 tool that a person may not use is not in their list, and a call to it fails.
 
 `core` sits between them. It holds the Claude token and the database password.
-It reaches the internet for the Claude API only.
+It reaches the Claude API. When `internet.fetch.enabled` is on, it also reads
+the web pages the internet agent was given, through the block list. See
+[the internet agent](#the-internet-agent-and-the-one-tool-that-reaches-out).
 
 ## Who may call what
 
@@ -387,8 +389,9 @@ list makes it. Keep such servers on a short list.
 - `channels` is on the host at port `8080` for BlueBubbles and webhook callers.
 - `core` is on the host at `127.0.0.1:8081` only, for the operator.
 - `gateway` and `postgres` have no host port.
-- `core` reaches the Claude API. `gateway` reaches its upstreams. `channels`
-  reaches Telegram and BlueBubbles.
+- `core` reaches the Claude API, and, when fetch is on, the pages the internet
+  agent reads. `gateway` reaches its upstreams. `channels` reaches Telegram and
+  BlueBubbles.
 - Telegram link previews are off, so Telegram's servers never fetch a URL that
   Joshua sends.
 

@@ -4,7 +4,75 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
-## Unreleased
+## 0.0.8 - 2026-09-26
+
+Joshua can look something up on the open web now, through the internet agent:
+a worker that holds one question and nothing else. A person can have more than
+one handle on a channel, and iMessage works on a BlueBubbles server that names
+its chats `any;`.
+
+### Upgrading from 0.0.7
+
+**Action needed: to let the internet agent read a page, turn fetch on in your
+`joshua.yaml`.** After the update, Joshua searches the open web, but it reads
+no page, not even a link a person sends. Reading a page opens a connection
+from your machine, so it is off until you turn it on and name what it must
+never reach. Your `joshua.yaml` from 0.0.7 has no `internet:` section, so it
+gets that default. Do these steps:
+
+1. Copy the `internet:` section from `joshua.example.yaml` into your
+   `joshua.yaml`. It sets `fetch.enabled: true` and holds a block list to
+   start from.
+2. Read the block list. It refuses every private network, the loopback, the
+   zero address, carrier-grade NAT (where a Tailscale address lives), and the
+   cloud metadata address. Add the names of your own network, such as
+   `example.net` for your home domain.
+3. Run `make validate`, then restart `core`. On Kubernetes, put the section in
+   the `config` value of the chart.
+
+The smallest section that turns fetch on is this. The block list in
+`joshua.example.yaml` is the one to start from; this one only shows the shape:
+
+```yaml
+internet:
+  fetch:
+    enabled: true
+    blocked:
+      - 0.0.0.0/8
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - "::/128"
+      - "::1/128"
+      - "fc00::/7"
+      - "fe80::/10"
+      - localhost
+      - .local
+      - .internal
+      - .svc
+      - example.net           # your own domain
+```
+
+Leave fetch off if you want Joshua to search only. It then makes no
+connection from your machine for a question.
+
+**Search is on by default, and it costs model turns.** Each question uses the
+model in `internet.model`, and `internet.max_turns` is the ceiling for one
+question. Set `internet.enabled: false` to turn off the whole thing.
+
+**A group lists platform handles in `members`, not person ids.** The old
+example showed person ids, and a group written that way was a guest chat. If
+you copied it, put each member's handle there instead.
+
+**On BlueBubbles, check the direct-message GUIDs.** If the GUIDs in
+`/admin/guard/recent` start with `any;`, set `channels.imessage.dm_service:
+any`. If you do not, a reminder to a direct message is lost.
+
+Nothing else needs a change. A handle written as one string still works. A
+list of handles is new, and you do not need it.
 
 ### Added
 
@@ -21,12 +89,6 @@ with the images and the packaged chart, are at
   on an `any` server that chat does not exist, so a reminder to a person's DM
   was lost. Set `dm_service: any` when the GUIDs in `/admin/guard/recent` start
   with `any;`. The default is unchanged.
-
-### Fixed
-
-- `joshua.example.yaml` and `docs/channels.md` listed person ids under
-  `groups[].members`. The guard and the group role compare platform handles,
-  so a group written that way was a guest chat. The examples now show handles.
 
 - **Joshua can look something up.** Ask for a recipe, a price, an opening time,
   or anything that changed after the model was trained, and Joshua searches the
@@ -79,6 +141,12 @@ with the images and the packaged chart, are at
   `internet.enabled: false` removes the whole thing, and Joshua then says it
   cannot look something up rather than answering as though it had.
   `docs/security.md` says what the block list does not stop.
+
+### Fixed
+
+- `joshua.example.yaml` and `docs/channels.md` listed person ids under
+  `groups[].members`. The guard and the group role compare platform handles,
+  so a group written that way was a guest chat. The examples now show handles.
 
 ## 0.0.7 - 2026-09-19
 

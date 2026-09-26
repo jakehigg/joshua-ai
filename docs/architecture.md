@@ -20,8 +20,9 @@ Webhooks ─┘   └──────────┘ ◄───────�
 Every design choice serves these goals, in this order:
 
 1. **Security through reduced agency.** The agent has no file tools, no shell,
-   and no direct web access. It reaches the world in two ways only: a reply
-   through `channels`, and an MCP tool call through `gateway`.
+   and no direct web access. It reaches the world in three ways only: a reply
+   through `channels`, an MCP tool call through `gateway`, and a question to the
+   internet agent, which searches the open web and holds nothing else.
 2. **Each task in the right container.** `channels` is the inbound trust
    boundary. `core` is the agent, the memory, and the scheduler. `gateway` is
    the outbound trust boundary and holds every upstream credential.
@@ -44,12 +45,20 @@ BlueBubbles password. It holds no upstream tool credential.
 `core` runs the agent. It keeps one session per conversation, composes the
 system prompt, and calls the Claude Agent SDK. The SDK gets an empty tool list.
 Every capability the agent has is an MCP server. Some run inside `core`
-(memory search, reminders, adding a person). The rest sit behind `gateway`.
+(memory search, reminders, adding a person, looking something up on the open
+web). The rest sit behind `gateway`.
+
+The `internet` tool asks the internet agent, an ephemeral worker in `core`. The
+worker gets one question and none of the conversation, and it holds the web
+tools and nothing else. A search runs on Anthropic's side. Reading a page runs
+in `core`, only when `internet.fetch.enabled` is on, and only for a page the
+worker was given. [security.md](security.md) has the whole design.
 
 `core` owns the database and the data volume. It indexes the volume for
 retrieval, writes the nightly reflection, and runs the scheduler.
 
-`core` holds the Claude token and the database password.
+`core` holds the Claude token and the database password. It reaches the
+Claude API, and, when fetch is on, the pages the internet agent reads.
 
 ## gateway
 

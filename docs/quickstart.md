@@ -151,7 +151,13 @@ next message reaches Joshua, and nothing restarts.
 
 ## 8. Give Joshua a new capability
 
-Joshua starts with your notes and your files. An MCP server adds more: the
+Joshua starts with your notes, your files, and the open web. It can search
+for a recipe or an opening time, and read a link you send it, because
+`joshua.example.yaml` turns on `internet.fetch`. Read the block list in that
+section before you start: it names the networks Joshua must never read a page
+from, and you can add your own. [config.md](config.md#internet) explains it.
+
+An MCP server adds more: the
 weather, your house, your issue tracker. Name a package under `mcp:` in
 `joshua.yaml`, and the gateway installs it at the next start. You do not build
 an image.

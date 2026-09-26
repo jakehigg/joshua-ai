@@ -13,9 +13,10 @@ three containers use.
 
 The same code runs on Kubernetes and on one Docker host with a Claude
 subscription. One instance serves one group of people. The design keeps
-the agent's power low: it has no file tools and no shell, and it reaches the
-world only through `channels`, through `gateway`, and through the Claude Agent
-SDK web tools.
+the agent's power low: it has no file tools, no shell, and no web tools. It
+reaches the world only through `channels`, through `gateway`, and through the
+internet agent, a worker in `core` that searches the open web for one question
+and holds nothing else.
 
 ## Architecture
 
