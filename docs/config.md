@@ -902,6 +902,13 @@ keeps working.
 
 The role, member or guest, comes from `people`. It is never set in `viewer`.
 
+- `viewer.anonymous`: a person id. A request with no `Authorization` header
+  reads as this person, so a private network needs no sign-in. This person
+  must be a guest. Config load refuses a member here, because an open viewer
+  must never write. A request that carries credentials is still checked
+  against `viewer.users`, so a member can sign in on an open viewer and edit.
+  Unset by default.
+
 ## Agent backend
 
 `core` reads the `AGENT_BACKEND` environment variable to pick the session backend.

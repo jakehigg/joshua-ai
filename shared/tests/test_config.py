@@ -62,6 +62,31 @@ def test_viewer_users_unknown_person_fails() -> None:
         config.parse(text, ENV, source="test.yaml")
 
 
+def test_viewer_anonymous_defaults_to_unset() -> None:
+    cfg = config.parse(GOOD, ENV, source="test.yaml")
+    assert cfg.viewer.anonymous is None
+
+
+def test_viewer_anonymous_naming_a_guest_passes() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: mia\n"
+    cfg = config.parse(text, ENV, source="test.yaml")
+    assert cfg.viewer.anonymous == "mia"
+
+
+def test_viewer_anonymous_naming_a_member_fails() -> None:
+    """An open viewer must never be able to write, so `anonymous` cannot name
+    a member."""
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: alex\n"
+    with pytest.raises(config.ConfigError, match="viewer.anonymous"):
+        config.parse(text, ENV, source="test.yaml")
+
+
+def test_viewer_anonymous_naming_nobody_fails() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: ghost\n"
+    with pytest.raises(config.ConfigError, match="viewer.anonymous: unknown person id 'ghost'"):
+        config.parse(text, ENV, source="test.yaml")
+
+
 def test_happy_path_and_defaults() -> None:
     cfg = config.parse(GOOD, ENV, source="test.yaml")
     assert cfg.name == "Home"

@@ -13,6 +13,10 @@ agent never gets: a delete, which moves a wiki page to the trash under
 ``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
 text and people. A guest reads.
 
+``viewer.anonymous`` names a guest that a request with no ``Authorization``
+header is served as, so a private network needs no sign-in. A request that
+carries credentials is still checked, so a member can sign in and write.
+
 Start it with ``python -m joshua_gateway.viewer``. It refuses to start when
 ``viewer.enabled`` is false. Put a reverse proxy in front for TLS; the viewer
 serves plain HTTP and binds every route behind basic auth except the probes.
@@ -258,12 +262,20 @@ def _authenticate(request: Request) -> Person | None:
 
     A wrong user and a wrong password fail the same way. A person named in
     ``viewer.users`` who is no longer in ``people`` cannot sign in.
+
+    A request with no ``Authorization`` header is served as ``viewer.anonymous``
+    when that is set, so a private network needs no password. Config load
+    already refuses an ``anonymous`` id that is not a guest, so this never
+    grants a write. A request that does carry credentials is always checked
+    against ``viewer.users``, so a member can still sign in and edit.
     """
+    cfg = config.load()
     creds = _basic_credentials(request)
     if creds is None:
-        return None
+        if cfg.viewer.anonymous is None:
+            return None
+        return cfg.person(cfg.viewer.anonymous)
     user, password = creds
-    cfg = config.load()
     if not _check_password(_password_reference(cfg, user), password):
         return None
     return cfg.person(user)
@@ -971,6 +983,7 @@ async def readyz(request: Request) -> JSONResponse:
             "ok": True,
             "enabled": cfg.viewer.enabled,
             "users": len(cfg.viewer.users),
+            "anonymous": cfg.viewer.anonymous is not None,
             "data": data_root().is_dir(),
         }
     )
@@ -1034,7 +1047,13 @@ def main() -> None:
         )
         raise SystemExit(1)
     install_healthcheck_filter()
-    logger.info({"message": "viewer up", "users": len(cfg.viewer.users)})
+    logger.info(
+        {
+            "message": "viewer up",
+            "users": len(cfg.viewer.users),
+            "anonymous": cfg.viewer.anonymous is not None,
+        }
+    )
     uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
 
 

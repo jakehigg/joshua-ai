@@ -624,6 +624,12 @@ class Viewer(_Model):
     # with no entry, or an empty value, cannot sign in.
     enabled: bool = False
     users: dict[str, str] = {}
+    # A person id that a request with no credentials is served as, so the
+    # viewer needs no sign-in on a private network. That person's role must be
+    # ``guest`` (checked in ``JoshuaConfig._check_viewer``): an open viewer must
+    # never be able to write. A request that carries credentials is still
+    # checked against ``users``, so a member can sign in and edit.
+    anonymous: str | None = None
 
 
 class JoshuaConfig(_Model):
@@ -691,6 +697,16 @@ class JoshuaConfig(_Model):
         for pid in self.viewer.users:
             if pid not in person_ids:
                 raise ValueError(f"viewer.users: unknown person id '{pid}'")
+        anonymous = self.viewer.anonymous
+        if anonymous is not None:
+            person = self.person(anonymous)
+            if person is None:
+                raise ValueError(f"viewer.anonymous: unknown person id '{anonymous}'")
+            if person.role != "guest":
+                raise ValueError(
+                    "viewer.anonymous: "
+                    f"'{anonymous}' must be a guest; an open viewer must never write"
+                )
         return self
 
     def person(self, person_id: str) -> Person | None:
