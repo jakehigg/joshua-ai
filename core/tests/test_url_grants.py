@@ -1,4 +1,4 @@
-"""Which URLs the agent may hand to the research worker.
+"""Which URLs the agent may hand to the internet agent.
 
 A URL the agent invented, or read on a page, is the shortest way for content
 from outside to send something out of this instance. These tests pin the gate.
@@ -91,3 +91,12 @@ def test_an_old_conversation_falls_out() -> None:
 def test_canonical_drops_the_fragment_and_lowers_the_host() -> None:
     assert canonical("HTTPS://Example.COM/A/#frag") == "https://example.com/A"
     assert canonical("https://example.com") == "https://example.com/"
+
+
+def test_a_url_that_cannot_be_read_is_never_granted() -> None:
+    """A bad port or an open bracket makes `urlsplit` raise. It must not escape."""
+    grants = UrlGrants()
+    for url in ("http://example.com:99999/", "http://[::1/", "http:///nohost"):
+        assert canonical(url) == ""
+        assert grants.grant("c1", [url]) == 0
+        assert grants.is_granted("c1", url) is False

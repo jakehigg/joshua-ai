@@ -149,38 +149,44 @@ attachments:
     max_chars: 100000     # how much text one attachment keeps
     embed: true           # put that text in the search index, marked as external
 
-research:
-  # Joshua answers a question it has no page for by searching the open web: a
-  # recipe, a specification, an opening time. A worker does the searching, and
-  # it holds nothing else: no wiki, no journal, no profile, and no message of
-  # the conversation. What comes back reaches Joshua as content from outside,
-  # never as an instruction.
+internet:
+  # The internet agent looks up on the open web what Joshua holds no page for:
+  # a recipe, a specification, an opening time. It is a worker that holds
+  # nothing else: no wiki, no journal, no profile, and no message of the
+  # conversation. What comes back reaches Joshua as content from outside, never
+  # as an instruction.
   enabled: true
   model: claude-sonnet-5
   timeout_seconds: 120     # a search, a read, and an answer take time
   max_turns: 12            # the ceiling on what one question costs
   fetch:
     # A search runs on Anthropic's side and makes no connection from this
-    # container. Reading a page does make one, from here. So a page Joshua
-    # reads could name a host on your own network. Set enabled: false to allow
-    # searching only, which makes no connection from this container at all.
+    # container. Reading a page does make one, from here. It is off when this
+    # section is missing, and this file turns it on. The worker reads only a
+    # page it was given (a link a person sent) or a page its own search
+    # returned, and never a URL it read on a page.
     enabled: true
 
-    # THIS LIST IS THE WHOLE POLICY. Nothing is blocked that it does not name,
-    # and an empty list blocks nothing at all. What is below is a starting
-    # point a careful person would keep: every private network, the loopback,
-    # and the address that carries cloud credentials. Delete what you do not
-    # want, and add your own names.
+    # THIS LIST IS THE WHOLE POLICY FOR A PLACE. Nothing is blocked that it
+    # does not name, and an empty list blocks nothing at all. What is below is
+    # a starting point a careful person would keep: every private network, the
+    # loopback, the zero address, carrier-grade NAT (where a Tailscale address
+    # lives), and the address that carries cloud credentials. Delete what you
+    # do not want, and add your own names.
     #
     # An entry is a CIDR, a domain (which covers every host under it), a
     # pattern such as "*.example.net", a host, or plain text to look for in
-    # the URL.
+    # the URL. An IPv6 address that carries an IPv4 address is checked
+    # against the IPv4 entries too.
     blocked:
+      - 0.0.0.0/8             # "this network"; 0.0.0.0 reaches this machine
       - 10.0.0.0/8            # RFC 1918
-      - 172.16.0.0/12         # RFC 1918
-      - 192.168.0.0/16        # RFC 1918
+      - 100.64.0.0/10         # carrier-grade NAT, and Tailscale
       - 127.0.0.0/8           # loopback
       - 169.254.0.0/16        # link local, and the cloud metadata address
+      - 172.16.0.0/12         # RFC 1918
+      - 192.168.0.0/16        # RFC 1918
+      - "::/128"              # the unspecified address, IPv6
       - "::1/128"             # loopback, IPv6
       - "fc00::/7"            # unique local, IPv6
       - "fe80::/10"           # link local, IPv6

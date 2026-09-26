@@ -14,11 +14,14 @@ HOUSE = ["example.net", "10.0.0.0/8"]
 # What `joshua.example.yaml` ships. It is a starting point in a file a person
 # owns, not a rule in the code, so these tests name it themselves.
 EXAMPLE = [
+    "0.0.0.0/8",
     "10.0.0.0/8",
+    "100.64.0.0/10",
     "172.16.0.0/12",
     "192.168.0.0/16",
     "127.0.0.0/8",
     "169.254.0.0/16",
+    "::/128",
     "::1/128",
     "fc00::/7",
     "fe80::/10",
@@ -222,3 +225,106 @@ def test_a_question_mark_matches_one_character() -> None:
 def test_a_star_entry_is_matched_against_the_host_and_not_the_path() -> None:
     """A pattern names a host. It does not quietly block half the web by path."""
     assert not _blocked("https://example.com/hub.example.net/page", ["*.example.net"])
+
+
+# ── a URL the fetch reads as another host ────────────────────────────────────
+#
+# The fetch runs in Node and reads a URL by the WHATWG rules. Each URL below
+# reads as a public host, or as nothing, to Python, and as a blocked address
+# to Node. The check must refuse every one with the example list, and the ones
+# that are about reading the URL must be refused with an empty list too.
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Node reads a backslash as a slash, so the host is the metadata address.
+        "http://169.254.169.254\\@example.com/latest/meta-data/",
+        "http://127.0.0.1\\example.com/",
+        # Node decodes a percent sign in the host.
+        "http://127.0.0.%31/",
+        "http://%6c%6fcalhost/",
+        # A user name or a password: the classic way to make a host read as another.
+        "http://example.com@127.0.0.1/",
+        "http://user:pass@example.com/",
+        # A tab or a newline, which Node drops and Python may not.
+        "http://127.0.0.1\t/",
+        "http://exa\nmple.com/",
+        # A zone id.
+        "http://[fe80::1%25eth0]/",
+        # A port that is not a number, and a bracket that is never closed.
+        "http://example.com:99999/",
+        "http://[::1/",
+        # Four parts where one is out of range, and too many parts.
+        "http://256.1.1.1/",
+        "http://1.2.3.4.5/",
+    ],
+)
+def test_a_url_the_fetch_could_read_as_another_host_is_refused(url: str) -> None:
+    assert block_reason(url, [], resolve=False) is not None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Every form of 127.0.0.1 that Node accepts.
+        "http://2130706433/",
+        "http://0x7f000001/",
+        "http://0x7f.1/",
+        "http://0177.0.0.1/",
+        "http://127.1/",
+        "http://127.0.0.1./",
+        # A full-width digit, which IDNA folds to the plain one.
+        "http://\uff11\uff12\uff17.0.0.1/",
+        # The metadata address in the same forms.
+        "http://2852039166/",
+        "http://0xa9.0xfe.0xa9.0xfe/",
+        # The zero address, which reaches this machine on Linux.
+        "http://0/",
+        "http://0.0.0.0:8080/",
+        "http://[::]/",
+        # An IPv6 address that carries a blocked IPv4 address.
+        "http://[::ffff:127.0.0.1]/",
+        "http://[::ffff:a9fe:a9fe]/",
+        "http://[64:ff9b::7f00:1]/",
+        "http://[2002:7f00:1::]/",
+        "http://[::127.0.0.1]/",
+        # Carrier-grade NAT, where a Tailscale address lives.
+        "http://100.100.100.100/",
+    ],
+)
+def test_every_form_of_a_blocked_address_is_refused(url: str) -> None:
+    assert _blocked(url)
+
+
+def test_an_ipv6_wrapper_is_checked_against_the_ipv4_entry() -> None:
+    """One entry, `127.0.0.0/8`, covers the IPv6 forms of the same address."""
+    assert _blocked("http://[::ffff:127.0.0.1]/", ["127.0.0.0/8"])
+    assert _blocked("http://[::ffff:127.0.0.1]/", ["127.0.0.1"])
+    assert not _blocked("http://[::ffff:8.8.8.8]/", ["127.0.0.0/8"])
+
+
+def test_a_resolved_ipv6_wrapper_is_checked_as_ipv4(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ipaddress
+
+    from joshua_shared import netblock
+
+    monkeypatch.setattr(
+        netblock, "_resolved", lambda host: [ipaddress.ip_address("::ffff:10.0.0.5")]
+    )
+    assert block_reason("https://inside.example.com/", ["10.0.0.0/8"], resolve=True) is not None
+
+
+def test_a_name_that_only_looks_like_a_number_is_a_name() -> None:
+    """`1.example.com` ends in a name, so it is a host, not an address."""
+    assert not _blocked("https://1.example.com/")
+    assert not _blocked("https://0x.example.com/")
+
+
+def test_an_international_name_is_allowed() -> None:
+    assert not _blocked("https://bücher.example/")
+
+
+def test_the_check_never_raises() -> None:
+    for url in ("http://[", "http://[::1", "http://:80", "http://a:b:c/", "\x00", "http://%"):
+        assert block_reason(url, EXAMPLE, resolve=False) is not None

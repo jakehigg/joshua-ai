@@ -272,7 +272,7 @@ def test_the_describer_module_is_the_only_caller_of_the_worker() -> None:
 
 
 async def test_a_link_in_a_message_is_granted_for_that_conversation(tmp_path: Path) -> None:
-    """ "Save this recipe" has to reach the research worker."""
+    """ "Save this recipe" has to reach the internet agent."""
     from joshua_core.engine.url_grants import UrlGrants
 
     grants = UrlGrants()

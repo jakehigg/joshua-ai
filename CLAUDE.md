@@ -202,7 +202,7 @@ links the platform binary, so the install passes
 
 Never add `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebSearch`, or
 `WebFetch` to the agent's tool list. `engine/agent.py` passes `tools=[]` and
-asserts it. Every capability is an MCP server: `recall`, `research`,
+asserts it. Every capability is an MCP server: `recall`, `internet`,
 `scheduling`, and `registration` inside `core`, and `files` plus every
 configured upstream behind `gateway`. If a task seems to need a built-in tool,
 the task is wrong. Open an issue.
@@ -212,9 +212,16 @@ tool, because it holds nothing else: one objective, no conversation, no MCP
 server, and no file tool. `build_worker_options` asserts that a worker's tools
 are a subset of `WORKER_TOOLS` (`WebSearch` and `WebFetch`), so a file tool or
 a shell fails to build. `WebSearch` runs on Anthropic's side; `WebFetch` runs
-in the container, so it is gated by a `PreToolUse` hook over the block list in
-`joshua_shared.netblock`. Never widen `WORKER_TOOLS`, and never give a worker
+in the container, is off unless `internet.fetch.enabled` is on, and is gated by
+a `PreToolUse` hook. The hook reads only a URL the caller passed or a search of
+that run returned, then checks the block list in `joshua_shared.netblock`, and
+a hook that fails denies. Never widen `WORKER_TOOLS`, and never give a worker
 the conversation.
+
+The worker that holds the web tools is the **internet agent**
+(`engine/internet.py`). It looks up what its caller asks and holds nothing
+else. The name **research** is kept for a later agent that reads the wiki and
+drives the internet agent. Do not use it for the internet agent.
 
 ## Coding rules
 

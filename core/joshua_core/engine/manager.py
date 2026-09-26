@@ -204,7 +204,7 @@ class ConversationManager:
         self._gateway_token = gateway_token
         self._agent_backend = agent_backend
         self._data_dir = Path(data_dir)
-        # A URL a person wrote may be handed to the research worker. One the
+        # A URL a person wrote may be handed to the internet agent. One the
         # agent read somewhere may not. See ``engine/url_grants.py``.
         self._url_grants = url_grants
         # scheduling / registration builders, injected by their tickets.
@@ -216,7 +216,7 @@ class ConversationManager:
 
     @property
     def url_grants(self) -> UrlGrants | None:
-        """The URLs each conversation may ask the research worker to read."""
+        """The URLs each conversation may ask the internet agent to read."""
         return self._url_grants
 
     def register_builtin(self, name: str, factory: BuiltinFactory) -> None:
