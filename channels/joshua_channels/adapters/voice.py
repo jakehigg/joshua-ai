@@ -225,7 +225,7 @@ def identify(
     if held_id is not None:
         held_person = cfg.person(held_id)
         if held_person is not None:
-            handle = held_person.handles.get(CHANNEL_TYPE) or held_person.id
+            handle = held_person.handle(CHANNEL_TYPE) or held_person.id
             return Speaker(
                 device=device,
                 person=held_person,

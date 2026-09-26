@@ -94,3 +94,13 @@ async def test_run_without_database_url(monkeypatch) -> None:
 def test_peopleerror_is_from_people_module() -> None:
     # The CLI catches people.PeopleError; keep the reference stable.
     assert issubclass(people.PeopleError, Exception)
+
+
+def test_cli_list_shows_every_handle(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="alex", display_name="Alex", role="member")])
+    repo.handles[("telegram", "9")] = "alex"
+    repo.handles[("telegram", "10")] = "alex"
+    rc = _run_cli(monkeypatch, repo, ["list"], tmp_path)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "telegram:10" in out and "telegram:9" in out

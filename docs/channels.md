@@ -14,7 +14,8 @@ credential is off, and the stack starts without it.
 Every channel runs the same guard before a message reaches `core`:
 
 1. The guard looks up the sender's handle in `people`. A known handle gives the
-   person.
+   person. Every handle a person lists counts, so a person who writes from
+   their second phone number is still that person.
 2. The guard admits an unknown sender in a group chat when the chat is in
    `groups` and the group either lists no `members` or lists this handle. The turn then
    runs as the group, with no person.
@@ -139,13 +140,15 @@ groups:
     channel: telegram
     chat_id: "-1001234567890"
     members:
-      - sam
-      - ana
+      - "998877"
+      - "112233"
 ```
 
 `chat_id` is the numeric id of the group. Add the bot to the group, send a
-message, and read the id from `/admin/guard/recent` in the same way as above. A
-group with no `members` list admits every sender in that chat.
+message, and read the id from `/admin/guard/recent` in the same way as above.
+`members` holds platform handles, the Telegram ids here, never person ids. A
+person who is in the list by one handle is admitted by every handle they have.
+A group with no `members` list admits every sender in that chat.
 
 In a group, Joshua answers as the group. It reads the shared profile and the
 shared files, and it does not read anyone's private notes.
@@ -218,12 +221,22 @@ people:
   - id: sam
     name: Sam
     handles:
-      imessage: "+15551234567"
+      imessage:                    # one handle, or a list: both name Sam
+        - "+15551234567"
+        - "sam@example.com"
 groups:
   - id: everyone
     channel: imessage
     chat_id: "iMessage;+;chat100000000000000001"
+    members:
+      - "+15551234567"             # platform handles, never person ids
 ```
+
+A direct-message chat GUID is `<service>;-;<handle>`. On most servers the
+service is `iMessage`. Some servers name it `any`, and then every GUID in
+`/admin/guard/recent` starts with `any;`. Set `dm_service: any` in that case,
+so a reply Joshua starts on its own, such as a reminder to `imessage:dm:sam`,
+goes to the chat that exists. A group GUID is copied from `chat_id` as it is.
 
 ### Knobs
 
@@ -234,6 +247,7 @@ groups:
 | `reconcile_interval_s` | `60` | Polls BlueBubbles this often for a message the webhook missed. `0` turns the poll off. |
 | `reconcile_lookback_s` | `300` | How far back the first poll looks at start. |
 | `send_chunk_chars` | `4000` | Splits a long reply into messages of this size. |
+| `dm_service` | `iMessage` | The service in a direct-message GUID Joshua builds, `<dm_service>;-;<handle>`. Set `any` when your server's GUIDs start with `any;`. |
 | `unknown_sender` | `drop` | `reply` answers a stranger once. |
 
 `/readyz` reports whether BlueBubbles answers a ping. A Mac that sleeps makes

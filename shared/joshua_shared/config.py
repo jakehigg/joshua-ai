@@ -53,6 +53,8 @@ TOOL_CLASSES = ("read", "write-local", "act")
 URL_ARGS = ("none", "grant-required")
 _E164_RE = re.compile(r"^\+[1-9]\d{1,14}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# A BlueBubbles service name: letters only, no separator.
+_DM_SERVICE_RE = re.compile(r"^[A-Za-z]+$")
 
 # ``${VAR}`` or ``${VAR:-default}``. The default runs to the next ``}``.
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}")
@@ -74,7 +76,10 @@ class Person(_Model):
     id: str
     name: str
     role: str = "member"
-    handles: dict[str, str] = {}
+    # One handle or a list of handles for each channel type. Most people have
+    # an email address and a phone number on iMessage; the first entry is the
+    # one Joshua uses to address the person, and every entry names them.
+    handles: dict[str, list[str]] = {}
     prompt: str | None = None
     # Consent for what Joshua's own journal records about this person's life
     # updates. There is no journal belonging to a person; this gates whether
@@ -103,15 +108,52 @@ class Person(_Model):
             raise ValueError("role must be 'member' or 'guest'")
         return value
 
+    @field_validator("handles", mode="before")
+    @classmethod
+    def _handles_as_lists(cls, handles: Any) -> Any:
+        """Accept ``type: "id"`` and ``type: ["id", "id"]`` alike."""
+        if not isinstance(handles, dict):
+            return handles
+        return {
+            handle_type: [value] if isinstance(value, str) else value
+            for handle_type, value in handles.items()
+        }
+
     @field_validator("handles")
     @classmethod
-    def _check_handles(cls, handles: dict[str, str]) -> dict[str, str]:
-        imessage = handles.get("imessage")
-        if imessage is not None and not (_E164_RE.match(imessage) or _EMAIL_RE.match(imessage)):
-            raise ValueError("imessage handle must be E.164 or a lowercase email")
-        if imessage is not None and imessage != imessage.lower():
-            raise ValueError("imessage handle must be lowercase")
+    def _check_handles(cls, handles: dict[str, list[str]]) -> dict[str, list[str]]:
+        for handle_type, ids in handles.items():
+            if not ids:
+                raise ValueError(f"{handle_type} handle must not be empty")
+            seen: set[str] = set()
+            for handle_id in ids:
+                if not handle_id.strip():
+                    raise ValueError(f"{handle_type} handle must not be empty")
+                if handle_id in seen:
+                    raise ValueError(f"duplicate {handle_type} handle {handle_id}")
+                seen.add(handle_id)
+                if handle_type == "imessage":
+                    if not (_E164_RE.match(handle_id) or _EMAIL_RE.match(handle_id)):
+                        raise ValueError("imessage handle must be E.164 or a lowercase email")
+                    if handle_id != handle_id.lower():
+                        raise ValueError("imessage handle must be lowercase")
         return handles
+
+    def handle(self, handle_type: str) -> str | None:
+        """The handle Joshua addresses this person with on ``handle_type``.
+
+        It is the first one listed. None when the person has no handle there.
+        """
+        ids = self.handles.get(handle_type)
+        return ids[0] if ids else None
+
+    def handle_ids(self, handle_type: str) -> list[str]:
+        """Every handle this person has on ``handle_type``."""
+        return list(self.handles.get(handle_type, []))
+
+    def has_handle(self, handle_type: str, handle_id: str) -> bool:
+        """True when ``handle_id`` is one of this person's handles on ``handle_type``."""
+        return handle_id in self.handles.get(handle_type, [])
 
 
 class Group(_Model):
@@ -141,6 +183,10 @@ class IMessageChannel(_Model):
     bluebubbles_url: str
     bluebubbles_password: str
     webhook_path_secret: str
+    # The service in a direct-message chat GUID, ``<dm_service>;-;<handle>``.
+    # BlueBubbles names it ``iMessage`` on most servers and ``any`` on some.
+    # A group GUID comes from ``groups[].chat_id`` and is not built here.
+    dm_service: str = "iMessage"
     unknown_sender: str = "drop"
     coalesce_window_s: float = Field(default=2.0, ge=0.0)
     stale_max_age_s: float = Field(default=900.0, ge=0.0)
@@ -152,6 +198,13 @@ class IMessageChannel(_Model):
     @classmethod
     def _check_unknown_sender(cls, value: str) -> str:
         return _check_unknown_sender(value)
+
+    @field_validator("dm_service")
+    @classmethod
+    def _check_dm_service(cls, value: str) -> str:
+        if not _DM_SERVICE_RE.match(value):
+            raise ValueError("dm_service must be a service name such as iMessage, SMS, or any")
+        return value
 
 
 class VoiceChannel(_Model):
@@ -597,11 +650,12 @@ class JoshuaConfig(_Model):
             seen_ids.add(person.id)
         seen_handles: set[tuple[str, str]] = set()
         for person in self.people:
-            for handle_type, handle_id in person.handles.items():
-                key = (handle_type, handle_id)
-                if key in seen_handles:
-                    raise ValueError(f"duplicate handle {handle_type}:{handle_id}")
-                seen_handles.add(key)
+            for handle_type, handle_ids in person.handles.items():
+                for handle_id in handle_ids:
+                    key = (handle_type, handle_id)
+                    if key in seen_handles:
+                        raise ValueError(f"duplicate handle {handle_type}:{handle_id}")
+                    seen_handles.add(key)
         return self
 
     @model_validator(mode="after")
@@ -678,7 +732,7 @@ class JoshuaConfig(_Model):
         if handle_type == "cli":
             return self.person(handle_id)
         for person in self.people:
-            if person.handles.get(handle_type) == handle_id:
+            if person.has_handle(handle_type, handle_id):
                 return person
         return None
 

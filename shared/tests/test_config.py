@@ -322,3 +322,124 @@ def test_the_describer_timeout_leaves_room_for_a_real_file() -> None:
     settings = config.JoshuaConfig(name="x", timezone="UTC", people=[])
 
     assert settings.attachments.describe.timeout_seconds >= 30
+
+
+# --- more than one handle on one channel ------------------------------------
+
+_TWO_HANDLES_YAML = """
+name: Test House
+timezone: America/New_York
+people:
+  - id: alex
+    name: Alex
+    role: member
+    handles:
+      imessage:
+        - "alex@example.com"
+        - "+15551234567"
+      telegram: "998877"
+  - id: mia
+    name: Mia
+    role: member
+    handles:
+      imessage: "+15557654321"
+groups:
+  - id: family
+    channel: imessage
+    chat_id: "any;+;chat100000000000000001"
+    members:
+      - "+15551234567"
+      - "+15557654321"
+channels:
+  imessage:
+    bluebubbles_url: http://bb.local
+    bluebubbles_password: pw
+    webhook_path_secret: s3cr3t
+    dm_service: any
+"""
+
+
+def test_a_handle_may_be_a_list() -> None:
+    cfg = config.parse(_TWO_HANDLES_YAML, env={}, source="<test>")
+    alex = cfg.person("alex")
+    assert alex is not None
+    assert alex.handle_ids("imessage") == ["alex@example.com", "+15551234567"]
+    assert alex.handle("imessage") == "alex@example.com"
+    assert alex.handle_ids("telegram") == ["998877"]
+    assert alex.handle("telegram") == "998877"
+    assert alex.handle("voice") is None
+    assert alex.handle_ids("voice") == []
+
+
+def test_a_string_handle_still_reads_as_one() -> None:
+    cfg = config.parse(GOOD, ENV, source="test.yaml")
+    alex = cfg.person("alex")
+    assert alex is not None
+    assert alex.handles["telegram"] == ["998877"]
+    assert alex.has_handle("telegram", "998877")
+    assert not alex.has_handle("telegram", "000")
+
+
+def test_every_listed_handle_names_the_person() -> None:
+    cfg = config.parse(_TWO_HANDLES_YAML, env={}, source="<test>")
+    assert cfg.people_by_handle("imessage", "alex@example.com").id == "alex"
+    assert cfg.people_by_handle("imessage", "+15551234567").id == "alex"
+    assert cfg.people_by_handle("imessage", "+15557654321").id == "mia"
+
+
+def test_a_group_listing_a_second_handle_is_a_member_chat() -> None:
+    """The members list names Alex by the phone, not the email; that is enough."""
+    cfg = config.parse(_TWO_HANDLES_YAML, env={}, source="<test>")
+    family = next(g for g in cfg.groups if g.id == "family")
+    assert cfg.group_role(family) == ("member", None)
+
+
+def test_the_same_handle_twice_on_one_person_fails() -> None:
+    text = _TWO_HANDLES_YAML.replace(
+        '- "+15551234567"\n      telegram', '- "alex@example.com"\n      telegram'
+    )
+    with pytest.raises(config.ConfigError) as exc:
+        config.parse(text, env={}, source="<test>")
+    assert "duplicate imessage handle alex@example.com" in str(exc.value)
+
+
+def test_a_listed_handle_that_another_person_holds_fails() -> None:
+    text = _TWO_HANDLES_YAML.replace('imessage: "+15557654321"', 'imessage: "+15551234567"')
+    with pytest.raises(config.ConfigError) as exc:
+        config.parse(text, env={}, source="<test>")
+    assert "duplicate handle imessage:+15551234567" in str(exc.value)
+
+
+def test_an_empty_handle_list_fails() -> None:
+    """strictyaml has no empty flow list, so the model is checked directly."""
+    with pytest.raises(ValueError) as exc:
+        config.Person(id="alex", name="Alex", handles={"imessage": []})
+    assert "must not be empty" in str(exc.value)
+    with pytest.raises(ValueError) as exc:
+        config.Person(id="alex", name="Alex", handles={"telegram": [" "]})
+    assert "must not be empty" in str(exc.value)
+
+
+def test_a_bad_imessage_handle_in_a_list_fails() -> None:
+    text = _TWO_HANDLES_YAML.replace('- "+15551234567"', '- "Not A Handle"')
+    with pytest.raises(config.ConfigError) as exc:
+        config.parse(text, env={}, source="<test>")
+    assert "imessage handle must be" in str(exc.value)
+
+
+def test_dm_service_defaults_to_imessage_and_takes_any() -> None:
+    cfg = config.parse(_TWO_HANDLES_YAML, env={}, source="<test>")
+    assert cfg.channels.imessage is not None
+    assert cfg.channels.imessage.dm_service == "any"
+    default = config.parse(
+        _TWO_HANDLES_YAML.replace("    dm_service: any\n", ""), env={}, source="<test>"
+    )
+    assert default.channels.imessage is not None
+    assert default.channels.imessage.dm_service == "iMessage"
+
+
+def test_dm_service_must_be_a_bare_service_name() -> None:
+    text = _TWO_HANDLES_YAML.replace("dm_service: any", 'dm_service: "any;-;"')
+    with pytest.raises(config.ConfigError) as exc:
+        config.parse(text, env={}, source="<test>")
+    assert "dm_service" in str(exc.value)

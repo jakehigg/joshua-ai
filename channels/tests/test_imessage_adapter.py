@@ -320,3 +320,69 @@ channels:
     max_text_chars: 20
     per_handle_per_minute: 20
 """
+
+
+# ── a person with two handles, on a server whose DM guids say "any" ─────────
+
+TWO_HANDLES_ANY_CONFIG = """
+name: Test House
+timezone: America/New_York
+people:
+  - id: alex
+    name: Alex Diaz
+    handles:
+      imessage:
+        - "alex@example.com"
+        - "+15551234567"
+groups:
+  - id: everyone
+    channel: imessage
+    chat_id: "any;+;chat100000000000000001"
+    members:
+      - "+15551234567"
+channels:
+  imessage:
+    bluebubbles_url: http://bb.local
+    bluebubbles_password: pw
+    webhook_path_secret: s3cr3t-path
+    dm_service: any
+  limits:
+    max_text_chars: 20
+    per_handle_per_minute: 20
+"""
+
+
+def test_resolve_ref_uses_dm_service_and_the_first_handle(tmp_path: Path) -> None:
+    adapter = make_adapter(tmp_path, cfg_text=TWO_HANDLES_ANY_CONFIG)
+    assert adapter.resolve_ref("dm:alex") == "any;-;alex@example.com"
+    assert adapter.resolve_ref("group:everyone") == "any;+;chat100000000000000001"
+
+
+async def test_a_dm_from_the_second_handle_is_the_person(tmp_path: Path) -> None:
+    """The webhook names the sender by the phone; the roster lists the email first.
+
+    The channel id is the GUID BlueBubbles sent, whatever ``dm_service`` says:
+    that field shapes only the GUID Joshua builds for an outbound DM."""
+    core = FakeCore()
+    adapter = make_adapter(tmp_path, core=core, cfg_text=TWO_HANDLES_ANY_CONFIG)
+    data = load_data("dm_text")
+    data["chats"][0]["guid"] = "any;-;+15551234567"
+    message = normalize_message(data, max_attachment_bytes=MAX_BYTES)
+    assert isinstance(message, InboundMessage)
+    await adapter._forwarder.deliver(message)
+
+    assert adapter._forwarder.refused == 0
+    assert len(core.events) == 1
+    event = core.events[0]
+    assert event.channel == "imessage:any;-;+15551234567"
+    assert event.handle is not None and event.handle.id == "+15551234567"
+
+    # The same DM from a handle nobody holds is refused, so the admission above
+    # came from the second handle and not from the chat.
+    data["handle"]["address"] = "+15559999999"
+    data["chats"][0]["guid"] = "any;-;+15559999999"
+    stranger = normalize_message(data, max_attachment_bytes=MAX_BYTES)
+    assert isinstance(stranger, InboundMessage)
+    await adapter._forwarder.deliver(stranger)
+    assert adapter._forwarder.refused == 1
+    assert len(core.events) == 1

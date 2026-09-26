@@ -82,3 +82,13 @@ def test_post_people_conflict_is_400(client) -> None:
 def test_post_people_bad_body_is_400(client) -> None:
     resp = client.post("/admin/people", headers=_laptop(), json=["not", "an", "object"])
     assert resp.status_code == 400
+
+
+def test_get_people_lists_every_handle_of_a_person(client) -> None:
+    client.repo.handles[("telegram", "10")] = "alex"
+    client.repo.handles[("imessage", "+15550001111")] = "alex"
+    resp = client.get("/admin/people", headers=_laptop())
+    assert resp.status_code == 200
+    handles = resp.json()["people"][0]["handles"]
+    # One handle is a string, two on one channel are a list.
+    assert handles == {"imessage": "+15550001111", "telegram": ["10", "9"]}

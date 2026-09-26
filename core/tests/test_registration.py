@@ -249,3 +249,28 @@ def test_people_file_mark_removed_clears_on_readd(tmp_path: Path) -> None:
     )
     entry = config_module.read_people_file(path)[0]
     assert entry["role"] == "guest"
+
+
+async def test_add_user_keeps_the_handle_the_person_already_has(tmp_path: Path) -> None:
+    """A second iMessage handle joins the first in the people file; it never swaps it out."""
+    repo = _member_repo()
+    deps = make_deps(repo, person_id="alex")
+
+    await registration.do_add_user(deps, name="Sam", handle="sam@example.com", data_dir=tmp_path)
+    await people.add_person(
+        repo, tmp_path, person_id="sam", name="Sam", handle="imessage:+15550001111"
+    )
+
+    assert repo.handles[("imessage", "sam@example.com")] == "sam"
+    assert repo.handles[("imessage", "+15550001111")] == "sam"
+    entries = config_module.read_people_file(tmp_path / "people.yaml")
+    assert entries[0]["handles"] == {"imessage": ["sam@example.com", "+15550001111"]}
+    # The merged roster reads the file, so both handles name Sam from now on.
+    cfg = config_module.parse(
+        "name: T\ntimezone: UTC\npeople:\n  - id: alex\n    name: Alex\n",
+        env={},
+        source="<test>",
+        file_people=entries,
+    )
+    assert cfg.people_by_handle("imessage", "sam@example.com").id == "sam"
+    assert cfg.people_by_handle("imessage", "+15550001111").id == "sam"

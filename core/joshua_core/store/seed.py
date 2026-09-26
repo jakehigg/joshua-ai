@@ -25,8 +25,9 @@ async def seed_people(repo: Repo, config: JoshuaConfig) -> None:
     for person in config.people:
         await repo.upsert_person(person.id, person.name, person.role)
         config_ids.add(person.id)
-        for channel_type, handle in person.handles.items():
-            await repo.upsert_person_handle(channel_type, handle, person.id)
+        for channel_type, handles in person.handles.items():
+            for handle in handles:
+                await repo.upsert_person_handle(channel_type, handle, person.id)
 
     for row in await repo.list_people():
         if row.id not in config_ids:

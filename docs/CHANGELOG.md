@@ -8,6 +8,26 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **A person can have more than one handle on a channel.** Most people have an
+  email address and a phone number on iMessage, and they write from either.
+  `people[].handles.<channel>` now takes one handle or a list. Every handle in
+  the list names the person, in a direct message and in a group chat, and the
+  first one is the handle Joshua uses to address them. `add_user` and
+  `people add` keep the handles a person already has when they gain another.
+  `GET /admin/people` and `people list` show every handle.
+- **`channels.imessage.dm_service`.** A BlueBubbles server names the service
+  in a direct-message GUID `iMessage` on most installs and `any` on some. Joshua
+  used to build `iMessage;-;<handle>` for every reply it starts on its own, and
+  on an `any` server that chat does not exist, so a reminder to a person's DM
+  was lost. Set `dm_service: any` when the GUIDs in `/admin/guard/recent` start
+  with `any;`. The default is unchanged.
+
+### Fixed
+
+- `joshua.example.yaml` and `docs/channels.md` listed person ids under
+  `groups[].members`. The guard and the group role compare platform handles,
+  so a group written that way was a guest chat. The examples now show handles.
+
 - **Joshua can look something up.** Ask for a recipe, a price, an opening time,
   or anything that changed after the model was trained, and Joshua searches the
   open web and answers with its sources. Before this it answered from memory,
