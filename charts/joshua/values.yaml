@@ -55,6 +55,9 @@ secrets:
       JOSHUA_TOKEN_GATEWAY: {}
       JOSHUA_TOKEN_LAPTOP: {}
       JOSHUA_TOKEN_CI: {}
+      # The callers of POST /v1/memory/search. Core verifies them.
+      JOSHUA_TOKEN_VIEWER: {}
+      JOSHUA_TOKEN_MCP: {}
   channels:
     name: joshua-channels-secrets
     keys:
@@ -81,14 +84,16 @@ secrets:
       JOSHUA_TOKEN_GATEWAY: {}
       JOSHUA_TOKEN_LAPTOP: {}
       JOSHUA_TOKEN_CI: {}
-  # The viewer reads one variable and nothing else. It holds no fleet token and
-  # no upstream credential, because it talks to no container: it reads the
-  # volume. VIEWER_PASSWORDS is every viewer password in one value, as
-  # `<person-id>=<bcrypt hash>` pairs, comma separated.
+  # The viewer reads the volume, and calls core for one thing: a search by
+  # meaning. It holds its own fleet token and no other, and no upstream
+  # credential. VIEWER_PASSWORDS is every viewer password in one value, as
+  # `<person-id>=<bcrypt hash>` pairs, comma separated. Without
+  # JOSHUA_TOKEN_VIEWER, the viewer searches by words only.
   viewer:
     name: joshua-viewer-secrets
     keys:
       VIEWER_PASSWORDS: {}
+      JOSHUA_TOKEN_VIEWER: {}
 
 # The shared /data volume. All three containers mount it at once, so the access
 # mode is ReadWriteMany and the class must support it.

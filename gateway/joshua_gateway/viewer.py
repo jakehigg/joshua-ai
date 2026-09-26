@@ -4,9 +4,11 @@ A person opens a browser, signs in with HTTP basic, and reads the one wiki
 (which carries Joshua's own journal and its profile of each person), their own
 attachments, and the shared attachments. ``/journal`` shows the journal as a
 feed, newest day first, because the wiki tree is the wrong shape for reading
-what happened. The viewer never calls core and the agent never calls the
-viewer. It reads the data volume through the same resolver as the files MCP
-(``files_mcp.paths``), so the two never drift on who reads what.
+what happened. The agent never calls the viewer. The viewer calls core for one
+thing: ``/search`` asks core to search by meaning (``viewer_search``) when
+``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set. It reads the data volume
+through the same resolver as the files MCP (``files_mcp.paths``), so the two
+never drift on who reads what.
 
 A member has two write actions, both human actions in a browser that the
 agent never gets: a delete, which moves a wiki page to the trash under
@@ -57,6 +59,7 @@ from starlette.routing import Route
 
 from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
+from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
 from joshua_gateway.files_mcp.server import IMAGE_MIME, MAX_BYTES, _atomic_write, data_root
@@ -663,18 +666,30 @@ async def attachments(request: Request, person: Person) -> Response:
 
 
 async def search(request: Request, person: Person) -> Response:
+    """Search by meaning through core, when core is configured, and by words.
+
+    The words section always shows, so the page still works when core is
+    down or not configured."""
     query = (request.query_params.get("q") or "").strip()
     if not query:
         return _page("search", "<h1>search</h1><p class=snippet>Enter a query.</p>")
+    meaning = ""
+    core = search_mod.from_env(os.environ)
+    if core is not None:
+        meaning = search_mod.meaning_html(await core.search(query))
     hits = _search(_roots_for(person), query)
     if not hits:
-        return _page("search", f"<h1>search</h1><p>No match for {escape(query)}.</p>")
-    items = "".join(
-        f'<li><a href="{escape(url)}">{escape(label)}</a> '
-        f"<span class=snippet>{escape(snippet)}</span></li>"
-        for url, label, snippet in hits
-    )
-    return _page("search", f"<h1>search</h1><ul class=tree>{items}</ul>")
+        words = f"<p>No match for {escape(query)}.</p>"
+    else:
+        items = "".join(
+            f'<li><a href="{escape(url)}">{escape(label)}</a> '
+            f"<span class=snippet>{escape(snippet)}</span></li>"
+            for url, label, snippet in hits
+        )
+        words = f"<ul class=tree>{items}</ul>"
+    if meaning:
+        words = f"<section class=words><h2>By words</h2>{words}</section>"
+    return _page("search", f"<h1>search</h1>{meaning}{words}")
 
 
 def _search(roots: dict[str, Root], query: str) -> list[tuple[str, str, str]]:
@@ -998,6 +1013,7 @@ async def readyz(request: Request) -> JSONResponse:
             "users": len(cfg.viewer.users),
             "anonymous": cfg.viewer.anonymous,
             "data": data_root().is_dir(),
+            "core_search": search_mod.from_env(os.environ) is not None,
         }
     )
 

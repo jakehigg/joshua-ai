@@ -1,7 +1,8 @@
 {{- if .Values.viewer.enabled }}
 {{/* The read-only web viewer. It is the gateway image with the second
-     entrypoint, and it is not the gateway: it holds no fleet token and no
-     upstream credential, and it never calls core. A person signs in with
+     entrypoint, and it is not the gateway: it holds only its own fleet token
+     and no upstream credential, and it calls core only to search by meaning.
+     A person signs in with
      HTTP basic and reads the wiki, their own profile, their own journal,
      their own attachments, and the shared profile.
 
@@ -53,6 +54,10 @@ spec:
               value: /etc/joshua/joshua.yaml
             - name: JOSHUA_DATA_DIR
               value: /data
+            {{/* /search asks core to search by meaning, with the viewer's own
+                 fleet token from the viewer secret. */}}
+            - name: CORE_URL
+              value: http://joshua-core:8000
             {{/* Every viewer password, in one variable, as
                  `<person-id>=<bcrypt hash>` pairs. No person is named here,
                  so nothing in this chart names your roster. */}}

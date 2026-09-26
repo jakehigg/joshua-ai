@@ -338,6 +338,14 @@ class Skills(_Model):
     top_k: int = Field(default=3, ge=1)
 
 
+class MemorySearch(_Model):
+    # The fleet identities that may call core's ``POST /v1/memory/search``: a
+    # search of the wiki, the journal, and the profiles by meaning. Each one
+    # needs a ``JOSHUA_TOKEN_<NAME>`` in core's environment. An empty list turns
+    # the route off.
+    allowed_callers: list[str] = ["viewer", "mcp"]
+
+
 class Memory(_Model):
     # No-ops, kept only so a config file written before the journal moved into
     # the wiki still validates. The recency tier holds no journal text now; a
@@ -353,6 +361,7 @@ class Memory(_Model):
     min_chars_for_post: int = Field(default=200, ge=0)
     inject: Inject = Inject()
     skills: Skills = Skills()
+    search: MemorySearch = MemorySearch()
     embed_model: str = "BAAI/bge-small-en-v1.5"
     # Source adapters the indexer runs, name → adapter options. ``files`` is the
     # kernel and always runs even if absent here; an option ``schedule`` sets a

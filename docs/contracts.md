@@ -19,7 +19,9 @@ missing or wrong token gets 401. An identity that is not on the route's list
 gets 403.
 
 The identities are `channels`, `core`, `gateway`, `laptop`, and `ci`. `laptop`
-and `ci` are for operators. `make init-env` writes the first four into `.env`.
+and `ci` are for operators. `viewer` and `mcp` call core's search by meaning:
+the web viewer and the joshua-mcp addon. `make init-env` writes all of them
+except `ci` into `.env`.
 
 ## Models
 
@@ -101,6 +103,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. |
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
+| `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
@@ -116,6 +119,21 @@ Port 8000 in the container. Compose publishes it on the host as
 reply reaches the person through `POST /v1/deliver`. A second turn with the
 same `message_id` inside 15 minutes is a duplicate. Core refuses new turns with
 `429` when more than `2 × core.pool_max` turns run at once.
+
+### The search route
+
+`POST /v1/memory/search` searches the index by meaning. `query` is 1 to 1000
+characters. `limit` is 1 to 25, default 10. `kinds` is a list of `wiki`,
+`journal`, and `profile`; empty or absent means all three. Any other kind gets
+`422`.
+
+The search is always in the shared scope, and the body names no person. It
+reads the `files` source only, and returns only a page under `wiki/`: a wiki
+page, a journal entry or day page, or a profile. It never returns a person's
+own attachments, a row from another source, or a taught skill. `path` is
+relative to the data volume. `date` is `YYYY-MM-DD` or null. An empty list in
+`allowed_callers` turns the route off: every caller gets `403`. Core never
+logs the query.
 
 ### The stream
 

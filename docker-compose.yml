@@ -20,6 +20,10 @@ x-fleet-tokens: &fleet-tokens
   JOSHUA_TOKEN_CORE: ${JOSHUA_TOKEN_CORE:-}
   JOSHUA_TOKEN_GATEWAY: ${JOSHUA_TOKEN_GATEWAY:-}
   JOSHUA_TOKEN_LAPTOP: ${JOSHUA_TOKEN_LAPTOP:-}
+  # Callers of core's POST /v1/memory/search (memory.search.allowed_callers):
+  # the viewer, and the joshua-mcp addon.
+  JOSHUA_TOKEN_VIEWER: ${JOSHUA_TOKEN_VIEWER:-}
+  JOSHUA_TOKEN_MCP: ${JOSHUA_TOKEN_MCP:-}
 
 # The channel credentials go to `channels` alone. joshua.yaml references them
 # as ${VAR:-}, so a container without the variable expands it to the empty
@@ -144,8 +148,9 @@ services:
   # entrypoint in the gateway image. Off by default; start it with
   # `docker compose --profile viewer up`. Set `viewer.enabled: true` and a
   # `viewer.users` entry per person in joshua.yaml first. Put a reverse proxy in
-  # front for TLS. It gets `/data` (read-write, for the delete) and the viewer
-  # passwords, and no fleet token or upstream credential.
+  # front for TLS. It gets `/data` (read-write, for the delete), the viewer
+  # passwords, and its own fleet token, which it sends to core to search by
+  # meaning. It holds no other fleet token and no upstream credential.
   #
   # It is published on the loopback address, on its own port, so it starts
   # beside the rest of the stack and nothing off the host reaches it. Put the
@@ -166,6 +171,10 @@ services:
       # id must also be a key of `viewer.users` in joshua.yaml, which is what
       # says who may sign in.
       VIEWER_PASSWORDS: ${VIEWER_PASSWORDS:-}
+      # Search by meaning: /search asks core. Without the token, the viewer
+      # searches by words only.
+      CORE_URL: http://core:8000
+      JOSHUA_TOKEN_VIEWER: ${JOSHUA_TOKEN_VIEWER:-}
     volumes:
       - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
       - data:/data

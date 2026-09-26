@@ -178,8 +178,10 @@ The chart can also run the read-only web viewer, which is the gateway image
 with a second entrypoint. It is off by default. A person signs in with HTTP
 basic and reads the wiki, their own profile, their own journal, their own
 attachments, and the shared profile. A member can move a wiki page to the
-trash. The viewer holds no fleet token and no upstream credential; it reads
-the volume and calls no container.
+trash. The viewer holds one fleet token, `JOSHUA_TOKEN_VIEWER`, and no
+upstream credential. It reads the volume, and calls core only to search by
+meaning. Put the same `JOSHUA_TOKEN_VIEWER` value in the viewer Secret and in
+the core Secret. Without it, the viewer searches by words only.
 
 Two switches turn it on, and both are needed:
 
@@ -208,12 +210,14 @@ config: |
 With only the first, the container exits at once and its log says why.
 
 The passwords are a Secret, named by `secrets.viewer` and made outside the
-chart like every other. It holds one key, `VIEWER_PASSWORDS`, whose value is
-`<person-id>=<bcrypt hash>` pairs, comma separated:
+chart like every other. It holds two keys. `VIEWER_PASSWORDS` is
+`<person-id>=<bcrypt hash>` pairs, comma separated. `JOSHUA_TOKEN_VIEWER` is
+the viewer's fleet token, the same value as in the core Secret:
 
 ```
 kubectl -n <namespace> create secret generic joshua-viewer-secrets \
-  --from-literal=VIEWER_PASSWORDS='alice=$2b$12$...,bob=$2b$12$...'
+  --from-literal=VIEWER_PASSWORDS='alice=$2b$12$...,bob=$2b$12$...' \
+  --from-literal=JOSHUA_TOKEN_VIEWER="$JOSHUA_TOKEN_VIEWER"
 ```
 
 `viewer.users` in your config is the authorization: a person who is not a key

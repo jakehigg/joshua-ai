@@ -87,6 +87,10 @@ A row holds the question, the decision, and the best match. It also holds each
 chunk core considered, with its file, its score, and whether the turn used it.
 Read this when an answer is wrong. It says what Joshua read before it answered.
 
+The viewer and the joshua-mcp addon search the same index by meaning through
+`POST /v1/memory/search`. That route reads the wiki, the journal, and the
+profiles only. See [contracts.md](contracts.md#the-search-route).
+
 `GET /admin/kb/status` reports the state of each source and the chunk count.
 `POST /admin/kb/reindex` re-indexes on demand.
 

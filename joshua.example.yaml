@@ -109,6 +109,13 @@ memory:
     # the default model, so this has to sit well above that.
     min_sim: 0.80
     top_k: 3             # most skills one turn can carry as notes
+  # Core's search by meaning, POST /v1/memory/search. It finds wiki pages,
+  # journal entries, and profiles, and nothing else. Each caller needs a
+  # JOSHUA_TOKEN_<NAME> in .env. An empty list turns the route off.
+  search:
+    allowed_callers:
+      - viewer                 # the web viewer
+      - mcp                    # the joshua-mcp addon
   embed_model: BAAI/bge-small-en-v1.5
   # In-core RAG over the data volume. `files` is the kernel source and always
   # runs; other adapters are optional. An adapter with no options takes an empty

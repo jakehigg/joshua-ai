@@ -95,8 +95,10 @@ case, is the caller's identity. A missing or wrong token gets 401. An identity
 that is not on the route's allowlist gets 403. There is no other bearer path.
 
 Identities: `channels`, `core`, `gateway`, plus `laptop` and `ci` for
-operators. `make init-env` mints the tokens into `.env`. Each container gets all
-of them, because each one verifies the callers it trusts. The three containers
+operators, and `viewer` and `mcp`, which call core's search by meaning.
+`make init-env` mints the tokens into `.env`. Each of the three containers gets
+all of them, because each one verifies the callers it trusts. The viewer gets
+only its own. The three containers
 are one trust domain. The agent cannot read the environment, because it has no
 file or shell tool.
 
@@ -104,6 +106,9 @@ Route allowlists, by default:
 
 - core `POST /v1/turns`, `POST /v1/turns/stream`: `channels`. The stream route
   also accepts `laptop` for a `cli` handle.
+- core `POST /v1/memory/search`: `memory.search.allowed_callers` (default
+  `viewer`, `mcp`). An empty list turns it off. It names no person and returns
+  only `wiki/` pages of kind `wiki`, `journal`, or `profile`.
 - channels `POST /v1/deliver`, `GET /v1/channels/resolve`: `core`.
 - channels `POST /v1/events`, `POST /v1/cli/*`, `GET /v1/cli/*`:
   `channels.webhooks.allowed_callers` (default `laptop`, `ci`).

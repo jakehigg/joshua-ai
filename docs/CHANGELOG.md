@@ -15,6 +15,17 @@ with the images and the packaged chart, are at
   send, but does not trust, is still a stranger: the default does not cover
   it.
 
+- **Search by meaning, in the viewer and for an outside caller.** Core has a
+  new route, `POST /v1/memory/search`. It searches the wiki, the journal, and
+  the profiles by meaning, with the index the agent uses. The viewer's search
+  page shows these results first and the word matches below them. The
+  joshua-mcp addon can call the route too. The route returns no person's own
+  attachments. `memory.search.allowed_callers` names who may call it (default
+  `viewer`, `mcp`). Run `make init-env` to mint `JOSHUA_TOKEN_VIEWER` and
+  `JOSHUA_TOKEN_MCP`. On Kubernetes, add `JOSHUA_TOKEN_VIEWER` and
+  `JOSHUA_TOKEN_MCP` to the core Secret, and `JOSHUA_TOKEN_VIEWER` to the
+  viewer Secret. Without the tokens, the viewer searches by words, as before.
+
 - **The viewer can open with no sign-in, for a household on a trusted
   network.** Set `viewer.anonymous: true`, and a browser with no password gets
   full access: it reads and writes the wiki, the same as a signed-in member.

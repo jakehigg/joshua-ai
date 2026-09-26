@@ -252,6 +252,12 @@ is one of three decisions. See [memory.md](memory.md#what-the-turn-brings-and-wh
 | `inject.top_k` | `2` | chunks used on a `full` decision |
 | `inject.max_chars` | `1200` | cap per chunk, in the prompt and in the audit row |
 
+`search.allowed_callers` (default `viewer`, `mcp`) names the fleet identities
+that may call core's `POST /v1/memory/search`, a search by meaning for a caller
+outside the agent. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty list turns
+the route off. The route uses `min_sim`, `per_doc_cap`, and the recency
+settings below. See [contracts.md](contracts.md#the-search-route).
+
 Raise `full_sim` if answers use text that is not relevant. Lower `hint_sim` if
 answers miss things that are in your files. Change one value at a time, and read
 `GET /admin/kb/events` for a few real questions before the next change.
@@ -871,7 +877,8 @@ opens a browser, signs in with a password, and reads the wiki, their own
 profile, the journal, their own attachments, and the shared profile. A member
 also writes: they edit any wiki page, make a new one, correct a journal entry,
 and delete a page, which moves it to `wiki/.trash/`. A guest reads and nothing
-more. The agent never reaches the viewer, and the viewer never calls core.
+more. The agent never reaches the viewer. The viewer calls core for one thing:
+its search page asks core to search by meaning, with the `viewer` fleet token.
 
 The viewer is off by default. Start it with `docker compose --profile viewer
 up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
