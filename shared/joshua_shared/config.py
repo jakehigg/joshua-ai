@@ -624,6 +624,12 @@ class Viewer(_Model):
     # with no entry, or an empty value, cannot sign in.
     enabled: bool = False
     users: dict[str, str] = {}
+    # ``true`` opens the viewer: a request with no ``Authorization`` header
+    # gets full access, read and write, as a synthetic "anonymous" identity,
+    # so a private network needs no sign-in. ``false`` (the default) keeps
+    # sign-in required, as today. A request that carries credentials is still
+    # checked against ``users``, so a member can sign in by password too.
+    anonymous: bool = False
 
 
 class JoshuaConfig(_Model):

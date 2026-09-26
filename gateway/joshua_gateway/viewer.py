@@ -13,6 +13,12 @@ agent never gets: a delete, which moves a wiki page to the trash under
 ``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
 text and people. A guest reads.
 
+``viewer.anonymous`` opens the viewer: a request with no ``Authorization``
+header gets full access, read and write, as a synthetic "anonymous" identity,
+so a private network needs no sign-in. A request that carries credentials is
+still checked, so a member can sign in by password too. ``viewer.users`` is
+how a household adds restrictions back.
+
 Start it with ``python -m joshua_gateway.viewer``. It refuses to start when
 ``viewer.enabled`` is false. Put a reverse proxy in front for TLS; the viewer
 serves plain HTTP and binds every route behind basic auth except the probes.
@@ -79,6 +85,13 @@ _META_SUFFIX = ".meta.json"
 # The per-process secret for the delete CSRF token. A fresh value each start is
 # fine; a form from an earlier process fails and the person reloads the page.
 _CSRF_SECRET = secrets.token_bytes(32)
+
+# The identity a request with no credentials gets when ``viewer.anonymous`` is
+# true. It is not in ``people``: it has full member access, but the home page
+# shows it no profile link and no personal files folder, because there is no
+# such person on disk.
+ANONYMOUS_PERSON_ID = "anonymous"
+_ANONYMOUS_PERSON = Person(id=ANONYMOUS_PERSON_ID, name="Anonymous", role="member")
 
 # Raw HTML is disabled, so a ``<script>`` in a markdown file renders as text.
 # The commonmark preset has no tables; the table and strikethrough rules are
@@ -258,12 +271,18 @@ def _authenticate(request: Request) -> Person | None:
 
     A wrong user and a wrong password fail the same way. A person named in
     ``viewer.users`` who is no longer in ``people`` cannot sign in.
+
+    A request with no ``Authorization`` header is served as the synthetic
+    anonymous identity when ``viewer.anonymous`` is true, so a private
+    network needs no password. That identity has full member access. A
+    request that does carry credentials is always checked against
+    ``viewer.users``, so a member can still sign in by password too.
     """
+    cfg = config.load()
     creds = _basic_credentials(request)
     if creds is None:
-        return None
+        return _ANONYMOUS_PERSON if cfg.viewer.anonymous else None
     user, password = creds
-    cfg = config.load()
     if not _check_password(_password_reference(cfg, user), password):
         return None
     return cfg.person(user)
@@ -561,21 +580,27 @@ def _commit_trash(root: Root, abs_path: Path) -> None:
 
 async def index(request: Request, person: Person) -> Response:
     roots = _roots_for(person)
-    profile_url = f"/wiki/people/{person.id}.md"
-    body = [
-        f"<h1>{escape(person.name)}</h1>",
-        f'<p><a href="{escape(profile_url, quote=True)}">profile</a> · '
-        '<a href="/journal">journal</a></p>',
-    ]
-    body.append(
-        _section(
-            "attachments",
-            [
-                (f"/attachments/{rel}", rel)
-                for rel in _list_attachments(roots["attachments"])[:HOME_ATTACHMENTS_MAX]
-            ],
+    anonymous = person.id == ANONYMOUS_PERSON_ID
+    body = [f"<h1>{escape(person.name)}</h1>"]
+    if anonymous:
+        body.append('<p><a href="/journal">journal</a></p>')
+    else:
+        profile_url = f"/wiki/people/{person.id}.md"
+        body.append(
+            f'<p><a href="{escape(profile_url, quote=True)}">profile</a> · '
+            '<a href="/journal">journal</a></p>'
         )
-    )
+        # The anonymous identity has no attachments folder on disk: there is
+        # no such person, so the section has nothing to show and is omitted.
+        body.append(
+            _section(
+                "attachments",
+                [
+                    (f"/attachments/{rel}", rel)
+                    for rel in _list_attachments(roots["attachments"])[:HOME_ATTACHMENTS_MAX]
+                ],
+            )
+        )
     tree = wiki.build_tree(roots["wiki"].base)
     body.append("<h2>wiki</h2>")
     body.append(wiki.tree_html(tree) if tree else "<p class=snippet>nothing yet.</p>")
@@ -971,6 +996,7 @@ async def readyz(request: Request) -> JSONResponse:
             "ok": True,
             "enabled": cfg.viewer.enabled,
             "users": len(cfg.viewer.users),
+            "anonymous": cfg.viewer.anonymous,
             "data": data_root().is_dir(),
         }
     )
@@ -1034,7 +1060,13 @@ def main() -> None:
         )
         raise SystemExit(1)
     install_healthcheck_filter()
-    logger.info({"message": "viewer up", "users": len(cfg.viewer.users)})
+    logger.info(
+        {
+            "message": "viewer up",
+            "users": len(cfg.viewer.users),
+            "anonymous": cfg.viewer.anonymous,
+        }
+    )
     uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
 
 

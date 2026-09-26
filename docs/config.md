@@ -902,6 +902,13 @@ keeps working.
 
 The role, member or guest, comes from `people`. It is never set in `viewer`.
 
+- `viewer.anonymous`: `false` by default. `true` opens the viewer: a request
+  with no `Authorization` header gets full access, read and write, the same
+  as a member, with no password. A request that carries credentials is still
+  checked against `viewer.users`, so a member can sign in by password too.
+  `viewer.users` is how a household adds restrictions back on top of an open
+  viewer.
+
 ## Agent backend
 
 `core` reads the `AGENT_BACKEND` environment variable to pick the session backend.

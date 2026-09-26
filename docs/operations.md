@@ -438,6 +438,29 @@ can also change the wiki, see the Otter Wiki enhancement in
 [docs/enhancements.md](enhancements.md). Unlike the viewer, Otter Wiki runs
 code from another project.
 
+### Opening the viewer with no sign-in
+
+A household on a private network can skip the password. Set `viewer.anonymous`
+to `true` in `joshua.yaml`:
+
+```yaml
+viewer:
+  enabled: true
+  anonymous: true
+```
+
+A request with no `Authorization` header now gets full access: it reads and
+also writes, the same as a signed-in member, with no password. A member who
+still wants to sign in by password can, exactly as before. To add
+restrictions back, set `viewer.users` and list who may sign in; a household
+that wants read-only for everyone else keeps `anonymous` off and gives each
+person their own password.
+
+**The network is now the only boundary.** Anyone who can reach the viewer
+reads and edits the whole wiki: the journal and every profile. Use this only
+on a network you trust, put TLS at the ingress or reverse proxy as always,
+and never expose the viewer to the open internet with `anonymous` set.
+
 ## Where the data is
 
 | Docker volume | Holds | `make nuke` deletes it |

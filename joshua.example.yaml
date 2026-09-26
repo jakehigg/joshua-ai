@@ -250,3 +250,9 @@ viewer:                         # a read-only web viewer for the wiki and a
   # value is a literal password. Uncomment to add a person:
   # users:
   #   alex: ""
+  #
+  # On a trusted private network, a household can skip sign-in entirely: a
+  # request with no password then gets full access, read and write, the same
+  # as a member. Add `users` above to bring restrictions back. Uncomment to
+  # turn it on:
+  # anonymous: true

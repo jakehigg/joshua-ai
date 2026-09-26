@@ -4,6 +4,18 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- **The viewer can open with no sign-in, for a household on a trusted
+  network.** Set `viewer.anonymous: true`, and a browser with no password gets
+  full access: it reads and writes the wiki, the same as a signed-in member.
+  A member can still sign in with a password on the same viewer. Set
+  `viewer.users` to add restrictions back. The network is then the only
+  boundary, and the wiki holds the journal and every profile, so keep this off
+  on an open network, and keep TLS at your reverse proxy.
+
 ## 0.0.8 - 2026-09-26
 
 Joshua can look something up on the open web now, through the internet agent:
