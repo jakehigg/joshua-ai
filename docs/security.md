@@ -249,49 +249,72 @@ reaching the agent's context. It makes that instruction content, the same as a
 message from a person the agent has no reason to obey. The controls that
 bound what any turn can do are the ones below.
 
-## Research, and the one tool that reaches out
+## The internet agent, and the one tool that reaches out
 
 Joshua can search the open web. That is the third leg of the lethal trifecta:
 private data, content somebody else wrote, and a way to act. The design keeps
 the three apart.
 
-**The worker holds nothing.** Research runs in an ephemeral worker
-(`core/joshua_core/engine/research.py`). It gets one question. It does not get
+**The worker holds nothing.** The internet agent is an ephemeral worker
+(`core/joshua_core/engine/internet.py`). It gets one question. It does not get
 the wiki, the journal, a profile, or any message of the conversation, so a page
-that tells it to look up a private thing has nothing to look up. A search query
-is the one channel out of that worker, and the worker has nothing to put in it.
+that tells it to look up a private thing has nothing to look up.
 
-**The worker cannot act.** Its tool list holds `WebSearch` and `WebFetch` and
-nothing else. No file tool, no shell, no MCP server, so nothing it reads can
-reach the house, the wiki, or an upstream.
+**The worker cannot act.** Its tool list holds `WebSearch`, and `WebFetch` when
+fetch is on, and nothing else. No file tool, no shell, no MCP server, so
+nothing it reads can reach the house, the wiki, or an upstream.
 `agent.build_worker_options` asserts that list, and a test proves that a file
 tool fails to build. The agent itself still has no built-in tool at all, and
 that test still passes.
 
-**What comes back is content.** The research reaches the agent wrapped and
+**What comes back is content.** The answer reaches the agent wrapped and
 named as what it is: text from the open web, not an instruction, possibly
-wrong. This is the same rule the text of an attachment follows.
+wrong. This is the same rule the text of an attachment follows. Text from a
+page cannot close the wrapper, because every copy of its tag is taken out
+first, and the confidence is one of three words, never free text.
 
-### Which URLs the agent may pass
+### Which pages the worker may read
 
-A person sends a link and says "save this recipe". Research answers with its
-sources, and the person asks about one of them. Both need the agent to name a
-URL, so `research_web` takes them.
-
-That is also the shortest way out of this instance: a page the worker read, the
-text of an attachment, or a tool result can all carry words that tell the agent
+A URL is the shortest way out of this instance. A page the worker read, the
+text of an attachment, or a tool result can all carry words that tell somebody
 to fetch `https://somewhere/?data=<something private>`. The block list does not
 stop that, because the host is on the open web, where a fetch is allowed to go.
 
-So a URL must be granted before the agent may pass it. A URL is granted when a
-person wrote it in a message of that conversation, or when earlier research in
-that conversation returned it as a source. Nothing else is, and a URL the agent
-read somewhere is refused with a line that tells it to ask the person for the
-link. The grants are per conversation, bounded, and held in memory only:
-`core/joshua_core/engine/url_grants.py`.
+So the worker reads a page only when it was **given** that URL, and the check
+is at the fetch itself, in the `PreToolUse` hook:
+
+- **Its caller named it** in `urls`.
+- **One of its own searches returned it** in the same run. Only the `url`
+  field of a search result counts; a URL in the text of a result is words
+  somebody wrote.
+
+Every other URL is refused: a URL written into the question, a link on a page
+the worker read, and a URL the model made up. A source the worker reports is
+kept only when it was given, so a page cannot make up a source either. A hook
+that fails denies the fetch.
+
+### Which URLs the agent may pass
+
+That is the rule of the worker. The chat agent, its caller, has a rule of its
+own about what it may put in `urls`. A person sends a link and says "save this
+recipe", or asks about a source of an earlier answer. Both need the agent to
+name a URL, so `use_internet` takes them.
+
+A URL must be granted before the agent may pass it. A URL is granted when a
+person wrote it in a message of that conversation, or when an earlier answer
+in that conversation returned it as a source. Nothing else is, and a URL the
+agent read somewhere is refused with a line that tells it to ask the person
+for the link. The grants are per conversation, bounded, and held in memory
+only: `core/joshua_core/engine/url_grants.py`.
 
 The text of an attachment is content, so a URL in it is not granted, and a test
 proves that.
+
+**What the question can still carry.** The agent writes the question, and a
+search sends it to Anthropic's search. A compromised turn can put a private
+detail in the question, and that detail then leaves in a search query. It
+cannot choose where it goes, because the worker fetches no URL it was not
+given. The tool tells the agent to keep private detail out of the question.
 
 ### Where a search runs, and where a fetch runs
 
@@ -305,18 +328,29 @@ This distinction decides the whole design, and it was measured, not assumed:
   It upgrades to HTTPS, which is what an internal service behind an ingress
   speaks.
 
-So every fetch goes through a `PreToolUse` hook first, over the block list of
-`research.fetch.blocked`. **That list is the whole policy, and it belongs to
-the person who runs Joshua.** Nothing is blocked in the code, an empty list
-blocks nothing, and `joshua.example.yaml` ships a list a careful person would
-start from: every private network, the loopback, and the address that carries
-cloud credentials. A person who wants Joshua to read a page on their own
-network deletes the line that stops it. `research.fetch.enabled: false`
-removes the fetch tool, and the worker then makes no connection from the
-container at all.
+So **fetch is off unless you turn it on.** A `joshua.yaml` with no `internet:`
+section searches and never fetches. `joshua.example.yaml` turns it on with a
+block list.
 
-One rule is not the list's: a scheme that is not `http` or `https` is always
-refused.
+With fetch on, every fetch goes through the block list of
+`internet.fetch.blocked` after the check above. **That list is the whole
+policy for a place, and it belongs to the person who runs Joshua.** Nothing is
+blocked in the code, an empty list blocks nothing, and `joshua.example.yaml`
+ships a list a careful person would start from: every private network, the
+loopback, the zero address, carrier-grade NAT, and the address that carries
+cloud credentials. A person who wants Joshua to read a page on their own
+network deletes the line that stops it.
+
+Some rules are not the list's, because they are about reading the URL:
+
+- A scheme that is not `http` or `https` is refused.
+- The fetch runs in Node, which reads a URL by the WHATWG rules. A URL that the
+  check and the fetch could read as two different hosts is refused: a
+  backslash, a user name or a password, a `%` in the host, a space or a
+  control character. A host that Node reads as an IPv4 address
+  (`2130706433`, `0x7f.1`, `127.1`) is read the same way by the check.
+- An IPv6 address that carries an IPv4 address (`::ffff:127.0.0.1`, NAT64,
+  6to4) is checked against the IPv4 entries too.
 
 **What the block list does not stop.** A redirect: the hook reads the URL the
 worker asked for, and a page that answers `302` to a private address is
@@ -338,11 +372,13 @@ that tells the agent to do something. This is what it can do at most:
 - Call the MCP servers the speaker is allowed, with the speaker's identity.
 - Reply on the channel the turn came from, and to any destination through a
   scheduled task.
-- Ask the research worker a question, which reaches the open web. The worker
-  answers with text and can do nothing else, and what it is asked is one
-  question with no private data in it.
+- Ask the internet agent a question, which reaches the open web. The worker
+  answers with text and can do nothing else. It reads only a page a person
+  sent, a source of an earlier answer, or a page its own search returned. A
+  private detail the agent puts in the question can leave in a search query.
 
-It cannot read a token. It cannot run a command. It cannot fetch a URL, because no tool does that. A server that acts
+It cannot read a token. It cannot run a command. It cannot fetch a URL of its
+own choosing, because the worker reads only a page it was given. A server that acts
 on the world, such as home automation, is exactly as exposed as its `allow`
 list makes it. Keep such servers on a short list.
 

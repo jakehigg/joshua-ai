@@ -368,64 +368,76 @@ text goes in the metadata file, so a later question about a receipt or a bill
 needs no second read. With `extract.embed` on, the text is in the search
 index too, marked as external.
 
-## research
+## internet
 
-Joshua answers a question it holds no page for by searching the open web.
+The internet agent looks up on the open web what Joshua holds no page for.
 
 ```yaml
-research:
+internet:
   enabled: true
   model: claude-sonnet-5
   timeout_seconds: 120
   max_turns: 12
   fetch:
     enabled: true
-    # blocked_extra:
-    #   - example.net
-    #   - 192.168.50.0/24
+    blocked:
+      - 192.168.0.0/16
+      - example.net
     resolve_hosts: true
 ```
 
 | Key | Default | What it does |
 |---|---|---|
-| `enabled` | `true` | `false` removes the `research` tool. Joshua then says it cannot look something up, instead of answering from memory as though it had. |
+| `enabled` | `true` | `false` removes the `internet` tool. Joshua then says it cannot look something up, instead of answering from memory as though it had. |
 | `model` | `claude-sonnet-5` | The model the worker uses. |
 | `timeout_seconds` | `120` | How long one question may take. A search, a read, and an answer are several calls. |
 | `max_turns` | `12` | The ceiling on what one question costs. |
-| `fetch.enabled` | `true` | `false` leaves the worker with search alone, which makes no connection from the container. |
-| `fetch.blocked` | empty in code | What a fetch may never reach. `joshua.example.yaml` ships a list to start from. |
+| `fetch.enabled` | `false` | `true` lets the worker read a page. `false` leaves it with search alone, which makes no connection from the container. `joshua.example.yaml` sets it to `true`. |
+| `fetch.blocked` | empty | What a fetch may never reach. `joshua.example.yaml` ships a list to start from. |
 | `fetch.resolve_hosts` | `true` | Look the host up, and refuse a name that resolves into a CIDR on the list. |
+
+**Reading a page is off unless you turn it on.** A `joshua.yaml` with no
+`internet:` section searches and never fetches. Turn fetch on only with a
+block list you have read.
 
 **The worker holds one question and nothing else.** No wiki, no journal, no
 profile, and no message of the conversation. A page that tells it to look up
 something private has nothing to look up. It has no file tool, no shell, and no
 MCP server, so nothing it reads can make it act.
 
-**The agent still has no web tool.** It calls `research_web(question, urls)`,
+**The worker reads only a page it was given.** That is a URL its caller
+passed, or a URL that one of its own searches returned. A URL in the text of
+the question, a link on a page it read, and a URL the model made up are
+refused at the fetch.
+
+**The agent still has no web tool.** It calls `use_internet(question, urls)`,
 and it writes that question itself, so it must put in what the worker needs and
 leave out what it does not. It may pass a URL a person sent, or a source from
-earlier research in that conversation; a URL it read on a page or in a file is
-refused. See [docs/security.md](security.md). What comes back reaches the agent wrapped and named as
-content from the open web, and the agent reads it for the person.
+an earlier answer in that conversation; a URL it read on a page or in a file is
+refused. See [docs/security.md](security.md). What comes back reaches the agent
+wrapped and named as content from the open web, and the agent reads it for the
+person.
 
 **A search runs on Anthropic's side. A fetch runs here.** That is the whole
 reason the block list exists. See [docs/security.md](security.md).
 
 ### The block list
 
-**The list is yours and it is the whole policy.** Nothing is blocked that it
+**The list is yours and it is the whole policy for a place.** Nothing is blocked that it
 does not name, and an empty list blocks nothing: Joshua will read a page on
 your own network if you let it. That is a real choice, and it is yours.
 Nothing is hard-coded, so what you can see in the file is what is enforced.
 
 `joshua.example.yaml` ships a list a careful person would start from: every
-private network (RFC 1918), the loopback, the IPv6 equivalents, and
+private network (RFC 1918), the loopback, the zero address, carrier-grade NAT
+(`100.64.0.0/10`, where a Tailscale address lives), the IPv6 equivalents, and
 `169.254.0.0/16`, which carries cloud credentials. Delete any line you do not
 want. Add the names of your own network:
 
 ```yaml
-research:
+internet:
   fetch:
+    enabled: true
     blocked:
       - 10.0.0.0/8
       - 192.168.0.0/16
@@ -451,8 +463,21 @@ A pattern (`*` or `?`) is matched against the host, never the path, so
 itself: a block list that quietly misses the apex is worse than one that says
 no twice.
 
-One rule is not the list's: a scheme that is not `http` or `https` is always
-refused, so no entry can turn `file://` into something a fetch may open.
+An IPv6 address that carries an IPv4 address (`::ffff:127.0.0.1`, the NAT64
+prefix `64:ff9b::/96`, and 6to4) is checked against the IPv4 entries too, so
+`127.0.0.0/8` covers `[::ffff:127.0.0.1]`.
+
+Some rules are not the list's. They are about reading the URL, not about a
+place, and no entry turns them off:
+
+- A scheme that is not `http` or `https` is refused, so no entry can turn
+  `file://` into something a fetch may open.
+- A URL that the check and the fetch could read as two different hosts is
+  refused: a backslash, a user name or a password, a `%` in the host, a space
+  or a control character, or a host that is not a valid name.
+- A host that the fetch reads as an IPv4 address is read the same way by the
+  check, in every form: `2130706433`, `0x7f.1`, `0177.0.0.1`, and `127.1` are
+  all `127.0.0.1`.
 
 ## MCP servers
 

@@ -13,8 +13,11 @@ So every host inside a URL in a tracked file must be one of:
 * a name that resolves nowhere real: `localhost`, `.local`, `.internal`,
   `.home.arpa`, a Kubernetes service name, or a host with no dot in it (a
   container name such as `core` or `gateway`);
-* an address on a private or loopback network, which the block list and its
-  tests must name to do their job;
+* an address on a private, loopback, or carrier-grade NAT network, which the
+  block list and its tests must name to do their job;
+* a host that is not a name DNS can hold, or an address written in another
+  notation (`0x7f.1`, `127.1`), which the tests of the block list use to prove
+  that a URL the fetch reads differently is refused;
 * a public project this repository genuinely depends on, listed in
   `ALLOWED_HOSTS` below, with the reason it is there.
 
@@ -81,7 +84,7 @@ ALLOWED_HOSTS = {
     "otterwiki.com": "the wiki frontend shipped as an enhancement",
     "bluebubbles.app": "the iMessage bridge the channel talks to",
     "localtest.me": "a name that resolves to 127.0.0.1, for a block list test",
-    "www.seriouseats.com": "a sample result in a research test",
+    "www.seriouseats.com": "a sample result in an internet agent test",
     "8.8.8.8": "a public resolver, so a test can prove a public address is allowed",
 }
 
@@ -95,6 +98,15 @@ def tracked_files() -> list[Path]:
         check=True,
     )
     return [ROOT / line for line in result.stdout.split() if line]
+
+
+# What a host name may hold, and an IPv4 address in the usual notation.
+DNS_NAME = re.compile(r"[a-z0-9_.-]+")
+DOTTED_QUAD = re.compile(r"\d{1,3}(\.\d{1,3}){3}")
+
+# Shared address space (RFC 6598), where a Tailscale address lives. Python does
+# not call it private, and the block list must name it.
+CARRIER_GRADE_NAT = ipaddress.ip_network("100.64.0.0/10")
 
 
 def host_of(url: str) -> str | None:
@@ -115,12 +127,24 @@ def is_allowed(host: str) -> bool:
         return True
     if "." not in host:
         return True  # a container or a service name, which resolves in one network
+    host = host.rstrip(".")
+    if not DNS_NAME.fullmatch(host):
+        return True  # not a name DNS can hold: a test of a URL the fetch misreads
+    last = host.rsplit(".", 1)[-1]
+    if (last.isdigit() or last.startswith("0x")) and not DOTTED_QUAD.fullmatch(host):
+        return True  # an address in another notation, which names no host
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        return False
+        return last.isdigit()  # four numbers that are not an address name nowhere
     # The block list and its tests must name these to prove what they refuse.
-    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip in CARRIER_GRADE_NAT
+    )
 
 
 def main() -> int:

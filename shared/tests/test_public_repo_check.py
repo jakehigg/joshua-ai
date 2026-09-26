@@ -67,3 +67,18 @@ def test_a_placeholder_is_not_a_host() -> None:
 def test_the_repository_is_clean_right_now() -> None:
     """The check runs in lint, so this catches a leak before it is pushed."""
     assert check.main() == 0
+
+
+def test_a_host_that_names_nowhere_is_allowed() -> None:
+    """The block list tests use URLs the fetch reads differently. They name no machine."""
+    for host in ("127.0.0.%31", "exa\nmple.com", "0x7f.1", "127.1", "0177.0.0.1", "256.1.1.1"):
+        assert check.is_allowed(host), host
+
+
+def test_carrier_grade_nat_is_allowed_because_the_block_list_needs_it() -> None:
+    assert check.is_allowed("100.100.100.100")
+
+
+def test_a_public_address_and_a_public_name_are_still_refused() -> None:
+    for host in ("9.9.9.9", "203.0.114.1", "hub.realhouse.net", "cafe.dead.beef"):
+        assert not check.is_allowed(host), host

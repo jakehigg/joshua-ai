@@ -361,19 +361,21 @@ class Attachments(_Model):
 
 
 class Fetch(_Model):
-    """Whether Joshua may read a web page, and what it may not reach.
+    """Whether the internet agent may read a web page, and what it may not reach.
 
     `WebSearch` runs on Anthropic's side, so it makes no connection from this
-    container. `WebFetch` does not: the container itself fetches the page. A
-    page Joshua reads can name a host on your own network, so `blocked` says
-    what a fetch may never reach.
+    container. `WebFetch` does: the container itself fetches the page. So
+    reading a page is **off unless you turn it on**. An install that has no
+    `internet:` section searches and never fetches. `joshua.example.yaml`
+    turns it on, with a block list to start from.
 
     **The list is yours and it is the whole policy.** Nothing is blocked that
     it does not name, and an empty list blocks nothing: a person who wants
-    Joshua to read a page on their own network may have it.
-    `joshua.example.yaml` ships a list to start from, and every line of it can
-    go. One rule is not the list's: a scheme that is not `http` or `https` is
-    always refused.
+    Joshua to read a page on their own network may have it. Some rules are not
+    the list's, because they are about reading the URL and not about a place:
+    a scheme that is not `http` or `https`, and a URL that two parsers could
+    read as two different hosts, are always refused. See
+    `joshua_shared.netblock`.
 
     An entry is a CIDR (`10.0.0.0/8`), a domain (`example.net`, which also
     covers `hub.example.net`), a pattern (`*.example.net`), a host, or plain
@@ -384,7 +386,7 @@ class Fetch(_Model):
     a public name aimed inside.
     """
 
-    enabled: bool = True
+    enabled: bool = False
     blocked: list[str] = []
     resolve_hosts: bool = True
 
@@ -393,17 +395,16 @@ class Fetch(_Model):
         return list(self.blocked)
 
 
-class Research(_Model):
-    """Research on the open web, in a worker that holds nothing else.
+class Internet(_Model):
+    """The internet agent: a worker that searches and reads the open web.
 
-    A person asks for a recipe or a fact, and a worker searches for it. The
-    worker gets the question and no part of the conversation: no wiki, no
-    journal, no profile, no message. So a page that tells it to look up a
-    private thing has nothing to look up.
+    The agent asks it one question, and it holds nothing else: no wiki, no
+    journal, no profile, no message of the conversation. So a page that tells
+    it to look up a private thing has nothing to look up.
 
-    What comes back is data from outside. It reaches the agent wrapped and
-    named as content, never as an instruction, and the agent decides what it
-    means for what the person asked.
+    It reads only the pages its caller named and the pages its own searches
+    returned. What comes back is data from outside. It reaches the agent
+    wrapped and named as content, never as an instruction.
     """
 
     enabled: bool = True
@@ -581,7 +582,7 @@ class JoshuaConfig(_Model):
     core: Core = Core()
     memory: Memory = Memory()
     attachments: Attachments = Attachments()
-    research: Research = Research()
+    internet: Internet = Internet()
     wiki: Wiki = Wiki()
     mcp: dict[str, McpServer] = {}
     modules: list[str] = []

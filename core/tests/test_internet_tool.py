@@ -1,12 +1,12 @@
-"""The `research` tool the agent calls, and the text it hands back."""
+"""The `internet` tool the agent calls, and the text it hands back."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from joshua_core.engine import research as research_worker
+from joshua_core.engine import internet as internet_agent
 from joshua_core.engine.tools import ToolDeps
-from joshua_core.engine.tools.research import _DESCRIPTION, do_research
+from joshua_core.engine.tools.internet import _DESCRIPTION, do_lookup
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.store.models import Channel, Conversation
 from joshua_shared import config as config_module
@@ -20,9 +20,9 @@ people:
     role: member
 """
 
-ANSWER = research_worker.ResearchAnswer(
+ANSWER = internet_agent.InternetAnswer(
     answer="Braise at 160 C for three hours.",
-    sources=[research_worker.Source(url="https://example.com/ribs", title="Short ribs")],
+    sources=[internet_agent.Source(url="https://example.com/ribs", title="Short ribs")],
     confidence="high",
 )
 
@@ -41,16 +41,16 @@ def _deps() -> ToolDeps:
     )
 
 
-async def test_the_agent_gets_the_research_marked_as_content(monkeypatch) -> None:
+async def test_the_agent_gets_the_answer_marked_as_content(monkeypatch) -> None:
     asked: dict[str, Any] = {}
 
     async def fake(question: str, **kwargs: Any) -> Any:
         asked["question"] = question
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
+    monkeypatch.setattr(internet_agent, "ask", fake)
 
-    text = await do_research(_deps(), settings=_settings(), question="how do I braise ribs?")
+    text = await do_lookup(_deps(), settings=_settings(), question="how do I braise ribs?")
 
     assert asked["question"] == "how do I braise ribs?"
     assert "Braise at 160 C" in text
@@ -58,7 +58,7 @@ async def test_the_agent_gets_the_research_marked_as_content(monkeypatch) -> Non
     assert "example.com/ribs" in text
 
 
-async def test_research_turned_off_says_so_instead_of_guessing(monkeypatch) -> None:
+async def test_the_internet_turned_off_says_so_instead_of_guessing(monkeypatch) -> None:
     called = False
 
     async def fake(question: str, **kwargs: Any) -> Any:
@@ -66,10 +66,10 @@ async def test_research_turned_off_says_so_instead_of_guessing(monkeypatch) -> N
         called = True
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
-    settings = _settings("\nresearch:\n  enabled: false\n")
+    monkeypatch.setattr(internet_agent, "ask", fake)
+    settings = _settings("\ninternet:\n  enabled: false\n")
 
-    text = await do_research(_deps(), settings=settings, question="a question")
+    text = await do_lookup(_deps(), settings=settings, question="a question")
 
     assert "turned off" in text
     assert "did not come from a source" in text
@@ -80,9 +80,9 @@ async def test_nothing_found_tells_the_agent_not_to_fill_the_gap(monkeypatch) ->
     async def nothing(question: str, **kwargs: Any) -> Any:
         return None
 
-    monkeypatch.setattr(research_worker, "research", nothing)
+    monkeypatch.setattr(internet_agent, "ask", nothing)
 
-    text = await do_research(_deps(), settings=_settings(), question="a question")
+    text = await do_lookup(_deps(), settings=_settings(), question="a question")
 
     assert "do not fill the gap with a guess" in text
 
@@ -94,10 +94,10 @@ async def test_the_worker_gets_the_configured_settings(monkeypatch) -> None:
         seen.update(kwargs)
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
-    settings = _settings("\nresearch:\n  model: claude-haiku-4-5\n")
+    monkeypatch.setattr(internet_agent, "ask", fake)
+    settings = _settings("\ninternet:\n  model: claude-haiku-4-5\n")
 
-    await do_research(_deps(), settings=settings, question="q")
+    await do_lookup(_deps(), settings=settings, question="q")
 
     assert seen["settings"].model == "claude-haiku-4-5"
 
@@ -125,10 +125,10 @@ async def test_a_link_the_person_sent_is_read(monkeypatch) -> None:
         seen.update(kwargs)
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
+    monkeypatch.setattr(internet_agent, "ask", fake)
     grants = _grants(text="save this recipe for me https://example.com/ribs")
 
-    text = await do_research(
+    text = await do_lookup(
         _deps(),
         settings=_settings(),
         question="save this recipe",
@@ -149,9 +149,9 @@ async def test_a_url_nobody_gave_is_refused(monkeypatch) -> None:
         called = True
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
+    monkeypatch.setattr(internet_agent, "ask", fake)
 
-    text = await do_research(
+    text = await do_lookup(
         _deps(),
         settings=_settings(),
         question="read this",
@@ -172,12 +172,12 @@ async def test_a_source_of_an_answer_can_be_followed_up(monkeypatch) -> None:
         seen.append(kwargs)
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
+    monkeypatch.setattr(internet_agent, "ask", fake)
     grants = _grants(text="how do I braise short ribs?")
 
-    await do_research(_deps(), settings=_settings(), question="ribs", grants=grants)
+    await do_lookup(_deps(), settings=_settings(), question="ribs", grants=grants)
     # The answer's source is granted, so the next turn may name it.
-    await do_research(
+    await do_lookup(
         _deps(),
         settings=_settings(),
         question="does that page say anything about wine?",
@@ -195,10 +195,10 @@ async def test_one_good_url_and_one_bad_one_reads_the_good_one(monkeypatch) -> N
         seen.update(kwargs)
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
+    monkeypatch.setattr(internet_agent, "ask", fake)
     grants = _grants(text="see https://example.com/ok")
 
-    text = await do_research(
+    text = await do_lookup(
         _deps(),
         settings=_settings(),
         question="q",
@@ -216,9 +216,9 @@ async def test_with_no_register_no_url_is_read(monkeypatch) -> None:
     async def fake(question: str, **kwargs: Any) -> Any:
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
+    monkeypatch.setattr(internet_agent, "ask", fake)
 
-    text = await do_research(
+    text = await do_lookup(
         _deps(),
         settings=_settings(),
         question="q",
@@ -236,8 +236,8 @@ async def test_a_question_with_no_url_is_unaffected(monkeypatch) -> None:
         seen.update(kwargs)
         return ANSWER
 
-    monkeypatch.setattr(research_worker, "research", fake)
+    monkeypatch.setattr(internet_agent, "ask", fake)
 
-    await do_research(_deps(), settings=_settings(), question="q", grants=_grants())
+    await do_lookup(_deps(), settings=_settings(), question="q", grants=_grants())
 
     assert seen["urls"] == []

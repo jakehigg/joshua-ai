@@ -1,8 +1,8 @@
-"""Which URLs the agent may hand to the research worker.
+"""Which URLs the chat agent may hand to the internet agent.
 
-A person sends a link and says "save this recipe". Research answers with its
-sources, and the person says "look at that second page again". Both need the
-agent to name a URL, so `research_web` takes them.
+A person sends a link and says "save this recipe". The internet agent answers
+with its sources, and the person says "look at that second page again". Both
+need the agent to name a URL, so `use_internet` takes them.
 
 That is also the shortest way out of this instance. A page the worker read, an
 attachment somebody sent, or a tool result can all carry words that tell the
@@ -14,12 +14,19 @@ So a URL has to be **granted** before the agent may pass it:
 
 - **A person wrote it.** Every URL in the text of an inbound turn is granted
   for that conversation. A person who sends a link has asked for it to be read.
-- **Research found it.** Every source of an answer is granted, so a follow-up
-  question about one of them works.
+- **The internet agent returned it.** Every source of an answer is granted, so
+  a follow-up question about one of them works. `engine/internet.py` keeps a
+  source only when the worker was given that URL or a search returned it, so a
+  page cannot make up a source and have it granted.
 
 Nothing else is. A URL that reaches the agent from a page, from the text of an
 attachment, or from the model itself is not granted, and the tool refuses it
 and says why. The agent can still ask the person for the link.
+
+This is the rule of one caller, the chat agent. The internet agent enforces
+the other half itself, at the fetch: it reads only the URLs its caller passed
+and the URLs its own searches returned, so a URL written into the question
+text is never fetched.
 
 The grants live for as long as core runs and are bounded for each conversation.
 They are a gate on what the agent may ask for, not a record of anything.
@@ -58,11 +65,19 @@ def canonical(url: str) -> str:
     The fragment goes, because it never reaches a server, and the host is
     lowered. Nothing else is touched: a query string is part of which page this
     is, and dropping it would grant more than the person did.
+
+    An empty string for a URL that cannot be read, which matches nothing.
     """
-    parts = urlsplit((url or "").strip())
-    host = (parts.hostname or "").lower()
-    if parts.port:
-        host = f"{host}:{parts.port}"
+    try:
+        parts = urlsplit((url or "").strip())
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return ""
+    if not host:
+        return ""
+    if port:
+        host = f"{host}:{port}"
     path = parts.path.rstrip("/") or "/"
     return urlunsplit((parts.scheme.lower(), host, path, parts.query, ""))
 

@@ -27,7 +27,7 @@ from joshua_core.engine import injection, taught_skills
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
-from joshua_core.engine.tools import recall, registration, research, scheduling
+from joshua_core.engine.tools import internet, recall, registration, scheduling
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
 from joshua_core.memory import embed
@@ -205,7 +205,7 @@ def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> Co
     )
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     # A URL a person writes is granted for that conversation, so the agent may
-    # hand it to the research worker. See ``engine/url_grants.py``.
+    # hand it to the internet agent. See ``engine/url_grants.py``.
     url_grants = UrlGrants()
     manager = ConversationManager(
         repo=repo,
@@ -259,8 +259,8 @@ def _build_memory(
         known_people=[p.id for p in settings.people],
     )
     recall.register(manager, store, settings)
-    if settings.research.enabled:
-        research.register(manager, settings, manager.url_grants)
+    if settings.internet.enabled:
+        internet.register(manager, settings, manager.url_grants)
     injection.register(manager, store, settings, repo)
     taught_skills.register(manager, store, settings, repo, indexer.skills)
     return indexer, IndexerLoop(indexer, intervals)

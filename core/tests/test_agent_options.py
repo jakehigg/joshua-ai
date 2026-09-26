@@ -188,7 +188,7 @@ async def test_an_answer_that_is_not_json_gives_none():
 
 def _worker(**overrides):
     kwargs = dict(
-        system_prompt="research one question",
+        system_prompt="look up one question",
         cwd=Path("/tmp/worker"),
         model="claude-sonnet-5",
         max_turns=12,

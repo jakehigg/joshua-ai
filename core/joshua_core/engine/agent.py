@@ -150,8 +150,8 @@ def build_worker_options(
     """Construct ``ClaudeAgentOptions`` for one ephemeral worker.
 
     A worker is not the agent. It holds one objective, no conversation, and no
-    MCP server, so it may hold a built-in tool that the agent may not: a
-    ``research`` worker searches the web. The assert below is the boundary. It
+    MCP server, so it may hold a built-in tool that the agent may not: the
+    internet agent searches the web. The assert below is the boundary. It
     names what a worker may hold, so a file tool, a shell, or anything else
     fails here rather than in production.
     """

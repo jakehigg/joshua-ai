@@ -13,25 +13,28 @@ with the images and the packaged chart, are at
   open web and answers with its sources. Before this it answered from memory,
   confidently, and sometimes wrongly.
 
-  The agent still has no web tool and never will. It asks a worker, and that
-  worker holds one question and nothing else: no wiki, no journal, no profile,
-  and no message of the conversation. So a page that tells it to look up
-  something private has nothing to look up. It has no file tool, no shell, and
-  no MCP server, so nothing it reads can make it act. What comes back reaches
-  Joshua marked as content from the open web, never as an instruction.
+  The agent still has no web tool and never will. It asks the internet agent,
+  a worker that holds one question and nothing else: no wiki, no journal, no
+  profile, and no message of the conversation. So a page that tells it to look
+  up something private has nothing to look up. It has no file tool, no shell,
+  and no MCP server, so nothing it reads can make it act. What comes back
+  reaches Joshua marked as content from the open web, never as an instruction.
 
   A search runs on Anthropic's side and makes no connection from your machine.
-  Reading a page does make one, from your machine, so **every fetch is checked
-  against a block list first**, and that list is yours: it lives in
-  `joshua.yaml`, nothing is blocked in the code, and an empty list blocks
-  nothing. `joshua.example.yaml` ships a list a careful person would start
-  from — every private network, the loopback, and the address that carries
-  cloud credentials — and every line of it can go, because letting Joshua read
-  a page on your own network is a choice you are allowed to make.
+  Reading a page does make one, from your machine, so **reading a page is off
+  unless you turn it on**. With no `internet:` section in `joshua.yaml`, Joshua
+  searches and never fetches. `joshua.example.yaml` turns fetch on, with a
+  block list a careful person would start from: every private network, the
+  loopback, the zero address, carrier-grade NAT (where a Tailscale address
+  lives), and the address that carries cloud credentials. The list is yours:
+  nothing is blocked in the code, an empty list blocks nothing, and every line
+  can go, because letting Joshua read a page on your own network is a choice
+  you are allowed to make.
 
   ```yaml
-  research:
+  internet:
     fetch:
+      enabled: true
       blocked:
         - 10.0.0.0/8
         - 192.168.0.0/16
@@ -39,13 +42,21 @@ with the images and the packaged chart, are at
         - "*.example.net"     # the same, written as a pattern
   ```
 
-  **Send Joshua a link** and it reads that page: "save this recipe for me". Ask
-  about a source it cited and it goes back to it. A URL it found somewhere
-  else, on a page it read or in the text of a file somebody sent, is refused.
-  Those words are content, and a link in them is the shortest way to send
-  something out of your instance. Joshua asks you for the link instead.
+  A URL that the check and the fetch could read as two different hosts is
+  always refused, whatever the list says: a backslash, a user name, a `%` in
+  the host. A host written as a number (`2130706433`, `0x7f.1`, `127.1`) is
+  checked as the address it is, and an IPv6 address that carries an IPv4
+  address is checked against the IPv4 entries.
 
-  `research.enabled: false` removes the whole thing, and Joshua then says it
+  **Send Joshua a link** and it reads that page: "save this recipe for me". Ask
+  about a source it cited and it goes back to it. The worker reads no other
+  page than one it was given and one its own search returned. A URL on a page
+  it read, in the text of a file somebody sent, or written into the question
+  is refused at the fetch. Those words are content, and a link in them is the
+  shortest way to send something out of your instance. Joshua asks you for the
+  link instead.
+
+  `internet.enabled: false` removes the whole thing, and Joshua then says it
   cannot look something up rather than answering as though it had.
   `docs/security.md` says what the block list does not stop.
 
