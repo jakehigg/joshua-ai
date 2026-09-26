@@ -49,9 +49,10 @@ CHANNEL_TYPE = "imessage"
 # Only this BlueBubbles event type is processed; every other type is ignored.
 WEBHOOK_EVENT = "new-message"
 
-# The iMessage DM chat guid is ``iMessage;-;<handle>``; a group guid is looked
-# up from config.
-_SERVICE = "iMessage"
+# A DM chat guid is ``<service>;-;<handle>``, where the service is
+# ``channels.imessage.dm_service`` (``iMessage`` unless the server says
+# ``any``); a group guid is looked up from config.
+_DEFAULT_SERVICE = "iMessage"
 _DM_PREFIX = "dm:"
 _GROUP_PREFIX = "group:"
 
@@ -229,15 +230,19 @@ class IMessageAdapter:
     # --- resolve -----------------------------------------------------------
 
     def resolve_ref(self, ref: str) -> str | None:
-        """Map ``dm:<person_id>`` to an ``iMessage;-;<handle>`` guid, or
-        ``group:<group_id>`` to the configured chat guid. None when unknown."""
+        """Map ``dm:<person_id>`` to a ``<dm_service>;-;<handle>`` guid, or
+        ``group:<group_id>`` to the configured chat guid. None when unknown.
+
+        A person with more than one iMessage handle is addressed on the first."""
         cfg = self._settings_provider()
         if ref.startswith(_DM_PREFIX):
             person = cfg.person(ref[len(_DM_PREFIX) :])
             if person is None:
                 return None
-            handle = person.handles.get(CHANNEL_TYPE)
-            return f"{_SERVICE};-;{handle}" if handle else None
+            handle = person.handle(CHANNEL_TYPE)
+            imessage = cfg.channels.imessage
+            service = imessage.dm_service if imessage is not None else _DEFAULT_SERVICE
+            return f"{service};-;{handle}" if handle else None
         if ref.startswith(_GROUP_PREFIX):
             group_id = ref[len(_GROUP_PREFIX) :]
             for group in cfg.groups:

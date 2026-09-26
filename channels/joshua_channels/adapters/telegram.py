@@ -352,7 +352,7 @@ class TelegramAdapter:
         cfg = self._settings_provider()
         if ref.startswith(_DM_PREFIX):
             person = cfg.person(ref[len(_DM_PREFIX) :])
-            return person.handles.get(CHANNEL_TYPE) if person is not None else None
+            return person.handle(CHANNEL_TYPE) if person is not None else None
         if ref.startswith(_GROUP_PREFIX):
             group_id = ref[len(_GROUP_PREFIX) :]
             for group in cfg.groups:

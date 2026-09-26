@@ -155,13 +155,16 @@ async def roster(repo: Repo) -> list[dict[str, Any]]:
     for person in await repo.list_people():
         if person.role == "removed":
             continue
-        handles = await repo.handles_for_person(person.id)
+        handles: dict[str, Any] = {}
+        for handle_type, handle in await repo.handles_for_person(person.id):
+            handles = people_file.merge_handles(handles, {handle_type: handle})
         out.append(
             {
                 "id": person.id,
                 "name": person.display_name,
                 "role": person.role,
-                "handles": {t: h for t, h in handles},
+                # One handle is a string; a person with two on one channel gets a list.
+                "handles": handles,
             }
         )
     return out

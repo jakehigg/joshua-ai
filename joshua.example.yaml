@@ -17,7 +17,9 @@ people:
     journal: auto                 # auto | ask | off — may Joshua's journal record this person (default auto)
     handles:
       telegram: "998877"
-      imessage: "+15551234567"
+      imessage:                   # one handle, or a list when a person has several
+        - "+15551234567"
+        - "alex@example.com"
   - id: mia
     name: Mia
     role: member
@@ -28,9 +30,9 @@ groups:
   - id: everyone
     channel: imessage
     chat_id: "iMessage;+;chat100000000000000001"
-    members:
-      - alex
-      - mia
+    members:                      # platform handles, never person ids
+      - "+15551234567"
+      - "+15557654321"
 
 channels:
   telegram:
@@ -40,6 +42,7 @@ channels:
     bluebubbles_url: http://bluebubbles.local:1234
     bluebubbles_password: ${BLUEBUBBLES_PASSWORD:-}
     webhook_path_secret: ${IMESSAGE_WEBHOOK_SECRET:-}
+    dm_service: iMessage          # the service in a DM guid Joshua builds; 'any' on a server whose guids start with any;
     unknown_sender: drop          # iMessage never replies to a stranger unless this is 'reply'
     coalesce_window_s: 2.0        # merge a burst from one sender into one turn; 0 disables
     stale_max_age_s: 900.0        # drop a webhook older than this (a replay); 0 disables

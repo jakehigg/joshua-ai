@@ -73,3 +73,19 @@ async def test_seed_updates_renamed_display_name() -> None:
     await seed_people(repo, cfg)
 
     assert repo.people["alex"].display_name == "Alex"
+
+
+async def test_seed_upserts_every_handle_of_a_person() -> None:
+    cfg = config_module.parse(
+        CONFIG_YAML.replace(
+            'imessage: "+15551234567"',
+            'imessage:\n      - "+15551234567"\n      - "alex@example.com"',
+        )
+    )
+    repo = FakeRepo()
+
+    await seed_people(repo, cfg)
+
+    assert ("imessage", "+15551234567", "alex") in repo.handles
+    assert ("imessage", "alex@example.com", "alex") in repo.handles
+    assert len(repo.handles) == 4

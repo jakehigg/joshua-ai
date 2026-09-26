@@ -35,7 +35,10 @@ Each `people[]` entry takes:
 - `id`: the person slug (`^[a-z0-9][a-z0-9-]{0,31}$`).
 - `name`: the display name.
 - `role`: `member` (default) or `guest`.
-- `handles`: a map of channel to handle id.
+- `handles`: a map of channel to handle. A value is one handle or a list of
+  handles, because a person often has an email address and a phone number on
+  iMessage. Every handle in the list names the person. The first one is the
+  handle Joshua uses to address them.
 - `prompt`: a path to an extra prompt snippet for this person.
 - `journal`: whether Joshua's own journal may record this person's life
   updates: `auto` (default, write an entry on its own), `ask` (offer first), or

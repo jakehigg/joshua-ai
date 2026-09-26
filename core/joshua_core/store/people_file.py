@@ -26,6 +26,23 @@ def write_people_file(path: Path, people: list[dict[str, Any]]) -> None:
     path.write_text(text)
 
 
+def merge_handles(current: dict[str, Any], added: dict[str, Any]) -> dict[str, Any]:
+    """Union ``added`` into ``current``, one channel type at a time.
+
+    A value is one handle or a list of handles. A second handle on a type the
+    person already has is appended, never swapped in, so the roster keeps the
+    handle Joshua already answers.
+    """
+    merged: dict[str, Any] = {}
+    for handle_type in [*current, *(t for t in added if t not in current)]:
+        ids: list[str] = []
+        for source in (current.get(handle_type), added.get(handle_type)):
+            values = [source] if isinstance(source, str) else list(source or [])
+            ids.extend(v for v in values if v not in ids)
+        merged[handle_type] = ids[0] if len(ids) == 1 else ids
+    return merged
+
+
 def upsert_person(path: Path, entry: dict[str, Any]) -> None:
     """Add ``entry`` to the people, or update the entry with the same id.
 
@@ -40,7 +57,7 @@ def upsert_person(path: Path, entry: dict[str, Any]) -> None:
             out.append(person)
             continue
         updated = {**person, **{k: v for k, v in entry.items() if k != "handles"}}
-        handles = {**(person.get("handles") or {}), **(entry.get("handles") or {})}
+        handles = merge_handles(person.get("handles") or {}, entry.get("handles") or {})
         if handles:
             updated["handles"] = handles
         out.append(updated)

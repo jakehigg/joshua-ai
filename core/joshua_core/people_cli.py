@@ -13,6 +13,7 @@ import asyncio
 import os
 import sys
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from joshua_core import people
 from joshua_core.store.db import Database
@@ -40,8 +41,7 @@ async def _add(repo: Repo, args: argparse.Namespace) -> int:
     result = await people.add_person(
         repo, _data_dir(), person_id=args.id, name=args.name, handle=args.handle, role=args.role
     )
-    handles = ", ".join(f"{t}:{h}" for t, h in result["handles"].items())
-    print(f"added {result['id']} ({result['role']}) {handles}")
+    print(f"added {result['id']} ({result['role']}) {_format_handles(result['handles'])}")
     return 0
 
 
@@ -51,9 +51,18 @@ async def _list(repo: Repo, _args: argparse.Namespace) -> int:
         print("no people")
         return 0
     for row in rows:
-        handles = ", ".join(f"{t}:{h}" for t, h in row["handles"].items()) or "no handles"
+        handles = _format_handles(row["handles"]) or "no handles"
         print(f"{row['id']}\t{row['name']}\t{row['role']}\t{handles}")
     return 0
+
+
+def _format_handles(handles: dict[str, Any]) -> str:
+    """``type:id`` pairs, one for each handle, so a person with two shows both."""
+    pairs: list[str] = []
+    for handle_type, value in handles.items():
+        for handle in [value] if isinstance(value, str) else value:
+            pairs.append(f"{handle_type}:{handle}")
+    return ", ".join(pairs)
 
 
 async def _remove(repo: Repo, args: argparse.Namespace) -> int:

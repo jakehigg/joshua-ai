@@ -319,3 +319,54 @@ def test_refuse_records_a_decision_the_caller_made() -> None:
     assert guard.stats()["unknown_sender"] == 1
     assert guard.recent()[-1]["address"] == "unrecognized"
     assert guard.recent()[-1]["channel_type"] == "voice"
+
+
+# --- a person with two handles on one channel --------------------------------
+
+TWO_HANDLES_CONFIG = f"""
+name: Test House
+timezone: America/New_York
+people:
+  - id: alex
+    name: Alex
+    handles:
+      telegram:
+        - "998877"
+        - "445566"
+groups:
+  - id: everyone
+    channel: telegram
+    chat_id: "{GROUP_CHAT}"
+    members:
+      - "998877"
+channels:
+  limits:
+    per_handle_per_minute: 20
+    max_text_chars: 50
+    max_attachment_bytes: 100
+"""
+
+
+def test_a_second_handle_names_the_person_in_a_dm() -> None:
+    guard = _guard(config_module.parse(TWO_HANDLES_CONFIG, env={}, source="<test>"))
+    verdict = _check(guard, "445566")
+    assert verdict.allowed is True
+    assert verdict.person_id == "alex"
+
+
+def test_a_second_handle_is_the_person_in_a_group_the_first_is_listed_in() -> None:
+    """Alex is listed by one handle and writes from the other: still Alex."""
+    guard = _guard(config_module.parse(TWO_HANDLES_CONFIG, env={}, source="<test>"))
+    verdict = _check(guard, "445566", chat_id=GROUP_CHAT, chat_kind="group")
+    assert verdict.allowed is True
+    assert verdict.person_id == "alex"
+    assert verdict.group_id is None
+
+
+def test_the_rate_limit_is_still_per_handle_for_one_person() -> None:
+    settings = config_module.parse(TWO_HANDLES_CONFIG, env={}, source="<test>")
+    guard = _guard(settings)
+    for _ in range(20):
+        assert _check(guard, "998877").allowed is True
+    assert _check(guard, "998877").reason == REASON_RATE_LIMITED
+    assert _check(guard, "445566").allowed is True
