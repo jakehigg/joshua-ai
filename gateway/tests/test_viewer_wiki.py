@@ -157,6 +157,69 @@ def test_folder_page_renders_its_index_and_lists_its_pages(client):
     assert "› <span>Recipes</span>" in html
 
 
+def test_index_links_resolve_from_the_folder_of_the_index_page():
+    def link(target: str, index: str = "recipes.md") -> str:
+        return viewer_wiki.index_links(f'<a href="{target}">x</a>', index)
+
+    assert link("recipes/ponzu-sauce.md") == '<a href="/wiki/recipes/ponzu-sauce.md">x</a>'
+    assert link("./recipes/eggy-ramen.md#top") == '<a href="/wiki/recipes/eggy-ramen.md#top">x</a>'
+    assert link("recipes/my%20page.md?v=1") == '<a href="/wiki/recipes/my%20page.md?v=1">x</a>'
+    assert link("recipes/sauces/") == '<a href="/wiki/recipes/sauces/">x</a>'
+    assert (
+        link("ponzu-sauce.md", "recipes/sauces.md")
+        == '<a href="/wiki/recipes/ponzu-sauce.md">x</a>'
+    )
+    assert link("../garden.md", "recipes/sauces.md") == '<a href="/wiki/garden.md">x</a>'
+    assert link("recipes.md", "Home.md") == '<a href="/wiki/recipes.md">x</a>'
+    img = viewer_wiki.index_links('<img src="recipes/pic.png" alt="">', "recipes.md")
+    assert img == '<img src="/wiki/recipes/pic.png" alt="">'
+
+
+def test_index_links_leave_other_links_alone():
+    for target in (
+        "/wiki/recipes/ponzu-sauce.md",
+        "/attachments/2026/09/a.png",
+        "//example.com/x",
+        "https://example.com/x",
+        "mailto:alex@example.com",
+        "#section",
+        "?q=1",
+        "",
+        "../outside.md",
+    ):
+        html = f'<a href="{target}">x</a>'
+        assert viewer_wiki.index_links(html, "recipes.md") == html
+
+
+def test_folder_page_links_resolve_from_the_index_page(client, tmp_path):
+    w = tmp_path / "data" / "wiki"
+    _write(
+        w / "recipes.md",
+        "# Recipes\n\n[Ponzu](recipes/ponzu-sauce.md) [Aji](recipes/sauces/aji.md) "
+        "[Beds](garden/beds.md) [Web](https://example.com/) ![Pic](/attachments/2026/09/a.png)\n",
+    )
+    _write(w / "recipes/sauces.md", "# Sauces\n\n[Aji](sauces/aji.md) [Up](../recipes.md)\n")
+    _write(w / "Home.md", "# Home\n\n[Recipes](recipes.md)\n")
+
+    html = client.get("/wiki/recipes/", auth=ALEX).text
+    assert '<a href="/wiki/recipes/ponzu-sauce.md">Ponzu</a>' in html
+    assert '<a href="/wiki/recipes/sauces/aji.md">Aji</a>' in html
+    assert '<a href="/wiki/garden/beds.md">Beds</a>' in html
+    assert '<a href="https://example.com/">Web</a>' in html
+    assert 'src="/wiki/attachments/2026/09/a.png"' in html
+
+    html = client.get("/wiki/recipes/sauces/", auth=ALEX).text
+    assert '<a href="/wiki/recipes/sauces/aji.md">Aji</a>' in html
+    assert '<a href="/wiki/recipes.md">Up</a>' in html
+
+    html = client.get("/wiki/", auth=ALEX).text
+    assert '<a href="/wiki/recipes.md">Recipes</a>' in html
+
+    # The page itself keeps the link as written; the browser resolves it right.
+    html = client.get("/wiki/recipes.md", auth=ALEX).text
+    assert '<a href="recipes/ponzu-sauce.md">Ponzu</a>' in html
+
+
 def test_a_directory_path_without_slash_redirects_to_the_folder_page(client):
     response = client.get("/wiki/recipes", auth=ALEX, follow_redirects=False)
     assert response.status_code == 302 and response.headers["location"] == "/wiki/recipes/"

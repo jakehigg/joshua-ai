@@ -40,6 +40,16 @@ with the images and the packaged chart, are at
   as a message on that channel instead. With `deliver_via` unset, such a
   reply is dropped, with one line in the log naming why.
 
+### Fixed
+
+- **The links on a folder page work.** A folder page, such as
+  `/wiki/recipes/`, shows the text of its index page, `recipes.md`. That file
+  is one folder up, so a relative link in it, such as
+  `recipes/pollo-saltado.md`, went to the wrong path and got 404. The viewer
+  now resolves each relative link and image from the folder of the index page,
+  the same as on the page itself. A link to `/attachments/` on a folder page
+  now goes to the wiki attachment, the same as on a page.
+
 ## 0.0.8 - 2026-09-26
 
 Joshua can look something up on the open web now, through the internet agent:
