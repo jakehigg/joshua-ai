@@ -320,9 +320,10 @@ is speaking and how sure it is. Joshua matches the name against
 Joshua never adds a person from a voice turn. A name that the config does not
 know stays a stranger.
 
-Some front ends never send a name at all. A mobile page has no wake clip to
-score, so its first turn, and every turn after it, names nobody. Set
-`channels.voice.device_defaults` to give such a device a person outright:
+Some front ends can never name a speaker with confidence. A mobile page has no
+wake clip to score, so its own speaker identification always returns a weak
+guess, on every turn. Set `channels.voice.device_defaults` to give such a
+device a person outright:
 
 ```yaml
 channels:
@@ -331,11 +332,12 @@ channels:
       mobile: alex   # the mobile page always speaks for Alex
 ```
 
-A device listed there is that person when the turn sends no name, exactly as
+A device listed there is that person whenever the turn sends no name, and
+also whenever it sends a name that `min_confidence` does not trust, exactly as
 if it had named them with full confidence, and the identity hold refreshes the
-same way. A name the front end does send, even one `min_confidence` does not
-trust, is a stranger, not an absence: the default does not cover it, and the
-turn still falls to the hold or to `unknown_sender`.
+same way. The owner declared who speaks on that device, so a weak guess never
+overrides it. A trusted name still wins: a member the front end recognizes
+with confidence on that device is still themselves, not the default.
 
 ### One conversation, or one for each room
 

@@ -10,10 +10,10 @@ with the images and the packaged chart, are at
 
 - **A voice device with no wake clip can default to a person.** Set
   `channels.voice.device_defaults` to map a device id to a person id. A device
-  listed there speaks for that person on any turn that names no speaker, such
-  as a mobile page that can never score a voice. A name the front end does
-  send, but does not trust, is still a stranger: the default does not cover
-  it.
+  listed there speaks for that person on any turn that names no speaker, and
+  also on a turn whose named speaker `min_confidence` does not trust, such as
+  a mobile page whose own speaker identification always returns a weak guess.
+  A trusted name still wins over the default.
 
 - **Search by meaning, in the viewer and for an outside caller.** Core has a
   new route, `POST /v1/memory/search`. It searches the wiki, the journal, and

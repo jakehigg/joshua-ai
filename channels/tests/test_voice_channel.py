@@ -456,7 +456,7 @@ async def test_a_device_default_refreshes_the_hold(tmp_path: Path) -> None:
         await client.post(
             COMPLETIONS, json=_body("first", user="voice:office"), headers=_bearer(VOICE_TOKEN)
         )
-        # A named but untrusted claim right after: the hold from the default
+        # A named but untrusted claim right after: the device default itself
         # carries the turn, exactly as a hold from a real confident match would.
         await client.post(
             COMPLETIONS,
@@ -470,14 +470,51 @@ async def test_a_device_default_refreshes_the_hold(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_device_default_does_not_apply_to_an_untrusted_name(tmp_path: Path) -> None:
-    """A speaker name that arrives but is not trusted is a stranger, not an
-    absence, so the default must not paper over it."""
-    app, core, context = _make(tmp_path, config=DEVICE_DEFAULT_CONFIG)
+async def test_a_device_default_applies_to_an_untrusted_name(tmp_path: Path) -> None:
+    """A front end such as a mobile page always runs its own speaker
+    identification and always sends a name, just one with a weak score. On a
+    device the map names, that weak guess still gets the default, not a
+    refusal."""
+    app, core, _ = _make(tmp_path, config=DEVICE_DEFAULT_CONFIG)
     async with _client(app) as client:
         response = await client.post(
             COMPLETIONS,
             json=_body("hello", user="voice:office", speaker="person:gwen", speaker_confidence=0.1),
+            headers=_bearer(VOICE_TOKEN),
+        )
+    assert response.status_code == 200
+    assert len(core.events) == 1
+    assert core.events[0].handle.id == "alex"
+
+
+@pytest.mark.asyncio
+async def test_a_trusted_name_wins_over_the_device_default(tmp_path: Path) -> None:
+    """The owner declared who speaks on that device, but a member the front end
+    confidently recognizes there is still themselves, not the default."""
+    app, core, _ = _make(tmp_path, config=DEVICE_DEFAULT_CONFIG)
+    async with _client(app) as client:
+        response = await client.post(
+            COMPLETIONS,
+            json=_body("hello", user="voice:office", speaker="person:gwen", speaker_confidence=0.9),
+            headers=_bearer(VOICE_TOKEN),
+        )
+    assert response.status_code == 200
+    assert len(core.events) == 1
+    assert core.events[0].handle.id == "gwen"
+
+
+@pytest.mark.asyncio
+async def test_an_untrusted_name_on_an_unlisted_device_is_still_refused(tmp_path: Path) -> None:
+    """The default is per device. A device the map does not name gets none of
+    it: an untrusted name there still falls to the hold, or is refused, the
+    same as with no ``device_defaults`` at all."""
+    app, core, context = _make(tmp_path, config=DEVICE_DEFAULT_CONFIG)
+    async with _client(app) as client:
+        response = await client.post(
+            COMPLETIONS,
+            json=_body(
+                "hello", user="voice:kitchen", speaker="person:gwen", speaker_confidence=0.1
+            ),
             headers=_bearer(VOICE_TOKEN),
         )
     assert core.events == []
