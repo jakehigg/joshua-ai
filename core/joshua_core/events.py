@@ -34,11 +34,18 @@ from typing import Any
 
 import httpx
 from fastapi.responses import JSONResponse
+from joshua_shared.config import VoiceChannel
 from joshua_shared.contracts import TurnEvent
 from joshua_shared.http import FleetClient
 from joshua_shared.log import get_logger
 
-from joshua_core.delivery import CHANNELS_URL_ENV, CORE_TOKEN_ENV, Deliverer, is_ignore
+from joshua_core.delivery import (
+    CHANNELS_URL_ENV,
+    CORE_TOKEN_ENV,
+    Deliverer,
+    is_ignore,
+    voice_delivery_target,
+)
 from joshua_core.engine.types import Attachment as EngineAttachment
 from joshua_core.store.models import Channel
 from joshua_core.store.repo import Repo
@@ -220,12 +227,14 @@ class EventService:
         manager: Any,
         deliverer: Deliverer,
         prompts_dir: Path | str | None = None,
+        voice: VoiceChannel | None = None,
     ) -> None:
         self._repo = repo
         self._registry = registry
         self._resolver = resolver
         self._manager = manager
         self._deliverer = deliverer
+        self._voice = voice
         base = Path(prompts_dir) if prompts_dir else Path(__file__).parent / "prompts"
         self._event_file = base / "builtin" / "event.md"
         self._background: set[asyncio.Task[None]] = set()
@@ -340,7 +349,15 @@ class EventService:
             return
         reply = result.text or ""
         if reply and not is_ignore(reply):
-            await self._deliverer.deliver(target, reply)
+            deliver_target = voice_delivery_target(
+                channel_type=channel.channel_type,
+                conversation_id=conversation.id,
+                person_id=conversation.person_id,
+                target=target,
+                voice=self._voice,
+            )
+            if deliver_target is not None:
+                await self._deliverer.deliver(deliver_target, reply)
 
     # --- helpers -----------------------------------------------------------
 

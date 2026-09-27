@@ -12,9 +12,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from joshua_shared.config import VoiceChannel
 from joshua_shared.log import get_logger
 
-from joshua_core.delivery import Deliverer, is_ignore
+from joshua_core.delivery import Deliverer, is_ignore, voice_delivery_target
 from joshua_core.engine.cron import compute_next_cron, now_in
 from joshua_core.store.models import Task
 from joshua_core.store.repo import Repo
@@ -51,10 +52,12 @@ class Scheduler:
         tick_seconds: int = 15,
         batch_limit: int = 25,
         prompts_dir: Path | str | None = None,
+        voice: VoiceChannel | None = None,
     ) -> None:
         self._repo = repo
         self._manager = manager
         self._deliverer = deliverer
+        self._voice = voice
         self._tz = tz
         self._tick = max(1, tick_seconds)
         self._batch_limit = batch_limit
@@ -148,7 +151,15 @@ class Scheduler:
 
         text = result.text or ""
         if text and not is_ignore(text):
-            await self._deliverer.deliver(target, text)
+            deliver_target = voice_delivery_target(
+                channel_type=channel.channel_type,
+                conversation_id=conv.id,
+                person_id=conv.person_id,
+                target=target,
+                voice=self._voice,
+            )
+            if deliver_target is not None:
+                await self._deliverer.deliver(deliver_target, text)
 
         await self._settle(task)
 

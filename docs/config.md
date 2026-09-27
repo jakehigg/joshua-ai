@@ -162,6 +162,7 @@ use it; this is what the block holds.
 | `model` | `claude-sonnet-5` | The model for a voice session. A spoken turn must answer fast. |
 | `max_turns` | unset | The agent turn ceiling for a voice session. Unset takes `core.max_turns`. |
 | `idle_ttl_s` | `300` | How long a voice session stays warm with nothing said. `0` leaves the session to the pool cap. |
+| `deliver_via` | unset | The channel type for a scheduled task or an event reply that targets a voice conversation with a person. One of `imessage` or `telegram`. With no value, Joshua drops that reply. See `channels.md`. |
 
 The voice channel needs no credential of its own. The front end presents a fleet
 token, so the section alone turns the route on.

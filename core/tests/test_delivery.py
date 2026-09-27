@@ -5,8 +5,9 @@ from __future__ import annotations
 import httpx
 import pytest
 from joshua_core import delivery
-from joshua_core.delivery import Deliverer, build_deliverer, is_ignore
+from joshua_core.delivery import Deliverer, build_deliverer, is_ignore, voice_delivery_target
 from joshua_shared import http
+from joshua_shared.config import VoiceChannel
 from joshua_shared.http import FleetClient
 
 
@@ -181,3 +182,94 @@ async def test_build_deliverer_dry_run_from_env() -> None:
 def test_build_deliverer_requires_channels_url() -> None:
     with pytest.raises(RuntimeError, match="CHANNELS_URL"):
         build_deliverer({"JOSHUA_TOKEN_CORE": "t"})
+
+
+# --- voice_delivery_target ---------------------------------------------------
+
+
+def test_a_non_voice_conversation_is_untouched() -> None:
+    assert (
+        voice_delivery_target(
+            channel_type="telegram",
+            conversation_id="c1",
+            person_id="alex",
+            target="telegram:123",
+            voice=None,
+        )
+        == "telegram:123"
+    )
+
+
+def test_a_voice_conversation_with_a_person_reroutes_to_deliver_via(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    voice = VoiceChannel(deliver_via="imessage")
+    with caplog.at_level("INFO"):
+        target = voice_delivery_target(
+            channel_type="voice",
+            conversation_id="c1",
+            person_id="alex",
+            target="voice:threads",
+            voice=voice,
+        )
+    assert target == "imessage:dm:alex"
+    assert any(
+        isinstance(r.msg, dict) and r.msg["message"] == "rerouted voice delivery"
+        for r in caplog.records
+    )
+
+
+def test_a_voice_device_thread_with_no_person_is_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    voice = VoiceChannel(deliver_via="imessage")
+    with caplog.at_level("WARNING"):
+        target = voice_delivery_target(
+            channel_type="voice",
+            conversation_id="c1",
+            person_id=None,
+            target="voice:kitchen",
+            voice=voice,
+        )
+    assert target is None
+    record = next(
+        r.msg
+        for r in caplog.records
+        if isinstance(r.msg, dict) and r.msg["message"] == "voice delivery dropped"
+    )
+    assert record["conversation_id"] == "c1"
+    assert "no person" in record["reason"]
+
+
+def test_a_voice_conversation_with_deliver_via_unset_is_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"):
+        target = voice_delivery_target(
+            channel_type="voice",
+            conversation_id="c1",
+            person_id="alex",
+            target="voice:threads",
+            voice=VoiceChannel(),
+        )
+    assert target is None
+    record = next(
+        r.msg
+        for r in caplog.records
+        if isinstance(r.msg, dict) and r.msg["message"] == "voice delivery dropped"
+    )
+    assert "deliver_via" in record["reason"]
+
+
+def test_a_voice_conversation_with_no_voice_config_is_dropped() -> None:
+    # Defensive: a voice channel row with no channels.voice section at all.
+    assert (
+        voice_delivery_target(
+            channel_type="voice",
+            conversation_id="c1",
+            person_id="alex",
+            target="voice:threads",
+            voice=None,
+        )
+        is None
+    )

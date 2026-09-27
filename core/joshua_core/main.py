@@ -147,6 +147,7 @@ async def lifespan(app: FastAPI):
         manager=manager,
         deliverer=deliverer,
         prompts_dir=settings.core.prompts_dir,
+        voice=settings.channels.voice,
     )
     turns = TurnService(
         repo=repo, settings=settings, manager=manager, deliverer=deliverer, events=events
@@ -157,6 +158,7 @@ async def lifespan(app: FastAPI):
         deliverer=deliverer,
         tz=settings.timezone,
         tick_seconds=settings.core.scheduler_tick_seconds,
+        voice=settings.channels.voice,
         prompts_dir=settings.core.prompts_dir,
     )
 

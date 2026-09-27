@@ -23,6 +23,12 @@ with the images and the packaged chart, are at
   boundary, and the wiki holds the journal and every profile, so keep this off
   on an open network, and keep TLS at your reverse proxy.
 
+- **A reminder made by voice can now reach you.** Set
+  `channels.voice.deliver_via` to `imessage` or `telegram`, and a scheduled
+  task or an event that would have spoken into a voice conversation arrives
+  as a message on that channel instead. With `deliver_via` unset, such a
+  reply is dropped, with one line in the log naming why.
+
 ## 0.0.8 - 2026-09-26
 
 Joshua can look something up on the open web now, through the internet agent:
