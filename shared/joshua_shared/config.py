@@ -226,10 +226,10 @@ class VoiceChannel(_Model):
     session. A spoken turn must answer fast, so the defaults are a quicker model
     and a shorter session life than the text channels use.
 
-    ``device_defaults`` maps a device id to a person id, for a device that never
-    sends a speaker name, such as a front end with no wake clip. It stands in
-    only for a missing name; a name the front end sends but does not trust still
-    falls to the hold-or-refuse path, never to the default. Each value must name
+    ``device_defaults`` maps a device id to a person id, for a device whose
+    speaker identification cannot be trusted, such as a front end with no wake
+    clip. It stands in for a missing name and for a name the front end sends
+    but does not trust; a trusted name still wins over it. Each value must name
     a person in ``people`` (checked in ``JoshuaConfig._check_voice``).
 
     ``deliver_via`` names the channel type a scheduled task or an event

@@ -205,13 +205,16 @@ def identify(
     is looked up in ``people[].handles.voice``. A confident match refreshes the
     device's hold.
 
-    A device that sends no name at all falls to ``device_defaults``: a device
-    id listed there is that person, exactly as if a confident match had named
-    them, and it refreshes the hold too. This is for a front end with no wake
-    clip, such as a page that can never say who is speaking. The default never
-    applies when a name was sent but not trusted — a claimed name below
-    ``min_confidence`` is a stranger, not an absence, so it still falls to the
-    identity the device holds, same as today.
+    A device listed in ``device_defaults`` is that person whenever this turn
+    does not hand Joshua a trusted name of its own: when the turn sends no
+    name at all, and also when it sends a name but the score falls below
+    ``min_confidence``. This is for a front end with no wake clip, such as a
+    page that can never say who is speaking, and its speaker identification
+    still runs and still sends a low-confidence guess. A trusted name still
+    wins over the default: the owner declared who speaks on that device, but a
+    member who is confidently recognized there is still themselves. A device
+    the map does not name gets none of this: an untrusted or missing name on
+    it still falls to the hold, or is refused, same as today.
 
     Nothing here creates a person.
     """
@@ -220,13 +223,18 @@ def identify(
     if speaker and trusted:
         person = cfg.people_by_handle(CHANNEL_TYPE, speaker)
 
-    if person is None and not speaker:
+    via_default = False
+    if person is None and (not speaker or not trusted):
         default_id = voice.device_defaults.get(device)
         if default_id is not None:
             person = cfg.person(default_id)
+            via_default = person is not None
 
     if person is not None:
-        handle = speaker or (person.handle(CHANNEL_TYPE) or person.id)
+        if via_default:
+            handle = person.handle(CHANNEL_TYPE) or person.id
+        else:
+            handle = speaker or (person.handle(CHANNEL_TYPE) or person.id)
         hold.remember(device, person.id, voice.identity_hold_s)
         return Speaker(
             device=device,
