@@ -48,6 +48,10 @@ MCP_TRANSPORTS = ("stdio", "http", "sse")
 # Memory source adapters the indexer can wire. ``files`` is the kernel and is
 # always active; the rest are optional and land with their own tickets.
 MEMORY_SOURCE_ADAPTERS = ("files", "memos")
+# Channel types whose adapter can send a person a direct message, for
+# ``channels.voice.deliver_via``. A voice channel has no outbound send of its
+# own, so a reply core delivers there must go to one of these instead.
+VOICE_DELIVER_VIA_TYPES = ("telegram", "imessage")
 # Reserved policy vocabulary (recorded now, enforced later).
 TOOL_CLASSES = ("read", "write-local", "act")
 URL_ARGS = ("none", "grant-required")
@@ -227,6 +231,11 @@ class VoiceChannel(_Model):
     only for a missing name; a name the front end sends but does not trust still
     falls to the hold-or-refuse path, never to the default. Each value must name
     a person in ``people`` (checked in ``JoshuaConfig._check_voice``).
+
+    ``deliver_via`` names the channel type a scheduled task or an event
+    delivers to instead, when the reply targets a voice conversation. A voice
+    channel has no outbound send, so with this unset such a reply is dropped.
+    Unset by default; when set, it must be one of ``VOICE_DELIVER_VIA_TYPES``.
     """
 
     allowed_callers: list[str] = ["voice"]
@@ -239,6 +248,7 @@ class VoiceChannel(_Model):
     max_turns: int | None = Field(default=None, gt=0)
     idle_ttl_s: int = Field(default=300, ge=0)
     device_defaults: dict[str, str] = {}
+    deliver_via: str | None = None
 
     @field_validator("thread")
     @classmethod
@@ -251,6 +261,13 @@ class VoiceChannel(_Model):
     @classmethod
     def _check_unknown_sender(cls, value: str) -> str:
         return _check_unknown_sender(value)
+
+    @field_validator("deliver_via")
+    @classmethod
+    def _check_deliver_via(cls, value: str | None) -> str | None:
+        if value is not None and value not in VOICE_DELIVER_VIA_TYPES:
+            raise ValueError(f"deliver_via must be one of {VOICE_DELIVER_VIA_TYPES}")
+        return value
 
 
 class Webhooks(_Model):

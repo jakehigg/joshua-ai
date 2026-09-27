@@ -371,12 +371,32 @@ loaded.
 A voice session also runs on `channels.voice.model`, and it closes after
 `idle_ttl_s` instead of `core.session_idle_seconds`.
 
+### A reminder made by voice
+
+A voice channel has no outbound send: it only answers the live call, so a
+scheduled task's reply, or an event's reply, has nowhere to speak when it
+targets a voice conversation. Set `channels.voice.deliver_via` to a message
+channel type, and such a reply arrives there instead, addressed to the person
+who set it:
+
+```yaml
+channels:
+  voice:
+    deliver_via: imessage   # or telegram
+```
+
+A member's roaming conversation carries a person, so "remind me at six to take
+the chicken out" reaches `imessage:dm:<person id>` (or the `telegram`
+equivalent) at six. A device conversation, such as a guest's, carries no
+person, so a reminder set there is still dropped, with one log line naming
+why. With `deliver_via` unset, every such reply is dropped, the same as
+before this setting existed.
+
 ### What voice does not do yet
 
-Joshua cannot start a call. A reminder scheduled inside a voice conversation has
-no device to reach, so it is not delivered; `POST /v1/deliver` answers
-`404 unknown_channel` for a `voice:` target. Give the agent an MCP server that
-speaks on your devices, and it can announce through that instead.
+Joshua cannot start a call, so it cannot speak a reminder aloud on any device.
+Give the agent an MCP server that speaks on your devices, and it can announce
+through that instead.
 
 ## Webhooks
 

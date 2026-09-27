@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 
 import httpx
 from joshua_shared import http
+from joshua_shared.config import VoiceChannel
 from joshua_shared.contracts import DeliverRequest
 from joshua_shared.http import FleetClient
 from joshua_shared.log import get_logger
@@ -31,6 +32,54 @@ CORE_TOKEN_ENV = "JOSHUA_TOKEN_CORE"
 DRY_RUN_ENV = "DELIVER_DRY_RUN"
 
 IGNORE_MARKER = "[IGNORE]"
+
+VOICE_CHANNEL_TYPE = "voice"
+
+
+def voice_delivery_target(
+    *,
+    channel_type: str,
+    conversation_id: str,
+    person_id: str | None,
+    target: str,
+    voice: VoiceChannel | None,
+) -> str | None:
+    """Where a reply to ``target`` actually goes, once a voice conversation is
+    handled.
+
+    A voice channel has no outbound send: the voice adapter only answers the
+    live HTTP turn, so a scheduled task's reply or an event's reply, which
+    both arrive here later, has nowhere to go on ``voice:`` itself. A
+    non-voice channel is unaffected and this returns ``target`` unchanged.
+
+    For a voice conversation with a ``person_id`` and ``channels.voice.
+    deliver_via`` set, the reply reroutes to that channel type's DM for the
+    person instead, and this logs one INFO line naming the conversation. A
+    device thread (no person) or an unset ``deliver_via`` delivers nothing:
+    this logs one WARNING naming the conversation and the reason, and returns
+    None so the caller settles the task or event exactly as a failed
+    delivery is settled today.
+    """
+    if channel_type != VOICE_CHANNEL_TYPE:
+        return target
+    if person_id is not None and voice is not None and voice.deliver_via is not None:
+        logger.info(
+            {
+                "message": "rerouted voice delivery",
+                "conversation_id": conversation_id,
+                "deliver_via": voice.deliver_via,
+            }
+        )
+        return f"{voice.deliver_via}:dm:{person_id}"
+    reason = "conversation has no person" if person_id is None else "deliver_via is not set"
+    logger.warning(
+        {
+            "message": "voice delivery dropped",
+            "conversation_id": conversation_id,
+            "reason": reason,
+        }
+    )
+    return None
 
 
 def is_ignore(text: str) -> bool:

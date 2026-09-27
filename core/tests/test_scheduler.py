@@ -8,6 +8,7 @@ from datetime import timedelta
 from joshua_core.engine.cron import now_in
 from joshua_core.scheduler import Scheduler
 from joshua_core.store.models import Channel, Conversation
+from joshua_shared.config import VoiceChannel
 from scheduler_fakes import FakeDeliverer, FakeManager, FakeTaskRepo
 
 TZ = "America/New_York"
@@ -50,6 +51,49 @@ async def test_delivery_targets_last_channel() -> None:
     await _scheduler(repo, manager, deliverer)._sweep()
 
     assert deliverer.delivered[0][0] == "telegram:9"
+
+
+def _wire_voice(repo: FakeTaskRepo, *, person_id: str | None) -> None:
+    repo.add_channel(Channel(id="voice:threads", channel_type="voice"))
+    repo.add_conversation(Conversation(id="c1", channel_id="voice:threads", person_id=person_id))
+
+
+async def test_a_voice_reply_reroutes_to_deliver_via_for_a_person_thread() -> None:
+    repo = FakeTaskRepo()
+    _wire_voice(repo, person_id="alex")
+    manager, deliverer = FakeManager(reply="the chicken is out"), FakeDeliverer()
+    await repo.create_task("c1", "remind me", now_in(TZ) - timedelta(seconds=1))
+
+    voice = VoiceChannel(deliver_via="imessage")
+    await _scheduler(repo, manager, deliverer, voice=voice)._sweep()
+
+    assert deliverer.delivered == [("imessage:dm:alex", "the chicken is out")]
+
+
+async def test_a_voice_reply_on_a_device_thread_is_dropped() -> None:
+    repo = FakeTaskRepo()
+    _wire_voice(repo, person_id=None)
+    manager, deliverer = FakeManager(reply="the chicken is out"), FakeDeliverer()
+    task = await repo.create_task("c1", "remind me", now_in(TZ) - timedelta(seconds=1))
+
+    voice = VoiceChannel(deliver_via="imessage")
+    await _scheduler(repo, manager, deliverer, voice=voice)._sweep()
+
+    assert deliverer.delivered == []
+    # Settled exactly as a failed delivery settles a one-shot task today.
+    assert (await repo.get_task(task.id)).status == "completed"
+
+
+async def test_a_voice_reply_with_deliver_via_unset_is_dropped() -> None:
+    repo = FakeTaskRepo()
+    _wire_voice(repo, person_id="alex")
+    manager, deliverer = FakeManager(reply="the chicken is out"), FakeDeliverer()
+    task = await repo.create_task("c1", "remind me", now_in(TZ) - timedelta(seconds=1))
+
+    await _scheduler(repo, manager, deliverer)._sweep()  # no voice config wired
+
+    assert deliverer.delivered == []
+    assert (await repo.get_task(task.id)).status == "completed"
 
 
 async def test_ignore_reply_is_not_delivered() -> None:

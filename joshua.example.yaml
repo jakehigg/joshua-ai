@@ -63,6 +63,7 @@ channels:
   #   max_text_chars: 4000       # a spoken turn is short
   #   model: claude-sonnet-5     # a spoken turn must answer fast
   #   idle_ttl_s: 300            # a voice session closes sooner than a chat
+  #   deliver_via: imessage      # imessage | telegram; a reminder made by voice arrives here instead
   webhooks:
     allowed_callers:
       - laptop

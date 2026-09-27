@@ -28,6 +28,7 @@ from joshua_core.events import (
     build_channels_resolver,
 )
 from joshua_core.store.models import Channel, Conversation
+from joshua_shared.config import VoiceChannel
 from joshua_shared.contracts import Attachment, Chat, EventOptions, TurnEvent
 from joshua_shared.http import FleetClient
 
@@ -144,6 +145,7 @@ def build_service(
     manager: CountingManager | None = None,
     received: list[dict[str, Any]] | None = None,
     resolver: Any = None,
+    voice: Any = None,
 ) -> tuple[EventService, EventsFakeRepo, CountingManager, list[dict[str, Any]]]:
     repo = repo or EventsFakeRepo()
     manager = manager or CountingManager()
@@ -156,6 +158,7 @@ def build_service(
         manager=manager,
         deliverer=make_deliverer(received),
         prompts_dir=tmp_path,
+        voice=voice,
     )
     return service, repo, manager, received
 
@@ -312,6 +315,61 @@ async def test_channel_addressed_unknown_channel_is_ignored(tmp_path) -> None:
     assert resp.status_code == 200
     assert b"unknown_channel" in resp.body
     assert manager.calls == []
+    assert received == []
+
+
+# --- voice delivery reroute -------------------------------------------------
+
+
+async def test_channel_addressed_voice_reply_reroutes_via_deliver_via(tmp_path) -> None:
+    repo = EventsFakeRepo()
+    repo.channels["voice:threads"] = Channel(
+        id="voice:threads",
+        channel_type="voice",
+        session_mode="per_person",
+        default_person_id="alex",
+    )
+    voice = VoiceChannel(deliver_via="imessage")
+    service, _repo, manager, received = build_service(tmp_path, repo=repo, voice=voice)
+
+    resp = await service.handle(addressed_event(channel="voice:threads"))
+    assert resp.status_code == 202
+    await service.drain()
+
+    assert len(manager.calls) == 1
+    assert received == [{"channel": "imessage:dm:alex", "text": "(reply)", "attachments": []}]
+
+
+async def test_channel_addressed_voice_device_thread_is_dropped(tmp_path) -> None:
+    repo = EventsFakeRepo()
+    repo.channels["voice:kitchen"] = Channel(
+        id="voice:kitchen", channel_type="voice", session_mode="per_person", default_person_id=None
+    )
+    voice = VoiceChannel(deliver_via="imessage")
+    service, _repo, manager, received = build_service(tmp_path, repo=repo, voice=voice)
+
+    resp = await service.handle(addressed_event(channel="voice:kitchen"))
+    assert resp.status_code == 202
+    await service.drain()
+
+    assert len(manager.calls) == 1  # the turn still ran
+    assert received == []  # nowhere to deliver it
+
+
+async def test_channel_addressed_voice_reply_with_deliver_via_unset_is_dropped(tmp_path) -> None:
+    repo = EventsFakeRepo()
+    repo.channels["voice:threads"] = Channel(
+        id="voice:threads",
+        channel_type="voice",
+        session_mode="per_person",
+        default_person_id="alex",
+    )
+    service, _repo, _manager, received = build_service(tmp_path, repo=repo)  # no voice config
+
+    resp = await service.handle(addressed_event(channel="voice:threads"))
+    await service.drain()
+
+    assert resp.status_code == 202
     assert received == []
 
 

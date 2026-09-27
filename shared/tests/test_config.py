@@ -487,3 +487,30 @@ def test_voice_device_defaults_rejects_an_unknown_person() -> None:
         config.ConfigError, match="device_defaults.mobile: unknown person id 'ghost'"
     ):
         config.parse(text, ENV, source="<test>")
+
+
+def _with_voice_deliver_via(channel_type: str) -> str:
+    return GOOD.replace(
+        "channels:\n  telegram:",
+        f"channels:\n  voice:\n    deliver_via: {channel_type}\n  telegram:",
+    )
+
+
+def test_voice_deliver_via_accepts_a_known_channel_type() -> None:
+    cfg = config.parse(_with_voice_deliver_via("imessage"), ENV, source="<test>")
+    assert cfg.channels.voice is not None
+    assert cfg.channels.voice.deliver_via == "imessage"
+
+
+def test_voice_deliver_via_defaults_to_unset() -> None:
+    text = GOOD.replace(
+        "channels:\n  telegram:", "channels:\n  voice:\n    thread: person\n  telegram:"
+    )
+    cfg = config.parse(text, ENV, source="<test>")
+    assert cfg.channels.voice is not None
+    assert cfg.channels.voice.deliver_via is None
+
+
+def test_voice_deliver_via_rejects_an_unknown_channel_type() -> None:
+    with pytest.raises(config.ConfigError, match="deliver_via must be one of"):
+        config.parse(_with_voice_deliver_via("webhook"), ENV, source="<test>")
