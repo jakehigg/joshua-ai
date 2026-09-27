@@ -647,7 +647,8 @@ def _folder_page(roots: dict[str, Root], rel: str, person: Person) -> Response:
         text = _read_text(root.base / folder.index.rel) or ""
         _, body_md = _split_frontmatter(text)
         _, body_md = wiki.first_heading(body_md)  # the folder title is the h1
-        index_html = _MD.render(body_md)
+        index_html = wiki.index_links(_MD.render(body_md), folder.index.rel)
+        index_html = _wiki_attachment_links(index_html)
     body = wiki.crumbs_html(root.base, rel, leaf=None) if rel else ""
     body += wiki.folder_html(folder, index_html)
     if person.role == "member":

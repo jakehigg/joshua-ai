@@ -12,6 +12,7 @@ Everything here reads. The routes and the auth live in ``viewer``.
 
 from __future__ import annotations
 
+import posixpath
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -26,6 +27,8 @@ from joshua_shared.layout import is_hidden
 from joshua_gateway.viewer_journal import split_frontmatter
 
 _H1 = re.compile(r"^#\s+(.+?)\s*#*\s*$")
+_LINK_ATTR = re.compile(r'\b(href|src)="([^"]*)"')
+_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 # The journal folder is a feed, not a tree: the home page links ``/journal``
 # in its place.
@@ -109,6 +112,37 @@ def first_heading(body: str) -> tuple[str, str]:
             return match.group(1).strip(), rest
         break
     return "", body
+
+
+def index_links(html: str, index_rel: str) -> str:
+    """Resolve the relative links of an index page from the folder that holds it.
+
+    The folder page ``/wiki/recipes/`` shows the text of ``recipes.md``, which
+    is one folder up. A relative link in that text is relative to the file, as
+    everywhere in the wiki, but a browser resolves it from the URL of the
+    folder page. So each relative ``href`` and ``src`` becomes an absolute
+    ``/wiki/`` path here. A link with a scheme, an absolute path, or only a
+    fragment or a query does not change. A link that goes above the wiki does
+    not change either.
+    """
+    base = posixpath.dirname(index_rel)
+
+    def fix(match: re.Match[str]) -> str:
+        attr, target = match.group(1), match.group(2)
+        if not target or target.startswith(("/", "#", "?")) or _SCHEME.match(target):
+            return match.group(0)
+        end = min((i for i in (target.find("?"), target.find("#")) if i >= 0), default=len(target))
+        path, rest = target[:end], target[end:]
+        resolved = posixpath.normpath(posixpath.join(base, path))
+        if resolved == ".." or resolved.startswith("../"):
+            return match.group(0)
+        if resolved == ".":
+            resolved = ""
+        if path.endswith("/") and resolved:
+            resolved += "/"
+        return f'{attr}="/wiki/{resolved}{rest}"'
+
+    return _LINK_ATTR.sub(fix, html)
 
 
 def page_title(text: str, fallback: str) -> str:
