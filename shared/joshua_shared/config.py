@@ -221,6 +221,12 @@ class VoiceChannel(_Model):
     ``model``, ``max_turns`` and ``idle_ttl_s`` are the ceilings for a voice
     session. A spoken turn must answer fast, so the defaults are a quicker model
     and a shorter session life than the text channels use.
+
+    ``device_defaults`` maps a device id to a person id, for a device that never
+    sends a speaker name, such as a front end with no wake clip. It stands in
+    only for a missing name; a name the front end sends but does not trust still
+    falls to the hold-or-refuse path, never to the default. Each value must name
+    a person in ``people`` (checked in ``JoshuaConfig._check_voice``).
     """
 
     allowed_callers: list[str] = ["voice"]
@@ -232,6 +238,7 @@ class VoiceChannel(_Model):
     model: str = "claude-sonnet-5"
     max_turns: int | None = Field(default=None, gt=0)
     idle_ttl_s: int = Field(default=300, ge=0)
+    device_defaults: dict[str, str] = {}
 
     @field_validator("thread")
     @classmethod
@@ -697,6 +704,19 @@ class JoshuaConfig(_Model):
         for pid in self.viewer.users:
             if pid not in person_ids:
                 raise ValueError(f"viewer.users: unknown person id '{pid}'")
+        return self
+
+    @model_validator(mode="after")
+    def _check_voice(self) -> JoshuaConfig:
+        voice = self.channels.voice
+        if voice is None:
+            return self
+        person_ids = {person.id for person in self.people}
+        for device, pid in voice.device_defaults.items():
+            if pid not in person_ids:
+                raise ValueError(
+                    f"channels.voice.device_defaults.{device}: unknown person id '{pid}'"
+                )
         return self
 
     def person(self, person_id: str) -> Person | None:

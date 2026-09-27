@@ -320,6 +320,23 @@ is speaking and how sure it is. Joshua matches the name against
 Joshua never adds a person from a voice turn. A name that the config does not
 know stays a stranger.
 
+Some front ends never send a name at all. A mobile page has no wake clip to
+score, so its first turn, and every turn after it, names nobody. Set
+`channels.voice.device_defaults` to give such a device a person outright:
+
+```yaml
+channels:
+  voice:
+    device_defaults:
+      mobile: alex   # the mobile page always speaks for Alex
+```
+
+A device listed there is that person when the turn sends no name, exactly as
+if it had named them with full confidence, and the identity hold refreshes the
+same way. A name the front end does send, even one `min_confidence` does not
+trust, is a stranger, not an absence: the default does not cover it, and the
+turn still falls to the hold or to `unknown_sender`.
+
 ### One conversation, or one for each room
 
 With `thread: person` a member keeps one conversation wherever they speak: ask a

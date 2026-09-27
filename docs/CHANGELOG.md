@@ -8,6 +8,13 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **A voice device with no wake clip can default to a person.** Set
+  `channels.voice.device_defaults` to map a device id to a person id. A device
+  listed there speaks for that person on any turn that names no speaker, such
+  as a mobile page that can never score a voice. A name the front end does
+  send, but does not trust, is still a stranger: the default does not cover
+  it.
+
 - **The viewer can open with no sign-in, for a household on a trusted
   network.** Set `viewer.anonymous: true`, and a browser with no password gets
   full access: it reads and writes the wiki, the same as a signed-in member.

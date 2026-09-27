@@ -157,6 +157,7 @@ use it; this is what the block holds.
 | `min_confidence` | `0.6` | The speaker score at or above which the front end's name is trusted. |
 | `identity_hold_s` | `120` | How long a device keeps its last trusted identity, for turns that score too low. `0` holds nothing. |
 | `unknown_sender` | `drop` | What an unidentified speaker hears. `drop` speaks nothing; `reply` says one sentence and ends the call. |
+| `device_defaults` | `{}` | Map a device id to a person id, for a device that never sends a speaker name. A named but untrusted claim still falls to the hold, never to this default. Each value must name a person in `people`. |
 | `max_text_chars` | `4000` | A longer turn is truncated. A spoken turn is short. |
 | `model` | `claude-sonnet-5` | The model for a voice session. A spoken turn must answer fast. |
 | `max_turns` | unset | The agent turn ceiling for a voice session. Unset takes `core.max_turns`. |

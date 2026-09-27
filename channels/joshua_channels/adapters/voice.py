@@ -203,20 +203,35 @@ def identify(
 
     A name with a score at or above ``min_confidence`` (or with no score at all)
     is looked up in ``people[].handles.voice``. A confident match refreshes the
-    device's hold. A name Joshua does not trust, or no name at all, falls back to
-    the identity the device still holds. Nothing here creates a person.
+    device's hold.
+
+    A device that sends no name at all falls to ``device_defaults``: a device
+    id listed there is that person, exactly as if a confident match had named
+    them, and it refreshes the hold too. This is for a front end with no wake
+    clip, such as a page that can never say who is speaking. The default never
+    applies when a name was sent but not trusted — a claimed name below
+    ``min_confidence`` is a stranger, not an absence, so it still falls to the
+    identity the device holds, same as today.
+
+    Nothing here creates a person.
     """
     person: Person | None = None
     trusted = confidence is None or confidence >= voice.min_confidence
     if speaker and trusted:
         person = cfg.people_by_handle(CHANNEL_TYPE, speaker)
 
+    if person is None and not speaker:
+        default_id = voice.device_defaults.get(device)
+        if default_id is not None:
+            person = cfg.person(default_id)
+
     if person is not None:
+        handle = speaker or (person.handle(CHANNEL_TYPE) or person.id)
         hold.remember(device, person.id, voice.identity_hold_s)
         return Speaker(
             device=device,
             person=person,
-            handle=speaker,
+            handle=handle,
             claimed=speaker,
             confidence=confidence,
         )

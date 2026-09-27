@@ -466,3 +466,24 @@ def test_dm_service_must_be_a_bare_service_name() -> None:
     with pytest.raises(config.ConfigError) as exc:
         config.parse(text, env={}, source="<test>")
     assert "dm_service" in str(exc.value)
+
+
+def _with_voice_device_default(person_id: str) -> str:
+    return GOOD.replace(
+        "channels:\n  telegram:",
+        f"channels:\n  voice:\n    device_defaults:\n      mobile: {person_id}\n  telegram:",
+    )
+
+
+def test_voice_device_defaults_names_a_real_person() -> None:
+    cfg = config.parse(_with_voice_device_default("alex"), ENV, source="<test>")
+    assert cfg.channels.voice is not None
+    assert cfg.channels.voice.device_defaults == {"mobile": "alex"}
+
+
+def test_voice_device_defaults_rejects_an_unknown_person() -> None:
+    text = _with_voice_device_default("ghost")
+    with pytest.raises(
+        config.ConfigError, match="device_defaults.mobile: unknown person id 'ghost'"
+    ):
+        config.parse(text, ENV, source="<test>")

@@ -424,6 +424,81 @@ async def test_a_turn_with_no_speaker_at_all_is_refused(tmp_path: Path) -> None:
     assert context.guard.recent()[-1]["address"] == UNNAMED_SPEAKER
 
 
+# --- device defaults ---------------------------------------------------------
+
+DEVICE_DEFAULT_CONFIG = CONFIG.replace(
+    "unknown_sender: drop\n", "unknown_sender: drop\n    device_defaults:\n      office: alex\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_device_default_stands_in_for_no_speaker_name(tmp_path: Path) -> None:
+    """A front end with no wake clip, such as a mobile page, names nobody. A
+    device listed in ``device_defaults`` is that person anyway, as if named
+    with full confidence."""
+    app, core, _ = _make(tmp_path, config=DEVICE_DEFAULT_CONFIG)
+    async with _client(app) as client:
+        response = await client.post(
+            COMPLETIONS, json=_body("hello", user="voice:office"), headers=_bearer(VOICE_TOKEN)
+        )
+    assert response.status_code == 200
+    assert len(core.events) == 1
+    assert core.events[0].handle.id == "alex"
+    assert core.events[0].channel == voice_adapter.ROAMING_CHANNEL
+
+
+@pytest.mark.asyncio
+async def test_a_device_default_refreshes_the_hold(tmp_path: Path) -> None:
+    """The default counts as a confident match, so it re-arms the device's
+    identity hold the same way a named, trusted turn does."""
+    app, core, _ = _make(tmp_path, config=DEVICE_DEFAULT_CONFIG)
+    async with _client(app) as client:
+        await client.post(
+            COMPLETIONS, json=_body("first", user="voice:office"), headers=_bearer(VOICE_TOKEN)
+        )
+        # A named but untrusted claim right after: the hold from the default
+        # carries the turn, exactly as a hold from a real confident match would.
+        await client.post(
+            COMPLETIONS,
+            json=_body(
+                "second", user="voice:office", speaker="person:gwen", speaker_confidence=0.1
+            ),
+            headers=_bearer(VOICE_TOKEN),
+        )
+    assert len(core.events) == 2
+    assert core.events[1].handle.id == "alex"
+
+
+@pytest.mark.asyncio
+async def test_a_device_default_does_not_apply_to_an_untrusted_name(tmp_path: Path) -> None:
+    """A speaker name that arrives but is not trusted is a stranger, not an
+    absence, so the default must not paper over it."""
+    app, core, context = _make(tmp_path, config=DEVICE_DEFAULT_CONFIG)
+    async with _client(app) as client:
+        response = await client.post(
+            COMPLETIONS,
+            json=_body("hello", user="voice:office", speaker="person:gwen", speaker_confidence=0.1),
+            headers=_bearer(VOICE_TOKEN),
+        )
+    assert core.events == []
+    assert _content(_chunks(response.text)) == voice_adapter.IGNORE_REPLY
+    assert context.guard.recent()[-1]["address"] == "gwen"
+
+
+@pytest.mark.asyncio
+async def test_a_device_not_in_device_defaults_behaves_as_today(tmp_path: Path) -> None:
+    """A device the map does not name gets no default: an unnamed speaker on it
+    is refused, the same as with no ``device_defaults`` at all."""
+    app, core, context = _make(tmp_path, config=DEVICE_DEFAULT_CONFIG)
+    async with _client(app) as client:
+        response = await client.post(
+            COMPLETIONS, json=_body("hello", user="voice:kitchen"), headers=_bearer(VOICE_TOKEN)
+        )
+    assert core.events == []
+    assert _content(_chunks(response.text)) == voice_adapter.IGNORE_REPLY
+    assert context.guard.recent()[-1]["address"] == UNNAMED_SPEAKER
+
+
 # --- the request body -------------------------------------------------------
 
 

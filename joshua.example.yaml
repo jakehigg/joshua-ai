@@ -58,6 +58,8 @@ channels:
   #   min_confidence: 0.6        # below this, the speaker name is not trusted
   #   identity_hold_s: 120       # how long a device keeps its last trusted identity
   #   unknown_sender: drop       # drop | reply, for a speaker Joshua cannot name
+  #   device_defaults:           # a device that never sends a speaker name defaults to this person
+  #     mobile: alex
   #   max_text_chars: 4000       # a spoken turn is short
   #   model: claude-sonnet-5     # a spoken turn must answer fast
   #   idle_ttl_s: 300            # a voice session closes sooner than a chat
