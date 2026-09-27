@@ -38,6 +38,7 @@ from joshua_core.memory.sources.memos import build_memos_source, schedule_second
 from joshua_core.memory.store import MemoryStore
 from joshua_core.migrate_links import migrate_page_links
 from joshua_core.scheduler import Scheduler
+from joshua_core.search_api import build_search_router
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
 from joshua_core.store.seed import seed_people
@@ -351,6 +352,7 @@ def build_app() -> FastAPI:
     app.add_api_route("/readyz", readyz, methods=["GET"])
     app.include_router(build_router())
     app.include_router(build_admin_router())
+    app.include_router(build_search_router())
     return app
 
 

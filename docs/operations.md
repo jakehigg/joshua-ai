@@ -425,9 +425,17 @@ page to `wiki/.trash/` and drops it from the search index at the next index run.
 A guest reads the wiki but cannot delete. To restore a page, move it back from
 `wiki/.trash/<timestamp>/` with a shell.
 
-The viewer holds no fleet token and no upstream credential. It reads the volume
-through the same resolver as the agent's `files` tool, so the two never drift
-on who reads what, and it calls no other container.
+The viewer holds one fleet token, its own, and no upstream credential. It
+reads the volume through the same resolver as the agent's `files` tool, so the
+two never drift on who reads what.
+
+The search page finds pages by words, and by meaning when the viewer can reach
+core. For the search by meaning, the viewer needs `CORE_URL` and
+`JOSHUA_TOKEN_VIEWER`, and core needs the same `JOSHUA_TOKEN_VIEWER`. Compose
+sets both, and `make init-env` mints the token. On Kubernetes, put the same
+value under `JOSHUA_TOKEN_VIEWER` in the core Secret and in the viewer Secret.
+Without the token, the page finds pages by words only. `GET /readyz` on the
+viewer reports `core_search`.
 
 On Kubernetes the chart runs it as its own deployment, off by default, with
 the passwords in a Secret and an ingress of its own. See

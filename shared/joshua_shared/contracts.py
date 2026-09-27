@@ -1,19 +1,32 @@
-"""Shared API shapes for the channels → core contract.
+"""Shared API shapes for the routes between containers.
 
 Channels normalizes every platform message into a ``TurnEvent`` and posts it to
 core. Both containers import these models, so the wire shape has one definition.
 Core never trusts ``framing`` from user input; only the scheduler and ops set it.
+
+``SearchRequest`` and ``SearchResponse`` are the shapes of core's
+``POST /v1/memory/search``, which the viewer and an addon call.
 """
 
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 HandleType = Literal["telegram", "imessage", "webhook", "voice", "cli"]
 ChatKind = Literal["dm", "group"]
 TurnKind = Literal["message", "event"]
+
+# The document kinds that ``POST /v1/memory/search`` can return: the pages of
+# the wiki, the journal, and the profiles. Every reader of the wiki can read
+# them. A person's own attachments (kind ``people``) and the skill rows are
+# never in this list.
+SearchKind = Literal["wiki", "journal", "profile"]
+SEARCH_KINDS: tuple[SearchKind, ...] = ("wiki", "journal", "profile")
+SEARCH_DEFAULT_LIMIT = 10
+SEARCH_MAX_LIMIT = 25
+SEARCH_MAX_QUERY_CHARS = 1000
 
 
 class _Model(BaseModel):
@@ -118,3 +131,30 @@ class ResolveResponse(_Model):
     chat: Chat
     channel_id: str
     chat_kind: ChatKind
+
+
+class SearchRequest(_Model):
+    """One search of the memory by meaning. ``kinds`` empty or absent means all
+    of ``SEARCH_KINDS``."""
+
+    query: str = Field(min_length=1, max_length=SEARCH_MAX_QUERY_CHARS)
+    limit: int = Field(default=SEARCH_DEFAULT_LIMIT, ge=1, le=SEARCH_MAX_LIMIT)
+    kinds: list[SearchKind] | None = None
+
+
+class SearchHit(_Model):
+    """One passage. ``path`` is relative to the data volume, for example
+    ``wiki/journal/2026/09/26/garden.md``. ``date`` is the journal day or a
+    frontmatter date, as ``YYYY-MM-DD``."""
+
+    path: str
+    title: str
+    heading: str
+    text: str
+    kind: SearchKind
+    score: float
+    date: str | None = None
+
+
+class SearchResponse(_Model):
+    results: list[SearchHit]

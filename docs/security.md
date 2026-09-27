@@ -47,6 +47,12 @@ Every route has an allowlist of fleet identities. The list is in
   `X-Joshua-Person` header only from `core`. No setting widens either one. Any
   other caller gets what an unknown person gets: the shared files, read-only.
 
+- core's `POST /v1/memory/search` names no person. It searches the shared
+  scope and returns only pages under `wiki/`, of kind `wiki`, `journal`, or
+  `profile`. It never returns a person's own attachments, although the index
+  holds their text in the shared scope. The route checks each row again after
+  the database filter, and a test proves it.
+
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
 name, a path, or a token.
 
