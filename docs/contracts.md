@@ -146,6 +146,11 @@ logs the query.
 | `done` | `{"turn_id", "text", "tools"}`, the full text and the tools used |
 | `error` | `{"message": "<what failed>"}` |
 
+The `delta` frames carry only the answer, and together they are the text of
+`done`. The text that the model writes before it calls a tool, such as "Not
+on the list, adding it", is not sent. Core holds the text of each model
+message until the message ends, so the answer arrives one message at a time.
+
 ### The voice route
 
 `POST /v1/voice/chat/completions` speaks the OpenAI chat-completions protocol,

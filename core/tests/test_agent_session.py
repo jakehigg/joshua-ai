@@ -113,6 +113,48 @@ def test_remote_server_names_only_http_sse():
     assert agent._remote_server_names(servers) == {"weather", "events"}
 
 
+class MessageStop:
+    def __init__(self, stop_reason: str):
+        self.event = {"type": "message_delta", "delta": {"stop_reason": stop_reason}}
+
+
+class NarratingClient(FakeClient):
+    """The shape of "add chips to the shopping list": two tool calls, each after
+    a line of narration, then the answer."""
+
+    async def receive_response(self):
+        yield StreamEvent("Let me check the list. ")
+        yield AssistantMessage([Block(name="mcp__apple__reminders_tasks", type="tool_use")])
+        yield MessageStop("tool_use")
+        yield StreamEvent("Not on there. ")
+        yield StreamEvent("Adding chips.")
+        yield AssistantMessage([Block(name="mcp__apple__reminders_tasks", type="tool_use")])
+        yield MessageStop("tool_use")
+        yield StreamEvent("Added chips ")
+        yield StreamEvent("to the shopping list. [DONE]")
+        yield MessageStop("end_turn")
+        yield ResultMessage(result="Added chips to the shopping list. [DONE]", session_id="s")
+
+
+async def test_narration_before_a_tool_call_is_not_streamed(sdk, monkeypatch):
+    """A voice front end speaks every delta. The narration must never reach it."""
+    monkeypatch.setattr(agent, "ClaudeSDKClient", NarratingClient)
+    session = agent.AgentSession(FakeOptions())
+    deltas: list[str] = []
+
+    result = await session.run("add chips to the shopping list", on_delta=_collect(deltas))
+
+    assert deltas == ["Added chips ", "to the shopping list. [DONE]"]
+    assert "".join(deltas) == result.text
+    assert result.tools_used == ["mcp__apple__reminders_tasks"]
+
+
+def test_stop_reason_is_read_only_from_a_message_delta() -> None:
+    assert agent._stop_reason(MessageStop("tool_use")) == "tool_use"
+    assert agent._stop_reason(StreamEvent("x")) is None
+    assert agent._stop_reason(ResultMessage(result="x", session_id="s")) is None
+
+
 def _collect(sink):
     async def on_delta(chunk: str) -> None:
         sink.append(chunk)

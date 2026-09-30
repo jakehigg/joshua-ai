@@ -404,6 +404,14 @@ def _extract_text_delta(msg: Any) -> str | None:
     return None
 
 
+def _stop_reason(msg: Any) -> str | None:
+    """The stop reason of a model message, from its ``message_delta`` event."""
+    event = getattr(msg, "event", None)
+    if isinstance(event, dict) and event.get("type") == "message_delta":
+        return (event.get("delta") or {}).get("stop_reason") or None
+    return None
+
+
 def _assistant_text(msg: Any) -> str:
     parts: list[str] = []
     for block in getattr(msg, "content", None) or []:
@@ -541,13 +549,31 @@ class AgentSession:
         tool_errors: dict[str, bool] = {}
         result_text: str | None = None
 
+        # The text of the model message in progress. It is held until the
+        # message's stop reason arrives: a message that stops to call a tool is
+        # narration ("Not on the list, adding it"), and only the answer reaches
+        # ``on_delta``, the same text the turn returns.
+        pending: list[str] = []
+
+        async def flush() -> None:
+            if on_delta is not None:
+                for chunk in pending:
+                    await on_delta(chunk)
+            pending.clear()
+
         async for msg in self._client.receive_response():
             delta = _extract_text_delta(msg)
             if delta is not None:
                 streamed = True
                 parts.append(delta)
-                if on_delta is not None:
-                    await on_delta(delta)
+                pending.append(delta)
+                continue
+            stop = _stop_reason(msg)
+            if stop is not None:
+                if stop == "tool_use":
+                    pending.clear()
+                else:
+                    await flush()
                 continue
 
             cls = type(msg).__name__
@@ -571,6 +597,9 @@ class AgentSession:
                 cost = getattr(msg, "total_cost_usd", None)
                 is_error = bool(getattr(msg, "is_error", False))
                 result_text = getattr(msg, "result", None)
+
+        # A message with no stop reason seen is sent, not lost.
+        await flush()
 
         # Deliver the final result (the clean final answer), not the concatenation
         # of all assistant text, which includes inter-tool narration.
