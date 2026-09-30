@@ -353,22 +353,25 @@ is a place, not a person.
 
 ### How a spoken reply differs
 
-A spoken turn takes the session profile it would take anyway, and adds two more
-kernel prompt files to it. Nothing is taken away: a guest on a call still gets
+A spoken turn takes the session profile it would take anyway, and adds one more
+kernel prompt file to it. Nothing is taken away: a guest on a call still gets
 the guest prompt, and a group still gets the group prompt.
 
-The two files ship in the core image, so a deployment that turns the voice
-channel on writes no prompt of its own:
+The file ships in the core image, so a deployment that turns the voice channel
+on writes no prompt of its own:
 
 - `voice.md`: answer in one or two sentences, write speech and not a page, and
   use the two call markers.
-- `voice-speech.md`: punctuate for the ear, and write a number, a time, a
-  temperature, a symbol or an abbreviation the way a person says it, because the
-  voice reads what you wrote.
 
-They load after the ordinary prompt, so where the two disagree about formatting,
-the spoken rule is the one that stands. On any other channel neither file is
-loaded.
+It loads after the ordinary prompt, so where the two disagree about formatting,
+the spoken rule is the one that stands. On any other channel it is not loaded.
+
+Every profile, on a call or not, also loads `speech.md`: punctuate for the ear,
+and write a number, a date, a year, a time, a temperature, a symbol or an
+abbreviation the way a person says it, because the voice reads what you wrote.
+It applies only to text that is heard: a reply on a call, or the text that the
+agent gives to a tool that says it out loud, such as an announcement on a
+speaker. A reply that is read on a screen stays as it is.
 
 A voice session also runs on `channels.voice.model`, and it closes after
 `idle_ttl_s` instead of `core.session_idle_seconds`.

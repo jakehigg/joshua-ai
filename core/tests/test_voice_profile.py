@@ -59,14 +59,14 @@ def test_a_call_adds_the_voice_files_to_the_ordinary_profile() -> None:
 def test_a_guest_on_a_call_keeps_the_guest_prompt() -> None:
     spoken = derive_profile(_GUEST, _VOICE, voice=_voice_config())
     assert "guest.md" in spoken.prompt_files
-    assert spoken.prompt_files[-2:] == VOICE_FILES
+    assert spoken.prompt_files[-len(VOICE_FILES) :] == VOICE_FILES
     assert spoken.name == "voice-guest"
 
 
 def test_a_group_on_a_call_keeps_the_group_prompt() -> None:
     spoken = derive_profile(None, _VOICE_GROUP, voice=_voice_config())
     assert "group.md" in spoken.prompt_files
-    assert spoken.prompt_files[-2:] == VOICE_FILES
+    assert spoken.prompt_files[-len(VOICE_FILES) :] == VOICE_FILES
     assert spoken.name == "voice-group"
 
 
@@ -122,6 +122,43 @@ def test_a_typed_turn_never_sees_the_voice_guidance() -> None:
     typed = PromptComposer().compose(derive_profile(_MEMBER, _TELEGRAM), _MEMBER, _TELEGRAM)
     assert "[IGNORE]" not in typed
     assert "You are talking out loud" not in typed
+
+
+# --- words that will be spoken, off a call ----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("person", "channel", "kind"),
+    [
+        (_MEMBER, _TELEGRAM, "message"),
+        (_GUEST, _TELEGRAM, "message"),
+        (None, Channel(id="telegram:g", channel_type="telegram", session_mode="shared"), "message"),
+        (_MEMBER, _TELEGRAM, "task"),
+        (_MEMBER, _TELEGRAM, "event"),
+    ],
+    ids=["dm", "guest", "group", "scheduled", "event"],
+)
+def test_every_profile_can_write_for_a_speaker(
+    person: Person | None, channel: Channel, kind: str
+) -> None:
+    """A scheduled announcement hands its text to a speaker tool with no call open.
+
+    The speech rules must reach that turn, or the voice reads "30th" and "1969"
+    wrong.
+    """
+    profile = derive_profile(person, channel, kind=kind)
+    assert "speech.md" in profile.prompt_files
+    prompt = PromptComposer().compose(profile, person, channel)
+    assert "Some of what you write is heard" in prompt
+
+
+def test_the_speech_rules_cover_dates_and_years() -> None:
+    prompt = PromptComposer().compose(
+        derive_profile(_MEMBER, _TELEGRAM, kind="task"), _MEMBER, _TELEGRAM
+    )
+    assert "September thirtieth" in prompt
+    assert "nineteen sixty-nine" in prompt
+    assert "twenty twenty-six" in prompt
 
 
 # --- when a voice session closes --------------------------------------------

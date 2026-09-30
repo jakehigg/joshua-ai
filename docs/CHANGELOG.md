@@ -42,6 +42,14 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **An announcement on a speaker says dates and years correctly.** The rules
+  for words that will be spoken loaded only on a voice call, so a scheduled
+  announcement that gave its text to a speaker tool got none of them. The
+  voice then said "30th" and "1960" wrong. The rules are now in `speech.md`,
+  which every profile loads. They apply only to text that is heard, and they
+  now also tell the agent to write a date and a year the way a person says
+  them: "September thirtieth", "nineteen sixty".
+
 - **The links on a folder page work.** A folder page, such as
   `/wiki/recipes/`, shows the text of its index page, `recipes.md`. That file
   is one folder up, so a relative link in it, such as

@@ -22,20 +22,22 @@ from joshua_core.store.models import Channel, Person
 VOICE_CHANNEL_TYPE = "voice"
 
 # name -> the ordered prompt files that compose that profile's system prompt.
+# Every profile ends with ``speech.md``: any turn can hand text to a tool that
+# says it out loud, such as a scheduled announcement on a speaker, and the page
+# applies only to text that is heard.
 _PROMPT_FILES: dict[str, tuple[str, ...]] = {
-    "dm": ("base.md", "people.md", "chat.md", "registration.md"),
-    "group": ("base.md", "people.md", "chat.md", "group.md", "registration.md"),
-    "guest": ("base.md", "guest.md", "chat.md"),
-    "event": ("base.md", "people.md", "event.md"),
-    "scheduled": ("base.md", "people.md", "scheduled.md"),
+    "dm": ("base.md", "people.md", "chat.md", "registration.md", "speech.md"),
+    "group": ("base.md", "people.md", "chat.md", "group.md", "registration.md", "speech.md"),
+    "guest": ("base.md", "guest.md", "chat.md", "speech.md"),
+    "event": ("base.md", "people.md", "event.md", "speech.md"),
+    "scheduled": ("base.md", "people.md", "scheduled.md", "speech.md"),
 }
 
-# What a spoken turn adds to whichever profile it took. ``voice.md`` is how to
-# behave on a call and the two call markers; ``voice-speech.md`` is how to write
-# words a speech engine reads correctly. They ship in the image, so a deployment
-# that turns the voice channel on writes no prompt of its own. On any other
-# channel they are never loaded.
-VOICE_FILES = ("voice.md", "voice-speech.md")
+# What a spoken turn adds to whichever profile it took: how to behave on a call
+# and the two call markers. It ships in the image, so a deployment that turns
+# the voice channel on writes no prompt of its own. On any other channel it is
+# never loaded.
+VOICE_FILES = ("voice.md",)
 
 
 @dataclass(frozen=True)
