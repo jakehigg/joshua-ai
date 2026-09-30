@@ -14,7 +14,13 @@ _SHARED = Channel(id="telegram:g", channel_type="telegram", session_mode="shared
 def test_derive_dm() -> None:
     profile = derive_profile(_MEMBER, _DM)
     assert profile.name == "dm"
-    assert profile.prompt_files == ("base.md", "people.md", "chat.md", "registration.md")
+    assert profile.prompt_files == (
+        "base.md",
+        "people.md",
+        "chat.md",
+        "registration.md",
+        "speech.md",
+    )
 
 
 def test_derive_group_from_shared_channel() -> None:
@@ -26,25 +32,26 @@ def test_derive_group_from_shared_channel() -> None:
         "chat.md",
         "group.md",
         "registration.md",
+        "speech.md",
     )
 
 
 def test_derive_guest_from_role() -> None:
     profile = derive_profile(_GUEST, _DM)
     assert profile.name == "guest"
-    assert profile.prompt_files == ("base.md", "guest.md", "chat.md")
+    assert profile.prompt_files == ("base.md", "guest.md", "chat.md", "speech.md")
 
 
 def test_derive_event_from_kind() -> None:
     profile = derive_profile(None, _DM, kind="event")
     assert profile.name == "event"
-    assert profile.prompt_files == ("base.md", "people.md", "event.md")
+    assert profile.prompt_files == ("base.md", "people.md", "event.md", "speech.md")
 
 
 def test_derive_scheduled_from_task_kind() -> None:
     profile = derive_profile(_MEMBER, _DM, kind="task")
     assert profile.name == "scheduled"
-    assert profile.prompt_files == ("base.md", "people.md", "scheduled.md")
+    assert profile.prompt_files == ("base.md", "people.md", "scheduled.md", "speech.md")
 
 
 def test_kind_beats_shared_and_role() -> None:
