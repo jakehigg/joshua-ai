@@ -35,6 +35,9 @@ if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then exit "$rc"; fi
 uv run --package joshua-core coverage report --show-missing --fail-under=80
 uv run --package joshua-core coverage xml -o coverage.xml
 
+echo "==> test: every member on other dates"
+make test-dates
+
 echo "==> test-policy"
 python3 scripts/check_test_policy.py
 

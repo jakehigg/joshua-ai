@@ -1,4 +1,4 @@
-.PHONY: sync lint fmt test up up-dev pull down nuke logs ps shell-core psql init-env e2e smoke chat validate backup restore
+.PHONY: sync lint fmt test test-dates up up-dev pull down nuke logs ps shell-core psql init-env e2e smoke chat validate backup restore
 
 MEMBERS := shared channels core gateway
 
@@ -31,6 +31,19 @@ test:
 	@for m in $(MEMBERS); do \
 		echo "==> pytest $$m"; \
 		uv run pytest $$m/tests || exit 1; \
+	done
+
+# Each suite again, with the clock moved to a date that breaks code that reads
+# today. Each date is one where the local date and the UTC date differ: New
+# Year's Eve behind UTC, and a leap day ahead of it.
+test-dates:
+	@for m in $(MEMBERS); do \
+		echo "==> pytest $$m, New Year's Eve, behind UTC"; \
+		TZ=America/Los_Angeles uv run pytest $$m/tests -q -p pytest_fake_now \
+			--fake-now 2026-12-31T23:30:00-08:00 || exit 1; \
+		echo "==> pytest $$m, a leap day, ahead of UTC"; \
+		TZ=Pacific/Auckland uv run pytest $$m/tests -q -p pytest_fake_now \
+			--fake-now 2028-02-29T08:00:00+13:00 || exit 1; \
 	done
 
 # Copy the example config on first run, then start the stack.

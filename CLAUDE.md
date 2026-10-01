@@ -273,11 +273,18 @@ drives the internet agent. Do not use it for the internet agent.
 - No `@pytest.mark.skip` or `xfail` without a reason that names an issue.
 - The `stub` agent backend (`AGENT_BACKEND=stub`) makes `core` testable without
   the SDK. Extend the stub instead of mocking around it.
+- A test passes on every date. It never expects today's date in a value or a
+  path. Give the code a fixed time (an injected clock, a `received_at`), and
+  set a file's time with `os.utime` from the same clock, not from the disk.
+  `make test-dates` runs every suite with the clock moved
+  (`pytest -p pytest_fake_now --fake-now <ISO time>`), and CI runs it on
+  every PR.
 - Run before you push:
 
 ```
 make lint
 make test
+make test-dates
 uv run python scripts/check_test_policy.py
 ```
 

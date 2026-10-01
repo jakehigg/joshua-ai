@@ -83,6 +83,8 @@ def described(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
             extracted_text="MARKET TOTAL 12.40",
             text_source="vision",
             description=RECEIPT,
+            # The month folder comes from this, so the test does not depend on today.
+            received_at="2026-09-16T14:05:09+00:00",
         )
         write_meta(abs_path, meta)
         return meta
