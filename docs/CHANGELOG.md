@@ -42,6 +42,12 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **A voice reply speaks only the answer.** The stream sent all the text that
+  the model wrote, also the text before a tool call. A voice device spoke it,
+  so "add chips to the shopping list" got "Not on there. Adding chips." before
+  the answer. Core now sends only the text that the turn returns. The answer
+  starts after the model finishes the message, not word by word.
+
 - **An announcement on a speaker says dates and years correctly.** The rules
   for words that will be spoken loaded only on a voice call, so a scheduled
   announcement that gave its text to a speaker tool got none of them. The
