@@ -386,9 +386,12 @@ def test_purge_stale_inbox(tmp_path: Path) -> None:
     stale = inbox / "stale"
     fresh.mkdir(parents=True)
     stale.mkdir(parents=True)
-    old = time.time() - 7200
+    # Every age comes from the test clock, never from the disk.
+    now = time.time()
+    old = now - 7200
     import os
 
+    os.utime(fresh, (now, now))
     os.utime(stale, (old, old))
 
     removed = _pipeline(tmp_path).purge_stale_inbox()
@@ -403,7 +406,9 @@ def test_sweep_retention_deletes_old_files(tmp_path: Path) -> None:
     attachments.mkdir(parents=True)
     old_file = attachments / "old.jpg"
     old_file.write_bytes(b"x")
-    old = time.time() - 400 * 86400
+    # Every age comes from the test clock, never from the disk.
+    now = time.time()
+    old = now - 400 * 86400
     import os
 
     os.utime(old_file, (old, old))
@@ -411,6 +416,7 @@ def test_sweep_retention_deletes_old_files(tmp_path: Path) -> None:
     recent = tmp_path / "people" / "alex" / "attachments" / "2026" / "08"
     recent.mkdir(parents=True)
     (recent / "new.jpg").write_bytes(b"x")
+    os.utime(recent / "new.jpg", (now, now))
 
     removed = AttachmentPipeline(data_dir=tmp_path, retention_days=365).sweep_retention()
 
