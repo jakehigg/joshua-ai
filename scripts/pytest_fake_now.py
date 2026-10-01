@@ -1,7 +1,8 @@
-"""Test options for every member.
+"""A pytest plugin: ``pytest -p pytest_fake_now --fake-now <ISO time>``.
 
-``--fake-now <ISO time>`` moves the clock for the whole run, and the clock
-keeps ticking from there. CI runs each suite again on dates that break code
+``--fake-now`` moves the clock for the whole run, and the clock keeps ticking
+from there. The root ``pyproject.toml`` puts ``scripts/`` on the path, so
+``-p`` finds this module. CI runs each suite again on dates that break code
 which reads today: the end of a month and a year, a leap day, and a time where
 the local date and the UTC date differ. A test that passes only on some days
 fails there, on the day it is written.

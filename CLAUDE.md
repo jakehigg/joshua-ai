@@ -277,7 +277,8 @@ drives the internet agent. Do not use it for the internet agent.
   path. Give the code a fixed time (an injected clock, a `received_at`), and
   set a file's time with `os.utime` from the same clock, not from the disk.
   `make test-dates` runs every suite with the clock moved
-  (`pytest --fake-now <ISO time>`), and CI runs it on every PR.
+  (`pytest -p pytest_fake_now --fake-now <ISO time>`), and CI runs it on
+  every PR.
 - Run before you push:
 
 ```

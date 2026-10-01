@@ -35,5 +35,7 @@ select = ["E", "F", "I", "B", "UP", "ASYNC"]
 
 [tool.pytest.ini_options]
 markers = ["integration: needs services or network"]
+# scripts/ holds the pytest_fake_now plugin; `make test-dates` loads it with -p.
+pythonpath = ["scripts"]
 addopts = "-m 'not integration'"
 asyncio_mode = "auto"

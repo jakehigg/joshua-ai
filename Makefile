@@ -39,10 +39,10 @@ test:
 test-dates:
 	@for m in $(MEMBERS); do \
 		echo "==> pytest $$m, New Year's Eve, behind UTC"; \
-		TZ=America/Los_Angeles uv run pytest $$m/tests -q \
+		TZ=America/Los_Angeles uv run pytest $$m/tests -q -p pytest_fake_now \
 			--fake-now 2026-12-31T23:30:00-08:00 || exit 1; \
 		echo "==> pytest $$m, a leap day, ahead of UTC"; \
-		TZ=Pacific/Auckland uv run pytest $$m/tests -q \
+		TZ=Pacific/Auckland uv run pytest $$m/tests -q -p pytest_fake_now \
 			--fake-now 2028-02-29T08:00:00+13:00 || exit 1; \
 	done
 
