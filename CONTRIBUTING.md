@@ -45,6 +45,7 @@ git checkout -b 42-telegram-privacy-mode
 ```
 make lint
 make test
+make test-dates
 uv run python scripts/check_test_policy.py
 ```
 
@@ -115,6 +116,7 @@ make sync    # install the workspace
 make lint    # ruff check, ruff format --check, chart version
 make fmt     # ruff format, ruff check --fix
 make test    # pytest for every member
+make test-dates  # pytest for every member, with the clock moved to other dates
 make smoke   # postgres in compose + the integration suite
 make up      # the whole stack, from the released images
 make up-dev  # the whole stack, from your build of this checkout
