@@ -82,6 +82,7 @@ core:
   max_turns: 20
   session_idle_seconds: 1800
   pool_max: 20
+  mcp_replace_seconds: 300     # replace a session whose client marked a gateway server failed, at most once in this time
   reflection_model: claude-sonnet-5
   scheduler_tick_seconds: 15   # how often the scheduler checks for due tasks
 
