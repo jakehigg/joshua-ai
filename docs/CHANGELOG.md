@@ -42,6 +42,19 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **A tool server that restarts no longer takes its tools away until the
+  session ends.** An `http` upstream drops its sessions when it restarts or
+  when a session is idle. The next call failed. The gateway answered core with
+  `400` and `503` while it reconnected, and the agent's client in core then
+  marked the server failed and stopped calling it for the life of the warm
+  session, which can be hours. Now the gateway connects again and sends a
+  refused call once more, and a request during the reconnect waits for it. A
+  call that still fails is a tool error that says to try again. After a turn,
+  core reads the status of each gateway server. When one is failed, the next
+  turn starts a new session. `core.mcp_replace_seconds` (default `300`) allows
+  one such replacement per session in that time. `GET /admin/inventory` shows
+  `reconnects` and `last_reconnect_at` for each connection.
+
 - **A voice reply speaks only the answer.** The stream sent all the text that
   the model wrote, also the text before a tool call. A voice device spoke it,
   so "add chips to the shopping list" got "Not on there. Adding chips." before

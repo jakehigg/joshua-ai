@@ -864,6 +864,36 @@ identity server, a person added to `identities` starts one connection and a pers
 removed stops one. The other people's connections are untouched. A body
 `{"server": "<name>"}` restarts one entry.
 
+### When an upstream loses its session
+
+An `http` or `sse` upstream can drop its session at any time. The MCP Python
+SDK drops a session that is idle for 30 minutes, and a restart drops all of
+them. The gateway then connects again, and core keeps its own session to the
+gateway:
+
+- When the upstream refuses the session id (`404` "Session not found"), the
+  call did not run. The gateway connects again and sends the call once more.
+- When the transport closes during a call, the call can have run. The gateway
+  connects again and sends a list or a read once more. It does not send a
+  `tools/call` again.
+- A call that arrives during the reconnect waits for it, for up to 10 seconds.
+- When the second attempt also fails, the agent gets a tool error, for example
+  `upstream health is reconnecting; try again`.
+
+Each identity connection connects again on its own. The gateway logs one line,
+`upstream reconnecting`, with the server and the reason. `GET /admin/inventory`
+shows `reconnects`, `last_reconnect_at`, and `last_reconnect_reason` for each
+connection.
+
+The agent's client in core stops sending to a server that it marked failed, for
+as long as the session lives. After a turn, core reads the status of each
+gateway server. When one is failed, the next turn starts a new session with new
+connections, and the history continues. The turn in progress is not stopped.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `core.mcp_replace_seconds` | `300` | At most one such replacement per session in this many seconds, so a server that fails again and again cannot cause a reconnect storm. `0` turns the replacement off. |
+
 ## modules
 
 `modules` is a reserved list of module names. It is the hook for optional
