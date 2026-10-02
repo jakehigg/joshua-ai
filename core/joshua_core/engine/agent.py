@@ -528,6 +528,25 @@ class AgentSession:
         else:
             logger.info({"message": "mcp servers ready", "count": len(self._remote_servers)})
 
+    async def failed_mcp_servers(self) -> list[str]:
+        """The gateway-backed MCP servers that the client marked ``failed``.
+
+        A client stops sending to a server it marked failed, for as long as it
+        lives. Best-effort: a status that cannot be read gives an empty list.
+        """
+        if not self._remote_servers or self._client is None:
+            return []
+        try:
+            status = await self._client.get_mcp_status()
+        except Exception as e:  # noqa: BLE001 — status is best-effort
+            logger.warning({"message": "mcp status unavailable after the turn", "error": str(e)})
+            return []
+        return sorted(
+            str(s.get("name"))
+            for s in (status or {}).get("mcpServers", [])
+            if str(s.get("name")) in self._remote_servers and s.get("status") == "failed"
+        )
+
     async def run(self, prompt: str, on_delta: OnDelta | None = None) -> TurnResult:
         t_start = time.monotonic()
         cold_start = self._client is None

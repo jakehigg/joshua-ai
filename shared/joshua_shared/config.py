@@ -296,6 +296,12 @@ class Core(_Model):
     max_turns: int = 20
     session_idle_seconds: int = 1800
     pool_max: int = 20
+    # After a turn in which the agent's client marked a gateway server
+    # ``failed``, the warm session is replaced before the next turn, so that
+    # turn connects to every server again. One replacement per session in this
+    # many seconds at most, so a server that keeps failing cannot cause a
+    # reconnect storm. 0 or less turns the replacement off.
+    mcp_replace_seconds: int = 300
     # None uses the prompts packaged in the image. Set a path only to read a
     # prompts directory mounted into the container.
     prompts_dir: str | None = None

@@ -87,6 +87,11 @@ class _Managed:
     # mtime (nightly rewrite of profile.md / shared/profile.md) triggers a rebuild.
     memory_paths: list[Path] = field(default_factory=list)
     memory_mtime: float = 0.0
+    # Set after a turn in which the client marked a gateway server failed. The
+    # next turn gets a new session. ``replaced_at`` limits it to one per
+    # ``core.mcp_replace_seconds``.
+    replace_pending: bool = False
+    replaced_at: float | None = None
 
 
 JOURNAL_TOOL = "mcp__files__write_journal_entry"
@@ -361,13 +366,21 @@ class ConversationManager:
 
     async def _refresh_if_stale_locked(self, mc: _Managed, channel: Channel) -> None:
         """Rebuild a pooled session when its ``profile.md`` or ``shared/profile.md``
-        changed on disk (the nightly rewrite). Called with ``_pool_lock`` held; a
-        busy session keeps its prompt and rebuilds on a later turn. History carries
-        over through the resumed sdk session."""
+        changed on disk (the nightly rewrite), or when the last turn found a
+        gateway server failed. Called with ``_pool_lock`` held; a busy session
+        keeps its client and rebuilds on a later turn. History carries over
+        through the resumed sdk session."""
         if mc.lock.locked():
+            return
+        if mc.replace_pending:
+            await self._rebuild_locked(mc, channel, "session rebuilt (mcp server failed)")
             return
         if memory_prompt.newest_mtime(mc.memory_paths) <= mc.memory_mtime:
             return
+        await self._rebuild_locked(mc, channel, "session rebuilt (memory changed)")
+
+    async def _rebuild_locked(self, mc: _Managed, channel: Channel, message: str) -> None:
+        """Give ``mc`` a new session: a new client with new MCP connections."""
         old = mc.session
         session, deps, profile, mem_paths, mem_mtime = await self._build_session(
             channel, mc.conversation, mc.conversation.sdk_session_id
@@ -379,9 +392,48 @@ class ConversationManager:
         mc.memory_paths = mem_paths
         mc.memory_mtime = mem_mtime
         mc.built_at = monotonic()
+        mc.replace_pending = False
         await old.close()
-        logger.info(
-            {"message": "session rebuilt (memory changed)", "conversation_id": mc.conversation.id}
+        logger.info({"message": message, "conversation_id": mc.conversation.id})
+
+    async def _check_mcp_failed(self, mc: _Managed) -> None:
+        """After a turn: when the client marked a gateway server failed, mark the
+        session for replacement before the next turn.
+
+        The client stops sending to a failed server for as long as it lives, and
+        a warm session can live for hours. The turn in progress is not stopped.
+        At most one replacement per ``core.mcp_replace_seconds``, so a server
+        that keeps failing cannot cause a reconnect storm. Never fails a turn.
+        """
+        window = self._settings.core.mcp_replace_seconds
+        check = getattr(mc.session, "failed_mcp_servers", None)
+        if window <= 0 or check is None or mc.replace_pending:
+            return
+        try:
+            failed = await check()
+        except Exception as e:  # noqa: BLE001 — best-effort
+            logger.warning({"message": "mcp status check failed", "error": str(e)})
+            return
+        if not failed:
+            return
+        now = monotonic()
+        if mc.replaced_at is not None and now - mc.replaced_at < window:
+            logger.warning(
+                {
+                    "message": "mcp server failed; session replaced recently, kept",
+                    "conversation_id": mc.conversation.id,
+                    "servers": failed,
+                }
+            )
+            return
+        mc.replace_pending = True
+        mc.replaced_at = now
+        logger.warning(
+            {
+                "message": "mcp server failed; session marked for replacement",
+                "conversation_id": mc.conversation.id,
+                "servers": failed,
+            }
         )
 
     async def _enforce_pool_limit_locked(self) -> None:
@@ -647,6 +699,7 @@ class ConversationManager:
                     **metrics,
                 }
             )
+            await self._check_mcp_failed(mc)
             return result
 
     async def _run_with_resume_retry(

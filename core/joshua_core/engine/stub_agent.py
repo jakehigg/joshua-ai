@@ -66,10 +66,16 @@ class StubAgentSession:
         # Every prompt this session was given, in order. A test reads it to see
         # what the manager put in front of the agent.
         self.prompts: list[str] = []
+        # The servers to report as failed after a turn; a test sets it.
+        self.failed_servers: list[str] = []
 
     @property
     def connected(self) -> bool:
         return self._connected
+
+    async def failed_mcp_servers(self) -> list[str]:
+        """The servers this session reports as failed, as ``AgentSession`` does."""
+        return sorted(self.failed_servers)
 
     def set_turn_context(self, person_id: str | None, journal_mode: str = "auto") -> None:
         """Bind the current turn's speaker and journal preference before ``run``."""

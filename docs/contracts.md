@@ -200,11 +200,27 @@ it.
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok": bool, "connected", "errored", "installing", "disabled", "total"}`, counts only. Always `200`; `ok` reports the upstreams, not readiness. `installing` is a package install still running; `disabled` is an entry whose credential is empty. Neither is an error. |
-| `ANY /<server>` and `/<server>/…` | `core` | MCP over streamable HTTP | the upstream's answer. `403` when the person may not use this server. `409` when a live session changes person. `503` when the upstream is down. |
+| `ANY /<server>` and `/<server>/…` | `core` | MCP over streamable HTTP | the upstream's answer. `403` when the person may not use this server. `409` when a live session changes person. `503` when the upstream is down and not reconnecting. See below for a lost upstream session. |
 | `POST /admin/reload` | `ADMIN_CALLERS` | `{"server": name}` or empty | `{"reloaded": {…}, "failed": {…}}`, `502` when one failed |
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
-| `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
+| `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
 | `POST /admin/mcp/install` | `ADMIN_CALLERS` | `{"server": name, "reinstall": bool}` | `{"server", "package", "resolved", "installed_at", "reconnected": […]}`. `404` for a server with no `package`, `502` with a one-line `error` when the install failed. |
+
+When an upstream loses its session, core's session to the gateway continues.
+The gateway connects to the upstream again:
+
+- A call that the upstream refused with "Session not found" did not run. The
+  gateway sends it once more, and core gets only the second answer.
+- A call that was in flight when the transport closed can have run. The
+  gateway sends a list or a read once more, but not a `tools/call`.
+- A request that arrives during the reconnect waits for up to 10 seconds.
+- A `tools/call` that fails is a tool result with `isError: true`, never a
+  JSON-RPC error. The text says what to do, for example
+  `upstream health is reconnecting; try again`.
+- A list or read that fails is a JSON-RPC error with code `-32603`
+  (`INTERNAL_ERROR`). The gateway never passes on the upstream's own code: a
+  code such as `-32600` would tell core that its request was bad, and HTTP
+  then answers `400`.
 
 `core` sends two headers with every MCP request:
 

@@ -169,6 +169,15 @@ def _package_fields(spec: ServerSpec, instances: list[Upstream]) -> dict[str, An
     }
 
 
+def _reconnect_fields(up: Upstream) -> dict[str, Any]:
+    """How often this connection lost its upstream session, and when it last did."""
+    return {
+        "reconnects": up.reconnects,
+        "last_reconnect_at": up.last_reconnect_at,
+        "last_reconnect_reason": up.last_reconnect_reason,
+    }
+
+
 async def admin_inventory(request: Request) -> JSONResponse:
     """Full inventory: every server with its status, tool names, ``allow`` list,
     the persons that currently have a live session, the per-person instances of an
@@ -194,7 +203,12 @@ async def admin_inventory(request: Request) -> JSONResponse:
             "tool_classes": spec.tool_classes,
             "identities": sorted(spec.identities),
             "instances": [
-                {"person": up.person, "status": up.status, "tool_count": up.tool_count}
+                {
+                    "person": up.person,
+                    "status": up.status,
+                    "tool_count": up.tool_count,
+                    **_reconnect_fields(up),
+                }
                 for up in instances
             ],
             **_package_fields(spec, instances),
@@ -210,6 +224,7 @@ async def admin_inventory(request: Request) -> JSONResponse:
                     "status": up.status,
                     "tools": up.tools,
                     "error": up.error,
+                    **_reconnect_fields(up),
                 }
             )
         elif spec.has_identities:
@@ -229,6 +244,7 @@ async def admin_inventory(request: Request) -> JSONResponse:
                     "status": up.status,
                     "tools": up.tools,
                     "error": up.error,
+                    **_reconnect_fields(up),
                 }
             )
         servers[name] = entry

@@ -15,9 +15,9 @@ import asyncio
 import os
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
-from typing import Any
+from typing import Any, Protocol
 
 import mcp_types as types
 from joshua_shared.log import get_logger
@@ -28,6 +28,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server.lowlevel import Server
 from mcp.shared._httpx_utils import create_mcp_http_client
+from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 
 from joshua_gateway.catalog import ServerSpec, permits
@@ -35,7 +36,6 @@ from joshua_gateway.observability import person_ctx
 
 log = get_logger("gateway.proxy")
 
-OnError = Callable[[Exception], None]
 OnCall = Callable[[str, float, str, str | None], None]
 
 # The only variables a stdio child inherits from the gateway. It never sees a
@@ -147,11 +147,7 @@ async def upstream_streams(cfg: dict[str, Any], name: str = "upstream"):
     elif typ in ("http", "streamable-http"):
         headers = cfg.get("headers")
         async with AsyncExitStack() as stack:
-            http_client = None
-            if headers:
-                http_client = await stack.enter_async_context(
-                    create_mcp_http_client(headers=headers)
-                )
+            http_client = await stack.enter_async_context(create_mcp_http_client(headers=headers))
             read, write = await stack.enter_async_context(
                 streamable_http_client(cfg["url"], http_client=http_client)
             )
@@ -163,47 +159,70 @@ async def upstream_streams(cfg: dict[str, Any], name: str = "upstream"):
         raise ValueError(f"unknown upstream type: {typ}")
 
 
+class UpstreamUnavailableError(Exception):
+    """The upstream has no live session for this call. The message is for core."""
+
+
+class UpstreamLink(Protocol):
+    """What the downstream server needs from its upstream (``Upstream``)."""
+
+    label: str
+    spec: ServerSpec
+
+    async def forward(
+        self, fn: Callable[[ClientSession], Awaitable[Any]], *, repeatable: bool
+    ) -> Any: ...
+
+
+def _list_error(label: str, exc: Exception) -> MCPError:
+    """The JSON-RPC error for a failed list or read.
+
+    The upstream's own error code is not passed on. A protocol code such as
+    ``INVALID_REQUEST`` would tell core that its request was malformed, and on
+    the 2026-07-28 wire it becomes HTTP 400, so the client marks the whole
+    server failed. ``INTERNAL_ERROR`` says the server could not do it now.
+    """
+    return MCPError(code=types.INTERNAL_ERROR, message=f"upstream {label}: {exc}")
+
+
+def _tool_error(text: str) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
+
+
 def build_upstream_server(
     name: str,
-    session: ClientSession,
+    link: UpstreamLink,
     caps: Any,
-    spec: ServerSpec,
-    lock: asyncio.Lock | None = None,
-    on_error: OnError | None = None,
     on_call: OnCall | None = None,
 ) -> Server:
-    """Build a low-level ``Server`` that forwards to ``session``.
+    """Build a low-level ``Server`` that forwards to the live session of ``link``.
 
-    ``tools/list`` and call-time checks run ``spec``'s tool filter and per-person
-    rule against the request person (read from ``person_ctx``); a tool the person
-    may not use is hidden from the list and rejected at call time. A lock (if
-    given) serializes upstream calls, since the stdio transport is not safe for
-    interleaved requests. ``on_error`` is called when a forwarded call raises so
-    the supervisor can treat the session as broken and reconnect. ``on_call`` is
-    invoked once per tool call with ``(tool, duration_ms, status, error)`` for the
-    call log; status is ``"success"``, ``"error"`` or ``"denied"``.
+    The server registers the handlers for the capabilities in ``caps``. Each
+    handler reads the upstream session per call through ``link.forward``, so
+    one server outlives an upstream reconnect. ``tools/list`` and call-time
+    checks run the spec's tool filter and per-person rule against the request
+    person (read from ``person_ctx``); a tool the person may not use is hidden
+    from the list and rejected at call time.
+
+    A failed ``tools/call`` is a tool result with ``is_error`` set, never a
+    JSON-RPC error, so the client keeps the server and the model reads the
+    message. ``on_call`` is invoked once per tool call with ``(tool,
+    duration_ms, status, error)`` for the call log; status is ``"success"``,
+    ``"error"`` or ``"denied"``.
     """
 
-    @asynccontextmanager
-    async def guard():
+    async def forward(fn: Callable[[ClientSession], Awaitable[Any]]) -> Any:
         try:
-            if lock is not None:
-                async with lock:
-                    yield
-            else:
-                yield
+            return await link.forward(fn, repeatable=True)
         except ValidationError:
-            raise  # schema mismatch — not a transport error, don't reconnect
+            raise  # a schema mismatch, reported as it is
         except Exception as exc:
-            if on_error is not None:
-                on_error(exc)
-            raise
+            raise _list_error(link.label, exc) from exc
 
     async def on_list_tools(ctx, params):
         person = person_ctx.get()
-        async with guard():
-            tools = (await session.list_tools()).tools
-        tools = [t for t in tools if permits(spec, t.name, person)]
+        result = await forward(lambda session: session.list_tools())
+        tools = [t for t in result.tools if permits(link.spec, t.name, person)]
         return types.ListToolsResult(tools=tools)
 
     async def on_call_tool(ctx, params):
@@ -211,21 +230,25 @@ def build_upstream_server(
         person = person_ctx.get()
         # Enforce the filter at CALL time, not just in tools/list. A consumer that
         # knows a filtered-out name could otherwise call it directly.
-        if not permits(spec, tool, person):
+        if not permits(link.spec, tool, person):
             if on_call is not None:
                 on_call(tool, 0.0, "denied", "tool not permitted")
-            return types.CallToolResult(
-                content=[types.TextContent(type="text", text=f"tool not permitted: {tool}")],
-                is_error=True,
-            )
+            return _tool_error(f"tool not permitted: {tool}")
         start = time.perf_counter()
         try:
-            async with guard():
-                res = await session.call_tool(tool, params.arguments or {})
-        except Exception as exc:
-            if on_call is not None:
-                on_call(tool, (time.perf_counter() - start) * 1000, "error", str(exc))
+            res = await link.forward(
+                lambda session: session.call_tool(tool, params.arguments or {}), repeatable=False
+            )
+        except ValidationError:
             raise
+        except Exception as exc:
+            if isinstance(exc, UpstreamUnavailableError):
+                text = str(exc)
+            else:
+                text = f"upstream {link.label} failed the call: {exc}"
+            if on_call is not None:
+                on_call(tool, (time.perf_counter() - start) * 1000, "error", text)
+            return _tool_error(text)
         duration_ms = (time.perf_counter() - start) * 1000
         if on_call is not None:
             status = "error" if res.is_error else "success"
@@ -233,20 +256,16 @@ def build_upstream_server(
         return res
 
     async def on_list_resources(ctx, params):
-        async with guard():
-            return await session.list_resources()
+        return await forward(lambda session: session.list_resources())
 
     async def on_read_resource(ctx, params):
-        async with guard():
-            return await session.read_resource(str(params.uri))
+        return await forward(lambda session: session.read_resource(str(params.uri)))
 
     async def on_list_prompts(ctx, params):
-        async with guard():
-            return await session.list_prompts()
+        return await forward(lambda session: session.list_prompts())
 
     async def on_get_prompt(ctx, params):
-        async with guard():
-            return await session.get_prompt(params.name, params.arguments)
+        return await forward(lambda session: session.get_prompt(params.name, params.arguments))
 
     handlers: dict[str, Any] = {}
     if caps and caps.tools:
