@@ -4,21 +4,32 @@ Each hosted upstream is owned by one supervisor task. The anyio client contexts
 (stdio/http/sse) must be exited by the task that entered them, so a reload from a
 request handler cannot close them directly. Instead the supervisor loops: connect
 → serve → (reload / transport error / stop) → drain in-flight calls → teardown →
-reconnect. ``POST /admin/reload`` and any transport error on a forwarded call both
-trigger a clean reconnect. Each connect builds a fresh ``Server`` and session
-manager; the ASGI route dereferences ``self.mgr`` per request, so a swap needs no
-route change and answers 503 while an upstream is down.
+reconnect. ``POST /admin/reload`` and a lost upstream session both trigger a
+clean reconnect.
+
+The downstream side is separate from the upstream connection. One ``Server`` and
+one session manager serve core for as long as the upstream keeps the same
+capabilities, and its handlers read the live upstream session per call through
+``Upstream.forward``. A reconnect therefore does not close the downstream
+session: a call that arrives during a reconnect waits for it (bounded), and a
+call that finds the upstream session gone reconnects and is sent once more when
+it is safe to repeat.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
+import anyio
+import mcp_types as types
 from joshua_shared.log import get_logger
 from mcp import ClientSession
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.shared.exceptions import MCPError
+from pydantic import ValidationError
 
 from joshua_gateway import mcp_store
 from joshua_gateway.catalog import ServerSpec
@@ -31,13 +42,44 @@ from joshua_gateway.observability import (
     now_iso,
     person_ctx,
 )
-from joshua_gateway.proxy import build_upstream_server, upstream_streams
+from joshua_gateway.proxy import UpstreamUnavailableError, build_upstream_server, upstream_streams
 
 logger = get_logger("gateway.upstream")
 
 _RECONNECT_BACKOFF_S = (5, 10, 30, 60)
 _DRAIN_TIMEOUT_S = 10.0
 _RELOAD_TIMEOUT_S = 45.0
+# How long a downstream call waits for a reconnect before it gets an error.
+SESSION_WAIT_S = 10.0
+
+# The two ways an upstream can lose a session.
+#
+# ``rejected``: the upstream refused the session id (HTTP 404 "Session not
+# found", "invalid or expired session ID"). It refused before it read the
+# request, so the request did not run, and it is safe to send it again.
+#
+# ``closed``: the transport closed. A request that was in flight can have run,
+# so only a request that changes nothing is sent again.
+REJECTED = "rejected"
+CLOSED = "closed"
+
+_SESSION_WORDS = ("not found", "expired", "terminated", "invalid", "unknown")
+
+
+def session_error_kind(exc: BaseException) -> str | None:
+    """Return ``rejected`` or ``closed`` when ``exc`` says the upstream session is
+    gone, else None. A JSON-RPC error that the upstream sent for any other reason
+    is None: the session answered, so it is alive."""
+    if isinstance(exc, MCPError):
+        message = (exc.error.message or "").lower()
+        if "session" in message and any(word in message for word in _SESSION_WORDS):
+            return REJECTED
+        if exc.error.code == types.CONNECTION_CLOSED:
+            return CLOSED
+        return None
+    if isinstance(exc, anyio.ClosedResourceError | anyio.BrokenResourceError | anyio.EndOfStream):
+        return CLOSED
+    return None
 
 
 class Upstream:
@@ -58,7 +100,24 @@ class Upstream:
         self.label = label or spec.name
         self.person = person
         self.spec = spec
+        # The downstream session manager that core talks to. It lives across
+        # upstream reconnects, and changes only when the capabilities change.
         self.mgr: StreamableHTTPSessionManager | None = None
+        self._mgr_caps: tuple[bool, bool, bool] | None = None
+        self._mgr_stop: asyncio.Event | None = None
+        self._mgr_task: asyncio.Task | None = None
+        # The live upstream session. None while down.
+        self.session: ClientSession | None = None
+        # Counts each connect, so a caller can wait for a session newer than
+        # the one that failed.
+        self._generation = 0
+        # True from a reload or a lost session until the next connect ends,
+        # with a session or with an error. A downstream call waits only then.
+        self._reconnecting = False
+        self._changed = asyncio.Event()
+        self.reconnects = 0
+        self.last_reconnect_at: str | None = None
+        self.last_reconnect_reason: str | None = None
         self.error: str | None = None
         self.tool_count: int | None = None
         self.tools: list[str] = []
@@ -106,7 +165,7 @@ class Upstream:
         the reload after the credential is set.
         """
         self.disabled = self.spec.disabled_reason
-        self._connected.clear()
+        self._drop_session()
         self._reload.set()
         try:
             await asyncio.wait_for(self._idle.wait(), timeout)
@@ -120,10 +179,19 @@ class Upstream:
         self._reload.set()  # wake whichever wait the supervisor is in
         if self._task is not None:
             await self._task
+        self._reconnecting = False
+        self._notify()
+        await self._close_mgr()
 
     @property
     def connected(self) -> bool:
-        return self.mgr is not None
+        return self.session is not None
+
+    @property
+    def serving(self) -> bool:
+        """True when a downstream request can be answered now or after a short
+        wait: the upstream is connected, or a reconnect is in progress."""
+        return self.mgr is not None and (self.connected or self._reconnecting)
 
     @property
     def status(self) -> str:
@@ -157,23 +225,117 @@ class Upstream:
         Raises ``TimeoutError`` if it is not up in time; the supervisor keeps
         retrying in the background regardless.
         """
-        self._connected.clear()
+        self._reconnecting = True
+        self._drop_session()
         self._reload.set()
         await asyncio.wait_for(self._connected.wait(), timeout)
 
-    def notify_broken(self, exc: Exception) -> None:
-        """A forwarded call failed — assume the kept-alive session is dead and
-        reconnect. Spurious triggers are cheap: the reconnect drains first."""
-        if self._connected.is_set():
-            logger.warning(
-                {
-                    "message": "upstream call failed; reconnecting",
-                    "server": self.name,
-                    "error": str(exc),
-                }
-            )
-            self._connected.clear()
-            self._reload.set()
+    def notify_broken(self, exc: BaseException) -> None:
+        """A forwarded call failed: treat the session as dead and reconnect."""
+        self._reconnect(self._generation, str(exc) or type(exc).__name__)
+
+    def _reconnect(self, generation: int, reason: str) -> None:
+        """Start one reconnect for the session of ``generation``.
+
+        A second failure on the same session, from a concurrent call, does
+        nothing: the reconnect is already in progress, or already done.
+        """
+        if generation != self._generation or self.session is None:
+            return
+        self.reconnects += 1
+        self.last_reconnect_at = now_iso()
+        self.last_reconnect_reason = reason
+        logger.warning({"message": "upstream reconnecting", "server": self.name, "reason": reason})
+        self._reconnecting = True
+        self._drop_session()
+        self._reload.set()
+
+    def _drop_session(self) -> None:
+        self._connected.clear()
+        self.session = None
+        self._notify()
+
+    def _notify(self) -> None:
+        """Wake every call that waits for the session state to change."""
+        self._changed.set()
+        self._changed = asyncio.Event()
+
+    async def _wait_session(self, after: int | None = None) -> tuple[ClientSession, int]:
+        """Return the live session and its generation.
+
+        With ``after``, return only a session newer than that generation. Wait up
+        to ``SESSION_WAIT_S`` while a reconnect is in progress. Raise
+        ``UpstreamUnavailableError`` when there is no session and none is coming.
+        """
+        deadline = asyncio.get_running_loop().time() + SESSION_WAIT_S
+        while True:
+            session = self.session
+            if session is not None and (after is None or self._generation != after):
+                return session, self._generation
+            if not self._reconnecting and session is None:
+                raise UpstreamUnavailableError(
+                    f"upstream {self.label} is unavailable; try again later"
+                )
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise UpstreamUnavailableError(f"upstream {self.label} is reconnecting; try again")
+            changed = self._changed
+            try:
+                await asyncio.wait_for(changed.wait(), remaining)
+            except TimeoutError:
+                pass
+
+    async def _send(self, session: ClientSession, fn: Callable[[ClientSession], Awaitable[Any]]):
+        # The lock serializes calls (stdio is not safe interleaved) and is the
+        # drain barrier of a reconnect.
+        async with self._lock:
+            return await fn(session)
+
+    async def forward(
+        self,
+        fn: Callable[[ClientSession], Awaitable[Any]],
+        *,
+        repeatable: bool,
+    ) -> Any:
+        """Send one request to the upstream session, and recover a lost session.
+
+        When the upstream rejected the session id, the request did not run: the
+        gateway reconnects and sends it once more. When the transport closed,
+        the gateway reconnects, and sends it again only if ``repeatable`` (the
+        request changes nothing, such as a list). Any other error goes back to
+        the caller as it is. A second failure is ``UpstreamUnavailableError``.
+        """
+        session, generation = await self._wait_session()
+        try:
+            return await self._send(session, fn)
+        except ValidationError:
+            raise  # a result that does not match the schema; the session is fine
+        except Exception as exc:
+            kind = session_error_kind(exc)
+            if kind is None:
+                if not isinstance(exc, MCPError):
+                    # Not a JSON-RPC answer, so the transport is in doubt.
+                    self._reconnect(generation, str(exc) or type(exc).__name__)
+                raise
+            self._reconnect(generation, str(exc) or kind)
+            if kind == CLOSED and not repeatable:
+                raise UpstreamUnavailableError(
+                    f"upstream {self.label} closed the connection during the call, "
+                    "so the call may have run; it is reconnecting. Check before you try again"
+                ) from exc
+        session, generation = await self._wait_session(after=generation)
+        try:
+            return await self._send(session, fn)
+        except ValidationError:
+            raise
+        except Exception as exc:
+            kind = session_error_kind(exc)
+            if kind is None and isinstance(exc, MCPError):
+                raise
+            self._reconnect(generation, str(exc) or kind or type(exc).__name__)
+            raise UpstreamUnavailableError(
+                f"upstream {self.label} is reconnecting; try again"
+            ) from exc
 
     def _record_call(self, tool: str, duration_ms: float, status: str, error: str | None) -> None:
         """``on_call`` hook: attribute the completed call to the request identity
@@ -250,6 +412,8 @@ class Upstream:
                     )
                 self.disabled = reason
                 self.error = None
+                self._reconnecting = False
+                self._notify()
                 await self._reload.wait()
                 continue
             self.disabled = None
@@ -258,7 +422,9 @@ class Upstream:
                 await self._serve_once()
                 failures = 0
             except Exception as exc:  # noqa: BLE001 — reconnect, never die
-                self.mgr = None
+                self.session = None
+                self._reconnecting = False
+                self._notify()
                 self.error = str(exc)
                 delay = _RECONNECT_BACKOFF_S[min(failures, len(_RECONNECT_BACKOFF_S) - 1)]
                 failures += 1
@@ -275,6 +441,42 @@ class Upstream:
                 except TimeoutError:
                     pass
 
+    async def _ensure_mgr(self, caps: Any) -> None:
+        """Keep the downstream session manager, or replace it when the upstream
+        now has other capabilities. The manager runs in its own task, so it
+        outlives each upstream connection."""
+        key = (
+            bool(caps and caps.tools),
+            bool(caps and caps.resources),
+            bool(caps and caps.prompts),
+        )
+        if self.mgr is not None and self._mgr_caps == key:
+            return
+        server = build_upstream_server(self.name, self, caps, on_call=self._record_call)
+        mgr = StreamableHTTPSessionManager(app=server, stateless=True, json_response=False)
+        ready, stop = asyncio.Event(), asyncio.Event()
+
+        async def host() -> None:
+            async with mgr.run():
+                ready.set()
+                await stop.wait()
+
+        task = asyncio.create_task(host(), name=f"downstream-{self.name}")
+        await ready.wait()
+        await self._close_mgr()
+        self.mgr, self._mgr_caps, self._mgr_stop, self._mgr_task = mgr, key, stop, task
+
+    async def _close_mgr(self) -> None:
+        stop, task = self._mgr_stop, self._mgr_task
+        self.mgr = None
+        self._mgr_caps = self._mgr_stop = self._mgr_task = None
+        if stop is not None and task is not None:
+            stop.set()
+            await task
+            # The bound sessions belong to the manager that closed; drop them
+            # so the next request starts each caller fresh.
+            SESSIONS.clear_server(self.name)
+
     async def _serve_once(self) -> None:
         spec = self.spec
         async with AsyncExitStack() as stack:
@@ -283,17 +485,6 @@ class Upstream:
             )
             session = await stack.enter_async_context(ClientSession(read, write))
             init = await session.initialize()
-            server = build_upstream_server(
-                self.name,
-                session,
-                init.capabilities,
-                spec,
-                self._lock,
-                on_error=self.notify_broken,
-                on_call=self._record_call,
-            )
-            mgr = StreamableHTTPSessionManager(app=server, stateless=True, json_response=False)
-            await stack.enter_async_context(mgr.run())
 
             # Count the filtered tools now — validates the session works past
             # initialize and feeds /readyz and /admin/inventory.
@@ -315,22 +506,22 @@ class Upstream:
                         }
                     )
 
-            self.mgr = mgr
+            await self._ensure_mgr(init.capabilities)
+            self.session = session
+            self._generation += 1
+            self._reconnecting = False
             self.error = None
             self._idle.clear()
             self._connected.set()
+            self._notify()
             logger.info(
                 {"message": "upstream connected", "server": self.name, "tools": self.tool_count}
             )
             try:
                 await self._reload.wait()  # reload or stop (stop sets it too)
             finally:
-                self._connected.clear()
-                self.mgr = None
+                self._drop_session()
                 self._idle.set()
-                # The bound sessions belong to the manager that is closing; drop
-                # them so a reconnect starts each caller fresh.
-                SESSIONS.clear_server(self.name)
                 # Drain in-flight forwarded calls before closing the session; a
                 # hung call must not wedge the reload forever.
                 try:

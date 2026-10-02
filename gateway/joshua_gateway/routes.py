@@ -6,7 +6,8 @@ app authenticates the request with ``joshua_shared.fleet_auth`` (the matched
 ``JOSHUA_TOKEN_*`` key is the caller identity), checks the caller is allowed on
 MCP routes, attributes the request to a person, applies the per-server person
 gate, binds the person to the session, then forwards to the upstream session
-manager (503 while down).
+manager. A request that arrives while the upstream reconnects waits for it; an
+upstream that is down and not reconnecting is 503.
 
 The person comes from ``X-Joshua-Person`` and the role from ``X-Joshua-Role``,
 both trusted only from ``core``. The role is what the files server acts on. A server
@@ -152,8 +153,11 @@ async def _forward(up: Upstream, identity: str, attr, scope, receive, send) -> N
         role_ctx.set(attr.role),
     )
     try:
+        # During a reconnect the request goes on: the handler waits for the
+        # new upstream session. Only an upstream that is down and not
+        # reconnecting gets 503.
         mgr = up.mgr
-        if mgr is None:
+        if mgr is None or not up.serving:
             await _reject(send, 503, f"upstream {up.label} unavailable".encode())
             return
         await mgr.handle_request(_strip_session_header(scope), receive, send)
