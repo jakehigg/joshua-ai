@@ -20,6 +20,10 @@ with the images and the packaged chart, are at
   you run Joshua" says in plain words that a tool call Joshua makes is real
   and that the result is yours. Nothing in the software changes.
 
+- **`SECURITY.md` says how to report a vulnerability privately**, and what
+  counts as one. An issue on GitHub now starts from a template: a change or a
+  bug.
+
 ### Added
 
 - **A voice device with no wake clip can default to a person.** Set
