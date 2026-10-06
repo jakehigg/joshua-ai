@@ -1,7 +1,7 @@
 # Joshua
 
 > **Pre-release.** The interfaces, the config, and the data layout can change
-> between commits. Read `docs/CHANGELOG.md` before you update.
+> in any release. Read `docs/CHANGELOG.md` before you update.
 
 Joshua is a personal AI agent for one person or a small group of people who
 share it: a family, friends, a team. It ships as three containers from one
