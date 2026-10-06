@@ -827,7 +827,7 @@ GitHub has, in three read-only tools:
 |---|---|
 | `instance_version` | The build of the gateway, core, and channels: version, revision, ref, build time, and one `display` string. `mismatch` is true when the three differ. |
 | `instance_check_updates` | The latest release of joshua-ai and of joshua-addons. The relation of this instance to it: `up_to_date`, `behind`, `ahead`, `diverged`, or `unknown`. The changelog sections between the running version and the latest, with every "Upgrading from" part first. |
-| `instance_addons` | `installed`: every `mcp:` entry with its kind, status, tool count, and version. `available`: the catalog addons this instance does not run. `updates`: an installed addon with a newer release, or one that needs a newer joshua-ai. |
+| `instance_addons` | `installed`: every `mcp:` entry with its kind, status, tool count, and version. `available`: the catalog addons this instance does not run. `updates`: an installed addon with a newer release, or one that needs a newer joshua-ai. An installed upstream is matched to the catalog by what its server calls itself, not by its entry name in `mcp:`. |
 
 A release build compares its version with the latest. A branch build has no
 version. The tool then compares its commit with the latest release and says

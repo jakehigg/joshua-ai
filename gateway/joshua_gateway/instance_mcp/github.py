@@ -62,7 +62,8 @@ class Release:
 
 @dataclass(frozen=True)
 class CatalogAddon:
-    name: str
+    name: str  # the directory in joshua-addons
+    server: str  # what the addon's MCPServer calls itself; the name when the catalog says nothing
     summary: str
     image: str | None
     docs: str | None
@@ -171,6 +172,7 @@ def parse_catalog(text: str) -> list[CatalogAddon]:
         out.append(
             CatalogAddon(
                 name=str(item["name"]),
+                server=str(item.get("server") or item["name"]),
                 summary=str(item.get("summary") or ""),
                 image=_opt(item.get("image")),
                 docs=_opt(item.get("docs")),

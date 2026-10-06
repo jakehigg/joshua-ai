@@ -71,6 +71,10 @@ addons:
   - name: vinyl
     summary: The record collection.
     since: 2026.10.1
+  - name: mcp
+    server: joshua-mcp
+    summary: The wiki over MCP.
+    since: 2026.10.1
 """
 
 
@@ -263,8 +267,9 @@ async def test_a_network_error_is_one_line_and_no_retry() -> None:
 
 def test_a_catalog_parses_and_a_bad_entry_is_left_out() -> None:
     addons = parse_catalog(CATALOG + "  - summary: no name\n")
-    assert [a.name for a in addons] == ["hello", "pantry", "vinyl"]
+    assert [a.name for a in addons] == ["hello", "pantry", "vinyl", "mcp"]
     assert addons[1].requires_joshua_ai == "2026.12.1"
+    assert addons[3].server == "joshua-mcp" and addons[0].server == "hello"
 
 
 # -- the tools --------------------------------------------------------------------
@@ -375,12 +380,15 @@ async def test_addons_reports_installed_available_and_updates(member) -> None:
         entry("files", None, None, kind="builtin"),
         entry("pantry", "pantry", "2026.10.1"),
         entry("vinyl", "vinyl", "2026.11.1"),
+        entry("notes", "joshua-mcp", "2026.11.1"),
     )
     github = FakeGitHub(standard_pages())
     server = build_instance_server(fetch=github, settings=settings())
     body, content, is_error = await call(server, "instance_addons")
     assert not is_error
-    assert [e["name"] for e in body["installed"]] == ["files", "pantry", "vinyl"]
+    assert [e["name"] for e in body["installed"]] == ["files", "pantry", "vinyl", "notes"]
+    # The mcp addon is installed under the entry name "notes": its server calls
+    # itself joshua-mcp, which the catalog names as `server`.
     assert [a["name"] for a in body["available"]] == ["hello"]
     reasons = {(u["name"], u["reason"]) for u in body["updates"]}
     assert ("pantry", "a newer release of the addon exists") in reasons

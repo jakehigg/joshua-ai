@@ -296,11 +296,14 @@ async def _addons(fetch: Fetch, settings: Settings) -> types.CallToolResult:
     by_server_name = {e.server_name: e for e in installed if e.server_name}
     summaries: list[str] = []
     for addon in catalog:
-        have = by_server_name.get(addon.name)
+        # An installed upstream is matched by what its server calls itself,
+        # which the catalog names as `server` when it differs from the directory.
+        have = by_server_name.get(addon.server)
         if have is None:
             report["available"].append(
                 {
                     "name": addon.name,
+                    "server": addon.server,
                     "summary": "(see content)",
                     "docs": addon.docs,
                     "since": addon.since,
