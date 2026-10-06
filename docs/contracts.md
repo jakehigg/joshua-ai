@@ -203,7 +203,7 @@ it.
 | `ANY /<server>` and `/<server>/…` | `core` | MCP over streamable HTTP | the upstream's answer. `403` when the person may not use this server. `409` when a live session changes person. `503` when the upstream is down and not reconnecting. See below for a lost upstream session. |
 | `POST /admin/reload` | `ADMIN_CALLERS` | `{"server": name}` or empty | `{"reloaded": {…}, "failed": {…}}`, `502` when one failed |
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
-| `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
+| `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. An external upstream has `server_name` and `server_version`, what it said at `initialize`; both are null while it is down, and a builtin has neither. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
 | `POST /admin/mcp/install` | `ADMIN_CALLERS` | `{"server": name, "reinstall": bool}` | `{"server", "package", "resolved", "installed_at", "reconnected": […]}`. `404` for a server with no `package`, `502` with a one-line `error` when the install failed. |
 
 When an upstream loses its session, core's session to the gateway continues.

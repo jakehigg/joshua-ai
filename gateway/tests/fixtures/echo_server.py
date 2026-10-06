@@ -3,8 +3,9 @@
 It exposes three tools: ``echo`` (returns its ``message``), ``secret_tool`` (the
 allowlist tests keep it out of ``tools/list`` and reject it at call time), and
 ``whoami`` (returns the ``ECHO_IDENTITY`` env var, so the identities tests can see
-which per-person credential the instance was started with). Run it over stdio:
-``python echo_server.py``.
+which per-person credential the instance was started with). ``ECHO_VERSION``, when
+set, is the version the server reports in ``serverInfo`` at ``initialize``, the
+way an addon reports its release. Run it over stdio: ``python echo_server.py``.
 """
 
 from __future__ import annotations
@@ -62,7 +63,12 @@ async def on_call_tool(ctx, params):
 
 
 async def main() -> None:
-    server = Server("echo", on_list_tools=on_list_tools, on_call_tool=on_call_tool)
+    server = Server(
+        "echo",
+        version=os.environ.get("ECHO_VERSION", ""),
+        on_list_tools=on_list_tools,
+        on_call_tool=on_call_tool,
+    )
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
 

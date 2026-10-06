@@ -26,6 +26,12 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **The inventory names each upstream's own name and version.** Every MCP
+  server says what it is when the gateway connects, and an addon puts its
+  release there. `GET /admin/inventory` now shows `server_name` and
+  `server_version` for each external upstream, so an operator can see which
+  release of an addon the gateway talks to.
+
 - **A voice device with no wake clip can default to a person.** Set
   `channels.voice.device_defaults` to map a device id to a person id. A device
   listed there speaks for that person on any turn that names no speaker, and

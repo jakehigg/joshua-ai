@@ -121,6 +121,10 @@ class Upstream:
         self.error: str | None = None
         self.tool_count: int | None = None
         self.tools: list[str] = []
+        # What the upstream says it is, from the `serverInfo` of its `initialize`
+        # result. An addon puts its release version here. None while down.
+        self.server_name: str | None = None
+        self.server_version: str | None = None
         # A `package` entry: the install record once it is in the store, and the
         # two transient states the supervisor passes through.
         self.install: dict[str, Any] | None = None
@@ -253,6 +257,8 @@ class Upstream:
     def _drop_session(self) -> None:
         self._connected.clear()
         self.session = None
+        self.server_name = None
+        self.server_version = None
         self._notify()
 
     def _notify(self) -> None:
@@ -485,6 +491,9 @@ class Upstream:
             )
             session = await stack.enter_async_context(ClientSession(read, write))
             init = await session.initialize()
+            info = init.server_info
+            self.server_name = (info.name or None) if info else None
+            self.server_version = (info.version or None) if info else None
 
             # Count the filtered tools now — validates the session works past
             # initialize and feeds /readyz and /admin/inventory.

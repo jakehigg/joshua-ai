@@ -169,6 +169,12 @@ def _package_fields(spec: ServerSpec, instances: list[Upstream]) -> dict[str, An
     }
 
 
+def _server_fields(up: Upstream) -> dict[str, Any]:
+    """What the upstream said it is at ``initialize``: its name and its version.
+    An addon reports its release here. Both are None while the upstream is down."""
+    return {"server_name": up.server_name, "server_version": up.server_version}
+
+
 def _reconnect_fields(up: Upstream) -> dict[str, Any]:
     """How often this connection lost its upstream session, and when it last did."""
     return {
@@ -207,6 +213,7 @@ async def admin_inventory(request: Request) -> JSONResponse:
                     "person": up.person,
                     "status": up.status,
                     "tool_count": up.tool_count,
+                    **_server_fields(up),
                     **_reconnect_fields(up),
                 }
                 for up in instances
@@ -228,12 +235,17 @@ async def admin_inventory(request: Request) -> JSONResponse:
                 }
             )
         elif spec.has_identities:
+            # One upstream program runs for every person, so the first instance
+            # that answered speaks for the server's name and version.
+            known = next((up for up in instances if up.server_name), None)
             entry.update(
                 {
                     "transport": spec.transport,
                     "status": _server_status(instances),
                     "tools": sorted({t for up in instances for t in up.tools}),
                     "error": next((up.error for up in instances if up.error), None),
+                    "server_name": known.server_name if known else None,
+                    "server_version": known.server_version if known else None,
                 }
             )
         else:
@@ -244,6 +256,7 @@ async def admin_inventory(request: Request) -> JSONResponse:
                     "status": up.status,
                     "tools": up.tools,
                     "error": up.error,
+                    **_server_fields(up),
                     **_reconnect_fields(up),
                 }
             )
