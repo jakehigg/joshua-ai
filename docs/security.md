@@ -422,3 +422,22 @@ other's shared files on one instance.
   credential. Keep `.env` private.
 - A `package` MCP server runs in the gateway's container with no sandbox. See
   [Package MCP servers](#package-mcp-servers).
+
+## What you accept when you run Joshua
+
+Joshua is an agent. It acts through the tools you give it. With the right
+servers in `mcp:`, it can open a door lock, send a message, spend money, or
+run code. A model can misread a request, a page, or a photograph, and a tool call
+it makes is real.
+
+You choose every server, every tool on an allowlist, and every person in
+`people`. The result of a tool call is yours. Keep a tool that can do harm off
+the allowlist, or behind a person you trust. Read each server's documentation
+before you add it.
+
+Memory can be wrong or stale. An answer can be wrong. Joshua promises nothing
+about correctness, availability, or privacy beyond what this documentation
+describes and the tests prove.
+
+The software is free and comes with ABSOLUTELY NO WARRANTY. See `LICENSE`,
+sections 15 and 16.

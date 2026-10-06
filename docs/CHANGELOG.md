@@ -15,6 +15,11 @@ with the images and the packaged chart, are at
   longer marked as a pre-release on GitHub. The interfaces can still change in
   any release, so read this page before you update.
 
+- **The README and `docs/security.md` say what the license says.** The
+  software comes with no warranty, and the new section "What you accept when
+  you run Joshua" says in plain words that a tool call Joshua makes is real
+  and that the result is yours. Nothing in the software changes.
+
 ### Added
 
 - **A voice device with no wake clip can default to a person.** Set
