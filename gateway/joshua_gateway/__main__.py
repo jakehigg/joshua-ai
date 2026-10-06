@@ -1,7 +1,7 @@
 import sys
 
 import uvicorn
-from joshua_shared import config, log
+from joshua_shared import build_info, config, log
 from joshua_shared.fleet_auth import load_fleet_tokens
 
 from joshua_gateway.cli import mcp_command
@@ -28,7 +28,8 @@ def main(argv: list[str] | None = None) -> None:
     ``docker compose exec gateway python -m joshua_gateway mcp check``.
     """
     args = sys.argv[1:] if argv is None else argv
-    log.configure_from_env("joshua-gateway")
+    logger = log.configure_from_env("joshua-gateway")
+    build_info.log_build(logger, "gateway")
     if args and args[0] == "mcp":
         raise SystemExit(mcp_command(args[1:]))
     if args:

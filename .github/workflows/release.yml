@@ -66,6 +66,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - id: date
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -73,11 +75,18 @@ jobs:
           context: .
           file: ${{ matrix.member }}/Dockerfile
           platforms: ${{ matrix.platform.name }}
+          # The image reports these on GET /v1/version and in its start log.
+          build-args: |
+            JOSHUA_BUILD_VERSION=${{ needs.version.outputs.version }}
+            JOSHUA_BUILD_REVISION=${{ github.sha }}
+            JOSHUA_BUILD_REF=v${{ needs.version.outputs.version }}
+            JOSHUA_BUILD_DATE=${{ steps.date.outputs.date }}
           # The label links the package to this repository, so the package page
           # shows the source and can inherit the repository visibility.
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=AGPL-3.0-or-later
           outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/joshua-ai-${{ matrix.member }},push-by-digest=true,name-canonical=true,push=true
           # One cache for each image and each architecture. A shared scope makes

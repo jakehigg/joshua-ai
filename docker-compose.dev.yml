@@ -10,24 +10,41 @@
 # The builds are tagged `joshua-ai-<component>:dev`, so they never replace a
 # release on your machine. `make up` still runs the release, and `make up-dev`
 # still runs your build. Nothing here changes docker-compose.yml.
+#
+# `make up-dev` passes the commit and the branch of the checkout as build
+# arguments, so your build reports itself on GET /v1/version and in its start
+# log, as `branch-<name>@<sha>`. A bare `docker compose build` passes none and
+# the build reports `dev`.
 services:
   gateway:
     image: joshua-ai-gateway:dev
     build:
       context: .
       dockerfile: gateway/Dockerfile
+      args:
+        JOSHUA_BUILD_REVISION: ${JOSHUA_BUILD_REVISION:-}
+        JOSHUA_BUILD_REF: ${JOSHUA_BUILD_REF:-}
+        JOSHUA_BUILD_DATE: ${JOSHUA_BUILD_DATE:-}
 
   core:
     image: joshua-ai-core:dev
     build:
       context: .
       dockerfile: core/Dockerfile
+      args:
+        JOSHUA_BUILD_REVISION: ${JOSHUA_BUILD_REVISION:-}
+        JOSHUA_BUILD_REF: ${JOSHUA_BUILD_REF:-}
+        JOSHUA_BUILD_DATE: ${JOSHUA_BUILD_DATE:-}
 
   channels:
     image: joshua-ai-channels:dev
     build:
       context: .
       dockerfile: channels/Dockerfile
+      args:
+        JOSHUA_BUILD_REVISION: ${JOSHUA_BUILD_REVISION:-}
+        JOSHUA_BUILD_REF: ${JOSHUA_BUILD_REF:-}
+        JOSHUA_BUILD_DATE: ${JOSHUA_BUILD_DATE:-}
 
   # The viewer is a second entrypoint in the gateway image.
   viewer:
@@ -35,3 +52,7 @@ services:
     build:
       context: .
       dockerfile: gateway/Dockerfile
+      args:
+        JOSHUA_BUILD_REVISION: ${JOSHUA_BUILD_REVISION:-}
+        JOSHUA_BUILD_REF: ${JOSHUA_BUILD_REF:-}
+        JOSHUA_BUILD_DATE: ${JOSHUA_BUILD_DATE:-}

@@ -47,6 +47,10 @@ formatter replaces it with `[REDACTED]`. Health-check requests are not logged.
 `LOG_LEVEL` in `.env` sets the level. The default is `INFO`. `DEBUG` shows each
 tool call and each retrieval decision.
 
+The first line of each container is its build: `version`, `revision`, `ref`,
+`built_at`, and `display`. A release shows `2026.10.1`. A branch build has no
+version and shows `branch-main@10ef1a4`: the branch and the commit.
+
 Message bodies are not logged at `INFO`. To read what a person said, use the
 transcript route below.
 
@@ -176,6 +180,19 @@ grep JOSHUA_VERSION .env
 
 There is no `latest` tag on the registry. Every image reference names one
 version, so a start always gets the same three images.
+
+Each container also knows its own build. The start log names it, and
+`GET /v1/version` returns it to the `gateway` and `laptop` identities:
+
+```
+curl -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" http://127.0.0.1:8081/v1/version
+```
+
+A release answers with its version. A branch build answers with an empty
+version, the commit in `revision`, and `branch-<name>` in `ref`, because a
+branch build is a commit and not a release. A build with no build arguments,
+such as a plain `docker compose build`, answers `dev`; `make up-dev` passes the
+commit and the branch of your checkout.
 
 ## Update Joshua
 

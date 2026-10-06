@@ -48,6 +48,8 @@ jobs:
         run: |
           branch=$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-100)
           echo "tags=${IMAGE}:${GITHUB_SHA},${IMAGE}:branch-${branch}" >> "$GITHUB_OUTPUT"
+          echo "ref=branch-${branch}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
@@ -56,6 +58,13 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          # A branch build has a revision and a ref, and no version. The image
+          # reports them on GET /v1/version and in its start log.
+          build-args: |
+            JOSHUA_BUILD_VERSION=
+            JOSHUA_BUILD_REVISION=${{ github.sha }}
+            JOSHUA_BUILD_REF=${{ steps.tags.outputs.ref }}
+            JOSHUA_BUILD_DATE=${{ steps.tags.outputs.date }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}

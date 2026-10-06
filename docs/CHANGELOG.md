@@ -26,6 +26,13 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Each container knows its own version.** The release and branch builds
+  stamp the version, the commit, the ref, and the build time into the image.
+  The first log line of each container names them, and `GET /v1/version`
+  returns them to the `gateway` and `laptop` identities. A release shows its
+  version. A branch build shows `branch-<name>@<commit>`, because it is not a
+  release. `make up-dev` stamps your checkout's commit and branch.
+
 - **The inventory names each upstream's own name and version.** Every MCP
   server says what it is when the gateway connects, and an addon puts its
   release there. `GET /admin/inventory` now shows `server_name` and

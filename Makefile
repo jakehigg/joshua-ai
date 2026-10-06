@@ -70,8 +70,13 @@ up: joshua.yaml
 pull:
 	$(COMPOSE) pull
 
-# Run your build of this checkout. Rebuilds what changed.
+# Run your build of this checkout. Rebuilds what changed. The commit and the
+# branch go in as build arguments, so the build reports itself on
+# GET /v1/version as branch-<name>@<sha>.
 up-dev: joshua.yaml
+	JOSHUA_BUILD_REVISION=$$(git rev-parse HEAD) \
+	JOSHUA_BUILD_REF=branch-$$(git rev-parse --abbrev-ref HEAD) \
+	JOSHUA_BUILD_DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
 	$(DEV) up -d --build
 	$(MAKE) --no-print-directory ps
 

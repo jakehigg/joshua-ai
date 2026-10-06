@@ -76,6 +76,7 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok": bool, "checks": {<channel>: {"ok": bool, …}}}`. Always `200`; `ok` reports the pollers, not readiness. The `voice` entry reports `thread` and a count of held identities. |
+| `GET /v1/version` | `gateway`, `laptop` | | `{"container": "channels", "version", "revision", "ref", "built_at", "display"}`. A release has a `version`; a branch build has an empty one and a `display` such as `branch-main@10ef1a4`. |
 | `POST /v1/deliver` | `core` | DeliverRequest | `200 {"delivered": true, "parts": n}`, `400 bad_request` or `invalid_attachment`, `404 unknown_channel`, `502 send_failed` |
 | `GET /v1/channels/resolve?ref=` | `core` | | `200` ResolveResponse, `404 unknown_channel` |
 | `GET /v1/channels/refusals?limit=` | `core` | | `200 {"refusals": [{"channel_type", "address", "chat_id", "reason", "at"}]}`. The handle and the channel, never a message body. |
@@ -101,6 +102,7 @@ Port 8000 in the container. Compose publishes it on the host as
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. |
+| `GET /v1/version` | `gateway`, `laptop` | | `{"container": "core", "version", "revision", "ref", "built_at", "display"}`, as on channels. |
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
@@ -200,6 +202,7 @@ it.
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok": bool, "connected", "errored", "installing", "disabled", "total"}`, counts only. Always `200`; `ok` reports the upstreams, not readiness. `installing` is a package install still running; `disabled` is an entry whose credential is empty. Neither is an error. |
+| `GET /v1/version` | `gateway`, `laptop` | | `{"container": "gateway", "version", "revision", "ref", "built_at", "display"}`, as on channels. |
 | `ANY /<server>` and `/<server>/…` | `core` | MCP over streamable HTTP | the upstream's answer. `403` when the person may not use this server. `409` when a live session changes person. `503` when the upstream is down and not reconnecting. See below for a lost upstream session. |
 | `POST /admin/reload` | `ADMIN_CALLERS` | `{"server": name}` or empty | `{"reloaded": {…}, "failed": {…}}`, `502` when one failed |
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
