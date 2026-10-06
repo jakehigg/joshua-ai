@@ -316,6 +316,15 @@ pull request. `CONTRIBUTING.md` has the release procedure.
 moves that section under `## <version> - <date>`, with an "Upgrading from"
 part when a person must act.
 
+**Build info.** The image is the unit that has a version; the packages keep
+`__version__ = "0.0.0"`. The workflows pass `JOSHUA_BUILD_VERSION`,
+`JOSHUA_BUILD_REVISION`, `JOSHUA_BUILD_REF`, and `JOSHUA_BUILD_DATE` into each
+Dockerfile, which exports them. `joshua_shared.build_info` reads them. A
+release has a version; a branch build has a revision and a ref and no version;
+a build with none is `dev`. Each container logs its build at start and answers
+`GET /v1/version` to `gateway` and `laptop`. Never read a version from a
+package or a file; read `build_info`.
+
 ## Workflow
 
 - One branch per issue, named `<issue>-<slug>`. One PR per issue. Squash merge.

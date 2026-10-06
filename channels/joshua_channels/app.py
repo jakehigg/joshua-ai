@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from joshua_shared import build_info
 from joshua_shared import config as config_module
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger, install_healthcheck_filter
@@ -264,6 +265,9 @@ def build_app(context: ChannelsContext | None = None) -> FastAPI:
     app = FastAPI(title="joshua-channels", lifespan=lifespan)
     app.add_api_route("/healthz", healthz, methods=["GET"])
     app.add_api_route("/readyz", readyz, methods=["GET"])
+    app.add_api_route(
+        build_info.VERSION_PATH, build_info.version_endpoint("channels"), methods=["GET"]
+    )
     app.include_router(deliver.build_router())
     app.include_router(webhooks.build_events_router())
     app.include_router(build_webhook_router())

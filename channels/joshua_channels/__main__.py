@@ -1,13 +1,14 @@
 import sys
 
 import uvicorn
-from joshua_shared import config, log
+from joshua_shared import build_info, config, log
 
 from joshua_channels.app import app
 
 
 def main() -> None:
-    log.configure_from_env("joshua-channels")
+    logger = log.configure_from_env("joshua-channels")
+    build_info.log_build(logger, "channels")
     try:
         config.load()
     except config.ConfigError as exc:

@@ -1,7 +1,7 @@
 import sys
 
 import uvicorn
-from joshua_shared import config, log
+from joshua_shared import build_info, config, log
 
 
 def main() -> None:
@@ -18,7 +18,8 @@ def main() -> None:
 
     from joshua_core.main import app
 
-    log.configure_from_env("joshua-core")
+    logger = log.configure_from_env("joshua-core")
+    build_info.log_build(logger, "core")
     try:
         config.load()
     except config.ConfigError as exc:

@@ -20,7 +20,7 @@ import asyncio
 from collections import Counter
 from contextlib import asynccontextmanager
 
-from joshua_shared import config
+from joshua_shared import build_info, config
 from joshua_shared.fleet_auth import load_fleet_tokens
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from starlette.applications import Starlette
@@ -291,6 +291,7 @@ def build_app() -> Starlette:
         routes=[
             Route("/healthz", healthz),
             Route("/readyz", readyz),
+            Route(build_info.VERSION_PATH, build_info.version_endpoint("gateway")),
             Route("/admin/reload", admin_reload, methods=["POST"]),
             Route("/admin/calls", admin_calls),
             Route("/admin/inventory", admin_inventory),

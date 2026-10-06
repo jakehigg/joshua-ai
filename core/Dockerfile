@@ -59,6 +59,19 @@ COPY --from=builder --chown=1000:1000 /app/core /app/core
 # Core publishes these into wiki/joshua/ on the data volume at start.
 COPY --from=builder --chown=1000:1000 /app/docs /app/docs
 ENV PATH="/app/.venv/bin:$PATH"
+# What the image knows about itself. The workflows pass these; a plain build
+# has none and reports `dev`. `joshua_shared.build_info` reads them, the start
+# log names them, and `GET /v1/version` returns them.
+ARG JOSHUA_BUILD_VERSION=""
+ARG JOSHUA_BUILD_REVISION=""
+ARG JOSHUA_BUILD_REF=""
+ARG JOSHUA_BUILD_DATE=""
+ENV JOSHUA_BUILD_VERSION=$JOSHUA_BUILD_VERSION \
+    JOSHUA_BUILD_REVISION=$JOSHUA_BUILD_REVISION \
+    JOSHUA_BUILD_REF=$JOSHUA_BUILD_REF \
+    JOSHUA_BUILD_DATE=$JOSHUA_BUILD_DATE
+LABEL org.opencontainers.image.version=$JOSHUA_BUILD_VERSION \
+      org.opencontainers.image.revision=$JOSHUA_BUILD_REVISION
 USER 1000
 EXPOSE 8000
 ENTRYPOINT ["python", "-m", "joshua_core"]

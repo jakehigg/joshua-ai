@@ -16,8 +16,8 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from joshua_shared import build_info, layout, wikigit
 from joshua_shared import config as config_module
-from joshua_shared import layout, wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger, install_healthcheck_filter
 
@@ -350,6 +350,7 @@ def build_app() -> FastAPI:
     app = FastAPI(title="joshua-core", lifespan=lifespan)
     app.add_api_route("/healthz", healthz, methods=["GET"])
     app.add_api_route("/readyz", readyz, methods=["GET"])
+    app.add_api_route(build_info.VERSION_PATH, build_info.version_endpoint("core"), methods=["GET"])
     app.include_router(build_router())
     app.include_router(build_admin_router())
     app.include_router(build_search_router())
