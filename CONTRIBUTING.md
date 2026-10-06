@@ -146,6 +146,31 @@ The linter prints violations per 100 words. Aim for less than 2.5 on prose and
 near 0 on a procedure. The score measures form, not truth. Check the facts
 yourself.
 
+## Version numbers
+
+The version is a date, `YYYY.M.N`: the year, the month with no leading zero,
+and the sequence of the release in that month, from 1. The maintainer sets
+every number and cuts every release. `CLAUDE.md`, "Versioning and releases",
+has the rule and the files that hold the version.
+
+## Cut a release (maintainer)
+
+1. Choose the number: `YYYY.M.N`, the next free N in this month.
+2. On a branch, set the version in every file that
+   `scripts/check_chart_version.py` names. Run `make lint`.
+3. In `docs/CHANGELOG.md`, move the content of `## Unreleased` under
+   `## <version> - <date>`. Write the part "Upgrading from <previous>" when a
+   person must act. Leave an empty `## Unreleased`.
+4. Open the pull request with the template. Merge it.
+5. Tag the merge commit `v<version>`. Push the tag. The release workflow
+   builds the images, packages the chart, and publishes the release.
+6. Open the release page. Check the images for both architectures, the chart,
+   and the notes. Ask Joshua "is there an update" on an instance that runs the
+   previous release. Confirm that it names the new one.
+7. On a compose host, set `JOSHUA_VERSION` in `.env`. Run `make pull` and
+   `make up`. On Kubernetes, change the chart version or the branch that the
+   Application follows.
+
 ## Report a bug or a vulnerability
 
 A bug is an issue with the **Bug** template. It asks for the version, the
