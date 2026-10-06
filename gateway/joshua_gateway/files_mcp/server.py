@@ -122,12 +122,17 @@ def data_root() -> Path:
 def build_builtin_server(name: str, options: dict[str, Any]) -> Server:
     """Build the in-process ``Server`` for a builtin catalog entry.
 
-    Only ``files`` exists today; ``viewer`` and ``research`` are reserved names.
+    ``files`` and ``instance`` exist; ``viewer`` and ``research`` are reserved
+    names.
     """
     if name == "files":
         from joshua_shared import config
 
         return build_files_server(data_root(), timezone=config.load().timezone)
+    if name == "instance":
+        from joshua_gateway.instance_mcp.server import build_instance_server
+
+        return build_instance_server()
     raise ValueError(f"unknown builtin server: {name}")
 
 

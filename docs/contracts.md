@@ -196,7 +196,8 @@ the name the front end sent, so an operator can add that person.
 ## gateway
 
 Port 8000 in the container. Compose does not publish it. Only `core` reaches
-it.
+it. The gateway itself calls `GET /v1/version` on core and channels, at
+`CORE_URL` and `CHANNELS_URL`, for the `instance` builtin.
 
 | Route | Callers | Request | Reply |
 |---|---|---|---|

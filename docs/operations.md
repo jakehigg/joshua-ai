@@ -213,6 +213,15 @@ is replaced at each start.
 Read `CHANGELOG.md` before an update. It names every change that a person who
 runs Joshua can see.
 
+A member can ask Joshua instead: "what version are you running" and "is there
+an update". The `instance` builtin reads the release list and the changelog on
+GitHub when asked, and Joshua names the newest release, says how far behind
+this instance is, and reads out what a person must do. "What addons can I add"
+lists the catalog of joshua-addons. Joshua reports; the update is still yours
+to run. A person who wants a routine asks for a weekly scheduled check, and
+the scheduler asks the same tool. `updates.enabled: false` in `joshua.yaml`
+turns the checks off.
+
 ### Run the newest main
 
 Set `JOSHUA_VERSION=branch-main` in `.env`, then:

@@ -208,8 +208,8 @@ links the platform binary, so the install passes
 Never add `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebSearch`, or
 `WebFetch` to the agent's tool list. `engine/agent.py` passes `tools=[]` and
 asserts it. Every capability is an MCP server: `recall`, `internet`,
-`scheduling`, and `registration` inside `core`, and `files` plus every
-configured upstream behind `gateway`. If a task seems to need a built-in tool,
+`scheduling`, and `registration` inside `core`, and `files`, `instance`, and
+every configured upstream behind `gateway`. If a task seems to need a built-in tool,
 the task is wrong. Open an issue.
 
 **One exception, and it is not the agent.** An ephemeral worker may hold a web
@@ -324,6 +324,14 @@ release has a version; a branch build has a revision and a ref and no version;
 a build with none is `dev`. Each container logs its build at start and answers
 `GET /v1/version` to `gateway` and `laptop`. Never read a version from a
 package or a file; read `build_info`.
+
+**The `instance` builtin** (`gateway/joshua_gateway/instance_mcp/`) is a
+capability like `files`: the agent still has no built-in tool. It reports the
+build, the latest release, the changelog, and the addon catalog, and it never
+acts. It reads two fixed hosts, `api.github.com` and `raw.githubusercontent.com`,
+only when a tool is called, with no token and no cache. Add a source only
+with a fixed host, a reason on the allowlist in `scripts/check_public_repo.py`,
+and a wrapped result. Never add a tool that updates, installs, or restarts.
 
 ## Workflow
 

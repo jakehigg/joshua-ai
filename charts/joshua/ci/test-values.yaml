@@ -9,6 +9,11 @@ config: |
       role: member
       handles:
         telegram: "123456789"
+  mcp:
+    files:
+      kind: builtin
+    instance:
+      kind: builtin
 persistence:
   storageClass: ""
   volumeName: joshua-data-pv

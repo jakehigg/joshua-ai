@@ -35,6 +35,7 @@ from joshua_gateway.admin import (
     admin_reload,
 )
 from joshua_gateway.catalog import ServerSpec, build_catalog, instance_name, instance_specs
+from joshua_gateway.instance_mcp import inventory
 from joshua_gateway.routes import UpstreamRoute, make_asgi, make_multi_asgi
 from joshua_gateway.upstream import Upstream
 
@@ -97,6 +98,9 @@ def _install_catalog(app: Starlette) -> list[Upstream]:
     specs = build_catalog(config.load())
     app.state.specs = specs
     app.state.upstreams = {}
+    # The instance builtin reads what this gateway runs. It reads the live
+    # state at each call, so a reload is reflected without a rebind.
+    inventory.set_provider(lambda: inventory.snapshot(app.state.specs, app.state.upstreams))
     started: list[Upstream] = []
     for name, spec in specs.items():
         made = _new_instances(app, name, spec)

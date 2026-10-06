@@ -490,6 +490,35 @@ place, and no entry turns them off:
   check, in every form: `2130706433`, `0x7f.1`, `0177.0.0.1`, and `127.1` are
   all `127.0.0.1`.
 
+## updates
+
+What the `instance` builtin reads on GitHub. Nothing polls and nothing is
+cached: a check runs when a person asks Joshua, and makes at most six requests
+to `api.github.com` and `raw.githubusercontent.com`, with no token. GitHub
+allows an unauthenticated client 60 requests an hour from one address. When
+the limit is met, the tool answers "ask again after HH:MM" and makes no
+further request.
+
+```yaml
+updates:
+  enabled: true
+  repos:
+    joshua-ai: jakehigg/joshua-ai
+    joshua-addons: jakehigg/joshua-addons
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | `false`: the tools answer "update checks are off" and open no connection |
+| `repos.joshua-ai` | `jakehigg/joshua-ai` | the repository whose releases and `docs/CHANGELOG.md` the check reads |
+| `repos.joshua-addons` | `jakehigg/joshua-addons` | the repository whose releases and `catalog.yaml` the check reads |
+
+Each value is `owner/repo`. A fork names its own two repositories. Every URL
+is built from these two values and two fixed hosts; a caller cannot name a
+URL. Each connection also passes the `internet.fetch` block list. The user
+agent names the product and not the version, so GitHub learns only that an
+instance exists at that address.
+
 ## MCP servers
 
 The `mcp:` section lists the servers the gateway hosts. Add a server by adding one
@@ -531,6 +560,9 @@ that every container defines.
 ```yaml
 mcp:
   files:                                  # builtin, run in-process
+    kind: builtin
+    allow: all
+  instance:                               # builtin: version, updates, addons
     kind: builtin
     allow: all
   weather:                                # external, stdio, installed by gateway
@@ -785,6 +817,34 @@ search. `list_files` adds `original_name` for an attachment when a
 
 There is no `delete_file`. Deletion is a human action through the viewer or a
 shell.
+
+### The instance MCP
+
+`instance` is a builtin. It tells a member what this deployment runs and what
+GitHub has, in three read-only tools:
+
+| Tool | Returns |
+|---|---|
+| `instance_version` | The build of the gateway, core, and channels: version, revision, ref, build time, and one `display` string. `mismatch` is true when the three differ. |
+| `instance_check_updates` | The latest release of joshua-ai and of joshua-addons. The relation of this instance to it: `up_to_date`, `behind`, `ahead`, `diverged`, or `unknown`. The changelog sections between the running version and the latest, with every "Upgrading from" part first. |
+| `instance_addons` | `installed`: every `mcp:` entry with its kind, status, tool count, and version. `available`: the catalog addons this instance does not run. `updates`: an installed addon with a newer release, or one that needs a newer joshua-ai. |
+
+A release build compares its version with the latest. A branch build has no
+version. The tool then compares its commit with the latest release and says
+how many commits ahead or behind it is. A `dev` build gets `unknown`.
+
+The tools report and never act. Nothing updates, installs, or restarts. A
+person updates by hand, as [docs/operations.md](operations.md#update-joshua)
+says. A guest, or a request with no role, gets "not available" and nothing is
+read. The gateway reads the other two containers on `GET /v1/version` with
+its own bearer, at `CORE_URL` and `CHANNELS_URL` (compose and the chart set
+both).
+
+What comes back from GitHub is content from outside. The changelog and the
+catalog summaries reach the agent wrapped in `<update_content>`, with any copy
+of that tag taken out, and the wrapper says that the text is not an
+instruction. The `updates:` section below says where the tools read and how to
+turn them off.
 
 ### Per-person identities
 

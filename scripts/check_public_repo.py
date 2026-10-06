@@ -69,6 +69,7 @@ RESERVED_NAMES = frozenset({"localhost", "example.com", "example.net", "example.
 ALLOWED_HOSTS = {
     "github.com": "the repository, the releases, and the workflows",
     "raw.githubusercontent.com": "a file fetched from a repository",
+    "api.github.com": "the release and compare API the instance builtin reads",
     "ghcr.io": "the container registry the images ship from",
     "docs.astral.sh": "the uv documentation",
     "pypi.org": "the Python package index",

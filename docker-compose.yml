@@ -72,6 +72,9 @@ services:
       <<: [*fleet-tokens, *runtime-vars]
       JOSHUA_CONFIG: /etc/joshua/joshua.yaml
       ADMIN_CALLERS: laptop
+      # The instance builtin reads GET /v1/version on the other two containers.
+      CORE_URL: http://core:8000
+      CHANNELS_URL: http://channels:8000
     # Every upstream credential an `mcp:` entry names with `${VAR:-}`: one
     # `NAME=value` line per variable in `.env.gateway`, which is yours and is
     # gitignored. It is optional, so a stack with no upstream credential starts

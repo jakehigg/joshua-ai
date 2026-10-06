@@ -43,7 +43,7 @@ _PERSON_ID_RE = PERSON_ID_RE
 MCP_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,31}$"
 _MCP_NAME_RE = re.compile(MCP_NAME_PATTERN)
 # Builtin servers run in-process in the gateway. Only these names are valid.
-BUILTIN_SERVER_NAMES = ("files", "viewer", "research")
+BUILTIN_SERVER_NAMES = ("files", "instance", "viewer", "research")
 MCP_TRANSPORTS = ("stdio", "http", "sse")
 # Memory source adapters the indexer can wire. ``files`` is the kernel and is
 # always active; the rest are optional and land with their own tickets.
@@ -508,6 +508,38 @@ class Internet(_Model):
     fetch: Fetch = Fetch()
 
 
+# `owner/repo` on GitHub. The instance builtin builds every URL from this.
+_GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
+
+
+class Updates(_Model):
+    """What the `instance` builtin reads on GitHub when a person asks for an update.
+
+    Nothing polls and nothing is cached: a check runs when a person asks
+    Joshua, and makes at most six requests to `api.github.com` and
+    `raw.githubusercontent.com`, with no token. `enabled: false` turns the
+    checks off and opens no connection; the tools then say so. A fork names
+    its own two repositories here.
+    """
+
+    enabled: bool = True
+    repos: dict[str, str] = {
+        "joshua-ai": "jakehigg/joshua-ai",
+        "joshua-addons": "jakehigg/joshua-addons",
+    }
+
+    @field_validator("repos")
+    @classmethod
+    def _check_repos(cls, value: dict[str, str]) -> dict[str, str]:
+        for key in ("joshua-ai", "joshua-addons"):
+            if key not in value:
+                raise ValueError(f"updates.repos must name '{key}'")
+        for key, repo in value.items():
+            if not _GITHUB_REPO_RE.match(repo):
+                raise ValueError(f"updates.repos.{key}: '{repo}' is not owner/repo")
+        return value
+
+
 class Wiki(_Model):
     """Whether Joshua keeps `/data/wiki` as a git repository.
 
@@ -681,6 +713,7 @@ class JoshuaConfig(_Model):
     memory: Memory = Memory()
     attachments: Attachments = Attachments()
     internet: Internet = Internet()
+    updates: Updates = Updates()
     wiki: Wiki = Wiki()
     mcp: dict[str, McpServer] = {}
     modules: list[str] = []

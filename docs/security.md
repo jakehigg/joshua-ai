@@ -439,5 +439,12 @@ Memory can be wrong or stale. An answer can be wrong. Joshua promises nothing
 about correctness, availability, or privacy beyond what this documentation
 describes and the tests prove.
 
+When a member asks about an update, the `instance` builtin reads the release
+list, the changelog, and the addon catalog on GitHub, from the gateway, with no
+token and no cache. GitHub then knows that an instance exists at your address.
+`updates.enabled: false` turns this off. The builtin reports and never acts:
+no tool updates, installs, or restarts anything, and a test holds its tool list
+to the three read-only names.
+
 The software is free and comes with ABSOLUTELY NO WARRANTY. See `LICENSE`,
 sections 15 and 16.

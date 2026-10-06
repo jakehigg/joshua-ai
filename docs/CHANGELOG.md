@@ -26,6 +26,19 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Ask Joshua what version it runs and whether there is an update.** A new
+  builtin, `instance`, gives a member three read-only tools: the build of the
+  three containers; the latest release of joshua-ai and joshua-addons, how far
+  this instance is from it, and the changelog between the two with every
+  "Upgrading from" part first; and the addons this instance runs, the ones in
+  the joshua-addons catalog it could add, and the installed addons that have a
+  newer release. It reads GitHub when asked, with no token and no cache, and
+  it changes nothing. Add `instance: {kind: builtin}` to `mcp:` in your
+  `joshua.yaml`, as `joshua.example.yaml` shows. The new `updates:` section
+  turns the checks off or points a fork at its own repositories. The gateway
+  reads the other two containers at `CORE_URL` and `CHANNELS_URL`, which
+  compose and the chart set.
+
 - **Each container knows its own version.** The release and branch builds
   stamp the version, the commit, the ref, and the build time into the image.
   The first log line of each container names them, and `GET /v1/version`

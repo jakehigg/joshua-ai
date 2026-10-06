@@ -45,6 +45,11 @@ spec:
               value: /data
             - name: ADMIN_CALLERS
               value: {{ .Values.gateway.adminCallers | quote }}
+            {{/* The instance builtin reads GET /v1/version on the other two. */}}
+            - name: CORE_URL
+              value: http://joshua-core:8000
+            - name: CHANNELS_URL
+              value: http://joshua-channels:8000
             {{/* Add an upstream credential as another key in secrets.gateway
                  when an MCP server in joshua.yaml refers to it as ${VAR}. */}}
             {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.gateway) | nindent 12 }}

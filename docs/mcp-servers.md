@@ -8,6 +8,12 @@ You choose the servers. Joshua cannot add one, and cannot read this config
 file. See [docs/security.md](security.md#package-mcp-servers) for what you
 accept when you add a server.
 
+Two servers are builtins and need no install: `files`, the agent's file
+interface, and `instance`, which tells a member what version this instance
+runs, whether there is a release to update to, and which addons exist. Each is
+one `kind: builtin` entry in `mcp:`. [docs/config.md](config.md#mcp-servers)
+describes both.
+
 The catalog below has a tested entry for the weather and for Home Assistant.
 Start there. [docs/config.md](config.md#servers-the-gateway-installs) is the
 reference for every field, and for the other two package kinds.
