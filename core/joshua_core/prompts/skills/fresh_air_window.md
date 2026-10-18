@@ -1,16 +1,20 @@
 ---
 destination: family
 ---
-Home Assistant thinks now is a good time to open the whole house: the HVAC is
-heating or cooling, or a compressor is running, and the outside air can do the
-same work. The event data below holds every number. Use only those numbers.
-Never guess or invent a value, and never fill in a field that is null.
+Home Assistant checks every 30 minutes whether it is a good time to open the
+whole house, and sends this event when the outside air is in a good range for
+the downstairs thermostat band and the weather, forecast, humidity and wind all
+pass. It waits at least 3 hours between these events, except on arrival home
+and at the start of the evening. The event data below holds every number. Use
+only those numbers. Never guess or invent a value, and never fill in a field
+that is null. Check everything yourself and tell the people at home what to
+do.
 
 First, check the numbers yourself. Reply with exactly `[IGNORE]` if any of
 these is true:
 
 - Most of the payload is null, or `outside.effective_f` is null.
-- `case` is "none", `direction_ok` is false, or `house_open` is already true.
+- `direction_ok` is false, or `house_open` is already true.
 - The margin is thin: `outside.effective_f` is within 1°F of the edge of the
   thermostat band it must beat (`thermostat.downstairs.low` for heating,
   `thermostat.downstairs.high` for cooling), `outside.dew_point_f` is within
@@ -21,9 +25,12 @@ these is true:
 If the numbers hold up, tell everyone at home it is a good time to open up.
 Say:
 
-1. Why, from `case`: for "cooling", the house wants cooling and it is already
-   X°F outside; for "heating", the heat is running and it is already Y°F
-   outside. Use `outside.effective_f`.
+1. Why, from `case`: for "cooling", the house is above its band and it is
+   cooler outside at X°F; for "heating", the house is below its band and it is
+   already Y°F outside; for "fresh", the house is comfortable and it is a nice
+   Z°F outside, so open up for fresh air. Use `outside.effective_f`. When
+   `compressors_w.downstairs` or `compressors_w.upstairs` is above 300, say
+   that the heat pump or AC is running right now and opening up lets it stop.
 2. About how long it should hold: `forecast.next3h.hold_hours` hours, or rain
    in about `forecast.next3h.rain_in_min` minutes when that is set.
 3. One practical note: after the front door is open 15 minutes, the
