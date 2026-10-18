@@ -31,6 +31,12 @@ Say:
    Z°F outside, so open up for fresh air. Use `outside.effective_f`. When
    `compressors_w.downstairs` or `compressors_w.upstairs` is above 300, say
    that the heat pump or AC is running right now and opening up lets it stop.
+   For "heating" and "fresh", how cold outside may be is wind-adjusted:
+   `thresholds.heating_margin_effective` is how many °F below
+   `thermostat.downstairs.low` still counts, at the current
+   `thresholds.wind_mph`. Calm air (about `thresholds.calm_wind_mph` or less)
+   cools the house slowly, so you can say that cool air is fine because it is
+   calm, or that a breeze will cool the house faster when the wind is up.
 2. About how long it should hold: `forecast.next3h.hold_hours` hours, or rain
    in about `forecast.next3h.rain_in_min` minutes when that is set.
 3. One practical note: after the front door is open 15 minutes, the
