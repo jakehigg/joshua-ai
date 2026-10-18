@@ -8,6 +8,15 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **A fourth fresh-air skill, `fresh_air_trajectory`, ships in the image.**
+  While the house is open, Home Assistant sends it when the downstairs is
+  about to reach, has reached, or is well past the heating or cooling
+  setpoint (`stage` = `approaching`, `hit`, `past`). Joshua tells the
+  `family` destination to close up before the heat or AC has to buy the
+  degrees back, and names the open doors and windows. The `fresh_air_window`
+  and `fresh_air_evening_check` skills now know the new
+  `inside.rate_f_per_h` and `inside.minutes_to_setpoint` fields.
+
 - **Three Home Assistant fresh-air skills ship in the image.** The named
   events `fresh_air_window`, `fresh_air_window_closing`, and
   `fresh_air_evening_check` now have skills in

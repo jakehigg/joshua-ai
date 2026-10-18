@@ -52,11 +52,18 @@ reach outside the skills directory.
 Put a file in `skills/`. You need no code change, no restart, and no config
 reload. Core reads the file when the event fires.
 
-The repository ships three Home Assistant skills in
+The repository ships four Home Assistant skills in
 `core/joshua_core/prompts/skills/`: `fresh_air_window`,
-`fresh_air_window_closing`, and `fresh_air_evening_check`. The event name is
-the file name. Each skill reads the fresh-air payload that Home Assistant sends
-and tells the people in the house when to open or close the windows.
+`fresh_air_window_closing`, `fresh_air_evening_check`, and
+`fresh_air_trajectory`. The event name is the file name. Each skill reads the
+fresh-air payload that Home Assistant sends and tells the people in the house
+when to open or close the windows. `fresh_air_trajectory` comes while the
+house is open, at most once per `stage`: `approaching` (the downstairs will
+reach the heating or cooling setpoint in `inside.minutes_to_setpoint`
+minutes), `hit` (it is at the setpoint) and `past` (it is `inside.past_f`°F
+beyond it). Its payload also has `direction`, `open_contacts` and
+`house_open_since`. The other fresh-air payloads carry
+`inside.rate_f_per_h`, `inside.minutes_to_setpoint` and `inside.direction`.
 
 Example `skills/front_door.md`:
 

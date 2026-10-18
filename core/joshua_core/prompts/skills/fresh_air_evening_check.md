@@ -30,6 +30,11 @@ Then pick one:
   Ecobee or widen its band.
 - Anything else: reply with exactly `[IGNORE]`.
 
+When the house is open, `inside.rate_f_per_h` (°F per hour, negative =
+falling) and `inside.minutes_to_setpoint` say how soon the downstairs reaches
+the heating or cooling setpoint; if that is before bedtime, you may say so in
+the "close up" advice.
+
 Write 1 to 3 short lines in your normal voice. No headers, no lists, no JSON.
 Temperatures in °F, rounded to whole degrees. If someone asks, you can check a
 sensor or change a thermostat, but this message does not need that.

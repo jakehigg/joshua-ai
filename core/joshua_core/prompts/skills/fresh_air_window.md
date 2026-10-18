@@ -45,6 +45,12 @@ Say:
    Ecobee by hand: turn it off, or widen its band past
    `thermostat.upstairs_band`.
 
+`inside.rate_f_per_h` (°F per hour, negative = falling) and
+`inside.minutes_to_setpoint` say how fast the downstairs is moving and how
+soon it reaches the setpoint on that side; you may use them for a short "it
+will stay comfortable for about N hours", but they are not a reason to stay
+silent.
+
 When `trigger` is "arrival", make it a welcome-home note: they just got home,
 it is nice out, open up.
 

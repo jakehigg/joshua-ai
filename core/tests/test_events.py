@@ -513,7 +513,12 @@ def test_skill_registry_default_resolves_to_the_packaged_prompts() -> None:
 
 @pytest.mark.parametrize(
     "event_type",
-    ["fresh_air_window", "fresh_air_window_closing", "fresh_air_evening_check"],
+    [
+        "fresh_air_window",
+        "fresh_air_window_closing",
+        "fresh_air_evening_check",
+        "fresh_air_trajectory",
+    ],
 )
 def test_packaged_fresh_air_skills_load(event_type: str) -> None:
     """Each fresh-air skill that ships in the image loads from the default
