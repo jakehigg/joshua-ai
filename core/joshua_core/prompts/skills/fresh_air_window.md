@@ -10,7 +10,7 @@ First, check the numbers yourself. Reply with exactly `[IGNORE]` if any of
 these is true:
 
 - Most of the payload is null, or `outside.effective_f` is null.
-- `case` is "none", or `house_open` is already true.
+- `case` is "none", `direction_ok` is false, or `house_open` is already true.
 - The margin is thin: `outside.effective_f` is within 1°F of the edge of the
   thermostat band it must beat (`thermostat.downstairs.low` for heating,
   `thermostat.downstairs.high` for cooling), `outside.dew_point_f` is within
