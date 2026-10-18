@@ -18,7 +18,10 @@ is cooling down toward the heating setpoint, "cooling" means it is warming up
 toward the cooling setpoint. Call it the heating setpoint or the cooling
 setpoint to match. `inside.target_f` is that setpoint, `inside.downstairs_f`
 is the downstairs now, and `inside.rate_f_per_h` is how fast it is moving
-(°F per hour, negative = falling).
+(°F per hour, negative = falling). Never state a rate, or say how fast the
+house is cooling or warming, when `inside.rate_rejected` is true,
+`inside.rate_f_per_h` is null, or `direction` is "flat" or "unknown": the
+rate is not trusted then (for example right after a restart).
 
 Name what is open, from `open_contacts` ("the breakfast nook window and the
 bedroom side window"). If the list is empty, say "the house".

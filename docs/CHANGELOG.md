@@ -16,6 +16,10 @@ with the images and the packaged chart, are at
   degrees back, and names the open doors and windows. The `fresh_air_window`
   and `fresh_air_evening_check` skills now know the new
   `inside.rate_f_per_h` and `inside.minutes_to_setpoint` fields.
+  The evening check now says to close up before bed when the house is open
+  and the downstairs is at or past the heating setpoint, or will reach it
+  within 4 hours, even on a mild night. No skill states a rate that Home
+  Assistant marks `inside.rate_rejected`.
 
 - **Three Home Assistant fresh-air skills ship in the image.** The named
   events `fresh_air_window`, `fresh_air_window_closing`, and

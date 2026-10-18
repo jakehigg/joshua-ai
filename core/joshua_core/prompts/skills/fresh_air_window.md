@@ -49,7 +49,8 @@ Say:
 `inside.minutes_to_setpoint` say how fast the downstairs is moving and how
 soon it reaches the setpoint on that side; you may use them for a short "it
 will stay comfortable for about N hours", but they are not a reason to stay
-silent.
+silent. Never state a rate when `inside.rate_rejected` is true or
+`inside.rate_f_per_h` is null.
 
 When `trigger` is "arrival", make it a welcome-home note: they just got home,
 it is nice out, open up.
