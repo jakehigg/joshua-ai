@@ -17,8 +17,8 @@ Two shapes arrive:
   the reply.
 
 The registry replaces the old hard-coded Python skill list: a self-hoster adds a
-skill by dropping a Markdown file, with no code change. The kernel ships zero
-skills; ``docs/events.md`` shows how to add one.
+skill by dropping a Markdown file, with no code change. ``docs/events.md`` shows
+how to add one and lists the skills that ship.
 """
 
 from __future__ import annotations

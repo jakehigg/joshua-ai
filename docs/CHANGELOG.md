@@ -8,6 +8,13 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Three Home Assistant fresh-air skills ship in the image.** The named
+  events `fresh_air_window`, `fresh_air_window_closing`, and
+  `fresh_air_evening_check` now have skills in
+  `core/joshua_core/prompts/skills/`. Each one sends a short message to the
+  `family` destination about when to open or close the house. A deployment
+  with no `family` destination ignores these events.
+
 - **A voice device with no wake clip can default to a person.** Set
   `channels.voice.device_defaults` to map a device id to a person id. A device
   listed there speaks for that person on any turn that names no speaker, and

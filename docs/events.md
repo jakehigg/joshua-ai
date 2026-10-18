@@ -50,7 +50,13 @@ reach outside the skills directory.
 ### Add a skill
 
 Put a file in `skills/`. You need no code change, no restart, and no config
-reload. Core reads the file when the event fires. The kernel ships zero skills.
+reload. Core reads the file when the event fires.
+
+The repository ships three Home Assistant skills in
+`core/joshua_core/prompts/skills/`: `fresh_air_window`,
+`fresh_air_window_closing`, and `fresh_air_evening_check`. The event name is
+the file name. Each skill reads the fresh-air payload that Home Assistant sends
+and tells the people in the house when to open or close the windows.
 
 Example `skills/front_door.md`:
 

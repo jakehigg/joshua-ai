@@ -511,6 +511,23 @@ def test_skill_registry_default_resolves_to_the_packaged_prompts() -> None:
     assert registry.get("anything") is None
 
 
+@pytest.mark.parametrize(
+    "event_type",
+    ["fresh_air_window", "fresh_air_window_closing", "fresh_air_evening_check"],
+)
+def test_packaged_fresh_air_skills_load(event_type: str) -> None:
+    """Each fresh-air skill that ships in the image loads from the default
+    prompts directory, with a destination and a body that can stay silent."""
+    from joshua_core.events import SkillRegistry
+
+    skill = SkillRegistry(None).get(event_type)
+    assert skill is not None
+    assert skill.destination == "family"
+    assert skill.framing is None
+    assert "[IGNORE]" in skill.prompt
+    assert not skill.prompt.startswith("---")
+
+
 async def test_an_event_attachment_keeps_the_sender_filename(tmp_path) -> None:
     """The name the sender gave the file reaches the agent, the same as in a chat."""
     repo = EventsFakeRepo()
