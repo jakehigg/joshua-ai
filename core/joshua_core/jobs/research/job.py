@@ -8,6 +8,8 @@ Arguments:
 - `questions`: slugs of the dossier, as a list or a string with commas. Only
   with `mode: run`, and only with `topic`.
 - `max_questions`: a cap on `jobs.research.questions_per_run` for this run.
+- `then_insights`: true or false, only with `mode: run`. It replaces
+  `jobs.insights.after_research` for this run.
 
 Both modes choose the topic, build its memory bundle, and load or start its
 dossier. When the dossier has fewer than `questions_per_run` open questions,
@@ -24,6 +26,14 @@ questions, in dossier order, up to the cap. Each question goes to the crew.
 A published answer becomes a page, and the dossier and `README.md` get their
 new state. A dry run does all of this and writes nothing; its report holds
 the full text of each page it would write.
+
+When a `run` publishes a page, `jobs.insights.enabled` is true, and
+`then_insights` (or else `jobs.insights.after_research`) is true, the run then
+does the insight pass for the same topic (`insights.job.InsightPass`). Its
+paths join the paths of the run, so one commit holds both, its worker call
+counts under `insight`, and its report is the section `Insights`. On a dry run
+the pass is a dry run too, and it reads the pages the run would publish. A
+failure of the pass is a line in that section, not a failure of the run.
 """
 
 from __future__ import annotations
@@ -71,7 +81,9 @@ logger = get_logger("jobs.research")
 
 MODES = ("plan", "run")
 RULE_GIVEN = "given"
-_ARGS = {"mode", "topic", "questions", "max_questions"}
+_ARGS = {"mode", "topic", "questions", "max_questions", "then_insights"}
+_TRUE = ("true", "yes", "1", "on")
+_FALSE = ("false", "no", "0", "off")
 
 
 def worker_model(settings: JoshuaConfig) -> str | None:
@@ -125,6 +137,16 @@ def parse_count(value: Any) -> int:
     return number
 
 
+def parse_flag(value: Any, name: str) -> bool:
+    """A true or false argument, as a bool or a string such as `false`.
+    Raises `JobArgsError`."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in _TRUE + _FALSE:
+        return value.strip().lower() in _TRUE
+    raise JobArgsError(f"{name} is true or false")
+
+
 @dataclass
 class _Outcome:
     question: Question
@@ -148,6 +170,9 @@ class _Run:
     rejected: list[Verdict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     outcomes: list[_Outcome] = field(default_factory=list)
+    insights: Any = None
+    insights_error: str = ""
+    insights_skipped: str = ""
 
 
 class ResearchJob(Job):
@@ -210,6 +235,10 @@ class ResearchJob(Job):
             out["questions"] = slugs
         if args.get("max_questions") not in (None, ""):
             out["max_questions"] = parse_count(args["max_questions"])
+        if args.get("then_insights") not in (None, ""):
+            if mode != "run":
+                raise JobArgsError("then_insights is only for mode run")
+            out["then_insights"] = parse_flag(args["then_insights"], "then_insights")
         return out
 
     # -- the run --------------------------------------------------------------
@@ -251,7 +280,41 @@ class ResearchJob(Job):
                     written.append(write_page(outcome.page, self._data_dir))
             written.append(save_dossier(dossier, self._data_dir, answers))
             written.append(write_index(self._data_dir))
+        if run.mode == "run" and any(o.page is not None for o in run.outcomes):
+            written.extend(await self._insights(run, topic, bundle, args, dry_run))
         return self._report(run, topic, bundle, dossier, written, dry_run)
+
+    async def _insights(
+        self, run: _Run, topic: Topic, bundle: Bundle, args: dict[str, Any], dry_run: bool
+    ) -> list[Path]:
+        """Run the insight pass for the topic when the config and the run ask
+        for it, and return the paths it wrote."""
+        cfg = self._settings.jobs.insights
+        wanted = args.get("then_insights")
+        if wanted is None:
+            wanted = cfg.after_research
+        if not wanted:
+            return []
+        if not cfg.enabled:
+            if args.get("then_insights"):
+                run.insights_skipped = "jobs.insights.enabled is false, so no insight pass ran."
+            return []
+        # A late import: the insights package reads the researcher's modules.
+        from joshua_core.jobs.insights.job import InsightPass
+
+        pages = {o.page.rel: o.page.text for o in run.outcomes if o.page is not None}
+        try:
+            run.insights = await InsightPass(
+                settings=self._settings,
+                data_dir=self._data_dir,
+                ledger=run.ledger,
+                runner=self._runner,
+            ).run(topic, bundle, today=run.day, dry_run=dry_run, extra_knowledge=pages)
+        except Exception as exc:  # noqa: BLE001 — the pass never fails the research run
+            logger.warning({"message": "insight pass failed", "error": str(exc)})
+            run.insights_error = str(exc) or repr(exc)
+            return []
+        return list(run.insights.written)
 
     def _select(
         self,
@@ -507,6 +570,9 @@ class ResearchJob(Job):
                 sections.append(("Pages", pages))
         if run.notes:
             sections.append(("Notes", "\n".join(f"- {n}" for n in run.notes)))
+        insights = self._insights_section(run)
+        if insights:
+            sections.append(("Insights", insights))
         sections.append(("Usage", self._usage_lines(run)))
 
         prefix = "Dry run: " if dry_run else ""
@@ -553,8 +619,36 @@ class ResearchJob(Job):
                 "dropped": [o.question.slug for o in dropped],
                 "coverage": dossier.compute_coverage(),
                 "usage": run.ledger.as_data(),
+                "insights": self._insights_data(run),
             },
         )
 
+    def _insights_section(self, run: _Run) -> str:
+        """The body of the `Insights` section, or `""` when no pass ran."""
+        if run.insights_error:
+            return f"The insight pass failed: {run.insights_error}"
+        if run.insights_skipped:
+            return run.insights_skipped
+        if run.insights is None:
+            return ""
+        lines = [run.insights.summary(), ""]
+        for heading, body in run.insights.sections():
+            lines += [f"### {heading}", "", body.strip() or "None.", ""]
+        return "\n".join(lines).strip()
 
-__all__ = ["Candidate", "ResearchJob", "parse_count", "parse_slugs", "worker_model"]
+    def _insights_data(self, run: _Run) -> dict[str, Any] | None:
+        if run.insights_error:
+            return {"error": run.insights_error}
+        if run.insights is None:
+            return None
+        return dict(run.insights.data())
+
+
+__all__ = [
+    "Candidate",
+    "ResearchJob",
+    "parse_count",
+    "parse_flag",
+    "parse_slugs",
+    "worker_model",
+]
