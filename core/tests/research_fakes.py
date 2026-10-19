@@ -260,3 +260,42 @@ def changed(before: dict[str, bytes], after: dict[str, bytes]) -> set[str]:
 
 
 Answer = Callable[[str], Any]
+
+
+# The leaked markup of research runs 8 and 9, as the pages showed it.
+CAVEAT = (
+    "**Caveat:** The benefit requires water to actually exit the pot, and the pot "
+    "must not sit in standing runoff."
+)
+SHORT = (
+    "Yes — runoff watering leaches salts out; measured non-runoff watering can't. "
+    "Gritty mix makes frequent runoff watering safe."
+)
+DISAGREE = (
+    "No source disputes the core principle. Sources differ only on how often to "
+    "flush. Different co…"
+)
+RUN9_ANSWER = (
+    "Water until it runs out of the drainage holes. Runoff carries the salts out.\n\n"
+    f"{CAVEAT}</answer>\n"
+    f"<answer_short>{SHORT}</answer_short>\n"
+    "<confidence>high</confidence>\n"
+    f"<disagreements>{DISAGREE}"
+)
+RUN8_DISAGREEMENTS = (
+    "One source gives eight weeks; another gives no numeric regrowth timeline at all."
+    '</disagreements>\n<parameter name="sources">[{"title": "A page", "url": "x"}]'
+)
+
+
+def run9_editor(**overrides: Any) -> dict[str, Any]:
+    """The editor answer of research run 9, with the fields it left empty."""
+    fields: dict[str, Any] = {
+        "answer": RUN9_ANSWER,
+        "answer_short": SHORT,
+        "evidence": [],
+        "disagreements": "",
+        "local_notes": "",
+    }
+    fields.update(overrides)
+    return editor((PRIMARY, "primary"), (SECONDARY, "secondary"), **fields)

@@ -22,6 +22,7 @@ from joshua_shared.config import JoshuaConfig
 from pydantic import BaseModel, Field
 
 from joshua_core.engine.ephemeral import Runner, run_worker
+from joshua_core.engine.sanitize import CleanModel
 from joshua_core.engine.usage import Usage, UsageLedger
 from joshua_core.jobs.curator.prompts import COMPARE_PROMPT, PLACE_PROMPT, REFRESH_PROMPT
 from joshua_core.jobs.curator.scan import Section, render_section_map
@@ -64,14 +65,21 @@ class Budget:
 # -- the answers ------------------------------------------------------------
 
 
-class PlaceAnswer(BaseModel):
+class PlaceAnswer(CleanModel):
+    """The `place` answer. `reason` is cleaned of leaked markup. `section` and
+    `folder` stay as they are, so the check refuses a value that is not a name."""
+
+    raw_fields = frozenset({"section", "folder"})
+
     section: str = Field(max_length=200)
     folder: str = Field(max_length=300)
     confidence: Confidence
     reason: str = Field(default="", max_length=1000)
 
 
-class Claim(BaseModel):
+class Claim(CleanModel):
+    """One claim of each page. Both are cleaned of leaked markup."""
+
     a_says: str = Field(max_length=2000)
     b_says: str = Field(max_length=2000)
 
@@ -83,7 +91,12 @@ class CompareAnswer(BaseModel):
     confidence: Confidence
 
 
-class PatchPair(BaseModel):
+class PatchPair(CleanModel):
+    """One edit of a page. `find` and `replace` stay byte for byte, because
+    `find` must match the page. `because` is cleaned of leaked markup."""
+
+    raw_fields = frozenset({"find", "replace"})
+
     find: str = Field(min_length=1, max_length=MAX_REPLACE_CHARS)
     replace: str = Field(max_length=MAX_REPLACE_CHARS)
     because: str = Field(default="", max_length=1000)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any
 
@@ -21,6 +22,7 @@ from joshua_core.jobs.research.text import Grounding
 from joshua_core.jobs.research.write import PageTooLong, render_page
 from joshua_shared import frontmatter
 from research_fakes import (
+    CAVEAT,
     FORUM_A,
     FORUM_B,
     GOOD_EDITOR,
@@ -34,6 +36,7 @@ from research_fakes import (
     editor,
     lookup,
     research_settings,
+    run9_editor,
 )
 
 SETTINGS = research_settings()
@@ -541,6 +544,17 @@ def test_empty_parts_are_left_out() -> None:
     assert "## Where this differs for us" not in body
     assert "## Disagreements" not in body
     assert "run_id" not in meta
+
+
+def test_the_run_9_answer_renders_with_no_leaked_tag() -> None:
+    text = _page(EditorAnswer.model_validate(run9_editor()))
+    body = frontmatter.split(text)[1]
+    answer = body.split("## Answer\n", 1)[1].split("\n## ", 1)[0].strip()
+    assert answer.splitlines()[-1] == CAVEAT
+    assert "## Disagreements" in body
+    assert "None given." in body
+    assert re.search(r"</?[a-z_]+>", text) is None
+    assert "<" not in body
 
 
 def test_a_page_over_64_kb_is_refused() -> None:

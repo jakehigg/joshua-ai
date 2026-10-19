@@ -39,10 +39,11 @@ from urllib.parse import urlsplit
 
 from joshua_shared.config import Internet as InternetConfig
 from joshua_shared.config import JobsResearch
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from joshua_core.engine import internet
 from joshua_core.engine.ephemeral import Runner, run_worker
+from joshua_core.engine.sanitize import CleanModel, note, recover_fields, recovered_list
 from joshua_core.engine.types import WorkerStats
 from joshua_core.engine.url_grants import canonical
 from joshua_core.engine.usage import Usage, UsageLedger
@@ -101,7 +102,12 @@ def cut_list(value: object, items: int, chars: int | None = None) -> object:
     return kept if chars is None else [cut_text(item, chars) for item in kept]
 
 
-class EditorSource(BaseModel):
+class EditorSource(CleanModel):
+    """One source of the editor. The title is cleaned of leaked markup, and
+    the URL is only trimmed."""
+
+    url_fields = frozenset({"url"})
+
     url: str = Field(max_length=URL_CHARS)
     title: str = Field(default="", max_length=TITLE_CHARS)
     trust: Trust
@@ -117,13 +123,22 @@ class EditorSource(BaseModel):
         return cut_text(value, TITLE_CHARS)
 
 
-class EditorAnswer(BaseModel):
+# The fields that the editor can leak into `answer` as tags, and that
+# `EditorAnswer` fills from the leaked copy when the field is empty.
+RECOVERED_FIELDS = ("answer_short", "local_notes", "evidence", "disagreements")
+
+
+class EditorAnswer(CleanModel):
     """The answer of the editor, in the order of `EDITOR_SCHEMA`: the short
     required fields first, then the long ones.
 
     The model gets `EDITOR_SCHEMA`, and this model checks the answer after it.
     A string or a list that is longer than its limit is cut to the limit, not
-    refused, so a long field never loses the whole answer."""
+    refused, so a long field never loses the whole answer.
+
+    Each text field is cleaned of leaked markup. When a field of
+    `RECOVERED_FIELDS` is empty and the raw `answer` holds a leaked block of
+    that name, the field gets the text of the block before the limits apply."""
 
     verdict: Literal["publish", "hold"]
     confidence: Literal["low", "medium", "high"]
@@ -134,6 +149,21 @@ class EditorAnswer(BaseModel):
     evidence: list[str] = Field(default_factory=list, max_length=EVIDENCE_ITEMS)
     disagreements: str = Field(default="", max_length=DISAGREEMENTS_CHARS)
     reason: str = Field(default="", max_length=REASON_CHARS)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _recover(cls, data: object, info: ValidationInfo) -> object:
+        if not isinstance(data, dict) or not isinstance(data.get("answer"), str):
+            return data
+        empty = [name for name in RECOVERED_FIELDS if not data.get(name)]
+        found = recover_fields(data["answer"], empty)
+        if not found:
+            return data
+        data = dict(data)
+        for name, text in found.items():
+            data[name] = recovered_list(text) if name == "evidence" else text
+            note(info, name)
+        return data
 
     @field_validator("answer_short", mode="before")
     @classmethod

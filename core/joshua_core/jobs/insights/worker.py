@@ -21,6 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from joshua_core.engine.ephemeral import Runner, run_worker
+from joshua_core.engine.sanitize import CleanModel, cleaning_context, log_cleaned
 from joshua_core.engine.usage import Usage
 from joshua_core.jobs.insights.knowledge import KnownPage
 from joshua_core.jobs.insights.page import InsightFile
@@ -33,8 +34,9 @@ TIMEOUT_S = 120.0
 MAX_RAISED = 20
 
 
-class RaisedInsight(BaseModel):
-    """One insight as the worker gives it."""
+class RaisedInsight(CleanModel):
+    """One insight as the worker gives it. Each text field is cleaned of
+    leaked markup."""
 
     claim: str = Field(max_length=1000)
     why: str = Field(max_length=4000)
@@ -49,7 +51,7 @@ class RaisedInsight(BaseModel):
     evidence: str = Field(default="", max_length=8000)
 
 
-class InsightAnswer(BaseModel):
+class InsightAnswer(CleanModel):
     """The answer schema the worker is asked for."""
 
     insights: list[RaisedInsight] = Field(default_factory=list, max_length=MAX_RAISED)
@@ -136,9 +138,10 @@ async def raise_insights(
         return Raised(None)
     good: list[RaisedInsight] = []
     invalid: list[tuple[str, str]] = []
+    context = cleaning_context()
     for item in answer.insights:
         try:
-            good.append(RaisedInsight.model_validate(item))
+            good.append(RaisedInsight.model_validate(item, context=context))
         except ValidationError as exc:
             invalid.append(
                 (
@@ -146,4 +149,5 @@ async def raise_insights(
                     f"the answer does not match the schema ({exc.error_count()} errors)",
                 )
             )
+    log_cleaned(f"insights-{WORKER}", context)
     return Raised(good, invalid)

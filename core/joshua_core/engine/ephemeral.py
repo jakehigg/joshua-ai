@@ -28,6 +28,7 @@ from typing import Any
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, ValidationError
 
+from joshua_core.engine.sanitize import cleaning_context, log_cleaned
 from joshua_core.engine.types import WorkerStats
 from joshua_core.engine.usage import Usage
 
@@ -86,6 +87,10 @@ async def run_worker[T: BaseModel](
     and whether the call timed out. A runner gets each of the two arguments
     only when the caller gives it.
 
+    The answer is validated with a `sanitize.cleaning_context`, so a
+    `sanitize.CleanModel` records each text field it cleaned, and one log line
+    names them.
+
     This never raises. Every failure is a warning and a `None`, because the turn
     that called it must continue.
     """
@@ -130,8 +135,9 @@ async def run_worker[T: BaseModel](
         )
         return None
 
+    context = cleaning_context()
     try:
-        validated = answer.model_validate(raw)
+        validated = answer.model_validate(raw, context=context)
     except ValidationError as exc:
         # The answer did not match the shape. The count alone goes in the log:
         # the content is untrusted, and it is not worth a line.
@@ -145,5 +151,6 @@ async def run_worker[T: BaseModel](
         )
         return None
 
+    log_cleaned(name, context)
     logger.info({"message": "worker answered", "worker": name, "duration_ms": duration_ms})
     return validated

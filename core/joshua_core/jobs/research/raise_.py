@@ -15,9 +15,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from joshua_core.engine.ephemeral import Runner, run_worker
+from joshua_core.engine.sanitize import CleanModel
 from joshua_core.engine.usage import Usage
 from joshua_core.jobs.research.gate import WEB, Candidate
 from joshua_core.jobs.research.prompts import RAISE_PROMPT
@@ -28,7 +29,10 @@ TIMEOUT_S = 120.0
 MAX_RAISED = 20
 
 
-class RaisedQuestion(BaseModel):
+class RaisedQuestion(CleanModel):
+    """One question as the worker gives it. Each text field is cleaned of
+    leaked markup."""
+
     question: str = Field(max_length=1000)
     grounded_in: list[str] = Field(default_factory=list, max_length=12)
     why: str = Field(default="", max_length=1000)
@@ -36,7 +40,7 @@ class RaisedQuestion(BaseModel):
     audience: str = Field(default=WEB, max_length=40)
 
 
-class RaiseAnswer(BaseModel):
+class RaiseAnswer(CleanModel):
     questions: list[RaisedQuestion] = Field(default_factory=list, max_length=MAX_RAISED)
 
 
