@@ -40,7 +40,9 @@ For each insight, answer with:
   insight is true, or null. After `valid_until` the insight no longer
   applies.
 - `we_do`: the phrases that say what we do, each copied word for word from
-  the bundle, 3 to 120 characters. Do not change, shorten, or join the words.
+  the bundle, 3 to 160 characters. Do not change, shorten, or join the words.
+  A phrase is the shortest span that identifies the specific: a product name,
+  a quantity, a cadence. It is not a whole sentence.
 - `we_do_paths`: the bundle paths (the `## <path>` lines) of those phrases.
 - `knowledge_says`: the paths of the knowledge pages that say otherwise, as
   they are given in the knowledge section.

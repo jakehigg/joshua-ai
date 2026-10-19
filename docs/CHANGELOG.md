@@ -156,6 +156,13 @@ with the images and the packaged chart, are at
   our pages. The gate rejects a raised question that names a person, holds a
   date from our records, or asks what we did, will do, or should do.
 
+- **A grounding phrase can be a full product name.** A `grounded_in` phrase
+  of the research gate, and a `we_do` phrase of the insights gate, can now
+  have 160 characters. Before, the limits were 80 and 120, and the gate
+  rejected a good question that named a 98-character product. The `raise`
+  prompt asks for the shortest span that identifies the specific: a product
+  name, a quantity, a cadence, not a whole sentence.
+
 - **A bundle holds less noise.** `jobs.bundle.sim` is now 0.78, not 0.70.
   A journal entry with a `source` of `curator`, `research`, or `insights` is
   a job report, and no bundle takes it.

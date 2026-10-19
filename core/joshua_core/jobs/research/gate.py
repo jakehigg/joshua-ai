@@ -2,7 +2,7 @@
 
 A question from the `raise` worker passes when all of these are true:
 
-- `grounded_in` has 2 phrases or more, each 3 to 80 characters, and each
+- `grounded_in` has 2 phrases or more, each 3 to 160 characters, and each
   occurs verbatim in the bundle text. Case and white space do not count. There
   is no stemming and no fuzzy match.
 - The question names the topic: it holds a name of the topic by the rule of
@@ -48,7 +48,7 @@ logger = get_logger("jobs.research.gate")
 
 MIN_PHRASES = 2
 PHRASE_MIN_CHARS = 3
-PHRASE_MAX_CHARS = 80
+PHRASE_MAX_CHARS = 160
 QUESTION_MIN_CHARS = 20
 QUESTION_MAX_CHARS = 300
 KNOWLEDGE_KIND = "knowledge"

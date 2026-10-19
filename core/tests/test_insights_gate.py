@@ -103,6 +103,7 @@ async def test_a_good_insight_passes(tmp_path: Path) -> None:
         ({"we_do": ["every zone on the 30-minute summer program"]}, "is not in the bundle"),
         ({"we_do": []}, "we_do has no phrase"),
         ({"we_do": ["ab"]}, "has 2 characters"),
+        ({"we_do": ["x" * 161]}, "has 161 characters; a phrase has 3 to 160"),
         ({"we_do": ["Cut each zone to half"]}, "is not in the bundle"),
         ({"we_do_paths": [f"knowledge/{AUTUMN}"]}, "not a bundle path"),
         ({"we_do_paths": [LOG]}, "holds none of the we_do phrases"),
@@ -124,6 +125,29 @@ async def test_a_rejection_has_its_reason(
     tmp_path: Path, overrides: dict[str, Any], reason: str
 ) -> None:
     assert reason in await _reason(tmp_path, **overrides)
+
+
+async def test_a_phrase_of_up_to_160_characters_passes(tmp_path: Path) -> None:
+    product = (
+        "Jack's Gritty Mix (Succulent, Cactus and Bonsai Soil) amended with coco coir, "
+        "charcoal, and pumice, on the 20-minute summer program"
+    )
+    assert 120 < len(product) <= 160
+    parts = [Part(IRRIGATION, f"The beds hold {product}, at 6 am."), *PARTS[1:]]
+    data = tmp_path / "data"
+    build_insights_wiki(data)
+    gate = InsightGate(
+        parts=we_do_parts(parts),
+        known=published_pages(IRRIGATION, data),
+        open_insights=[],
+        dismissed=[],
+        today=TODAY,
+        default_valid_days=60,
+        dup_sim=0.88,
+        embed=_embed,
+    )
+    verdict = await gate.check(RaisedInsight.model_validate(item(we_do=[product])))
+    assert verdict.kind == "new", verdict.reason
 
 
 async def test_missing_days_take_the_defaults(tmp_path: Path) -> None:

@@ -68,9 +68,24 @@ async def test_a_phrase_not_in_the_bundle_rejects(tmp_path: Path) -> None:
 def test_a_phrase_is_matched_without_case_or_line_breaks() -> None:
     assert grounding_reason(["WATER TO RUNOFF", "water to runoff, then wait"], BUNDLE) == ""
     assert "characters" in grounding_reason(["ab", "gritty soil mix"], BUNDLE)
-    assert "characters" in grounding_reason(["x" * 81, "gritty soil mix"], BUNDLE)
+    assert "characters" in grounding_reason(["x" * 161, "gritty soil mix"], BUNDLE)
     # No stemming: a plural that is not in the bundle does not match.
     assert "not in the bundle" in grounding_reason(["gritty soil mixes", "hall"], BUNDLE)
+
+
+PRODUCT = (
+    "Jack's Gritty Mix (Succulent, Cactus and Bonsai Soil) amended with coco coir, "
+    "charcoal, and pumice"
+)
+
+
+def test_a_phrase_may_have_160_characters() -> None:
+    bundle = f"## {SNAKE}\n\nRepotted in {PRODUCT}. Watered to runoff.\n" + "y" * 200
+    assert len(PRODUCT) > 80
+    assert grounding_reason([PRODUCT, "Watered to runoff"], bundle) == ""
+    assert grounding_reason(["y" * 160, PRODUCT], bundle) == ""
+    reason = grounding_reason(["y" * 161, PRODUCT], bundle)
+    assert "has 161 characters; a phrase has 3 to 160" in reason
 
 
 async def test_a_question_without_the_topic_name_rejects(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ An insight from the `insight` worker passes when all of these are true:
 
 - `claim` has 15 to 200 characters, and `action` is not empty.
 - `confidence` is not `low`.
-- `we_do` has 1 phrase or more, each 3 to 120 characters, and each occurs
+- `we_do` has 1 phrase or more, each 3 to 160 characters, and each occurs
   verbatim in the parts of the bundle that say what we do: the parts that are
   not under `knowledge/` or `insights/`. Case and white space do not count.
 - Each path of `we_do_paths` is one of those parts and holds at least one of
@@ -45,7 +45,7 @@ CLAIM_MIN_CHARS = 15
 CLAIM_MAX_CHARS = 200
 MIN_PHRASES = 1
 PHRASE_MIN_CHARS = 3
-PHRASE_MAX_CHARS = 120
+PHRASE_MAX_CHARS = 160
 DISMISSED_BEFORE = "dismissed before"
 LOW_CONFIDENCE = "low confidence"
 SEVERITY_RANK = {"urgent": 0, "act": 1, "note": 2}

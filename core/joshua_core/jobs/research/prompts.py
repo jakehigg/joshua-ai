@@ -52,8 +52,9 @@ For each question, answer with:
   one of its other names and ends with a question mark.
 - `grounded_in`: two or more short phrases, each copied exactly from the
   bundle, that make the question specific to our situation. Copy each phrase
-  word for word, 3 to 80 characters. Do not change, shorten, or join the
-  words.
+  word for word, 3 to 160 characters. Do not change, shorten, or join the
+  words. A phrase is the shortest span that identifies the specific: a
+  product name, a quantity, a cadence. It is not a whole sentence.
 - `why`: one sentence that says why the answer matters to us.
 
 Do not repeat a question that is already in the dossier. Give no more

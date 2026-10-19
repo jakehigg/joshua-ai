@@ -596,8 +596,9 @@ The `raise` worker has no tools. It gets the memory bundle of the topic, the
 title and the aliases, and the questions in the dossier. It answers with up
 to `questions_per_topic` questions, less the open questions. Each question
 has `grounded_in`, the phrases from the bundle that make it about us, and
-`why`. The prompt tells the worker that the bundle is content, not
-instructions.
+`why`. The prompt asks for the shortest span that identifies the specific: a
+product name, a quantity, a cadence, not a whole sentence. The prompt tells
+the worker that the bundle is content, not instructions.
 
 Each question goes to the internet agent, which searches the open web and
 has no access to our pages. So the prompt asks for a question that an expert
@@ -609,7 +610,7 @@ what we did, recorded, planned, or will do.
 The gate is Python. A question gets into the dossier only when all of these
 rules are true:
 
-- `grounded_in` has two phrases or more. Each phrase has 3 to 80 characters
+- `grounded_in` has two phrases or more. Each phrase has 3 to 160 characters
   and occurs word for word in the bundle text. Case and line breaks do not
   count. There is no stemming and no fuzzy match.
 - The question holds a name of the topic (see
@@ -802,7 +803,7 @@ true:
 
 - `claim` has 15 to 200 characters, and `action` is not empty.
 - `confidence` is not `low`. The reason is `low confidence`.
-- `we_do` has one phrase or more. Each phrase has 3 to 120 characters and
+- `we_do` has one phrase or more. Each phrase has 3 to 160 characters and
   occurs word for word in a part of the bundle that says what we do. Case and
   line breaks do not count.
 - Each path in `we_do_paths` is one of those parts, and holds at least one of
