@@ -752,3 +752,128 @@ class Repo:
                     (job, limit),
                 )
             return await cur.fetchall()
+
+    # --- curator findings -------------------------------------------------
+
+    async def upsert_finding(
+        self,
+        *,
+        run_id: int | None,
+        kind: str,
+        tier: str,
+        fingerprint: str,
+        paths: list[str],
+        detail: dict[str, Any],
+        patch: dict[str, Any] | None,
+        status: str,
+        seen_at: datetime,
+    ) -> dict[str, Any]:
+        """Insert a finding, or record that a run saw it again, and return the row.
+
+        A new finding gets `status`. A finding seen again keeps its
+        `first_seen` and its status, and gets the new `last_seen`, `run_id`,
+        `detail`, and `patch`; a `note` in the old detail stays. A `stale`
+        finding seen again is `open` again.
+        """
+        _check_finding_status(status)
+        resolved = seen_at if status in _RESOLVED_STATUSES else None
+        resolver = "curator" if status in _RESOLVED_STATUSES else None
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                INSERT INTO curator_finding (run_id, kind, tier, fingerprint, paths, detail,
+                                             patch, status, first_seen, last_seen,
+                                             resolved_at, resolved_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (fingerprint) DO UPDATE SET
+                    run_id = EXCLUDED.run_id,
+                    tier = EXCLUDED.tier,
+                    detail = CASE WHEN curator_finding.detail ? 'note'
+                                  THEN EXCLUDED.detail || jsonb_build_object(
+                                      'note', curator_finding.detail -> 'note')
+                                  ELSE EXCLUDED.detail END,
+                    patch = EXCLUDED.patch,
+                    last_seen = EXCLUDED.last_seen,
+                    status = CASE WHEN curator_finding.status = 'stale' THEN 'open'
+                                  ELSE curator_finding.status END,
+                    resolved_at = CASE WHEN curator_finding.status = 'stale' THEN NULL
+                                       ELSE curator_finding.resolved_at END
+                RETURNING *
+                """,
+                (
+                    run_id,
+                    kind,
+                    tier,
+                    fingerprint,
+                    list(paths),
+                    Json(detail),
+                    Json(patch) if patch is not None else None,
+                    status,
+                    seen_at,
+                    seen_at,
+                    resolved,
+                    resolver,
+                ),
+            )
+            return await cur.fetchone()
+
+    async def list_findings(
+        self, status: str | None = "open", limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """The newest findings first, of one status or of every status when `status` is None."""
+        async with self._pool.connection() as conn:
+            if status is None:
+                cur = await conn.execute(
+                    "SELECT * FROM curator_finding ORDER BY id DESC LIMIT %s", (limit,)
+                )
+            else:
+                _check_finding_status(status)
+                cur = await conn.execute(
+                    "SELECT * FROM curator_finding WHERE status = %s ORDER BY id DESC LIMIT %s",
+                    (status, limit),
+                )
+            return await cur.fetchall()
+
+    async def get_finding(self, finding_id: int) -> dict[str, Any] | None:
+        """One finding, or None."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT * FROM curator_finding WHERE id = %s", (finding_id,))
+            return await cur.fetchone()
+
+    async def set_finding_status(
+        self,
+        finding_id: int,
+        status: str,
+        *,
+        at: datetime,
+        resolved_by: str | None = None,
+        note: str | None = None,
+    ) -> bool:
+        """Set the status of a finding. Returns False when there is no such finding.
+
+        `applied`, `dismissed`, and `stale` record `at` as `resolved_at`, and
+        `resolved_by`. `open` clears both. `note` goes into `detail` as `note`.
+        """
+        _check_finding_status(status)
+        resolved = at if status in _RESOLVED_STATUSES else None
+        who = resolved_by if status in _RESOLVED_STATUSES else None
+        extra = Json({"note": note}) if note is not None else Json({})
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE curator_finding
+                SET status = %s, resolved_at = %s, resolved_by = %s, detail = detail || %s
+                WHERE id = %s
+                """,
+                (status, resolved, who, extra, finding_id),
+            )
+            return cur.rowcount > 0
+
+
+FINDING_STATUSES = ("open", "applied", "dismissed", "stale")
+_RESOLVED_STATUSES = ("applied", "dismissed", "stale")
+
+
+def _check_finding_status(status: str) -> None:
+    if status not in FINDING_STATUSES:
+        raise ValueError(f"unknown finding status: {status!r}")

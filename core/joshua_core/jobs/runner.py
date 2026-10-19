@@ -15,6 +15,7 @@ never raises out of its task.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import re
 from abc import ABC, abstractmethod
@@ -36,6 +37,18 @@ Clock = Callable[[], datetime]
 
 # A job name is part of a journal slug, so it is a short slug itself.
 JOB_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}\Z")
+
+
+# The id of the run whose job is working in this task. `JobRunner` sets it
+# around `Job.run_once`, so a job can tag what it records with its run.
+_CURRENT_RUN_ID: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "job_run_id", default=None
+)
+
+
+def current_run_id() -> int | None:
+    """The id of the run that calls this, or None outside a run."""
+    return _CURRENT_RUN_ID.get()
 
 
 def utc_now() -> datetime:
@@ -289,6 +302,7 @@ class JobRunner:
     async def _execute(
         self, run_id: int, job: Job, args: dict[str, Any], dry_run: bool, started: datetime
     ) -> RunReport:
+        token = _CURRENT_RUN_ID.set(run_id)
         try:
             report = await job.run_once(args=args, dry_run=dry_run, clock=self._clock)
         except Exception as exc:  # noqa: BLE001 — the error goes into the report
@@ -300,6 +314,8 @@ class JobRunner:
                 summary="The run failed.",
                 error=str(exc) or repr(exc),
             )
+        finally:
+            _CURRENT_RUN_ID.reset(token)
         report.job = job.name
         report.started_at = started
         report.dry_run = dry_run

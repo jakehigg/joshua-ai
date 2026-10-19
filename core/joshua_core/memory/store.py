@@ -10,6 +10,7 @@ narrow a search.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Any
@@ -220,6 +221,29 @@ class MemoryStore:
             )
             rows = await cur.fetchall()
         return {r["path"]: float(r["similarity"]) for r in rows}
+
+    async def kb_mean_vectors(
+        self, paths: Sequence[str], *, source: str = "files"
+    ) -> dict[str, list[float]]:
+        """`{path: the mean of its chunk vectors}` for each of `paths` that has a vector.
+
+        A path is in the index form, relative to the data root
+        (`wiki/garden/roses.md`). The curator compares two pages with it.
+        """
+        if not paths:
+            return {}
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT path, AVG(embedding)::text AS mean
+                FROM kb_chunk
+                WHERE source = %s AND path = ANY(%s) AND embedding IS NOT NULL
+                GROUP BY path
+                """,
+                (source, list(paths)),
+            )
+            rows = await cur.fetchall()
+        return {r["path"]: [float(x) for x in json.loads(r["mean"])] for r in rows}
 
     async def kb_stats(self) -> list[dict[str, Any]]:
         """Per-source document/chunk counts for ``/admin/kb/status``."""

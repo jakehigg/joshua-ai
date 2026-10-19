@@ -158,6 +158,27 @@ CREATE TABLE IF NOT EXISTS job_run (
     error        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_job_run_job ON job_run (job, id DESC);
+
+-- One row per curator finding (see docs/jobs.md). `fingerprint` keeps one
+-- finding one row across runs. `status`: 'open' | 'applied' | 'dismissed' |
+-- 'stale'. `patch` is the action that applies it, or NULL when a person must
+-- act. `run_id` is the last run that saw it; NULL for a chat apply.
+CREATE TABLE IF NOT EXISTS curator_finding (
+    id           BIGSERIAL PRIMARY KEY,
+    run_id       BIGINT,
+    kind         TEXT NOT NULL,
+    tier         TEXT NOT NULL,
+    fingerprint  TEXT NOT NULL UNIQUE,
+    paths        TEXT[] NOT NULL DEFAULT '{}',
+    detail       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    patch        JSONB,
+    status       TEXT NOT NULL DEFAULT 'open',
+    first_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at  TIMESTAMPTZ,
+    resolved_by  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_curator_finding_status ON curator_finding (status, id DESC);
 """
 
 
