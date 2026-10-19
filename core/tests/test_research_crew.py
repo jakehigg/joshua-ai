@@ -255,6 +255,43 @@ async def test_a_source_the_lookup_never_returned_is_not_given_to_the_editor() -
     assert UNGIVEN not in workers.calls[0][1]
 
 
+class _FetchingInternet(FakeInternet):
+    """The internet fake, with a researcher that fetches `fetched` and names no source."""
+
+    def __init__(self, fetched: list[str]) -> None:
+        super().__init__(draft=lookup(), searched=fetched)
+        self.fetched = fetched
+
+    async def __call__(self, **kwargs: Any) -> dict[str, Any] | None:
+        got = await super().__call__(**kwargs)
+        if not kwargs["user_text"].startswith("You check an answer"):
+            for url in self.fetched:
+                for hook in (kwargs.get("hooks") or {}).get("PreToolUse", []):
+                    await hook({"tool_name": "WebFetch", "tool_input": {"url": url}}, "t", None)
+        return got
+
+
+async def test_backfilled_sources_pass_the_independence_check() -> None:
+    """The researcher named no source, but fetched two pages of two domains."""
+    settings = research_settings(
+        "internet:\n  fetch:\n    enabled: true\n    resolve_hosts: false\n"
+    )
+    net = _FetchingInternet([PRIMARY, SECONDARY])
+    result = await crew.research_question(
+        GROUNDED,
+        GROUNDINGS,
+        internet_settings=settings.internet,
+        research_settings=CFG,
+        editor_model=None,
+        ledger=UsageLedger(),
+        internet_runner=net,
+        editor_runner=FakeWorkers(),
+    )
+    assert result.draft is not None
+    assert [s.url for s in result.draft.sources] == [PRIMARY, SECONDARY]
+    assert result.publish, result.hold_reason
+
+
 def _keys(value: Any) -> set[str]:
     """Every key of a JSON value, at any depth."""
     if isinstance(value, dict):

@@ -107,12 +107,16 @@ class FetchGate:
     the URLs it returned, and nothing else adds one. `WebFetch` is denied for
     any other URL, and for any URL the block list covers. Every failure inside
     a hook is a denial: a check that breaks never lets a fetch through.
+
+    `fetched` holds each URL whose fetch the gate let through, in order, once
+    each, and at most `MAX_SOURCES` of them.
     """
 
     def __init__(self, settings: InternetConfig, urls: list[str] | None = None) -> None:
         self._blocked = settings.fetch.block_list()
         self._resolve = settings.fetch.resolve_hosts
         self._urls: dict[str, str] = {}
+        self.fetched: list[str] = []
         self.add(urls or [])
 
     def add(self, urls: list[str]) -> None:
@@ -152,12 +156,18 @@ class FetchGate:
 
         if reason is None:
             logger.info({"message": "fetch allowed", "host": _host(url)})
+            self._note_fetched(url)
             return {}
         logger.warning({"message": "fetch denied", "host": _host(url), "reason": reason})
         return _deny(
             f"This URL may not be fetched: {reason}. Do not try it again, and answer "
             "from the open web."
         )
+
+    def _note_fetched(self, url: str) -> None:
+        key = canonical(url)
+        if len(self.fetched) < MAX_SOURCES and all(canonical(u) != key for u in self.fetched):
+            self.fetched.append(url)
 
     async def post_tool_use(
         self, payload: Any, tool_use_id: str | None, context: Any
@@ -242,7 +252,8 @@ async def ask(
     `urls` are the pages the caller lets this run read. The caller decides
     which ones it may name, and this worker reads no other page but the ones
     its own searches return. A source the worker names that it was never given
-    is dropped from the answer. When `usage_out` is a list, the tokens of the
+    is dropped from the answer. When no source is left, the pages the worker
+    fetched become the sources, with no title. When `usage_out` is a list, the tokens of the
     lookup are appended to it.
 
     `timeout_s` and `max_turns` replace `settings.timeout_seconds` and
@@ -288,6 +299,11 @@ async def ask(
     kept = [s for s in answer.sources if gate.holds(s.url)]
     dropped = len(answer.sources) - len(kept)
     answer.sources = kept[:MAX_SOURCES]
+    if not answer.sources and gate.fetched:
+        answer.sources = [Source(url=url) for url in gate.fetched]
+        logger.info(
+            {"message": "sources backfilled from fetched pages", "count": len(gate.fetched)}
+        )
     logger.info(
         {
             "message": "internet answered",

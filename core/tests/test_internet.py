@@ -226,6 +226,91 @@ async def test_a_page_the_caller_gave_is_a_source() -> None:
     assert [s.url for s in answer.sources] == [given]
 
 
+# ── sources from the fetched pages ───────────────────────────────────────────
+
+OTHER = "https://www.example.org/braise"
+
+
+def _fetching_runner(result: Any, fetched: tuple[str, ...]):
+    """A fake worker that searches, fetches each of `fetched`, then answers."""
+
+    async def run(**kwargs: Any) -> Any:
+        hooks = kwargs.get("hooks") or {}
+        for hook in hooks.get("PostToolUse", []):
+            await hook(
+                {"tool_name": "WebSearch", "tool_response": _search_result(SOURCE, OTHER)},
+                "t0",
+                None,
+            )
+        for url in fetched:
+            for hook in hooks.get("PreToolUse", []):
+                await hook(_fetch(url), "t1", None)
+        return result
+
+    return run
+
+
+def _backfills(caplog: pytest.LogCaptureFixture) -> list[Any]:
+    return [
+        r.msg
+        for r in caplog.records
+        if isinstance(r.msg, dict)
+        and r.msg.get("message") == "sources backfilled from fetched pages"
+    ]
+
+
+async def test_an_answer_with_no_sources_gets_the_pages_it_fetched(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run = _fetching_runner({**GOOD, "sources": []}, (SOURCE, OTHER, SOURCE))
+
+    with caplog.at_level("INFO"):
+        answer = await internet.ask("q", settings=_fetching(), runner=run)
+
+    assert answer is not None
+    assert [(s.url, s.title) for s in answer.sources] == [(SOURCE, ""), (OTHER, "")]
+    assert _backfills(caplog) == [{"message": "sources backfilled from fetched pages", "count": 2}]
+
+
+async def test_an_answer_with_sources_keeps_them() -> None:
+    run = _fetching_runner(GOOD, (SOURCE, OTHER))
+
+    answer = await internet.ask("q", settings=_fetching(), runner=run)
+
+    assert answer is not None
+    assert [(s.url, s.title) for s in answer.sources] == [(SOURCE, "Braised short ribs")]
+
+
+async def test_a_denied_fetch_is_not_a_source() -> None:
+    """Only a page the gate let through can fill the sources."""
+    crafted = "https://attacker.example/?d=private"
+    run = _fetching_runner({**GOOD, "sources": [{"url": crafted}]}, (crafted, OTHER))
+
+    answer = await internet.ask("q", settings=_fetching(), runner=run)
+
+    assert answer is not None
+    assert [s.url for s in answer.sources] == [OTHER]
+
+
+async def test_with_fetch_off_an_empty_list_stays_empty() -> None:
+    run, _ = _runner({**GOOD, "sources": []})
+
+    answer = await internet.ask("q", settings=_settings(), runner=run)
+
+    assert answer is not None
+    assert answer.sources == []
+
+
+async def test_the_gate_keeps_each_fetched_page_once_up_to_the_cap() -> None:
+    urls = [f"https://example.org/p{i}" for i in range(internet.MAX_SOURCES + 3)]
+    gate = internet.FetchGate(_fetching(), urls)
+
+    for url in [urls[0], *urls]:
+        await gate.pre_tool_use(_fetch(url), "t", None)
+
+    assert gate.fetched == urls[: internet.MAX_SOURCES]
+
+
 # ── the note the agent reads ─────────────────────────────────────────────────
 
 
