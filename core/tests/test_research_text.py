@@ -68,10 +68,11 @@ def test_strip_links_keeps_only_a_source_link() -> None:
     allowed = allowed_urls(["https://example.org/a"])
     text = (
         "See [ok](https://example.org/a), [bad](https://evil.example.com/b), "
-        "![pic](https://example.org/a), [[secret]], [[page|label]], and <https://x.example>."
+        "![pic](https://example.org/a), [[secret]], [[page|label]], "
+        "and <https://x.example.com> here."
     )
     assert strip_links(text, allowed) == (
-        "See [ok](https://example.org/a), bad, pic, secret, label, and https://x.example."
+        "See [ok](https://example.org/a), bad, pic, secret, label, and https://x.example.com here."
     )
 
 
