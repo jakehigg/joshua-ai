@@ -786,6 +786,11 @@ file that arrived where it is.
 `wiki/joshua-docs/` holds the documentation that the repo ships. Core
 replaces it at each start.
 
+`wiki/knowledge/` and `wiki/insights/` belong to the jobs: the researcher job
+writes the first, and the insights job writes the second. The agent reads
+both. `write_file` and `rename_file` refuse a path in them. See
+[docs/jobs.md](jobs.md).
+
 Channels stores an inbound attachment under `people/<id>/attachments/YYYY/MM/` with the name
 `YYYY-MM-DD-HHMMSS-<stem>.<ext>`, where `<stem>` is the sanitized original stem.
 The timestamp is the arrival time in `timezone`, the person's wall
@@ -824,7 +829,8 @@ never moved and never changed. A file over 50 MB is refused.
 
 `write_file` writes `.md` only, at most 256 KB, and `mode: create` fails when
 the file exists. `rename_file` renames one file in place under `wiki/`.
-`new_name` is a bare filename and the extension must not change.
+`new_name` is a bare filename and the extension must not change. It refuses
+a file in `wiki/journal/`, `wiki/knowledge/`, or `wiki/insights/`.
 `search_files` is a substring or regex search over markdown text, not semantic
 search. `list_files` adds `original_name` for an attachment when a
 `<file>.meta.json` metadata file records the sender's filename.

@@ -50,6 +50,25 @@ The indexer re-reads the volume every `memory.index_interval_s` seconds (60 by
 default). It compares each file against the index by content, so a file that did
 not change is not embedded again. A new note is findable within one interval.
 
+### Knowledge and insights
+
+Two folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
+
+- `wiki/knowledge/` holds what the researcher job found about a topic: one
+  dossier per topic, at the same path as the topic page, and one page for each
+  question it researched. The index gives these chunks the kind `knowledge`.
+- `wiki/insights/` holds what the insights job raised: a place where what we
+  do is different from what the knowledge says. The index gives these chunks
+  the kind `insight`.
+
+The agent finds both the same way it finds any wiki page: through the
+injection before a turn, and through `search_memory`. The agent cannot write
+them. `write_file` and `rename_file` refuse a path in either folder, so a
+dossier and an insight keep the frontmatter that their job reads. The search
+route for the viewer and joshua-mcp, `POST /v1/memory/search`, returns the
+kinds `wiki`, `journal`, and `profile` only, so it does not return these
+chunks.
+
 ### Two ways a chunk reaches the agent
 
 **The turn brings it.** Before each turn, core searches with the person's
@@ -336,7 +355,9 @@ member may tell Joshua about someone else.
 The journal has one writer: `write_journal_entry`. `write_file` and
 `rename_file` refuse a path under `wiki/journal/`, so every entry lands in the
 right day folder with the front matter the index reads, and the nightly page
-cannot be overwritten by a free write.
+cannot be overwritten by a free write. The same two tools refuse a path under
+`wiki/knowledge/` and `wiki/insights/`, which the jobs own. See
+[Knowledge and insights](#knowledge-and-insights).
 
 The indexer picks up a new or changed journal page like any other wiki page,
 and chunks it into `kb_chunk` at shared scope. A later turn that asks about the

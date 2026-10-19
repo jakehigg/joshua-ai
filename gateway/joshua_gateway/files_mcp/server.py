@@ -48,9 +48,11 @@ from joshua_shared.attachments import (
 )
 from joshua_shared.layout import (
     attachment_area,
+    insights_root,
     is_hidden,
     journal_entry_path,
     journal_root,
+    knowledge_root,
     month_dir,
     wiki_attachments_root,
 )
@@ -201,7 +203,8 @@ TOOLS = [
             "Write one .md file under wiki/. mode create fails if the file "
             "exists; overwrite replaces it; append adds to it. Max 256 KB. A "
             "path under wiki/journal/ is refused: the journal has one writer, "
-            "write_journal_entry."
+            "write_journal_entry. A path under wiki/knowledge/ or wiki/insights/ "
+            "is refused: the researcher job and the insights job write them."
         ),
         input_schema={
             "type": "object",
@@ -221,7 +224,8 @@ TOOLS = [
         name="rename_file",
         description=(
             "Rename one file in place under wiki/. new_name is a bare filename; "
-            "the extension must not change."
+            "the extension must not change. A file under wiki/journal/, "
+            "wiki/knowledge/, or wiki/insights/ cannot be renamed."
         ),
         input_schema={
             "type": "object",
@@ -522,6 +526,26 @@ def _in_journal(abs_path: Path, root_dir: Path) -> bool:
     return abs_path == journal_root(root_dir) or journal_root(root_dir) in abs_path.parents
 
 
+# The refusal for a write into a folder that a job owns.
+_JOB_FOLDER_REFUSAL = (
+    "wiki/knowledge/ and wiki/insights/ are read-only: the researcher job and "
+    "the insights job write them"
+)
+
+
+def _in_job_folder(abs_path: Path, root_dir: Path) -> bool:
+    """True when ``abs_path`` is inside ``wiki/knowledge/`` or ``wiki/insights/``.
+
+    The researcher job owns the first and the insights job owns the second.
+    Each page there carries the state of its job in its frontmatter, so a free
+    write could break a dossier or hide an insight.
+    """
+    for folder in (knowledge_root(root_dir), insights_root(root_dir)):
+        if abs_path == folder or folder in abs_path.parents:
+            return True
+    return False
+
+
 def _write_file(
     roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo, root_dir: Path
 ) -> types.CallToolResult:
@@ -533,6 +557,8 @@ def _write_file(
     root, abs_path = resolve(path, roots, write=True)
     if _in_journal(abs_path, root_dir):
         raise FilesError("the journal is written with write_journal_entry")
+    if _in_job_folder(abs_path, root_dir):
+        raise FilesError(_JOB_FOLDER_REFUSAL)
 
     _check_frontmatter(content)
     data = content.encode("utf-8")
@@ -559,6 +585,8 @@ def _rename_file(
         raise FilesError(f"{root.name} is read-only for a guest")
     if _in_journal(src, root_dir):
         raise FilesError("a journal entry cannot be renamed")
+    if _in_job_folder(src, root_dir):
+        raise FilesError(_JOB_FOLDER_REFUSAL)
     if not src.is_file():
         raise FilesError("file not found")
 
@@ -577,6 +605,8 @@ def _rename_file(
     dest = src.parent / final
     if dest == src:
         raise FilesError("new_name matches the current name")
+    if _in_job_folder(dest, root_dir):
+        raise FilesError(_JOB_FOLDER_REFUSAL)
     if dest.exists():
         raise FilesError("target exists")
 

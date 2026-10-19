@@ -1,0 +1,124 @@
+"""The files MCP refuses a write into `wiki/knowledge/` and `wiki/insights/`.
+
+The researcher job and the insights job own these folders. The agent reads
+them and writes neither, through `write_file` or through `rename_file`.
+"""
+
+from __future__ import annotations
+
+import json
+import textwrap
+from pathlib import Path
+
+import pytest
+from conftest import gateway_session
+from joshua_gateway.files_mcp import server
+from joshua_gateway.main import lifespan
+
+FOLDERS = ("knowledge", "insights")
+MEMBER = {"X-Joshua-Person": "alex"}
+
+
+@pytest.fixture
+def data_root(tmp_path, monkeypatch) -> Path:
+    root = tmp_path / "data"
+    (root / "wiki" / "houseplants").mkdir(parents=True)
+    (root / "people" / "alex" / "attachments").mkdir(parents=True)
+    (root / "shared").mkdir(parents=True)
+    (root / "wiki" / "houseplants" / "snake-plant.md").write_text("# Snake plant\n")
+    (root / "wiki" / "knowledge" / "houseplants").mkdir(parents=True)
+    (root / "wiki" / "knowledge" / "houseplants" / "snake-plant.md").write_text(
+        "---\ntopic: houseplants/snake-plant.md\n---\nThe dossier.\n"
+    )
+    (root / "wiki" / "insights" / "garden").mkdir(parents=True)
+    (root / "wiki" / "insights" / "garden" / "autumn.md").write_text(
+        "---\nstatus: new\n---\nThe insight.\n"
+    )
+    monkeypatch.setenv(server.DATA_ENV, str(root))
+    return root
+
+
+def files_yaml() -> str:
+    return textwrap.dedent("""\
+        files:
+          kind: builtin
+          allow: all
+        """)
+
+
+EXISTING = {
+    "knowledge": "wiki/knowledge/houseplants/snake-plant.md",
+    "insights": "wiki/insights/garden/autumn.md",
+}
+
+
+@pytest.mark.parametrize("folder", FOLDERS)
+@pytest.mark.parametrize("mode", ["create", "overwrite", "append"])
+async def test_write_file_refuses_a_job_folder(gateway, data_root, folder, mode) -> None:
+    app = gateway(files_yaml())
+    target = f"wiki/{folder}/houseplants/new-page.md"
+    async with lifespan(app):
+        async with gateway_session(app, "/files", "core", MEMBER) as session:
+            new = await session.call_tool(
+                "write_file", {"path": target, "content": "x\n", "mode": mode}
+            )
+            old = await session.call_tool(
+                "write_file",
+                {"path": EXISTING[folder], "content": "clobbered\n", "mode": "overwrite"},
+            )
+    for res in (new, old):
+        assert res.is_error is True
+        text = res.content[0].text
+        assert "researcher job" in text and "insights job" in text
+    assert not (data_root / target).exists()
+    assert "clobbered" not in (data_root / EXISTING[folder]).read_text()
+
+
+@pytest.mark.parametrize("folder", FOLDERS)
+async def test_rename_file_refuses_a_job_folder(gateway, data_root, folder) -> None:
+    app = gateway(files_yaml())
+    source = data_root / EXISTING[folder]
+    async with lifespan(app):
+        async with gateway_session(app, "/files", "core", MEMBER) as session:
+            res = await session.call_tool(
+                "rename_file", {"path": EXISTING[folder], "new_name": "renamed.md"}
+            )
+    assert res.is_error is True
+    assert "researcher job" in res.content[0].text
+    assert source.exists()
+    assert not (source.parent / "renamed.md").exists()
+
+
+@pytest.mark.parametrize("folder", FOLDERS)
+async def test_read_file_in_a_job_folder_is_allowed(gateway, data_root, folder) -> None:
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        async with gateway_session(app, "/files", "core", MEMBER) as session:
+            res = await session.call_tool("read_file", {"path": EXISTING[folder]})
+            listed = await session.call_tool(
+                "list_files", {"root": "wiki", "subpath": folder, "recursive": True}
+            )
+    assert res.is_error is not True
+    assert "The " in res.content[0].text
+    paths = [item["path"] for item in json.loads(listed.content[0].text)]
+    assert EXISTING[folder] in paths
+
+
+async def test_a_wiki_page_outside_the_job_folders_is_still_written(gateway, data_root) -> None:
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        async with gateway_session(app, "/files", "core", MEMBER) as session:
+            res = await session.call_tool(
+                "write_file", {"path": "wiki/houseplants/knowledge.md", "content": "ok\n"}
+            )
+    assert res.is_error is not True
+    assert (data_root / "wiki" / "houseplants" / "knowledge.md").read_text() == "ok\n"
+
+
+def test_in_job_folder_unit(tmp_path) -> None:
+    wiki = tmp_path / "wiki"
+    assert server._in_job_folder(wiki / "knowledge", tmp_path)
+    assert server._in_job_folder(wiki / "knowledge" / "a" / "b.md", tmp_path)
+    assert server._in_job_folder(wiki / "insights" / "g" / "x.md", tmp_path)
+    assert not server._in_job_folder(wiki / "knowledge.md", tmp_path)
+    assert not server._in_job_folder(wiki / "garden" / "insights" / "x.md", tmp_path)
