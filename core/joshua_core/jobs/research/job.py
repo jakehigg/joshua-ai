@@ -27,7 +27,10 @@ knowledge page.
 `run` then researches the questions: those that the run names, or else the
 open questions that a person asked, the other open questions, and the held
 questions, in dossier order, up to the cap. Each question goes to the crew.
-A published answer becomes a page, and the dossier and `README.md` get their
+A held question that kept its two lookups, not older than
+`jobs.research.lookup_max_age_days`, goes to the editor alone. A held or
+dropped question keeps the lookups of the run, and a published one loses
+them. A published answer becomes a page, and the dossier and `README.md` get their
 new state. A dry run does all of this and writes nothing; its report holds
 the full text of each page it would write.
 
@@ -184,6 +187,7 @@ class _Outcome:
     page: Page | None = None
     short: str = ""
     dropped_urls: list[str] = field(default_factory=list)
+    reused: bool = False
 
 
 @dataclass
@@ -499,6 +503,7 @@ class ResearchJob(Job):
         chosen = self._chosen(run, dossier, args)
         for question in chosen:
             groundings = extract_sentences(question.grounded_in, parts)
+            kept = question.kept_lookups(run.day, cfg.lookup_max_age_days)
             result = await crew.research_question(
                 question.question,
                 groundings,
@@ -508,12 +513,15 @@ class ResearchJob(Job):
                 ledger=run.ledger,
                 internet_runner=self._internet_runner,
                 editor_runner=self._runner,
+                draft=kept[0] if kept else None,
+                challenge=kept[1] if kept else None,
             )
             page = self._page(topic, question, groundings, result, run)
             if page is not None and result.page is not None:
                 question.status = "answered"
                 question.page = page.rel
                 question.hold_reason = ""
+                question.clear_lookups()
                 run.outcomes.append(
                     _Outcome(
                         question,
@@ -521,18 +529,22 @@ class ResearchJob(Job):
                         page=page,
                         short=result.page.answer_short,
                         dropped_urls=result.dropped_urls,
+                        reused=kept is not None,
                     )
                 )
                 continue
             question.holds += 1
             question.hold_reason = result.hold_reason or crew.NO_ANSWER
             question.status = "dropped" if question.holds >= cfg.max_holds else "held"
+            if kept is None:
+                question.keep_lookups(result.draft, result.challenge, run.day)
             run.outcomes.append(
                 _Outcome(
                     question,
                     question.status,
                     reason=question.hold_reason,
                     dropped_urls=result.dropped_urls,
+                    reused=kept is not None,
                 )
             )
         if chosen:
@@ -653,6 +665,8 @@ class ResearchJob(Job):
                 if o.dropped_urls:
                     urls = ", ".join(code_span(u, 200) for u in o.dropped_urls)
                     line += f". Sources no lookup returned, dropped: {urls}"
+                if o.reused:
+                    line += ". Only the editor ran, on the lookups that an earlier run kept"
                 result_lines.append(line)
             sections.append(("Researched", "\n".join(result_lines) or "No question to research."))
             if dry_run and published:
@@ -718,6 +732,7 @@ class ResearchJob(Job):
                 "pages": [f"knowledge/{o.page.rel}" for o in published if o.page is not None],
                 "held": [o.question.slug for o in held],
                 "dropped": [o.question.slug for o in dropped],
+                "editor_only": [o.question.slug for o in run.outcomes if o.reused],
                 "coverage": dossier.compute_coverage(),
                 "usage": run.ledger.as_data(),
                 "insights": self._insights_data(run),

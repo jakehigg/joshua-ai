@@ -324,6 +324,82 @@ async def test_two_holds_drop_a_question(h: Harness) -> None:
         h.job().check_args({"mode": "run", "topic": "garden/roses.md", "questions": slug})
 
 
+# -- the kept lookups of a held question ---------------------------------------
+
+
+async def _held_once(h: Harness, **args: Any) -> list[str]:
+    """Plan, then hold every question the run takes at the editor."""
+    await h.run(mode="plan", topic=SNAKE)
+    h.workers.editor_answer = editor(verdict="hold", reason="weak")
+    report = await h.run(mode="run", topic=SNAKE, **args)
+    h.workers.editor_answer = editor(
+        ("https://extension.university.example/snake-plant", "primary"),
+        ("https://www.example.org/houseplants/sansevieria", "secondary"),
+    )
+    return report.data["held"]
+
+
+async def test_a_held_question_with_its_lookups_runs_the_editor_alone(h: Harness) -> None:
+    held = await _held_once(h, max_questions=1)
+    question = h.dossier().find(held[0])  # type: ignore[union-attr]
+    assert question.draft is not None and question.challenge is not None
+    assert question.looked_up_at == fixed_clock()().date()
+    assert len(h.internet.texts) == 2
+
+    report = await h.run(mode="run", topic=SNAKE, questions=held[0])
+
+    assert len(h.internet.texts) == 2
+    assert h.workers.names()[-1] == "editor"
+    assert report.data["pages"] == [f"knowledge/houseplants/snake-plant/{held[0]}.md"]
+    assert report.data["editor_only"] == held
+    assert "Only the editor ran" in dict(report.sections)["Researched"]
+    question = h.dossier().find(held[0])  # type: ignore[union-attr]
+    assert question.status == "answered"
+    assert (question.draft, question.challenge, question.looked_up_at) == (None, None, None)
+    meta, body = frontmatter.split(layout.knowledge_dossier(SNAKE, h.data).read_text())
+    assert all("draft" not in q and "looked_up_at" not in q for q in meta["questions"])
+    assert "<details>" not in body
+
+
+async def test_old_lookups_are_done_again(h: Harness) -> None:
+    from datetime import timedelta
+
+    from jobs_fakes import NOW
+
+    held = await _held_once(h, max_questions=1)
+    job = h.job()
+    later = NOW + timedelta(days=h.settings.jobs.research.lookup_max_age_days + 1)
+    report = await job.run_once(
+        args=job.check_args({"mode": "run", "topic": SNAKE, "questions": held[0]}),
+        dry_run=False,
+        clock=fixed_clock(later),
+    )
+    assert len(h.internet.texts) == 4
+    assert report.data["editor_only"] == []
+    assert report.data["pages"] == [f"knowledge/houseplants/snake-plant/{held[0]}.md"]
+
+
+async def test_a_hold_shows_the_draft_and_a_drop_keeps_the_lookups(h: Harness) -> None:
+    held = await _held_once(h, max_questions=1)
+    body = layout.knowledge_dossier(SNAKE, h.data).read_text()
+    assert body.count("<details>") == 1
+    assert "<summary>The draft answer of" in body
+    h.workers.editor_answer = {"bad": "shape"}
+    await h.run(mode="run", topic=SNAKE, questions=held[0])
+    question = h.dossier().find(held[0])  # type: ignore[union-attr]
+    assert question.status == "dropped" and question.draft is not None
+    assert len(h.internet.texts) == 2
+
+
+async def test_the_cap_counts_a_question_that_runs_the_editor_alone(h: Harness) -> None:
+    held = await _held_once(h)
+    assert len(held) == 3 and len(h.internet.texts) == 6
+    report = await h.run(mode="run", topic=SNAKE, max_questions=2)
+    assert len(report.data["pages"]) == 2
+    assert report.data["editor_only"] == held[:2]
+    assert len(h.internet.texts) == 6
+
+
 async def test_a_person_question_is_researched_first(h: Harness) -> None:
     await h.run(mode="plan", topic=SNAKE)
     dossier = h.dossier()

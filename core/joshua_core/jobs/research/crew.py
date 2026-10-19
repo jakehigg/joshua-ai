@@ -22,6 +22,9 @@ A source on `jobs.research.distrusted_domains` is always `weak`, and a source on
 at any step is a hold with the reason `no answer`. A lookup that timed out is
 a hold that says so, with the searches and the fetches it made.
 
+When the caller gives a `draft` and a `challenge` that an earlier run kept,
+the crew does not look up again: the editor gets those two.
+
 The two lookups take `jobs.research.lookup_timeout_seconds` and
 `jobs.research.lookup_max_turns` in place of the limits of the `internet`
 section.
@@ -320,8 +323,14 @@ async def research_question(
     ledger: UsageLedger,
     internet_runner: Runner | None = None,
     editor_runner: Runner | None = None,
+    draft: internet.InternetAnswer | None = None,
+    challenge: internet.InternetAnswer | None = None,
 ) -> CrewResult:
-    """Run the crew for one question. Each call is counted on `ledger`."""
+    """Run the crew for one question. Each call is counted on `ledger`.
+
+    When both `draft` and `challenge` are given, the two lookups do not run,
+    and the editor gets these two answers.
+    """
 
     async def lookup(text: str, stats: WorkerStats) -> internet.InternetAnswer | None:
         used: list[Usage] = []
@@ -337,14 +346,17 @@ async def research_question(
         ledger.add(INTERNET, used)
         return got
 
-    stats = WorkerStats()
-    draft = await lookup(research_text(question), stats)
-    if draft is None:
-        return CrewResult(page=None, holds=[no_answer_reason("the researcher", stats)])
-    stats = WorkerStats()
-    challenge = await lookup(challenge_text(question, draft.answer), stats)
-    if challenge is None:
-        return CrewResult(page=None, holds=[no_answer_reason("the challenger", stats)], draft=draft)
+    if draft is None or challenge is None:
+        stats = WorkerStats()
+        draft = await lookup(research_text(question), stats)
+        if draft is None:
+            return CrewResult(page=None, holds=[no_answer_reason("the researcher", stats)])
+        stats = WorkerStats()
+        challenge = await lookup(challenge_text(question, draft.answer), stats)
+        if challenge is None:
+            return CrewResult(
+                page=None, holds=[no_answer_reason("the challenger", stats)], draft=draft
+            )
 
     used: list[Usage] = []
     edited = await run_worker(

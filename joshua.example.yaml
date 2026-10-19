@@ -276,6 +276,8 @@ jobs:
                            # it replaces internet.timeout_seconds for these lookups
     lookup_max_turns: 20   # the turn ceiling of one such lookup; it replaces
                            # internet.max_turns for these lookups
+    lookup_max_age_days: 7 # a held question keeps its two lookups this many
+                           # days; a later run gives them to the editor again
     trusted_domains:       # the editor may not grade a page here weak. An entry
       - .edu               # that starts with a dot matches the end of a host;
       - .gov               # an entry that ends with a dot matches its start

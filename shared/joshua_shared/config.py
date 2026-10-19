@@ -612,7 +612,9 @@ class JobsResearch(_Model):
     `record_sim` is the cosine floor for a record of the wiki, the journal, or
     `knowledge/` to answer a question that the `raise` worker sends to our
     records. `max_holds` is how many holds drop a question. `refresh_days` sets
-    `refresh_after` after a run. `trusted_domains` and `distrusted_domains`
+    `refresh_after` after a run. `lookup_max_age_days` is how long the
+    lookups of a held question stay good: a later run gives them to the editor
+    again and does not repeat them. `trusted_domains` and `distrusted_domains`
     are the trust rubric of the editor. See `docs/jobs.md`.
     """
 
@@ -630,6 +632,7 @@ class JobsResearch(_Model):
     distrusted_domains: list[str] = list(RESEARCH_DISTRUSTED_DOMAINS)
     lookup_timeout_seconds: int = Field(default=300, ge=1)
     lookup_max_turns: int = Field(default=20, ge=1)
+    lookup_max_age_days: int = Field(default=7, ge=1)
 
     @field_validator("trusted_domains", "distrusted_domains")
     @classmethod

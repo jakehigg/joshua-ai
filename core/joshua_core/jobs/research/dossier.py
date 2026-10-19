@@ -6,6 +6,11 @@ topic, its questions, and when it was last researched. Python writes its body
 again on each save, from the frontmatter and the pages of the answered
 questions. No worker writes a dossier.
 
+A question that was held or dropped after its lookups ran keeps the answers of
+the two lookups in `draft` and `challenge`, and the day of the lookups in
+`looked_up_at`. The body shows the draft of a held question in a collapsed
+section.
+
 `knowledge/README.md` (`layout.knowledge_index`) is the table of every
 dossier. `write_index` writes it again on each write of the researcher.
 """
@@ -24,7 +29,8 @@ from joshua_shared import frontmatter, layout
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from joshua_core.jobs.research.text import inline, strip_links
+from joshua_core.engine.internet import InternetAnswer
+from joshua_core.jobs.research.text import code_span, fenced, inline, strip_links
 from joshua_core.jobs.topics import read_page
 
 logger = get_logger("jobs.research.dossier")
@@ -65,6 +71,37 @@ class Question(BaseModel):
     holds: int = 0
     hold_reason: str = ""
     raised_at: date | None = None
+    draft: InternetAnswer | None = None
+    challenge: InternetAnswer | None = None
+    looked_up_at: date | None = None
+
+    def keep_lookups(
+        self, draft: InternetAnswer | None, challenge: InternetAnswer | None, day: date
+    ) -> None:
+        """Keep the answers of the two lookups of `day`, or clear them when
+        the researcher gave none."""
+        self.draft = draft
+        self.challenge = challenge if draft is not None else None
+        self.looked_up_at = day if draft is not None else None
+
+    def clear_lookups(self) -> None:
+        self.draft = None
+        self.challenge = None
+        self.looked_up_at = None
+
+    def kept_lookups(
+        self, day: date, max_age_days: int
+    ) -> tuple[InternetAnswer, InternetAnswer] | None:
+        """The draft and the challenge to give the editor again, or None.
+
+        Only a held question with both answers gives them, and only when the
+        lookups are not older than `max_age_days` on `day`.
+        """
+        if self.status != "held" or self.draft is None or self.challenge is None:
+            return None
+        if self.looked_up_at is None or (day - self.looked_up_at).days > max_age_days:
+            return None
+        return self.draft, self.challenge
 
     @property
     def by_person(self) -> bool:
@@ -257,9 +294,39 @@ def render_body(dossier: Dossier, answers: Mapping[str, str]) -> str:
                 f" Held: {inline(q.hold_reason)}." if status == "held" and q.hold_reason else ""
             )
             lines.append(f"- `{q.slug}`: {inline(strip_links(q.question, set()))}{reason}")
+            if status == "held" and q.draft is not None:
+                lines += _draft_lines(q)
         if not items:
             lines.append("None.")
     return "\n".join(lines) + "\n"
+
+
+def _draft_lines(question: Question) -> list[str]:
+    """The draft answer of a held question, in a collapsed section.
+
+    The answer is text from the open web, so it is in a code block, with no
+    link, and each source is a code span.
+    """
+    draft = question.draft
+    assert draft is not None
+    day = question.looked_up_at.isoformat() if question.looked_up_at else "an earlier run"
+    sources = [f"- {code_span(s.url, 300)}" for s in draft.sources] or ["- None."]
+    block = fenced(strip_links(draft.answer, set()))
+    indented = "\n".join(f"  {line}" if line else "" for line in block.split("\n"))
+    return [
+        "",
+        "  <details>",
+        f"  <summary>The draft answer of {day}, confidence {draft.confidence}</summary>",
+        "",
+        indented,
+        "",
+        "  Sources:",
+        "",
+        *[f"  {line}" for line in sources],
+        "",
+        "  </details>",
+        "",
+    ]
 
 
 def render_dossier(dossier: Dossier, answers: Mapping[str, str]) -> str:

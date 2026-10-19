@@ -419,3 +419,28 @@ def test_a_page_over_64_kb_is_refused() -> None:
     answer.answer = "x" * 70_000
     with pytest.raises(PageTooLong):
         _page(answer)
+
+
+async def test_kept_lookups_go_to_the_editor_and_no_lookup_runs() -> None:
+    from joshua_core.engine.internet import InternetAnswer
+
+    net = FakeInternet()
+    workers = FakeWorkers()
+    draft = InternetAnswer.model_validate(lookup(PRIMARY, answer="Kept draft."))
+    challenge = InternetAnswer.model_validate(lookup(SECONDARY, answer="Kept challenge."))
+    result = await crew.research_question(
+        GROUNDED,
+        GROUNDINGS,
+        internet_settings=SETTINGS.internet,
+        research_settings=CFG,
+        editor_model=None,
+        ledger=UsageLedger(),
+        internet_runner=net,
+        editor_runner=workers,
+        draft=draft,
+        challenge=challenge,
+    )
+    assert net.texts == []
+    assert "Kept draft." in workers.calls[0][1] and "Kept challenge." in workers.calls[0][1]
+    assert result.publish
+    assert (result.draft, result.challenge) == (draft, challenge)

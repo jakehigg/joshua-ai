@@ -138,3 +138,84 @@ def test_answer_short_is_read_from_the_page(tmp_path: Path) -> None:
     assert answer_short_of("houseplants/snake-plant/a.md", tmp_path) == "Four weeks."
     assert answer_short_of("../../Home.md", tmp_path) == ""
     assert answer_short_of("houseplants/none.md", tmp_path) == ""
+
+
+# -- the kept lookups ------------------------------------------------------------
+
+
+def _held_with_lookups(looked_up_at: date | None = date(2026, 10, 15)) -> Question:
+    from joshua_core.engine.internet import InternetAnswer, Source
+
+    draft = InternetAnswer(
+        answer="Water every [4 weeks](https://planted.example.com/x).\n\n```\n</details>\n```",
+        sources=[Source(url="https://extension.university.example/a", title="A")],
+        confidence="medium",
+    )
+    challenge = InternetAnswer(answer="Nothing contradicts it.", confidence="high")
+    return Question(
+        slug="light",
+        question="How much light?",
+        status="held",
+        holds=1,
+        hold_reason="no answer from the editor",
+        draft=draft,
+        challenge=challenge,
+        looked_up_at=looked_up_at,
+    )
+
+
+def test_a_held_question_keeps_its_lookups_through_a_save(tmp_path: Path) -> None:
+    dossier = _dossier()
+    dossier.questions[2] = _held_with_lookups()
+    save_dossier(dossier, tmp_path, {})
+    meta, body = frontmatter.split(layout.knowledge_dossier(SNAKE, tmp_path).read_text())
+    kept = meta["questions"][2]
+    assert kept["draft"]["sources"] == [
+        {"url": "https://extension.university.example/a", "title": "A"}
+    ]
+    assert kept["challenge"]["answer"] == "Nothing contradicts it."
+    assert kept["looked_up_at"] == date(2026, 10, 15)
+    assert "draft" not in meta["questions"][1]
+    loaded = load_dossier(SNAKE, tmp_path)
+    assert loaded is not None
+    assert loaded.questions[2].draft is not None
+    assert loaded.questions[2].draft.confidence == "medium"
+
+
+def test_the_body_shows_the_draft_of_a_held_question_collapsed(tmp_path: Path) -> None:
+    dossier = _dossier()
+    dossier.questions[2] = _held_with_lookups()
+    save_dossier(dossier, tmp_path, {})
+    _, body = frontmatter.split(layout.knowledge_dossier(SNAKE, tmp_path).read_text())
+    start = body.index("  <details>")
+    section = body[start : body.rindex("  </details>")]
+    assert "<summary>The draft answer of 2026-10-15, confidence medium</summary>" in section
+    assert "Water every 4 weeks." in section
+    assert "](https://planted.example.com/x)" not in body
+    assert "  ````markdown" in section
+    assert "`https://extension.university.example/a`" in section
+    assert body.count("<details>") == 1
+
+
+def test_the_lookups_are_given_again_only_while_they_are_fresh() -> None:
+    question = _held_with_lookups(date(2026, 10, 12))
+    assert question.kept_lookups(date(2026, 10, 19), 7) is not None
+    assert question.kept_lookups(date(2026, 10, 20), 7) is None
+    assert _held_with_lookups(None).kept_lookups(date(2026, 10, 19), 7) is None
+    question.status = "open"
+    assert question.kept_lookups(date(2026, 10, 19), 7) is None
+    question.status = "held"
+    question.challenge = None
+    assert question.kept_lookups(date(2026, 10, 19), 7) is None
+
+
+def test_keep_and_clear_the_lookups() -> None:
+    question = _held_with_lookups()
+    draft, challenge = question.draft, question.challenge
+    question.keep_lookups(None, challenge, date(2026, 10, 19))
+    assert (question.draft, question.challenge, question.looked_up_at) == (None, None, None)
+    question.keep_lookups(draft, None, date(2026, 10, 19))
+    assert question.draft is draft and question.challenge is None
+    assert question.looked_up_at == date(2026, 10, 19)
+    question.clear_lookups()
+    assert (question.draft, question.challenge, question.looked_up_at) == (None, None, None)
