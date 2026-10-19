@@ -6,3 +6,58 @@ one lock, records it in the `job_run` table, and, when the run is not a dry
 run, writes its report as a journal entry and commits the wiki. See
 `docs/jobs.md`.
 """
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from joshua_shared.config import JoshuaConfig
+
+from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle
+from joshua_core.jobs.bundle_job import BundleJob
+from joshua_core.jobs.runner import (
+    Clock,
+    Job,
+    JobArgsError,
+    JobBusy,
+    JobError,
+    JobRunner,
+    JobRunStore,
+    RunReport,
+    UnknownJob,
+)
+from joshua_core.jobs.topics import Topic, is_topic_page, list_topics
+
+__all__ = [
+    "Bundle",
+    "BundleJob",
+    "BundleStore",
+    "Clock",
+    "Job",
+    "JobArgsError",
+    "JobBusy",
+    "JobError",
+    "JobRunStore",
+    "JobRunner",
+    "RunReport",
+    "Topic",
+    "UnknownJob",
+    "build_bundle",
+    "build_job_runner",
+    "is_topic_page",
+    "list_topics",
+]
+
+
+def build_job_runner(
+    *,
+    repo: JobRunStore,
+    store: BundleStore,
+    settings: JoshuaConfig,
+    data_dir: Path | str,
+    lock: asyncio.Lock,
+) -> JobRunner:
+    """The runner with every built-in job. `lock` is the nightly reflection's lock."""
+    jobs: list[Job] = [BundleJob(store=store, settings=settings, data_dir=data_dir)]
+    return JobRunner(repo=repo, settings=settings, data_dir=data_dir, jobs=jobs, lock=lock)

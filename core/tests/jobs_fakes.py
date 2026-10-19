@@ -106,3 +106,64 @@ class FakeStore:
             {"count": len(embeddings), "kinds": list(kinds), "min_sim": min_sim, "source": source}
         )
         return dict(self.near)
+
+
+class FakeJobRunStore:
+    """An in-memory `job_run` table."""
+
+    def __init__(self) -> None:
+        self.rows: dict[int, dict[str, Any]] = {}
+        self.fail_finish = False
+
+    async def create_job_run(
+        self, *, job: str, args: dict[str, Any], dry_run: bool, started_at: datetime
+    ) -> int:
+        run_id = len(self.rows) + 1
+        self.rows[run_id] = {
+            "id": run_id,
+            "job": job,
+            "started_at": started_at,
+            "finished_at": None,
+            "dry_run": dry_run,
+            "args": args,
+            "commit_sha": None,
+            "report": None,
+            "calls": 0,
+            "tokens": 0,
+            "error": None,
+        }
+        return run_id
+
+    async def finish_job_run(
+        self,
+        run_id: int,
+        *,
+        finished_at: datetime,
+        report: dict[str, Any],
+        commit_sha: str | None,
+        calls: int,
+        tokens: int,
+        error: str | None,
+    ) -> None:
+        if self.fail_finish:
+            raise RuntimeError("database gone")
+        self.rows[run_id].update(
+            finished_at=finished_at,
+            report=report,
+            commit_sha=commit_sha,
+            calls=calls,
+            tokens=tokens,
+            error=error,
+        )
+
+    async def get_job_run(self, run_id: int) -> dict[str, Any] | None:
+        row = self.rows.get(run_id)
+        return dict(row) if row is not None else None
+
+    async def list_job_runs(self, job: str | None, limit: int = 20) -> list[dict[str, Any]]:
+        rows = [r for r in self.rows.values() if job is None or r["job"] == job]
+        return [dict(r) for r in sorted(rows, key=lambda r: r["id"], reverse=True)[:limit]]
+
+
+def fixed_clock(when: datetime = NOW):
+    return lambda: when

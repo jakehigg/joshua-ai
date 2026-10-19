@@ -140,6 +140,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_kb_chunk_doc
 CREATE INDEX IF NOT EXISTS idx_kb_chunk_embedding
     ON kb_chunk USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_kb_chunk_scope ON kb_chunk (person_id, source);
+
+-- One row per job run (see docs/jobs.md). `report` is the RunReport as JSON;
+-- it is NULL while the run is in progress. `commit_sha` is the wiki commit of
+-- a run that was not a dry run.
+CREATE TABLE IF NOT EXISTS job_run (
+    id           BIGSERIAL PRIMARY KEY,
+    job          TEXT NOT NULL,
+    started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at  TIMESTAMPTZ,
+    dry_run      BOOLEAN NOT NULL DEFAULT true,
+    args         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    commit_sha   TEXT,
+    report       JSONB,
+    calls        INT NOT NULL DEFAULT 0,
+    tokens       INT NOT NULL DEFAULT 0,
+    error        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_job_run_job ON job_run (job, id DESC);
 """
 
 

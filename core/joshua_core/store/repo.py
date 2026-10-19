@@ -691,3 +691,64 @@ class Repo:
                 (limit,),
             )
             return await cur.fetchall()
+
+    # --- job runs ------------------------------------------------------------
+
+    async def create_job_run(
+        self, *, job: str, args: dict[str, Any], dry_run: bool, started_at: datetime
+    ) -> int:
+        """Insert the row of a run that starts now, and return its id."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                INSERT INTO job_run (job, args, dry_run, started_at)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (job, Json(args), dry_run, started_at),
+            )
+            row = await cur.fetchone()
+        return int(row["id"])
+
+    async def finish_job_run(
+        self,
+        run_id: int,
+        *,
+        finished_at: datetime,
+        report: dict[str, Any],
+        commit_sha: str | None,
+        calls: int,
+        tokens: int,
+        error: str | None,
+    ) -> None:
+        """Record the end of a run: its report, its commit, its cost, and any error."""
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                UPDATE job_run
+                SET finished_at = %s, report = %s, commit_sha = %s,
+                    calls = %s, tokens = %s, error = %s
+                WHERE id = %s
+                """,
+                (finished_at, Json(report), commit_sha, calls, tokens, error, run_id),
+            )
+
+    async def get_job_run(self, run_id: int) -> dict[str, Any] | None:
+        """One run row, or None."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT * FROM job_run WHERE id = %s", (run_id,))
+            return await cur.fetchone()
+
+    async def list_job_runs(self, job: str | None, limit: int = 20) -> list[dict[str, Any]]:
+        """The newest runs first, of one job or of every job when `job` is None."""
+        async with self._pool.connection() as conn:
+            if job is None:
+                cur = await conn.execute(
+                    "SELECT * FROM job_run ORDER BY id DESC LIMIT %s", (limit,)
+                )
+            else:
+                cur = await conn.execute(
+                    "SELECT * FROM job_run WHERE job = %s ORDER BY id DESC LIMIT %s",
+                    (job, limit),
+                )
+            return await cur.fetchall()

@@ -178,8 +178,12 @@ class NightlyReflector:
         settings: JoshuaConfig,
         data_dir: Path | str = "/data",
         oneshot: Any = None,
+        lock: asyncio.Lock | None = None,
     ) -> None:
         self._repo = repo
+        # Shared with the job runner, so a job and this run never write the
+        # wiki at the same time.
+        self._lock = lock or asyncio.Lock()
         self._indexer = indexer
         self._manager = manager
         self._settings = settings
@@ -247,15 +251,24 @@ class NightlyReflector:
 
     async def run_once(self) -> dict[str, Any]:
         """The scheduled run: reflect on yesterday, then roll sessions over."""
-        summary = await self.reflect(target_date=self._yesterday())
-        if self._daily_rollover:
-            summary["rolled_over"] = await self._rollover()
+        async with self._lock:
+            summary = await self._reflect(target_date=self._yesterday(), person=None)
+            if self._daily_rollover:
+                summary["rolled_over"] = await self._rollover()
         return summary
 
     async def reflect(
         self, *, target_date: date | None = None, person: str | None = None
     ) -> dict[str, Any]:
         """Write the day's journal page and profiles. No session rollover.
+
+        It waits for the lock while a job runs.
+        """
+        async with self._lock:
+            return await self._reflect(target_date=target_date, person=person)
+
+    async def _reflect(self, *, target_date: date | None, person: str | None) -> dict[str, Any]:
+        """The body of `reflect`, with the lock held.
 
         With ``person`` set, only that person's profile is written, gated on
         their own transcript, and no journal page and no shared pass run. A

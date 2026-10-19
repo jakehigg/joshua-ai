@@ -166,3 +166,42 @@ def test_git_missing_returns_false_and_logs(
     assert wikigit.ensure_repo(wiki) is False
     assert not (wiki / ".git").exists()
     assert wikigit.commit(wiki, None, "sync") is False
+
+
+def test_head_sha_follows_each_commit(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    assert wikigit.head_sha(wiki) is None
+    wikigit.ensure_repo(wiki)
+    assert wikigit.head_sha(wiki) is None
+    (wiki / "a.md").write_text("a\n")
+    assert wikigit.commit(wiki, ["a.md"], "first") is True
+    first = wikigit.head_sha(wiki)
+    assert first is not None and len(first) == 40
+    (wiki / "a.md").write_text("b\n")
+    wikigit.commit(wiki, ["a.md"], "second")
+    second = wikigit.head_sha(wiki)
+    assert second is not None and second != first
+    expected = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=wiki, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert second == expected
+
+
+def test_head_sha_with_no_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wiki = tmp_path / "wiki"
+    (wiki / ".git").mkdir(parents=True)
+    monkeypatch.setenv("PATH", "")
+    assert wikigit.head_sha(wiki) is None
+
+
+def test_head_sha_when_git_cannot_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    wikigit.ensure_repo(wiki)
+
+    def _boom(args, *, cwd):
+        raise OSError("no")
+
+    monkeypatch.setattr(wikigit, "_git_run", _boom)
+    assert wikigit.head_sha(wiki) is None

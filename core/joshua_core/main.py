@@ -7,6 +7,7 @@ Both probes are open and carry no secrets.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
@@ -30,6 +31,7 @@ from joshua_core.engine.prompts import PromptComposer
 from joshua_core.engine.tools import internet, recall, registration, scheduling
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
+from joshua_core.jobs import JobRunner, build_job_runner
 from joshua_core.memory import embed
 from joshua_core.memory.indexer import Indexer, IndexerLoop
 from joshua_core.memory.nightly import NightlyReflector
@@ -71,6 +73,8 @@ class AppContext:
     memory: MemoryStore
     indexer: Indexer
     reflector: NightlyReflector
+    # The jobs behind `/admin/jobs/*`. None leaves those routes at 404.
+    jobs: JobRunner | None = None
 
 
 def _database_url() -> str:
@@ -137,8 +141,19 @@ async def lifespan(app: FastAPI):
     memory_store = MemoryStore(db.pool)
     indexer, indexer_loop = _build_memory(settings, memory_store, manager, repo)
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
+    # One lock for the nightly reflection and every job, so two of them never
+    # write the wiki at the same time.
+    wiki_lock = asyncio.Lock()
     reflector = NightlyReflector(
-        repo=repo, indexer=indexer, manager=manager, settings=settings, data_dir=data_dir
+        repo=repo,
+        indexer=indexer,
+        manager=manager,
+        settings=settings,
+        data_dir=data_dir,
+        lock=wiki_lock,
+    )
+    jobs = build_job_runner(
+        repo=repo, store=memory_store, settings=settings, data_dir=data_dir, lock=wiki_lock
     )
     deliverer = build_deliverer()
     events = EventService(
@@ -174,6 +189,7 @@ async def lifespan(app: FastAPI):
         memory=memory_store,
         indexer=indexer,
         reflector=reflector,
+        jobs=jobs,
     )
     await scheduler.start()
     indexer_loop.start()

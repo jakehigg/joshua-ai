@@ -86,6 +86,21 @@ def commit(wiki: Path, paths: Iterable[Path | str] | None, message: str) -> bool
         return False
 
 
+def head_sha(wiki: Path) -> str | None:
+    """The full SHA of the commit at `HEAD`, or None when there is none or
+    `git` failed (logged as a WARNING)."""
+    if shutil.which("git") is None or not (wiki / ".git").exists():
+        return None
+    try:
+        result = _git_run(["rev-parse", "--verify", "-q", "HEAD"], cwd=wiki)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning({"message": "wiki git rev-parse failed", "error": str(exc)})
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 # --- internals ---------------------------------------------------------
 
 
