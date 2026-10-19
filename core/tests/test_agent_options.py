@@ -261,3 +261,116 @@ def test_a_matcher_that_is_already_built_is_left_alone(fake_sdk):
     options = _worker(tools=["WebFetch"], hooks={"PreToolUse": [matcher]})
 
     assert options.hooks["PreToolUse"] == [matcher]
+
+
+# ── the structured result ────────────────────────────────────────────────────
+
+
+class ResultMessage:
+    """The SDK result message, with the fields a structured call reads."""
+
+    def __init__(self, *, subtype="success", structured=None, result=None, num_turns=1):
+        self.subtype = subtype
+        self.structured_output = structured
+        self.result = result
+        self.num_turns = num_turns
+        self.is_error = subtype != "success"
+        self.usage = None
+
+
+class StreamClient(FakeClient):
+    """Gives each message of a list, in order."""
+
+    def __init__(self, messages, options=None):
+        super().__init__(None)
+        self._messages = messages
+        self.options = options
+
+    async def receive_response(self):
+        for msg in self._messages:
+            yield msg
+
+    async def disconnect(self):
+        return None
+
+
+def _answer_warnings(caplog):
+    return [
+        r.msg
+        for r in caplog.records
+        if isinstance(r.msg, dict) and r.msg.get("message") == "worker result without an answer"
+    ]
+
+
+async def test_a_result_that_ran_out_of_turns_logs_one_line_and_gives_none(caplog):
+    """The CLI stops at the turn limit before the StructuredOutput call lands."""
+    client = StreamClient(
+        [ResultMessage(subtype="error_max_turns", structured=None, result="", num_turns=2)]
+    )
+
+    with caplog.at_level("WARNING"):
+        answer = await agent._structured_turn(client, "u", None, None)
+
+    assert answer is None
+    assert _answer_warnings(caplog) == [
+        {
+            "message": "worker result without an answer",
+            "subtype": "error_max_turns",
+            "num_turns": 2,
+            "is_error": True,
+        }
+    ]
+
+
+async def test_a_result_with_the_structured_answer_gives_it_and_logs_nothing(caplog):
+    client = StreamClient([ResultMessage(structured={"kind": "photo"}, num_turns=2)])
+
+    with caplog.at_level("WARNING"):
+        answer = await agent._structured_turn(client, "u", None, None)
+
+    assert answer == {"kind": "photo"}
+    assert _answer_warnings(caplog) == []
+
+
+async def test_a_successful_result_with_no_answer_logs_without_the_content(caplog):
+    client = StreamClient([ResultMessage(result="I cannot answer that private thing.")])
+
+    with caplog.at_level("WARNING"):
+        assert await agent._structured_turn(client, "u", None, None) is None
+
+    lines = _answer_warnings(caplog)
+    assert len(lines) == 1 and lines[0]["subtype"] == "success"
+    assert "private" not in str(lines)
+
+
+async def test_an_answer_on_a_result_that_is_not_a_success_is_kept_and_logged(caplog):
+    client = StreamClient([ResultMessage(subtype="error_max_turns", structured={"a": 1})])
+
+    with caplog.at_level("WARNING"):
+        assert await agent._structured_turn(client, "u", None, None) == {"a": 1}
+
+    assert len(_answer_warnings(caplog)) == 1
+
+
+async def test_run_structured_allows_the_structured_output_turns(monkeypatch):
+    """The answer arrives as a tool call, which is a turn of its own."""
+    built: list[dict] = []
+
+    def fake_build(**kwargs):
+        built.append(kwargs)
+        return FakeOptions(**kwargs)
+
+    monkeypatch.setattr(agent, "build_options", fake_build)
+    monkeypatch.setattr(
+        agent,
+        "ClaudeSDKClient",
+        lambda options: StreamClient([ResultMessage(structured={"ok": True})], options),
+    )
+
+    answer = await agent.run_structured(
+        system_prompt="s", user_text="u", schema={}, model=None, timeout_s=5
+    )
+
+    assert answer == {"ok": True}
+    assert built[0]["max_turns"] == agent.STRUCTURED_MAX_TURNS == 3
+    assert built[0]["output_format"] == {"type": "json_schema", "schema": {}}

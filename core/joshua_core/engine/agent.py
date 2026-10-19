@@ -62,7 +62,14 @@ _NO_TOOLS: list[str] = []
 # shell, and no MCP server.
 WORKER_TOOLS: frozenset[str] = frozenset({"WebSearch", "WebFetch"})
 
+# The turn limit of a structured call. The CLI delivers the structured answer
+# through a `StructuredOutput` tool call, and that call counts as a turn. At 1
+# the run can stop with `error_max_turns` before the answer arrives, and the
+# model sometimes calls the tool twice, so 3 leaves room for both.
+STRUCTURED_MAX_TURNS = 3
+
 __all__ = [
+    "STRUCTURED_MAX_TURNS",
     "AgentSession",
     "TurnResult",
     "Usage",
@@ -333,7 +340,7 @@ async def run_structured(
         cwd=cwd,
         mcp_servers={},
         model=model,
-        max_turns=1,
+        max_turns=STRUCTURED_MAX_TURNS,
         resume=None,
         output_format={"type": "json_schema", "schema": schema},
     )
@@ -401,16 +408,40 @@ async def _structured_turn(
     await client.query(_one_message())
     async for msg in client.receive_response():
         note_result(msg, usage_out)
-        structured = getattr(msg, "structured_output", None)
-        if isinstance(structured, dict):
-            return structured
-        result = getattr(msg, "result", None)
-        if isinstance(result, str) and result.strip().startswith("{"):
-            try:
-                parsed = json.loads(result)
-            except ValueError:
-                return None
-            return parsed if isinstance(parsed, dict) else None
+        answer = _structured_answer(msg)
+        if type(msg).__name__ == "ResultMessage":
+            subtype = getattr(msg, "subtype", None)
+            if answer is None or subtype != "success":
+                logger.warning(
+                    {
+                        "message": "worker result without an answer",
+                        "subtype": subtype,
+                        "num_turns": getattr(msg, "num_turns", None),
+                        "is_error": bool(getattr(msg, "is_error", False)),
+                    }
+                )
+            return answer
+        if answer is not None:
+            return answer
+    return None
+
+
+def _structured_answer(msg: Any) -> dict[str, Any] | None:
+    """The structured answer on one message, or None.
+
+    The answer is `structured_output`, or else a `result` string that holds a
+    JSON object.
+    """
+    structured = getattr(msg, "structured_output", None)
+    if isinstance(structured, dict):
+        return structured
+    result = getattr(msg, "result", None)
+    if isinstance(result, str) and result.strip().startswith("{"):
+        try:
+            parsed = json.loads(result)
+        except ValueError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
     return None
 
 
