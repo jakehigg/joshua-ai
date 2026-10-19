@@ -571,10 +571,58 @@ class JobsCurator(_Model):
         return self
 
 
+# The domains whose pages a research editor may not grade `weak`. An entry
+# that starts with a dot matches the end of a host, and an entry that ends with
+# a dot matches its start.
+RESEARCH_TRUSTED_DOMAINS = (".edu", ".gov", ".ac.uk", "extension.", ".int")
+# The domains whose pages are always `weak` to a research editor.
+RESEARCH_DISTRUSTED_DOMAINS = (
+    "pinterest.com",
+    "quora.com",
+    "answers.com",
+    "ehow.com",
+    "wikihow.com",
+    "facebook.com",
+    "reddit.com",
+)
+
+
 class JobsResearch(_Model):
-    """The researcher job. Reserved: package 3 adds its keys."""
+    """The researcher job: cited, challenged facts about one topic at a time.
+
+    `enabled` registers the job and the `research` chat tool. `model` is the
+    model of the two tool-less workers, `raise` and `editor`; `None` uses
+    `jobs.model`, then `core.reflection_model`. The lookups use the
+    `internet` section. `topics_per_run` is how many topics one run takes.
+    `questions_per_topic` is how many questions one `raise` call may add,
+    less the open ones. `questions_per_run` is how many questions one run
+    researches. `coverage_target` is the coverage below which a topic is due.
+    `dup_sim` is the cosine floor for a new question to be a duplicate.
+    `max_holds` is how many holds drop a question. `refresh_days` sets
+    `refresh_after` after a run. `trusted_domains` and `distrusted_domains`
+    are the trust rubric of the editor. See `docs/jobs.md`.
+    """
 
     enabled: bool = False
+    model: str | None = None
+    topics_per_run: int = Field(default=1, ge=1, le=1)
+    questions_per_topic: int = Field(default=8, ge=1, le=50)
+    questions_per_run: int = Field(default=3, ge=1, le=50)
+    coverage_target: float = Field(default=0.6, ge=0.0, le=1.0)
+    dup_sim: float = Field(default=0.85, ge=0.0, le=1.0)
+    max_holds: int = Field(default=2, ge=1)
+    refresh_days: int = Field(default=180, ge=1)
+    trusted_domains: list[str] = list(RESEARCH_TRUSTED_DOMAINS)
+    distrusted_domains: list[str] = list(RESEARCH_DISTRUSTED_DOMAINS)
+
+    @field_validator("trusted_domains", "distrusted_domains")
+    @classmethod
+    def _domains(cls, value: list[str]) -> list[str]:
+        out = [item.strip().lower() for item in value if item.strip()]
+        bad = [item for item in out if "/" in item or " " in item or item in (".", "..")]
+        if bad:
+            raise ValueError(f"not a domain entry: {', '.join(bad)}")
+        return list(dict.fromkeys(out))
 
 
 class JobsInsights(_Model):

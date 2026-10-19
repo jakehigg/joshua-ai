@@ -239,6 +239,13 @@ def _term_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
     return re.compile(rf"(?<!\w)(?:{body})(?:e?s)?(?!\w)", re.IGNORECASE)
 
 
+def topic_pattern(topic: Topic, wiki_root: Path) -> re.Pattern[str] | None:
+    """The pattern that finds the title or an alias of `topic` in a text, by the
+    rule of the module docstring, or None when no term is long enough."""
+    meta, _ = frontmatter.split(read_page(Path(wiki_root) / topic.path))
+    return _term_pattern([topic.title, *topic_aliases(topic, meta, Path(wiki_root))])
+
+
 # -- journal ----------------------------------------------------------------
 
 
@@ -247,6 +254,10 @@ class _Entry:
     rel: str
     day: date
     text: str
+
+
+# One journal page: its path relative to the wiki root, its day, and its text.
+JournalEntry = _Entry
 
 
 def _journal_entries(data_root: Path, wiki_root: Path, today: date) -> list[_Entry]:
@@ -270,6 +281,12 @@ def _journal_entries(data_root: Path, wiki_root: Path, today: date) -> list[_Ent
                 continue
             entries.append(_Entry(path.relative_to(wiki_root).as_posix(), day, text))
     return entries
+
+
+def journal_entries(wiki_root: Path, today: date) -> list[JournalEntry]:
+    """Every journal page dated up to `today`, except the pages a job run wrote."""
+    wiki_root = Path(wiki_root)
+    return _journal_entries(wiki_root.parent, wiki_root, today)
 
 
 async def _near_journal_paths(

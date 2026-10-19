@@ -118,3 +118,7 @@ def test_trash_path_refuses_an_unsafe_path(tmp_path: Path, rel: str) -> None:
 
     with pytest.raises(ValueError):
         layout.trash_path(rel, date(2026, 10, 19), tmp_path)
+
+
+def test_knowledge_index_is_the_readme_of_the_knowledge_folder(tmp_path: Path) -> None:
+    assert layout.knowledge_index(tmp_path) == tmp_path / "wiki" / "knowledge" / "README.md"

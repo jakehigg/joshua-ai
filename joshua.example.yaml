@@ -252,7 +252,33 @@ jobs:
     trash: true            # true: move a stray file to wiki/.trash/<day>/;
                            # false: record it as a finding only
   research:
-    enabled: false         # reserved, package 3
+    # The researcher keeps wiki/knowledge/: cited, challenged facts about one
+    # topic at a time, in a dossier per topic. docs/jobs.md explains it.
+    enabled: false         # true: the research job and the research chat tool
+    # model: claude-sonnet-5 # the model of its two tool-less workers (raise,
+    #                        # editor); when it is not set, jobs.model, then
+    #                        # core.reflection_model. The lookups use internet.
+    topics_per_run: 1      # the topics one run works on; only 1 is supported
+    questions_per_topic: 8 # the questions one raise call may add, less the open ones
+    questions_per_run: 3   # the questions one run researches
+    coverage_target: 0.6   # a topic below this coverage is due for research
+    dup_sim: 0.85          # a new question this close to a known one is a duplicate
+    max_holds: 2           # a question held this many times is dropped
+    refresh_days: 180      # a researched topic is due again after this many days
+    trusted_domains:       # the editor may not grade a page here weak. An entry
+      - .edu               # that starts with a dot matches the end of a host;
+      - .gov               # an entry that ends with a dot matches its start
+      - .ac.uk
+      - extension.
+      - .int
+    distrusted_domains:    # the editor always grades a page here weak
+      - pinterest.com
+      - quora.com
+      - answers.com
+      - ehow.com
+      - wikihow.com
+      - facebook.com
+      - reddit.com
   insights:
     enabled: false         # reserved, package 4
 

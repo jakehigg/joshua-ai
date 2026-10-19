@@ -520,6 +520,28 @@ jobs:
     trash: true
   research:
     enabled: false
+    model: claude-sonnet-5
+    topics_per_run: 1
+    questions_per_topic: 8
+    questions_per_run: 3
+    coverage_target: 0.6
+    dup_sim: 0.85
+    max_holds: 2
+    refresh_days: 180
+    trusted_domains:
+      - .edu
+      - .gov
+      - .ac.uk
+      - extension.
+      - .int
+    distrusted_domains:
+      - pinterest.com
+      - quora.com
+      - answers.com
+      - ehow.com
+      - wikihow.com
+      - facebook.com
+      - reddit.com
   insights:
     enabled: false
 ```
@@ -539,8 +561,22 @@ jobs:
 | `curator.overlap_sim` | `0.70` | Two topic pages of one section this close are also compared, after the near-duplicate pairs, while the budget lasts. It must not be above `duplicate_sim`. |
 | `curator.apply` | none | The Tier B actions that a run applies: `move`, `merge`, `refresh`. Any other value is an error. The `apply` argument of a run replaces this list for that run. |
 | `curator.trash` | `true` | `true` moves a stray file to `wiki/.trash/<day>/`. `false` records it as a finding and leaves it. |
-| `research.enabled` | `false` | Reserved, package 3. |
+| `research.enabled` | `false` | `true` adds the `research` job and the `research` chat tool for members. Both also need `jobs.enabled`. A `run` also needs `internet.enabled`. |
+| `research.model` | not set | The model of the two research workers that have no tools, `raise` and `editor`. When it is not set, the researcher uses `jobs.model`, then `core.reflection_model`. The two lookups use `internet.model`. |
+| `research.topics_per_run` | `1` | The topics that one run works on. Only `1` is supported. |
+| `research.questions_per_topic` | `8` | The most questions that one `raise` call may add to a dossier, less the open questions. |
+| `research.questions_per_run` | `3` | The most questions that one run researches. The `max_questions` argument of a run can make it lower. A `plan` or a `run` calls `raise` only when the dossier has fewer open questions than this. |
+| `research.coverage_target` | `0.6` | A topic with a coverage below this is due for research (selection rule 3). |
+| `research.dup_sim` | `0.85` | A new question with a vector this close to a question of the dossier, or to a knowledge page, is a duplicate. |
+| `research.max_holds` | `2` | A question held this many times is `dropped`. |
+| `research.refresh_days` | `180` | The days from a research run to `refresh_after` on the dossier and the page. |
+| `research.trusted_domains` | `.edu`, `.gov`, `.ac.uk`, `extension.`, `.int` | The editor may not grade a page on these domains `weak`. |
+| `research.distrusted_domains` | `pinterest.com`, `quora.com`, `answers.com`, `ehow.com`, `wikihow.com`, `facebook.com`, `reddit.com` | A page on these domains is always `weak`. |
 | `insights.enabled` | `false` | Reserved, package 4. |
+
+A domain entry matches a host when the host is the entry, when the host ends
+with the entry (`.edu`, or `reddit.com` for `www.reddit.com`), or, for an
+entry that ends with a dot (`extension.`), when the host starts with it.
 
 A **topic** is one leaf page of the wiki, such as
 `houseplants/snake-plant.md`. These pages are not topics: `Home.md`, a section

@@ -257,6 +257,11 @@ def knowledge_root(root: Path | str | None = None) -> Path:
     return wiki_root(root) / KNOWLEDGE
 
 
+def knowledge_index(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/knowledge/README.md`, the table of every dossier."""
+    return knowledge_root(root) / "README.md"
+
+
 def _topic_stem(topic_rel: str) -> PurePosixPath:
     """The wiki-relative path of a topic page without `.md`.
 

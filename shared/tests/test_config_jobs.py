@@ -124,3 +124,66 @@ def test_curator_overrides_load() -> None:
 def test_curator_bad_values_fail(fragment: str) -> None:
     with pytest.raises(config.ConfigError):
         config.parse(BASE + "jobs:\n" + fragment, {}, source="test.yaml")
+
+
+def test_research_defaults() -> None:
+    research = config.Jobs().research
+    assert research.enabled is False
+    assert research.model is None
+    assert research.topics_per_run == 1
+    assert research.questions_per_topic == 8
+    assert research.questions_per_run == 3
+    assert research.coverage_target == 0.6
+    assert research.dup_sim == 0.85
+    assert research.max_holds == 2
+    assert research.refresh_days == 180
+    assert research.trusted_domains == [".edu", ".gov", ".ac.uk", "extension.", ".int"]
+    assert "reddit.com" in research.distrusted_domains
+    assert len(research.distrusted_domains) == 7
+
+
+def test_research_overrides_load() -> None:
+    text = BASE + (
+        "jobs:\n"
+        "  research:\n"
+        "    enabled: true\n"
+        "    model: claude-haiku-4-5\n"
+        "    questions_per_topic: 4\n"
+        "    questions_per_run: 1\n"
+        "    coverage_target: 0.8\n"
+        "    dup_sim: 0.9\n"
+        "    max_holds: 3\n"
+        "    refresh_days: 30\n"
+        "    trusted_domains:\n"
+        "      - ' .EDU '\n"
+        "      - .edu\n"
+        "    distrusted_domains:\n"
+        "      - Example.COM\n"
+    )
+    research = config.parse(text, {}, source="test.yaml").jobs.research
+    assert research.enabled is True
+    assert research.model == "claude-haiku-4-5"
+    assert research.questions_per_topic == 4
+    assert research.questions_per_run == 1
+    assert research.coverage_target == 0.8
+    assert research.dup_sim == 0.9
+    assert research.max_holds == 3
+    assert research.refresh_days == 30
+    assert research.trusted_domains == [".edu"]
+    assert research.distrusted_domains == ["example.com"]
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "  research:\n    topics_per_run: 2\n",
+        "  research:\n    questions_per_run: 0\n",
+        "  research:\n    dup_sim: 1.5\n",
+        "  research:\n    max_holds: 0\n",
+        "  research:\n    trusted_domains:\n      - example.com/path\n",
+        "  research:\n    exclude:\n      - x.md\n",
+    ],
+)
+def test_research_bad_values_fail(fragment: str) -> None:
+    with pytest.raises(config.ConfigError):
+        config.parse(BASE + "jobs:\n" + fragment, {}, source="test.yaml")
