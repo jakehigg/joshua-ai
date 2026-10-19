@@ -203,3 +203,19 @@ def test_base_prompt_has_the_knowledge_rule() -> None:
     assert "search memory first" in paragraph
     assert "confidence" in paragraph and "queue the" in paragraph
     assert len(re.findall(r"\S+", paragraph)) < 80
+
+
+def test_base_prompt_keeps_the_questions_and_sends_none() -> None:
+    import re
+
+    base = (
+        Path(__file__).resolve().parents[1] / "joshua_core" / "prompts" / "builtin" / "base.md"
+    ).read_text()
+    paragraph = next(p for p in base.split("\n\n") if "questions/" in p)
+    flat = " ".join(paragraph.split())
+    assert "`list_questions`" in flat and "`answer_question`" in flat
+    assert "Never raise one on your own." in flat
+    assert "need anything from them" in flat
+    assert len(re.findall(r"\S+", paragraph)) < 60
+    assert not re.search(r"\b(send|sends|deliver|notify|remind|message)\b", flat, re.I)
+    assert not re.search(r"(?<!Never )\b(ask|raise) (them|one|the question)", flat)
