@@ -14,11 +14,15 @@ Arguments:
 Both modes choose the topic, build its memory bundle, and load or start its
 dossier. When the dossier has fewer than `questions_per_run` open questions,
 and the run names no `questions`, the `raise` worker proposes new ones and the
-gate decides which the dossier takes.
+gate gives each one its route: a `web` question goes to the dossier, a
+`person` question becomes a page under `wiki/questions/`, and a `record`
+question that our records answer is closed in the report. Nobody gets a
+question: a person answers one later, in chat.
 
-`plan` stops there. When it is not a dry run, it writes the dossier and
-`knowledge/README.md`, so a later run can name the new slugs. It makes no
-lookup and writes no page.
+`plan` stops there. When it is not a dry run, it writes the dossier,
+`knowledge/README.md`, and each new question page with `questions/README.md`,
+so a later run can name the new slugs. It makes no lookup and writes no
+knowledge page.
 
 `run` then researches the questions: those that the run names, or else the
 open questions that a person asked, the other open questions, and the held
@@ -63,12 +67,28 @@ from joshua_core.jobs.research.dossier import (
     write_index,
 )
 from joshua_core.jobs.research.gate import (
+    NO_RECORD,
+    PERSON,
+    RECORD,
+    AskedQuestion,
     Candidate,
     Gate,
     Verdict,
     default_embedder,
     roster_names,
 )
+from joshua_core.jobs.research.questions import (
+    QuestionPage,
+    counts,
+    load_questions,
+    new_slug,
+    question_rel,
+    question_section,
+    roster,
+    who_would_know,
+    write_question,
+)
+from joshua_core.jobs.research.questions import write_index as write_questions_index
 from joshua_core.jobs.research.raise_ import WORKER as RAISE
 from joshua_core.jobs.research.raise_ import raise_questions
 from joshua_core.jobs.research.select import Selection, journal_counts, select_topic
@@ -90,6 +110,9 @@ RULE_GIVEN = "given"
 _ARGS = {"mode", "topic", "questions", "max_questions", "then_insights"}
 _TRUE = ("true", "yes", "1", "on")
 _FALSE = ("false", "no", "0", "off")
+# The `why` of a question for a person when the worker gave none.
+_WHY_NO_RECORD = "The researcher looked for this in our pages and the journal and did not find it."
+_WHY_ABOUT_US = "Only somebody here knows this: the web cannot answer a question about us."
 
 
 def worker_model(settings: JoshuaConfig) -> str | None:
@@ -164,6 +187,15 @@ class _Outcome:
 
 
 @dataclass
+class _PersonQuestion:
+    """A new question for a person: its id, its page, and the gate's verdict."""
+
+    id: str
+    page: QuestionPage
+    verdict: Verdict
+
+
+@dataclass
 class _Run:
     """The state of one run."""
 
@@ -174,6 +206,9 @@ class _Run:
     ledger: UsageLedger = field(default_factory=UsageLedger)
     added: list[Question] = field(default_factory=list)
     rejected: list[Verdict] = field(default_factory=list)
+    person: list[_PersonQuestion] = field(default_factory=list)
+    asked_before: list[Verdict] = field(default_factory=list)
+    record: list[Verdict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     outcomes: list[_Outcome] = field(default_factory=list)
     insights: Any = None
@@ -284,6 +319,11 @@ class ResearchJob(Job):
             for outcome in run.outcomes:
                 if outcome.page is not None:
                     written.append(write_page(outcome.page, self._data_dir))
+            for item in run.person:
+                written.append(write_question(item.id, item.page, self._data_dir))
+            if run.person:
+                written.append(write_questions_index(self._data_dir))
+            dossier.person_open, dossier.person_answered = counts(self._data_dir, topic.path)
             written.append(save_dossier(dossier, self._data_dir, answers))
             written.append(write_index(self._data_dir))
         if run.mode == "run" and any(o.page is not None for o in run.outcomes):
@@ -366,11 +406,25 @@ class ResearchJob(Job):
             data_root=self._data_dir,
             embed=default_embedder(self._settings, topic.title),
             people=roster_names(self._settings),
+            record_sim=cfg.record_sim,
+            asked=[
+                AskedQuestion(q.page.question, q.page.status, q.rel)
+                for q in load_questions(self._data_dir, topic.path)
+            ],
         )
         for candidate in raised.candidates:
             verdict = await gate.check(candidate)
             if not verdict.accepted:
-                run.rejected.append(verdict)
+                if verdict.route == PERSON:
+                    run.asked_before.append(verdict)
+                else:
+                    run.rejected.append(verdict)
+                continue
+            if verdict.route == RECORD:
+                run.record.append(verdict)
+                continue
+            if verdict.route == PERSON:
+                run.person.append(self._person_question(run, topic, bundle, verdict))
                 continue
             question = Question(
                 slug=question_slug(candidate.question, (q.slug for q in dossier.questions)),
@@ -381,6 +435,37 @@ class ResearchJob(Job):
             dossier.questions.append(question)
             run.added.append(question)
         run.notes.extend(gate.notes)
+
+    def _person_question(
+        self, run: _Run, topic: Topic, bundle: Bundle, verdict: Verdict
+    ) -> _PersonQuestion:
+        """The page of a new question for a person, not yet written."""
+        candidate = verdict.candidate
+        groundings = extract_sentences(candidate.grounded_in, bundle_parts(bundle))
+        section = question_section(topic.path)
+        taken = [p.id.split("/", 1)[1] for p in run.person if p.id.startswith(f"{section}/")]
+        slug = new_slug(section, candidate.question, self._data_dir, taken)
+        why = candidate.why or (
+            _WHY_NO_RECORD if verdict.route_reason == NO_RECORD else _WHY_ABOUT_US
+        )
+        page = QuestionPage.model_validate(
+            {
+                "question": candidate.question,
+                "topic": topic.path,
+                "section": section,
+                "why": why,
+                "for": who_would_know(
+                    [*(g.sentence for g in groundings), *candidate.grounded_in],
+                    roster(self._settings),
+                ),
+                "context": list(dict.fromkeys(g.path for g in groundings)) or [topic.path],
+                "grounded_in": list(candidate.grounded_in),
+                "route_reason": verdict.route_reason,
+                "raised_at": run.day,
+                "run_id": current_run_id(),
+            }
+        )
+        return _PersonQuestion(f"{section}/{slug}", page, verdict)
 
     def _chosen(self, run: _Run, dossier: Dossier, args: dict[str, Any]) -> list[Question]:
         cfg = self._settings.jobs.research
@@ -550,6 +635,8 @@ class ResearchJob(Job):
             ("Topic", self._topic_lines(run)),
             ("Bundle", "\n".join(bundle_lines)),
             ("Questions", "\n".join(question_lines) or "None."),
+            ("For a person", self._person_lines(run, dry_run)),
+            ("Answered by our records", self._record_lines(run)),
             ("Rejected", "\n".join(rejected_lines) or "None."),
         ]
         published = [o for o in run.outcomes if o.page is not None]
@@ -587,7 +674,8 @@ class ResearchJob(Job):
             summary = (
                 f"{prefix}research plan for {topic.path}, chosen by the rule "
                 f"`{run.selection.rule}`. {len(run.added)} new questions, "
-                f"{len(run.rejected)} rejected, {dossier.count('open')} open."
+                f"{len(run.person)} for a person, {len(run.record)} answered by our "
+                f"records, {len(run.rejected)} rejected, {dossier.count('open')} open."
             )
         else:
             summary = (
@@ -621,6 +709,12 @@ class ResearchJob(Job):
                     }
                     for v in run.rejected
                 ],
+                "person": [p.id for p in run.person],
+                "asked_before": [
+                    {"question": v.candidate.question, "reason": v.reason, "page": v.page}
+                    for v in run.asked_before
+                ],
+                "record": [v.answered_by for v in run.record],
                 "pages": [f"knowledge/{o.page.rel}" for o in published if o.page is not None],
                 "held": [o.question.slug for o in held],
                 "dropped": [o.question.slug for o in dropped],
@@ -629,6 +723,28 @@ class ResearchJob(Job):
                 "insights": self._insights_data(run),
             },
         )
+
+    def _person_lines(self, run: _Run, dry_run: bool) -> str:
+        """The body of the `For a person` section."""
+        verb = "would write" if dry_run else "wrote"
+        lines = [
+            f"- `{p.id}` (for {p.page.for_}; {p.verdict.route_reason}): "
+            f"{code_span(p.page.question)}. Why: {code_span(p.page.why)}. "
+            f"{verb} `{question_rel(p.id)}`"
+            for p in run.person
+        ]
+        for v in run.asked_before:
+            where = f" (`{v.page}`)" if v.page else ""
+            lines.append(f"- {code_span(v.candidate.question)}: {v.reason}{where}")
+        return "\n".join(lines) or "None."
+
+    def _record_lines(self, run: _Run) -> str:
+        """The body of the `Answered by our records` section."""
+        lines = [
+            f"- {code_span(v.candidate.question)}: answered_by: `{v.answered_by}`"
+            for v in run.record
+        ]
+        return "\n".join(lines) or "None."
 
     def _insights_section(self, run: _Run) -> str:
         """The body of the `Insights` section, or `""` when no pass ran."""

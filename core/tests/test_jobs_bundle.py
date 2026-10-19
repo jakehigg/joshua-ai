@@ -314,3 +314,36 @@ async def test_the_bundle_job_reports_how_each_entry_got_in(wiki: Path, fake_emb
     assert "- `journal/2026/10/07/repot.md`: alias" in body
     assert "- `journal/2026/10/01/water.md`: title" in body
     assert report.data["journal_via"]["journal/2026/10/05/hall.md"] == "alias"
+
+
+async def test_bundle_holds_the_answered_questions_of_the_topic_only(
+    wiki: Path, fake_embed
+) -> None:
+    folder = wiki / "questions" / "houseplants"
+    folder.mkdir(parents=True)
+    head = f"---\nquestion: Which feed went on at the October watering?\ntopic: {TOPIC}\n"
+    (folder / "feed.md").write_text(
+        head + "status: answered\nanswer: Half strength 10-10-10.\nwhy: Secret why.\n---\n"
+        "# Which feed\n\n## Why Joshua wants to know\n\nSecret body.\n"
+    )
+    (folder / "open.md").write_text(head + "status: open\n---\nOpen body.\n")
+    (folder / "dismissed.md").write_text(head + "status: dismissed\nanswer: No.\n---\n")
+    (folder / "blank.md").write_text(head + "status: answered\nanswer: ' '\n---\n")
+    (folder / "other.md").write_text(
+        "---\nquestion: Q?\ntopic: garden/irrigation.md\nstatus: answered\nanswer: A.\n---\n"
+    )
+    got = await _build(wiki, FakeStore())
+    questions = [p for p in got.paths if p.startswith("questions/")]
+    assert questions == ["questions/houseplants/feed.md"]
+    knowledge = got.paths.index("knowledge/houseplants/snake-plant/winter-watering.md")
+    assert (
+        knowledge
+        < got.paths.index(questions[0])
+        < got.paths.index("insights/houseplants/too-wet.md")
+    )
+    assert (
+        "## questions/houseplants/feed.md\n\n"
+        "Question: Which feed went on at the October watering?\n\n"
+        "Answer: Half strength 10-10-10.\n"
+    ) in got.text
+    assert "Secret" not in got.text and "Open body" not in got.text

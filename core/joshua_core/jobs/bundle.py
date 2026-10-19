@@ -11,7 +11,11 @@ order:
    chunk of the topic page. The entries that only the similarity brings in
    are capped at `jobs.bundle.max_vector_entries`, the closest first;
 4. the dossier of the topic and its knowledge pages, when they exist;
-5. the open insights of the topic: an insight page whose frontmatter `topic`
+5. the answered questions of the topic: a page in `wiki/questions/` whose
+   frontmatter `topic` is this topic and whose `status` is `answered`, as a
+   short block of the question and the answer only. An open or a dismissed
+   question is never in a bundle;
+6. the open insights of the topic: an insight page whose frontmatter `topic`
    is this topic and whose `status` is `new`, `told`, or `acknowledged`.
 
 Each part starts with a line `## <path>`, the path relative to the wiki root,
@@ -70,6 +74,7 @@ logger = get_logger("jobs.bundle")
 
 VOCABULARY_PAGE = "vocabulary.md"
 OPEN_INSIGHT_STATUSES = ("new", "told", "acknowledged")
+ANSWERED_QUESTION = "answered"
 JOURNAL_KIND = "journal"
 # The `source` of a journal entry that a job wrote.
 JOB_SOURCES = ("curator", "research", "insights")
@@ -362,7 +367,7 @@ def _about_topic(
     return via
 
 
-# -- knowledge and insights -------------------------------------------------
+# -- knowledge, questions, and insights ------------------------------------
 
 
 def _knowledge_parts(topic: Topic, data_root: Path, wiki_root: Path) -> list[_Part]:
@@ -375,6 +380,25 @@ def _knowledge_parts(topic: Topic, data_root: Path, wiki_root: Path) -> list[_Pa
         for page in sorted(folder.glob("*.md")):
             if page.is_file() and not page.name.startswith("."):
                 parts.append(_Part(page.relative_to(wiki_root).as_posix(), read_page(page)))
+    return parts
+
+
+def _question_parts(topic: Topic, data_root: Path, wiki_root: Path) -> list[_Part]:
+    root = layout.questions_root(data_root)
+    parts: list[_Part] = []
+    if not root.is_dir():
+        return parts
+    for page in sorted(root.rglob("*.md")):
+        if not page.is_file() or layout.is_hidden(page, root):
+            continue
+        meta, _ = frontmatter.split(read_page(page))
+        question, answer = meta.get("question"), meta.get("answer")
+        if meta.get("topic") != topic.path or meta.get("status") != ANSWERED_QUESTION:
+            continue
+        if not isinstance(question, str) or not isinstance(answer, str) or not answer.strip():
+            continue
+        text = f"Question: {' '.join(question.split())}\n\nAnswer: {answer.strip()}"
+        parts.append(_Part(page.relative_to(wiki_root).as_posix(), text))
     return parts
 
 
@@ -440,6 +464,7 @@ async def build_bundle(
     parts.extend(_Part(e.rel, e.text) for e in entries)
 
     parts.extend(_knowledge_parts(topic, data_root, wiki_root))
+    parts.extend(_question_parts(topic, data_root, wiki_root))
     parts.extend(_insight_parts(topic, data_root, wiki_root))
 
     limit = settings.jobs.bundle.max_chars

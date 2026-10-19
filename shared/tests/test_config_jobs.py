@@ -143,6 +143,7 @@ def test_research_defaults() -> None:
     assert research.questions_per_run == 3
     assert research.coverage_target == 0.6
     assert research.dup_sim == 0.85
+    assert research.record_sim == 0.80
     assert research.max_holds == 2
     assert research.refresh_days == 180
     assert research.lookup_timeout_seconds == 300
@@ -162,6 +163,7 @@ def test_research_overrides_load() -> None:
         "    questions_per_run: 1\n"
         "    coverage_target: 0.8\n"
         "    dup_sim: 0.9\n"
+        "    record_sim: 0.7\n"
         "    max_holds: 3\n"
         "    refresh_days: 30\n"
         "    lookup_timeout_seconds: 600\n"
@@ -179,6 +181,7 @@ def test_research_overrides_load() -> None:
     assert research.questions_per_run == 1
     assert research.coverage_target == 0.8
     assert research.dup_sim == 0.9
+    assert research.record_sim == 0.7
     assert research.max_holds == 3
     assert research.refresh_days == 30
     assert research.lookup_timeout_seconds == 600
@@ -193,6 +196,7 @@ def test_research_overrides_load() -> None:
         "  research:\n    topics_per_run: 2\n",
         "  research:\n    questions_per_run: 0\n",
         "  research:\n    dup_sim: 1.5\n",
+        "  research:\n    record_sim: -0.1\n",
         "  research:\n    max_holds: 0\n",
         "  research:\n    lookup_timeout_seconds: 0\n",
         "  research:\n    lookup_max_turns: 0\n",

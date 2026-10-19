@@ -27,13 +27,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from joshua_core.jobs.bundle import OPEN_INSIGHT_STATUSES
 from joshua_core.jobs.research.text import inline, strip_links
-from joshua_core.jobs.topics import read_page
+from joshua_core.jobs.topics import ROOT_SECTION as ROOT_SECTION
+from joshua_core.jobs.topics import read_page, section_slug
 
 logger = get_logger("jobs.insights.page")
 
 SOURCE = "insights"
-# The section of a topic page at the wiki root.
-ROOT_SECTION = "general"
 EXPIRY = "expiry"
 
 InsightStatus = Literal["new", "told", "acknowledged", "dismissed", "expired"]
@@ -50,7 +49,6 @@ HEADING_KNOWN = "What is known"
 HEADING_EVIDENCE = "Evidence"
 HEADINGS = (HEADING_WHY, HEADING_ACTION, HEADING_WE_DO, HEADING_KNOWN, HEADING_EVIDENCE)
 
-_SECTION_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
 # The mark of a Markdown heading line, so worker text cannot add a heading.
 _HEADING_MARK_RE = re.compile(r"^[ \t]{0,3}#{1,6}(?:[ \t]+|$)", re.MULTILINE)
 
@@ -116,14 +114,7 @@ class Body:
 def insight_section(topic_rel: str) -> str:
     """The insight section of a topic: its first path segment as a slug, or
     `general` for a page at the wiki root."""
-    parts = PurePosixPath(topic_rel).parts
-    if len(parts) < 2:
-        return ROOT_SECTION
-    first = parts[0]
-    if _SECTION_RE.match(first):
-        return first
-    slug = re.sub(r"[^a-z0-9]+", "-", first.lower()).strip("-")[:64].strip("-")
-    return slug or ROOT_SECTION
+    return section_slug(topic_rel)
 
 
 def insight_rel(insight_id: str) -> str:

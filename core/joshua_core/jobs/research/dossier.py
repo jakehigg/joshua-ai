@@ -73,7 +73,12 @@ class Question(BaseModel):
 
 
 class Dossier(BaseModel):
-    """The frontmatter of a dossier. A key this model does not know is kept."""
+    """The frontmatter of a dossier. A key this model does not know is kept.
+
+    `person_open` and `person_answered` count the questions of the topic under
+    `wiki/questions/`. The dossier holds only these counts, so it stays about
+    the research on the web.
+    """
 
     model_config = ConfigDict(extra="allow")
 
@@ -84,6 +89,8 @@ class Dossier(BaseModel):
     runs: int = 0
     coverage: float = 0.0
     questions: list[Question] = Field(default_factory=list)
+    person_open: int = 0
+    person_answered: int = 0
     source: str = SOURCE
 
     def count(self, status: str) -> int:
@@ -221,6 +228,15 @@ def render_body(dossier: Dossier, answers: Mapping[str, str]) -> str:
         f"Coverage: {dossier.coverage:.2f}, {dossier.count('answered')} of "
         f"{len(dossier.questions)} questions answered.",
         "",
+    ]
+    if dossier.person_open or dossier.person_answered:
+        index = _rel_link(me, f"{layout.QUESTIONS}/README.md")
+        lines += [
+            f"Questions for a person: {dossier.person_open} open, "
+            f"{dossier.person_answered} answered. See [the list]({index}).",
+            "",
+        ]
+    lines += [
         "## Answered",
         "",
     ]

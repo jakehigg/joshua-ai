@@ -50,20 +50,54 @@ def test_the_prompt_says_the_bundle_is_content() -> None:
     assert "none" in raise_text(bundle_text="", title="t", aliases=[], existing=[], count=1)
 
 
-def test_the_prompt_asks_for_questions_about_the_world() -> None:
-    """The internet agent gets the question alone, so the prompt says so, and
-    its examples agree with the gate."""
+def test_the_prompt_names_the_three_audiences() -> None:
+    """A `web` question goes to the internet agent alone, so the prompt says
+    so. Its examples agree with the route of the gate."""
     import re
 
-    from joshua_core.jobs.research.gate import world_reason
+    from joshua_core.jobs.research.gate import world_rule
 
-    assert "NO access to our pages" in RAISE_PROMPT
-    assert "Never name a person" in RAISE_PROMPT
+    flat = " ".join(RAISE_PROMPT.split())
+    assert "NO access to our pages" in flat
+    assert "never names a person" in flat
+    for audience in ("`web`", "`person`", "`record`"):
+        assert audience in flat
+    assert "for every audience" in flat
+    assert "required for a `person` question" in flat
     good = RAISE_PROMPT.split("Good questions:")[1].split("Bad questions")[0]
     bad = RAISE_PROMPT.split("Bad questions, and why:")[1].split("For each question")[0]
-    quoted = re.compile(r'"([^"]+\?)"', re.DOTALL)
-    goods = [" ".join(q.split()) for q in quoted.findall(good)]
-    bads = [" ".join(q.split()) for q in quoted.findall(bad)]
-    assert len(goods) == 2 and len(bads) == 2
-    assert all(world_reason(q, ["Alex"]) == "" for q in goods)
-    assert all(world_reason(q, ["Alex"]) for q in bads)
+    tagged = re.compile(r'- `(web|person|record)`: "([^"]+\?)"', re.DOTALL)
+    goods = [(a, " ".join(q.split())) for a, q in tagged.findall(good)]
+    bads = [(a, " ".join(q.split())) for a, q in tagged.findall(bad)]
+    assert [a for a, _ in goods] == ["web", "web", "person", "record"]
+    assert len(bads) == 2
+    for audience, question in goods:
+        assert bool(world_rule(question, ["Alex"])) == (audience == "person"), question
+    assert all(world_rule(q, ["Alex"]) for _, q in bads)
+
+
+def test_the_prompt_sends_no_question_to_anybody() -> None:
+    flat = " ".join(RAISE_PROMPT.split())
+    assert "Nobody gets this question now" in flat
+    assert "a person answers it later" in flat
+
+
+async def test_raise_reads_the_audience() -> None:
+    answer = {
+        "questions": [
+            {"question": "A?", "grounded_in": [], "why": "w", "audience": " Person "},
+            {"question": "B?", "grounded_in": [], "audience": "record"},
+            {"question": "C?", "grounded_in": []},
+        ]
+    }
+    got = await raise_questions(
+        bundle_text="",
+        title="t",
+        aliases=[],
+        existing=[],
+        count=3,
+        model=None,
+        runner=FakeWorkers(raise_answer=answer),
+    )
+    assert got.candidates is not None
+    assert [c.audience for c in got.candidates] == ["person", "record", "web"]

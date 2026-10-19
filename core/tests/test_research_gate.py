@@ -6,6 +6,17 @@ from pathlib import Path
 
 import pytest
 from joshua_core.jobs.research.gate import (
+    ALREADY_ASKED,
+    DISMISSED_BEFORE,
+    NO_RECORD,
+    PERSON,
+    RECORD,
+    RULE_DATE,
+    RULE_OPENING,
+    RULE_PERSON,
+    RULE_US,
+    WEB,
+    AskedQuestion,
     Candidate,
     Gate,
     cosine,
@@ -15,6 +26,7 @@ from joshua_core.jobs.research.gate import (
     roster_names,
     shape_reason,
     world_reason,
+    world_rule,
 )
 from joshua_core.jobs.topics import Topic, topic_names
 from joshua_shared import layout
@@ -263,23 +275,196 @@ def test_the_date_forms() -> None:
     assert world_reason("from October to March, at 20 to 30 days?") == ""
 
 
-async def test_the_gate_rejects_a_person_and_passes_a_world_question(tmp_path: Path) -> None:
-    gate = Gate(
+async def test_the_gate_sends_a_person_question_to_a_person(tmp_path: Path) -> None:
+    gate = _window_gate(tmp_path)
+    person = Candidate("Will Alex check the snake plants in one pass?", GOOD_PHRASES)
+    verdict = await gate.check(person)
+    assert verdict.accepted and verdict.route == PERSON
+    assert verdict.route_reason == RULE_PERSON
+    good = await gate.check(Candidate(GOOD_WORLD, GOOD_PHRASES))
+    assert good.accepted and good.route == WEB, good.reason
+    asked = await gate.check(Candidate("Should we feed Snake Plants in May?", []), person=True)
+    assert asked.accepted and asked.route == WEB
+
+
+# -- the route --------------------------------------------------------------------
+
+WINDOW = "houseplants/snake-plants-living-room-window.md"
+FEED_ENTRY = "journal/2026/10/04/snake-plants-aloe-watered-fed.md"
+# Two questions of the third live run. The roster of the tests has Alex.
+RUN3_DOSE = (
+    "What product and dose was actually used in the 2026-10-04 fertilizer application "
+    "for the Snake Plants, since it wasn't recorded?"
+)
+RUN3_CHECK = "At the 2026-11-10 check, will Alex verify both Snake Plants in one pass?"
+RECORD_Q = "When were the snake plants last given water to runoff in the gritty mix?"
+
+
+def _window_wiki(tmp_path: Path) -> Path:
+    wiki = layout.wiki_root(tmp_path)
+    (wiki / WINDOW).parent.mkdir(parents=True, exist_ok=True)
+    (wiki / WINDOW).write_text(WINDOW_BUNDLE.split("\n\n", 1)[1])
+    (wiki / FEED_ENTRY).parent.mkdir(parents=True, exist_ok=True)
+    (wiki / FEED_ENTRY).write_text("---\ndate: 2026-10-04\n---\nWatered and fed.\n")
+    return wiki
+
+
+def _window_gate(tmp_path: Path, *, near=None, asked=(), store=None) -> Gate:
+    return Gate(
         bundle_text=WINDOW_BUNDLE,
         terms=WINDOW_TERMS,
         existing=[],
-        store=FakeStore(None),
+        store=store or FakeStore(near),
         dup_sim=0.85,
         data_root=tmp_path,
         embed=_embed,
         people=["Alex", "alex"],
+        record_sim=0.80,
+        asked=list(asked),
     )
-    person = Candidate("Will Alex check the snake plants in one pass?", GOOD_PHRASES)
-    assert "names a person" in (await gate.check(person)).reason
-    good = await gate.check(Candidate(GOOD_WORLD, GOOD_PHRASES))
-    assert good.accepted, good.reason
-    asked = await gate.check(Candidate("Should we feed Snake Plants in May?", []), person=True)
-    assert asked.accepted
+
+
+@pytest.mark.parametrize(
+    ("question", "audience", "route", "reason"),
+    [
+        (RUN3_DOSE, "web", PERSON, RULE_DATE),
+        (RUN3_CHECK, "web", PERSON, RULE_PERSON),
+        (RUN3_CHECK, "record", PERSON, RULE_PERSON),
+        (GOOD_WORLD, "web", WEB, ""),
+        ("Did we feed the snake plants at quarter strength?", "web", PERSON, RULE_OPENING),
+        ("Is our snake plant mix too gritty for winter?", "record", PERSON, RULE_US),
+        (GOOD_WORLD, "bogus", WEB, ""),
+    ],
+)
+async def test_the_live_questions_route(
+    tmp_path: Path, question: str, audience: str, route: str, reason: str
+) -> None:
+    _window_wiki(tmp_path)
+    verdict = await _window_gate(tmp_path).check(Candidate(question, GOOD_PHRASES, "w", audience))
+    assert verdict.accepted, verdict.reason
+    assert (verdict.route, verdict.route_reason) == (route, reason)
+
+
+async def test_a_record_question_with_a_strong_hit_is_answered_by_it(tmp_path: Path) -> None:
+    _window_wiki(tmp_path)
+    store = FakeStore({f"wiki/{FEED_ENTRY}": 0.91, f"wiki/{WINDOW}": 0.83})
+    gate = _window_gate(tmp_path, store=store)
+    verdict = await gate.check(Candidate(RECORD_Q, GOOD_PHRASES, "w", "record"))
+    assert verdict.accepted and verdict.route == RECORD
+    assert verdict.answered_by == FEED_ENTRY
+    assert {"kinds": ["wiki", "journal", "knowledge"], "min_sim": 0.80} in store.calls
+
+
+async def test_a_record_question_with_no_hit_goes_to_a_person(tmp_path: Path) -> None:
+    _window_wiki(tmp_path)
+    store = FakeStore({f"wiki/{FEED_ENTRY}": 0.79})
+    verdict = await _window_gate(tmp_path, store=store).check(
+        Candidate(RECORD_Q, GOOD_PHRASES, "", "record")
+    )
+    assert verdict.accepted and verdict.route == PERSON
+    assert verdict.route_reason == NO_RECORD
+    assert verdict.answered_by is None
+
+
+async def test_a_record_is_a_topic_page_an_entry_or_an_answer_page(tmp_path: Path) -> None:
+    wiki = _window_wiki(tmp_path)
+    pages = {
+        "journal/2026/10/05/research-report.md": "---\nsource: research\n---\nReport.\n",
+        "joshua-docs/jobs.md": "# Jobs\n",
+        "knowledge/houseplants/snake-plants-living-room-window.md": "---\ntopic: x\n---\n",
+        "houseplants/.hidden/page.md": "# Hidden\n",
+    }
+    for rel, text in pages.items():
+        (wiki / rel).parent.mkdir(parents=True, exist_ok=True)
+        (wiki / rel).write_text(text)
+    near = {f"wiki/{rel}": 0.95 for rel in pages}
+    near["wiki/houseplants/gone.md"] = 0.97
+    near["shared/notes.md"] = 0.99
+    verdict = await _window_gate(tmp_path, near=near).check(
+        Candidate(RECORD_Q, GOOD_PHRASES, "", "record")
+    )
+    assert verdict.route == PERSON and verdict.route_reason == NO_RECORD
+    near[f"wiki/{WINDOW}"] = 0.81
+    again = await _window_gate(tmp_path, near=near).check(
+        Candidate(RECORD_Q, GOOD_PHRASES, "", "record")
+    )
+    assert again.route == RECORD and again.answered_by == WINDOW
+
+
+async def test_a_record_search_that_fails_goes_to_a_person(tmp_path: Path) -> None:
+    class Broken(FakeStore):
+        async def kb_near_paths(self, embeddings, *, kinds, min_sim, source="files"):
+            if "wiki" in kinds:
+                raise RuntimeError("no index")
+            return {}
+
+    gate = _window_gate(tmp_path, store=Broken())
+    verdict = await gate.check(Candidate(RECORD_Q, GOOD_PHRASES, "", "record"))
+    assert verdict.route == PERSON and verdict.route_reason == NO_RECORD
+    assert "The record search did not run." in gate.notes
+
+
+async def test_a_worker_person_question_needs_why(tmp_path: Path) -> None:
+    question = "Which liquid fertilizer is in the cupboard for the snake plants?"
+    gate = _window_gate(tmp_path)
+    bare = await gate.check(Candidate(question, GOOD_PHRASES, " ", "person"))
+    assert not bare.accepted and "needs `why`" in bare.reason
+    told = await gate.check(Candidate(question, GOOD_PHRASES, "To set the dose.", "person"))
+    assert told.accepted and told.route == PERSON
+    assert told.route_reason == "the raise worker asks a person"
+
+
+async def test_the_shape_rules_still_reject_a_person_question(tmp_path: Path) -> None:
+    gate = _window_gate(tmp_path)
+    ungrounded = await gate.check(Candidate(RUN3_DOSE, [], "w", "person"))
+    assert not ungrounded.accepted and "grounded_in" in ungrounded.reason
+    nameless = await gate.check(Candidate("What dose went on 2026-10-04?", GOOD_PHRASES))
+    assert not nameless.accepted and "name the topic" in nameless.reason
+    assert (await gate.check(Candidate(RUN3_DOSE, GOOD_PHRASES))).route == PERSON
+    twice = await gate.check(Candidate(RUN3_DOSE, GOOD_PHRASES))
+    assert not twice.accepted and twice.route == ""
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [("open", ALREADY_ASKED), ("answered", ALREADY_ASKED), ("dismissed", DISMISSED_BEFORE)],
+)
+async def test_a_person_question_asked_before_is_not_asked_again(
+    tmp_path: Path, status: str, reason: str
+) -> None:
+    page = "questions/houseplants/product-dose.md"
+    asked = [AskedQuestion(RUN3_DOSE.upper(), status, page)]
+    verdict = await _window_gate(tmp_path, asked=asked).check(Candidate(RUN3_DOSE, GOOD_PHRASES))
+    assert not verdict.accepted and verdict.route == PERSON
+    assert verdict.reason == reason and verdict.page == page
+
+
+async def test_a_near_person_question_counts_as_asked(tmp_path: Path) -> None:
+    near_text = "Which feed went on the snake plants at the watering to runoff in the gritty mix?"
+    asked = [AskedQuestion("A gritty mix watered to runoff?", "open", "questions/h/x.md")]
+    verdict = await _window_gate(tmp_path, asked=asked).check(
+        Candidate(near_text, GOOD_PHRASES, "w", "person")
+    )
+    assert verdict.reason == ALREADY_ASKED
+    far = [AskedQuestion("Which pest showed up on the leaf?", "open", "questions/h/y.md")]
+    fresh = await _window_gate(tmp_path, asked=far).check(
+        Candidate(near_text, GOOD_PHRASES, "w", "person")
+    )
+    assert fresh.accepted and fresh.route == PERSON
+
+
+def test_world_rule_names_each_rule() -> None:
+    names = [world_rule(q, ["Alex", "alex"]) for q in LIVE_CANDIDATES]
+    assert names[:7] == [
+        RULE_DATE,
+        RULE_PERSON,
+        RULE_DATE,
+        RULE_OPENING,
+        RULE_OPENING,
+        RULE_OPENING,
+        RULE_US,
+    ]
+    assert names[7] == ""
 
 
 def test_the_roster_names_are_the_names_and_the_ids() -> None:

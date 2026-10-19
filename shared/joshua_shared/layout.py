@@ -79,11 +79,12 @@ SHARED_PROFILE_NAME = "everyone"
 
 _PERSON_ID_RE = PERSON_ID_RE
 _JOURNAL_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
-# A knowledge page slug, an insight slug, and an insight section.
+# A knowledge page slug, an insight or question slug, and their section.
 _PAGE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
 
 KNOWLEDGE = "knowledge"
 INSIGHTS = "insights"
+QUESTIONS = "questions"
 
 # A pre-single-wiki `blog/` post: the nightly digest, `YYYY-MM-DD.md` ...
 _LEGACY_DIGEST_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\.md\Z")
@@ -325,6 +326,26 @@ def insight_page(section: str, slug: str, root: Path | str | None = None) -> Pat
     """
     folder = _page_slug(section, "insight section")
     return insights_root(root) / folder / f"{_page_slug(slug, 'insight slug')}.md"
+
+
+def questions_root(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/questions`, the questions that only a person can answer."""
+    return wiki_root(root) / QUESTIONS
+
+
+def questions_index(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/questions/README.md`, the list of every question for a person."""
+    return questions_root(root) / "README.md"
+
+
+def question_page(section: str, slug: str, root: Path | str | None = None) -> Path:
+    """`<data>/wiki/questions/<section>/<slug>.md`, one question for a person.
+
+    `section` and `slug` each match `^[a-z0-9][a-z0-9-]{0,63}$`. Raises
+    `ValueError` for any other value.
+    """
+    folder = _page_slug(section, "question section")
+    return questions_root(root) / folder / f"{_page_slug(slug, 'question slug')}.md"
 
 
 TRASH = ".trash"

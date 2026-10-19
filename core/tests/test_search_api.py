@@ -56,6 +56,7 @@ _ROWS = [
     _chunk("profile", "wiki/people/alex.md"),
     _chunk("knowledge", "wiki/knowledge/garden/roses/pruning.md"),
     _chunk("insight", "wiki/insights/garden/late-pruning.md"),
+    _chunk("question", "wiki/questions/garden/rose-feed.md"),
     _chunk("people", "people/alex/attachments/2026/09/scan.pdf"),
     _chunk("skill", "wiki/skills/movie.md"),
     _chunk("shared", "shared/old.md"),
@@ -131,6 +132,7 @@ def test_returns_only_the_wiki_page_kinds(monkeypatch) -> None:
         "wiki/people/alex.md",
         "wiki/knowledge/garden/roses/pruning.md",
         "wiki/insights/garden/late-pruning.md",
+        "wiki/questions/garden/rose-feed.md",
     }
 
 
@@ -150,7 +152,7 @@ def test_searches_the_shared_scope_of_the_files_source(monkeypatch) -> None:
     call = client.store.calls[0]
     assert call["person_id"] is None
     assert call["sources"] == ("files",)
-    assert call["kinds"] == ("wiki", "journal", "profile", "knowledge", "insight")
+    assert call["kinds"] == ("wiki", "journal", "profile", "knowledge", "insight", "question")
 
 
 def test_kinds_narrow_the_search(monkeypatch) -> None:

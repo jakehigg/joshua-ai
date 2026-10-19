@@ -1,12 +1,13 @@
-"""The `raise` worker: questions about the world, made specific to one topic.
+"""The `raise` worker: questions made specific to one topic, each for one audience.
 
-Each question goes to the internet agent, which searches the open web and has
-none of our pages, so a question asks what an expert source can answer and
-carries our conditions in its words.
+A `web` question goes to the internet agent, which searches the open web and
+has none of our pages, so it asks what an expert source can answer and carries
+our conditions in its words. A `person` question asks what only somebody here
+knows. A `record` question asks what our own pages and journal already hold.
 
 The worker reads the memory bundle of the topic, its title and aliases, and
-the questions the dossier holds. It has no tools. The specificity gate in
-`gate.py` then decides which questions the dossier takes.
+the questions the dossier holds. It has no tools. The gate in `gate.py` then
+checks each question and gives its route.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from joshua_core.engine.ephemeral import Runner, run_worker
 from joshua_core.engine.usage import Usage
-from joshua_core.jobs.research.gate import Candidate
+from joshua_core.jobs.research.gate import WEB, Candidate
 from joshua_core.jobs.research.prompts import RAISE_PROMPT
 
 WORKER = "raise"
@@ -31,6 +32,8 @@ class RaisedQuestion(BaseModel):
     question: str = Field(max_length=1000)
     grounded_in: list[str] = Field(default_factory=list, max_length=12)
     why: str = Field(default="", max_length=1000)
+    # `web`, `person`, or `record`. The gate reads any other value as `web`.
+    audience: str = Field(default=WEB, max_length=40)
 
 
 class RaiseAnswer(BaseModel):
@@ -93,6 +96,7 @@ async def raise_questions(
                 question=" ".join(q.question.split()),
                 grounded_in=[p for p in q.grounded_in if isinstance(p, str)],
                 why=" ".join(q.why.split()),
+                audience=q.audience.strip().lower(),
             )
             for q in answer.questions[:count]
         ]

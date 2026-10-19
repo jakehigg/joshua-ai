@@ -268,6 +268,8 @@ jobs:
     questions_per_run: 3   # the questions one run researches
     coverage_target: 0.6   # a topic below this coverage is due for research
     dup_sim: 0.85          # a new question this close to a known one is a duplicate
+    record_sim: 0.80       # a record this close answers a question for our records;
+                           # below it, the question goes to wiki/questions/ for a person
     max_holds: 2           # a question held this many times is dropped
     refresh_days: 180      # a researched topic is due again after this many days
     lookup_timeout_seconds: 300 # one lookup of the researcher or the challenger;

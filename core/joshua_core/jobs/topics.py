@@ -5,7 +5,7 @@ A topic is a `wiki/**.md` page that is none of these:
 - `Home.md`, the front page;
 - a section index page: `X.md` with a folder `X/` beside it;
 - a page under `journal/`, `people/`, `joshua-docs/`, `skills/`,
-  `knowledge/`, `insights/`, or `attachments/`;
+  `knowledge/`, `insights/`, `questions/`, or `attachments/`;
 - a page with a part of its path that starts with a dot;
 - a page that a glob in `jobs.topics.exclude` matches. A glob is an
   `fnmatch` pattern, matched case-sensitively against the path relative to the
@@ -44,6 +44,7 @@ RESERVED_FOLDERS = (
     "skills",
     layout.KNOWLEDGE,
     layout.INSIGHTS,
+    layout.QUESTIONS,
     layout.ATTACHMENTS,
 )
 # A shorter name matches too many words to mean the topic.
@@ -51,6 +52,9 @@ MIN_NAME_CHARS = 3
 # The phrases of the file stem that name the topic: its first 2 to 4 words.
 STEM_PHRASE_WORDS = (2, 3, 4)
 _PAREN_TAIL_RE = re.compile(r"\s*\([^()]*\)\s*$")
+# The section of a topic page at the wiki root, for a job page that has a section.
+ROOT_SECTION = "general"
+_SECTION_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
 
 
 @dataclass(frozen=True)
@@ -148,6 +152,19 @@ def list_topics(wiki_root: Path, exclude: Sequence[str]) -> list[Topic]:
             if is_topic_page(rel, wiki_root, exclude):
                 found.append(rel)
     return [load_topic(rel, wiki_root) for rel in sorted(found)]
+
+
+def section_slug(topic_rel: str) -> str:
+    """The section of a topic for a job page: its first path segment as a
+    slug, or `general` for a page at the wiki root."""
+    parts = PurePosixPath(topic_rel).parts
+    if len(parts) < 2:
+        return ROOT_SECTION
+    first = parts[0]
+    if _SECTION_RE.match(first):
+        return first
+    slug = re.sub(r"[^a-z0-9]+", "-", first.lower()).strip("-")[:64].strip("-")
+    return slug or ROOT_SECTION
 
 
 # -- names --------------------------------------------------------------------

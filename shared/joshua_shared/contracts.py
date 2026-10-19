@@ -20,11 +20,18 @@ TurnKind = Literal["message", "event"]
 
 # The document kinds that ``POST /v1/memory/search`` can return: the pages of
 # the wiki, the journal, the profiles, and the pages of the jobs under
-# ``wiki/knowledge/`` and ``wiki/insights/``. Every reader of the wiki can read
-# them. A person's own attachments (kind ``people``) and the skill rows are
-# never in this list.
-SearchKind = Literal["wiki", "journal", "profile", "knowledge", "insight"]
-SEARCH_KINDS: tuple[SearchKind, ...] = ("wiki", "journal", "profile", "knowledge", "insight")
+# ``wiki/knowledge/``, ``wiki/insights/``, and ``wiki/questions/``. Every
+# reader of the wiki can read them. A person's own attachments (kind
+# ``people``) and the skill rows are never in this list.
+SearchKind = Literal["wiki", "journal", "profile", "knowledge", "insight", "question"]
+SEARCH_KINDS: tuple[SearchKind, ...] = (
+    "wiki",
+    "journal",
+    "profile",
+    "knowledge",
+    "insight",
+    "question",
+)
 SEARCH_DEFAULT_LIMIT = 10
 SEARCH_MAX_LIMIT = 25
 SEARCH_MAX_QUERY_CHARS = 1000

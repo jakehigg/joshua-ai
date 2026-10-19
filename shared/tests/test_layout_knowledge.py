@@ -1,5 +1,5 @@
-"""The `knowledge/` and `insights/` paths in `joshua_shared.layout`, and the
-values they refuse."""
+"""The `knowledge/`, `insights/`, and `questions/` paths in
+`joshua_shared.layout`, and the values they refuse."""
 
 from __future__ import annotations
 
@@ -12,12 +12,14 @@ from joshua_shared import layout
 def test_roots(tmp_path: Path) -> None:
     assert layout.knowledge_root(tmp_path) == tmp_path / "wiki" / "knowledge"
     assert layout.insights_root(tmp_path) == tmp_path / "wiki" / "insights"
+    assert layout.questions_root(tmp_path) == tmp_path / "wiki" / "questions"
 
 
 def test_roots_follow_the_data_dir_env(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(layout.DATA_DIR_ENV, str(tmp_path))
     assert layout.knowledge_root() == tmp_path / "wiki" / "knowledge"
     assert layout.insights_root() == tmp_path / "wiki" / "insights"
+    assert layout.questions_root() == tmp_path / "wiki" / "questions"
 
 
 def test_knowledge_dossier_mirrors_the_topic_path(tmp_path: Path) -> None:
@@ -51,6 +53,12 @@ def test_insights_index(tmp_path: Path) -> None:
 def test_insight_page(tmp_path: Path) -> None:
     got = layout.insight_page("garden", "autumn-watering-too-high", tmp_path)
     assert got == tmp_path / "wiki" / "insights" / "garden" / "autumn-watering-too-high.md"
+
+
+def test_questions_index_and_page(tmp_path: Path) -> None:
+    assert layout.questions_index(tmp_path) == tmp_path / "wiki" / "questions" / "README.md"
+    got = layout.question_page("houseplants", "product-dose", tmp_path)
+    assert got == tmp_path / "wiki" / "questions" / "houseplants" / "product-dose.md"
 
 
 BAD_TOPICS = [
@@ -92,12 +100,17 @@ def test_bad_slug_is_refused(slug: str, tmp_path: Path) -> None:
         layout.insight_page("garden", slug, tmp_path)
     with pytest.raises(ValueError):
         layout.insight_page(slug, "ok", tmp_path)
+    with pytest.raises(ValueError):
+        layout.question_page("houseplants", slug, tmp_path)
+    with pytest.raises(ValueError):
+        layout.question_page(slug, "ok", tmp_path)
 
 
 def test_bootstrap_wiki_does_not_make_the_job_folders(tmp_path: Path) -> None:
     layout.bootstrap_wiki(tmp_path)
     assert not layout.knowledge_root(tmp_path).exists()
     assert not layout.insights_root(tmp_path).exists()
+    assert not layout.questions_root(tmp_path).exists()
 
 
 def test_trash_path_keeps_the_relative_path_under_the_day(tmp_path: Path) -> None:

@@ -1,4 +1,5 @@
-"""The files MCP refuses a write into `wiki/knowledge/` and `wiki/insights/`.
+"""The files MCP refuses a write into `wiki/knowledge/`, `wiki/questions/`,
+and `wiki/insights/`.
 
 The researcher job and the insights job own these folders. The agent reads
 them and writes neither, through `write_file` or through `rename_file`.
@@ -15,7 +16,7 @@ from conftest import gateway_session
 from joshua_gateway.files_mcp import server
 from joshua_gateway.main import lifespan
 
-FOLDERS = ("knowledge", "insights")
+FOLDERS = ("knowledge", "questions", "insights")
 MEMBER = {"X-Joshua-Person": "alex"}
 
 
@@ -29,6 +30,10 @@ def data_root(tmp_path, monkeypatch) -> Path:
     (root / "wiki" / "knowledge" / "houseplants").mkdir(parents=True)
     (root / "wiki" / "knowledge" / "houseplants" / "snake-plant.md").write_text(
         "---\ntopic: houseplants/snake-plant.md\n---\nThe dossier.\n"
+    )
+    (root / "wiki" / "questions" / "houseplants").mkdir(parents=True)
+    (root / "wiki" / "questions" / "houseplants" / "feed-dose.md").write_text(
+        "---\nstatus: open\n---\nThe question.\n"
     )
     (root / "wiki" / "insights" / "garden").mkdir(parents=True)
     (root / "wiki" / "insights" / "garden" / "autumn.md").write_text(
@@ -48,6 +53,7 @@ def files_yaml() -> str:
 
 EXISTING = {
     "knowledge": "wiki/knowledge/houseplants/snake-plant.md",
+    "questions": "wiki/questions/houseplants/feed-dose.md",
     "insights": "wiki/insights/garden/autumn.md",
 }
 
@@ -70,6 +76,7 @@ async def test_write_file_refuses_a_job_folder(gateway, data_root, folder, mode)
         assert res.is_error is True
         text = res.content[0].text
         assert "researcher job" in text and "insights job" in text
+        assert f"wiki/{folder}/" in text
     assert not (data_root / target).exists()
     assert "clobbered" not in (data_root / EXISTING[folder]).read_text()
 
@@ -115,10 +122,26 @@ async def test_a_wiki_page_outside_the_job_folders_is_still_written(gateway, dat
     assert (data_root / "wiki" / "houseplants" / "knowledge.md").read_text() == "ok\n"
 
 
+@pytest.mark.parametrize("folder", ["questionsx", "knowledgex", "insightsx"])
+async def test_a_folder_that_only_starts_like_a_job_folder_is_written(
+    gateway, data_root, folder
+) -> None:
+    app = gateway(files_yaml())
+    target = f"wiki/{folder}/note.md"
+    async with lifespan(app):
+        async with gateway_session(app, "/files", "core", MEMBER) as session:
+            res = await session.call_tool("write_file", {"path": target, "content": "ok\n"})
+    assert res.is_error is not True
+    assert (data_root / target).read_text() == "ok\n"
+
+
 def test_in_job_folder_unit(tmp_path) -> None:
     wiki = tmp_path / "wiki"
     assert server._in_job_folder(wiki / "knowledge", tmp_path)
     assert server._in_job_folder(wiki / "knowledge" / "a" / "b.md", tmp_path)
     assert server._in_job_folder(wiki / "insights" / "g" / "x.md", tmp_path)
+    assert server._in_job_folder(wiki / "questions", tmp_path)
+    assert server._in_job_folder(wiki / "questions" / "g" / "x.md", tmp_path)
+    assert not server._in_job_folder(wiki / "questionsx" / "x.md", tmp_path)
     assert not server._in_job_folder(wiki / "knowledge.md", tmp_path)
     assert not server._in_job_folder(wiki / "garden" / "insights" / "x.md", tmp_path)

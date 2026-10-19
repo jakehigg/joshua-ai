@@ -503,6 +503,9 @@ async def test_an_empty_document_logs_one_line_and_not_one_a_pass(_count_embeds,
         ("wiki/knowledge/README.md", "knowledge"),
         ("wiki/insights/garden/autumn-watering-too-high.md", "insight"),
         ("wiki/insights/README.md", "insight"),
+        ("wiki/questions/houseplants/feed-dose.md", "question"),
+        ("wiki/questions/README.md", "question"),
+        ("wiki/questionsx/note.md", "wiki"),
         ("wiki/journal/2026/10/19/entry.md", "journal"),
         ("wiki/people/alex.md", "profile"),
         ("wiki/houseplants/snake-plant.md", "wiki"),
@@ -524,6 +527,7 @@ async def test_a_knowledge_page_and_an_insight_page_are_indexed_with_their_kind(
     for uri, kind in (
         ("wiki/knowledge/houseplants/snake-plant.md", "knowledge"),
         ("wiki/insights/garden/autumn-watering.md", "insight"),
+        ("wiki/questions/houseplants/feed-dose.md", "question"),
     ):
         store = FakeStore()
         indexer = Indexer(
