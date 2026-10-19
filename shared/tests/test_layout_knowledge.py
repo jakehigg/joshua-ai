@@ -44,6 +44,10 @@ def test_knowledge_page(tmp_path: Path) -> None:
     )
 
 
+def test_insights_index(tmp_path: Path) -> None:
+    assert layout.insights_index(tmp_path) == tmp_path / "wiki" / "insights" / "README.md"
+
+
 def test_insight_page(tmp_path: Path) -> None:
     got = layout.insight_page("garden", "autumn-watering-too-high", tmp_path)
     assert got == tmp_path / "wiki" / "insights" / "garden" / "autumn-watering-too-high.md"

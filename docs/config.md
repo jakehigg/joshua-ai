@@ -544,6 +544,11 @@ jobs:
       - reddit.com
   insights:
     enabled: false
+    model: claude-sonnet-5
+    max_per_run: 5
+    dup_sim: 0.88
+    default_valid_days: 60
+    after_research: true
 ```
 
 | Key | Default | What it does |
@@ -572,7 +577,12 @@ jobs:
 | `research.refresh_days` | `180` | The days from a research run to `refresh_after` on the dossier and the page. |
 | `research.trusted_domains` | `.edu`, `.gov`, `.ac.uk`, `extension.`, `.int` | The editor may not grade a page on these domains `weak`. |
 | `research.distrusted_domains` | `pinterest.com`, `quora.com`, `answers.com`, `ehow.com`, `wikihow.com`, `facebook.com`, `reddit.com` | A page on these domains is always `weak`. |
-| `insights.enabled` | `false` | Reserved, package 4. |
+| `insights.enabled` | `false` | `true` adds the `insights` job and the `insights` chat tool for members. Both also need `jobs.enabled`. |
+| `insights.model` | not set | The model of the `insight` worker, which has no tools. When it is not set, the insights job uses `jobs.model`, then `core.reflection_model`. |
+| `insights.max_per_run` | `5` | The most new insights that one run writes. The gate keeps the highest severity first, then the highest confidence. |
+| `insights.dup_sim` | `0.88` | A new claim with a vector this close to the claim of an insight of the topic is a duplicate. |
+| `insights.default_valid_days` | `60` | When the worker gives no `valid_until`, it is the day of the run plus this many days. |
+| `insights.after_research` | `true` | A research `run` that publishes a page also runs the insight pass for the same topic, in the same run and the same commit. The `then_insights` argument of a research run replaces this value for that run. |
 
 A domain entry matches a host when the host is the entry, when the host ends
 with the entry (`.edu`, or `reddit.com` for `www.reddit.com`), or, for an

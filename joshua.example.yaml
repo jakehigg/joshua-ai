@@ -280,7 +280,17 @@ jobs:
       - facebook.com
       - reddit.com
   insights:
-    enabled: false         # reserved, package 4
+    # The insights job keeps wiki/insights/: where what we do, in the wiki and
+    # the journal, disagrees with what is known in knowledge/, for the date and
+    # the season. docs/jobs.md explains it.
+    enabled: false         # true: the insights job and the insights chat tool
+    # model: claude-sonnet-5 # the model of its tool-less insight worker; when it
+    #                        # is not set, jobs.model, then core.reflection_model
+    max_per_run: 5         # the new insights one run writes, highest severity first
+    dup_sim: 0.88          # a new claim this close to an insight of the topic is a duplicate
+    default_valid_days: 60 # valid_until is this many days after today when the worker gives none
+    after_research: true   # a research run that published a page runs the insight
+                           # pass for the same topic, in the same run and commit
 
 wiki:
   git: true   # keep /data/wiki as a git repository Joshua commits; false leaves

@@ -626,9 +626,23 @@ class JobsResearch(_Model):
 
 
 class JobsInsights(_Model):
-    """The insights job. Reserved: package 4 adds its keys."""
+    """The insights job: where what we do disagrees with what is known, now.
+
+    `enabled` registers the job and the `insights` chat tool. `model` is the
+    model of the tool-less `insight` worker; `None` uses `jobs.model`, then
+    `core.reflection_model`. `max_per_run` is how many new insights one run
+    writes. `dup_sim` is the cosine floor for a new claim to be a duplicate of
+    an insight of the topic. `default_valid_days` sets `valid_until` when the
+    worker gives none. `after_research` runs the insight pass at the end of a
+    research run that published a page. See `docs/jobs.md`.
+    """
 
     enabled: bool = False
+    model: str | None = None
+    max_per_run: int = Field(default=5, ge=1, le=50)
+    dup_sim: float = Field(default=0.88, ge=0.0, le=1.0)
+    default_valid_days: int = Field(default=60, ge=1)
+    after_research: bool = True
 
 
 class Jobs(_Model):

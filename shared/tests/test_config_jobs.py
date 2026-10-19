@@ -187,3 +187,47 @@ def test_research_overrides_load() -> None:
 def test_research_bad_values_fail(fragment: str) -> None:
     with pytest.raises(config.ConfigError):
         config.parse(BASE + "jobs:\n" + fragment, {}, source="test.yaml")
+
+
+def test_insights_defaults() -> None:
+    insights = config.Jobs().insights
+    assert insights.enabled is False
+    assert insights.model is None
+    assert insights.max_per_run == 5
+    assert insights.dup_sim == 0.88
+    assert insights.default_valid_days == 60
+    assert insights.after_research is True
+
+
+def test_insights_overrides_load() -> None:
+    text = BASE + (
+        "jobs:\n"
+        "  insights:\n"
+        "    enabled: true\n"
+        "    model: claude-haiku-4-5\n"
+        "    max_per_run: 2\n"
+        "    dup_sim: 0.9\n"
+        "    default_valid_days: 30\n"
+        "    after_research: false\n"
+    )
+    insights = config.parse(text, {}, source="test.yaml").jobs.insights
+    assert insights.enabled is True
+    assert insights.model == "claude-haiku-4-5"
+    assert insights.max_per_run == 2
+    assert insights.dup_sim == 0.9
+    assert insights.default_valid_days == 30
+    assert insights.after_research is False
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "  insights:\n    max_per_run: 0\n",
+        "  insights:\n    dup_sim: 1.5\n",
+        "  insights:\n    default_valid_days: 0\n",
+        "  insights:\n    bogus: 1\n",
+    ],
+)
+def test_insights_bad_values_fail(fragment: str) -> None:
+    with pytest.raises(config.ConfigError):
+        config.parse(BASE + "jobs:\n" + fragment, {}, source="test.yaml")

@@ -312,6 +312,11 @@ def insights_root(root: Path | str | None = None) -> Path:
     return wiki_root(root) / INSIGHTS
 
 
+def insights_index(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/insights/README.md`, the table of every insight."""
+    return insights_root(root) / "README.md"
+
+
 def insight_page(section: str, slug: str, root: Path | str | None = None) -> Path:
     """`<data>/wiki/insights/<section>/<slug>.md`, one insight.
 
