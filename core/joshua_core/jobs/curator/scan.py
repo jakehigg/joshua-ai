@@ -21,7 +21,10 @@ the folder of the page, then to the wiki root, then by the file name of a page
 anywhere in the wiki when exactly one page has it. A URL with a scheme
 (`https:`, `mailto:`), a target that is only an anchor, and a target that
 leaves the wiki are not checked. A link into `attachments/` is checked for the
-file only. Links inside code and inside the frontmatter do not count.
+file only. Links inside code and inside the frontmatter do not count. A fenced
+code block opens with three or more backticks or tildes, at most three spaces
+in, and closes at a line of the same mark that is at least as long and holds
+nothing else, as in CommonMark.
 
 The scan does not read the links of a page under `people/` or `joshua-docs/`,
 and it never proposes a change there. A journal entry is read for links, but a
@@ -75,7 +78,7 @@ _WIKILINK_RE = re.compile(
     r"\[\[(?P<target>[^\]|#\n]+)(?P<anchor>#[^\]|\n]*)?(?P<label>\|[^\]\n]*)?\]\]"
 )
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
-_FENCE_RE = re.compile(r"^\s{0,3}(```|~~~)")
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 LIST_LINE_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 HEADING_RE = re.compile(r"^(#{1,6})\s")
@@ -244,19 +247,25 @@ def _mask(text: str) -> str:
         if chars[i] != "\n":
             chars[i] = " "
     offset = 0
-    fenced = False
+    fence = ""
     for line in text.splitlines(keepends=True):
         start = offset
         offset += len(line)
         if start < meta_end:
             continue
-        is_fence = bool(_FENCE_RE.match(line))
-        if fenced or is_fence:
-            for i in range(start, offset):
-                if chars[i] != "\n":
-                    chars[i] = " "
-        if is_fence:
-            fenced = not fenced
+        match = _FENCE_RE.match(line)
+        mark = match.group(1) if match else ""
+        if fence:
+            rest = line[match.end() :] if match else ""
+            if mark[:1] == fence[:1] and len(mark) >= len(fence) and not rest.strip():
+                fence = ""
+        elif mark:
+            fence = mark
+        else:
+            continue
+        for i in range(start, offset):
+            if chars[i] != "\n":
+                chars[i] = " "
     masked = "".join(chars)
     return _INLINE_CODE_RE.sub(lambda m: " " * len(m.group()), masked)
 

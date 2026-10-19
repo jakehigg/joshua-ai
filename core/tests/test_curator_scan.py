@@ -238,3 +238,19 @@ def test_tree_helpers(tree) -> None:
     assert tree.by_basename["todo.md"] == ("notes/a/todo.md", "notes/b/todo.md")
     assert scan.journal_day(tree, "journal/2026/10/01/x.md").isoformat() == "2026-10-01"
     assert scan.read_exact(tree.root / "nope.md") == ""
+
+
+def test_a_link_in_fenced_code_is_not_a_link() -> None:
+    text = (
+        "# Page\n\n"
+        "```text\n[a](a.md)\n```\n"
+        "~~~\n[[b]]\n~~~\n"
+        "  ````text\n```\n[c](c.md)\n````\n"
+        "[d](d.md)\n"
+    )
+    assert [link.target for link in parse_links(text)] == ["d.md"]
+
+
+def test_a_shorter_or_other_fence_does_not_close_a_block() -> None:
+    text = "````\n```\n~~~~\n[a](a.md)\n```` not a close\n````\n[b](b.md)\n"
+    assert [link.target for link in parse_links(text)] == ["b.md"]
