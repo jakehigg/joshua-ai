@@ -8,6 +8,19 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Jobs: work on the wiki that you start from the laptop.** A new
+  `jobs:` section in `joshua.yaml` turns on the `/admin/jobs/*` routes; it is
+  off by default. `scripts/jobs.sh` starts a run and reads its report. Each run
+  has a row in the new `job_run` table. A run that is not a dry run writes one
+  journal entry and makes one wiki commit. Nothing schedules a run. The first
+  job, `bundle`, lists the pages that Joshua holds about one topic. See
+  [docs/jobs.md](jobs.md).
+
+- **Two wiki folders for the jobs: `wiki/knowledge/` and `wiki/insights/`.**
+  The index gives their pages the kinds `knowledge` and `insight`. The agent
+  reads them, and `write_file` and `rename_file` refuse a path in them. No job
+  writes them yet.
+
 - **A voice device with no wake clip can default to a person.** Set
   `channels.voice.device_defaults` to map a device id to a person id. A device
   listed there speaks for that person on any turn that names no speaker, and

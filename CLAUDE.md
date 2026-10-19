@@ -75,7 +75,7 @@ channels/                package joshua_channels
 core/                    package joshua_core
 gateway/                 package joshua_gateway
 docs/                    the product documentation; core ships it into the wiki
-scripts/                 backup, restore, chat, check_test_policy, ci-local
+scripts/                 backup, restore, chat, jobs, check_test_policy, ci-local
 tests/e2e/               compose-level tests
 .claude/skills/          the ste-writing skill (the documentation standard)
 .github/workflows/       CI
@@ -194,6 +194,18 @@ if any, plus everything shared, and a group turn finds the shared scope only.
 `docs/memory.md` documents every knob. The admin routes are
 `POST /admin/kb/reindex`, `GET /admin/kb/status`, `GET /admin/kb/events`, and
 `POST /admin/reflect`.
+
+## Jobs
+
+`core/joshua_core/jobs/` holds the jobs: work on the wiki that an operator
+starts with `POST /admin/jobs/{job}/run` or `scripts/jobs.sh`. Nothing
+schedules one. `JobRunner` runs one job at a time under the lock that the
+nightly reflection also takes, keeps a row per run in `job_run`, and, for a run
+that is not a dry run, writes the report as a journal entry and makes one wiki
+commit. A job reads a topic through `build_bundle` (`jobs/bundle.py`), lists
+each path it writes in `RunReport.written`, and writes nothing in a dry run.
+`wiki/knowledge/` and `wiki/insights/` belong to the jobs; the files MCP
+refuses an agent write there. `docs/jobs.md` is the reference.
 
 ## Runtime images
 

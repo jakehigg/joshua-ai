@@ -43,6 +43,7 @@ subscription. You do not need Python, and you do not need a Telegram bot.
 - [docs/channels.md](docs/channels.md): the terminal, Telegram, iMessage, voice, webhooks.
 - [docs/config.md](docs/config.md): every setting in `joshua.yaml`.
 - [docs/memory.md](docs/memory.md): notes, journal, profiles, retrieval.
+- [docs/jobs.md](docs/jobs.md): the jobs you start from the laptop.
 - [docs/operations.md](docs/operations.md): health, logs, updates, backup, the viewer.
 - [docs/architecture.md](docs/architecture.md): the three containers.
 - [docs/security.md](docs/security.md): what the agent can and cannot reach.

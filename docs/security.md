@@ -74,6 +74,7 @@ The `files` server confines every path to the speaker's roots:
 | `wiki/journal/` | everyone | a member, through `write_journal_entry` only. The nightly page is core alone. |
 | `wiki/people/<id>.md` | everyone | that person, when a member. Nightly reflection also rewrites it. |
 | `wiki/people/everyone.md` | everyone | nobody through the agent. Nightly reflection writes it. |
+| `wiki/knowledge/`, `wiki/insights/` | everyone | nobody through the agent. A job run in core writes them. See [docs/jobs.md](jobs.md). |
 | `people/<id>/attachments/` | everyone | nobody. Channels writes it. |
 | `shared/` | everyone | nobody. Core and channels write it. |
 
@@ -293,7 +294,7 @@ is at the fetch itself, in the `PreToolUse` hook:
 
 - **Its caller named it** in `urls`.
 - **One of its own searches returned it** in the same run. Only the `url`
-  field of a search result counts; a URL in the text of a result is words
+  field of a search result counts. A URL in the text of a result is words
   somebody wrote.
 
 Every other URL is refused: a URL written into the question, a link on a page
@@ -351,14 +352,14 @@ network deletes the line that stops it.
 
 Some rules are not the list's, because they are about reading the URL:
 
-- A scheme that is not `http` or `https` is refused.
+- The check refuses a scheme that is not `http` or `https`.
 - The fetch runs in Node, which reads a URL by the WHATWG rules. A URL that the
   check and the fetch could read as two different hosts is refused: a
   backslash, a user name or a password, a `%` in the host, a space or a
-  control character. A host that Node reads as an IPv4 address
-  (`2130706433`, `0x7f.1`, `127.1`) is read the same way by the check.
+  control character. When Node reads a host as an IPv4 address
+  (`2130706433`, `0x7f.1`, `127.1`), the check reads it the same way.
 - An IPv6 address that carries an IPv4 address (`::ffff:127.0.0.1`, NAT64,
-  6to4) is checked against the IPv4 entries too.
+  6to4) must also pass the IPv4 entries.
 
 **What the block list does not stop.** A redirect: the hook reads the URL the
 worker asked for, and a page that answers `302` to a private address is

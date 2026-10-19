@@ -102,6 +102,10 @@ message text and no sender handle.
 | `POST /admin/reflect` | run the nightly reflection now. `{"date": "2026-08-27", "person": "sam"}` re-runs one day for one person. |
 | `GET /admin/journal/status` | today's journal: entries written, whether the nightly page landed, and the last nightly run |
 | `POST /admin/turn` | run one turn with no channel: `{"channel", "text", "person"}`. The reply comes back in the response and is not delivered. |
+| `POST /admin/jobs/{job}/run` | start a job run in the background: `{"args": {...}, "dry_run": true}`. It answers 202 with the run id, and 409 while another run or the nightly reflection holds the lock. |
+| `GET /admin/jobs/{job}/status` | whether a run holds the lock, and the last run of that job |
+| `GET /admin/jobs/runs/{id}` | one run and its report |
+| `GET /admin/jobs/runs?job=&limit=` | the newest runs, of one job or of every job |
 
 Example:
 
@@ -110,6 +114,17 @@ curl -s -H "$auth" 127.0.0.1:8081/admin/kb/status
 curl -s -H "$auth" -X POST -H "Content-Type: application/json" \
   -d '{"full": true}' 127.0.0.1:8081/admin/kb/reindex
 ```
+
+The `/admin/jobs/*` routes answer 404 until you set `jobs.enabled: true`.
+`scripts/jobs.sh` wraps them for the laptop:
+
+```
+scripts/jobs.sh run bundle --dry-run --arg topic=houseplants/snake-plant.md
+scripts/jobs.sh runs 12
+```
+
+[docs/jobs.md](jobs.md) explains the jobs, the lock, and the journal entry
+that a run writes.
 
 ### gateway
 
