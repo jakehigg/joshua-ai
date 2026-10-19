@@ -791,6 +791,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "strictyaml" },
 ]
 
@@ -799,6 +800,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.9" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "strictyaml", specifier = ">=1.7" },
 ]
 
