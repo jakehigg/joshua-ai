@@ -317,6 +317,38 @@ def insight_page(section: str, slug: str, root: Path | str | None = None) -> Pat
     return insights_root(root) / folder / f"{_page_slug(slug, 'insight slug')}.md"
 
 
+TRASH = ".trash"
+
+
+def trash_root(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/.trash`, where a page goes when a job or the viewer removes it.
+
+    The wiki repository ignores this folder, and every listing skips it,
+    because it is a dot path.
+    """
+    return wiki_root(root) / TRASH
+
+
+def trash_path(rel: str, day: date, root: Path | str | None = None) -> Path:
+    """`<data>/wiki/.trash/YYYY-MM-DD/<rel>`, the place in the trash for one wiki file.
+
+    `rel` is the path of the file relative to the wiki root. A segment may
+    start with a dot (`._notes.md`), because a stray file often does. Raises
+    `ValueError` for an absolute path, a backslash, an empty, `.`, or `..`
+    segment, or a path inside `.git` or `.trash`.
+    """
+    if not isinstance(rel, str) or not rel or "\\" in rel or "\0" in rel:
+        raise ValueError(f"invalid wiki path: {rel!r}")
+    if rel.startswith("/"):
+        raise ValueError(f"wiki path must be relative: {rel!r}")
+    segments = rel.split("/")
+    if any(not seg or seg in (".", "..") for seg in segments):
+        raise ValueError(f"invalid wiki path: {rel!r}")
+    if segments[0] in (".git", TRASH):
+        raise ValueError(f"cannot put a path from {segments[0]} in the trash: {rel!r}")
+    return trash_root(root) / day.isoformat() / PurePosixPath(*segments)
+
+
 def inbox_root(root: Path | str | None = None) -> Path:
     """`<data>/inbox`."""
     return _root(root) / "inbox"

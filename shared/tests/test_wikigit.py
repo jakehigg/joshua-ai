@@ -205,3 +205,36 @@ def test_head_sha_when_git_cannot_run(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(wikigit, "_git_run", _boom)
     assert wikigit.head_sha(wiki) is None
+
+
+def test_commit_skips_an_ignored_path_and_an_untracked_gone_path(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    wikigit.ensure_repo(wiki)
+    (wiki / "page.md").write_text("one\n")
+    wikigit.commit(wiki, None, "init")
+    (wiki / "page.md").rename(wiki / "moved.md")
+    trashed = wiki / ".trash" / "2026-10-19" / "page.md"
+    trashed.parent.mkdir(parents=True)
+    trashed.write_text("one\n")
+
+    paths = [wiki / "page.md", wiki / "moved.md", trashed, wiki / "never-there.md"]
+    assert wikigit.commit(wiki, paths, "move") is True
+    files = subprocess.run(
+        ["git", "ls-files"], cwd=wiki, capture_output=True, text=True, check=True
+    ).stdout.split()
+    assert "moved.md" in files
+    assert "page.md" not in files
+    assert not any(name.startswith(".trash") for name in files)
+
+
+def test_commit_skips_an_ignored_path_with_a_non_ascii_name(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    wikigit.ensure_repo(wiki)
+    wikigit.commit(wiki, None, "init")
+    (wiki / "café.md").write_text("x\n")
+    trashed = wiki / ".trash" / "2026-10-19" / "crème.md"
+    trashed.parent.mkdir(parents=True)
+    trashed.write_text("y\n")
+    assert wikigit.commit(wiki, [wiki / "café.md", trashed], "add") is True

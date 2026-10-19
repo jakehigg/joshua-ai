@@ -511,6 +511,13 @@ jobs:
       - "*/README.md"
   curator:
     enabled: false
+    model: claude-sonnet-5
+    max_worker_calls: 40
+    duplicate_sim: 0.92
+    overlap_sim: 0.70
+    apply:
+      - move
+    trash: true
   research:
     enabled: false
   insights:
@@ -525,7 +532,13 @@ jobs:
 | `bundle.max_chars` | `24000` | The size limit of the bundle text. The topic page is never cut. |
 | `bundle.recent_days` | `14` | How many days back a job looks for the topics that the journal names now. |
 | `topics.exclude` | `vocabulary.md`, `*/README.md` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. |
-| `curator.enabled` | `false` | Reserved, package 2. |
+| `curator.enabled` | `false` | `true` adds the `curator` job and the `curator` chat tool for members. Both also need `jobs.enabled`. |
+| `curator.model` | not set | The model of the curator workers. When it is not set, the curator uses `jobs.model`, then `core.reflection_model`. |
+| `curator.max_worker_calls` | `40` | The maximum number of worker calls in one curator run. `0` makes a run that only scans. |
+| `curator.duplicate_sim` | `0.92` | Two topic pages with mean vectors this close are a near-duplicate pair, and the `compare` worker reads them. |
+| `curator.overlap_sim` | `0.70` | Two topic pages of one section this close are also compared, after the near-duplicate pairs, while the budget lasts. It must not be above `duplicate_sim`. |
+| `curator.apply` | none | The Tier B actions that a run applies: `move`, `merge`, `refresh`. Any other value is an error. The `apply` argument of a run replaces this list for that run. |
+| `curator.trash` | `true` | `true` moves a stray file to `wiki/.trash/<day>/`. `false` records it as a finding and leaves it. |
 | `research.enabled` | `false` | Reserved, package 3. |
 | `insights.enabled` | `false` | Reserved, package 4. |
 

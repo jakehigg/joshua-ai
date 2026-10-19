@@ -94,3 +94,27 @@ def test_bootstrap_wiki_does_not_make_the_job_folders(tmp_path: Path) -> None:
     layout.bootstrap_wiki(tmp_path)
     assert not layout.knowledge_root(tmp_path).exists()
     assert not layout.insights_root(tmp_path).exists()
+
+
+def test_trash_path_keeps_the_relative_path_under_the_day(tmp_path: Path) -> None:
+    from datetime import date
+
+    day = date(2026, 10, 19)
+    assert layout.trash_root(tmp_path) == tmp_path / "wiki" / ".trash"
+    assert layout.trash_path("garden/._notes.md", day, tmp_path) == (
+        tmp_path / "wiki" / ".trash" / "2026-10-19" / "garden" / "._notes.md"
+    )
+    assert layout.trash_path(".DS_Store", day, tmp_path) == (
+        tmp_path / "wiki" / ".trash" / "2026-10-19" / ".DS_Store"
+    )
+
+
+@pytest.mark.parametrize(
+    "rel",
+    ["", "/etc/passwd", "a/../b.md", "a//b.md", "./a.md", "a\\b.md", ".git/config", ".trash/x.md"],
+)
+def test_trash_path_refuses_an_unsafe_path(tmp_path: Path, rel: str) -> None:
+    from datetime import date
+
+    with pytest.raises(ValueError):
+        layout.trash_path(rel, date(2026, 10, 19), tmp_path)

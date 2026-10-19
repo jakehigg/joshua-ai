@@ -529,10 +529,46 @@ class JobsTopics(_Model):
     exclude: list[str] = ["vocabulary.md", "*/README.md"]
 
 
+# The Tier B actions of the curator that `jobs.curator.apply` can turn on.
+CURATOR_ACTIONS = ("move", "merge", "refresh")
+
+
 class JobsCurator(_Model):
-    """The curator job. Reserved: package 2 adds its keys."""
+    """The curator job: it keeps the wiki and the journal correct and organized.
+
+    `enabled` registers the job and the `curator` chat tool. `model` is the
+    model of its workers; `None` uses `jobs.model`, then
+    `core.reflection_model`. `max_worker_calls` is the worker budget of one
+    run. `duplicate_sim` is the cosine floor for two topic pages to be a
+    near-duplicate pair, and `overlap_sim` the floor for two pages of one
+    section to be compared after the near-duplicates. `apply` names the Tier B
+    actions that a run applies. `trash` moves a stray file to `wiki/.trash/`;
+    `false` records it as a finding instead. See `docs/jobs.md`.
+    """
 
     enabled: bool = False
+    model: str | None = None
+    max_worker_calls: int = Field(default=40, ge=0)
+    duplicate_sim: float = Field(default=0.92, ge=0.0, le=1.0)
+    overlap_sim: float = Field(default=0.70, ge=0.0, le=1.0)
+    apply: list[str] = []
+    trash: bool = True
+
+    @field_validator("apply")
+    @classmethod
+    def _known_actions(cls, value: list[str]) -> list[str]:
+        unknown = [item for item in value if item not in CURATOR_ACTIONS]
+        if unknown:
+            raise ValueError(
+                f"unknown curator action: {', '.join(unknown)}; use {', '.join(CURATOR_ACTIONS)}"
+            )
+        return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def _overlap_below_duplicate(self) -> JobsCurator:
+        if self.overlap_sim > self.duplicate_sim:
+            raise ValueError("jobs.curator.overlap_sim must not be above duplicate_sim")
+        return self
 
 
 class JobsResearch(_Model):

@@ -76,7 +76,8 @@ def commit(wiki: Path, paths: Iterable[Path | str] | None, message: str) -> bool
     Raises `ValueError` when a path is not inside `wiki`: a caller passing a
     path outside the wiki is a programming error, not a runtime failure. A
     path that no longer exists (a rename source, a delete) is still valid —
-    it is passed to `git add -A` so the removal is staged.
+    it is passed to `git add -A` so the removal is staged. A path that the
+    repository ignores, or that is gone and was never tracked, is left out.
     """
     rel_paths = None if paths is None else [_relative(wiki, p) for p in paths]
     try:
@@ -169,10 +170,12 @@ def _commit(wiki: Path, rel_paths: list[str] | None, message: str) -> bool:
             _log_failure("add", add_result)
             return False
     elif rel_paths:
-        add_result = _git_run(["add", "-A", "--", *rel_paths], cwd=wiki)
-        if add_result.returncode != 0:
-            _log_failure("add", add_result)
-            return False
+        stage = _stageable(wiki, rel_paths)
+        if stage:
+            add_result = _git_run(["add", "-A", "--", *stage], cwd=wiki)
+            if add_result.returncode != 0:
+                _log_failure("add", add_result)
+                return False
     # An empty ``rel_paths`` list stages nothing; the commit below then finds
     # nothing new and reports it, same as any other empty change.
 
@@ -183,6 +186,31 @@ def _commit(wiki: Path, rel_paths: list[str] | None, message: str) -> bool:
         return False
     _log_failure("commit", result)
     return False
+
+
+def _stageable(wiki: Path, rel_paths: list[str]) -> list[str]:
+    """The paths of `rel_paths` that `git add` can take.
+
+    A path that the repository ignores (a file in `.trash/`) is left out. A
+    path that is not on the disk is kept only when git tracks it, so its
+    removal is staged. `git add` fails on the whole list for one path of
+    either kind, and the commit would then record nothing.
+    """
+    tracked_result = _git_run(["ls-files", "-z", "--", *rel_paths], cwd=wiki)
+    tracked = set(tracked_result.stdout.split("\0")) if tracked_result.returncode == 0 else set()
+    # `check-ignore` takes `-z` only with `--stdin`; with `quotePath` off it
+    # prints a path with a non-ASCII name as it is.
+    ignored_result = _git_run(
+        ["-c", "core.quotePath=false", "check-ignore", "--", *rel_paths], cwd=wiki
+    )
+    ignored = set(ignored_result.stdout.splitlines()) if ignored_result.returncode == 0 else set()
+    kept: list[str] = []
+    for rel in rel_paths:
+        if rel in tracked:
+            kept.append(rel)
+        elif (wiki / rel).exists() and rel not in ignored:
+            kept.append(rel)
+    return kept
 
 
 def _nothing_to_commit(result: subprocess.CompletedProcess[str]) -> bool:

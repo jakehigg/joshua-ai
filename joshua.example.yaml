@@ -236,7 +236,21 @@ jobs:
       - vocabulary.md
       - "*/README.md"
   curator:
-    enabled: false         # reserved, package 2
+    # The curator keeps the wiki and the journal correct and organized: links,
+    # index pages, stray files, the place of a page, duplicates, and pages the
+    # journal has made old. docs/jobs.md explains the tiers.
+    enabled: false         # true: the curator job and the curator chat tool
+    # model: claude-sonnet-5 # the model of its workers; when it is not set,
+    #                        # jobs.model, then core.reflection_model
+    max_worker_calls: 40   # the worker calls one run may make
+    duplicate_sim: 0.92    # two topic pages this close are a near-duplicate pair
+    overlap_sim: 0.70      # two pages of one section this close are compared too
+    # apply:               # the Tier B actions a run applies; none by default.
+    #   - move             # move a page to the folder it belongs in
+    #   - merge            # point every link at one of two duplicates
+    #   - refresh          # apply a patch that the journal supports
+    trash: true            # true: move a stray file to wiki/.trash/<day>/;
+                           # false: record it as a finding only
   research:
     enabled: false         # reserved, package 3
   insights:
