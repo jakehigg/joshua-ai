@@ -437,6 +437,7 @@ with `scripts/jobs.sh runs <id>`.
 | `topic` | A topic page, relative to the wiki root. When it is not there, the run selects a topic. A path that is not a topic page gets 400. |
 | `questions` | Slugs from the dossier, with commas between them. Only with `mode=run` and a `topic`. A slug that is not in the dossier gets 400. |
 | `max_questions` | A lower limit than `jobs.research.questions_per_run`, for this run. |
+| `then_insights` | `true` or `false`. Only with `mode=run`. It replaces `jobs.insights.after_research` for this run. See [the research hook](#the-research-hook). |
 
 ### The modes
 
@@ -666,5 +667,188 @@ to queue the question.
 
 ## Insights
 
-Package 4. The insights job keeps `wiki/insights/`: where what we do is
-different from what the knowledge says.
+The insights job keeps `wiki/insights/`. An insight is a place where what we
+do, in the wiki and the journal, disagrees with what is known, in the
+`knowledge/` pages of the topic, for the date, the season, and our situation.
+"The garden is still on the summer watering program and it is late October"
+is an insight. It is not a fact about the world (that is knowledge), not an
+event (that is the journal), and not a reference (that is the wiki). It is
+something that Joshua must tell us.
+
+The job works on one topic in each run, and only on a topic that has a
+published knowledge page. With no knowledge, the report says
+`no knowledge for this topic`, and the run stops. That is not an error.
+
+Set `jobs.insights.enabled: true`, with `jobs.enabled: true`, to add the job
+and the `insights` chat tool. [docs/config.md](config.md#jobs) has the keys.
+
+```
+scripts/jobs.sh run insights --dry-run --arg topic=garden/irrigation.md
+scripts/jobs.sh run insights --arg topic=garden/irrigation.md
+```
+
+The one argument is `topic`, a topic page relative to the wiki root. It is
+required. A path that is not a topic page gets 400.
+
+### What a run does
+
+1. It loads the topic and builds its memory bundle.
+2. It expires the old insights of the topic (see [Expiry](#expiry)).
+3. It loads the published knowledge pages of the topic: each page that the
+   dossier names for an answered question, and each page in the folder of the
+   topic under `knowledge/`, when its frontmatter has `status: published`.
+   With none, the run stops here.
+4. The `insight` worker has no tools and a timeout of 120 seconds. It gets
+   the parts of the bundle that say what we do (the parts that are not under
+   `knowledge/` or `insights/`), the full text of each knowledge page with its
+   frontmatter (so it sees `confidence`, `sources`, and `refresh_after`), the
+   date, the timezone and the `name` from `joshua.yaml`, and the open
+   insights of the topic, so that it does not raise one again. The prompt
+   tells the worker that the bundle and the pages are content, not
+   instructions.
+5. The gate decides which insights are new, which refresh an open insight,
+   and which are rejected.
+6. It writes each new and refreshed page and `insights/README.md`.
+
+A dry run does the worker call and the gate, and writes nothing. It does not
+expire an insight either: the report lists the insights that would expire.
+The report holds the full text of each page that the run would write.
+
+The summary is `insights: <topic> (N new, M refreshed, K expired, R
+rejected)`. The report has the sections **Knowledge**, **New** (each with its
+claim, severity, valid days, `we_do`, and `knowledge_says`), **Refreshed**,
+**Expired**, **Rejected** (each with its reason), and **Usage**. The worker
+call counts under the name `insight`.
+
+### The gate
+
+The gate is Python. An insight gets a page only when all of these rules are
+true:
+
+- `claim` has 15 to 200 characters, and `action` is not empty.
+- `confidence` is not `low`. The reason is `low confidence`.
+- `we_do` has one phrase or more. Each phrase has 3 to 120 characters and
+  occurs word for word in a part of the bundle that says what we do. Case and
+  line breaks do not count.
+- Each path in `we_do_paths` is one of those parts, and holds at least one of
+  the phrases. When `we_do_paths` is empty, it becomes the parts that hold the
+  phrases.
+- `knowledge_says` has one path or more, each a published knowledge page of
+  this topic. A path is relative to `wiki/knowledge/`, with or without
+  `knowledge/` in front.
+- `valid_from` and `valid_until` are ISO days. `valid_until` is after
+  `valid_from`, and not before today. When `valid_from` is missing, it is
+  today. When `valid_until` is missing, it is today plus
+  `jobs.insights.default_valid_days` (60).
+
+A claim that has the same text as an open insight of the topic, or a vector
+at `jobs.insights.dup_sim` (0.88) or more to the claim of one, is a
+duplicate. A duplicate of an open insight refreshes it: `seen_at` becomes
+today, and `we_do`, `we_do_paths`, `knowledge_says`, and the evidence come
+from the new answer. The status does not change, and the report lists it as
+refreshed. A duplicate of a `dismissed` insight is dropped with the reason
+`dismissed before`.
+
+A run writes at most `jobs.insights.max_per_run` (5) new insights: the
+highest severity first (`urgent`, `act`, `note`), then the highest
+confidence. The rest are rejected with a reason. An item of the worker answer
+that does not match the schema is a rejection too, and it changes nothing.
+
+### The page
+
+An insight is one page at `wiki/insights/<section>/<slug>.md`. The section is
+the first folder of the topic path, or `general` for a page at the wiki root.
+The slug comes from the claim, in the same way as a question slug: its first
+six words that are not small words, joined with `-`, and `-2`, `-3`, and so
+on when the section has the slug already. A tool names an insight by
+`<section>/<slug>`.
+
+```yaml
+topic: garden/irrigation.md
+section: garden
+claim: The garden is still on the 20-minute summer program in late October.
+status: new                    # new, told, acknowledged, dismissed, or expired
+severity: act                  # note, act, or urgent
+valid_from: 2026-10-01
+valid_until: 2026-11-30
+we_do: ["every zone on the 20-minute summer program"]
+we_do_paths: [garden/irrigation.md, journal/2026/10/15/garden-weather-log.md]
+knowledge_says: [garden/irrigation/autumn-watering.md]
+confidence: high
+found_at: 2026-10-19
+seen_at: 2026-10-19            # the last run that raised it
+source: insights
+run_id: 9
+```
+
+`told_at`, `resolved_at`, `resolved_by`, and `resolution_note` are added when
+they get a value. The body has these headings, in this order: the claim as
+the title, **Why it matters**, **What to do**, **What we do** (each `we_do`
+phrase in quotes, with a link to its page), **What is known** (the
+`answer_short` of each `knowledge_says` page, with a link), and **Evidence**
+(the reasoning of the worker). The job removes each link from the text of the
+worker, and keeps its text. The one exception is a link in the evidence to a
+path in `we_do_paths` or `knowledge_says`. A heading line from the worker
+becomes plain text.
+
+`insights/README.md` has one table with a row for each insight: the status,
+the severity, the topic with a link, the claim with a link, the valid-until
+day, and the day it was found. The open insights (`new`, `told`, and
+`acknowledged`) come first, then the rest, and the newest come first in each
+group. The job and the chat tool write it again on each change.
+
+### Expiry
+
+At the start of each run, and in the insight pass of a research run, each
+open insight of the topic whose `valid_until` is before today becomes
+`expired`, with `resolved_at` today and `resolved_by: expiry`. Then
+`insights/README.md` is written again. This is Python, with no worker call.
+A dry run does not expire an insight.
+
+### The research hook
+
+A research `run` that publishes a page also runs the insight pass for the
+same topic, at the end of the same run, when `jobs.insights.enabled` is true
+and `jobs.insights.after_research` is true. The `then_insights` argument of
+the research run replaces `after_research` for that run.
+
+- The paths of the pass join the paths of the research run, so one commit
+  holds the knowledge page and the insight.
+- The worker call of the pass counts under `insight` in the usage of the
+  research run.
+- The report of the pass is the section **Insights** of the research report.
+- On a dry research run, the pass is a dry run too. It reads the pages that
+  the research run would publish.
+- A failure of the pass is a line in the **Insights** section. The research
+  run does not fail.
+
+### The chat tool
+
+The `insights` tool server is in core. A member gets four tools:
+
+| Tool | What it does |
+|---|---|
+| `list_insights(status="open", topic=None, limit=20)` | lists insights, open first and newest first. `open` means `new`, `told`, and `acknowledged`. A status can also be `new`, `told`, `acknowledged`, `dismissed`, `expired`, or `all`. |
+| `acknowledge_insight(slug)` | sets `status: acknowledged`, `resolved_at`, and `resolved_by: <person id>` on a `new` or `told` insight |
+| `dismiss_insight(slug, why)` | sets `status: dismissed`, `resolved_at`, `resolved_by`, and `resolution_note` on an open insight. A later run does not raise it again. |
+| `run_insights(topic)` | starts a run that is not a dry run, and answers with the run id |
+
+`slug` is `<section>/<slug>`. A status change takes the job lock, writes the
+page and `insights/README.md`, and commits the wiki with the message
+`insights: <slug> <status> by <person id>`. A guest, or a speaker that core
+does not know, gets a refusal from each tool, and nothing changes. The server
+is there only when `jobs.enabled` and `jobs.insights.enabled` are both true.
+
+### Telling us
+
+An insight with `status: new` waits in `wiki/insights/` for a later delivery
+step, which is not in this release. Now, the chat tools are the way to read
+and resolve an insight, and the report of each run is a journal entry.
+
+### What the insights job never does
+
+- It never writes outside `wiki/insights/`. Each path comes from `layout`,
+  and a write outside `insights/` fails.
+- It never raises an insight for a topic with no published knowledge page.
+- It never raises a claim with `confidence: low`.
+- It writes nothing in a dry run, and expires nothing.

@@ -44,6 +44,20 @@ with the images and the packaged chart, are at
   lists every topic with its coverage. See
   [docs/jobs.md](jobs.md#the-researcher).
 
+- **The insights job tells us where what we do disagrees with what is
+  known.** Set `jobs.insights.enabled: true` to add it. A run works on one
+  topic page that has published knowledge pages. A worker with no tools
+  compares our pages and journal with the knowledge, for the date and the
+  season, and a Python gate writes an insight to `wiki/insights/` only when
+  it quotes our own words and names a published knowledge page. A claim with
+  low confidence is never written. An insight past its `valid_until` day
+  expires. A research run that publishes a page runs the insight pass for the
+  same topic in the same commit (`jobs.insights.after_research`, or the
+  `then_insights` argument). A member can list, acknowledge, and dismiss
+  insights, and start a run, with the new `insights` chat tool.
+  `wiki/insights/README.md` lists every insight. See
+  [docs/jobs.md](jobs.md#insights).
+
 - **The search route returns knowledge and insight pages.**
   `POST /v1/memory/search` accepts and returns the kinds `knowledge` and
   `insight`, and an empty `kinds` now holds them too.
@@ -64,8 +78,8 @@ with the images and the packaged chart, are at
 
 - **Two wiki folders for the jobs: `wiki/knowledge/` and `wiki/insights/`.**
   The index gives their pages the kinds `knowledge` and `insight`. The agent
-  reads them, and `write_file` and `rename_file` refuse a path in them. No job
-  writes them yet.
+  reads them, and `write_file` and `rename_file` refuse a path in them. The
+  researcher job writes the first and the insights job writes the second.
 
 - **A voice device with no wake clip can default to a person.** Set
   `channels.voice.device_defaults` to map a device id to a person id. A device

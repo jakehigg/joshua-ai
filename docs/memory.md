@@ -66,8 +66,17 @@ Two folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   `wiki/knowledge/README.md` is the table of every dossier. See
   [the researcher](jobs.md#the-researcher).
 - `wiki/insights/` holds what the insights job raised: a place where what we
-  do is different from what the knowledge says. The index gives these chunks
-  the kind `insight`.
+  do is different from what the knowledge says, for the date and the season.
+  The index gives these chunks the kind `insight`. An insight is one page at
+  `wiki/insights/<section>/<slug>.md`. Its frontmatter holds the `topic`, the
+  `claim`, the `status` (`new`, `told`, `acknowledged`, `dismissed`, or
+  `expired`), the `severity` (`note`, `act`, or `urgent`), `valid_from` and
+  `valid_until`, the `we_do` phrases from our pages with their
+  `we_do_paths`, the `knowledge_says` pages, the `confidence`, and
+  `found_at` and `seen_at`. Its body has the headings **Why it matters**,
+  **What to do**, **What we do**, **What is known**, and **Evidence**.
+  `wiki/insights/README.md` is the table of every insight, open insights
+  first. See [insights](jobs.md#insights).
 
 The agent finds both the same way it finds any wiki page: through the
 injection before a turn, and through `search_memory`. The agent cannot write
