@@ -12,8 +12,11 @@ from joshua_core.jobs.research.gate import (
     grounding_reason,
     names_topic,
     normalize,
+    roster_names,
     shape_reason,
+    world_reason,
 )
+from joshua_core.jobs.topics import Topic, topic_names
 from joshua_shared import layout
 from research_fakes import (
     GENERIC,
@@ -167,3 +170,105 @@ async def test_an_index_that_fails_does_not_stop_the_gate(tmp_path: Path) -> Non
 def test_cosine() -> None:
     assert cosine([1, 0], [1, 0]) == pytest.approx(1.0)
     assert cosine([0, 0], [1, 0]) == 0.0
+
+
+# -- the topic names and the world rule ---------------------------------------
+
+WINDOW_TOPIC = Topic(
+    path="houseplants/snake-plants-living-room-window.md",
+    section="houseplants",
+    title="Snake Plants (Living Room Window)",
+)
+WINDOW_TERMS = topic_names(WINDOW_TOPIC)
+WINDOW_BUNDLE = (
+    "## houseplants/snake-plants-living-room-window.md\n\n"
+    "# Snake Plants (Living Room Window)\n\n"
+    "Two snake plants in a gritty mix, watered to runoff. The house stays at\n"
+    "65-68°F in winter. Fed once on 2026-10-04 at quarter strength.\n"
+)
+GOOD_WORLD = (
+    "How often should a snake plant in a gritty mix, watered to runoff, be watered "
+    "from October to March in a 65–68°F house?"
+)
+GOOD_PHRASES = ["gritty mix", "watered to runoff"]
+
+# The questions of the first live run, with the person and the dates kept
+# in their shape. Seven ask about our records; the last asks about the plan.
+LIVE_CANDIDATES = [
+    "What dose was used on the snake plants on 2026-10-04?",
+    "Will Alex verify both snake plants in one pass?",
+    "Did we divide the snake plants before the October 4 feeding?",
+    "What did the snake plant division in August produce?",
+    "Should we move the snake plants away from the window in winter?",
+    "When did the snake plants last get water to runoff?",
+    "Is our snake plant pot too big after the repot?",
+    "Why was the snake plant fed in fall when the plan says spring?",
+]
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["Is the snake plant cold in winter?", "Are Snake Plants safe for cats?"],
+)
+def test_a_question_with_a_short_name_of_the_title_names_the_topic(question: str) -> None:
+    assert names_topic(question, WINDOW_TERMS)
+
+
+def test_a_question_about_the_plants_does_not_name_the_topic() -> None:
+    assert not names_topic("How much light do the plants need in winter?", WINDOW_TERMS)
+
+
+def test_the_live_candidates_are_rejected_as_questions_about_us() -> None:
+    reasons = [world_reason(q, ["Alex", "alex"]) for q in LIVE_CANDIDATES]
+    rejected = [r for r in reasons if r]
+    assert len(rejected) >= 6
+    assert "names a person" in reasons[1]
+    assert "date" in reasons[0] and "date" in reasons[2]
+    assert "`what did`" in reasons[3]
+    assert "`should we`" in reasons[4]
+    assert "`when did`" in reasons[5]
+    assert "about us" in reasons[6]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        GOOD_WORLD,
+        "What light level does a snake plant need in the US Midwest in winter?",
+        "Does a snake plant in a gritty mix need feeding between October and March?",
+    ],
+)
+def test_a_question_about_the_world_passes_the_world_rule(question: str) -> None:
+    assert world_reason(question, ["Alex", "alex"]) == ""
+
+
+def test_the_date_forms() -> None:
+    for question in ("on Oct 4?", "by March 3rd?", "on Sept. 12?", "on 2026-10-04?"):
+        assert "date" in world_reason(question)
+    assert world_reason("from October to March, at 20 to 30 days?") == ""
+
+
+async def test_the_gate_rejects_a_person_and_passes_a_world_question(tmp_path: Path) -> None:
+    gate = Gate(
+        bundle_text=WINDOW_BUNDLE,
+        terms=WINDOW_TERMS,
+        existing=[],
+        store=FakeStore(None),
+        dup_sim=0.85,
+        data_root=tmp_path,
+        embed=_embed,
+        people=["Alex", "alex"],
+    )
+    person = Candidate("Will Alex check the snake plants in one pass?", GOOD_PHRASES)
+    assert "names a person" in (await gate.check(person)).reason
+    good = await gate.check(Candidate(GOOD_WORLD, GOOD_PHRASES))
+    assert good.accepted, good.reason
+    asked = await gate.check(Candidate("Should we feed Snake Plants in May?", []), person=True)
+    assert asked.accepted
+
+
+def test_the_roster_names_are_the_names_and_the_ids() -> None:
+    from jobs_fakes import make_settings
+
+    assert roster_names(make_settings()) == ["Alex", "alex"]
+    assert roster_names(object()) == []

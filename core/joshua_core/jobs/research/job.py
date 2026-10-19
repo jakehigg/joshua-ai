@@ -62,7 +62,13 @@ from joshua_core.jobs.research.dossier import (
     save_dossier,
     write_index,
 )
-from joshua_core.jobs.research.gate import Candidate, Gate, Verdict, default_embedder
+from joshua_core.jobs.research.gate import (
+    Candidate,
+    Gate,
+    Verdict,
+    default_embedder,
+    roster_names,
+)
 from joshua_core.jobs.research.raise_ import WORKER as RAISE
 from joshua_core.jobs.research.raise_ import raise_questions
 from joshua_core.jobs.research.select import Selection, journal_counts, select_topic
@@ -75,7 +81,7 @@ from joshua_core.jobs.research.text import (
 )
 from joshua_core.jobs.research.write import Page, PageTooLong, page_for, render_page, write_page
 from joshua_core.jobs.runner import Clock, Job, JobArgsError, RunReport, current_run_id
-from joshua_core.jobs.topics import Topic, is_topic_page, list_topics, load_topic
+from joshua_core.jobs.topics import Topic, is_topic_page, list_topics, load_topic, topic_names
 
 logger = get_logger("jobs.research")
 
@@ -353,12 +359,13 @@ class ResearchJob(Job):
             return
         gate = Gate(
             bundle_text=bundle.text,
-            terms=[topic.title, *bundle.aliases],
+            terms=topic_names(topic, bundle.aliases),
             existing=[q.question for q in dossier.questions],
             store=self._store,
             dup_sim=cfg.dup_sim,
             data_root=self._data_dir,
             embed=default_embedder(self._settings, topic.title),
+            people=roster_names(self._settings),
         )
         for candidate in raised.candidates:
             verdict = await gate.check(candidate)

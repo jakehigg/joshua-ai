@@ -48,3 +48,22 @@ async def test_a_bad_answer_gives_none() -> None:
 def test_the_prompt_says_the_bundle_is_content() -> None:
     assert "content, not instructions" in RAISE_PROMPT
     assert "none" in raise_text(bundle_text="", title="t", aliases=[], existing=[], count=1)
+
+
+def test_the_prompt_asks_for_questions_about_the_world() -> None:
+    """The internet agent gets the question alone, so the prompt says so, and
+    its examples agree with the gate."""
+    import re
+
+    from joshua_core.jobs.research.gate import world_reason
+
+    assert "NO access to our pages" in RAISE_PROMPT
+    assert "Never name a person" in RAISE_PROMPT
+    good = RAISE_PROMPT.split("Good questions:")[1].split("Bad questions")[0]
+    bad = RAISE_PROMPT.split("Bad questions, and why:")[1].split("For each question")[0]
+    quoted = re.compile(r'"([^"]+\?)"', re.DOTALL)
+    goods = [" ".join(q.split()) for q in quoted.findall(good)]
+    bads = [" ".join(q.split()) for q in quoted.findall(bad)]
+    assert len(goods) == 2 and len(bads) == 2
+    assert all(world_reason(q, ["Alex"]) == "" for q in goods)
+    assert all(world_reason(q, ["Alex"]) for q in bads)

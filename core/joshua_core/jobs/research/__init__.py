@@ -26,7 +26,15 @@ from joshua_core.jobs.research.dossier import (
     save_dossier,
     write_index,
 )
-from joshua_core.jobs.research.gate import Candidate, Gate, Verdict, names_topic, shape_reason
+from joshua_core.jobs.research.gate import (
+    Candidate,
+    Gate,
+    Verdict,
+    names_topic,
+    roster_names,
+    shape_reason,
+    world_reason,
+)
 from joshua_core.jobs.research.job import ResearchJob, worker_model
 from joshua_core.jobs.research.raise_ import raise_questions
 from joshua_core.jobs.research.select import Selection, journal_counts, select_topic
@@ -52,6 +60,7 @@ __all__ = [
     "load_dossier",
     "load_dossiers",
     "names_topic",
+    "roster_names",
     "question_slug",
     "raise_questions",
     "registrable_domain",
@@ -60,6 +69,7 @@ __all__ = [
     "save_dossier",
     "select_topic",
     "shape_reason",
+    "world_reason",
     "strip_links",
     "worker_model",
     "write_index",

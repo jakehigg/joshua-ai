@@ -46,7 +46,7 @@ from joshua_core.jobs.research.dossier import (
 from joshua_core.jobs.research.gate import shape_reason
 from joshua_core.jobs.research.job import local_day, researchable
 from joshua_core.jobs.runner import Clock, JobArgsError, JobBusy, JobRunner, UnknownJob, utc_now
-from joshua_core.jobs.topics import is_topic_page, load_topic, read_page
+from joshua_core.jobs.topics import is_topic_page, load_topic, read_page, topic_names
 
 logger = get_logger("tools.research")
 
@@ -144,7 +144,7 @@ async def do_queue_question(
     text = " ".join((question or "").split())
     page = load_topic(topic, wiki)
     meta, _ = frontmatter.split(read_page(wiki / topic))
-    terms = [page.title, *topic_aliases(page, meta, wiki)]
+    terms = topic_names(page, topic_aliases(page, meta, wiki))
     reason = shape_reason(text, terms)
     if reason:
         return _reply(

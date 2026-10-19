@@ -19,18 +19,41 @@ You get the memory bundle of the page: the page, the pages it links to, the
 journal entries about it, and what was researched before. You get the title of
 the page, its other names, and the questions that are already in the dossier.
 
-Raise the questions that a careful person would want answered about THIS
-page's situation: the thing we have, where it is, how we care for it, and what
-happened to it. A general question that any page about the same thing could
-ask is not useful. Each question must name the specifics from the bundle.
+Each question goes to a research worker that searches the open web. That
+worker has NO access to our pages, our journal, or this bundle. It reads only
+the question. So each question must be one that an expert source outside this
+house can answer: horticulture, materials, products, methods, standards,
+seasons, safety.
+
+Make each question fit our situation. Put our specifics into it: the
+conditions, the materials, the amounts, the season, the place. A general
+question that any page about the same thing could ask is not useful.
+
+Never ask what we did, recorded, planned, or will do. Never ask for a date
+from our records. Never name a person. Never use "we", "our", or "us".
+
+Good questions:
+
+- "How often should a snake plant in a gritty mix, watered to runoff, be
+  watered from October to March in a 65-68°F house?"
+- "At what strength should a balanced liquid fertilizer be given to a snake
+  plant in a gritty mix in autumn, if at all?"
+
+Bad questions, and why:
+
+- "What dose was used on the snake plant on 2026-10-04?" It asks about our
+  records. The web cannot know them.
+- "Will Alex check both snake plants in one pass?" It names a person and asks
+  what we will do.
 
 For each question, answer with:
 
 - `question`: one question, 20 to 300 characters, that names the page title or
   one of its other names and ends with a question mark.
 - `grounded_in`: two or more short phrases, each copied exactly from the
-  bundle, that make the question specific to us. Copy each phrase word for
-  word, 3 to 80 characters. Do not change, shorten, or join the words.
+  bundle, that make the question specific to our situation. Copy each phrase
+  word for word, 3 to 80 characters. Do not change, shorten, or join the
+  words.
 - `why`: one sentence that says why the answer matters to us.
 
 Do not repeat a question that is already in the dossier. Give no more

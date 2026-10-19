@@ -35,7 +35,7 @@ from research_fakes import (
     word_vector,
 )
 
-SECOND = "When should we repot Snakey, now that the leaf flop showed up in the hall?"
+SECOND = "When should a snake plant be repotted when leaf flop shows up in a dim hall?"
 SECOND_PHRASES = ["leaf flop", "lives in the hall"]
 THIRD = "Does the snake plant need more light than the hall gives it in winter?"
 THIRD_PHRASES = ["lives in the hall", "65 to 68 F in winter"]
@@ -169,6 +169,16 @@ async def test_plan_picks_the_journal_topic_and_writes_only_the_dossier_and_read
     assert "Runner-up" in body["Topic"]
     assert GENERIC in body["Rejected"]
     assert report.calls == 1 and report.tokens == RAISE_USAGE.total
+
+
+async def test_plan_rejects_a_question_that_names_a_person_on_the_roster(h: Harness) -> None:
+    named = "Will Alex check the snake plant for leaf flop in the hall?"
+    h.workers = FakeWorkers(raise_answer=raised((named, SECOND_PHRASES), (THIRD, THIRD_PHRASES)))
+    report = await h.run(mode="plan", topic=SNAKE)
+    rejected = report.data["rejected"]
+    assert [r["question"] for r in rejected] == [named]
+    assert "names a person" in rejected[0]["reason"]
+    assert [q.question for q in h.dossier().questions] == [THIRD]
 
 
 async def test_plan_dry_run_writes_nothing(h: Harness) -> None:

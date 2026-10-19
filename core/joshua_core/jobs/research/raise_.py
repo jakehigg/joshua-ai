@@ -1,4 +1,8 @@
-"""The `raise` worker: questions about one topic that are specific to us.
+"""The `raise` worker: questions about the world, made specific to one topic.
+
+Each question goes to the internet agent, which searches the open web and has
+none of our pages, so a question asks what an expert source can answer and
+carries our conditions in its words.
 
 The worker reads the memory bundle of the topic, its title and aliases, and
 the questions the dossier holds. It has no tools. The specificity gate in
