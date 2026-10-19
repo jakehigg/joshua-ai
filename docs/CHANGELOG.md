@@ -16,6 +16,25 @@ with the images and the packaged chart, are at
   job, `bundle`, lists the pages that Joshua holds about one topic. See
   [docs/jobs.md](jobs.md).
 
+- **The curator job keeps the wiki correct and organized.** Set
+  `jobs.curator.enabled: true` to add it. Each run scans the whole wiki for
+  broken links, orphan pages, index lines to pages that are not there, stray
+  files, and journal entries with no date, and fixes them (Tier A). Three
+  workers read only the pages whose body changed since the last review: one
+  finds a page in the wrong folder, one finds duplicate pages, and one finds a
+  page that the journal has made old. A run applies a `move`, a `merge`, or a
+  `refresh` only when `jobs.curator.apply` or the `apply` argument names it.
+  The rest is recorded in the new `curator_finding` table. Each reviewed page
+  gets two frontmatter keys, `curated` and `curated_hash`, so a second run
+  sends no unchanged page to a worker. A member can list, apply, and dismiss
+  findings in chat with the new `curator` tool. The curator never changes
+  `people/`, `joshua-docs/`, or the body of a journal entry. See
+  [docs/jobs.md](jobs.md#the-curator).
+
+- **A wiki commit no longer fails on a path in the trash.** A commit that
+  listed a file in `wiki/.trash/`, or a removed file that git never tracked,
+  recorded nothing. Core now leaves such a path out of the commit.
+
 - **Two wiki folders for the jobs: `wiki/knowledge/` and `wiki/insights/`.**
   The index gives their pages the kinds `knowledge` and `insight`. The agent
   reads them, and `write_file` and `rename_file` refuse a path in them. No job

@@ -28,6 +28,7 @@ already at the new path stays where it is. See [Migration](#migration).
 /data/wiki/insights/<section>/<slug>.md          one insight; the insights job writes it
 /data/wiki/**.md                                 the rest of the wiki, incl. wiki/skills/*.md
 /data/wiki/.trash/<UTC timestamp>/**             pages the viewer deleted; the index skips it
+/data/wiki/.trash/YYYY-MM-DD/**                  files the curator job moved out; the index skips it
 /data/wiki/.git/                                 the wiki's git repository; core makes it
 /data/wiki/.gitignore                            excludes .trash/ and attachments/; core writes it
 /data/wiki/attachments/YYYY/MM/<file>            the files the wiki keeps; core and gateway write them
@@ -103,7 +104,9 @@ A member teaches one. [memory.md](memory.md#taught-skills) explains the match.
 `wiki/.trash/<UTC timestamp>/<the path under wiki>`. It is never a hard
 delete. The timestamp directory keeps the original tree, so you restore a
 page with a shell. The index skips any path with a `.trash` part, so a
-deleted page leaves the search index at the next index run.
+deleted page leaves the search index at the next index run. The curator job
+moves a stray file, or a page it merged into its duplicate, to
+`wiki/.trash/YYYY-MM-DD/<the path under wiki>`, dated in `timezone`.
 
 The file tools, the viewer, and the index ignore any file or directory whose
 name starts with a dot, at any depth under `wiki/`. This is what lets a wiki
