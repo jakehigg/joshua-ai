@@ -1,4 +1,4 @@
-"""In-process SDK MCP tool servers (scheduling, registration).
+"""In-process SDK MCP tool servers (scheduling, registration, curator, and more).
 
 Each server is built per conversation as a closure over ``ToolDeps`` so a tool
 call always acts on the conversation that invoked it. The scheduling and people

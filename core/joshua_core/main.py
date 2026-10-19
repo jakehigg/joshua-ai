@@ -28,6 +28,7 @@ from joshua_core.engine import injection, taught_skills
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
+from joshua_core.engine.tools import curator as curator_tool
 from joshua_core.engine.tools import internet, recall, registration, scheduling
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
@@ -153,8 +154,16 @@ async def lifespan(app: FastAPI):
         lock=wiki_lock,
     )
     jobs = build_job_runner(
-        repo=repo, store=memory_store, settings=settings, data_dir=data_dir, lock=wiki_lock
+        repo=repo,
+        store=memory_store,
+        settings=settings,
+        data_dir=data_dir,
+        lock=wiki_lock,
+        findings=repo,
     )
+    # The `curator` builtin needs the wiki lock, so it registers here and not
+    # with `scheduling` in `_build_manager`.
+    curator_tool.register(manager, settings=settings, data_dir=data_dir, lock=wiki_lock)
     deliverer = build_deliverer()
     events = EventService(
         repo=repo,
