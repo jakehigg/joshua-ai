@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import cast
 
 from joshua_shared.config import JoshuaConfig
 
 from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle
 from joshua_core.jobs.bundle_job import BundleJob
+from joshua_core.jobs.curator import CuratorJob, CuratorStore, FindingStore
 from joshua_core.jobs.runner import (
     Clock,
     Job,
@@ -26,6 +28,7 @@ from joshua_core.jobs.runner import (
     JobRunStore,
     RunReport,
     UnknownJob,
+    current_run_id,
 )
 from joshua_core.jobs.topics import Topic, is_topic_page, list_topics
 
@@ -34,6 +37,7 @@ __all__ = [
     "BundleJob",
     "BundleStore",
     "Clock",
+    "CuratorJob",
     "Job",
     "JobArgsError",
     "JobBusy",
@@ -45,6 +49,7 @@ __all__ = [
     "UnknownJob",
     "build_bundle",
     "build_job_runner",
+    "current_run_id",
     "is_topic_page",
     "list_topics",
 ]
@@ -58,10 +63,25 @@ def build_job_runner(
     data_dir: Path | str,
     lock: asyncio.Lock,
     clock: Clock | None = None,
+    findings: FindingStore | None = None,
 ) -> JobRunner:
     """The runner with every built-in job. `lock` is the nightly reflection's lock.
-    `clock` defaults to the current UTC time."""
+    `clock` defaults to the current UTC time.
+
+    The `curator` job is added when `jobs.curator.enabled` is true and
+    `findings` holds the `curator_finding` table; `store` must then also
+    answer `kb_mean_vectors`.
+    """
     jobs: list[Job] = [BundleJob(store=store, settings=settings, data_dir=data_dir)]
+    if settings.jobs.curator.enabled and findings is not None:
+        jobs.append(
+            CuratorJob(
+                store=cast(CuratorStore, store),
+                findings=findings,
+                settings=settings,
+                data_dir=data_dir,
+            )
+        )
     return JobRunner(
         repo=repo, settings=settings, data_dir=data_dir, jobs=jobs, lock=lock, clock=clock
     )
