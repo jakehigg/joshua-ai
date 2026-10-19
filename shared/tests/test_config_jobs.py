@@ -24,7 +24,9 @@ def test_jobs_defaults_are_off_and_documented_values() -> None:
     jobs = cfg.jobs
     assert jobs.enabled is False
     assert jobs.model is None
-    assert jobs.bundle.sim == pytest.approx(0.70)
+    assert jobs.bundle.sim == pytest.approx(0.78)
+    assert jobs.bundle.max_vector_entries == 6
+    assert jobs.bundle.exclude_slugs == []
     assert jobs.bundle.max_chars == 24000
     assert jobs.bundle.recent_days == 14
     assert jobs.topics.exclude == ["vocabulary.md", "*/README.md"]
@@ -40,6 +42,9 @@ def test_jobs_overrides_load() -> None:
         "  model: claude-haiku-4-5\n"
         "  bundle:\n"
         "    sim: 0.8\n"
+        "    max_vector_entries: 2\n"
+        "    exclude_slugs:\n"
+        "      - garden-weather-log-*\n"
         "    max_chars: 1000\n"
         "    recent_days: 30\n"
         "  topics:\n"
@@ -50,6 +55,8 @@ def test_jobs_overrides_load() -> None:
     assert cfg.jobs.enabled is True
     assert cfg.jobs.model == "claude-haiku-4-5"
     assert cfg.jobs.bundle.sim == pytest.approx(0.8)
+    assert cfg.jobs.bundle.max_vector_entries == 2
+    assert cfg.jobs.bundle.exclude_slugs == ["garden-weather-log-*"]
     assert cfg.jobs.bundle.max_chars == 1000
     assert cfg.jobs.bundle.recent_days == 30
     assert cfg.jobs.topics.exclude == ["drafts/*"]
@@ -60,6 +67,7 @@ def test_jobs_overrides_load() -> None:
     [
         "  bundle:\n    sim: 1.5\n",
         "  bundle:\n    max_chars: 0\n",
+        "  bundle:\n    max_vector_entries: -1\n",
         "  bundle:\n    recent_days: 0\n",
         "  bogus: 1\n",
         "  curator:\n    bogus: 1\n",

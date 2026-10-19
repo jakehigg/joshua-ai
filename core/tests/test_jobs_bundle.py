@@ -6,10 +6,10 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from jobs_fakes import NOW, TOPIC, FakeStore, build_wiki, make_settings
+from jobs_fakes import NOW, TOPIC, WIKI, FakeStore, build_wiki, make_settings
 from joshua_core.jobs import bundle as bundle_module
 from joshua_core.jobs.bundle import build_bundle, topic_aliases, vocabulary_terms
-from joshua_core.jobs.topics import load_topic
+from joshua_core.jobs.topics import load_topic, names_pattern
 from joshua_core.memory import embed as embed_module
 
 VEC = [1.0] + [0.0] * 383
@@ -169,8 +169,8 @@ def test_aliases_accept_a_string_and_drop_the_title_and_repeats(wiki: Path) -> N
 
 
 def test_short_terms_do_not_match() -> None:
-    assert bundle_module._term_pattern(["ab", ""]) is None
-    pattern = bundle_module._term_pattern(["fig", "ab"])
+    assert names_pattern(["ab", ""]) is None
+    pattern = names_pattern(["fig", "ab"])
     assert pattern is not None
     assert pattern.search("Two figs.")
     assert not pattern.search("a configuration")
@@ -187,3 +187,130 @@ def test_resolve_link_rules(wiki: Path) -> None:
     assert resolve("a\\b.md", TOPIC, wiki) is None
     assert resolve("#top", TOPIC, wiki) is None
     assert resolve("snake%20plant.md", TOPIC, wiki) is None
+
+
+# -- the journal rules ----------------------------------------------------------
+
+
+def _entry(day: int, slug: str, text: str, meta: str = "") -> tuple[str, str]:
+    head = f"---\n{meta}---\n" if meta else ""
+    return f"journal/2026/09/{day:02d}/{slug}.md", head + text
+
+
+async def test_how_each_journal_entry_got_in(wiki: Path, fake_embed) -> None:
+    store = FakeStore({"wiki/journal/2026/10/08/bread.md": 0.8123})
+    got = await _build(wiki, store)
+    assert got.journal_via == {
+        "journal/2026/10/08/bread.md": "vector 0.81",
+        "journal/2026/10/07/repot.md": "alias",
+        "journal/2026/10/05/hall.md": "alias",
+        "journal/2026/10/01/water.md": "title",
+    }
+
+
+async def test_vector_only_entries_are_capped_the_closest_first(tmp_path: Path, fake_embed) -> None:
+    pages = dict(WIKI)
+    near: dict[str, float] = {}
+    for day in range(1, 11):
+        rel, text = _entry(day, f"day-{day}", "Something else happened.\n")
+        pages[rel] = text
+        near[f"wiki/{rel}"] = 0.80 + day / 100
+    named, text = _entry(11, "named", "Watered the snake plant.\n")
+    pages[named] = text
+    near[f"wiki/{named}"] = 0.79
+    wiki = build_wiki(tmp_path / "data", pages)
+    got = await _build(wiki, FakeStore(near), extra="jobs:\n  bundle:\n    max_vector_entries: 3\n")
+    vector = [p for p, via in got.journal_via.items() if via.startswith("vector")]
+    assert vector == [
+        "journal/2026/09/10/day-10.md",
+        "journal/2026/09/09/day-9.md",
+        "journal/2026/09/08/day-8.md",
+    ]
+    assert got.journal_via[named] == "title"
+
+
+async def test_the_default_cap_is_six(tmp_path: Path, fake_embed) -> None:
+    pages = dict(WIKI)
+    near = {}
+    for day in range(1, 10):
+        rel, text = _entry(day, f"day-{day}", "Other.\n")
+        pages[rel] = text
+        near[f"wiki/{rel}"] = 0.9
+    got = await _build(build_wiki(tmp_path / "data", pages), FakeStore(near))
+    assert sum(via.startswith("vector") for via in got.journal_via.values()) == 6
+
+
+async def test_an_excluded_slug_is_left_out_even_when_it_names_the_topic(
+    tmp_path: Path, fake_embed
+) -> None:
+    pages = dict(WIKI)
+    weather, text = _entry(3, "garden-weather-log-2026-09-03", "Snake plant by the cold door.\n")
+    pages[weather] = text
+    kept, text = _entry(4, "weather-notes", "The snake plant.\n")
+    pages[kept] = text
+    wiki = build_wiki(tmp_path / "data", pages)
+    store = FakeStore({f"wiki/{weather}": 0.99})
+    got = await _build(
+        wiki, store, extra='jobs:\n  bundle:\n    exclude_slugs:\n      - "garden-weather-log-*"\n'
+    )
+    assert weather not in got.paths
+    assert kept in got.paths
+
+
+@pytest.mark.parametrize("source", ["curator", "research", "insights"])
+async def test_a_job_report_is_left_out_by_its_source(
+    tmp_path: Path, fake_embed, source: str
+) -> None:
+    pages = dict(WIKI)
+    report, text = _entry(5, f"{source}-report", "The snake plant.\n", f"source: {source}\n")
+    pages[report] = text
+    person, text = _entry(6, "chat", "The snake plant.\n", "source: chat\n")
+    pages[person] = text
+    got = await _build(build_wiki(tmp_path / "data", pages), FakeStore({f"wiki/{report}": 0.99}))
+    assert report not in got.paths
+    assert person in got.paths
+
+
+async def test_a_short_name_of_the_title_brings_in_an_entry(tmp_path: Path, fake_embed) -> None:
+    window = "houseplants/snake-plants-living-room-window.md"
+    pages = {
+        "Home.md": "# Home\n",
+        "houseplants.md": "# Houseplants\n",
+        window: "# Snake Plants (Living Room Window)\n\nGritty mix.\n",
+    }
+    one, text = _entry(2, "water", "Watered the snake plant by the window.\n")
+    pages[one] = text
+    other, text = _entry(3, "pothos", "Watered the plants.\n")
+    pages[other] = text
+    wiki = build_wiki(tmp_path / "data", pages)
+    got = await build_bundle(
+        load_topic(window, wiki),
+        wiki_root=wiki,
+        repo=FakeStore(),
+        settings=make_settings(),
+        now=NOW,
+    )
+    assert got.journal_via == {one: "title"}
+
+
+def test_the_bundle_floor_and_cap_defaults() -> None:
+    cfg = make_settings().jobs.bundle
+    assert cfg.sim == 0.78
+    assert cfg.max_vector_entries == 6
+    assert cfg.exclude_slugs == []
+
+
+async def test_the_bundle_job_reports_how_each_entry_got_in(wiki: Path, fake_embed) -> None:
+    from joshua_core.jobs.bundle_job import BundleJob
+
+    job = BundleJob(
+        store=FakeStore({"wiki/journal/2026/10/08/bread.md": 0.8}),
+        settings=make_settings(),
+        data_dir=wiki.parent,
+    )
+    report = await job.run_once(args={"topic": TOPIC}, dry_run=True, clock=lambda: NOW)
+    body = dict(report.sections)["Journal entries"]
+    assert "- `journal/2026/10/08/bread.md`: vector 0.80" in body
+    assert "- `journal/2026/10/07/repot.md`: alias" in body
+    assert "- `journal/2026/10/01/water.md`: title" in body
+    assert report.data["journal_via"]["journal/2026/10/05/hall.md"] == "alias"

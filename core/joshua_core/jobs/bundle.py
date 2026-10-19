@@ -6,9 +6,10 @@ order:
 
 1. the topic page;
 2. the pages it links to inside its own section, one hop, in link order;
-3. the journal entries about it, newest first: each entry that holds the page
-   title or an alias, and each entry with a chunk at or above
-   `jobs.bundle.sim` to a chunk of the topic page;
+3. the journal entries about it, newest first: each entry that names the
+   topic, and the entries with a chunk at or above `jobs.bundle.sim` to a
+   chunk of the topic page. The entries that only the similarity brings in
+   are capped at `jobs.bundle.max_vector_entries`, the closest first;
 4. the dossier of the topic and its knowledge pages, when they exist;
 5. the open insights of the topic: an insight page whose frontmatter `topic`
    is this topic and whose `status` is `new`, `told`, or `acknowledged`.
@@ -24,11 +25,19 @@ links to the topic page names one term: the text before the first colon on
 that line, with list marks, emphasis, code marks, and link syntax removed. A
 line with no colon names no term.
 
-A title or an alias matches a journal entry when the entry holds it as whole
-words, or with a plural `s` or `es`, in any case. A term shorter than three
-characters is not matched. An entry that a job run wrote (its frontmatter has
-`run_id`) is left out, so a report never feeds the next bundle. An entry dated
-after the day of `now` is left out too.
+A journal entry names the topic when it holds a name of the topic by the rule
+of `topics.names_pattern`. A name from the title or the file stem is a `title`
+match, and an alias is an `alias` match. `Bundle.journal_via` says, for each
+journal entry, how it got in: `title`, `alias`, or `vector <sim>`.
+
+These journal entries are left out of every bundle, so a report never feeds
+the next bundle:
+
+- an entry that a job run wrote: its frontmatter has `run_id`, or its
+  `source` is `curator`, `research`, or `insights`;
+- an entry whose file stem a glob in `jobs.bundle.exclude_slugs` matches
+  (`fnmatch`, case-sensitive);
+- an entry dated after the day of `now`.
 """
 
 from __future__ import annotations
@@ -38,6 +47,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 from urllib.parse import unquote
@@ -47,7 +57,13 @@ from joshua_shared import frontmatter, layout
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
-from joshua_core.jobs.topics import RESERVED_FOLDERS, Topic, read_page
+from joshua_core.jobs.topics import (
+    RESERVED_FOLDERS,
+    Topic,
+    names_pattern,
+    read_page,
+    topic_names,
+)
 from joshua_core.memory.indexer import embed_document
 
 logger = get_logger("jobs.bundle")
@@ -55,8 +71,11 @@ logger = get_logger("jobs.bundle")
 VOCABULARY_PAGE = "vocabulary.md"
 OPEN_INSIGHT_STATUSES = ("new", "told", "acknowledged")
 JOURNAL_KIND = "journal"
-# A shorter term matches too many words to mean the topic.
-_MIN_TERM_CHARS = 3
+# The `source` of a journal entry that a job wrote.
+JOB_SOURCES = ("curator", "research", "insights")
+VIA_TITLE = "title"
+VIA_ALIAS = "alias"
+VIA_VECTOR = "vector"
 # The index stores a files path relative to the data root.
 _INDEX_WIKI_PREFIX = "wiki/"
 
@@ -87,7 +106,9 @@ class Bundle:
 
     `paths` lists every page in `text`, relative to the wiki root, in the order
     of the text. `chars` is `len(text)`. `truncated` is true when a part was
-    left out because of `jobs.bundle.max_chars`.
+    left out because of `jobs.bundle.max_chars`. `journal_via` maps each
+    journal entry in `paths` to how it got in: `title`, `alias`, or
+    `vector <sim>`.
     """
 
     topic: Topic
@@ -96,6 +117,7 @@ class Bundle:
     chars: int
     truncated: bool
     aliases: list[str] = field(default_factory=list)
+    journal_via: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -231,19 +253,11 @@ def topic_aliases(topic: Topic, meta: dict[str, Any], wiki_root: Path) -> list[s
     return out
 
 
-def _term_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
-    usable = sorted({t for t in terms if len(t) >= _MIN_TERM_CHARS}, key=len, reverse=True)
-    if not usable:
-        return None
-    body = "|".join(re.escape(t) for t in usable)
-    return re.compile(rf"(?<!\w)(?:{body})(?:e?s)?(?!\w)", re.IGNORECASE)
-
-
 def topic_pattern(topic: Topic, wiki_root: Path) -> re.Pattern[str] | None:
-    """The pattern that finds the title or an alias of `topic` in a text, by the
-    rule of the module docstring, or None when no term is long enough."""
+    """The pattern that finds a name of `topic` in a text, by the rule of
+    `topics.names_pattern`, or None when no name is long enough."""
     meta, _ = frontmatter.split(read_page(Path(wiki_root) / topic.path))
-    return _term_pattern([topic.title, *topic_aliases(topic, meta, Path(wiki_root))])
+    return names_pattern(topic_names(topic, topic_aliases(topic, meta, Path(wiki_root))))
 
 
 # -- journal ----------------------------------------------------------------
@@ -258,6 +272,11 @@ class _Entry:
 
 # One journal page: its path relative to the wiki root, its day, and its text.
 JournalEntry = _Entry
+
+
+def is_job_entry(meta: dict[str, Any]) -> bool:
+    """True for the frontmatter of a journal entry that a job wrote."""
+    return "run_id" in meta or meta.get("source") in JOB_SOURCES
 
 
 def _journal_entries(data_root: Path, wiki_root: Path, today: date) -> list[_Entry]:
@@ -277,7 +296,7 @@ def _journal_entries(data_root: Path, wiki_root: Path, today: date) -> list[_Ent
                 continue
             text = read_page(path)
             meta, _ = frontmatter.split(text)
-            if "run_id" in meta:
+            if is_job_entry(meta):
                 continue
             entries.append(_Entry(path.relative_to(wiki_root).as_posix(), day, text))
     return entries
@@ -291,8 +310,9 @@ def journal_entries(wiki_root: Path, today: date) -> list[JournalEntry]:
 
 async def _near_journal_paths(
     topic: Topic, text: str, repo: BundleStore, settings: JoshuaConfig
-) -> set[str]:
-    """The journal pages with a chunk at or above `jobs.bundle.sim` to the topic page."""
+) -> dict[str, float]:
+    """The journal pages with a chunk at or above `jobs.bundle.sim` to the topic
+    page, each with its best similarity."""
     try:
         chunks = await embed_document(
             topic.title,
@@ -302,10 +322,44 @@ async def _near_journal_paths(
         )
     except RuntimeError as exc:
         logger.warning({"message": "bundle has no vector match", "error": str(exc)})
-        return set()
+        return {}
     vectors = [vec for _, _, vec in chunks]
     near = await repo.kb_near_paths(vectors, kinds=[JOURNAL_KIND], min_sim=settings.jobs.bundle.sim)
-    return {path[len(_INDEX_WIKI_PREFIX) :] for path in near if path.startswith(_INDEX_WIKI_PREFIX)}
+    return {
+        path[len(_INDEX_WIKI_PREFIX) :]: float(sim)
+        for path, sim in near.items()
+        if path.startswith(_INDEX_WIKI_PREFIX)
+    }
+
+
+def _about_topic(
+    entries: list[_Entry],
+    *,
+    topic: Topic,
+    aliases: Sequence[str],
+    near: dict[str, float],
+    settings: JoshuaConfig,
+) -> dict[str, str]:
+    """`{entry path: how it got in}` for the journal entries of the bundle."""
+    cfg = settings.jobs.bundle
+    by_title = names_pattern(topic_names(topic))
+    by_alias = names_pattern(aliases)
+    via: dict[str, str] = {}
+    vector_only: list[_Entry] = []
+    for entry in entries:
+        stem = PurePosixPath(entry.rel).stem
+        if any(fnmatchcase(stem, glob) for glob in cfg.exclude_slugs):
+            continue
+        if by_title is not None and by_title.search(entry.text):
+            via[entry.rel] = VIA_TITLE
+        elif by_alias is not None and by_alias.search(entry.text):
+            via[entry.rel] = VIA_ALIAS
+        elif entry.rel in near:
+            vector_only.append(entry)
+    vector_only.sort(key=lambda e: (-near[e.rel], e.rel))
+    for entry in vector_only[: cfg.max_vector_entries]:
+        via[entry.rel] = f"{VIA_VECTOR} {near[entry.rel]:.2f}"
+    return via
 
 
 # -- knowledge and insights -------------------------------------------------
@@ -377,13 +431,10 @@ async def build_bundle(
         for rel in _linked_pages(topic, topic_text, wiki_root)
     )
 
-    pattern = _term_pattern([topic.title, *aliases])
     near = await _near_journal_paths(topic, topic_text, repo, settings)
-    entries = [
-        entry
-        for entry in _journal_entries(data_root, wiki_root, _local_day(now, settings))
-        if entry.rel in near or (pattern is not None and pattern.search(entry.text))
-    ]
+    every = _journal_entries(data_root, wiki_root, _local_day(now, settings))
+    via = _about_topic(every, topic=topic, aliases=aliases, near=near, settings=settings)
+    entries = [entry for entry in every if entry.rel in via]
     entries.sort(key=lambda e: e.rel)
     entries.sort(key=lambda e: e.day, reverse=True)
     parts.extend(_Part(e.rel, e.text) for e in entries)
@@ -413,4 +464,5 @@ async def build_bundle(
         chars=len(text),
         truncated=truncated,
         aliases=aliases,
+        journal_via={p: via[p] for p in paths if p in via},
     )

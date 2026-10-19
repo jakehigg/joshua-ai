@@ -226,7 +226,12 @@ jobs:
   #                        # not set, core.reflection_model
   bundle:
     # The memory bundle: what a job reads about one topic.
-    sim: 0.70              # a journal chunk this close to the topic page is about it
+    sim: 0.78              # a journal chunk this close to the topic page is about it
+    max_vector_entries: 6  # entries that only that similarity brings in, the closest first
+    # Globs on the file stem of a journal entry that no bundle takes. The
+    # values belong to one instance, for example a daily log:
+    # exclude_slugs:
+    #   - "garden-weather-log-*"
     max_chars: 24000       # the bundle text stops here; the topic page is never cut
     recent_days: 14        # how far back a job looks for what the journal names now
   topics:

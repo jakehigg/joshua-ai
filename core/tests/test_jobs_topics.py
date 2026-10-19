@@ -5,7 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from joshua_core.jobs.topics import Topic, is_topic_page, list_topics, load_topic, page_title
+from joshua_core.jobs.topics import (
+    Topic,
+    is_topic_page,
+    list_topics,
+    load_topic,
+    names_pattern,
+    page_title,
+    topic_names,
+)
 
 EXCLUDE = ["vocabulary.md", "*/README.md"]
 
@@ -127,3 +135,62 @@ def test_page_title_rules() -> None:
 def test_load_topic_reads_an_unreadable_page_as_its_stem(wiki: Path) -> None:
     (wiki / "garden" / "binary.md").write_bytes(b"\xff\xfe\x00")
     assert load_topic("garden/binary.md", wiki).title == "binary"
+
+
+# -- names --------------------------------------------------------------------
+
+WINDOW = Topic(
+    path="houseplants/snake-plants-living-room-window.md",
+    section="houseplants",
+    title="Snake Plants (Living Room Window)",
+)
+
+
+def test_the_names_of_a_topic() -> None:
+    assert topic_names(WINDOW, ["Sansevieria", "snake plants"]) == [
+        "Snake Plants (Living Room Window)",
+        "Snake Plants",
+        "Sansevieria",
+        "snake plants living",
+        "snake plants living room",
+    ]
+    one_word = Topic(path="garden/roses.md", section="garden", title="Roses")
+    assert topic_names(one_word) == ["Roses"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "How often should a snake plant be watered?",
+        "Do Snake Plants need a gritty mix?",
+        "the SNAKE\n  PLANTS by the window",
+        "Is the Sansevieria too cold?",
+        "snake plants living room window light",
+    ],
+)
+def test_a_name_of_the_topic_is_found(text: str) -> None:
+    pattern = names_pattern(topic_names(WINDOW, ["Sansevieria"]))
+    assert pattern is not None and pattern.search(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["How often should the plants be watered?", "a snakeplant", "snake", "a living room"],
+)
+def test_a_text_without_a_name_of_the_topic_is_not_found(text: str) -> None:
+    pattern = names_pattern(topic_names(WINDOW))
+    assert pattern is not None and not pattern.search(text)
+
+
+def test_a_name_is_matched_with_and_without_its_plural() -> None:
+    pattern = names_pattern(["Boxes", "fern"])
+    assert pattern is not None
+    for text in ("one box", "two boxes", "a fern", "ferns", "FERNES"):
+        assert pattern.search(text), text
+    moss = names_pattern(["moss"])
+    assert moss is not None and moss.search("moss") and not moss.search("mos")
+
+
+def test_a_short_name_is_not_matched() -> None:
+    assert names_pattern(["ab", "", " "]) is None
+    assert names_pattern(["ivy"]) is not None

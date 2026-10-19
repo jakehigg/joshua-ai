@@ -13,11 +13,20 @@ A topic is a `wiki/**.md` page that is none of these:
 
 `houseplants/snake-plant.md` is a topic. `houseplants.md` is not, because the
 folder `houseplants/` is beside it.
+
+The names of a topic are the words a text uses for it (`topic_names`): the
+title, the title with a parenthetical at its end removed, each alias, and the
+first two, three, and four words of the file stem, with hyphens as spaces. A
+stem of one word is a name too. `names_pattern` finds a name in a text as whole
+words in any case, with any white space between the words. It also finds the
+name with a plural `s` or `es`, and without one when the name ends in `s` or
+`es`. A name shorter than three characters is not matched.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -37,6 +46,11 @@ RESERVED_FOLDERS = (
     layout.INSIGHTS,
     layout.ATTACHMENTS,
 )
+# A shorter name matches too many words to mean the topic.
+MIN_NAME_CHARS = 3
+# The phrases of the file stem that name the topic: its first 2 to 4 words.
+STEM_PHRASE_WORDS = (2, 3, 4)
+_PAREN_TAIL_RE = re.compile(r"\s*\([^()]*\)\s*$")
 
 
 @dataclass(frozen=True)
@@ -134,3 +148,48 @@ def list_topics(wiki_root: Path, exclude: Sequence[str]) -> list[Topic]:
             if is_topic_page(rel, wiki_root, exclude):
                 found.append(rel)
     return [load_topic(rel, wiki_root) for rel in sorted(found)]
+
+
+# -- names --------------------------------------------------------------------
+
+
+def topic_names(topic: Topic, aliases: Sequence[str] = ()) -> list[str]:
+    """The names of `topic`, once each, in order. See the module docstring."""
+    found = [topic.title, _PAREN_TAIL_RE.sub("", topic.title), *aliases]
+    words = PurePosixPath(topic.path).stem.replace("-", " ").split()
+    if len(words) == 1:
+        found.append(words[0])
+    found.extend(" ".join(words[:n]) for n in STEM_PHRASE_WORDS if n <= len(words))
+    out: list[str] = []
+    seen: set[str] = set()
+    for name in found:
+        name = " ".join(str(name).split())
+        key = name.casefold()
+        if name and key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
+
+
+def _forms(name: str) -> list[str]:
+    """`name`, and `name` without the plural end of its last word."""
+    forms = [name]
+    lower = name.casefold()
+    if lower.endswith("es"):
+        forms.append(name[:-2])
+    if lower.endswith("s") and not lower.endswith("ss"):
+        forms.append(name[:-1])
+    return [f for f in forms if len(f) >= MIN_NAME_CHARS]
+
+
+def names_pattern(names: Sequence[str]) -> re.Pattern[str] | None:
+    """The pattern that finds one of `names` in a text, by the rule of the
+    module docstring, or None when no name is long enough."""
+    forms = {f for name in names for f in _forms(" ".join(str(name).split()))}
+    if not forms:
+        return None
+    body = "|".join(
+        r"\s+".join(re.escape(word) for word in form.split())
+        for form in sorted(forms, key=lambda f: (-len(f), f))
+    )
+    return re.compile(rf"(?<!\w)(?:{body})(?:e?s)?(?!\w)", re.IGNORECASE)

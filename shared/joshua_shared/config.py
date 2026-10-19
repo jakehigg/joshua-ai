@@ -512,12 +512,18 @@ class JobsBundle(_Model):
     """How a job builds the memory bundle of one topic.
 
     `sim` is the cosine floor for a journal chunk to count as about the topic.
-    `max_chars` is the size of the bundle text; the topic page itself is never
-    cut. `recent_days` is how far back a later job looks for the topics the
+    `max_vector_entries` caps the journal entries that only that similarity
+    brings in, the closest first; an entry that names the topic is not
+    capped. `exclude_slugs` holds `fnmatch` globs on the file stem of a
+    journal entry, for the entries that no bundle takes. `max_chars` is the
+    size of the bundle text; the topic page itself is never cut.
+    `recent_days` is how far back a later job looks for the topics the
     journal names now.
     """
 
-    sim: float = Field(default=0.70, ge=0.0, le=1.0)
+    sim: float = Field(default=0.78, ge=0.0, le=1.0)
+    max_vector_entries: int = Field(default=6, ge=0)
+    exclude_slugs: list[str] = []
     max_chars: int = Field(default=24000, gt=0)
     recent_days: int = Field(default=14, ge=1)
 

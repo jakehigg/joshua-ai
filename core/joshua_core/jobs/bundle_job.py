@@ -1,8 +1,9 @@
 """The `bundle` job: build the memory bundle of one topic and report it.
 
 It makes no model call and writes no page. Its report lists the paths in the
-bundle, its size, its aliases, and whether it was cut, so an operator can see
-what a later job would read about a topic. Arguments: `{"topic": "<path>"}`,
+bundle, its size, its aliases, whether it was cut, and how each journal entry
+got in (`title`, `alias`, or `vector <sim>`), so an operator can see what a
+later job would read about a topic. Arguments: `{"topic": "<path>"}`,
 the topic page relative to the wiki root.
 """
 
@@ -55,6 +56,7 @@ class BundleJob(Job):
             f"{bundle.chars} characters.{cut}"
         )
         aliases = ", ".join(bundle.aliases) if bundle.aliases else "None."
+        journal = "\n".join(f"- `{path}`: {via}" for path, via in bundle.journal_via.items())
         return RunReport(
             job=self.name,
             started_at=started,
@@ -64,6 +66,7 @@ class BundleJob(Job):
             sections=[
                 ("Pages", "\n".join(f"- `{path}`" for path in bundle.paths)),
                 ("Aliases", aliases),
+                ("Journal entries", journal),
             ],
             data={
                 "topic": topic.path,
@@ -73,5 +76,6 @@ class BundleJob(Job):
                 "chars": bundle.chars,
                 "truncated": bundle.truncated,
                 "aliases": bundle.aliases,
+                "journal_via": bundle.journal_via,
             },
         )
