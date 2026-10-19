@@ -77,6 +77,24 @@ def _kind_from_uri(uri: str) -> str:
     return uri.split("/", 1)[0]
 
 
+async def embed_document(
+    title: str, text: str, *, model: str, chunk_chars: int
+) -> list[tuple[str, str, list[float]]]:
+    """Chunk a page and embed each chunk: `[(heading, text, vector)]`.
+
+    This is the one path from a page to its vectors, so a job that needs the
+    vectors of a page gets the same ones the index holds. Raises
+    `RuntimeError` when the embedding model is not available.
+    """
+    embedded: list[tuple[str, str, list[float]]] = []
+    for c in chunk_markdown(text, chunk_chars):
+        vec = await asyncio.to_thread(embed_module.embed, c.embed_text(title), model)
+        if vec is None:
+            raise RuntimeError("embedding unavailable (fastembed not loaded?)")
+        embedded.append((c.heading, c.text, vec))
+    return embedded
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -194,15 +212,9 @@ class Indexer:
             # A convention page holds no trigger. It is reference material, so
             # it is indexed as an ordinary wiki page and a turn reaches it
             # through recall.
-        chunks = chunk_markdown(doc.text, self._chunk_chars)
-        embedded: list[tuple[str, str, list[float]]] = []
-        for c in chunks:
-            vec = await asyncio.to_thread(
-                embed_module.embed, c.embed_text(doc.title), self._embed_model
-            )
-            if vec is None:
-                raise RuntimeError("embedding unavailable (fastembed not loaded?)")
-            embedded.append((c.heading, c.text, vec))
+        embedded = await embed_document(
+            doc.title, doc.text, model=self._embed_model, chunk_chars=self._chunk_chars
+        )
         return await self._store.kb_replace_item(
             source=doc.source,
             person_id=doc.person_id,

@@ -186,6 +186,41 @@ class MemoryStore:
             rows = await cur.fetchall()
         return [_kb_chunk(r) for r in rows]
 
+    async def kb_near_paths(
+        self,
+        embeddings: Sequence[list[float]],
+        *,
+        kinds: Sequence[str],
+        min_sim: float,
+        source: str = "files",
+    ) -> dict[str, float]:
+        """`{path: best similarity}` for every document of `kinds` that has a
+        chunk at or above `min_sim` to any of `embeddings`.
+
+        The scan is exact: it compares every chunk of those kinds, with no
+        `LIMIT`, so no document above the floor is left out. A job uses it to
+        find the journal entries about one topic page.
+        """
+        if not embeddings or not kinds:
+            return {}
+        vectors = [_vec_literal(e) for e in embeddings]
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT c.path, MAX(1 - (c.embedding <=> q.v)) AS similarity
+                FROM kb_chunk AS c,
+                     (SELECT unnest(%s::text[])::vector AS v) AS q
+                WHERE c.embedding IS NOT NULL
+                  AND c.source = %s
+                  AND c.kind = ANY(%s)
+                  AND 1 - (c.embedding <=> q.v) >= %s
+                GROUP BY c.path
+                """,
+                (vectors, source, list(kinds), min_sim),
+            )
+            rows = await cur.fetchall()
+        return {r["path"]: float(r["similarity"]) for r in rows}
+
     async def kb_stats(self) -> list[dict[str, Any]]:
         """Per-source document/chunk counts for ``/admin/kb/status``."""
         async with self._pool.connection() as conn:
