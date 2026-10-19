@@ -31,6 +31,28 @@ with the images and the packaged chart, are at
   `people/`, `joshua-docs/`, or the body of a journal entry. See
   [docs/jobs.md](jobs.md#the-curator).
 
+- **The researcher job writes cited facts to `wiki/knowledge/`.** Set
+  `jobs.research.enabled: true` to add it. A run works on one topic page. It
+  selects the topic by four fixed rules, keeps a dossier of questions for the
+  topic, and asks only questions that name phrases from our own pages and
+  journal. The internet agent looks each question up and then challenges its
+  own answer. An editor with no tools writes a page with the answer, where it
+  is different for us, the evidence, and the sources. A page with fewer than
+  two good sources from two domains is not written. `mode=plan` shows what a
+  run would research. A member can start a plan or a run, and queue a
+  question, with the new `research` chat tool. `wiki/knowledge/README.md`
+  lists every topic with its coverage. See
+  [docs/jobs.md](jobs.md#the-researcher).
+
+- **The search route returns knowledge and insight pages.**
+  `POST /v1/memory/search` accepts and returns the kinds `knowledge` and
+  `insight`, and an empty `kinds` now holds them too.
+
+- **Joshua names a knowledge page when it uses one.** For a factual question
+  about the world, the prompt tells Joshua to search memory first, to name a
+  `knowledge/` page and its confidence, and else to say that the answer is
+  from inference and offer to queue the question for research.
+
 - **A job run counts its tokens.** The `tokens` of a run row, and of its
   journal entry, is now the sum of the input, output, and cache tokens of each
   worker call. `report.data.usage` gives the calls and the tokens of each

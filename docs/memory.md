@@ -57,6 +57,14 @@ Two folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
 - `wiki/knowledge/` holds what the researcher job found about a topic: one
   dossier per topic, at the same path as the topic page, and one page for each
   question it researched. The index gives these chunks the kind `knowledge`.
+  A knowledge page answers one question. Its frontmatter holds the
+  `question`, a one-line `answer_short`, the `topic`, the `confidence`, the
+  `sources` with the trust of each, and `researched_at` and `refresh_after`.
+  Its body has the headings **Answer**, **Where this differs for us**,
+  **Evidence**, **Disagreements**, and **Sources**. When Joshua uses a
+  knowledge page in an answer, it says so and gives the confidence.
+  `wiki/knowledge/README.md` is the table of every dossier. See
+  [the researcher](jobs.md#the-researcher).
 - `wiki/insights/` holds what the insights job raised: a place where what we
   do is different from what the knowledge says. The index gives these chunks
   the kind `insight`.

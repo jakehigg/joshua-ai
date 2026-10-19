@@ -240,8 +240,10 @@ the conversation.
 
 The worker that holds the web tools is the **internet agent**
 (`engine/internet.py`). It looks up what its caller asks and holds nothing
-else. The name **research** is kept for a later agent that reads the wiki and
-drives the internet agent. Do not use it for the internet agent.
+else. The name **research** belongs to the researcher job
+(`jobs/research/`), which reads the wiki and drives the internet agent. It
+never gives the internet agent a page of the wiki. Do not use the name for the
+internet agent.
 
 ## Coding rules
 

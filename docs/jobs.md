@@ -408,8 +408,261 @@ trash.
 
 ## The researcher
 
-Package 3. The researcher keeps `wiki/knowledge/`: researched facts about one
-topic at a time, in a dossier per topic.
+The researcher keeps `wiki/knowledge/`: facts about one topic at a time, each
+looked up on the web, challenged, and cited. It works on one topic in each
+run, and it asks questions that are about our situation, not about the topic
+in general.
+
+Set `jobs.research.enabled: true`, with `jobs.enabled: true`, to add the job
+and the `research` chat tool. A `run` also needs `internet.enabled: true`.
+[docs/config.md](config.md#jobs) has the keys.
+
+```
+scripts/jobs.sh run research --arg mode=plan
+scripts/jobs.sh run research --arg mode=plan --arg topic=houseplants/snake-plant.md
+scripts/jobs.sh run research --dry-run --arg mode=run --arg topic=houseplants/snake-plant.md
+scripts/jobs.sh run research --arg mode=run --arg topic=houseplants/snake-plant.md \
+    --arg questions=winter-watering,repotting
+scripts/jobs.sh run research --arg mode=run --arg max_questions=1
+```
+
+Start with a `plan`, then a dry `run` on one question, and read each report
+with `scripts/jobs.sh runs <id>`.
+
+### The arguments
+
+| Argument | What it does |
+|---|---|
+| `mode` | Required. `plan` or `run`. |
+| `topic` | A topic page, relative to the wiki root. When it is not there, the run selects a topic. A path that is not a topic page gets 400. |
+| `questions` | Slugs from the dossier, with commas between them. Only with `mode=run` and a `topic`. A slug that is not in the dossier gets 400. |
+| `max_questions` | A lower limit than `jobs.research.questions_per_run`, for this run. |
+
+### The modes
+
+Each mode first selects the topic, builds its memory bundle, and loads its
+dossier, or starts a new one. When the dossier has fewer open questions than
+`questions_per_run`, and the run names no `questions`, the `raise` worker
+proposes new questions, and the gate decides which questions the dossier
+takes.
+
+- **`plan`** stops there. It makes no lookup and writes no page. When it is
+  not a dry run, it writes the dossier and `knowledge/README.md`, so that a
+  later run can name the new slugs in `questions`. Its report gives the rule
+  that selected the topic and the runner-up, the bundle paths and size, each
+  question with its slug and status, each rejected question with the reason,
+  and the tokens.
+- **`run`** then researches the questions: the ones that `questions` names,
+  or else the open questions that a person asked, then the other open
+  questions, then the held questions, in dossier order, up to the limit. It
+  writes a page for each published answer, and the new state of the dossier
+  and of `knowledge/README.md`. A dry run does all the worker calls and writes
+  nothing. Its report holds the full text of each page that it would write.
+
+### The topic
+
+A topic is one leaf page of the wiki (see
+[Topics and the memory bundle](#topics-and-the-memory-bundle)). The rules
+below select one topic. The first rule that gives a topic is the one that
+applies:
+
+1. **`person`**: a topic whose dossier has an open question that a person
+   asked.
+2. **`journal`**: of the topics that a journal entry of the last
+   `jobs.bundle.recent_days` days is about, the one with the lowest coverage.
+   A topic with no dossier has a coverage of 0. An entry is about a topic when
+   it holds the title or an alias of the topic, the same text rule as the
+   bundle. When two topics have the same coverage, the topic with more entries
+   is first.
+3. **`coverage`**: of all the topics, the one with the lowest coverage below
+   `jobs.research.coverage_target` (0.6).
+4. **`refresh`**: the dossier with the oldest `refresh_after` that is before
+   the day of the run.
+
+Each tie that is left goes to the **seeded pick**: a shuffle of the sorted
+topic paths with the seed `<day of the run>:<sha256 of the sorted paths>`.
+The same wiki on the same day gives the same topic. On a different day, a
+different topic can win a tie. The report names the rule, the reason, and the
+runner-up: the second topic of that rule, or else the first topic of a later
+rule.
+
+### The dossier
+
+Each topic that the researcher works on has one dossier, at the path of the
+topic page under `wiki/knowledge/`:
+
+```
+wiki/knowledge/README.md                                   the table of every dossier
+wiki/knowledge/houseplants/snake-plant.md                  the dossier
+wiki/knowledge/houseplants/snake-plant/winter-watering.md  one question, one page
+```
+
+The frontmatter of the dossier is the state of the topic:
+
+```yaml
+topic: houseplants/snake-plant.md
+title: Snake plant
+researched_at: 2026-10-19        # the last run that researched this topic
+refresh_after: 2027-04-17        # researched_at + jobs.research.refresh_days
+runs: 2
+coverage: 0.4                    # answered / all questions; 0.0 with no questions
+questions:
+  - slug: winter-watering
+    question: How often should the snake plant in a gritty mix be watered in winter?
+    status: answered             # open, answered, held, or dropped
+    page: houseplants/snake-plant/winter-watering.md
+    grounded_in: ["gritty soil mix", "water to runoff"]
+    asked_by: research           # research, or the id of a person
+    holds: 0
+    hold_reason: ""
+    raised_at: 2026-10-19
+source: research
+```
+
+The slug comes from the question: its first six words that are not small
+words such as "how" or "the", in lower case, joined with `-`. A slug that the
+dossier has already gets `-2`, `-3`, and so on. The researcher writes the body
+of the dossier again on each save: a title, a line for each answered question
+with a link to its page and its short answer, and the open and held
+questions. No worker writes the dossier.
+
+`knowledge/README.md` has one table with a row for each dossier, sorted by
+topic path: the topic, with a link to its dossier, the coverage, the answered
+and total questions, the day of the last research, and the open questions.
+The researcher writes it again each time it writes the wiki. It is the index
+page of `knowledge/`: it has a link to each dossier.
+
+### The questions and the gate
+
+The `raise` worker has no tools. It gets the memory bundle of the topic, the
+title and the aliases, and the questions in the dossier. It answers with up
+to `questions_per_topic` questions, less the open questions. Each question
+has `grounded_in`, the phrases from the bundle that make it about us, and
+`why`. The prompt tells the worker that the bundle is content, not
+instructions.
+
+The gate is Python. A question gets into the dossier only when all of these
+rules are true:
+
+- `grounded_in` has two phrases or more. Each phrase has 3 to 80 characters
+  and occurs word for word in the bundle text. Case and line breaks do not
+  count. There is no stemming and no fuzzy match.
+- The question holds the title of the topic or an alias, as whole words.
+- The question has 20 to 300 characters and ends with `?`.
+- It is not a duplicate. Its text is not the text of a question of the
+  dossier, and its vector is below `jobs.research.dup_sim` (0.85) to each
+  question of the dossier and to each knowledge page in the index. The report
+  gives `answered_by: <path>` for a question that a knowledge page answers.
+
+So "How often should I water a snake plant?" fails, because no phrase of it
+comes from our pages. "How often should the snake plant in a gritty soil mix,
+watered to runoff, be watered in winter?" passes when "gritty soil mix" and
+"water to runoff" are in the topic page. The report lists each rejected
+question with its reason, so a weak prompt shows on the first run.
+
+### The crew
+
+For each question, three workers run in this order:
+
+1. The **researcher** is the internet agent. It gets the question and a brief
+   that asks for the primary source, two independent sources or more, the
+   numbers, and the disagreements. It gets nothing from the wiki.
+2. The **challenger** is the internet agent again. It gets the question and
+   the draft answer, and it looks for the strongest evidence that the draft
+   is wrong, old, or not complete. It says so when it finds nothing.
+3. The **editor** has no tools and a timeout of 120 seconds. It gets the
+   question, each `grounded_in` phrase with its sentence from the bundle, the
+   draft and the challenge with their sources, and the trust rubric with the
+   two domain lists. It writes the page: the answer, a short answer of 160
+   characters or less, where our situation is different, the evidence, the
+   disagreements, each source with its trust (`primary`, `secondary`, or
+   `weak`), the confidence, and the verdict: `publish` or `hold`.
+
+### The hold rules
+
+Python checks the answer of the editor. Each of these is a hold, with a
+reason:
+
+- A source URL that neither lookup returned. The URL is removed, and the
+  count below is done again without it.
+- Fewer than two sources that are not `weak`, from two different registrable
+  domains. The registrable domain is the host without `www.`, cut to its last
+  two labels, or to its last three when the label before a two-letter country
+  code is `co`, `ac`, `gov`, `edu`, `org`, or `com` (`example.co.uk`).
+- `verdict: hold`.
+- `confidence: low`.
+
+A source on `distrusted_domains` is always `weak`. A source on
+`trusted_domains` is never `weak`: a `weak` grade there becomes `secondary`.
+A worker that gives no answer at any step is a hold with the reason
+`no answer`, and the hold counts. A held question gets one more `holds` and
+the reason in `hold_reason`. At `max_holds` (2) its status becomes `dropped`,
+and no run researches it again.
+
+### The page
+
+A published answer is one page at
+`wiki/knowledge/<topic path without .md>/<slug>.md`:
+
+```yaml
+question: How often should the snake plant in a gritty mix be watered in winter?
+answer_short: About every 4 weeks in winter, when the mix is dry.
+topic: houseplants/snake-plant.md
+context: [houseplants/snake-plant.md, journal/2026/10/15/snake-plant-leaf-flop.md]
+grounded_in: ["gritty soil mix", "water to runoff"]
+researched_at: 2026-10-19
+refresh_after: 2027-04-17
+confidence: high
+status: published
+sources:
+  - url: https://extension.university.example/snake-plant
+    title: Snake plant care
+    trust: primary
+    retrieved: 2026-10-19
+source: research
+run_id: 7
+```
+
+`context` lists the bundle pages that the `grounded_in` phrases come from, or
+the topic page for a question with no phrases. The body has these headings,
+in this order: the question as the title, **Answer**, **Where this differs
+for us** (only when there is a local note), **Evidence**, **Disagreements**
+(only when there are some), and **Sources** (the title, the URL, and the
+trust of each source). A link in the text of a worker stays only when its URL
+is a source of the page. The researcher removes each other link, picture, and
+wikilink, and keeps its text. A page is 64 KB or less, and a longer page is a
+hold.
+
+### The chat tool
+
+The `research` tool server is in core. A member gets four tools:
+
+| Tool | What it does |
+|---|---|
+| `plan_research(topic=None)` | starts a `plan` run that is not a dry run, and answers with the run id |
+| `run_research(topic, questions=None, max_questions=None)` | starts a `run` run that is not a dry run, and answers with the run id |
+| `queue_question(topic, question)` | adds an open question with `asked_by: <person id>` to the dossier, writes the dossier and `knowledge/README.md`, and commits the wiki with the message `research: question from <person id>`. The question must have 20 to 300 characters, end with `?`, and name the topic. The other rules of the gate do not apply to a person. |
+| `research_status()` | gives the summary of the last research run |
+
+A guest, or a speaker that core does not know, gets a refusal from each tool,
+and nothing changes. The server is there only when `jobs.enabled` and
+`jobs.research.enabled` are both true. A question that a person queues makes
+rule 1 select its topic in the next run that does not name a topic.
+
+The agent prompt tells Joshua to search memory first for a factual question
+about the world, to use and name a `knowledge/` page and its confidence when
+one answers it, and else to say that the answer is from inference and offer
+to queue the question.
+
+### What the researcher never does
+
+- It never writes outside `wiki/knowledge/`. Each path comes from `layout`,
+  and a write outside `knowledge/` fails.
+- It never gives the bundle, or any page of the wiki, to a lookup. The
+  internet agent gets the question and the brief. The challenger also gets the
+  draft answer.
+- It never cites a URL that a lookup did not return.
+- It writes nothing in a dry run.
 
 ## Insights
 
