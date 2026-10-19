@@ -4,10 +4,14 @@ A run does this, in order:
 
 1. The scan (`scan.py`) over the whole wiki, every run.
 2. The workers (`workers.py`), on the topic pages whose body changed since
-   their last review, within `jobs.curator.max_worker_calls`: `refresh` for a
-   page with journal entries about it, then `place` for each page, then
-   `compare` for each pair of similar pages. A page that was never reviewed
-   goes first, then the page with the oldest `curated` day.
+   their last review, within the worker budget
+   (`jobs.curator.max_worker_calls`). The budget goes in this order:
+   1. `place` for each page that was never curated (it has no
+      `curated_hash`);
+   2. `compare` for each pair of similar pages, the near-duplicates first;
+   3. `refresh` for each page with journal entries about it, the page that
+      was never curated first, then the page with the oldest `curated` day;
+   4. `place` for each page that was curated before and changed since.
 3. The apply step (`apply.py`), when the run is not a dry run: every Tier A
    finding, and each Tier B finding whose action the run may apply. A
    dismissed finding is not applied.
@@ -18,15 +22,26 @@ A run does this, in order:
 A page is reviewed when every worker call due for it answered. A page that is
 not a topic page (an index page, a skill, a journal entry) needs no worker,
 so the scan alone reviews it. A page that the budget or a failed call left
-out keeps its old keys and is reviewed in a later run.
+out keeps its old keys and is reviewed in a later run. A page that a failed
+call or the budget already left out gets no more worker calls in the run.
 
-Arguments: `{"apply": ["move", "merge", "refresh"]}`, or the same as a string
-with commas. It replaces `jobs.curator.apply` for the run.
+Arguments, each optional:
+
+- `apply`: a list of actions, or the same as a string with commas, such as
+  `move,merge,refresh`. It replaces `jobs.curator.apply` for the run.
+- `max_worker_calls`: a whole number of 0 or more. It replaces
+  `jobs.curator.max_worker_calls` for the run.
+- `paths`: a list of wiki-relative prefixes, or the same as a string with
+  commas, such as `houseplants/,garden/`. The workers then get only the pages
+  whose path starts with a prefix, and only those pages are reviewed. A pair
+  is compared when one of its pages is in scope. The scan still reads the
+  whole wiki.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
@@ -52,7 +67,13 @@ from joshua_core.jobs.curator.findings import (
     from_row,
 )
 from joshua_core.jobs.curator.scan import Pair, Tree
-from joshua_core.jobs.curator.track import body_hash, curated_day, is_untouched, may_track
+from joshua_core.jobs.curator.track import (
+    HASH_KEY,
+    body_hash,
+    curated_day,
+    is_untouched,
+    may_track,
+)
 from joshua_core.jobs.curator.track import needs_review as page_needs_review
 from joshua_core.jobs.runner import Clock, Job, JobArgsError, RunReport, current_run_id
 from joshua_core.jobs.topics import Topic, list_topics
@@ -108,9 +129,48 @@ def local_day(now: datetime, settings: JoshuaConfig) -> date:
     return now.astimezone(ZoneInfo(settings.timezone)).date()
 
 
+def parse_calls(value: Any) -> int:
+    """The `max_worker_calls` argument as a count of 0 or more. Raises `JobArgsError`."""
+    message = "max_worker_calls is a whole number of 0 or more"
+    if isinstance(value, bool):
+        raise JobArgsError(message)
+    try:
+        number = int(value.strip()) if isinstance(value, str) else int(value)
+    except (TypeError, ValueError):
+        raise JobArgsError(message) from None
+    if number < 0 or (isinstance(value, float) and value != number):
+        raise JobArgsError(message)
+    return number
+
+
+def parse_paths(value: Any) -> list[str]:
+    """The `paths` argument as a list of wiki-relative prefixes. Raises `JobArgsError`."""
+    if isinstance(value, str):
+        items = [part.strip() for part in value.split(",") if part.strip()]
+    elif isinstance(value, list) and all(isinstance(v, str) for v in value):
+        items = [v.strip() for v in value if v.strip()]
+    else:
+        raise JobArgsError("paths is a list of wiki path prefixes, or a string with commas")
+    if not items:
+        raise JobArgsError("paths names no prefix")
+    for item in items:
+        parts = item.rstrip("/").split("/")
+        if item.startswith("/") or "\\" in item or any(p in ("", ".", "..") for p in parts):
+            raise JobArgsError(f"not a wiki path prefix: {item}")
+        if any(p.startswith(".") for p in parts):
+            raise JobArgsError(f"not a wiki path prefix: {item}")
+    return list(dict.fromkeys(items))
+
+
+def in_scope(rel: str, prefixes: list[str] | None) -> bool:
+    """True when `prefixes` is None or `rel` starts with one of them."""
+    return prefixes is None or any(rel.startswith(p) for p in prefixes)
+
+
 @dataclass
 class _Run:
-    """The state of one run."""
+    """The state of one run. `failed` maps `(worker, outcome)` to the pages
+    or pairs of the calls that gave no usable answer."""
 
     tree: Tree
     day: date
@@ -121,7 +181,9 @@ class _Run:
     incomplete: set[str] = field(default_factory=set)
     answered: set[str] = field(default_factory=set)
     skipped: list[str] = field(default_factory=list)
+    failed: dict[tuple[str, str], list[str]] = field(default_factory=dict)
     unsent: int = 0
+    scope: list[str] | None = None
 
 
 class CuratorJob(Job):
@@ -147,12 +209,17 @@ class CuratorJob(Job):
         return layout.wiki_root(self._data_dir)
 
     def check_args(self, args: dict[str, Any]) -> dict[str, Any]:
-        unknown = sorted(set(args) - {"apply"})
+        unknown = sorted(set(args) - {"apply", "max_worker_calls", "paths"})
         if unknown:
             raise JobArgsError(f"unknown argument: {', '.join(unknown)}")
+        out: dict[str, Any] = {}
         if "apply" in args:
-            return {"apply": parse_apply(args["apply"])}
-        return {}
+            out["apply"] = parse_apply(args["apply"])
+        if args.get("max_worker_calls") not in (None, ""):
+            out["max_worker_calls"] = parse_calls(args["max_worker_calls"])
+        if args.get("paths") not in (None, "", []):
+            out["paths"] = parse_paths(args["paths"])
+        return out
 
     # -- the run ------------------------------------------------------------
 
@@ -166,13 +233,17 @@ class CuratorJob(Job):
             day=local_day(now, self._settings),
             now=now,
             apply=list(args["apply"]) if "apply" in args else list(cfg.apply),
-            budget=workers.Budget(cfg.max_worker_calls),
+            budget=workers.Budget(args.get("max_worker_calls", cfg.max_worker_calls)),
             findings=list(result.findings),
+            scope=args.get("paths"),
         )
+        scope = run.scope
 
         texts = {rel: tree.text(rel) for rel in tree.pages}
         due = {
-            rel for rel, text in texts.items() if may_track(rel, text) and page_needs_review(text)
+            rel
+            for rel, text in texts.items()
+            if in_scope(rel, scope) and may_track(rel, text) and page_needs_review(text)
         }
         for rel in sorted(due):
             if not _keys_fit(texts[rel]):
@@ -194,15 +265,19 @@ class CuratorJob(Job):
             ),
         )
         review_paths = {t.path for t in review}
+        never = [t for t in review if not _was_curated(texts[t.path])]
+        again = [t for t in review if _was_curated(texts[t.path])]
 
-        await self._refresh_pass(run, review, texts)
         sections = scan.section_map(tree)
-        if sections:
-            await self._place_pass(run, review, texts, sections)
-        elif review:
+        if not sections and review:
             run.skipped.append("No page was placed: `Home.md` has no `## Sections` list.")
+        if sections:
+            await self._place_pass(run, never, texts, sections)
         pairs = await self._pairs(run, topics, review_paths)
         await self._compare_pass(run, pairs, review_paths, texts)
+        await self._refresh_pass(run, review, texts)
+        if sections:
+            await self._place_pass(run, again, texts, sections)
         if run.unsent:
             run.skipped.append(
                 f"The budget of {run.budget.limit} worker calls ran out: "
@@ -243,10 +318,7 @@ class CuratorJob(Job):
         return workers.worker_model(self._settings)
 
     def _skip(self, run: _Run, worker: str, label: str, outcome: str) -> None:
-        if outcome == "refused":
-            run.skipped.append(f"The `{worker}` answer for {label} was refused.")
-        else:
-            run.skipped.append(f"The `{worker}` worker gave no answer for {label}.")
+        run.failed.setdefault((worker, outcome), []).append(label)
 
     async def _entries(self, run: _Run, topic: Topic, text: str) -> list[tuple[str, str]] | None:
         """The journal entries about a topic since its `curated` day, or None
@@ -275,6 +347,8 @@ class CuratorJob(Job):
 
     async def _refresh_pass(self, run: _Run, review: list[Topic], texts: dict[str, str]) -> None:
         for topic in review:
+            if topic.path in run.incomplete:
+                continue
             if run.budget.left == 0:
                 run.incomplete.add(topic.path)
                 run.unsent += 1
@@ -581,6 +655,8 @@ class CuratorJob(Job):
         todo_b = [f for f in open_ if f.tier == TIER_B]
         todo_c = [f for f in open_ if f.tier == TIER_C]
         skipped = list(run.skipped)
+        for (worker, outcome), labels in run.failed.items():
+            skipped += [_failed_line(worker, outcome, label) for label in labels]
         skipped += [
             f"Finding #{f.id} ({f.kind}) is dismissed, so it was not applied." for f in held
         ]
@@ -611,7 +687,7 @@ class CuratorJob(Job):
                 ("Proposed (Tier B)", _lines(todo_b)),
                 ("Proposed (Tier C)", _lines(todo_c)),
             ]
-        sections.append(("Skipped", "\n".join(f"- {line}" for line in skipped)))
+        sections.append(("Skipped", _skipped_text(run, held)))
         sections.append(
             ("Reviewed", f"{review_count} pages {'would get' if dry_run else 'got'} tracking keys.")
         )
@@ -638,6 +714,8 @@ class CuratorJob(Job):
             written=ws.paths() if ws is not None else [],
             data={
                 "apply": run.apply,
+                "max_worker_calls": run.budget.limit,
+                "paths": run.scope,
                 "usage": run.budget.usage.as_data(),
                 "counts": counts,
                 "findings": {
@@ -651,6 +729,37 @@ class CuratorJob(Job):
                 "skipped": skipped,
             },
         )
+
+
+def _was_curated(text: str) -> bool:
+    """True when the page carries a `curated_hash` from an earlier review."""
+    meta, _ = frontmatter.split(text)
+    return isinstance(meta.get(HASH_KEY), str)
+
+
+_NOUN = {"compare": ("pair", "pairs")}
+
+
+def _failed_line(worker: str, outcome: str, label: str) -> str:
+    if outcome == "refused":
+        return f"The `{worker}` answer for {label} was refused."
+    return f"The `{worker}` worker gave no answer for {label}."
+
+
+def _skipped_text(run: _Run, held: list[Finding]) -> str:
+    """The Skipped section: one line for each note, and one line with a count
+    for each worker and outcome, with its pages or pairs under it."""
+    lines = [f"- {line}" for line in run.skipped]
+    for (worker, outcome), labels in run.failed.items():
+        one, many = _NOUN.get(worker, ("page", "pages"))
+        noun = one if len(labels) == 1 else many
+        if outcome == "refused":
+            lines.append(f"- The `{worker}` answer was refused for {len(labels)} {noun}:")
+        else:
+            lines.append(f"- The `{worker}` worker gave no answer for {len(labels)} {noun}:")
+        lines.extend(f"  - {label}" for label in labels)
+    lines.extend(f"- Finding #{f.id} ({f.kind}) is dismissed, so it was not applied." for f in held)
+    return "\n".join(lines)
 
 
 def _keys_fit(text: str) -> bool:
@@ -711,12 +820,28 @@ def _patch_text(finding: Finding) -> str:
             f"point its links at {_code(patch['into'])} and move "
             f"{_code(patch['path'])} to the trash"
         )
-    edits = "".join(
-        f"\n  - find {_code(p.get('find', ''))}, replace with {_code(p.get('replace', ''))}"
-        f" because {_code(p.get('because', ''))}"
-        for p in patch.get("patch") or []
-    )
+    edits = "".join("\n\n" + patch_block(p) for p in patch.get("patch") or [])
     return f"{detail.get('status', 'stale')}, confidence {detail.get('confidence')}:{edits}"
+
+
+def patch_block(pair: dict[str, Any], indent: str = "  ") -> str:
+    """One find and replace pair as a fenced `text` block, byte for byte.
+
+    The fence is longer than any run of backticks in the text, so no line of
+    the text can close it, and the scan reads no link inside it. Each line is
+    indented by `indent`, so the block stays inside its list item.
+    """
+    lines = [f"find: {pair.get('find', '')}", f"replace: {pair.get('replace', '')}"]
+    if pair.get("because"):
+        lines.append(f"because: {pair['because']}")
+    body = "\n".join(lines)
+    fence = "`" * max(3, _longest_backticks(body) + 1)
+    block = [f"{fence}text", *body.split("\n"), fence]
+    return "\n".join(indent + line if line else line for line in block)
+
+
+def _longest_backticks(text: str) -> int:
+    return max((len(run) for run in re.findall(r"`+", text)), default=0)
 
 
 def _detail_text(finding: Finding) -> str:
@@ -748,7 +873,8 @@ def _detail_text(finding: Finding) -> str:
 
 def describe(finding: Finding) -> str:
     """One line, or a few, that say what a finding is and what its patch does.
-    Every text from a page or a worker is a code span."""
+    Every text from a page or a worker is a code span, or, for a find and
+    replace pair, a fenced block."""
     paths = ", ".join(_code(p) for p in finding.paths)
     head = f"#{finding.id} {finding.kind} (Tier {finding.tier}) {paths}"
     body = _patch_text(finding) if finding.patch else _detail_text(finding)

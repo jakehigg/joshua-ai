@@ -323,9 +323,11 @@ async def test_a_refused_worker_answer_is_a_skip(h: Harness) -> None:
     h.workers.place[KITCHEN_NOTES] = None
     report = await h.run()
     skipped = dict(report.sections)["Skipped"]
-    assert f"The `place` answer for `{POTHOS}` was refused." in skipped
-    assert f"The `place` answer for `{CACTUS}` was refused." in skipped
-    assert f"The `place` worker gave no answer for `{KITCHEN_NOTES}`." in skipped
+    assert (
+        f"- The `place` answer was refused for 2 pages:\n  - `{CACTUS}`\n  - `{POTHOS}`" in skipped
+    )
+    assert f"- The `place` worker gave no answer for 1 page:\n  - `{KITCHEN_NOTES}`" in skipped
+    assert f"The `place` answer for `{POTHOS}` was refused." in report.data["skipped"]
     for rel in (POTHOS, KITCHEN_NOTES):
         assert needs_review(h.text(rel))
     assert not h.findings.by_kind("no-section") or all(
@@ -336,7 +338,7 @@ async def test_a_refused_worker_answer_is_a_skip(h: Harness) -> None:
 async def test_a_refresh_with_a_long_replace_is_refused(h: Harness) -> None:
     h.workers.refresh[SNAKE]["patch"][0]["replace"] = "x" * 2001
     report = await h.run()
-    assert "The `refresh` answer for" in dict(report.sections)["Skipped"]
+    assert "The `refresh` answer was refused for 1 page:" in dict(report.sections)["Skipped"]
     assert needs_review(h.text(SNAKE))
 
 
@@ -346,21 +348,21 @@ async def test_the_budget_limits_the_calls(tmp_path: Path) -> None:
     assert h.workers.count == 2
     assert report.calls == 2
     assert "budget of 2 worker calls ran out" in dict(report.sections)["Skipped"]
-    # The refresh goes first, then the oldest page.
-    assert h.workers.calls[0] == ("refresh", [SNAKE])
+    # The place of a page that was never curated goes first.
+    assert [name for name, _ in h.workers.calls] == ["place", "place"]
     assert needs_review(h.text(ROSES))
 
 
 async def test_entries_before_curated_are_left_out_and_never_curated_goes_first(
     tmp_path: Path,
 ) -> None:
-    h = Harness(tmp_path / "data", "    max_worker_calls: 1\n")
+    h = Harness(tmp_path / "data")
     path = h.wiki / SNAKE
     path.write_text(frontmatter.update(path.read_text(), curated="2026-10-15"))
     await h.run()
     # Both entries about the snake plant are dated before 2026-10-15.
     assert h.workers.names("refresh") == []
-    assert h.workers.calls == [("place", [ROSE_CARE])]
+    assert h.workers.calls[0] == ("place", [ROSE_CARE])
 
 
 async def test_no_vectors_means_no_compare(h: Harness) -> None:
@@ -480,3 +482,141 @@ async def test_a_refresh_is_only_proposed_when_config_and_args_leave_it_out(h: H
     row = _row(h, "refresh", SNAKE)
     assert row["status"] == "open"
     assert row["id"] in report.data["findings"]["proposed_b"]
+
+
+# -- the budget order, the run arguments, and the report ----------------------
+
+
+def _order(h: Harness) -> list[str]:
+    """The workers in call order, with one entry for each run of the same one."""
+    out: list[str] = []
+    for name, _ in h.workers.calls:
+        if not out or out[-1] != name:
+            out.append(name)
+    return out
+
+
+async def test_the_budget_goes_to_place_then_compare_then_refresh(h: Harness) -> None:
+    await h.run(dry_run=True)
+    assert _order(h) == ["place", "compare", "refresh"]
+
+
+async def test_a_page_curated_before_is_placed_after_the_refresh(tmp_path: Path) -> None:
+    h = Harness(tmp_path / "data")
+    path = h.wiki / POTHOS
+    old = frontmatter.update(path.read_text(), curated="2026-09-01", curated_hash="000000000000")
+    path.write_text(old)
+    await h.run(dry_run=True)
+    assert _order(h) == ["place", "compare", "refresh", "place"]
+    assert h.workers.calls[-1] == ("place", [POTHOS])
+
+
+async def test_a_small_budget_is_spent_on_place_first(tmp_path: Path) -> None:
+    h = Harness(tmp_path / "data")
+    report = await h.run(dry_run=True, max_worker_calls="3")
+    assert [name for name, _ in h.workers.calls] == ["place"] * 3
+    assert report.calls == 3
+    assert report.data["max_worker_calls"] == 3
+    assert "budget of 3 worker calls ran out" in dict(report.sections)["Skipped"]
+
+
+async def test_max_worker_calls_zero_runs_the_scan_only(h: Harness) -> None:
+    report = await h.run(dry_run=True, max_worker_calls=0)
+    assert h.workers.calls == []
+    assert h.findings.by_kind("broken-link")
+    assert report.calls == 0
+
+
+async def test_paths_scope_the_workers_and_not_the_scan(h: Harness) -> None:
+    report = await h.run(dry_run=True, paths="garden/")
+    called = {p for _, paths in h.workers.calls for p in paths}
+    assert called <= {ROSES, ROSE_CARE}
+    assert h.workers.names("compare") == [[ROSE_CARE, ROSES]]
+    assert h.workers.names("refresh") == []
+    # The scan still reads every page.
+    assert _row(h, "broken-link", POTHOS)["tier"] == "A"
+    assert report.data["paths"] == ["garden/"]
+    assert report.data["counts"]["reviewed"] == 2
+
+
+async def test_a_scoped_run_tracks_only_the_pages_in_scope(h: Harness) -> None:
+    await h.run(paths=["houseplants/"])
+    assert not needs_review(h.text(SNAKE))
+    assert needs_review(h.text(ROSES))
+    assert needs_review(h.text("Home.md"))
+
+
+def test_the_new_run_arguments(h: Harness) -> None:
+    job = h.job()
+    assert job.check_args({"max_worker_calls": "20"}) == {"max_worker_calls": 20}
+    assert job.check_args({"max_worker_calls": 0}) == {"max_worker_calls": 0}
+    assert job.check_args({"paths": "houseplants/, garden/"}) == {
+        "paths": ["houseplants/", "garden/"]
+    }
+    assert job.check_args({"paths": ["garden/", "garden/"]}) == {"paths": ["garden/"]}
+    assert job.check_args({"paths": "", "max_worker_calls": ""}) == {}
+    for bad in (
+        {"max_worker_calls": -1},
+        {"max_worker_calls": "x"},
+        {"max_worker_calls": True},
+        {"max_worker_calls": 1.5},
+        {"paths": ","},
+        {"paths": 3},
+        {"paths": "/garden/"},
+        {"paths": "../garden/"},
+        {"paths": "garden/../people/"},
+        {"paths": ".trash/"},
+        {"paths": "a\\b"},
+    ):
+        with pytest.raises(JobArgsError):
+            job.check_args(bad)
+
+
+async def test_failed_calls_are_grouped_by_worker_with_a_count(h: Harness) -> None:
+    for rel in (SNAKE, POTHOS, CACTUS):
+        h.workers.place[rel] = None
+    h.workers.compare[(ROSE_CARE, ROSES)] = None
+    report = await h.run(dry_run=True)
+    skipped = dict(report.sections)["Skipped"]
+    assert (
+        "- The `place` worker gave no answer for 3 pages:\n"
+        f"  - `{CACTUS}`\n  - `{POTHOS}`\n  - `{SNAKE}`"
+    ) in skipped
+    assert (
+        f"- The `compare` worker gave no answer for 1 pair:\n  - `{ROSE_CARE}` and `{ROSES}`"
+        in (skipped)
+    )
+    assert skipped.count("gave no answer for") == 2
+    assert report.data["counts"]["skipped"] == len(report.data["skipped"])
+
+
+def test_a_patch_pair_is_shown_byte_for_byte_in_a_fenced_block() -> None:
+    from joshua_core.jobs.curator.findings import Finding
+    from joshua_core.jobs.curator.scan import parse_links
+
+    pair = {
+        "find": "| `minio-data-vol` | [old](old.md) |",
+        "replace": "| `minio-data` |\n```\nnot a fence end\n```",
+        "because": "the entry of 2026-10-04",
+    }
+    finding = Finding(
+        "refresh",
+        "B",
+        ["a.md"],
+        detail={"status": "stale", "confidence": "high"},
+        patch={"action": "refresh", "path": "a.md", "patch": [pair]},
+    )
+    text = describe(finding)
+    assert "  find: | `minio-data-vol` | [old](old.md) |" in text
+    assert "  replace: | `minio-data` |" in text
+    assert "'minio-data-vol'" not in text
+    assert "  ````text\n" in text and text.rstrip().endswith("````")
+    assert parse_links("# r\n\n" + text + "\n\nAfter [x](x.md).\n")[0].target == "x.md"
+    assert len(parse_links(text)) == 0
+
+
+def test_patch_block_takes_a_three_backtick_fence_for_plain_text() -> None:
+    from joshua_core.jobs.curator.job import patch_block
+
+    block = patch_block({"find": "a", "replace": "b"}, indent="")
+    assert block == "```text\nfind: a\nreplace: b\n```"
