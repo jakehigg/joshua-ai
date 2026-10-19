@@ -128,12 +128,14 @@ same `message_id` inside 15 minutes is a duplicate. Core refuses new turns with
 
 `POST /v1/memory/search` searches the index by meaning. `query` is 1 to 1000
 characters. `limit` is 1 to 25, default 10. `kinds` is a list of `wiki`,
-`journal`, and `profile`; empty or absent means all three. Any other kind gets
-`422`.
+`journal`, `profile`, `knowledge`, and `insight`; empty or absent means all
+five. Any other kind gets `422`.
 
 The search is always in the shared scope, and the body names no person. It
 reads the `files` source only, and returns only a page under `wiki/`: a wiki
-page, a journal entry or day page, or a profile. It never returns a person's
+page, a journal entry or day page, a profile, a page under
+`wiki/knowledge/` (kind `knowledge`), or a page under `wiki/insights/` (kind
+`insight`). It never returns a person's
 own attachments, a row from another source, or a taught skill. `path` is
 relative to the data volume. `date` is `YYYY-MM-DD` or null. An empty list in
 `allowed_callers` turns the route off: every caller gets `403`. Core never

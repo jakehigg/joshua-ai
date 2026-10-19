@@ -65,9 +65,8 @@ The agent finds both the same way it finds any wiki page: through the
 injection before a turn, and through `search_memory`. The agent cannot write
 them. `write_file` and `rename_file` refuse a path in either folder, so a
 dossier and an insight keep the frontmatter that their job reads. The search
-route for the viewer and joshua-mcp, `POST /v1/memory/search`, returns the
-kinds `wiki`, `journal`, and `profile` only, so it does not return these
-chunks.
+route for the viewer and joshua-mcp, `POST /v1/memory/search`, returns these
+chunks too, with the kinds `knowledge` and `insight`.
 
 ### Two ways a chunk reaches the agent
 

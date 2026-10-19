@@ -108,7 +108,8 @@ Route allowlists, by default:
   also accepts `laptop` for a `cli` handle.
 - core `POST /v1/memory/search`: `memory.search.allowed_callers` (default
   `viewer`, `mcp`). An empty list turns it off. It names no person and returns
-  only `wiki/` pages of kind `wiki`, `journal`, or `profile`.
+  only `wiki/` pages of kind `wiki`, `journal`, `profile`, `knowledge`, or
+  `insight`.
 - channels `POST /v1/deliver`, `GET /v1/channels/resolve`: `core`.
 - channels `POST /v1/events`, `POST /v1/cli/*`, `GET /v1/cli/*`:
   `channels.webhooks.allowed_callers` (default `laptop`, `ci`).

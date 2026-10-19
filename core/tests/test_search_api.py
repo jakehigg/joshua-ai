@@ -54,6 +54,8 @@ _ROWS = [
     _chunk("wiki", "wiki/garden.md"),
     _chunk("journal", "wiki/journal/2026/09/26/garden.md"),
     _chunk("profile", "wiki/people/alex.md"),
+    _chunk("knowledge", "wiki/knowledge/garden/roses/pruning.md"),
+    _chunk("insight", "wiki/insights/garden/late-pruning.md"),
     _chunk("people", "people/alex/attachments/2026/09/scan.pdf"),
     _chunk("skill", "wiki/skills/movie.md"),
     _chunk("shared", "shared/old.md"),
@@ -118,16 +120,18 @@ def test_empty_allowlist_turns_the_route_off(monkeypatch) -> None:
         assert response.status_code == 403
 
 
-def test_returns_only_wiki_journal_and_profile_rows(monkeypatch) -> None:
+def test_returns_only_the_wiki_page_kinds(monkeypatch) -> None:
     client = _client(monkeypatch)
     response = client.post(SEARCH_PATH, json={"query": "garden"}, headers=_bearer(VIEWER))
     assert response.status_code == 200
-    paths = [hit["path"] for hit in response.json()["results"]]
-    assert paths == [
+    paths = {hit["path"] for hit in response.json()["results"]}
+    assert paths == {
         "wiki/garden.md",
         "wiki/journal/2026/09/26/garden.md",
         "wiki/people/alex.md",
-    ]
+        "wiki/knowledge/garden/roses/pruning.md",
+        "wiki/insights/garden/late-pruning.md",
+    }
 
 
 def test_never_returns_a_persons_attachment_or_a_skill(monkeypatch) -> None:
@@ -146,7 +150,7 @@ def test_searches_the_shared_scope_of_the_files_source(monkeypatch) -> None:
     call = client.store.calls[0]
     assert call["person_id"] is None
     assert call["sources"] == ("files",)
-    assert call["kinds"] == ("wiki", "journal", "profile")
+    assert call["kinds"] == ("wiki", "journal", "profile", "knowledge", "insight")
 
 
 def test_kinds_narrow_the_search(monkeypatch) -> None:
@@ -159,7 +163,19 @@ def test_kinds_narrow_the_search(monkeypatch) -> None:
     assert [hit["kind"] for hit in body["results"]] == ["journal"]
 
 
-@pytest.mark.parametrize("kind", ["people", "skill", "shared"])
+def test_the_knowledge_kind_is_accepted(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    response = client.post(
+        SEARCH_PATH, json={"query": "roses", "kinds": ["knowledge"]}, headers=_bearer(VIEWER)
+    )
+    assert response.status_code == 200
+    assert client.store.calls[0]["kinds"] == ("knowledge",)
+    assert [hit["path"] for hit in response.json()["results"]] == [
+        "wiki/knowledge/garden/roses/pruning.md"
+    ]
+
+
+@pytest.mark.parametrize("kind", ["people", "skill", "shared", "bogus"])
 def test_a_kind_off_the_list_is_422(monkeypatch, kind: str) -> None:
     client = _client(monkeypatch)
     response = client.post(

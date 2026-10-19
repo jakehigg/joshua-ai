@@ -1,5 +1,5 @@
-"""``POST /v1/memory/search``: search the wiki, the journal, and the profiles by
-meaning, for a caller outside the agent.
+"""``POST /v1/memory/search``: search the wiki, the journal, the profiles, and
+the pages of the jobs by meaning, for a caller outside the agent.
 
 The viewer and the joshua-mcp addon call this route. Core owns the index and
 the embedding model, so a caller sends a query and gets passages back; it never
