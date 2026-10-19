@@ -352,7 +352,7 @@ async def test_a_held_question_with_its_lookups_runs_the_editor_alone(h: Harness
     assert h.workers.names()[-1] == "editor"
     assert report.data["pages"] == [f"knowledge/houseplants/snake-plant/{held[0]}.md"]
     assert report.data["editor_only"] == held
-    assert "Only the editor ran" in dict(report.sections)["Researched"]
+    assert f"`{held[0]}` (editor only): published" in dict(report.sections)["Researched"]
     question = h.dossier().find(held[0])  # type: ignore[union-attr]
     assert question.status == "answered"
     assert (question.draft, question.challenge, question.looked_up_at) == (None, None, None)
@@ -398,6 +398,74 @@ async def test_the_cap_counts_a_question_that_runs_the_editor_alone(h: Harness) 
     assert len(report.data["pages"]) == 2
     assert report.data["editor_only"] == held[:2]
     assert len(h.internet.texts) == 6
+
+
+async def test_a_held_question_that_needs_only_the_editor_goes_first(h: Harness) -> None:
+    held = await _held_once(h, max_questions=1)
+    open_slugs = [q.slug for q in h.dossier().questions if q.status == "open"]  # type: ignore[union-attr]
+    assert len(open_slugs) == 2
+    report = await h.run(mode="run", topic=SNAKE, max_questions=2)
+    researched = dict(report.sections)["Researched"].splitlines()
+    assert researched[0].startswith(f"- `{held[0]}` (editor only): published")
+    assert researched[1].startswith(f"- `{open_slugs[0]}` (full crew): published")
+    assert report.data["editor_only"] == held
+    assert len(h.internet.texts) == 4
+
+
+async def test_the_usage_shows_the_tokens_of_each_question(h: Harness) -> None:
+    held = await _held_once(h, max_questions=1)
+    report = await h.run(mode="run", topic=SNAKE, max_questions=2)
+    first, second = held[0], report.data["pages"][1].rsplit("/", 1)[1][:-3]
+    assert report.data["usage_by_question"] == {
+        first: {"researcher": 0, "challenger": 0, "editor": EDITOR_USAGE.total},
+        second: {
+            "researcher": LOOKUP_USAGE.total,
+            "challenger": LOOKUP_USAGE.total,
+            "editor": EDITOR_USAGE.total,
+        },
+    }
+    usage = dict(report.sections)["Usage"]
+    assert f"- `{first}`: researcher 0 tokens, challenger 0 tokens, editor 250 tokens" in usage
+    assert f"- `{second}`: researcher 60 tokens, challenger 60 tokens, editor 250 tokens" in usage
+
+
+def test_the_research_order() -> None:
+    from datetime import date
+
+    from joshua_core.engine.internet import InternetAnswer
+    from joshua_core.jobs.research.dossier import Question
+    from joshua_core.jobs.research.job import research_order
+    from research_fakes import PRIMARY, lookup
+
+    day = date(2026, 10, 19)
+    answer = InternetAnswer.model_validate(lookup(PRIMARY))
+
+    def held(slug: str, looked: date | None) -> Question:
+        q = Question(slug=slug, question=f"{slug}?", status="held")
+        if looked is not None:
+            q.keep_lookups(answer, answer, looked)
+        return q
+
+    questions = [
+        Question(slug="open-a", question="a?"),
+        held("held-plain", None),
+        held("held-new", date(2026, 10, 18)),
+        Question(slug="asked", question="b?", asked_by="alex"),
+        held("held-old", date(2026, 10, 14)),
+        held("held-stale", date(2026, 10, 1)),
+        Question(slug="done", question="c?", status="answered"),
+        Question(slug="open-b", question="d?"),
+    ]
+    order = [q.slug for q in research_order(questions, day, 7)]
+    assert order == [
+        "held-old",
+        "held-new",
+        "asked",
+        "open-a",
+        "open-b",
+        "held-plain",
+        "held-stale",
+    ]
 
 
 async def test_a_person_question_is_researched_first(h: Harness) -> None:

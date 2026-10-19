@@ -24,11 +24,12 @@ question: a person answers one later, in chat.
 so a later run can name the new slugs. It makes no lookup and writes no
 knowledge page.
 
-`run` then researches the questions: those that the run names, or else the
-open questions that a person asked, the other open questions, and the held
-questions, in dossier order, up to the cap. Each question goes to the crew.
-A held question that kept its two lookups, not older than
-`jobs.research.lookup_max_age_days`, goes to the editor alone. A held or
+`run` then researches the questions, up to the cap: those that the run
+names, or else the questions in the order of `research_order`. The held
+questions that need only the editor come first, then the open questions that
+a person asked, the other open questions, and the other held questions. Each
+question goes to the crew. A held question that kept its two lookups, not
+older than `jobs.research.lookup_max_age_days`, goes to the editor alone. A held or
 dropped question keeps the lookups of the run, and a published one loses
 them. A published answer becomes a page, and the dossier and `README.md` get their
 new state. A dry run does all of this and writes nothing; its report holds
@@ -110,6 +111,8 @@ logger = get_logger("jobs.research")
 
 MODES = ("plan", "run")
 RULE_GIVEN = "given"
+EDITOR_ONLY = "editor only"
+FULL_CREW = "full crew"
 _ARGS = {"mode", "topic", "questions", "max_questions", "then_insights"}
 _TRUE = ("true", "yes", "1", "on")
 _FALSE = ("false", "no", "0", "off")
@@ -179,6 +182,28 @@ def parse_flag(value: Any, name: str) -> bool:
     raise JobArgsError(f"{name} is true or false")
 
 
+def research_order(questions: list[Question], day: date, max_age_days: int) -> list[Question]:
+    """The questions a run researches when it names none, in this order:
+
+    1. The held questions with kept lookups of `max_age_days` or less, which
+       need only the editor, the oldest `looked_up_at` first.
+    2. The open questions that a person asked.
+    3. The other open questions.
+    4. The other held questions.
+
+    Within a group, the order is the order of the dossier.
+    """
+    held = [q for q in questions if q.status == "held"]
+    retry = sorted(
+        (q for q in held if q.kept_lookups(day, max_age_days) is not None),
+        key=lambda q: q.looked_up_at or day,
+    )
+    by_person = [q for q in questions if q.status == "open" and q.by_person]
+    other = [q for q in questions if q.status == "open" and not q.by_person]
+    rest = [q for q in held if q not in retry]
+    return [*retry, *by_person, *other, *rest]
+
+
 @dataclass
 class _Outcome:
     question: Question
@@ -188,6 +213,16 @@ class _Outcome:
     short: str = ""
     dropped_urls: list[str] = field(default_factory=list)
     reused: bool = False
+    usage: dict[str, Usage] = field(default_factory=dict)
+
+    @property
+    def crew(self) -> str:
+        """`editor only` or `full crew`: which steps ran for the question."""
+        return EDITOR_ONLY if self.reused else FULL_CREW
+
+    def tokens(self) -> dict[str, int]:
+        """The tokens of each step of the crew; 0 for a step that did not run."""
+        return {step: self.usage.get(step, Usage()).total for step in crew.STEPS}
 
 
 @dataclass
@@ -485,10 +520,7 @@ class ResearchJob(Job):
                 else:
                     chosen.append(question)
             return chosen[:limit]
-        first = [q for q in dossier.questions if q.status == "open" and q.by_person]
-        rest = [q for q in dossier.questions if q.status == "open" and not q.by_person]
-        held = [q for q in dossier.questions if q.status == "held"]
-        return [*first, *rest, *held][:limit]
+        return research_order(dossier.questions, run.day, cfg.lookup_max_age_days)[:limit]
 
     async def _research(
         self,
@@ -530,6 +562,7 @@ class ResearchJob(Job):
                         short=result.page.answer_short,
                         dropped_urls=result.dropped_urls,
                         reused=kept is not None,
+                        usage=result.usage,
                     )
                 )
                 continue
@@ -545,6 +578,7 @@ class ResearchJob(Job):
                     reason=question.hold_reason,
                     dropped_urls=result.dropped_urls,
                     reused=kept is not None,
+                    usage=result.usage,
                 )
             )
         if chosen:
@@ -590,6 +624,9 @@ class ResearchJob(Job):
             f"- `{name}`: {v['calls']} calls, {v['tokens']} tokens" for name, v in data.items()
         ]
         lines.append(f"- Total: {run.ledger.calls} calls, {run.ledger.tokens} tokens")
+        for o in run.outcomes:
+            steps = ", ".join(f"{step} {n} tokens" for step, n in o.tokens().items())
+            lines.append(f"- `{o.question.slug}`: {steps}")
         return "\n".join(lines)
 
     def _topic_lines(self, run: _Run) -> str:
@@ -657,16 +694,15 @@ class ResearchJob(Job):
         if run.mode == "run":
             result_lines = []
             for o in run.outcomes:
+                head = f"- `{o.question.slug}` ({o.crew})"
                 if o.page is not None:
                     verb = "would write" if dry_run else "wrote"
-                    line = f"- `{o.question.slug}`: published; {verb} `knowledge/{o.page.rel}`"
+                    line = f"{head}: published; {verb} `knowledge/{o.page.rel}`"
                 else:
-                    line = f"- `{o.question.slug}`: {o.status} ({o.question.holds}): {o.reason}"
+                    line = f"{head}: {o.status} ({o.question.holds}): {o.reason}"
                 if o.dropped_urls:
                     urls = ", ".join(code_span(u, 200) for u in o.dropped_urls)
                     line += f". Sources no lookup returned, dropped: {urls}"
-                if o.reused:
-                    line += ". Only the editor ran, on the lookups that an earlier run kept"
                 result_lines.append(line)
             sections.append(("Researched", "\n".join(result_lines) or "No question to research."))
             if dry_run and published:
@@ -735,6 +771,7 @@ class ResearchJob(Job):
                 "editor_only": [o.question.slug for o in run.outcomes if o.reused],
                 "coverage": dossier.compute_coverage(),
                 "usage": run.ledger.as_data(),
+                "usage_by_question": {o.question.slug: o.tokens() for o in run.outcomes},
                 "insights": self._insights_data(run),
             },
         )
@@ -788,5 +825,6 @@ __all__ = [
     "parse_count",
     "parse_flag",
     "parse_slugs",
+    "research_order",
     "worker_model",
 ]
