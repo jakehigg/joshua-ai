@@ -113,7 +113,52 @@ with the images and the packaged chart, are at
   as a message on that channel instead. With `deliver_via` unset, such a
   reply is dropped, with one line in the log naming why.
 
+- **Two curator arguments scope a test run.** `max_worker_calls` replaces
+  `jobs.curator.max_worker_calls` for one run, and `paths` (wiki path
+  prefixes, such as `houseplants/,garden/`) limits the workers and the
+  tracking keys to the pages under them. The scan still reads the whole wiki.
+
+- **Two bundle keys cut the noise in a bundle.**
+  `jobs.bundle.max_vector_entries` (6) caps the journal entries that only the
+  similarity brings in, the closest first. `jobs.bundle.exclude_slugs` keeps
+  journal entries out of every bundle by their file name, for example a daily
+  log. The `bundle` job report now says how each journal entry got in:
+  `title`, `alias`, or `vector <sim>`.
+
 ### Fixed
+
+- **A worker that answers with a structured object no longer loses its
+  answer.** The CLI delivers the answer as a tool call, and that call counts
+  as a turn. With a limit of one turn, a call could stop before the answer
+  arrived: 20 of 40 curator calls on a cluster gave no answer. The limit is
+  now 3, and a result with no answer logs one warning with its subtype and
+  turn count.
+
+- **The curator spends its budget on placement and duplicates first.** A run
+  now calls `place` for the pages that were never curated, then `compare`,
+  then `refresh`, then `place` for the pages that changed after a review.
+  Before, `refresh` could take the whole budget. The Skipped section groups
+  the calls that gave no answer by worker, with a count.
+
+- **A refresh patch in the curator report shows its backticks.** Each find
+  and replace pair is now a fenced block, byte for byte. Before, each backtick
+  showed as a quote. The scan closes a fenced block by the CommonMark rule, so
+  a fence line in a patch cannot end the block early.
+
+- **The research gate finds the topic in a question.** A topic now has more
+  than one name: the title, the title without a part in parentheses at its
+  end, each alias, and the first words of the file name, with or without a
+  plural `s`. So "snake plant" names "Snake Plants (Living Room Window)". The
+  bundle and the topic choice use the same names.
+
+- **The researcher asks the web about the world, not about our records.** The
+  `raise` prompt says that the question goes to the open web with no access to
+  our pages. The gate rejects a raised question that names a person, holds a
+  date from our records, or asks what we did, will do, or should do.
+
+- **A bundle holds less noise.** `jobs.bundle.sim` is now 0.78, not 0.70.
+  A journal entry with a `source` of `curator`, `research`, or `insights` is
+  a job report, and no bundle takes it.
 
 - **A tool server that restarts no longer takes its tools away until the
   session ends.** An `http` upstream drops its sessions when it restarts or

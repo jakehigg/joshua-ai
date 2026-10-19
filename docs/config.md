@@ -502,7 +502,10 @@ jobs:
   enabled: false
   model: claude-sonnet-5
   bundle:
-    sim: 0.70
+    sim: 0.78
+    max_vector_entries: 6
+    exclude_slugs:
+      - "garden-weather-log-*"
     max_chars: 24000
     recent_days: 14
   topics:
@@ -555,7 +558,9 @@ jobs:
 |---|---|---|
 | `enabled` | `false` | `true` makes the `/admin/jobs/*` routes live. `false` makes each of them answer 404. Nothing else changes. |
 | `model` | not set | The model for the workers of a job that have no tools. When it is not set, a job uses `core.reflection_model`. |
-| `bundle.sim` | `0.70` | A journal entry with a chunk this close to a chunk of the topic page is part of the memory bundle of that topic. |
+| `bundle.sim` | `0.78` | A journal entry with a chunk this close to a chunk of the topic page is part of the memory bundle of that topic. |
+| `bundle.max_vector_entries` | `6` | The most journal entries that only `bundle.sim` brings into a bundle, the closest first. An entry that names the topic is not in this count. |
+| `bundle.exclude_slugs` | empty | `fnmatch` globs on the file name of a journal entry, without `.md`. No bundle takes an entry that a glob matches. The names belong to one instance, for example `garden-weather-log-*` for a daily log. |
 | `bundle.max_chars` | `24000` | The size limit of the bundle text. The topic page is never cut. |
 | `bundle.recent_days` | `14` | How many days back a job looks for the topics that the journal names now. |
 | `topics.exclude` | `vocabulary.md`, `*/README.md` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. |

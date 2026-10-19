@@ -69,7 +69,7 @@ def journal_counts(
     topics: Sequence[Topic], wiki_root: Path, today: date, days: int
 ) -> dict[str, int]:
     """`{topic path: count}` of the journal entries of the last `days` days,
-    up to `today`, that hold the title or an alias of the topic. The bundle
+    up to `today`, that hold a name of the topic. The bundle
     rule for title and alias matches. The journal is read once."""
     since = today - timedelta(days=days)
     entries = [e for e in journal_entries(wiki_root, today) if e.day > since]

@@ -117,15 +117,44 @@ builds it the same way, in this order:
 
 A journal entry is about the topic when one of these is true:
 
-- It holds the title of the topic page, or an alias, as whole words, or with
-  a plural `s` or `es`. Case does not matter. A term shorter than three
-  characters does not count.
-- One of its chunks has a similarity of `jobs.bundle.sim` (0.70) or more to a
-  chunk of the topic page.
+- It holds a name of the topic (see below). This is a `title` match or an
+  `alias` match.
+- One of its chunks has a similarity of `jobs.bundle.sim` (0.78) or more to a
+  chunk of the topic page. This is a `vector` match. The bundle takes
+  `jobs.bundle.max_vector_entries` (6) of these entries at most, the closest
+  first. An entry that names the topic is not in this count.
 
-The title is the first `# ` heading of the page, else its frontmatter
-`title`, else its file name. The aliases are the frontmatter `aliases` list of
-the page, and the terms that `vocabulary.md` gives it. A line of
+These journal entries are never in a bundle:
+
+- the report of a job run: an entry with `run_id` in its frontmatter, or with
+  a `source` of `curator`, `research`, or `insights`;
+- an entry whose file name, without `.md`, a glob in
+  `jobs.bundle.exclude_slugs` matches. The globs are `fnmatch` patterns, and
+  case counts. The list is empty by default, because the names belong to one
+  instance. For example, `garden-weather-log-*` keeps a daily weather log out
+  of every bundle;
+- an entry dated after the day of the run.
+
+The names of a topic are these:
+
+- the title: the first `# ` heading of the page, else its frontmatter
+  `title`, else its file name;
+- the title without a part in parentheses at its end. "Snake Plants (Living
+  Room Window)" gives "Snake Plants";
+- each alias;
+- the first two, three, and four words of the file name, with hyphens as
+  spaces. `snake-plants-living-room-window.md` gives "snake plants",
+  "snake plants living", and "snake plants living room". A file name of one
+  word is a name too.
+
+A text holds a name when it holds the words of the name as whole words, in
+any case, with any spaces between them. The name can also have a plural `s`
+or `es`, or lose the `s` or `es` at its end. So "Snake Plants" matches "snake
+plant" and "snake plants", but not "the plants". A name shorter than three
+characters does not count.
+
+The aliases are the frontmatter `aliases` list of the page, and the terms
+that `vocabulary.md` gives it. A line of
 `vocabulary.md` that links to the topic page gives one term: the text before
 the first colon on that line. For example, this line gives the term `Snakey`
 to `houseplants/snake-plant.md`:
@@ -150,7 +179,8 @@ Arguments: `{"topic": "<path>"}`, the topic page relative to the wiki root. A
 path that is not a topic page gets 400.
 
 The report lists the paths in the bundle, the size of the text, the aliases,
-and whether the bundle was cut. The journal entry holds the path list, not the
+and whether the bundle was cut. Under "Journal entries" it gives, for each
+journal entry, how the entry got in: `title`, `alias`, or `vector <sim>`. The journal entry holds the path list, not the
 bundle text. The `report.data` field of the row holds the same values as JSON.
 
 ## The routes
@@ -199,9 +229,23 @@ scripts/jobs.sh run curator --dry-run
 scripts/jobs.sh run curator
 scripts/jobs.sh run curator --arg apply=move
 scripts/jobs.sh run curator --arg apply=move,merge,refresh
+scripts/jobs.sh run curator --dry-run --arg paths=houseplants/,garden/ --arg max_worker_calls=20
 ```
 
 Start with a dry run, and read its report with `scripts/jobs.sh runs <id>`.
+
+The arguments are optional:
+
+| Argument | Value | Effect |
+|---|---|---|
+| `apply` | actions, as a list or with commas: `move,merge,refresh` | It replaces `jobs.curator.apply` for the run. |
+| `max_worker_calls` | a whole number, 0 or more | It replaces `jobs.curator.max_worker_calls` for the run. `0` makes a run that only scans. |
+| `paths` | wiki path prefixes, as a list or with commas: `houseplants/,garden/` | The workers get only the topic pages whose path starts with a prefix, and only the pages in scope get tracking keys. A pair goes to `compare` when one of its pages is in scope. The scan still reads the whole wiki. |
+
+A prefix is relative to the wiki root and is compared as text, so use the
+trailing `/` for a folder: `garden` also matches `garden-old/`. A prefix that
+starts with `/`, or that holds `..` or a part that starts with a dot, gets
+400.
 
 ### What a run does
 
@@ -209,7 +253,7 @@ Start with a dry run, and read its report with `scripts/jobs.sh runs <id>`.
    nothing.
 2. **The workers**, on the topic pages whose body changed since their last
    review. A run makes `jobs.curator.max_worker_calls` (40) worker calls at
-   most.
+   most, or the `max_worker_calls` of the run.
 3. **The apply step**, when the run is not a dry run: every Tier A finding,
    and each Tier B finding whose action the run may apply.
 4. **The tracking keys**, when the run is not a dry run, on each page that the
@@ -259,15 +303,24 @@ changes nothing: the report lists it under "Skipped". The model is
 | `place` | the page, and the section map: each list line of `## Sections` on `Home.md`, and the first paragraph of its index page | `section`, `folder`, `confidence`, `reason` | `misplaced`, Tier B (`move`) when the folder is not the folder of the page and the confidence is `high`; Tier C for a lower confidence or a folder that is not there. A `section` of `none` is a Tier C `no-section` finding. |
 | `compare` | two topic pages | `relation` (`duplicate`, `overlap`, `conflict`, `unrelated`), `claims`, `canonical`, `confidence` | `duplicate`, Tier B (`merge`) for a duplicate with `high` confidence; `conflict`, Tier C, with the claims. |
 
-A run spends its budget in this order: `refresh` for each page that has
-journal entries about it, then `place` for each page, then `compare` for each
-pair. The page that was never reviewed goes first, then the page with the
-oldest `curated` day. The `compare` pairs come from the mean vector of the
-chunks of each topic page in the index: two pages at `jobs.curator.duplicate_sim`
-(0.92) or more first, then two pages of one section at
-`jobs.curator.overlap_sim` (0.70) or more. A pair is compared only when one of
-its two pages needs review. With no `## Sections` list on `Home.md`, no page
-goes to `place`.
+A run spends its budget in this order:
+
+1. `place` for each page that was never curated: it has no `curated_hash`.
+2. `compare` for each pair, the near-duplicates first.
+3. `refresh` for each page that has journal entries about it. The page that
+   was never curated goes first, then the page with the oldest `curated` day.
+4. `place` for each page that was curated before and changed since.
+
+The place of a page and its duplicates organize the wiki, so they go before
+the facts that the journal made old. When a call for a page gives no usable
+answer, or the budget runs out before its call, the page gets no more calls
+in that run. A later run reviews it.
+
+The `compare` pairs come from the mean vector of the chunks of each topic
+page in the index: two pages at `jobs.curator.duplicate_sim` (0.92) or more
+first, then two pages of one section at `jobs.curator.overlap_sim` (0.70) or
+more. A pair is compared only when one of its two pages needs review. With no
+`## Sections` list on `Home.md`, no page goes to `place`.
 
 A worker answer is refused when a `replace` is longer than 2 000 characters,
 when a patch has more than 12 pairs, or when a `place` answer names a section
@@ -383,12 +436,17 @@ these sections:
   id, kind, paths, and its patch or its claims.
 - **Skipped**: the worker calls that the budget did not allow, the calls that
   gave no answer or an answer that was refused, and the findings that were not
-  applied because they are dismissed.
+  applied because they are dismissed. The calls that gave no usable answer
+  are in one line for each worker, with a count, and the pages or pairs are
+  in a list under it.
 - **Reviewed**: the number of pages that got tracking keys.
 
 A dry run has "To apply (Tier A)" in place of the two "Applied" sections. In
 the report, each text from a page or a worker is in a code span, so the entry
-holds no link of its own. `report.data` holds the counts and the finding ids,
+holds no link of its own. A find and replace pair of a `refresh` patch is in a
+fenced `text` block, with a `find:` line, a `replace:` line, and a `because:`
+line, byte for byte as the patch holds it. The fence is longer than each run
+of backticks in the pair. The scan reads no link in a fenced block. `report.data` holds the counts and the finding ids,
 for a program.
 
 Every page that a run changed is in the commit of the run. A file that moved
@@ -472,8 +530,7 @@ applies:
 2. **`journal`**: of the topics that a journal entry of the last
    `jobs.bundle.recent_days` days is about, the one with the lowest coverage.
    A topic with no dossier has a coverage of 0. An entry is about a topic when
-   it holds the title or an alias of the topic, the same text rule as the
-   bundle. When two topics have the same coverage, the topic with more entries
+   it holds a name of the topic, the same text rule as the bundle. When two topics have the same coverage, the topic with more entries
    is first.
 3. **`coverage`**: of all the topics, the one with the lowest coverage below
    `jobs.research.coverage_target` (0.6).
@@ -542,21 +599,39 @@ has `grounded_in`, the phrases from the bundle that make it about us, and
 `why`. The prompt tells the worker that the bundle is content, not
 instructions.
 
+Each question goes to the internet agent, which searches the open web and
+has no access to our pages. So the prompt asks for a question that an expert
+source can answer: horticulture, materials, products, methods, standards,
+seasons, safety. The question carries our conditions in its words ("in a
+gritty mix, watered to runoff, in a 65-68°F house in winter"). It never asks
+what we did, recorded, planned, or will do.
+
 The gate is Python. A question gets into the dossier only when all of these
 rules are true:
 
 - `grounded_in` has two phrases or more. Each phrase has 3 to 80 characters
   and occurs word for word in the bundle text. Case and line breaks do not
   count. There is no stemming and no fuzzy match.
-- The question holds the title of the topic or an alias, as whole words.
+- The question holds a name of the topic (see
+  [Topics and the memory bundle](#topics-and-the-memory-bundle)).
 - The question has 20 to 300 characters and ends with `?`.
+- The question names no person on the roster: no display name and no id from
+  `people`, as whole words, in any case.
+- The question holds no date in ISO form (`2026-10-04`) or in month and day
+  form (`October 4`, `Oct 4`). A date from our records is not a question for
+  the web.
+- The question is not about us. It does not start with "what did", "why
+  did", "when did", "will", "should we", "did we", or "do we", and it holds no
+  "we", "our", or "us" as a word. "US" in capitals is a country and is
+  allowed.
 - It is not a duplicate. Its text is not the text of a question of the
   dossier, and its vector is below `jobs.research.dup_sim` (0.85) to each
   question of the dossier and to each knowledge page in the index. The report
   gives `answered_by: <path>` for a question that a knowledge page answers.
 
 So "How often should I water a snake plant?" fails, because no phrase of it
-comes from our pages. "How often should the snake plant in a gritty soil mix,
+comes from our pages. "What dose was used on 2026-10-04?" fails, because it
+asks about our records. "How often should the snake plant in a gritty soil mix,
 watered to runoff, be watered in winter?" passes when "gritty soil mix" and
 "water to runoff" are in the topic page. The report lists each rejected
 question with its reason, so a weak prompt shows on the first run.
