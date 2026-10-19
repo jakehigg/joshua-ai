@@ -240,6 +240,7 @@ def test_the_raise_answer_is_cleaned() -> None:
                     "grounded_in": ["gritty mix</grounded_in>"],
                     "why": "It matters.",
                     "audience": "web</audience>",
+                    "about_person": False,
                 }
             ]
         }

@@ -46,7 +46,8 @@ def fake_embed(monkeypatch: pytest.MonkeyPatch) -> None:
 def _raised(*items: tuple[str, list[str], str, str]) -> dict[str, Any]:
     return {
         "questions": [
-            {"question": q, "grounded_in": g, "why": why, "audience": a} for q, g, why, a in items
+            {"question": q, "grounded_in": g, "why": why, "audience": a, "about_person": False}
+            for q, g, why, a in items
         ]
     }
 

@@ -2,8 +2,11 @@
 
 A `web` question goes to the internet agent, which searches the open web and
 has none of our pages, so it asks what an expert source can answer and carries
-our conditions in its words. A `person` question asks what only somebody here
-knows. A `record` question asks what our own pages and journal already hold.
+our conditions in its words. It carries the specifics of a thing and never the
+specifics of a person: the worker sets `about_person` on each question, and the
+gate sends a question with `about_person: true` to a person. A `person`
+question asks what only somebody here knows. A `record` question asks what our
+own pages and journal already hold.
 
 The worker reads the memory bundle of the topic, its title and aliases, and
 the questions the dossier holds. It has no tools. The gate in `gate.py` then
@@ -38,6 +41,8 @@ class RaisedQuestion(CleanModel):
     why: str = Field(default="", max_length=1000)
     # `web`, `person`, or `record`. The gate reads any other value as `web`.
     audience: str = Field(default=WEB, max_length=40)
+    # True when the question carries a specific of a person, named or not.
+    about_person: bool
 
 
 class RaiseAnswer(CleanModel):
@@ -101,6 +106,7 @@ async def raise_questions(
                 grounded_in=[p for p in q.grounded_in if isinstance(p, str)],
                 why=" ".join(q.why.split()),
                 audience=q.audience.strip().lower(),
+                about_person=q.about_person,
             )
             for q in answer.questions[:count]
         ]

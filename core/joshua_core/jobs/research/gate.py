@@ -30,6 +30,14 @@ one of these is true (`world_rule` names the rule in `route_reason`):
 - it holds `we`, `our`, or `us` as a word (`asks about us`). `US` in capitals
   is a country and does not count.
 
+The `raise` worker also judges each question: `about_person: true` says that
+it carries a specific of a person, named or not, such as a condition, a
+symptom, a diet, a body measurement, a mood, a finance, a location, or a
+relationship. Such a `web` or `person` question goes to
+`person` with `route_reason: about a person`, and a `record` one still goes to
+the record search, which stays inside the instance. The worker judges, and
+Python enforces: the rules above still apply when the worker says `false`.
+
 A topic in a person section (`jobs.research.person_sections`) is about
 people, so its questions go to `person` too, whatever the worker said, with
 `route_reason: person section`. A `record` question of such a topic still
@@ -90,6 +98,7 @@ RULE_OPENING = "asks what we did or will do"
 RULE_US = "asks about us"
 ROUTE_WORKER = "the raise worker asks a person"
 PERSON_SECTION = "person section"
+ABOUT_PERSON = "about a person"
 NO_RECORD = "no record found"
 ALREADY_ASKED = "already asked"
 DISMISSED_BEFORE = "dismissed before"
@@ -113,12 +122,14 @@ Embedder = Callable[[str], Awaitable[list[list[float]]]]
 
 @dataclass(frozen=True)
 class Candidate:
-    """A question to check, with its phrases, why it matters, and its audience."""
+    """A question to check, with its phrases, why it matters, its audience, and
+    whether the worker says it carries a specific of a person."""
 
     question: str
     grounded_in: list[str] = field(default_factory=list)
     why: str = ""
     audience: str = WEB
+    about_person: bool = False
 
 
 @dataclass(frozen=True)
@@ -443,6 +454,8 @@ class Gate:
             audience = PERSON
         elif self._person_section and audience != RECORD:
             audience, route_reason = PERSON, PERSON_SECTION
+        elif candidate.about_person and audience != RECORD:
+            audience, route_reason = PERSON, ABOUT_PERSON
         elif audience == PERSON:
             if not candidate.why.strip():
                 return Verdict(candidate, False, "a question for a person needs `why`")

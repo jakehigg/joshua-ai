@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from joshua_core.jobs.research.gate import (
+    ABOUT_PERSON,
     ALREADY_ASKED,
     DISMISSED_BEFORE,
     NO_RECORD,
@@ -496,3 +497,67 @@ async def test_a_person_section_still_allows_a_record_question(tmp_path: Path) -
     gate = _window_gate(tmp_path, near={f"wiki/{FEED_ENTRY}": 0.95}, person_section=True)
     verdict = await gate.check(Candidate(RECORD_Q, GOOD_PHRASES, audience=RECORD))
     assert (verdict.route, verdict.answered_by) == (RECORD, FEED_ENTRY)
+
+
+# -- about a person -----------------------------------------------------------
+
+PLAN_TERMS = ["Endurance plan", "endurance plan"]
+PLAN_BUNDLE = (
+    "## fitness/endurance-plan.md\n\n# Endurance plan\n\n"
+    "The plan is the river loop, 3 miles, at dawn. Alex trains on weekdays.\n"
+)
+PLAN_PHRASES = ["river loop", "3 miles"]
+# The five web questions of research run 11 that carried the health of a
+# person with no name, reworded for the test roster.
+RUN11 = [
+    "Which endurance plan pace on the river loop suits an adult with physician-diagnosed "
+    "hypertension?",
+    "How should weight-loss-focused endurance training fit an endurance plan of 3 miles?",
+    "What endurance plan intervals suit a max heart rate of 150 bpm on the river loop?",
+    "Does a ~603 kcal breakfast fuel an endurance plan of 3 miles at dawn?",
+    "Is 24.5 g of fiber a day enough for an endurance plan on the river loop?",
+]
+THING = "What shoe cushioning suits an endurance plan of 3 miles on a gravel river loop?"
+
+
+def _plan_gate(tmp_path: Path) -> Gate:
+    return Gate(
+        bundle_text=PLAN_BUNDLE,
+        terms=PLAN_TERMS,
+        existing=[],
+        store=FakeStore(),
+        dup_sim=0.85,
+        data_root=tmp_path,
+        embed=_embed,
+        people=["Alex", "alex", "Bo", "bo"],
+    )
+
+
+@pytest.mark.parametrize("question", RUN11)
+async def test_a_web_question_about_a_person_goes_to_a_person(
+    tmp_path: Path, question: str
+) -> None:
+    # No rule of the floor catches these: only the worker's judgement does.
+    assert world_rule(question, ["Alex", "Bo"]) == ""
+    candidate = Candidate(question, PLAN_PHRASES, audience=WEB, about_person=True)
+    verdict = await _plan_gate(tmp_path).check(candidate)
+    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, ABOUT_PERSON)
+
+
+async def test_a_thing_question_tagged_false_stays_web(tmp_path: Path) -> None:
+    verdict = await _plan_gate(tmp_path).check(Candidate(THING, PLAN_PHRASES, about_person=False))
+    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, WEB, "")
+
+
+async def test_the_name_rule_holds_when_the_worker_says_false(tmp_path: Path) -> None:
+    question = "Which endurance plan pace on the river loop suits Bo in the cold?"
+    verdict = await _plan_gate(tmp_path).check(
+        Candidate(question, PLAN_PHRASES, audience=WEB, about_person=False)
+    )
+    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, RULE_PERSON)
+
+
+async def test_a_person_question_about_a_person_needs_no_why(tmp_path: Path) -> None:
+    candidate = Candidate(RUN11[0], PLAN_PHRASES, why="", audience=PERSON, about_person=True)
+    verdict = await _plan_gate(tmp_path).check(candidate)
+    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, ABOUT_PERSON)

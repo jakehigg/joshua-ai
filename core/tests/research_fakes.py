@@ -86,7 +86,10 @@ def research_settings(extra: str = "") -> Any:
 
 def raised(*questions: tuple[str, list[str]]) -> dict[str, Any]:
     return {
-        "questions": [{"question": q, "grounded_in": g, "why": "It matters."} for q, g in questions]
+        "questions": [
+            {"question": q, "grounded_in": g, "why": "It matters.", "about_person": False}
+            for q, g in questions
+        ]
     }
 
 

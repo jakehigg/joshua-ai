@@ -38,6 +38,22 @@ Each question has one audience:
 - `record`: a question that our own pages and journal already answer. It is
   checked against them, and nobody gets it.
 
+A thing and a person: a `web` question may carry the specifics of the thing
+(the plant, the device, the material, the method) and never the specifics of
+a person, named or not: not a condition, a diagnosis, a symptom, a
+medication, a diet, a body measurement, a mood, a finance, a location, or a
+relationship. Set `about_person` to true for a question that carries such a
+detail of a person, and to false for a question about a thing only.
+
+- About a person, `about_person: true`: "What are the early symptoms of a
+  depressive episode for someone who stopped sleeping well in October?"
+- About a thing, `about_person: false`: "What does the NHS say about sleep
+  hygiene for adults?"
+
+A question with `about_person: true` never goes to the web. Ask it as
+`person` when a person here can answer it. When no person can answer it, do
+not raise it.
+
 Good questions:
 
 - `web`: "How often should a snake plant in a gritty mix, watered to runoff,
@@ -61,6 +77,9 @@ For each question, answer with:
 - `question`: one question, 20 to 300 characters, that names the page title or
   one of its other names and ends with a question mark.
 - `audience`: `web`, `person`, or `record`.
+- `about_person`: true when the question carries a specific of a person,
+  named or not, by the rule above; else false. It is required for every
+  question.
 - `grounded_in`: for every audience, two or more short phrases, each copied
   exactly from the bundle, that make the question specific to our situation.
   Copy each phrase word for word, 3 to 160 characters. Do not change,

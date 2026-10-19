@@ -4,13 +4,14 @@ network, no database."""
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
 import pytest
 from jobs_fakes import CONFIG, fixed_clock
 from joshua_core.jobs.research.dossier import Question, load_dossier, new_dossier, save_dossier
-from joshua_core.jobs.research.gate import PERSON_SECTION
+from joshua_core.jobs.research.gate import ABOUT_PERSON, PERSON_SECTION
 from joshua_core.jobs.research.job import ResearchJob
 from joshua_core.jobs.research.questions import load_questions
 from joshua_core.jobs.runner import JobArgsError
@@ -24,7 +25,6 @@ from research_fakes import (
     FakeStore,
     FakeWorkers,
     build_research_wiki,
-    word_vector,
 )
 
 ROSTER = CONFIG + "  - id: bo\n    name: Bo\n"
@@ -39,15 +39,28 @@ SHOES = "What shoe cushioning suits a walking plan of 3 miles on a gravel river 
 LAYERS = "Which winter layers suit a walking plan on the river loop at 3 miles at dawn?"
 
 
+def _vector(text: str) -> list[float]:
+    """One dimension for each text, so no two texts are near."""
+    vec = [0.0] * 1024
+    vec[int(hashlib.sha256(text.encode()).hexdigest(), 16) % 1024] = 1.0
+    return vec
+
+
 @pytest.fixture(autouse=True)
 def fake_embed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(embed_module, "embed", lambda text, model="": word_vector(text))
+    monkeypatch.setattr(embed_module, "embed", lambda text, model="": _vector(text))
 
 
-def raised(*questions: str, audience: str = "web") -> dict[str, Any]:
+def raised(*questions: str, audience: str = "web", about_person: bool = False) -> dict[str, Any]:
     return {
         "questions": [
-            {"question": q, "grounded_in": PHRASES, "why": "", "audience": audience}
+            {
+                "question": q,
+                "grounded_in": PHRASES,
+                "why": "",
+                "audience": audience,
+                "about_person": about_person,
+            }
             for q in questions
         ]
     }
@@ -133,3 +146,45 @@ async def test_a_topic_outside_a_person_section_keeps_its_web_questions(tmp_path
     dossier = load_dossier("fitness/walking-plan.md", h.data)
     assert dossier is not None and [q.question for q in dossier.questions] == [SHOES]
     assert "Person section" not in _section(report, "Topic")
+
+
+# -- about a person -----------------------------------------------------------
+
+PLAN = "fitness/endurance-plan.md"
+PLAN_PAGE = (
+    "# Endurance plan\n\n"
+    "The plan is the river loop, 3 miles, at dawn, on a gravel path.\n"
+    "Alex trains on weekdays. Bo joins on Sundays.\n"
+)
+# The five web questions of research run 11 that carried the health of a
+# person with no name, reworded for the test roster.
+RUN11 = [
+    "Which endurance plan pace on the river loop suits an adult with physician-diagnosed "
+    "hypertension?",
+    "How should weight-loss-focused endurance training fit an endurance plan of 3 miles?",
+    "What endurance plan intervals suit a max heart rate of 150 bpm on the river loop?",
+    "Does a ~603 kcal breakfast fuel an endurance plan of 3 miles at dawn?",
+    "Is 24.5 g of fiber a day enough for an endurance plan on the river loop?",
+]
+THING = "What shoe cushioning suits an endurance plan of 3 miles on a gravel river loop?"
+
+
+async def test_the_run_11_questions_never_reach_the_web(tmp_path: Path) -> None:
+    answer = raised(*RUN11, about_person=True)
+    answer["questions"].append(raised(THING)["questions"][0])
+    h = Harness(tmp_path / "data", {"fitness.md": "# Fitness\n", PLAN: PLAN_PAGE}, answer)
+    report = await h.run(mode="plan", topic=PLAN)
+    dossier = load_dossier(PLAN, h.data)
+    assert dossier is not None and [q.question for q in dossier.questions] == [THING]
+    pages = {p.page.question: p.page for p in load_questions(h.data, PLAN)}
+    dropped = {r["question"] for r in report.data["rejected"]}
+    dropped |= {r["question"] for r in report.data["asked_before"]}
+    for question in RUN11:
+        assert (question in pages) != (question in dropped), question
+    assert sorted(pages) == sorted(RUN11)
+    for page in pages.values():
+        assert page.route_reason == ABOUT_PERSON
+        assert (
+            page.why == "Only somebody here knows this: the web cannot answer a question about us."
+        )
+    assert f"; {ABOUT_PERSON})" in _section(report, "For a person")

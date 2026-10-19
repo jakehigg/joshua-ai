@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from joshua_core.engine.usage import Usage
 from joshua_core.jobs.research.prompts import RAISE_PROMPT
-from joshua_core.jobs.research.raise_ import raise_questions, raise_text
+from joshua_core.jobs.research.raise_ import RaiseAnswer, raise_questions, raise_text
 from research_fakes import GROUNDED, GROUNDED_PHRASES, FakeWorkers, raised
 
 
@@ -85,9 +85,15 @@ def test_the_prompt_sends_no_question_to_anybody() -> None:
 async def test_raise_reads_the_audience() -> None:
     answer = {
         "questions": [
-            {"question": "A?", "grounded_in": [], "why": "w", "audience": " Person "},
-            {"question": "B?", "grounded_in": [], "audience": "record"},
-            {"question": "C?", "grounded_in": []},
+            {
+                "question": "A?",
+                "grounded_in": [],
+                "why": "w",
+                "audience": " Person ",
+                "about_person": True,
+            },
+            {"question": "B?", "grounded_in": [], "audience": "record", "about_person": False},
+            {"question": "C?", "grounded_in": [], "about_person": False},
         ]
     }
     got = await raise_questions(
@@ -101,3 +107,50 @@ async def test_raise_reads_the_audience() -> None:
     )
     assert got.candidates is not None
     assert [c.audience for c in got.candidates] == ["person", "record", "web"]
+    assert [c.about_person for c in got.candidates] == [True, False, False]
+
+
+async def test_about_person_is_required() -> None:
+    answer = {"questions": [{"question": "A?", "grounded_in": [], "audience": "web"}]}
+    got = await raise_questions(
+        bundle_text="",
+        title="t",
+        aliases=[],
+        existing=[],
+        count=1,
+        model=None,
+        runner=FakeWorkers(raise_answer=answer),
+    )
+    assert got.candidates is None
+    assert "about_person" in RaiseAnswer.model_json_schema()["$defs"]["RaisedQuestion"]["required"]
+
+
+def test_the_prompt_has_the_person_rule() -> None:
+    flat = " ".join(RAISE_PROMPT.split())
+    assert (
+        "a `web` question may carry the specifics of the thing (the plant, the device, the "
+        "material, the method) and never the specifics of a person, named or not" in flat
+    )
+    for detail in (
+        "a condition",
+        "a diagnosis",
+        "a symptom",
+        "a medication",
+        "a diet",
+        "a body measurement",
+        "a mood",
+        "a finance",
+        "a location",
+        "or a relationship",
+    ):
+        assert detail in flat
+    assert (
+        'About a person, `about_person: true`: "What are the early symptoms of a depressive '
+        'episode for someone who stopped sleeping well in October?"' in flat
+    )
+    assert (
+        'About a thing, `about_person: false`: "What does the NHS say about sleep hygiene '
+        'for adults?"' in flat
+    )
+    assert "Ask it as `person` when a person here can answer it" in flat
+    assert "When no person can answer it, do not raise it" in flat
