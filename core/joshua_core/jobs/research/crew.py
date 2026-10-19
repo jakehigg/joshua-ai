@@ -31,12 +31,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from joshua_shared.config import Internet as InternetConfig
 from joshua_shared.config import JobsResearch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from joshua_core.engine import internet
 from joshua_core.engine.ephemeral import Runner, run_worker
@@ -64,16 +64,22 @@ _SECOND_LEVEL = frozenset({"co", "ac", "gov", "edu", "org", "com"})
 Trust = Literal["primary", "secondary", "weak"]
 
 
+ANSWER_SHORT_CHARS = 160
+
+
 class EditorSource(BaseModel):
     url: str = Field(max_length=2000)
     title: str = Field(default="", max_length=300)
     trust: Trust
-    used_for: str = Field(default="", max_length=500)
 
 
 class EditorAnswer(BaseModel):
+    """The answer of the editor. The model gets `EDITOR_SCHEMA`, and this model
+    checks the limits after it. A longer `answer_short` is cut, because the page
+    keeps only its first line."""
+
     answer: str = Field(max_length=20000)
-    answer_short: str = Field(max_length=160)
+    answer_short: str = Field(max_length=ANSWER_SHORT_CHARS)
     local_notes: str = Field(default="", max_length=6000)
     evidence: list[str] = Field(default_factory=list, max_length=30)
     disagreements: str = Field(default="", max_length=6000)
@@ -81,6 +87,53 @@ class EditorAnswer(BaseModel):
     confidence: Literal["low", "medium", "high"]
     verdict: Literal["publish", "hold"]
     reason: str = Field(default="", max_length=1000)
+
+    @field_validator("answer_short", mode="before")
+    @classmethod
+    def _cut_short(cls, value: object) -> object:
+        if isinstance(value, str) and len(value) > ANSWER_SHORT_CHARS:
+            return value[: ANSWER_SHORT_CHARS - 1].rstrip() + "…"
+        return value
+
+
+def _string() -> dict[str, str]:
+    return {"type": "string"}
+
+
+def _enum(*values: str) -> dict[str, Any]:
+    return {"type": "string", "enum": list(values)}
+
+
+# The schema the editor is asked for. It is flat: no reference, no length
+# limit, and an enum only for `trust`, `confidence`, and `verdict`. Each try
+# that the validator of the CLI refuses costs a turn, so a simple schema leaves
+# the turns for the answer. `EditorAnswer` checks the limits after it.
+EDITOR_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "answer": _string(),
+        "answer_short": _string(),
+        "local_notes": _string(),
+        "evidence": {"type": "array", "items": _string()},
+        "disagreements": _string(),
+        "sources": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "url": _string(),
+                    "title": _string(),
+                    "trust": _enum("primary", "secondary", "weak"),
+                },
+                "required": ["url", "trust"],
+            },
+        },
+        "confidence": _enum("low", "medium", "high"),
+        "verdict": _enum("publish", "hold"),
+        "reason": _string(),
+    },
+    "required": ["answer", "answer_short", "sources", "confidence", "verdict"],
+}
 
 
 # -- domains -------------------------------------------------------------------
@@ -299,6 +352,7 @@ async def research_question(
         system_prompt=EDITOR_PROMPT,
         user_text=editor_text(question, groundings, draft, challenge, research_settings),
         answer=EditorAnswer,
+        schema=EDITOR_SCHEMA,
         model=editor_model,
         timeout_s=EDITOR_TIMEOUT_S,
         runner=editor_runner,

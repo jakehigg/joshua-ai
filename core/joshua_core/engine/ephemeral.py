@@ -66,12 +66,14 @@ async def run_worker[T: BaseModel](
     hooks: dict[str, Any] | None = None,
     usage_out: list[Usage] | None = None,
     stats_out: WorkerStats | None = None,
+    schema: dict[str, Any] | None = None,
 ) -> T | None:
     """Run one worker and return its answer, or `None`.
 
     `answer` is the Pydantic model the reply must match; its JSON schema is what
-    the model is asked for. `image` is `(bytes, media type)` and `document` is a
-    PDF. Give one or neither.
+    the model is asked for, unless `schema` gives a simpler one. The reply is
+    then validated against `answer` all the same. `image` is
+    `(bytes, media type)` and `document` is a PDF. Give one or neither.
 
     A worker with no `tools` answers in one turn from what it was given. A
     worker with `tools` may take up to `max_turns` to search and read first, and
@@ -88,6 +90,7 @@ async def run_worker[T: BaseModel](
     that called it must continue.
     """
     started = monotonic()
+    shape = answer.model_json_schema() if schema is None else schema
     extra: dict[str, Any] = {} if usage_out is None else {"usage_out": usage_out}
     try:
         if tools:
@@ -95,7 +98,7 @@ async def run_worker[T: BaseModel](
             raw = await call(
                 system_prompt=system_prompt,
                 user_text=user_text,
-                schema=answer.model_json_schema(),
+                schema=shape,
                 model=model,
                 timeout_s=timeout_s,
                 tools=tools,
@@ -109,7 +112,7 @@ async def run_worker[T: BaseModel](
             raw = await call(
                 system_prompt=system_prompt,
                 user_text=user_text,
-                schema=answer.model_json_schema(),
+                schema=shape,
                 model=model,
                 timeout_s=timeout_s,
                 image=image,

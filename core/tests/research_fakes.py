@@ -110,7 +110,7 @@ def editor(*sources: tuple[str, str], **overrides: Any) -> dict[str, Any]:
         "evidence": [f"The extension service says 4 weeks ([source]({PRIMARY}))."],
         "disagreements": "One page says every 6 weeks. [[secret-page]]",
         "sources": [
-            {"url": url, "title": f"Title {i}", "trust": trust, "used_for": "the interval"}
+            {"url": url, "title": f"Title {i}", "trust": trust}
             for i, (url, trust) in enumerate(sources)
         ],
         "confidence": "high",

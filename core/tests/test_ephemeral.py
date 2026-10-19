@@ -166,3 +166,44 @@ async def test_the_worker_sees_no_message_of_the_conversation() -> None:
         "image",
         "document",
     }
+
+
+async def test_a_simpler_schema_goes_to_the_model_and_the_model_still_validates() -> None:
+    """The runner gets the schema the caller gave, and the answer still has to
+    match the Pydantic model."""
+    simple = {"type": "object", "properties": {"kind": {"type": "string"}}}
+    run, calls = _runner({"kind": "receipt", "count": "not a number"})
+
+    answer = await run_worker(
+        name="w",
+        system_prompt="s",
+        user_text="u",
+        answer=Answer,
+        model="m",
+        timeout_s=5,
+        runner=run,
+        schema=simple,
+    )
+
+    assert answer is None
+    assert calls[0]["schema"] == simple
+
+
+async def test_a_simpler_schema_also_reaches_a_worker_with_tools() -> None:
+    simple = {"type": "object"}
+    run, calls = _runner({"kind": "page"})
+
+    answer = await run_worker(
+        name="w",
+        system_prompt="s",
+        user_text="u",
+        answer=Answer,
+        model="m",
+        timeout_s=5,
+        runner=run,
+        tools=["WebSearch"],
+        schema=simple,
+    )
+
+    assert answer == Answer(kind="page")
+    assert calls[0]["schema"] == simple

@@ -372,5 +372,101 @@ async def test_run_structured_allows_the_structured_output_turns(monkeypatch):
     )
 
     assert answer == {"ok": True}
-    assert built[0]["max_turns"] == agent.STRUCTURED_MAX_TURNS == 3
+    assert built[0]["max_turns"] == agent.STRUCTURED_MAX_TURNS == 6
     assert built[0]["output_format"] == {"type": "json_schema", "schema": {}}
+
+
+# ── the validator of the structured answer ───────────────────────────────────
+
+
+class ToolUse:
+    """The SDK `ToolUseBlock`."""
+
+    def __init__(self, id, name):
+        self.id = id
+        self.name = name
+        self.input = {}
+
+
+class ToolResult:
+    """The SDK `ToolResultBlock`."""
+
+    def __init__(self, tool_use_id, content, is_error=None):
+        self.tool_use_id = tool_use_id
+        self.content = content
+        self.is_error = is_error
+
+
+class Message:
+    """An SDK `AssistantMessage` or `UserMessage`: blocks of content."""
+
+    def __init__(self, *blocks):
+        self.content = list(blocks)
+
+
+def _refusals(caplog):
+    return [
+        r.msg
+        for r in caplog.records
+        if isinstance(r.msg, dict)
+        and r.msg.get("message") == "structured answer refused by the validator"
+    ]
+
+
+async def test_a_refused_structured_answer_logs_the_validator_message(caplog):
+    """The model tries again after a refusal, and the log says why it had to."""
+    refusal = "Output does not match required schema: sources.0.trust: " + "x" * 400
+    client = StreamClient(
+        [
+            Message(ToolUse("t1", agent.STRUCTURED_TOOL)),
+            Message(ToolResult("t1", refusal, is_error=True)),
+            Message(ToolUse("t2", agent.STRUCTURED_TOOL)),
+            Message(ToolResult("t2", "Structured output provided successfully")),
+            ResultMessage(structured={"ok": True}, num_turns=4),
+        ]
+    )
+
+    with caplog.at_level("WARNING"):
+        answer = await agent._structured_turn(client, "u", None, None)
+
+    assert answer == {"ok": True}
+    assert _refusals(caplog) == [
+        {"message": "structured answer refused by the validator", "detail": refusal[:300]}
+    ]
+
+
+async def test_a_refusal_in_a_list_of_text_blocks_without_the_error_flag_is_logged(caplog):
+    client = StreamClient(
+        [
+            Message(ToolUse("t1", agent.STRUCTURED_TOOL)),
+            Message(ToolResult("t1", [{"type": "text", "text": "Validation failed: answer"}])),
+            ResultMessage(subtype="error_max_turns", num_turns=6),
+        ]
+    )
+
+    with caplog.at_level("WARNING"):
+        assert await agent._structured_turn(client, "u", None, None) is None
+
+    assert [r["detail"] for r in _refusals(caplog)] == ["Validation failed: answer"]
+
+
+async def test_a_result_of_another_tool_is_not_a_refusal(caplog):
+    """Only the result of a `StructuredOutput` call can tell of the validator."""
+    client = StreamClient(
+        [
+            Message(ToolUse("t1", "WebSearch")),
+            Message(ToolResult("t1", "invalid schema of the page", is_error=True)),
+            Message(ToolResult("t9", "invalid", is_error=True), "text"),
+            ResultMessage(structured={"ok": True}),
+        ]
+    )
+
+    with caplog.at_level("WARNING"):
+        assert await agent._structured_turn(client, "u", None, None) == {"ok": True}
+
+    assert _refusals(caplog) == []
+
+
+def test_the_text_of_a_tool_result_with_no_content_is_empty():
+    assert agent._result_text(None) == ""
+    assert agent._result_text([{"type": "image"}, "x"]) == ""

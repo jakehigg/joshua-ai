@@ -255,6 +255,57 @@ async def test_a_source_the_lookup_never_returned_is_not_given_to_the_editor() -
     assert UNGIVEN not in workers.calls[0][1]
 
 
+def _keys(value: Any) -> set[str]:
+    """Every key of a JSON value, at any depth."""
+    if isinstance(value, dict):
+        return set(value) | {k for v in value.values() for k in _keys(v)}
+    if isinstance(value, list):
+        return {k for v in value for k in _keys(v)}
+    return set()
+
+
+def test_the_editor_schema_is_flat_and_has_no_limit() -> None:
+    keys = _keys(crew.EDITOR_SCHEMA)
+    assert not keys & {"$ref", "$defs", "maxLength", "maxItems", "used_for"}
+    item = crew.EDITOR_SCHEMA["properties"]["sources"]["items"]
+    assert set(item["properties"]) == {"url", "title", "trust"}
+    enums = {name for name, prop in crew.EDITOR_SCHEMA["properties"].items() if "enum" in prop}
+    assert enums == {"confidence", "verdict"}
+    assert crew.EDITOR_SCHEMA["properties"]["evidence"]["items"] == {"type": "string"}
+
+
+async def test_the_editor_gets_the_flat_schema() -> None:
+    workers = FakeWorkers()
+    schemas: list[Any] = []
+
+    async def editor_runner(**kwargs: Any) -> Any:
+        schemas.append(kwargs["schema"])
+        return await workers(**kwargs)
+
+    result = await crew.research_question(
+        GROUNDED,
+        GROUNDINGS,
+        internet_settings=SETTINGS.internet,
+        research_settings=CFG,
+        editor_model=None,
+        ledger=UsageLedger(),
+        internet_runner=FakeInternet(),
+        editor_runner=editor_runner,
+    )
+    assert result.publish
+    assert schemas == [crew.EDITOR_SCHEMA]
+
+
+def test_the_model_still_checks_the_limits_and_cuts_the_short_answer() -> None:
+    pair = ((PRIMARY, "primary"), (SECONDARY, "secondary"))
+    cut = _answer(*pair, answer_short="x" * 400)
+    assert len(cut.answer_short) == crew.ANSWER_SHORT_CHARS and cut.answer_short.endswith("…")
+    with pytest.raises(ValueError):
+        _answer(*pair, evidence=["e"] * 31)
+    with pytest.raises(ValueError):
+        _answer(*pair, sources=[{"url": PRIMARY, "trust": "excellent"}])
+
+
 def test_the_challenge_text_fits_the_lookup() -> None:
     text = challenge_text(GROUNDED, "x" * 9000)
     assert len(text) <= 2000

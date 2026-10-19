@@ -82,7 +82,8 @@ How to research this:
   university or an extension service, the original study.
 - Use at least two independent sources, from different sites.
 - Give the numbers: the amounts, the intervals, the temperatures, the dates.
-- Say where good sources disagree, and what each one says."""
+- Say where good sources disagree, and what each one says.
+- Put every page you used in `sources`, as URLs, not only in the answer text."""
 
 CHALLENGE_BRIEF = """You check an answer that somebody else found. Find the strongest evidence
 that the draft answer below is wrong, outdated, or incomplete, or that a more
@@ -124,8 +125,7 @@ Write the page:
 - `disagreements`: where good sources disagree, and what the challenge found.
   An empty string when there is none.
 - `sources`: each source you used, copied exactly from the draft or the
-  challenge, with `url`, `title`, `trust`, and `used_for` (what it supports).
-  Use no other URL.
+  challenge, with `url`, `title`, and `trust`. Use no other URL.
 - `confidence`: `high` when two or more good, independent sources agree and
   the challenge found nothing that overturns them; `low` when the evidence is
   thin or the sources conflict; `medium` otherwise.

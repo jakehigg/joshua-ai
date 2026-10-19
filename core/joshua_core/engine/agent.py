@@ -63,13 +63,22 @@ _NO_TOOLS: list[str] = []
 WORKER_TOOLS: frozenset[str] = frozenset({"WebSearch", "WebFetch"})
 
 # The turn limit of a structured call. The CLI delivers the structured answer
-# through a `StructuredOutput` tool call, and that call counts as a turn. At 1
-# the run can stop with `error_max_turns` before the answer arrives, and the
-# model sometimes calls the tool twice, so 3 leaves room for both.
-STRUCTURED_MAX_TURNS = 3
+# through a `StructuredOutput` tool call, and that call counts as a turn. When
+# the answer does not match the schema, the validator of the CLI refuses it and
+# the model tries again, and each try is a turn. A large schema can need some
+# tries, so 6 leaves room for them.
+STRUCTURED_MAX_TURNS = 6
+
+# The name of the tool that the CLI gives the model for a structured answer.
+STRUCTURED_TOOL = "StructuredOutput"
+# The words of a tool result that tell that the validator refused the answer.
+_REFUSAL_WORDS = ("does not match", "validation", "invalid", "schema")
+# How much of the message of the validator goes in the log line.
+_REFUSAL_DETAIL_CHARS = 300
 
 __all__ = [
     "STRUCTURED_MAX_TURNS",
+    "STRUCTURED_TOOL",
     "AgentSession",
     "TurnResult",
     "Usage",
@@ -438,11 +447,13 @@ async def _structured_turn(
         }
 
     meter = UsageMeter()
+    structured_calls: set[str] = set()
     try:
         await client.connect()
         await client.query(_one_message())
         async for msg in client.receive_response():
             meter.note(msg)
+            _note_refusal(msg, structured_calls)
             answer = _structured_answer(msg)
             if type(msg).__name__ == "ResultMessage":
                 subtype = getattr(msg, "subtype", None)
@@ -461,6 +472,51 @@ async def _structured_turn(
         return None
     finally:
         meter.flush(usage_out)
+
+
+def _note_refusal(msg: Any, structured_calls: set[str]) -> None:
+    """Log one warning for each `StructuredOutput` call that the validator refused.
+
+    `structured_calls` holds the ids of the `StructuredOutput` calls seen so
+    far. A tool result for one of them that is an error, or whose text tells of
+    a failed validation, is a refusal. The text is the message of the
+    validator of the CLI, not the content of a page, so its start goes in the
+    log line.
+    """
+    for block in getattr(msg, "content", None) or []:
+        if isinstance(block, (str, dict)):
+            continue
+        if getattr(block, "name", None) == STRUCTURED_TOOL:
+            block_id = getattr(block, "id", None)
+            if isinstance(block_id, str):
+                structured_calls.add(block_id)
+            continue
+        if getattr(block, "tool_use_id", None) not in structured_calls:
+            continue
+        text = _result_text(getattr(block, "content", None))
+        if getattr(block, "is_error", False) or any(
+            word in text.lower() for word in _REFUSAL_WORDS
+        ):
+            logger.warning(
+                {
+                    "message": "structured answer refused by the validator",
+                    "detail": text[:_REFUSAL_DETAIL_CHARS],
+                }
+            )
+
+
+def _result_text(content: Any) -> str:
+    """The text of a tool result, which is a string or a list of content blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            str(item.get("text", ""))
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        ]
+        return "\n".join(p for p in parts if p)
+    return ""
 
 
 def _structured_answer(msg: Any) -> dict[str, Any] | None:
