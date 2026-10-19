@@ -57,7 +57,11 @@ def build_job_runner(
     settings: JoshuaConfig,
     data_dir: Path | str,
     lock: asyncio.Lock,
+    clock: Clock | None = None,
 ) -> JobRunner:
-    """The runner with every built-in job. `lock` is the nightly reflection's lock."""
+    """The runner with every built-in job. `lock` is the nightly reflection's lock.
+    `clock` defaults to the current UTC time."""
     jobs: list[Job] = [BundleJob(store=store, settings=settings, data_dir=data_dir)]
-    return JobRunner(repo=repo, settings=settings, data_dir=data_dir, jobs=jobs, lock=lock)
+    return JobRunner(
+        repo=repo, settings=settings, data_dir=data_dir, jobs=jobs, lock=lock, clock=clock
+    )

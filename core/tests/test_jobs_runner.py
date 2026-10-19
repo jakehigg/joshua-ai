@@ -300,6 +300,7 @@ async def test_the_bundle_job_reports_the_paths(data_root: Path) -> None:
         settings=make_settings(),
         data_dir=data_root,
         lock=asyncio.Lock(),
+        clock=fixed_clock(),
     )
     assert runner.names == ["bundle"]
     assert runner.has("bundle")
