@@ -38,6 +38,7 @@ from joshua_shared.config import CURATOR_ACTIONS, JoshuaConfig
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.ephemeral import Runner
+from joshua_core.engine.usage import Usage
 from joshua_core.jobs.bundle import BundleStore, build_bundle
 from joshua_core.jobs.curator import scan, workers
 from joshua_core.jobs.curator.apply import ApplyRefused, Workspace, apply_patch, finds_once
@@ -287,9 +288,16 @@ class CuratorJob(Job):
             if not entries:
                 continue
             run.budget.spend()
+            used: list[Usage] = []
             got = await workers.refresh(
-                topic.path, text, entries, model=self._model(), runner=self._runner
+                topic.path,
+                text,
+                entries,
+                model=self._model(),
+                runner=self._runner,
+                usage_out=used,
             )
+            run.budget.usage.add("refresh", used)
             if got.answer is None:
                 run.incomplete.add(topic.path)
                 self._skip(run, "refresh", f"`{topic.path}`", got.outcome)
@@ -334,9 +342,16 @@ class CuratorJob(Job):
                 run.incomplete.add(topic.path)
                 run.unsent += 1
                 continue
+            used: list[Usage] = []
             got = await workers.place(
-                topic.path, texts[topic.path], sections, model=self._model(), runner=self._runner
+                topic.path,
+                texts[topic.path],
+                sections,
+                model=self._model(),
+                runner=self._runner,
+                usage_out=used,
             )
+            run.budget.usage.add("place", used)
             if got.answer is None:
                 run.incomplete.add(topic.path)
                 self._skip(run, "place", f"`{topic.path}`", got.outcome)
@@ -398,12 +413,15 @@ class CuratorJob(Job):
                 run.incomplete |= members
                 run.unsent += 1
                 continue
+            used: list[Usage] = []
             got = await workers.compare(
                 (pair.a, texts[pair.a]),
                 (pair.b, texts[pair.b]),
                 model=self._model(),
                 runner=self._runner,
+                usage_out=used,
             )
+            run.budget.usage.add("compare", used)
             if got.answer is None:
                 run.incomplete |= members
                 self._skip(run, "compare", f"`{pair.a}` and `{pair.b}`", got.outcome)
@@ -616,9 +634,11 @@ class CuratorJob(Job):
             summary=summary,
             sections=sections,
             calls=run.budget.calls,
+            tokens=run.budget.usage.tokens,
             written=ws.paths() if ws is not None else [],
             data={
                 "apply": run.apply,
+                "usage": run.budget.usage.as_data(),
                 "counts": counts,
                 "findings": {
                     "applied_a": [f.id for f in done_a],

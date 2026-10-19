@@ -31,6 +31,11 @@ with the images and the packaged chart, are at
   `people/`, `joshua-docs/`, or the body of a journal entry. See
   [docs/jobs.md](jobs.md#the-curator).
 
+- **A job run counts its tokens.** The `tokens` of a run row, and of its
+  journal entry, is now the sum of the input, output, and cache tokens of each
+  worker call. `report.data.usage` gives the calls and the tokens of each
+  worker. A curator run showed 0 tokens before.
+
 - **A wiki commit no longer fails on a path in the trash.** A commit that
   listed a file in `wiki/.trash/`, or a removed file that git never tracked,
   recorded nothing. Core now leaves such a path out of the commit.

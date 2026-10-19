@@ -46,6 +46,16 @@ Each run has one row in `job_run`:
 
 The table keeps every run. The row is the record that survives a restart.
 
+### Tokens
+
+The `tokens` of a run is the sum, over each worker call of the run, of the
+input tokens, the output tokens, the cache read tokens, and the cache write
+tokens. A call that fails before the model answers counts no tokens.
+`report.data.usage` holds `{"<worker>": {"calls": n, "tokens": m}}` for each
+worker of the run. The seam for a program that reads the usage is
+`joshua_core.engine.usage`: `Usage`, `UsageLedger`, and the `usage_out`
+argument of each worker call.
+
 ### The journal entry
 
 A run that is not a dry run writes its report at
@@ -263,8 +273,8 @@ A worker answer is refused when a `replace` is longer than 2 000 characters,
 when a patch has more than 12 pairs, or when a `place` answer names a section
 that is not in the map.
 
-The `tokens` count of a curator run is 0: the worker call does not return
-the tokens it used. `calls` counts each worker call.
+`calls` counts each worker call, and `tokens` counts the tokens of these
+calls. `report.data.usage` gives the calls and the tokens of each worker.
 
 ### The tiers
 

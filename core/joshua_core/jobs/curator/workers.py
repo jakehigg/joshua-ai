@@ -6,7 +6,9 @@ each has a 90-second timeout. `ask_worker` runs one and says what happened:
 answer did not match the schema or a check of this module). Only an answered
 call can change the wiki.
 
-`Budget` counts the calls of one run against `jobs.curator.max_worker_calls`.
+`Budget` counts the calls of one run against `jobs.curator.max_worker_calls`,
+and its `usage` ledger sums the tokens of each worker. A worker function takes
+`usage_out`, a list that the call appends its tokens to.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from joshua_shared.config import JoshuaConfig
 from pydantic import BaseModel, Field
 
 from joshua_core.engine.ephemeral import Runner, run_worker
+from joshua_core.engine.usage import Usage, UsageLedger
 from joshua_core.jobs.curator.prompts import COMPARE_PROMPT, PLACE_PROMPT, REFRESH_PROMPT
 from joshua_core.jobs.curator.scan import Section, render_section_map
 
@@ -39,11 +42,12 @@ def worker_model(settings: JoshuaConfig) -> str | None:
 
 
 class Budget:
-    """The worker calls one run may still make."""
+    """The worker calls one run may still make, and the tokens they used."""
 
     def __init__(self, limit: int) -> None:
         self.limit = max(0, limit)
         self.calls = 0
+        self.usage = UsageLedger()
 
     @property
     def left(self) -> int:
@@ -114,8 +118,10 @@ async def ask_worker[T: BaseModel](
     model: str | None,
     runner: Runner | None = None,
     check: Callable[[T], bool] | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> WorkerResult[T]:
-    """Run one tool-less worker. `check` refuses an answer that the schema allows."""
+    """Run one tool-less worker. `check` refuses an answer that the schema allows.
+    `usage_out` gets the tokens of the call."""
     call = runner or _default_runner()
     seen: dict[str, Any] = {}
 
@@ -132,6 +138,7 @@ async def ask_worker[T: BaseModel](
         model=model,
         timeout_s=TIMEOUT_S,
         runner=recording,
+        usage_out=usage_out,
     )
     if got is None:
         return WorkerResult(None, "refused" if seen.get("raw") is not None else "no-answer")
@@ -167,6 +174,7 @@ async def place(
     *,
     model: str | None,
     runner: Runner | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> WorkerResult[PlaceAnswer]:
     """Ask where one page belongs. The section must be one of `sections`, or `none`."""
     names = {s.name for s in sections} | {NO_SECTION}
@@ -190,6 +198,7 @@ async def place(
         model=model,
         runner=runner,
         check=check,
+        usage_out=usage_out,
     )
 
 
@@ -199,6 +208,7 @@ async def compare(
     *,
     model: str | None,
     runner: Runner | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> WorkerResult[CompareAnswer]:
     """Compare two pages, each `(path, text)`. Page `a` is the first."""
     user_text = _page_block("page_a", a[0], a[1]) + "\n\n" + _page_block("page_b", b[0], b[1])
@@ -209,6 +219,7 @@ async def compare(
         answer=CompareAnswer,
         model=model,
         runner=runner,
+        usage_out=usage_out,
     )
 
 
@@ -219,6 +230,7 @@ async def refresh(
     *,
     model: str | None,
     runner: Runner | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> WorkerResult[RefreshAnswer]:
     """Check a page against its journal entries, each `(path, text)`."""
     blocks = "\n\n".join(_page_block("entry", p, t) for p, t in entries)
@@ -230,4 +242,5 @@ async def refresh(
         answer=RefreshAnswer,
         model=model,
         runner=runner,
+        usage_out=usage_out,
     )

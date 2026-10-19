@@ -28,6 +28,8 @@ from typing import Any
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, ValidationError
 
+from joshua_core.engine.usage import Usage
+
 logger = get_logger("engine.ephemeral")
 
 # The call the worker makes. The real one is `agent.run_structured`; a test
@@ -61,6 +63,7 @@ async def run_worker[T: BaseModel](
     tools: list[str] | None = None,
     max_turns: int = 1,
     hooks: dict[str, Any] | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> T | None:
     """Run one worker and return its answer, or `None`.
 
@@ -73,10 +76,15 @@ async def run_worker[T: BaseModel](
     `hooks` gates what a tool may do. `agent.build_worker_options` decides which
     tools a worker may hold at all.
 
+    When `usage_out` is a list, the runner gets it and appends the tokens of
+    the call to it, so the caller learns what the call cost. A runner gets the
+    argument only when the caller gives one.
+
     This never raises. Every failure is a warning and a `None`, because the turn
     that called it must continue.
     """
     started = monotonic()
+    extra: dict[str, Any] = {} if usage_out is None else {"usage_out": usage_out}
     try:
         if tools:
             call = runner or _default_tool_runner()
@@ -89,6 +97,7 @@ async def run_worker[T: BaseModel](
                 tools=tools,
                 max_turns=max_turns,
                 hooks=hooks,
+                **extra,
             )
         else:
             call = runner or _default_runner()
@@ -100,6 +109,7 @@ async def run_worker[T: BaseModel](
                 timeout_s=timeout_s,
                 image=image,
                 document=document,
+                **extra,
             )
     except Exception as exc:  # noqa: BLE001 — a worker never breaks its caller
         logger.warning({"message": "worker call failed", "worker": name, "error": str(exc)})
