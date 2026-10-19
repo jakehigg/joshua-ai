@@ -151,8 +151,30 @@ with the images and the packaged chart, are at
   answer.** The CLI delivers the answer as a tool call, and that call counts
   as a turn. With a limit of one turn, a call could stop before the answer
   arrived: 20 of 40 curator calls on a cluster gave no answer. The limit is
-  now 3, and a result with no answer logs one warning with its subtype and
-  turn count.
+  now 6, because an answer that does not match the schema is refused and the
+  model tries again, and each try is a turn. A result with no answer logs one
+  warning with its subtype and turn count. Each refused try logs the warning
+  `structured answer refused by the validator`, with the first 300
+  characters of the message of the validator in `detail`.
+
+- **The editor of the researcher gets a simpler schema.** The schema has no
+  length limits, and each source has only `url`, `title`, and `trust`. The
+  `used_for` field is gone: the page did not show it. The limits are still
+  checked after the answer arrives, and a short answer of more than 160
+  characters is cut.
+
+- **A held question keeps its lookups.** When the editor holds a question or
+  gives no answer, the dossier keeps the answer of the researcher and of the
+  challenger, and the day of the lookups. The next run sends the question to
+  the editor alone, while the lookups are not older than the new key
+  `jobs.research.lookup_max_age_days` (7). The dossier shows the draft answer
+  of a held question in a collapsed section. Before, a hold threw away both
+  lookups, and the next run did them again.
+
+- **A lookup with no sources gets the pages it read.** When the internet
+  agent gives an answer with no source, the pages that its fetches read
+  become the sources, with no title. Before, a researcher that put its
+  sources only in the answer text caused a hold.
 
 - **The curator spends its budget on placement and duplicates first.** A run
   now calls `place` for the pages that were never curated, then `compare`,

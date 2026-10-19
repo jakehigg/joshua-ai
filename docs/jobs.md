@@ -612,6 +612,18 @@ questions:
     holds: 0
     hold_reason: ""
     raised_at: 2026-10-19
+  - slug: winter-light
+    question: How much light does the snake plant need in a hall in winter?
+    status: held
+    holds: 1
+    hold_reason: no answer from the editor
+    draft:                       # the answer of the researcher; see The kept lookups
+      answer: Bright, indirect light ...
+      sources: [{url: "https://extension.university.example/a", title: ""}]
+      confidence: medium
+      disagreements: ""
+    challenge: {answer: ..., sources: [...], confidence: high, disagreements: ""}
+    looked_up_at: 2026-10-19
 person_open: 1                   # the open questions of the topic in wiki/questions/
 person_answered: 0               # the answered questions of the topic in wiki/questions/
 source: research
@@ -622,7 +634,9 @@ words such as "how" or "the", in lower case, joined with `-`. A slug that the
 dossier has already gets `-2`, `-3`, and so on. The researcher writes the body
 of the dossier again on each save: a title, a line for each answered question
 with a link to its page and its short answer, and the open and held
-questions. When the topic has questions for a person, a line gives the two
+questions. Under a held question with a `draft`, a collapsed section
+(`<details>`) shows the draft answer in a code block, with its day, its
+confidence, and its sources, so a person can read what came back. When the topic has questions for a person, a line gives the two
 counts and a link to `questions/README.md`. The dossier holds only these
 counts, so it stays about the research on the web. No worker writes the
 dossier.
@@ -787,6 +801,19 @@ For each question, three workers run in this order:
    disagreements, each source with its trust (`primary`, `secondary`, or
    `weak`), the confidence, and the verdict: `publish` or `hold`.
 
+The editor answers in one structured call of up to 6 turns. The CLI checks
+the answer against a flat schema with no length limits, and when the answer
+does not match, the model tries again in the next turn. The log line
+`structured answer refused by the validator` gives the start of the message
+of the validator for each refused try. Python then checks the limits: a short
+answer of more than 160 characters is cut.
+
+When a lookup gives an answer with no source, but its fetches read pages, the
+pages that the fetch gate let through become its sources, with no title, up
+to 12. The log line `sources backfilled from fetched pages` gives the count.
+With `internet.fetch.enabled` off, there is no fetch, and the list stays
+empty.
+
 The two lookups have their own limits, because the brief needs more searches
 and fetches than a chat question. Each lookup may take
 `jobs.research.lookup_timeout_seconds` (300) seconds and
@@ -814,9 +841,27 @@ A worker that gives no answer at any step is a hold with the reason
 `no answer`, and the hold counts. A lookup that passed its timeout is a hold
 with the reason `lookup timed out after 300 s (6 searches, 4 fetches)`, with
 the counts of that lookup, so the report shows how far it got. For the
-challenger, the reason starts with `the lookup of the challenger`. A held question gets one more `holds` and
-the reason in `hold_reason`. At `max_holds` (2) its status becomes `dropped`,
-and no run researches it again.
+challenger, the reason starts with `the lookup of the challenger`. A held
+question gets one more `holds` and the reason in `hold_reason`. At
+`max_holds` (2) its status becomes `dropped`, and no run researches it again.
+
+### The kept lookups
+
+A question that is held or dropped after its two lookups ran keeps their
+answers in the dossier: `draft` from the researcher, `challenge` from the
+challenger, and `looked_up_at`, the day of the lookups. Each has its
+`answer`, `sources`, `confidence`, and `disagreements`. When the researcher
+gave no answer, the question keeps nothing.
+
+The next run that takes a held question with a `draft` and a `challenge`
+sends it to the editor alone, and does no lookup. When `looked_up_at` is
+more than `jobs.research.lookup_max_age_days` (7) days old, the run does the
+two lookups again and keeps the new answers. The Researched section of the
+report says `Only the editor ran` for such a question, and the report data
+lists it in `editor_only`. This question counts toward `questions_per_run`
+and `max_questions` the same as a question with lookups. When the editor
+publishes the question, the dossier removes the three fields, because the
+page holds what it needs.
 
 ### The page
 
