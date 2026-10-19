@@ -22,6 +22,16 @@ Routes:
   day page exists, and the summary of the last nightly run.
 - ``POST /admin/turn`` — run one turn as an operator and return the text. The
   reply is never delivered to a channel.
+- ``POST /admin/jobs/{job}/run`` — start a job run in the background (body
+  ``{args?, dry_run?}``; ``dry_run`` defaults to true). 202 with the run id,
+  404 for an unknown job, 400 for bad arguments, 409 while a run or the
+  nightly reflection holds the lock.
+- ``GET /admin/jobs/{job}/status`` — whether a run holds the lock, and the
+  last run of that job.
+- ``GET /admin/jobs/runs/{id}`` — one run and its report.
+- ``GET /admin/jobs/runs?job=&limit=`` — the newest runs, of one job or all.
+
+Every ``/admin/jobs/*`` route answers 404 when ``jobs.enabled`` is false.
 """
 
 from __future__ import annotations
@@ -42,6 +52,7 @@ from joshua_shared.fleet_auth import (
 from joshua_shared.log import get_logger
 
 from joshua_core import people
+from joshua_core.jobs import JobArgsError, JobBusy, UnknownJob
 from joshua_core.memory import embed
 
 logger = get_logger("core.admin")
@@ -50,6 +61,12 @@ logger = get_logger("core.admin")
 # Transcript tail bounds for ``GET /admin/transcript``.
 _DEFAULT_TRANSCRIPT_LIMIT = 40
 _MAX_TRANSCRIPT_LIMIT = 500
+
+# Bounds for ``GET /admin/jobs/runs``.
+_DEFAULT_RUNS_LIMIT = 20
+_MAX_RUNS_LIMIT = 200
+
+_JOBS_OFF = {"error": "jobs are off; set jobs.enabled: true in joshua.yaml"}
 
 
 def _log_background_reindex(task: asyncio.Task[Any]) -> None:
@@ -95,6 +112,23 @@ def _json_safe_event(row: dict[str, Any]) -> dict[str, Any]:
     if out.get("conversation_id") is not None:
         out["conversation_id"] = str(out["conversation_id"])
     return out
+
+
+def _parse_runs_limit(raw: str | None) -> int:
+    """Clamp the ``limit`` query param of the runs list to ``[1, _MAX_RUNS_LIMIT]``."""
+    try:
+        value = int(raw) if raw is not None else _DEFAULT_RUNS_LIMIT
+    except ValueError:
+        value = _DEFAULT_RUNS_LIMIT
+    return max(1, min(value, _MAX_RUNS_LIMIT))
+
+
+def _job_runner(request: Request) -> Any:
+    """The job runner, or None when ``jobs.enabled`` is false or core has none."""
+    ctx = request.app.state.ctx
+    if not ctx.settings.jobs.enabled:
+        return None
+    return getattr(ctx, "jobs", None)
 
 
 def _authorize(request: Request) -> JSONResponse | None:
@@ -302,5 +336,84 @@ def build_admin_router() -> APIRouter:
             direction="in",
         )
         return JSONResponse({"conversation_id": conversation.id, "text": result.text or ""})
+
+    # The runs routes come before ``/admin/jobs/{job}/...`` so that ``runs`` is
+    # never read as a job name.
+    @router.get("/admin/jobs/runs")
+    async def jobs_runs(request: Request):  # type: ignore[no-untyped-def]
+        denied = _authorize(request)
+        if denied is not None:
+            return denied
+        runner = _job_runner(request)
+        if runner is None:
+            return JSONResponse(_JOBS_OFF, status_code=404)
+        job = request.query_params.get("job") or None
+        limit = _parse_runs_limit(request.query_params.get("limit"))
+        return JSONResponse({"runs": await runner.list_runs(job, limit)})
+
+    @router.get("/admin/jobs/runs/{run_id}")
+    async def jobs_run(run_id: str, request: Request):  # type: ignore[no-untyped-def]
+        denied = _authorize(request)
+        if denied is not None:
+            return denied
+        runner = _job_runner(request)
+        if runner is None:
+            return JSONResponse(_JOBS_OFF, status_code=404)
+        try:
+            number = int(run_id)
+        except ValueError:
+            return JSONResponse({"error": "run id must be a number"}, status_code=400)
+        run = await runner.get_run(number)
+        if run is None:
+            return JSONResponse({"error": f"no run {number}"}, status_code=404)
+        return JSONResponse(run)
+
+    @router.post("/admin/jobs/{job}/run")
+    async def jobs_start(job: str, request: Request):  # type: ignore[no-untyped-def]
+        denied = _authorize(request)
+        if denied is not None:
+            return denied
+        runner = _job_runner(request)
+        if runner is None:
+            return JSONResponse(_JOBS_OFF, status_code=404)
+        raw = await request.body()
+        try:
+            body = await request.json() if raw.strip() else {}
+        except Exception:  # noqa: BLE001 — a bad body is a 400, not a 500
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
+        args = body.get("args", {})
+        dry_run = body.get("dry_run", True)
+        if not isinstance(args, dict):
+            return JSONResponse({"error": "args must be a JSON object"}, status_code=400)
+        if not isinstance(dry_run, bool):
+            return JSONResponse({"error": "dry_run must be true or false"}, status_code=400)
+        try:
+            run_id = await runner.start(job, args, dry_run)
+        except UnknownJob:
+            return JSONResponse({"error": f"unknown job {job}"}, status_code=404)
+        except JobArgsError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except JobBusy:
+            return JSONResponse(
+                {"error": "a job or the nightly reflection is running; try again later"},
+                status_code=409,
+            )
+        return JSONResponse({"run_id": run_id, "job": job, "dry_run": dry_run}, status_code=202)
+
+    @router.get("/admin/jobs/{job}/status")
+    async def jobs_status(job: str, request: Request):  # type: ignore[no-untyped-def]
+        denied = _authorize(request)
+        if denied is not None:
+            return denied
+        runner = _job_runner(request)
+        if runner is None:
+            return JSONResponse(_JOBS_OFF, status_code=404)
+        if not runner.has(job):
+            return JSONResponse({"error": f"unknown job {job}"}, status_code=404)
+        return JSONResponse(
+            {"job": job, "busy": runner.busy, "last_run": await runner.last_run(job)}
+        )
 
     return router
