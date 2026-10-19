@@ -53,18 +53,25 @@ logger = get_logger("memory.indexer")
 
 
 _JOURNAL_PREFIX = "wiki/journal/"
+_KNOWLEDGE_PREFIX = "wiki/knowledge/"
+_INSIGHTS_PREFIX = "wiki/insights/"
 _PROFILE_PAGE = re.compile(r"^wiki/people/[^/]+\.md\Z")
 
 
 def _kind_from_uri(uri: str) -> str:
     """The document kind, from its path.
 
-    ``wiki/journal/**`` is ``journal``; a ``wiki/people/*.md`` page (a
-    person's profile, or the shared profile) is ``profile``; anything else is
-    the leading path segment (``wiki`` | ``shared`` for the files source; the
-    adapter name for a flat source)."""
+    ``wiki/journal/**`` is ``journal``; ``wiki/knowledge/**`` is
+    ``knowledge``; ``wiki/insights/**`` is ``insight``; a ``wiki/people/*.md``
+    page (a person's profile, or the shared profile) is ``profile``; anything
+    else is the leading path segment (``wiki`` | ``shared`` for the files
+    source; the adapter name for a flat source)."""
     if uri.startswith(_JOURNAL_PREFIX):
         return "journal"
+    if uri.startswith(_KNOWLEDGE_PREFIX):
+        return "knowledge"
+    if uri.startswith(_INSIGHTS_PREFIX):
+        return "insight"
     if _PROFILE_PAGE.match(uri):
         return "profile"
     return uri.split("/", 1)[0]

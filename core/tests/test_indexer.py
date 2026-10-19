@@ -493,3 +493,41 @@ async def test_an_empty_document_logs_one_line_and_not_one_a_pass(_count_embeds,
         await indexer.reindex()
     lines = [r for r in caplog.records if "nothing to index" in r.getMessage()]
     assert len(lines) == 1
+
+
+@pytest.mark.parametrize(
+    ("uri", "kind"),
+    [
+        ("wiki/knowledge/houseplants/snake-plant.md", "knowledge"),
+        ("wiki/knowledge/houseplants/snake-plant/winter-watering.md", "knowledge"),
+        ("wiki/knowledge/README.md", "knowledge"),
+        ("wiki/insights/garden/autumn-watering-too-high.md", "insight"),
+        ("wiki/insights/README.md", "insight"),
+        ("wiki/journal/2026/10/19/entry.md", "journal"),
+        ("wiki/people/alex.md", "profile"),
+        ("wiki/houseplants/snake-plant.md", "wiki"),
+        ("wiki/knowledge.md", "wiki"),
+        ("wiki/houseplants/knowledge/note.md", "wiki"),
+        ("shared/notes.md", "shared"),
+    ],
+)
+def test_kind_from_uri(uri: str, kind: str) -> None:
+    from joshua_core.memory.indexer import _kind_from_uri
+
+    assert _kind_from_uri(uri) == kind
+
+
+async def test_a_knowledge_page_and_an_insight_page_are_indexed_with_their_kind(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(embed_module, "embed", lambda text, model=None: [0.0] * 384)
+    for uri, kind in (
+        ("wiki/knowledge/houseplants/snake-plant.md", "knowledge"),
+        ("wiki/insights/garden/autumn-watering.md", "insight"),
+    ):
+        store = FakeStore()
+        indexer = Indexer(
+            store, {"files": FakeSource([_doc(None, uri, "r1")])}, embed_model="m", chunk_chars=800
+        )
+        await indexer.reindex()
+        assert store.last_replace["kind"] == kind

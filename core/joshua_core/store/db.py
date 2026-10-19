@@ -120,7 +120,8 @@ CREATE TABLE IF NOT EXISTS kb_chunk (
     id           BIGSERIAL PRIMARY KEY,
     person_id    TEXT REFERENCES people(id) ON DELETE CASCADE,   -- NULL = shared/
     source       TEXT NOT NULL,
-    kind         TEXT NOT NULL DEFAULT '',   -- files → 'journal' | 'profile' | 'wiki' | 'shared'
+    -- kind, for files: 'journal' | 'profile' | 'knowledge' | 'insight' | 'wiki' | 'shared'
+    kind         TEXT NOT NULL DEFAULT '',
     path         TEXT NOT NULL,
     provenance   TEXT NOT NULL DEFAULT 'own',   -- 'own' | 'external'
     title        TEXT NOT NULL DEFAULT '',
