@@ -490,6 +490,52 @@ place, and no entry turns them off:
   check, in every form: `2130706433`, `0x7f.1`, `0177.0.0.1`, and `127.1` are
   all `127.0.0.1`.
 
+## jobs
+
+A job is work that core does on the wiki when you start it. Nothing schedules a
+job. You start a run from the laptop with `scripts/jobs.sh`, and each run
+writes one journal entry and makes one wiki commit. See
+[docs/jobs.md](jobs.md).
+
+```yaml
+jobs:
+  enabled: false
+  model: claude-sonnet-5
+  bundle:
+    sim: 0.70
+    max_chars: 24000
+    recent_days: 14
+  topics:
+    exclude:
+      - vocabulary.md
+      - "*/README.md"
+  curator:
+    enabled: false
+  research:
+    enabled: false
+  insights:
+    enabled: false
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `false` | `true` makes the `/admin/jobs/*` routes live. `false` makes each of them answer 404. Nothing else changes. |
+| `model` | not set | The model for the workers of a job that have no tools. When it is not set, a job uses `core.reflection_model`. |
+| `bundle.sim` | `0.70` | A journal entry with a chunk this close to a chunk of the topic page is part of the memory bundle of that topic. |
+| `bundle.max_chars` | `24000` | The size limit of the bundle text. The topic page is never cut. |
+| `bundle.recent_days` | `14` | How many days back a job looks for the topics that the journal names now. |
+| `topics.exclude` | `vocabulary.md`, `*/README.md` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. |
+| `curator.enabled` | `false` | Reserved, package 2. |
+| `research.enabled` | `false` | Reserved, package 3. |
+| `insights.enabled` | `false` | Reserved, package 4. |
+
+A **topic** is one leaf page of the wiki, such as
+`houseplants/snake-plant.md`. These pages are not topics: `Home.md`, a section
+index page (`houseplants.md` beside the folder `houseplants/`), a page in a
+folder whose name starts with a dot, a page under `journal/`, `people/`,
+`joshua-docs/`, `skills/`, `knowledge/`, or `insights/`, and a page that a
+glob in `topics.exclude` matches.
+
 ## MCP servers
 
 The `mcp:` section lists the servers the gateway hosts. Add a server by adding one

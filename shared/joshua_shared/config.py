@@ -508,6 +508,63 @@ class Internet(_Model):
     fetch: Fetch = Fetch()
 
 
+class JobsBundle(_Model):
+    """How a job builds the memory bundle of one topic.
+
+    `sim` is the cosine floor for a journal chunk to count as about the topic.
+    `max_chars` is the size of the bundle text; the topic page itself is never
+    cut. `recent_days` is how far back a later job looks for the topics the
+    journal names now.
+    """
+
+    sim: float = Field(default=0.70, ge=0.0, le=1.0)
+    max_chars: int = Field(default=24000, gt=0)
+    recent_days: int = Field(default=14, ge=1)
+
+
+class JobsTopics(_Model):
+    """Which wiki pages are topics. `exclude` holds `fnmatch` globs, relative
+    to the wiki root, for the pages that are not."""
+
+    exclude: list[str] = ["vocabulary.md", "*/README.md"]
+
+
+class JobsCurator(_Model):
+    """The curator job. Reserved: package 2 adds its keys."""
+
+    enabled: bool = False
+
+
+class JobsResearch(_Model):
+    """The researcher job. Reserved: package 3 adds its keys."""
+
+    enabled: bool = False
+
+
+class JobsInsights(_Model):
+    """The insights job. Reserved: package 4 adds its keys."""
+
+    enabled: bool = False
+
+
+class Jobs(_Model):
+    """The jobs that core runs by hand, through the admin routes.
+
+    Nothing schedules a job. With `enabled: false` (the default) every
+    `/admin/jobs/*` route answers 404 and nothing else changes. `model` is the
+    default model for the tool-less workers of a job; `None` uses
+    `core.reflection_model`. See `docs/jobs.md`.
+    """
+
+    enabled: bool = False
+    model: str | None = None
+    bundle: JobsBundle = JobsBundle()
+    topics: JobsTopics = JobsTopics()
+    curator: JobsCurator = JobsCurator()
+    research: JobsResearch = JobsResearch()
+    insights: JobsInsights = JobsInsights()
+
+
 class Wiki(_Model):
     """Whether Joshua keeps `/data/wiki` as a git repository.
 
@@ -681,6 +738,7 @@ class JoshuaConfig(_Model):
     memory: Memory = Memory()
     attachments: Attachments = Attachments()
     internet: Internet = Internet()
+    jobs: Jobs = Jobs()
     wiki: Wiki = Wiki()
     mcp: dict[str, McpServer] = {}
     modules: list[str] = []

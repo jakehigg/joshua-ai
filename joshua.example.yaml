@@ -217,6 +217,31 @@ internet:
     # Look the host up, and refuse a name that resolves into a CIDR above.
     resolve_hosts: true
 
+jobs:
+  # The jobs core runs by hand: you start a run from the laptop with
+  # scripts/jobs.sh, and nothing schedules one. Each run writes one journal
+  # entry and makes one wiki commit. docs/jobs.md explains them.
+  enabled: false           # false: every /admin/jobs/* route answers 404
+  # model: claude-sonnet-5 # the model of a job's tool-less workers; when it is
+  #                        # not set, core.reflection_model
+  bundle:
+    # The memory bundle: what a job reads about one topic.
+    sim: 0.70              # a journal chunk this close to the topic page is about it
+    max_chars: 24000       # the bundle text stops here; the topic page is never cut
+    recent_days: 14        # how far back a job looks for what the journal names now
+  topics:
+    # A topic is one leaf page of the wiki. These globs, relative to the wiki
+    # root, name the pages that are not topics.
+    exclude:
+      - vocabulary.md
+      - "*/README.md"
+  curator:
+    enabled: false         # reserved, package 2
+  research:
+    enabled: false         # reserved, package 3
+  insights:
+    enabled: false         # reserved, package 4
+
 wiki:
   git: true   # keep /data/wiki as a git repository Joshua commits; false leaves
               # git to a frontend or a sync tool
