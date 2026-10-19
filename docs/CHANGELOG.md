@@ -147,6 +147,20 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **A research question never carries the specifics of a person.** A run
+  with no topic could take the coaching profile of one person as its topic,
+  and the `raise` worker then wrote web questions with that person's health
+  and no name. Now a page about one person on the roster is not a topic, and
+  the name of a person is never a name of a topic, so an entry that only
+  names a person counts for no topic. The new key
+  `jobs.research.person_sections` (`coach`, `people`) names the sections
+  whose pages are about people: their questions go to a person, and the
+  selection takes such a topic only when no other topic qualifies. The
+  default `jobs.topics.exclude` adds `coach/profiles/*`. The `raise` worker
+  tags each question `about_person`, and a question about a person goes to a
+  person, never to the web. If you set `jobs.topics.exclude` in
+  `joshua.yaml`, add `coach/profiles/*` to your list.
+
 - **No worker markup on a page.** A model sometimes wrote its next fields as
   tags inside one field, so a knowledge page showed
   `</answer><answer_short>...` in its Answer and "None given" for Evidence.

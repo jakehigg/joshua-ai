@@ -111,7 +111,13 @@ A **topic** is one leaf page of the wiki, such as
   `knowledge/`, `insights/`, `questions/`, or `attachments/`;
 - a page with a folder or a file name that starts with a dot;
 - a page that a glob in `jobs.topics.exclude` matches. The default globs are
-  `vocabulary.md` and `*/README.md`.
+  `vocabulary.md`, `*/README.md`, and `coach/profiles/*`;
+- a **person page**: a page about one person on the roster. Its file name,
+  without `.md`, is the id of a person, or its title, or a name from its
+  title or its file name, is the id or the display name of a person. The
+  comparison uses the whole name, in any case. So `coach/alex.md` and a page
+  with the title "Alex" are not topics. A recipe with the title "Alex's caldo
+  verde" is a topic.
 
 The **memory bundle** of a topic is what a job reads about it. Every job
 builds it the same way, in this order:
@@ -165,6 +171,12 @@ any case, with any spaces between them. The name can also have a plural `s`
 or `es`, or lose the `s` or `es` at its end. So "Snake Plants" matches "snake
 plant" and "snake plants", but not "the plants". A name shorter than three
 characters does not count.
+
+The id or the display name of a person on the roster is never a name of a
+topic, and never an alias. A name that starts with the name of a person and
+`'s` also gives the rest: "Alex's caldo verde" gives "caldo verde", and never
+"Alex". So a journal entry that only names a person is not about a topic. It
+does not come into a bundle, and it does not count for the selection.
 
 The aliases are the frontmatter `aliases` list of the page, and the terms
 that `vocabulary.md` gives it. A line of
@@ -582,6 +594,13 @@ applies:
 4. **`refresh`**: the dossier with the oldest `refresh_after` that is before
    the day of the run.
 
+A **person section** is a wiki section, the first part of the path, that
+`jobs.research.person_sections` names. The default list is `coach` and
+`people`. The pages of a person section are about people. Each rule takes a
+topic in a person section only when no topic outside one qualifies under the
+same rule. The reason of the selection then says so, and the `Topic` section
+of the report has a line `Person section: <section>`.
+
 Each tie that is left goes to the **seeded pick**: a shuffle of the sorted
 topic paths with the seed `<day of the run>:<sha256 of the sorted paths>`.
 The same wiki on the same day gives the same topic. On a different day, a
@@ -664,6 +683,8 @@ these fields:
 
 - `question`: the question.
 - `audience`: `web`, `person`, or `record`.
+- `about_person`: true when the question carries a specific of a person,
+  named or not. It is required.
 - `grounded_in`: the phrases from the bundle that make it about us, for every
   audience. The prompt asks for the shortest span that identifies the
   specific: a product name, a quantity, a cadence, not a whole sentence.
@@ -677,6 +698,13 @@ The three audiences are these:
   goes to the internet agent, which searches the open web and has no access
   to our pages. So the question carries our conditions in its words ("in a
   gritty mix, watered to runoff, in a 65-68°F house in winter").
+  It carries the specifics of the thing (the plant, the device, the
+  material, the method) and never the specifics of a person, named or not:
+  not a condition, a diagnosis, a symptom, a medication, a diet, a body
+  measurement, a mood, a finance, a location, or a relationship. "What are
+  the early symptoms of a depressive episode for someone who stopped
+  sleeping well in October?" is about a person. "What does the NHS say about
+  sleep hygiene for adults?" is about a thing.
 - **`person`**: a question that only somebody here can answer: what was done,
   used, intended, or preferred, or a record that is missing. "What product and
   dose went on the snake plants at the October 4 feed?" is one.
@@ -709,11 +737,28 @@ these rules is true. The page and the report name the rule in
 | The question starts with "what did", "why did", "when did", "will", "should we", "did we", or "do we". | `asks what we did or will do` |
 | The question holds "we", "our", or "us" as a word. "US" in capitals is a country and does not count. | `asks about us` |
 
+These rules are the floor. Two more rules come after them:
+
+| Rule | `route_reason` |
+|---|---|
+| The topic is in a person section. This applies to a question that the worker tags `web` or `person`. | `person section` |
+| The worker tags the question `about_person: true`, and tags it `web` or `person`. | `about a person` |
+
+The worker judges which question is about a person, and Python enforces the
+route. When the worker tags a question `false` but the question names a
+person, the floor still sends it to a person. A `record` question of either
+kind still goes to the record search, because the search stays inside the
+instance. A question for a person that one of these rules sends there needs
+no `why`: its page gets a fixed sentence. The prompt also tells the worker
+not to raise a question about a person that no person here can answer.
+
 A `person` question that no rule sends there has the `route_reason`
 `the raise worker asks a person`. Each route then does this:
 
 - **`web`**: the question goes into the dossier as an `open` question. A
-  `run` researches it.
+  `run` researches it. On a topic in a person section, a `run` researches only
+  the questions that a person asked, and the report has a note for each other
+  question.
 - **`record`**: the gate searches the index with the question, over the kinds
   `wiki`, `journal`, and `knowledge`. A hit counts when it is a topic page, a
   journal entry that no job wrote, or a knowledge page with a `question`. When
@@ -955,7 +1000,7 @@ The report of a research run is the journal entry of the run, and
 
 | Section | What it holds |
 |---|---|
-| Topic | the topic, the rule that selected it and why, and the runner-up |
+| Topic | the topic, the rule that selected it and why, the runner-up, and for a topic in a person section, a line that says so |
 | Bundle | each path of the bundle, its size, and if it was cut |
 | Questions | each question of the dossier, with its slug and status: the `web` questions |
 | For a person | each new question page, with its id, `for`, `route_reason`, and `why`, and each question that was `already asked` or `dismissed before` |
@@ -1021,6 +1066,9 @@ them, and that it never raises one on its own.
 - It never sends a question to a person. It keeps the question as a page,
   and a person answers it in chat.
 - It never gives a question for a person to a lookup.
+- It never takes a person page as a topic. It never gives a lookup a
+  question that the worker tags `about_person: true`, or a question of a
+  topic in a person section that no person asked.
 - It never gives the bundle, or any page of the wiki, to a lookup. The
   internet agent gets the question and the brief. The challenger also gets the
   draft answer.

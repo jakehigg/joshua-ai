@@ -512,6 +512,7 @@ jobs:
     exclude:
       - vocabulary.md
       - "*/README.md"
+      - "coach/profiles/*"
   curator:
     enabled: false
     model: claude-sonnet-5
@@ -568,7 +569,7 @@ jobs:
 | `bundle.exclude_slugs` | empty | `fnmatch` globs on the file name of a journal entry, without `.md`. No bundle takes an entry that a glob matches. The names belong to one instance, for example `garden-weather-log-*` for a daily log. |
 | `bundle.max_chars` | `24000` | The size limit of the bundle text. The topic page is never cut. |
 | `bundle.recent_days` | `14` | How many days back a job looks for the topics that the journal names now. |
-| `topics.exclude` | `vocabulary.md`, `*/README.md` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. |
+| `topics.exclude` | `vocabulary.md`, `*/README.md`, `coach/profiles/*` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. A list that you set replaces the default list, so keep `coach/profiles/*` in it. |
 | `curator.enabled` | `false` | `true` adds the `curator` job and the `curator` chat tool for members. Both also need `jobs.enabled`. |
 | `curator.model` | not set | The model of the curator workers. When it is not set, the curator uses `jobs.model`, then `core.reflection_model`. |
 | `curator.max_worker_calls` | `40` | The maximum number of worker calls in one curator run. `0` makes a run that only scans. |
@@ -592,6 +593,7 @@ jobs:
 | `research.editor_timeout_seconds` | `240` | How long one call of the editor may take. The time includes each try that the validator of the CLI refuses. |
 | `research.trusted_domains` | `.edu`, `.gov`, `.ac.uk`, `extension.`, `.int` | The editor may not grade a page on these domains `weak`. |
 | `research.distrusted_domains` | `pinterest.com`, `quora.com`, `answers.com`, `ehow.com`, `wikihow.com`, `facebook.com`, `reddit.com` | A page on these domains is always `weak`. |
+| `research.person_sections` | `coach`, `people` | The wiki sections, by the first part of the path, whose pages are about people. The gate sends each raised question of a topic there to a person or to our records, never to the web. A `run` on such a topic researches only the questions that a person asked. The selection takes such a topic only when no other topic qualifies under the same rule. A section has no `/` and does not start with a dot. |
 | `insights.enabled` | `false` | `true` adds the `insights` job and the `insights` chat tool for members. Both also need `jobs.enabled`. |
 | `insights.model` | not set | The model of the `insight` worker, which has no tools. When it is not set, the insights job uses `jobs.model`, then `core.reflection_model`. |
 | `insights.max_per_run` | `5` | The most new insights that one run writes. The gate keeps the highest severity first, then the highest confidence. |
@@ -607,8 +609,10 @@ A **topic** is one leaf page of the wiki, such as
 `houseplants/snake-plant.md`. These pages are not topics: `Home.md`, a section
 index page (`houseplants.md` beside the folder `houseplants/`), a page in a
 folder whose name starts with a dot, a page under `journal/`, `people/`,
-`joshua-docs/`, `skills/`, `knowledge/`, or `insights/`, and a page that a
-glob in `topics.exclude` matches.
+`joshua-docs/`, `skills/`, `knowledge/`, or `insights/`, a page that a glob
+in `topics.exclude` matches, and a page about one person on the roster: a
+page whose file name is the id of a person, or whose title is the id or the
+display name of a person.
 
 ## MCP servers
 
