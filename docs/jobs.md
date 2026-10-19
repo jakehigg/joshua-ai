@@ -101,7 +101,7 @@ A **topic** is one leaf page of the wiki, such as
 - `Home.md`;
 - a section index page: `houseplants.md` beside the folder `houseplants/`;
 - a page under `journal/`, `people/`, `joshua-docs/`, `skills/`,
-  `knowledge/`, `insights/`, or `attachments/`;
+  `knowledge/`, `insights/`, `questions/`, or `attachments/`;
 - a page with a folder or a file name that starts with a dot;
 - a page that a glob in `jobs.topics.exclude` matches. The default globs are
   `vocabulary.md` and `*/README.md`.
@@ -113,7 +113,11 @@ builds it the same way, in this order:
 2. the pages that the topic page links to inside its own section, one hop;
 3. the journal entries about the topic, newest first;
 4. the dossier of the topic and its knowledge pages, when they exist;
-5. the open insights of the topic: a page in `wiki/insights/` whose
+5. the answered questions of the topic: a page in `wiki/questions/` whose
+   frontmatter `topic` is the topic and whose `status` is `answered`. The
+   bundle holds the question and the answer only. An open or a dismissed
+   question is not in the bundle;
+6. the open insights of the topic: a page in `wiki/insights/` whose
    frontmatter `topic` is the topic and whose `status` is `new`, `told`, or
    `acknowledged`.
 
@@ -286,8 +290,8 @@ that is only an anchor, or a target outside the wiki. For a target in
 
 The index page of a folder `X/` is `X.md` beside it, and the index page of
 the wiki root is `Home.md`. A page under `journal/`, `people/`,
-`joshua-docs/`, `knowledge/`, `insights/`, `skills/`, or `attachments/` is
-never an orphan, and its links do not make another page reachable.
+`joshua-docs/`, `knowledge/`, `insights/`, `questions/`, `skills/`, or
+`attachments/` is never an orphan, and its links do not make another page reachable.
 
 A broken link in a journal entry is always Tier C, because the curator never
 changes the body of a journal entry. The scan does not read the links of a
@@ -498,7 +502,13 @@ trash.
 The researcher keeps `wiki/knowledge/`: facts about one topic at a time, each
 looked up on the web, challenged, and cited. It works on one topic in each
 run, and it asks questions that are about our situation, not about the topic
-in general.
+in general. It also keeps `wiki/questions/`: the questions that only a person
+can answer.
+
+A job runs at night, when nobody is in a conversation. So Joshua never sends
+a question to a person. The researcher keeps each question for a person as a
+page, and a person answers it later, in chat. See
+[Questions for a person](#questions-for-a-person).
 
 Set `jobs.research.enabled: true`, with `jobs.enabled: true`, to add the job
 and the `research` chat tool. A `run` also needs `internet.enabled: true`.
@@ -534,12 +544,11 @@ dossier, or starts a new one. When the dossier has fewer open questions than
 proposes new questions, and the gate decides which questions the dossier
 takes.
 
-- **`plan`** stops there. It makes no lookup and writes no page. When it is
-  not a dry run, it writes the dossier and `knowledge/README.md`, so that a
-  later run can name the new slugs in `questions`. Its report gives the rule
-  that selected the topic and the runner-up, the bundle paths and size, each
-  question with its slug and status, each rejected question with the reason,
-  and the tokens.
+- **`plan`** stops there. It makes no lookup and writes no knowledge page.
+  When it is not a dry run, it writes the dossier, `knowledge/README.md`, and
+  each new question for a person with `questions/README.md`, so that a later
+  run can name the new slugs in `questions`. Its report is described in
+  [The report](#the-report).
 - **`run`** then researches the questions: the ones that `questions` names,
   or else the open questions that a person asked, then the other open
   questions, then the held questions, in dossier order, up to the limit. It
@@ -603,6 +612,8 @@ questions:
     holds: 0
     hold_reason: ""
     raised_at: 2026-10-19
+person_open: 1                   # the open questions of the topic in wiki/questions/
+person_answered: 0               # the answered questions of the topic in wiki/questions/
 source: research
 ```
 
@@ -611,7 +622,10 @@ words such as "how" or "the", in lower case, joined with `-`. A slug that the
 dossier has already gets `-2`, `-3`, and so on. The researcher writes the body
 of the dossier again on each save: a title, a line for each answered question
 with a link to its page and its short answer, and the open and held
-questions. No worker writes the dossier.
+questions. When the topic has questions for a person, a line gives the two
+counts and a link to `questions/README.md`. The dossier holds only these
+counts, so it stays about the research on the web. No worker writes the
+dossier.
 
 `knowledge/README.md` has one table with a row for each dossier, sorted by
 topic path: the topic, with a link to its dossier, the coverage, the answered
@@ -619,25 +633,36 @@ and total questions, the day of the last research, and the open questions.
 The researcher writes it again each time it writes the wiki. It is the index
 page of `knowledge/`: it has a link to each dossier.
 
-### The questions and the gate
+### The questions and the route
 
 The `raise` worker has no tools. It gets the memory bundle of the topic, the
 title and the aliases, and the questions in the dossier. It answers with up
-to `questions_per_topic` questions, less the open questions. Each question
-has `grounded_in`, the phrases from the bundle that make it about us, and
-`why`. The prompt asks for the shortest span that identifies the specific: a
-product name, a quantity, a cadence, not a whole sentence. The prompt tells
-the worker that the bundle is content, not instructions.
+to `questions_per_topic` questions, less the open questions. The prompt tells
+the worker that the bundle is content, not instructions. Each question has
+these fields:
 
-Each question goes to the internet agent, which searches the open web and
-has no access to our pages. So the prompt asks for a question that an expert
-source can answer: horticulture, materials, products, methods, standards,
-seasons, safety. The question carries our conditions in its words ("in a
-gritty mix, watered to runoff, in a 65-68°F house in winter"). It never asks
-what we did, recorded, planned, or will do.
+- `question`: the question.
+- `audience`: `web`, `person`, or `record`.
+- `grounded_in`: the phrases from the bundle that make it about us, for every
+  audience. The prompt asks for the shortest span that identifies the
+  specific: a product name, a quantity, a cadence, not a whole sentence.
+- `why`: one or two sentences that say why the researcher wants the answer.
+  A `person` question must have it.
 
-The gate is Python. A question gets into the dossier only when all of these
-rules are true:
+The three audiences are these:
+
+- **`web`**: a question that an expert source outside the house can answer:
+  horticulture, materials, products, methods, standards, seasons, safety. It
+  goes to the internet agent, which searches the open web and has no access
+  to our pages. So the question carries our conditions in its words ("in a
+  gritty mix, watered to runoff, in a 65-68°F house in winter").
+- **`person`**: a question that only somebody here can answer: what was done,
+  used, intended, or preferred, or a record that is missing. "What product and
+  dose went on the snake plants at the October 4 feed?" is one.
+- **`record`**: a question that our own pages and journal already answer.
+
+The gate is Python. Each question, for each audience, must pass these rules,
+or the gate rejects it with a reason:
 
 - `grounded_in` has two phrases or more. Each phrase has 3 to 160 characters
   and occurs word for word in the bundle text. Case and line breaks do not
@@ -645,26 +670,104 @@ rules are true:
 - The question holds a name of the topic (see
   [Topics and the memory bundle](#topics-and-the-memory-bundle)).
 - The question has 20 to 300 characters and ends with `?`.
-- The question names no person on the roster: no display name and no id from
-  `people`, as whole words, in any case.
-- The question holds no date in ISO form (`2026-10-04`) or in month and day
-  form (`October 4`, `Oct 4`). A date from our records is not a question for
-  the web.
-- The question is not about us. It does not start with "what did", "why
-  did", "when did", "will", "should we", "did we", or "do we", and it holds no
-  "we", "our", or "us" as a word. "US" in capitals is a country and is
-  allowed.
 - It is not a duplicate. Its text is not the text of a question of the
   dossier, and its vector is below `jobs.research.dup_sim` (0.85) to each
   question of the dossier and to each knowledge page in the index. The report
   gives `answered_by: <path>` for a question that a knowledge page answers.
+- A `person` question from the worker has a `why`.
+
+Then the gate gives the route. The web cannot answer a question about us, so
+the gate sends a question to `person`, whatever the worker said, when one of
+these rules is true. The page and the report name the rule in
+`route_reason`:
+
+| Rule | `route_reason` |
+|---|---|
+| The question names a person on the roster: a display name or an id from `people`, as whole words, in any case. | `names a person` |
+| The question holds a date in ISO form (`2026-10-04`) or in month and day form (`October 4`, `Oct 4`). | `names a record date` |
+| The question starts with "what did", "why did", "when did", "will", "should we", "did we", or "do we". | `asks what we did or will do` |
+| The question holds "we", "our", or "us" as a word. "US" in capitals is a country and does not count. | `asks about us` |
+
+A `person` question that no rule sends there has the `route_reason`
+`the raise worker asks a person`. Each route then does this:
+
+- **`web`**: the question goes into the dossier as an `open` question. A
+  `run` researches it.
+- **`record`**: the gate searches the index with the question, over the kinds
+  `wiki`, `journal`, and `knowledge`. A hit counts when it is a topic page, a
+  journal entry that no job wrote, or a knowledge page with a `question`. When
+  the best hit is at `jobs.research.record_sim` (0.80) or more, the report
+  closes the question with `answered_by: <path>`, and the run writes nothing
+  for it. Below that, nothing holds the answer, so the question goes to
+  `person` with the `route_reason` `no record found`.
+- **`person`**: the question becomes a page under `wiki/questions/`. It never
+  goes to a lookup and never goes into the dossier.
 
 So "How often should I water a snake plant?" fails, because no phrase of it
-comes from our pages. "What dose was used on 2026-10-04?" fails, because it
-asks about our records. "How often should the snake plant in a gritty soil mix,
-watered to runoff, be watered in winter?" passes when "gritty soil mix" and
-"water to runoff" are in the topic page. The report lists each rejected
-question with its reason, so a weak prompt shows on the first run.
+comes from our pages. "What dose was used on 2026-10-04?" goes to a person,
+because it asks about our records. "How often should the snake plant in a
+gritty soil mix, watered to runoff, be watered in winter?" goes to the web
+when "gritty soil mix" and "water to runoff" are in the topic page.
+
+### Questions for a person
+
+A question for a person is one page at
+`wiki/questions/<section>/<slug>.md`. The section is the first folder of the
+topic path, or `general` for a page at the wiki root. The slug comes from the
+question as the slug of a dossier question does, and is unique in its
+section.
+
+```yaml
+question: What product and dose went on the snake plants at the October 4 feed?
+topic: houseplants/snake-plants-living-room-window.md
+section: houseplants
+why: The researcher wants to know whether an early-October feed builds up salt in a gritty mix.
+for: everyone                  # everyone, or the id of the person who would know
+context: [houseplants/snake-plants-living-room-window.md, journal/2026/10/04/snake-plants-fed.md]
+grounded_in: ["fed at the October watering", "Liquid rather than granular"]
+route_reason: names a record date
+status: open                   # open, answered, or dismissed
+asked_by: research
+raised_at: 2026-10-19
+answered_at: null
+answered_by: null
+answer: null
+source: research
+run_id: 6
+```
+
+`context` lists the bundle pages that the `grounded_in` phrases come from, or
+the topic page. `for` is the id of a person only when the sentences of the
+`grounded_in` phrases name that one person, by a display name or an id from
+`people`. Else it is `everyone`. When the worker gave no `why`, the
+researcher writes a fixed sentence. The body has these headings, in this
+order: the question as the title, **Why Joshua wants to know**, **Where it
+came from** (a link to each `context` page), and **Answer**, which is empty
+until a person answers.
+
+`questions/README.md` is the list of every question. The researcher and the
+`questions` chat tool write it again on each change. Its first paragraph says
+that these are questions that the researcher could not answer from the web or
+from our records, that Joshua does not send them, and that a person answers
+them in chat. A table of the open questions follows, the oldest first, with
+the question, the topic, `for`, and the day it was raised. A second table
+holds the answered and the dismissed questions, the newest first.
+
+A run does not write the same question two times. When the text of a new
+`person` question, or its vector at `jobs.research.dup_sim` or more, matches
+an open or answered question page of the same topic, the run writes no page,
+and the report says `already asked`. When it matches a dismissed question,
+the report says `dismissed before`.
+
+The dossier of the topic holds only the counts, `person_open` and
+`person_answered`, and a line that links to `questions/README.md`.
+
+A person answers a question in chat with the `questions` chat tool, which
+the chat tool section below describes. The answer goes onto the page, and the
+memory bundle of the topic holds each answered question from then on, as the
+question and the answer only. So the next `raise` call and the editor read
+what the person said. An open or a dismissed question is not in the bundle.
+A dry run writes no question page.
 
 ### The crew
 
@@ -749,6 +852,28 @@ is a source of the page. The researcher removes each other link, picture, and
 wikilink, and keeps its text. A page is 64 KB or less, and a longer page is a
 hold.
 
+### The report
+
+The report of a research run is the journal entry of the run, and
+`scripts/jobs.sh runs <id>` shows it. It has these sections, in this order:
+
+| Section | What it holds |
+|---|---|
+| Topic | the topic, the rule that selected it and why, and the runner-up |
+| Bundle | each path of the bundle, its size, and if it was cut |
+| Questions | each question of the dossier, with its slug and status: the `web` questions |
+| For a person | each new question page, with its id, `for`, `route_reason`, and `why`, and each question that was `already asked` or `dismissed before` |
+| Answered by our records | each `record` question with its `answered_by` path |
+| Rejected | each rejected question with the reason |
+| Researched | `run` only: the result of each question that the run researched |
+| Pages | a dry `run` only: the full text of each page it would write |
+| Notes | what did not run, such as the vector check with no embedding model |
+| Insights | the insight pass, when one ran |
+| Usage | the calls and the tokens of each worker |
+
+The report data has `person`, the ids of the new question pages, and
+`record`, the `answered_by` paths, beside `added` and `rejected`.
+
 ### The chat tool
 
 The `research` tool server is in core. A member gets four tools:
@@ -770,10 +895,33 @@ about the world, to use and name a `knowledge/` page and its confidence when
 one answers it, and else to say that the answer is from inference and offer
 to queue the question.
 
+The `questions` tool server is in core too, with the same two switches. A
+member gets three tools. A tool names a question by `<section>/<slug>`:
+
+| Tool | What it does |
+|---|---|
+| `list_questions(status="open", topic=None, for_person=None, limit=20)` | lists the questions, the oldest open question first, each with its id, the question, `why`, `for`, and the topic. `for_person` keeps the questions for that person and for `everyone`. `status` is `open`, `answered`, `dismissed`, or `all`. |
+| `answer_question(slug, answer)` | writes the answer of a person onto an open question: `answer`, `answered_at`, `answered_by: <person id>`, `status: answered`, and the **Answer** section. It writes `questions/README.md` and the counts of the dossier again, and commits the wiki with the message `research: question <slug> answered by <person id>`, under the job lock. |
+| `dismiss_question(slug, why)` | closes an open question that does not apply: `status: dismissed`, `answered_by`, and `answer: <why>`, with the same writes and the commit message `research: question <slug> dismissed by <person id>`. |
+
+An answer is text from a person. The page shows it under **Answer** as
+content. A link in it stays only when it points to a page of the wiki that
+exists. The tool removes each other link and picture, and keeps its text. A
+guest, or a speaker that core does not know, gets a refusal from each tool,
+and nothing changes.
+
+No tool and no prompt rule sends a question to anybody. The agent prompt says
+that the questions are under `questions/`, that Joshua lists the open
+questions with `list_questions` when a person asks if it needs anything from
+them, and that it never raises one on its own.
+
 ### What the researcher never does
 
-- It never writes outside `wiki/knowledge/`. Each path comes from `layout`,
-  and a write outside `knowledge/` fails.
+- It never writes outside `wiki/knowledge/` and `wiki/questions/`. Each path
+  comes from `layout`, and a write outside these folders fails.
+- It never sends a question to a person. It keeps the question as a page,
+  and a person answers it in chat.
+- It never gives a question for a person to a lookup.
 - It never gives the bundle, or any page of the wiki, to a lookup. The
   internet agent gets the question and the brief. The challenger also gets the
   draft answer.

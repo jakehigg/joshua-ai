@@ -108,8 +108,8 @@ Route allowlists, by default:
   also accepts `laptop` for a `cli` handle.
 - core `POST /v1/memory/search`: `memory.search.allowed_callers` (default
   `viewer`, `mcp`). An empty list turns it off. It names no person and returns
-  only `wiki/` pages of kind `wiki`, `journal`, `profile`, `knowledge`, or
-  `insight`.
+  only `wiki/` pages of kind `wiki`, `journal`, `profile`, `knowledge`,
+  `insight`, or `question`.
 - channels `POST /v1/deliver`, `GET /v1/channels/resolve`: `core`.
 - channels `POST /v1/events`, `POST /v1/cli/*`, `GET /v1/cli/*`:
   `channels.webhooks.allowed_callers` (default `laptop`, `ci`).
@@ -141,6 +141,7 @@ One volume mounts at `/data` in all three containers:
 /data/wiki/joshua-docs/*.md                      the repo docs; core rewrites them each start
 /data/wiki/knowledge/**.md                       researched topics; core writes it (a job run)
 /data/wiki/insights/<section>/<slug>.md          insights; core writes it (a job run)
+/data/wiki/questions/<section>/<slug>.md         questions for a person; core writes it (a job run, a chat answer)
 /data/wiki/.git                                  the wiki's git repository; core and gateway write it
 /data/people/<id>/attachments/YYYY/MM/<file>     channels writes it
 /data/people/<id>/cli/outbox.jsonl               channels writes it
@@ -205,8 +206,10 @@ nightly reflection also takes, keeps a row per run in `job_run`, and, for a run
 that is not a dry run, writes the report as a journal entry and makes one wiki
 commit. A job reads a topic through `build_bundle` (`jobs/bundle.py`), lists
 each path it writes in `RunReport.written`, and writes nothing in a dry run.
-`wiki/knowledge/` and `wiki/insights/` belong to the jobs; the files MCP
-refuses an agent write there. `docs/jobs.md` is the reference.
+`wiki/knowledge/`, `wiki/questions/`, and `wiki/insights/` belong to the
+jobs; the files MCP refuses an agent write there. A job never sends a
+question to a person: it keeps the question under `wiki/questions/`, and a
+person answers it in chat. `docs/jobs.md` is the reference.
 
 ## Runtime images
 

@@ -61,6 +61,7 @@ OUT_OF_SCOPE = (
     "joshua-docs",
     layout.KNOWLEDGE,
     layout.INSIGHTS,
+    layout.QUESTIONS,
     "skills",
     ATTACHMENTS,
 )

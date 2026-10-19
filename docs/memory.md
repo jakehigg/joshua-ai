@@ -50,9 +50,9 @@ The indexer re-reads the volume every `memory.index_interval_s` seconds (60 by
 default). It compares each file against the index by content, so a file that did
 not change is not embedded again. A new note is findable within one interval.
 
-### Knowledge and insights
+### Knowledge, questions, and insights
 
-Two folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
+Three folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
 
 - `wiki/knowledge/` holds what the researcher job found about a topic: one
   dossier per topic, at the same path as the topic page, and one page for each
@@ -65,6 +65,21 @@ Two folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   knowledge page in an answer, it says so and gives the confidence.
   `wiki/knowledge/README.md` is the table of every dossier. See
   [the researcher](jobs.md#the-researcher).
+- `wiki/questions/` holds the questions that the researcher job could not
+  answer from the web or from our records: what was done, used, intended, or
+  preferred, or a record that is missing. The index gives these chunks the
+  kind `question`. A question is one page at
+  `wiki/questions/<section>/<slug>.md`. Its frontmatter holds the
+  `question`, the `topic`, `why` the researcher wants to know, `for`
+  (`everyone`, or the id of the person who would know), the `context` pages,
+  the `status` (`open`, `answered`, or `dismissed`), and, after a person
+  answers, the `answer`, `answered_by`, and `answered_at`. Its body has the
+  headings **Why Joshua wants to know**, **Where it came from**, and
+  **Answer**. Joshua never sends a question. A member asks what Joshua needs,
+  and Joshua lists the open questions. `wiki/questions/README.md` lists every
+  question, the oldest open question first. The memory bundle of a topic
+  holds its answered questions, so the next research run reads what a person
+  said. See [questions for a person](jobs.md#questions-for-a-person).
 - `wiki/insights/` holds what the insights job raised: a place where what we
   do is different from what the knowledge says, for the date and the season.
   The index gives these chunks the kind `insight`. An insight is one page at
@@ -78,12 +93,14 @@ Two folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   `wiki/insights/README.md` is the table of every insight, open insights
   first. See [insights](jobs.md#insights).
 
-The agent finds both the same way it finds any wiki page: through the
+The agent finds them the same way it finds any wiki page: through the
 injection before a turn, and through `search_memory`. The agent cannot write
-them. `write_file` and `rename_file` refuse a path in either folder, so a
-dossier and an insight keep the frontmatter that their job reads. The search
-route for the viewer and joshua-mcp, `POST /v1/memory/search`, returns these
-chunks too, with the kinds `knowledge` and `insight`.
+them. `write_file` and `rename_file` refuse a path in these folders, so a
+dossier, a question, and an insight keep the frontmatter that their job reads.
+A member answers a question with the `questions` chat tool, which writes the
+page for them. The search route for the viewer and joshua-mcp,
+`POST /v1/memory/search`, returns these chunks too, with the kinds
+`knowledge`, `question`, and `insight`.
 
 ### Two ways a chunk reaches the agent
 
@@ -372,8 +389,8 @@ The journal has one writer: `write_journal_entry`. `write_file` and
 `rename_file` refuse a path under `wiki/journal/`, so every entry lands in the
 right day folder with the front matter the index reads, and the nightly page
 cannot be overwritten by a free write. The same two tools refuse a path under
-`wiki/knowledge/` and `wiki/insights/`, which the jobs own. See
-[Knowledge and insights](#knowledge-and-insights).
+`wiki/knowledge/`, `wiki/questions/`, and `wiki/insights/`, which the jobs
+own. See [Knowledge, questions, and insights](#knowledge-questions-and-insights).
 
 The indexer picks up a new or changed journal page like any other wiki page,
 and chunks it into `kb_chunk` at shared scope. A later turn that asks about the

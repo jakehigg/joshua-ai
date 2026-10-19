@@ -44,6 +44,26 @@ with the images and the packaged chart, are at
   lists every topic with its coverage. See
   [docs/jobs.md](jobs.md#the-researcher).
 
+- **The researcher keeps the questions that only a person can answer.** The
+  `raise` worker now gives each question an audience: `web`, `person`, or
+  `record`. A question that names a person, a date from our records, or "we"
+  goes to a person, whatever the worker said. A `record` question that a
+  topic page, a journal entry, or a knowledge page answers at
+  `jobs.research.record_sim` (0.80) or more is closed in the report with
+  `answered_by`; with no such record it goes to a person. A question for a
+  person is a page under the new folder `wiki/questions/`, with why the
+  researcher wants to know and where the question came from, and
+  `wiki/questions/README.md` lists them. Joshua never sends a question: the
+  jobs run at night. A member asks Joshua if it needs anything, and Joshua
+  lists the open questions with the new `questions` chat tool
+  (`list_questions`, `answer_question`, `dismiss_question`). The next
+  research run of the topic reads each answer in the memory bundle. The
+  report of a run has the new sections "For a person" and "Answered by our
+  records". The folder is reserved like `wiki/knowledge/`: `write_file` and
+  `rename_file` refuse it, and the search route returns its pages with the
+  kind `question`. See
+  [docs/jobs.md](jobs.md#questions-for-a-person).
+
 - **The insights job tells us where what we do disagrees with what is
   known.** Set `jobs.insights.enabled: true` to add it. A run works on one
   topic page that has published knowledge pages. A worker with no tools

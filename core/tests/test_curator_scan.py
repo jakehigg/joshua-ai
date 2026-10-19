@@ -254,3 +254,18 @@ def test_a_link_in_fenced_code_is_not_a_link() -> None:
 def test_a_shorter_or_other_fence_does_not_close_a_block() -> None:
     text = "````\n```\n~~~~\n[a](a.md)\n```` not a close\n````\n[b](b.md)\n"
     assert [link.target for link in parse_links(text)] == ["b.md"]
+
+
+def test_a_job_page_is_never_an_orphan(tmp_path: Path) -> None:
+    wiki = _wiki(
+        tmp_path,
+        {
+            "Home.md": "# Home\n",
+            "knowledge/houseplants/snake-plant.md": "# Dossier\n",
+            "insights/houseplants/too-wet.md": "# Insight\n",
+            "questions/houseplants/feed-dose.md": "# Question\n",
+            "questions/README.md": "# Questions\n",
+        },
+    )
+    result = scan_tree(load_tree(wiki), trash=False)
+    assert [f for f in result.findings if f.kind == "orphan"] == []

@@ -529,6 +529,7 @@ jobs:
     questions_per_run: 3
     coverage_target: 0.6
     dup_sim: 0.85
+    record_sim: 0.80
     max_holds: 2
     refresh_days: 180
     lookup_timeout_seconds: 300
@@ -580,6 +581,7 @@ jobs:
 | `research.questions_per_run` | `3` | The most questions that one run researches. The `max_questions` argument of a run can make it lower. A `plan` or a `run` calls `raise` only when the dossier has fewer open questions than this. |
 | `research.coverage_target` | `0.6` | A topic with a coverage below this is due for research (selection rule 3). |
 | `research.dup_sim` | `0.85` | A new question with a vector this close to a question of the dossier, or to a knowledge page, is a duplicate. |
+| `research.record_sim` | `0.80` | A question that the `raise` worker sends to our records is closed with `answered_by` when a topic page, a journal entry, or a knowledge page has a chunk this close to it. Below it, the question goes to `wiki/questions/` for a person. |
 | `research.max_holds` | `2` | A question held this many times is `dropped`. |
 | `research.refresh_days` | `180` | The days from a research run to `refresh_after` on the dossier and the page. |
 | `research.lookup_timeout_seconds` | `300` | How long one lookup of the researcher or the challenger may take. It replaces `internet.timeout_seconds` for these lookups, because a lookup that needs a primary source and two independent sources makes more searches and fetches than a chat question. The chat tool keeps `internet.timeout_seconds`. |
