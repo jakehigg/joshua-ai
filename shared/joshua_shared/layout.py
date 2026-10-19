@@ -19,6 +19,9 @@ There is one wiki, at `<data>/wiki/`. It is Joshua's memory:
   the shared profile. `everyone` is reserved: no person may use it as an id.
 - `attachments/YYYY/MM/` holds the attachments the wiki keeps. Core moves a
   file here. The wiki repository ignores this folder.
+- `knowledge/` holds what the researcher job found about each topic, and
+  `insights/` holds what the insights job raised. Only those jobs write them,
+  and each folder appears at its first write.
 
 Every person reads the wiki and a member writes it. A person's own files
 outside the wiki are `attachments/` and, for the terminal channel, `cli/`,
@@ -76,6 +79,11 @@ SHARED_PROFILE_NAME = "everyone"
 
 _PERSON_ID_RE = PERSON_ID_RE
 _JOURNAL_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
+# A knowledge page slug, an insight slug, and an insight section.
+_PAGE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
+
+KNOWLEDGE = "knowledge"
+INSIGHTS = "insights"
 
 # A pre-single-wiki `blog/` post: the nightly digest, `YYYY-MM-DD.md` ...
 _LEGACY_DIGEST_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\.md\Z")
@@ -242,6 +250,71 @@ def journal_day_from_path(path: Path, root: Path | str | None = None) -> date | 
         return date(int(parts[0]), int(parts[1]), int(parts[2]))
     except ValueError:
         return None
+
+
+def knowledge_root(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/knowledge`, what the researcher job found, one dossier per topic."""
+    return wiki_root(root) / KNOWLEDGE
+
+
+def _topic_stem(topic_rel: str) -> PurePosixPath:
+    """The wiki-relative path of a topic page without `.md`.
+
+    `topic_rel` is a relative wiki path, such as `houseplants/snake-plant.md`.
+    Raises `ValueError` for an absolute path, a backslash, an empty segment,
+    a `.` or `..` segment, or a segment that starts with a dot.
+    """
+    if not isinstance(topic_rel, str) or not topic_rel or "\\" in topic_rel or "\0" in topic_rel:
+        raise ValueError(f"invalid topic path: {topic_rel!r}")
+    if topic_rel.startswith("/"):
+        raise ValueError(f"topic path must be relative: {topic_rel!r}")
+    stem = topic_rel[:-3] if topic_rel.endswith(".md") else topic_rel
+    segments = stem.split("/")
+    if any(not seg or seg in (".", "..") or seg.startswith(".") for seg in segments):
+        raise ValueError(f"invalid topic path: {topic_rel!r}")
+    return PurePosixPath(*segments)
+
+
+def _page_slug(value: str, what: str) -> str:
+    if not isinstance(value, str) or not _PAGE_SLUG_RE.match(value):
+        raise ValueError(f"invalid {what}: {value!r}")
+    return value
+
+
+def knowledge_dossier(topic_rel: str, root: Path | str | None = None) -> Path:
+    """`<data>/wiki/knowledge/<topic>.md`, the dossier of one topic.
+
+    For the topic `houseplants/snake-plant.md` the dossier is
+    `wiki/knowledge/houseplants/snake-plant.md`. Raises `ValueError` for a
+    `topic_rel` that is not a safe relative wiki path.
+    """
+    stem = _topic_stem(topic_rel)
+    return knowledge_root(root) / stem.parent / f"{stem.name}.md"
+
+
+def knowledge_page(topic_rel: str, slug: str, root: Path | str | None = None) -> Path:
+    """`<data>/wiki/knowledge/<topic>/<slug>.md`, one researched question of a topic.
+
+    `slug` matches `^[a-z0-9][a-z0-9-]{0,63}$`. Raises `ValueError` for a bad
+    slug or a `topic_rel` that is not a safe relative wiki path.
+    """
+    stem = _topic_stem(topic_rel)
+    return knowledge_root(root) / stem / f"{_page_slug(slug, 'knowledge slug')}.md"
+
+
+def insights_root(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/insights`, what the insights job raised."""
+    return wiki_root(root) / INSIGHTS
+
+
+def insight_page(section: str, slug: str, root: Path | str | None = None) -> Path:
+    """`<data>/wiki/insights/<section>/<slug>.md`, one insight.
+
+    `section` and `slug` each match `^[a-z0-9][a-z0-9-]{0,63}$`. Raises
+    `ValueError` for any other value.
+    """
+    folder = _page_slug(section, "insight section")
+    return insights_root(root) / folder / f"{_page_slug(slug, 'insight slug')}.md"
 
 
 def inbox_root(root: Path | str | None = None) -> Path:

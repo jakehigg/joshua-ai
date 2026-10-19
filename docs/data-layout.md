@@ -23,6 +23,9 @@ already at the new path stays where it is. See [Migration](#migration).
 /data/wiki/journal/YYYY/MM/DD/<slug>.md          an entry Joshua wrote that day
 /data/wiki/people/<person_id>.md                 Joshua's profile of a person
 /data/wiki/people/everyone.md                    the shared profile
+/data/wiki/knowledge/<topic>.md                  the dossier of one topic; the researcher job writes it
+/data/wiki/knowledge/<topic>/<slug>.md           one researched question of that topic
+/data/wiki/insights/<section>/<slug>.md          one insight; the insights job writes it
 /data/wiki/**.md                                 the rest of the wiki, incl. wiki/skills/*.md
 /data/wiki/.trash/<UTC timestamp>/**             pages the viewer deleted; the index skips it
 /data/wiki/.git/                                 the wiki's git repository; core makes it
@@ -56,6 +59,8 @@ may write comes from their role, never from the path. See `security.md`.
   `wiki/attachments/`, and `inbox/sessions/`. Core also writes the metadata
   file of an attachment, and renames an attachment after the description.
   Core never writes the bytes of a file that a person sent.
+- core writes `wiki/knowledge/` and `wiki/insights/` too, from a job run.
+  See [docs/jobs.md](jobs.md).
 - gateway (files MCP) writes the rest of `wiki/` for a member, and
   `wiki/people/<id>.md` for that person. The `<id>` must be a person on the
   roster, so a write makes no page beside a real one. `save_attachment` copies
@@ -126,6 +131,27 @@ person. It holds two kinds of page:
 The index holds both kinds. This is how Joshua remembers that a person did
 something: as an event in its own journal, in its own voice, not as a post
 that belongs to the person.
+
+## Knowledge and insights
+
+Two folders of the wiki belong to the jobs. See [docs/jobs.md](jobs.md).
+
+- `wiki/knowledge/` holds what the researcher job found. The path of a topic
+  dossier is the same as the path of its topic page: the dossier of
+  `houseplants/snake-plant.md` is `knowledge/houseplants/snake-plant.md`, and
+  each researched question of that topic is a page in
+  `knowledge/houseplants/snake-plant/`.
+- `wiki/insights/<section>/<slug>.md` holds one insight: a place where what
+  the wiki and the journal say we do is different from what the knowledge
+  says.
+
+`layout.knowledge_dossier`, `layout.knowledge_page`, and `layout.insight_page`
+build these paths. A slug and a section match `^[a-z0-9][a-z0-9-]{0,63}$`. A
+topic path is relative to the wiki and has no `.` or `..` segment. Core does
+not make the folders at start. Each folder appears at its first write.
+
+Every person reads both folders. The agent cannot write them: `write_file`
+and `rename_file` refuse a path in them.
 
 ## Profiles
 
