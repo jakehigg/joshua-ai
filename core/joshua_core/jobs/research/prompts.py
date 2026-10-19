@@ -83,12 +83,15 @@ How to research this:
 - Use at least two independent sources, from different sites.
 - Give the numbers: the amounts, the intervals, the temperatures, the dates.
 - Say where good sources disagree, and what each one says.
-- Put every page you used in `sources`, as URLs, not only in the answer text."""
+- Put every page you used in `sources`, as URLs, not only in the answer text.
+- Read at most four pages. Stop when you have a primary source and one
+  independent second source."""
 
 CHALLENGE_BRIEF = """You check an answer that somebody else found. Find the strongest evidence
 that the draft answer below is wrong, outdated, or incomplete, or that a more
 authoritative source says otherwise. Report what you found, with its sources.
-When you found nothing that contradicts the draft, say so plainly.
+When you found nothing that contradicts the draft, say so plainly. Read at
+most three pages.
 
 The question: {question}
 
@@ -109,28 +112,35 @@ the distrusted domains below is always `weak`."""
 
 EDITOR_PROMPT = f"""You are the editor of a research page about one question.
 
+Answer with the short required fields first: `verdict`, `confidence`,
+`answer_short`, and `sources`. Then give `answer` and the other fields. Keep
+the whole answer under 2500 characters. Put the numbers in `answer` and the
+reasoning in `evidence`. Do not repeat the sources inside the answer text.
+
 You get the question, the local context (phrases from our own wiki and journal,
 each with the sentence it came from), a draft answer with its sources, a
 challenge to the draft with its sources, and a trust rubric.
 
 Write the page:
 
-- `answer`: the answer, in full, so that somebody can act on it without
-  opening a source: the steps, the amounts, the numbers. Plain Markdown.
-- `answer_short`: the answer in one line, 160 characters or less.
-- `local_notes`: where the general advice differs for our situation, from the
-  local context. An empty string when it does not differ.
-- `evidence`: the facts that support the answer, one item each, each with the
-  source it came from.
-- `disagreements`: where good sources disagree, and what the challenge found.
-  An empty string when there is none.
-- `sources`: each source you used, copied exactly from the draft or the
-  challenge, with `url`, `title`, and `trust`. Use no other URL.
+- `verdict`: `publish` when the answer is supported, `hold` when it is not:
+  the challenge overturned the draft, or the sources are too weak.
 - `confidence`: `high` when two or more good, independent sources agree and
   the challenge found nothing that overturns them; `low` when the evidence is
   thin or the sources conflict; `medium` otherwise.
-- `verdict`: `publish` when the answer is supported, `hold` when it is not:
-  the challenge overturned the draft, or the sources are too weak.
+- `answer_short`: the answer in one line, 160 characters or less.
+- `sources`: each source you used, copied exactly from the draft or the
+  challenge, with `url`, `title`, and `trust`. Use no other URL. 8 or less.
+- `answer`: the answer, so that somebody can act on it without opening a
+  source: the steps, the amounts, the numbers. Plain Markdown, 2500
+  characters or less.
+- `local_notes`: where the general advice differs for our situation, from the
+  local context. An empty string when it does not differ. 800 characters or
+  less.
+- `evidence`: the facts that support the answer, one item each, each with the
+  source it came from. 8 items or less, each 300 characters or less.
+- `disagreements`: where good sources disagree, and what the challenge found.
+  An empty string when there is none. 800 characters or less.
 - `reason`: one sentence that says why.
 
 Do not put a link in the text other than to a source in `sources`.

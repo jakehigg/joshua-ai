@@ -604,6 +604,7 @@ class JobsResearch(_Model):
     `internet.timeout_seconds` and `internet.max_turns` for the researcher
     and the challenger, because a lookup that needs a primary source and two
     independent sources takes more searches than a chat question.
+    `editor_timeout_seconds` is the timeout of one call of the editor.
     `topics_per_run` is how many topics one run takes.
     `questions_per_topic` is how many questions one `raise` call may add,
     less the open ones. `questions_per_run` is how many questions one run
@@ -631,8 +632,9 @@ class JobsResearch(_Model):
     trusted_domains: list[str] = list(RESEARCH_TRUSTED_DOMAINS)
     distrusted_domains: list[str] = list(RESEARCH_DISTRUSTED_DOMAINS)
     lookup_timeout_seconds: int = Field(default=300, ge=1)
-    lookup_max_turns: int = Field(default=20, ge=1)
+    lookup_max_turns: int = Field(default=14, ge=1)
     lookup_max_age_days: int = Field(default=7, ge=1)
+    editor_timeout_seconds: int = Field(default=240, ge=1)
 
     @field_validator("trusted_domains", "distrusted_domains")
     @classmethod

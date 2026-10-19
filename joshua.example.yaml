@@ -274,10 +274,11 @@ jobs:
     refresh_days: 180      # a researched topic is due again after this many days
     lookup_timeout_seconds: 300 # one lookup of the researcher or the challenger;
                            # it replaces internet.timeout_seconds for these lookups
-    lookup_max_turns: 20   # the turn ceiling of one such lookup; it replaces
+    lookup_max_turns: 14   # the turn ceiling of one such lookup; it replaces
                            # internet.max_turns for these lookups
     lookup_max_age_days: 7 # a held question keeps its two lookups this many
                            # days; a later run gives them to the editor again
+    editor_timeout_seconds: 240 # one call of the editor, which has no tools
     trusted_domains:       # the editor may not grade a page here weak. An entry
       - .edu               # that starts with a dot matches the end of a host;
       - .gov               # an entry that ends with a dot matches its start

@@ -27,7 +27,7 @@ the crew does not look up again: the editor gets those two.
 
 The two lookups take `jobs.research.lookup_timeout_seconds` and
 `jobs.research.lookup_max_turns` in place of the limits of the `internet`
-section.
+section. The editor takes `jobs.research.editor_timeout_seconds`.
 """
 
 from __future__ import annotations
@@ -55,8 +55,10 @@ from joshua_core.jobs.research.prompts import (
 from joshua_core.jobs.research.text import Grounding, inline
 
 EDITOR = "editor"
+RESEARCHER = "researcher"
+CHALLENGER = "challenger"
+STEPS = (RESEARCHER, CHALLENGER, EDITOR)
 INTERNET = internet.WORKER
-EDITOR_TIMEOUT_S = 120.0
 NO_ANSWER = "no answer"
 # `internet.ask` keeps this many characters of the question text.
 _LOOKUP_CHARS = 2000
@@ -68,74 +70,150 @@ Trust = Literal["primary", "secondary", "weak"]
 
 
 ANSWER_SHORT_CHARS = 160
+# The limits of the editor's answer. The schema states each one as guidance,
+# and `EditorAnswer` cuts a longer value to it.
+ANSWER_CHARS = 2500
+LOCAL_NOTES_CHARS = 800
+EVIDENCE_ITEMS = 8
+EVIDENCE_CHARS = 300
+DISAGREEMENTS_CHARS = 800
+REASON_CHARS = 300
+SOURCE_ITEMS = 8
+TITLE_CHARS = 200
+URL_CHARS = 500
+_MORE = "…"
+
+
+def cut_text(value: object, limit: int) -> object:
+    """A string longer than `limit` cut to `limit` characters, the last one
+    `…`. Any other value is returned as it is, for the model to check."""
+    if isinstance(value, str) and len(value) > limit:
+        return value[: limit - 1].rstrip() + _MORE
+    return value
+
+
+def cut_list(value: object, items: int, chars: int | None = None) -> object:
+    """A list cut to `items` items, and each string in it to `chars`
+    characters. Any other value is returned as it is."""
+    if not isinstance(value, list):
+        return value
+    kept = value[:items]
+    return kept if chars is None else [cut_text(item, chars) for item in kept]
 
 
 class EditorSource(BaseModel):
-    url: str = Field(max_length=2000)
-    title: str = Field(default="", max_length=300)
+    url: str = Field(max_length=URL_CHARS)
+    title: str = Field(default="", max_length=TITLE_CHARS)
     trust: Trust
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def _cut_url(cls, value: object) -> object:
+        return cut_text(value, URL_CHARS)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _cut_title(cls, value: object) -> object:
+        return cut_text(value, TITLE_CHARS)
 
 
 class EditorAnswer(BaseModel):
-    """The answer of the editor. The model gets `EDITOR_SCHEMA`, and this model
-    checks the limits after it. A longer `answer_short` is cut, because the page
-    keeps only its first line."""
+    """The answer of the editor, in the order of `EDITOR_SCHEMA`: the short
+    required fields first, then the long ones.
 
-    answer: str = Field(max_length=20000)
-    answer_short: str = Field(max_length=ANSWER_SHORT_CHARS)
-    local_notes: str = Field(default="", max_length=6000)
-    evidence: list[str] = Field(default_factory=list, max_length=30)
-    disagreements: str = Field(default="", max_length=6000)
-    sources: list[EditorSource] = Field(default_factory=list, max_length=20)
-    confidence: Literal["low", "medium", "high"]
+    The model gets `EDITOR_SCHEMA`, and this model checks the answer after it.
+    A string or a list that is longer than its limit is cut to the limit, not
+    refused, so a long field never loses the whole answer."""
+
     verdict: Literal["publish", "hold"]
-    reason: str = Field(default="", max_length=1000)
+    confidence: Literal["low", "medium", "high"]
+    answer_short: str = Field(max_length=ANSWER_SHORT_CHARS)
+    sources: list[EditorSource] = Field(default_factory=list, max_length=SOURCE_ITEMS)
+    answer: str = Field(max_length=ANSWER_CHARS)
+    local_notes: str = Field(default="", max_length=LOCAL_NOTES_CHARS)
+    evidence: list[str] = Field(default_factory=list, max_length=EVIDENCE_ITEMS)
+    disagreements: str = Field(default="", max_length=DISAGREEMENTS_CHARS)
+    reason: str = Field(default="", max_length=REASON_CHARS)
 
     @field_validator("answer_short", mode="before")
     @classmethod
     def _cut_short(cls, value: object) -> object:
-        if isinstance(value, str) and len(value) > ANSWER_SHORT_CHARS:
-            return value[: ANSWER_SHORT_CHARS - 1].rstrip() + "…"
-        return value
+        return cut_text(value, ANSWER_SHORT_CHARS)
+
+    @field_validator("answer", mode="before")
+    @classmethod
+    def _cut_answer(cls, value: object) -> object:
+        return cut_text(value, ANSWER_CHARS)
+
+    @field_validator("local_notes", mode="before")
+    @classmethod
+    def _cut_local_notes(cls, value: object) -> object:
+        return cut_text(value, LOCAL_NOTES_CHARS)
+
+    @field_validator("disagreements", mode="before")
+    @classmethod
+    def _cut_disagreements(cls, value: object) -> object:
+        return cut_text(value, DISAGREEMENTS_CHARS)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _cut_reason(cls, value: object) -> object:
+        return cut_text(value, REASON_CHARS)
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def _cut_evidence(cls, value: object) -> object:
+        return cut_list(value, EVIDENCE_ITEMS, EVIDENCE_CHARS)
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _cut_sources(cls, value: object) -> object:
+        return cut_list(value, SOURCE_ITEMS)
 
 
-def _string() -> dict[str, str]:
-    return {"type": "string"}
+def _string(limit: int) -> dict[str, str]:
+    return {"type": "string", "description": f"At most {limit} characters."}
 
 
 def _enum(*values: str) -> dict[str, Any]:
     return {"type": "string", "enum": list(values)}
 
 
-# The schema the editor is asked for. It is flat: no reference, no length
-# limit, and an enum only for `trust`, `confidence`, and `verdict`. Each try
-# that the validator of the CLI refuses costs a turn, so a simple schema leaves
-# the turns for the answer. `EditorAnswer` checks the limits after it.
+def _array(items: dict[str, Any], limit: int) -> dict[str, Any]:
+    return {"type": "array", "items": items, "description": f"At most {limit} items."}
+
+
+# The schema the editor is asked for. It is flat: no reference, and an enum only
+# for `trust`, `confidence`, and `verdict`. The short required fields come
+# first, so that an answer that is cut off still has them. Each limit is a
+# `description`, not a `maxLength` or a `maxItems`: the validator of the CLI
+# refuses a value over a hard limit, and each refused try costs a turn.
+# `EditorAnswer` cuts a longer value to its limit.
 EDITOR_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "answer": _string(),
-        "answer_short": _string(),
-        "local_notes": _string(),
-        "evidence": {"type": "array", "items": _string()},
-        "disagreements": _string(),
-        "sources": {
-            "type": "array",
-            "items": {
+        "verdict": _enum("publish", "hold"),
+        "confidence": _enum("low", "medium", "high"),
+        "answer_short": _string(ANSWER_SHORT_CHARS),
+        "sources": _array(
+            {
                 "type": "object",
                 "properties": {
-                    "url": _string(),
-                    "title": _string(),
+                    "url": _string(URL_CHARS),
+                    "title": _string(TITLE_CHARS),
                     "trust": _enum("primary", "secondary", "weak"),
                 },
                 "required": ["url", "trust"],
             },
-        },
-        "confidence": _enum("low", "medium", "high"),
-        "verdict": _enum("publish", "hold"),
-        "reason": _string(),
+            SOURCE_ITEMS,
+        ),
+        "answer": _string(ANSWER_CHARS),
+        "local_notes": _string(LOCAL_NOTES_CHARS),
+        "evidence": _array(_string(EVIDENCE_CHARS), EVIDENCE_ITEMS),
+        "disagreements": _string(DISAGREEMENTS_CHARS),
+        "reason": _string(REASON_CHARS),
     },
-    "required": ["answer", "answer_short", "sources", "confidence", "verdict"],
+    "required": ["verdict", "confidence", "answer_short", "sources", "answer"],
 }
 
 
@@ -201,7 +279,8 @@ class CrewResult:
     `page` is the editor's answer after the checks, or None when a step gave
     no answer. `holds` lists the reasons to hold; it is empty for a page that
     may be published. `dropped_urls` are the sources the editor named that no
-    lookup returned.
+    lookup returned. `usage` holds the tokens of each step that ran, by step
+    name: `researcher`, `challenger`, and `editor`.
     """
 
     page: EditorAnswer | None
@@ -209,6 +288,7 @@ class CrewResult:
     dropped_urls: list[str] = field(default_factory=list)
     draft: internet.InternetAnswer | None = None
     challenge: internet.InternetAnswer | None = None
+    usage: dict[str, Usage] = field(default_factory=dict)
 
     @property
     def publish(self) -> bool:
@@ -326,13 +406,15 @@ async def research_question(
     draft: internet.InternetAnswer | None = None,
     challenge: internet.InternetAnswer | None = None,
 ) -> CrewResult:
-    """Run the crew for one question. Each call is counted on `ledger`.
+    """Run the crew for one question. Each call is counted on `ledger`, and
+    the tokens of each step are on `CrewResult.usage`.
 
     When both `draft` and `challenge` are given, the two lookups do not run,
     and the editor gets these two answers.
     """
+    steps: dict[str, Usage] = {}
 
-    async def lookup(text: str, stats: WorkerStats) -> internet.InternetAnswer | None:
+    async def lookup(step: str, text: str, stats: WorkerStats) -> internet.InternetAnswer | None:
         used: list[Usage] = []
         got = await internet.ask(
             text,
@@ -344,18 +426,24 @@ async def research_question(
             stats_out=stats,
         )
         ledger.add(INTERNET, used)
+        steps[step] = Usage.sum(used)
         return got
 
     if draft is None or challenge is None:
         stats = WorkerStats()
-        draft = await lookup(research_text(question), stats)
+        draft = await lookup(RESEARCHER, research_text(question), stats)
         if draft is None:
-            return CrewResult(page=None, holds=[no_answer_reason("the researcher", stats)])
+            return CrewResult(
+                page=None, holds=[no_answer_reason("the researcher", stats)], usage=steps
+            )
         stats = WorkerStats()
-        challenge = await lookup(challenge_text(question, draft.answer), stats)
+        challenge = await lookup(CHALLENGER, challenge_text(question, draft.answer), stats)
         if challenge is None:
             return CrewResult(
-                page=None, holds=[no_answer_reason("the challenger", stats)], draft=draft
+                page=None,
+                holds=[no_answer_reason("the challenger", stats)],
+                draft=draft,
+                usage=steps,
             )
 
     used: list[Usage] = []
@@ -366,17 +454,23 @@ async def research_question(
         answer=EditorAnswer,
         schema=EDITOR_SCHEMA,
         model=editor_model,
-        timeout_s=EDITOR_TIMEOUT_S,
+        timeout_s=research_settings.editor_timeout_seconds,
         runner=editor_runner,
         usage_out=used,
     )
     ledger.add(EDITOR, used)
+    steps[EDITOR] = Usage.sum(used)
     if edited is None:
         return CrewResult(
-            page=None, holds=[f"{NO_ANSWER} from the editor"], draft=draft, challenge=challenge
+            page=None,
+            holds=[f"{NO_ANSWER} from the editor"],
+            draft=draft,
+            challenge=challenge,
+            usage=steps,
         )
     given = [s.url for s in draft.sources] + [s.url for s in challenge.sources]
     result = check_editor(edited, given, research_settings)
     result.draft = draft
     result.challenge = challenge
+    result.usage = steps
     return result

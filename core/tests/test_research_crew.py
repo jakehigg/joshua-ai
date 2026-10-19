@@ -202,7 +202,7 @@ async def test_the_lookups_take_the_research_limits() -> None:
         editor_runner=FakeWorkers(),
     )
     assert [(k["timeout_s"], k["max_turns"]) for k in net.kwargs] == [(450, 25), (450, 25)]
-    assert (CFG.lookup_timeout_seconds, CFG.lookup_max_turns) == (300, 20)
+    assert (CFG.lookup_timeout_seconds, CFG.lookup_max_turns) == (300, 14)
 
 
 def _timed_out(searches: int, fetches: int) -> Any:
@@ -301,14 +301,60 @@ def _keys(value: Any) -> set[str]:
     return set()
 
 
-def test_the_editor_schema_is_flat_and_has_no_limit() -> None:
+def test_the_editor_schema_is_flat_and_has_no_hard_limit() -> None:
     keys = _keys(crew.EDITOR_SCHEMA)
     assert not keys & {"$ref", "$defs", "maxLength", "maxItems", "used_for"}
     item = crew.EDITOR_SCHEMA["properties"]["sources"]["items"]
-    assert set(item["properties"]) == {"url", "title", "trust"}
+    assert list(item["properties"]) == ["url", "title", "trust"]
     enums = {name for name, prop in crew.EDITOR_SCHEMA["properties"].items() if "enum" in prop}
     assert enums == {"confidence", "verdict"}
-    assert crew.EDITOR_SCHEMA["properties"]["evidence"]["items"] == {"type": "string"}
+    assert crew.EDITOR_SCHEMA["properties"]["evidence"]["items"]["type"] == "string"
+
+
+ORDER = [
+    "verdict",
+    "confidence",
+    "answer_short",
+    "sources",
+    "answer",
+    "local_notes",
+    "evidence",
+    "disagreements",
+    "reason",
+]
+
+
+def test_the_short_required_fields_come_first() -> None:
+    assert list(crew.EDITOR_SCHEMA["properties"]) == ORDER
+    assert crew.EDITOR_SCHEMA["required"] == ORDER[:5]
+    assert list(EditorAnswer.model_fields) == ORDER
+    assert list(EditorAnswer.model_json_schema()["properties"]) == ORDER
+
+
+@pytest.mark.parametrize(
+    ("path", "limit"),
+    [
+        (("answer",), 2500),
+        (("answer_short",), 160),
+        (("local_notes",), 800),
+        (("disagreements",), 800),
+        (("reason",), 300),
+        (("evidence", "items"), 300),
+        (("sources", "items", "properties", "title"), 200),
+        (("sources", "items", "properties", "url"), 500),
+    ],
+)
+def test_the_schema_states_each_text_limit(path: tuple[str, ...], limit: int) -> None:
+    prop: Any = crew.EDITOR_SCHEMA["properties"]
+    for key in path:
+        prop = prop[key]
+    assert prop["description"] == f"At most {limit} characters."
+
+
+def test_the_schema_states_each_list_limit() -> None:
+    props = crew.EDITOR_SCHEMA["properties"]
+    assert props["sources"]["description"] == "At most 8 items."
+    assert props["evidence"]["description"] == "At most 8 items."
 
 
 async def test_the_editor_gets_the_flat_schema() -> None:
@@ -333,14 +379,97 @@ async def test_the_editor_gets_the_flat_schema() -> None:
     assert schemas == [crew.EDITOR_SCHEMA]
 
 
-def test_the_model_still_checks_the_limits_and_cuts_the_short_answer() -> None:
+def test_the_model_cuts_a_long_field_and_does_not_refuse_it() -> None:
     pair = ((PRIMARY, "primary"), (SECONDARY, "secondary"))
     cut = _answer(*pair, answer_short="x" * 400)
     assert len(cut.answer_short) == crew.ANSWER_SHORT_CHARS and cut.answer_short.endswith("…")
-    with pytest.raises(ValueError):
-        _answer(*pair, evidence=["e"] * 31)
+    long = _answer(
+        *pair,
+        answer="a" * 9000,
+        local_notes="n" * 2000,
+        disagreements="d" * 2000,
+        reason="r" * 900,
+        evidence=["e" * 900] * 31,
+    )
+    assert len(long.answer) == 2500 and long.answer.endswith("…")
+    assert len(long.local_notes) == 800
+    assert len(long.disagreements) == 800
+    assert len(long.reason) == 300
+    assert len(long.evidence) == 8 and all(len(e) == 300 for e in long.evidence)
+    many = _answer(*[(f"{PRIMARY}/{i}", "primary") for i in range(12)])
+    assert len(many.sources) == 8
+    source = _answer(
+        sources=[{"url": PRIMARY + "x" * 900, "title": "t" * 900, "trust": "primary"}]
+    ).sources[0]
+    assert (len(source.url), len(source.title)) == (500, 200)
     with pytest.raises(ValueError):
         _answer(*pair, sources=[{"url": PRIMARY, "trust": "excellent"}])
+    with pytest.raises(ValueError):
+        _answer(*pair, verdict="maybe")
+
+
+def test_short_values_are_kept_as_they_are() -> None:
+    assert crew.cut_text("abc", 3) == "abc"
+    assert crew.cut_text(5, 3) == 5
+    assert crew.cut_list("abc", 1) == "abc"
+    assert crew.cut_list([1, 2, 3], 2) == [1, 2]
+
+
+async def test_an_editor_answer_over_the_limits_is_published() -> None:
+    long = editor((PRIMARY, "primary"), (SECONDARY, "secondary"), answer="Water. " * 1000)
+    result = await _crew(FakeInternet(), FakeWorkers(editor_answer=long))
+    assert result.publish, result.hold_reason
+    assert result.page is not None and len(result.page.answer) <= crew.ANSWER_CHARS
+    assert result.page.answer.endswith("Water.…")
+
+
+async def test_the_editor_takes_its_timeout_from_the_config() -> None:
+    cfg = research_settings("    editor_timeout_seconds: 77\n").jobs.research
+    workers = FakeWorkers()
+    timeouts: list[Any] = []
+
+    async def editor_runner(**kwargs: Any) -> Any:
+        timeouts.append(kwargs["timeout_s"])
+        return await workers(**kwargs)
+
+    await crew.research_question(
+        GROUNDED,
+        GROUNDINGS,
+        internet_settings=SETTINGS.internet,
+        research_settings=cfg,
+        editor_model=None,
+        ledger=UsageLedger(),
+        internet_runner=FakeInternet(),
+        editor_runner=editor_runner,
+    )
+    assert timeouts == [77]
+    assert CFG.editor_timeout_seconds == 240
+
+
+async def test_the_result_holds_the_tokens_of_each_step() -> None:
+    from research_fakes import EDITOR_USAGE, LOOKUP_USAGE
+
+    result = await _crew(FakeInternet(), FakeWorkers())
+    assert {k: v.total for k, v in result.usage.items()} == {
+        "researcher": LOOKUP_USAGE.total,
+        "challenger": LOOKUP_USAGE.total,
+        "editor": EDITOR_USAGE.total,
+    }
+    net = FakeInternet()
+    net.challenge = None
+    result = await _crew(net, FakeWorkers())
+    assert set(result.usage) == {"researcher", "challenger"}
+
+
+def test_the_briefs_limit_the_pages_a_lookup_reads() -> None:
+    from joshua_core.jobs.research.prompts import CHALLENGE_BRIEF, EDITOR_PROMPT, RESEARCH_BRIEF
+
+    assert "at most four pages" in RESEARCH_BRIEF
+    assert "one\n  independent second source" in RESEARCH_BRIEF
+    assert "most three pages" in CHALLENGE_BRIEF
+    head = EDITOR_PROMPT.split("Write the page:")[0]
+    assert "`verdict`, `confidence`,\n`answer_short`, and `sources`" in head
+    assert "under 2500 characters" in head
 
 
 def test_the_challenge_text_fits_the_lookup() -> None:
