@@ -1,0 +1,270 @@
+"""The crew of one question and the checks after the editor, with fake workers."""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import Any
+
+import pytest
+from joshua_core.engine.usage import UsageLedger
+from joshua_core.jobs.research import crew
+from joshua_core.jobs.research.crew import (
+    EditorAnswer,
+    challenge_text,
+    check_editor,
+    domain_matches,
+    on_list,
+    registrable_domain,
+)
+from joshua_core.jobs.research.text import Grounding
+from joshua_core.jobs.research.write import PageTooLong, render_page
+from joshua_shared import frontmatter
+from research_fakes import (
+    FORUM_A,
+    FORUM_B,
+    GOOD_EDITOR,
+    GROUNDED,
+    PRIMARY,
+    SECOND_PAGE,
+    SECONDARY,
+    UNGIVEN,
+    FakeInternet,
+    FakeWorkers,
+    editor,
+    lookup,
+    research_settings,
+)
+
+SETTINGS = research_settings()
+CFG = SETTINGS.jobs.research
+GIVEN = [PRIMARY, SECONDARY, SECOND_PAGE, FORUM_A, FORUM_B]
+GROUNDINGS = [Grounding("gritty soil mix", "houseplants/snake-plant.md", "A gritty soil mix.")]
+
+
+def _answer(*sources: tuple[str, str], **overrides: Any) -> EditorAnswer:
+    return EditorAnswer.model_validate(editor(*sources, **overrides))
+
+
+# -- domains -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("host", "entry", "match"),
+    [
+        ("extension.example.edu", ".edu", True),
+        ("example.edu", ".edu", True),
+        ("example.education", ".edu", False),
+        ("extension.example.edu", "extension.", True),
+        ("www.extension.example.edu", "extension.", True),
+        ("myextension.example", "extension.", False),
+        ("forum.example", "forum.example", True),
+        ("board.forum.example", "forum.example", True),
+        ("notforum.example", "forum.example", False),
+        ("www.reddit.com", "reddit.com", True),
+        ("", ".edu", False),
+    ],
+)
+def test_a_domain_entry_matches_a_host(host: str, entry: str, match: bool) -> None:
+    assert domain_matches(host, entry) is match
+
+
+@pytest.mark.parametrize(
+    ("value", "domain"),
+    [
+        ("https://www.example.org/a", "example.org"),
+        ("https://a.b.example.org/a", "example.org"),
+        ("shop.example.co.uk", "example.co.uk"),
+        ("dept.example.ac.uk", "example.ac.uk"),
+        ("example.com.au", "example.com.au"),
+        ("a.example.uk", "example.uk"),
+        ("localhost", "localhost"),
+    ],
+)
+def test_the_registrable_domain(value: str, domain: str) -> None:
+    assert registrable_domain(value) == domain
+
+
+def test_on_list_reads_the_host_of_a_url() -> None:
+    assert on_list(FORUM_B, ["forum.example"])
+    assert not on_list("not a url", ["forum.example"])
+
+
+# -- the checks ------------------------------------------------------------------
+
+
+def test_a_good_pair_publishes() -> None:
+    result = check_editor(_answer((PRIMARY, "primary"), (SECONDARY, "secondary")), GIVEN, CFG)
+    assert result.publish and result.holds == []
+
+
+def test_one_source_holds() -> None:
+    result = check_editor(_answer((PRIMARY, "primary")), GIVEN, CFG)
+    assert not result.publish
+    assert "1 independent sources" in result.hold_reason
+
+
+def test_two_sources_on_one_domain_hold() -> None:
+    result = check_editor(_answer((SECONDARY, "primary"), (SECOND_PAGE, "secondary")), GIVEN, CFG)
+    assert "1 independent sources" in result.hold_reason
+
+
+def test_a_distrusted_pair_holds_as_weak() -> None:
+    result = check_editor(_answer((FORUM_A, "primary"), (FORUM_B, "primary")), GIVEN, CFG)
+    assert [s.trust for s in result.page.sources] == ["weak", "weak"]  # type: ignore[union-attr]
+    assert "0 independent sources" in result.hold_reason
+
+
+def test_a_trusted_source_is_not_weak() -> None:
+    result = check_editor(_answer((PRIMARY, "weak"), (SECONDARY, "secondary")), GIVEN, CFG)
+    assert result.page is not None and result.page.sources[0].trust == "secondary"
+    assert result.publish
+
+
+def test_a_url_no_lookup_returned_is_dropped_and_counted_again() -> None:
+    result = check_editor(_answer((PRIMARY, "primary"), (UNGIVEN, "primary")), GIVEN, CFG)
+    assert result.dropped_urls == [UNGIVEN]
+    assert [s.url for s in result.page.sources] == [PRIMARY]  # type: ignore[union-attr]
+    assert not result.publish
+
+
+def test_a_repeated_source_counts_once() -> None:
+    answer = _answer((PRIMARY, "primary"), (PRIMARY + "/", "primary"))
+    result = check_editor(answer, GIVEN, CFG)
+    assert len(result.page.sources) == 1  # type: ignore[union-attr]
+
+
+def test_verdict_hold_and_low_confidence_hold() -> None:
+    pair = ((PRIMARY, "primary"), (SECONDARY, "secondary"))
+    held = check_editor(_answer(*pair, verdict="hold", reason="overturned"), GIVEN, CFG)
+    assert held.hold_reason == "the editor held it: overturned"
+    low = check_editor(_answer(*pair, confidence="low"), GIVEN, CFG)
+    assert low.hold_reason == "the confidence is low"
+
+
+# -- the crew --------------------------------------------------------------------
+
+
+async def _crew(internet_fake: FakeInternet, workers: FakeWorkers) -> crew.CrewResult:
+    return await crew.research_question(
+        GROUNDED,
+        GROUNDINGS,
+        internet_settings=SETTINGS.internet,
+        research_settings=CFG,
+        editor_model=None,
+        ledger=UsageLedger(),
+        internet_runner=internet_fake,
+        editor_runner=workers,
+    )
+
+
+async def test_the_crew_runs_the_three_steps() -> None:
+    net = FakeInternet()
+    workers = FakeWorkers()
+    result = await _crew(net, workers)
+    assert result.publish
+    assert len(net.texts) == 2
+    assert net.texts[0].startswith(GROUNDED) and "primary source" in net.texts[0]
+    assert net.texts[1].startswith("You check an answer") and GROUNDED in net.texts[1]
+    editor_text = workers.calls[0][1]
+    assert '"gritty soil mix" (houseplants/snake-plant.md): A gritty soil mix.' in editor_text
+    assert "Distrusted domains: forum.example" in editor_text
+
+
+@pytest.mark.parametrize("step", ["draft", "challenge", "editor"])
+async def test_no_answer_at_any_step_holds(step: str) -> None:
+    net = FakeInternet()
+    workers = FakeWorkers()
+    if step == "draft":
+        net.draft = None
+    elif step == "challenge":
+        net.challenge = None
+    else:
+        workers.editor_answer = {"bad": "shape"}
+    result = await _crew(net, workers)
+    assert result.page is None and not result.publish
+    assert result.hold_reason.startswith("no answer")
+
+
+async def test_a_source_the_lookup_never_returned_is_not_given_to_the_editor() -> None:
+    net = FakeInternet(draft=lookup(PRIMARY, UNGIVEN), searched=[PRIMARY])
+    workers = FakeWorkers()
+    await _crew(net, workers)
+    assert UNGIVEN not in workers.calls[0][1]
+
+
+def test_the_challenge_text_fits_the_lookup() -> None:
+    text = challenge_text(GROUNDED, "x" * 9000)
+    assert len(text) <= 2000
+    assert text.startswith("You check an answer")
+
+
+# -- the page --------------------------------------------------------------------
+
+
+def _page(answer: EditorAnswer, run_id: int | None = 7) -> str:
+    return render_page(
+        question=GROUNDED,
+        topic="houseplants/snake-plant.md",
+        context=["houseplants/snake-plant.md", "journal/2026/10/15/x.md"],
+        grounded_in=["gritty soil mix", "water to runoff"],
+        answer=answer,
+        day=date(2026, 10, 19),
+        refresh_days=180,
+        run_id=run_id,
+    )
+
+
+def test_a_page_has_the_frontmatter_and_the_body_in_order() -> None:
+    text = _page(EditorAnswer.model_validate(GOOD_EDITOR))
+    meta, body = frontmatter.split(text)
+    assert meta["question"] == GROUNDED
+    assert meta["topic"] == "houseplants/snake-plant.md"
+    assert meta["context"] == ["houseplants/snake-plant.md", "journal/2026/10/15/x.md"]
+    assert meta["researched_at"] == date(2026, 10, 19)
+    assert meta["refresh_after"] == date(2027, 4, 17)
+    assert meta["confidence"] == "high"
+    assert meta["status"] == "published"
+    assert meta["source"] == "research"
+    assert meta["run_id"] == 7
+    assert meta["answer_short"].startswith("About every 4 weeks")
+    assert meta["sources"][0] == {
+        "url": PRIMARY,
+        "title": "Title 0",
+        "trust": "primary",
+        "retrieved": date(2026, 10, 19),
+    }
+    headings = [line for line in body.splitlines() if line.startswith("#")]
+    assert headings == [
+        f"# {GROUNDED}",
+        "## Answer",
+        "## Where this differs for us",
+        "## Evidence",
+        "## Disagreements",
+        "## Sources",
+    ]
+    assert f"- [Title 0]({PRIMARY}), primary" in body
+
+
+def test_links_not_in_the_sources_are_stripped() -> None:
+    body = frontmatter.split(_page(EditorAnswer.model_validate(GOOD_EDITOR)))[1]
+    assert f"[the guide]({PRIMARY})" in body
+    assert "planted.example.com" not in body
+    assert "a planted link" in body
+    assert "[[" not in body and "secret-page" in body
+
+
+def test_empty_parts_are_left_out() -> None:
+    answer = _answer(
+        (PRIMARY, "primary"), (SECONDARY, "secondary"), local_notes="", disagreements=""
+    )
+    meta, body = frontmatter.split(_page(answer, run_id=None))
+    assert "## Where this differs for us" not in body
+    assert "## Disagreements" not in body
+    assert "run_id" not in meta
+
+
+def test_a_page_over_64_kb_is_refused() -> None:
+    answer = _answer((PRIMARY, "primary"), (SECONDARY, "secondary"))
+    answer.answer = "x" * 70_000
+    with pytest.raises(PageTooLong):
+        _page(answer)

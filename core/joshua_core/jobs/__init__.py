@@ -18,6 +18,7 @@ from joshua_shared.config import JoshuaConfig
 from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle
 from joshua_core.jobs.bundle_job import BundleJob
 from joshua_core.jobs.curator import CuratorJob, CuratorStore, FindingStore
+from joshua_core.jobs.research import ResearchJob
 from joshua_core.jobs.runner import (
     Clock,
     Job,
@@ -44,6 +45,7 @@ __all__ = [
     "JobError",
     "JobRunStore",
     "JobRunner",
+    "ResearchJob",
     "RunReport",
     "Topic",
     "UnknownJob",
@@ -70,7 +72,8 @@ def build_job_runner(
 
     The `curator` job is added when `jobs.curator.enabled` is true and
     `findings` holds the `curator_finding` table; `store` must then also
-    answer `kb_mean_vectors`.
+    answer `kb_mean_vectors`. The `research` job is added when
+    `jobs.research.enabled` is true.
     """
     jobs: list[Job] = [BundleJob(store=store, settings=settings, data_dir=data_dir)]
     if settings.jobs.curator.enabled and findings is not None:
@@ -82,6 +85,8 @@ def build_job_runner(
                 data_dir=data_dir,
             )
         )
+    if settings.jobs.research.enabled:
+        jobs.append(ResearchJob(store=store, settings=settings, data_dir=data_dir))
     return JobRunner(
         repo=repo, settings=settings, data_dir=data_dir, jobs=jobs, lock=lock, clock=clock
     )
