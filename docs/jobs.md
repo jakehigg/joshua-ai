@@ -549,9 +549,9 @@ takes.
   each new question for a person with `questions/README.md`, so that a later
   run can name the new slugs in `questions`. Its report is described in
   [The report](#the-report).
-- **`run`** then researches the questions: the ones that `questions` names,
-  or else the open questions that a person asked, then the other open
-  questions, then the held questions, in dossier order, up to the limit. It
+- **`run`** then researches the questions, up to the limit: the ones that
+  `questions` names, or else the questions in the order that
+  [The kept lookups](#the-kept-lookups) gives. It
   writes a page for each published answer, and the new state of the dossier
   and of `knowledge/README.md`. A dry run does all the worker calls and writes
   nothing. Its report holds the full text of each page that it would write.
@@ -789,11 +789,15 @@ For each question, three workers run in this order:
 
 1. The **researcher** is the internet agent. It gets the question and a brief
    that asks for the primary source, two independent sources or more, the
-   numbers, and the disagreements. It gets nothing from the wiki.
+   numbers, and the disagreements. The brief tells it to read at most four
+   pages, and to stop when it has a primary source and one independent second
+   source. It gets nothing from the wiki.
 2. The **challenger** is the internet agent again. It gets the question and
    the draft answer, and it looks for the strongest evidence that the draft
-   is wrong, old, or not complete. It says so when it finds nothing.
-3. The **editor** has no tools and a timeout of 120 seconds. It gets the
+   is wrong, old, or not complete. It says so when it finds nothing. The
+   brief tells it to read at most three pages.
+3. The **editor** has no tools and a timeout of
+   `jobs.research.editor_timeout_seconds` (240) seconds. It gets the
    question, each `grounded_in` phrase with its sentence from the bundle, the
    draft and the challenge with their sources, and the trust rubric with the
    two domain lists. It writes the page: the answer, a short answer of 160
@@ -802,11 +806,37 @@ For each question, three workers run in this order:
    `weak`), the confidence, and the verdict: `publish` or `hold`.
 
 The editor answers in one structured call of up to 6 turns. The CLI checks
-the answer against a flat schema with no length limits, and when the answer
-does not match, the model tries again in the next turn. The log line
+the answer against a flat schema, and when the answer does not match, the
+model tries again in the next turn. The log line
 `structured answer refused by the validator` gives the start of the message
-of the validator for each refused try. Python then checks the limits: a short
-answer of more than 160 characters is cut.
+of the validator for each refused try. The timeout includes each try.
+
+The schema puts the short required fields first, in this order: `verdict`,
+`confidence`, `answer_short`, `sources`, and `answer`. The fields that are
+not required come after them: `local_notes`, `evidence`, `disagreements`, and
+`reason`. So an answer that is cut off still has the fields that a page
+needs. The prompt tells the editor to give the fields in this order, and to
+keep the whole answer under 2500 characters.
+
+Each field has a limit:
+
+| Field | Limit |
+|---|---|
+| `answer_short` | 160 characters |
+| `answer` | 2500 characters |
+| `local_notes` | 800 characters |
+| `evidence` | 8 items, each 300 characters |
+| `disagreements` | 800 characters |
+| `reason` | 300 characters |
+| `sources` | 8 items |
+| `title` of a source | 200 characters |
+| `url` of a source | 500 characters |
+
+The schema gives each limit as a `description`, not as `maxLength` or
+`maxItems`, because the validator refuses a value over a hard limit, and each
+refused try costs a turn. Python then cuts a longer value to its limit: a
+string ends with `…`, and a list keeps its first items. A long field never
+causes the editor to lose the answer.
 
 When a lookup gives an answer with no source, but its fetches read pages, the
 pages that the fetch gate let through become its sources, with no title, up
@@ -817,7 +847,7 @@ empty.
 The two lookups have their own limits, because the brief needs more searches
 and fetches than a chat question. Each lookup may take
 `jobs.research.lookup_timeout_seconds` (300) seconds and
-`jobs.research.lookup_max_turns` (20) turns, in place of
+`jobs.research.lookup_max_turns` (14) turns, in place of
 `internet.timeout_seconds` and `internet.max_turns`. The `internet` chat tool
 keeps the limits of the `internet` section.
 
@@ -857,11 +887,25 @@ The next run that takes a held question with a `draft` and a `challenge`
 sends it to the editor alone, and does no lookup. When `looked_up_at` is
 more than `jobs.research.lookup_max_age_days` (7) days old, the run does the
 two lookups again and keeps the new answers. The Researched section of the
-report says `Only the editor ran` for such a question, and the report data
-lists it in `editor_only`. This question counts toward `questions_per_run`
-and `max_questions` the same as a question with lookups. When the editor
+report marks such a question `editor only`, and each other question
+`full crew`. The report data lists the editor-only questions in
+`editor_only`. This question counts toward `questions_per_run` and
+`max_questions` the same as a question with lookups. When the editor
 publishes the question, the dossier removes the three fields, because the
 page holds what it needs.
+
+A run that names no `questions` takes the questions in this order, up to
+the limit:
+
+1. The held questions with a kept `draft` and `challenge` that are not more
+   than `lookup_max_age_days` old. These need only the editor, which costs
+   much less than two lookups. The oldest `looked_up_at` goes first.
+2. The open questions that a person asked.
+3. The other open questions, in dossier order.
+4. The held questions with no kept lookups, or with lookups that are too
+   old, in dossier order.
+
+A run that names `questions` takes exactly those questions.
 
 ### The page
 
@@ -914,10 +958,13 @@ The report of a research run is the journal entry of the run, and
 | Pages | a dry `run` only: the full text of each page it would write |
 | Notes | what did not run, such as the vector check with no embedding model |
 | Insights | the insight pass, when one ran |
-| Usage | the calls and the tokens of each worker |
+| Usage | the calls and the tokens of each worker, and for each researched question a line `<slug>: researcher N tokens, challenger M tokens, editor K tokens` |
 
 The report data has `person`, the ids of the new question pages, and
 `record`, the `answered_by` paths, beside `added` and `rejected`.
+`usage_by_question` holds
+`{"<slug>": {"researcher": n, "challenger": m, "editor": k}}` for each
+question that the run researched. A step that did not run has 0.
 
 ### The chat tool
 

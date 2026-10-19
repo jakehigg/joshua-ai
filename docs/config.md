@@ -533,8 +533,9 @@ jobs:
     max_holds: 2
     refresh_days: 180
     lookup_timeout_seconds: 300
-    lookup_max_turns: 20
+    lookup_max_turns: 14
     lookup_max_age_days: 7
+    editor_timeout_seconds: 240
     trusted_domains:
       - .edu
       - .gov
@@ -586,8 +587,9 @@ jobs:
 | `research.max_holds` | `2` | A question held this many times is `dropped`. |
 | `research.refresh_days` | `180` | The days from a research run to `refresh_after` on the dossier and the page. |
 | `research.lookup_timeout_seconds` | `300` | How long one lookup of the researcher or the challenger may take. It replaces `internet.timeout_seconds` for these lookups, because a lookup that needs a primary source and two independent sources makes more searches and fetches than a chat question. The chat tool keeps `internet.timeout_seconds`. |
-| `research.lookup_max_turns` | `20` | The turn ceiling of one lookup of the researcher or the challenger. It replaces `internet.max_turns` for these lookups. The chat tool keeps `internet.max_turns`. |
+| `research.lookup_max_turns` | `14` | The turn ceiling of one lookup of the researcher or the challenger. It replaces `internet.max_turns` for these lookups. The chat tool keeps `internet.max_turns`. |
 | `research.lookup_max_age_days` | `7` | How many days the two lookups of a held question stay good. A later run gives them to the editor again and does not repeat them. When the lookups are older than this many days, the run does them again. |
+| `research.editor_timeout_seconds` | `240` | How long one call of the editor may take. The time includes each try that the validator of the CLI refuses. |
 | `research.trusted_domains` | `.edu`, `.gov`, `.ac.uk`, `extension.`, `.int` | The editor may not grade a page on these domains `weak`. |
 | `research.distrusted_domains` | `pinterest.com`, `quora.com`, `answers.com`, `ehow.com`, `wikihow.com`, `facebook.com`, `reddit.com` | A page on these domains is always `weak`. |
 | `insights.enabled` | `false` | `true` adds the `insights` job and the `insights` chat tool for members. Both also need `jobs.enabled`. |

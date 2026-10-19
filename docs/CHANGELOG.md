@@ -147,6 +147,28 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **The editor of the researcher gives its short fields first.** The schema
+  now asks for `verdict`, `confidence`, `answer_short`, and `sources` before
+  the long fields, so an answer that is cut off still has the required
+  fields. Each field has a limit: 2500 characters for `answer`, 800 for
+  `local_notes` and `disagreements`, 300 for `reason`, and 8 items for
+  `evidence` and `sources`. The schema states each limit as a description,
+  and Python cuts a longer value to its limit and does not refuse the answer.
+  The editor timeout is the new key `jobs.research.editor_timeout_seconds`
+  (240). Before, it was 120 seconds, and the validator refused the same
+  answer three times until the timeout.
+
+- **A run researches the cheap retries first.** A held question that kept its
+  lookups needs only the editor, so a run takes it before the open
+  questions. The Researched section marks each question `editor only` or
+  `full crew`, and the Usage section gives the tokens of the researcher, the
+  challenger, and the editor for each question.
+
+- **A lookup costs less.** The default of `jobs.research.lookup_max_turns` is
+  now 14. Before, it was 20. The brief tells the researcher to read at most
+  four pages and to stop when it has a primary source and one independent
+  second source. The challenger reads at most three pages.
+
 - **A worker that answers with a structured object no longer loses its
   answer.** The CLI delivers the answer as a tool call, and that call counts
   as a turn. With a limit of one turn, a call could stop before the answer
