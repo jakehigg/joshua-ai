@@ -18,6 +18,7 @@ from joshua_shared.config import JoshuaConfig
 from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle
 from joshua_core.jobs.bundle_job import BundleJob
 from joshua_core.jobs.curator import CuratorJob, CuratorStore, FindingStore
+from joshua_core.jobs.insights import InsightsJob
 from joshua_core.jobs.research import ResearchJob
 from joshua_core.jobs.runner import (
     Clock,
@@ -39,6 +40,7 @@ __all__ = [
     "BundleStore",
     "Clock",
     "CuratorJob",
+    "InsightsJob",
     "Job",
     "JobArgsError",
     "JobBusy",
@@ -87,6 +89,8 @@ def build_job_runner(
         )
     if settings.jobs.research.enabled:
         jobs.append(ResearchJob(store=store, settings=settings, data_dir=data_dir))
+    if settings.jobs.insights.enabled:
+        jobs.append(InsightsJob(store=store, settings=settings, data_dir=data_dir))
     return JobRunner(
         repo=repo, settings=settings, data_dir=data_dir, jobs=jobs, lock=lock, clock=clock
     )

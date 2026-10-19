@@ -76,6 +76,16 @@ def test_strip_links_keeps_only_a_source_link() -> None:
     )
 
 
+def test_strip_links_rewrite_keeps_a_link_it_maps() -> None:
+    def rewrite(target: str) -> str | None:
+        return "../../garden/irrigation.md" if target == "garden/irrigation.md" else None
+
+    text = "See [ours](garden/irrigation.md), [other](notes/x.md), and ![p](garden/irrigation.md)."
+    assert strip_links(text, set(), rewrite=rewrite) == (
+        "See [ours](../../garden/irrigation.md), other, and p."
+    )
+
+
 def test_small_helpers() -> None:
     assert collapse("  A\n  b ") == "a b"
     assert inline("a\n\nb", 10) == "a b"

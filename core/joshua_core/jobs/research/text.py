@@ -5,7 +5,7 @@ phrase, the links a worker may keep, and one-line text for a table or a list.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 
 from joshua_shared.attachments import clean_text
@@ -37,17 +37,31 @@ def inline(text: str, limit: int = 1000) -> str:
     return " ".join(clean_text(str(text), limit=limit * 4).split())[:limit]
 
 
-def strip_links(text: str, allowed: Collection[str]) -> str:
+def strip_links(
+    text: str,
+    allowed: Collection[str],
+    *,
+    rewrite: Callable[[str], str | None] | None = None,
+) -> str:
     """`text` with every link removed, except a Markdown link to a URL in
     `allowed` (canonical form). A removed link leaves its text. A picture, a
     wikilink, and an autolink are always removed, so a worker cannot plant a
-    link that the curator follows."""
+    link that the curator follows.
+
+    `rewrite`, when given, gets the target of each other Markdown link. When
+    it gives a string, the link stays with that string as its target."""
 
     def md(match: re.Match[str]) -> str:
         label = match.group("text")
         target = match.group("target")
-        if not match.group("image") and target and canonical(target) in allowed:
+        if match.group("image") or not target:
+            return label
+        if canonical(target) in allowed:
             return match.group(0)
+        if rewrite is not None:
+            new_target = rewrite(target)
+            if new_target:
+                return f"[{label}]({new_target})"
         return label
 
     def wiki(match: re.Match[str]) -> str:
