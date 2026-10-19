@@ -147,6 +147,16 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **No worker markup on a page.** A model sometimes wrote its next fields as
+  tags inside one field, so a knowledge page showed
+  `</answer><answer_short>...` in its Answer and "None given" for Evidence.
+  Core now cuts each text field of a worker answer at the first such tag and
+  removes the tags that are left. The researcher's editor fills an empty
+  `answer_short`, `local_notes`, `evidence`, or `disagreements` from the copy
+  in `answer`, within the same limits. The HTML that a page uses, such as
+  `<details>`, stays. Each answer that needed this logs one line,
+  `worker answer cleaned`, with the field names.
+
 - **The editor of the researcher gives its short fields first.** The schema
   now asks for `verdict`, `confidence`, `answer_short`, and `sources` before
   the long fields, so an answer that is cut off still has the required

@@ -21,6 +21,13 @@ routes live. [docs/config.md](config.md#jobs) has every key.
 A run that fails records its error in the row, and in the journal entry when it
 is not a dry run. A failure never stops core.
 
+Core cleans the text fields of each worker answer before it uses them: a tag
+that the model put into a field, such as `</answer>` or
+`<parameter name="sources">`, is removed with the text after it, and the
+researcher's editor gets an empty field back from a copy that it put into
+`answer`. The log line `worker answer cleaned` names the fields. The `find`
+and `replace` of a curator patch are never changed.
+
 ### The lock
 
 One lock covers every job and the nightly reflection. Only one of them writes
