@@ -50,7 +50,9 @@ The table keeps every run. The row is the record that survives a restart.
 
 The `tokens` of a run is the sum, over each worker call of the run, of the
 input tokens, the output tokens, the cache read tokens, and the cache write
-tokens. A call that fails before the model answers counts no tokens.
+tokens. A call that times out counts the tokens of each model message that
+arrived before the timeout. A call that fails before the model answers counts
+no tokens.
 `report.data.usage` holds `{"<worker>": {"calls": n, "tokens": m}}` for each
 worker of the run. The seam for a program that reads the usage is
 `joshua_core.engine.usage`: `Usage`, `UsageLedger`, and the `usage_out`
@@ -655,6 +657,13 @@ For each question, three workers run in this order:
    disagreements, each source with its trust (`primary`, `secondary`, or
    `weak`), the confidence, and the verdict: `publish` or `hold`.
 
+The two lookups have their own limits, because the brief needs more searches
+and fetches than a chat question. Each lookup may take
+`jobs.research.lookup_timeout_seconds` (300) seconds and
+`jobs.research.lookup_max_turns` (20) turns, in place of
+`internet.timeout_seconds` and `internet.max_turns`. The `internet` chat tool
+keeps the limits of the `internet` section.
+
 ### The hold rules
 
 Python checks the answer of the editor. Each of these is a hold, with a
@@ -672,7 +681,10 @@ reason:
 A source on `distrusted_domains` is always `weak`. A source on
 `trusted_domains` is never `weak`: a `weak` grade there becomes `secondary`.
 A worker that gives no answer at any step is a hold with the reason
-`no answer`, and the hold counts. A held question gets one more `holds` and
+`no answer`, and the hold counts. A lookup that passed its timeout is a hold
+with the reason `lookup timed out after 300 s (6 searches, 4 fetches)`, with
+the counts of that lookup, so the report shows how far it got. For the
+challenger, the reason starts with `the lookup of the challenger`. A held question gets one more `holds` and
 the reason in `hold_reason`. At `max_holds` (2) its status becomes `dropped`,
 and no run researches it again.
 

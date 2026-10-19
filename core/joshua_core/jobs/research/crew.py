@@ -19,7 +19,12 @@ Python then checks the editor's answer. Each of these is a hold, with a reason:
 
 A source on `jobs.research.distrusted_domains` is always `weak`, and a source on
 `jobs.research.trusted_domains` is never `weak`. A worker that gives no answer
-at any step is a hold with the reason `no answer`.
+at any step is a hold with the reason `no answer`. A lookup that timed out is
+a hold that says so, with the searches and the fetches it made.
+
+The two lookups take `jobs.research.lookup_timeout_seconds` and
+`jobs.research.lookup_max_turns` in place of the limits of the `internet`
+section.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from pydantic import BaseModel, Field
 
 from joshua_core.engine import internet
 from joshua_core.engine.ephemeral import Runner, run_worker
+from joshua_core.engine.types import WorkerStats
 from joshua_core.engine.url_grants import canonical
 from joshua_core.engine.usage import Usage, UsageLedger
 from joshua_core.jobs.research.prompts import (
@@ -196,6 +202,18 @@ def check_editor(
 # -- the steps -------------------------------------------------------------------
 
 
+def no_answer_reason(who: str, stats: WorkerStats) -> str:
+    """The hold reason for a lookup that gave no answer. A lookup that timed
+    out says so, with its tool counts."""
+    if not stats.timed_out:
+        return f"{NO_ANSWER} from {who}"
+    seconds = f"{stats.timeout_s:g}" if stats.timeout_s is not None else "?"
+    counts = f"{stats.searches} searches, {stats.fetches} fetches"
+    if who == "the researcher":
+        return f"lookup timed out after {seconds} s ({counts})"
+    return f"the lookup of {who} timed out after {seconds} s ({counts})"
+
+
 def research_text(question: str) -> str:
     return question + RESEARCH_BRIEF
 
@@ -252,20 +270,28 @@ async def research_question(
 ) -> CrewResult:
     """Run the crew for one question. Each call is counted on `ledger`."""
 
-    async def lookup(text: str) -> internet.InternetAnswer | None:
+    async def lookup(text: str, stats: WorkerStats) -> internet.InternetAnswer | None:
         used: list[Usage] = []
         got = await internet.ask(
-            text, settings=internet_settings, runner=internet_runner, usage_out=used
+            text,
+            settings=internet_settings,
+            runner=internet_runner,
+            usage_out=used,
+            timeout_s=research_settings.lookup_timeout_seconds,
+            max_turns=research_settings.lookup_max_turns,
+            stats_out=stats,
         )
         ledger.add(INTERNET, used)
         return got
 
-    draft = await lookup(research_text(question))
+    stats = WorkerStats()
+    draft = await lookup(research_text(question), stats)
     if draft is None:
-        return CrewResult(page=None, holds=[f"{NO_ANSWER} from the researcher"])
-    challenge = await lookup(challenge_text(question, draft.answer))
+        return CrewResult(page=None, holds=[no_answer_reason("the researcher", stats)])
+    stats = WorkerStats()
+    challenge = await lookup(challenge_text(question, draft.answer), stats)
     if challenge is None:
-        return CrewResult(page=None, holds=[f"{NO_ANSWER} from the challenger"], draft=draft)
+        return CrewResult(page=None, holds=[no_answer_reason("the challenger", stats)], draft=draft)
 
     used: list[Usage] = []
     edited = await run_worker(

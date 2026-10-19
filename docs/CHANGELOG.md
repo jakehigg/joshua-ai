@@ -156,6 +156,21 @@ with the images and the packaged chart, are at
   our pages. The gate rejects a raised question that names a person, holds a
   date from our records, or asks what we did, will do, or should do.
 
+- **A research lookup has time to find its sources.** The lookups of the
+  researcher and the challenger now have their own limits:
+  `jobs.research.lookup_timeout_seconds` (300) and
+  `jobs.research.lookup_max_turns` (20). Before, they had the 120 seconds of
+  `internet.timeout_seconds`, and a lookup that needed a primary source and two
+  independent sources could stop before its answer. The `internet` chat tool
+  keeps its limits. A lookup that times out is a hold with the reason
+  `lookup timed out after 300 s (6 searches, 4 fetches)`, and the log line
+  `worker timed out` gives the same counts.
+
+- **A worker call that times out counts its tokens.** A structured call and a
+  worker session now add the usage of each model message as it arrives. A
+  call that ends counts the totals of its result message, once. Before, a
+  call that timed out counted 0 tokens.
+
 - **A grounding phrase can be a full product name.** A `grounded_in` phrase
   of the research gate, and a `we_do` phrase of the insights gate, can now
   have 160 characters. Before, the limits were 80 and 120, and the gate

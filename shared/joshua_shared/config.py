@@ -599,7 +599,12 @@ class JobsResearch(_Model):
     `enabled` registers the job and the `research` chat tool. `model` is the
     model of the two tool-less workers, `raise` and `editor`; `None` uses
     `jobs.model`, then `core.reflection_model`. The lookups use the
-    `internet` section. `topics_per_run` is how many topics one run takes.
+    `internet` section, except for two limits of their own:
+    `lookup_timeout_seconds` and `lookup_max_turns` replace
+    `internet.timeout_seconds` and `internet.max_turns` for the researcher
+    and the challenger, because a lookup that needs a primary source and two
+    independent sources takes more searches than a chat question.
+    `topics_per_run` is how many topics one run takes.
     `questions_per_topic` is how many questions one `raise` call may add,
     less the open ones. `questions_per_run` is how many questions one run
     researches. `coverage_target` is the coverage below which a topic is due.
@@ -620,6 +625,8 @@ class JobsResearch(_Model):
     refresh_days: int = Field(default=180, ge=1)
     trusted_domains: list[str] = list(RESEARCH_TRUSTED_DOMAINS)
     distrusted_domains: list[str] = list(RESEARCH_DISTRUSTED_DOMAINS)
+    lookup_timeout_seconds: int = Field(default=300, ge=1)
+    lookup_max_turns: int = Field(default=20, ge=1)
 
     @field_validator("trusted_domains", "distrusted_domains")
     @classmethod

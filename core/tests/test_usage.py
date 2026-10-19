@@ -3,6 +3,7 @@ each call path, and the sum on a curator run. No SDK: fake clients stand in."""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,8 @@ import pytest
 from curator_fakes import FakeCuratorStore, FakeFindingStore, FakeWorkers, build_curator_wiki
 from jobs_fakes import fixed_clock, make_settings
 from joshua_core.engine import agent, ephemeral, internet
-from joshua_core.engine.usage import Usage, UsageLedger, note_result
+from joshua_core.engine.types import WorkerStats
+from joshua_core.engine.usage import Usage, UsageLedger, UsageMeter, note_result
 from joshua_core.jobs.curator import workers
 from joshua_core.jobs.curator.job import CuratorJob
 from joshua_core.memory import embed as embed_module
@@ -41,6 +43,46 @@ class AssistantMessage:
     def __init__(self) -> None:
         self.content: list[Any] = []
         self.usage = {"input_tokens": 999}
+
+
+class ModelMessage:
+    """An SDK assistant message: its content, its usage, and its message id."""
+
+    def __init__(self, usage: Any, message_id: str | None, tools: tuple[str, ...] = ()) -> None:
+        self.content = [ToolUse(name) for name in tools]
+        self.usage = usage
+        self.message_id = message_id
+
+
+ModelMessage.__name__ = "AssistantMessage"
+
+
+class ToolUse:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class StalledClient:
+    """A client that sends `messages`, then waits until the call times out."""
+
+    def __init__(self, messages: list[Any]) -> None:
+        self.messages = messages
+
+    async def connect(self) -> None:
+        return None
+
+    async def query(self, prompt: Any) -> None:
+        if not isinstance(prompt, str):
+            async for _ in prompt:
+                pass
+
+    async def receive_response(self):
+        for msg in self.messages:
+            yield msg
+        await asyncio.sleep(60)
+
+    async def disconnect(self) -> None:
+        return None
 
 
 class FakeClient:
@@ -124,6 +166,31 @@ def test_only_the_result_message_counts() -> None:
     assert [u.total for u in out] == [424]
 
 
+def test_the_meter_counts_each_model_message_once() -> None:
+    meter = UsageMeter()
+    assert not meter.seen
+    meter.note(ModelMessage({"input_tokens": 10, "output_tokens": 1}, "m1"))
+    # The CLI sends one model message as one assistant message for each block.
+    meter.note(ModelMessage({"input_tokens": 10, "output_tokens": 3}, "m1"))
+    meter.note(ModelMessage({"input_tokens": 20}, "m2"))
+    meter.note(ModelMessage({"input_tokens": 5}, None))
+    meter.note(ModelMessage(None, "m3"))
+    assert meter.seen
+    assert meter.usage == Usage(input=35, output=3)
+    meter.note(ResultMessage(SDK_USAGE))
+    assert meter.usage == Usage.from_sdk(SDK_USAGE)
+
+
+def test_the_meter_appends_nothing_when_no_message_came() -> None:
+    out: list[Usage] = []
+    UsageMeter().flush(out)
+    meter = UsageMeter()
+    meter.note(ModelMessage({"input_tokens": 4}, "m1"))
+    meter.flush(None)
+    meter.flush(out)
+    assert out == [Usage(input=4)]
+
+
 # -- the call paths -------------------------------------------------------------
 
 
@@ -136,13 +203,28 @@ async def test_run_structured_appends_the_usage(sdk: None) -> None:
     assert out == [Usage.from_sdk(SDK_USAGE)]
 
 
-async def test_run_structured_with_no_usage_gives_zero(
+async def test_a_result_with_no_usage_counts_the_model_messages(
     sdk: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         agent,
         "ClaudeSDKClient",
         lambda options: FakeClient(options, [AssistantMessage(), ResultMessage(None, {"a": 1})]),
+    )
+    out: list[Usage] = []
+    await agent.run_structured(
+        system_prompt="s", user_text="u", schema={}, model=None, timeout_s=5, usage_out=out
+    )
+    assert [u.total for u in out] == [999]
+
+
+async def test_run_structured_with_no_usage_gives_zero(
+    sdk: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        agent,
+        "ClaudeSDKClient",
+        lambda options: FakeClient(options, [ResultMessage(None, {"a": 1})]),
     )
     out: list[Usage] = []
     await agent.run_structured(
@@ -164,6 +246,78 @@ async def test_run_worker_session_appends_the_usage(sdk: None) -> None:
         usage_out=out,
     )
     assert sum(u.total for u in out) == 424
+
+
+_STEPS = [
+    ModelMessage({"input_tokens": 100, "output_tokens": 10}, "m1", ("WebSearch",)),
+    ModelMessage({"input_tokens": 100, "output_tokens": 10}, "m1", ("WebSearch",)),
+    ModelMessage({"input_tokens": 200, "output_tokens": 20}, "m2", ("WebFetch",)),
+    ModelMessage({"input_tokens": 300, "output_tokens": 30}, "m3", ("WebSearch",)),
+]
+
+
+async def test_a_worker_session_that_times_out_keeps_its_usage_and_counts(
+    sdk: None, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(agent, "ClaudeSDKClient", lambda options: StalledClient(list(_STEPS)))
+    out: list[Usage] = []
+    stats = WorkerStats()
+    got = await agent.run_worker_session(
+        system_prompt="s",
+        user_text="u",
+        schema={},
+        model=None,
+        timeout_s=0.05,
+        max_turns=2,
+        tools=["WebSearch"],
+        usage_out=out,
+        stats_out=stats,
+    )
+    assert got is None
+    assert out == [Usage(input=600, output=60)]
+    assert stats.timed_out and stats.timeout_s == 0.05
+    assert (stats.searches, stats.fetches) == (3, 1)
+    line = next(r for r in caplog.records if "worker timed out" in str(r.msg))
+    assert line.msg["searches"] == 3 and line.msg["fetches"] == 1  # type: ignore[index]
+
+
+async def test_a_worker_session_that_ends_counts_the_result_once(
+    sdk: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = [*_STEPS, ResultMessage(SDK_USAGE, {"a": 1})]
+    monkeypatch.setattr(agent, "ClaudeSDKClient", lambda options: FakeClient(options, messages))
+    out: list[Usage] = []
+    stats = WorkerStats()
+    got = await agent.run_worker_session(
+        system_prompt="s",
+        user_text="u",
+        schema={},
+        model=None,
+        timeout_s=5,
+        max_turns=2,
+        tools=["WebSearch"],
+        usage_out=out,
+        stats_out=stats,
+    )
+    assert got == {"a": 1}
+    assert out == [Usage.from_sdk(SDK_USAGE)]
+    assert not stats.timed_out
+
+
+async def test_a_structured_call_that_times_out_keeps_its_usage(
+    sdk: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        agent,
+        "ClaudeSDKClient",
+        lambda options: StalledClient([ModelMessage({"output_tokens": 7}, "m1")]),
+    )
+    out: list[Usage] = []
+    got = await agent.run_structured(
+        system_prompt="s", user_text="u", schema={}, model=None, timeout_s=0.05, usage_out=out
+    )
+    assert got is None
+    assert out == [Usage(output=7)]
 
 
 async def test_run_oneshot_appends_the_usage(sdk: None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,6 +351,24 @@ async def test_run_worker_passes_the_list_only_when_given() -> None:
     await ephemeral.run_worker(**base, runner=runner)
     assert [u.total for u in out] == [7, 7]
     assert "usage_out" not in seen[2]
+
+
+async def test_run_worker_passes_the_stats_only_to_a_worker_with_tools() -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def runner(**kwargs: Any) -> dict[str, Any]:
+        seen.append(kwargs)
+        return {"ok": True}
+
+    stats = WorkerStats()
+    base: dict[str, Any] = dict(
+        name="w", system_prompt="s", user_text="u", answer=_Answer, model=None, timeout_s=5
+    )
+    await ephemeral.run_worker(**base, runner=runner, tools=["WebSearch"], stats_out=stats)
+    await ephemeral.run_worker(**base, runner=runner, tools=["WebSearch"])
+    await ephemeral.run_worker(**base, runner=runner, stats_out=stats)
+    assert seen[0]["stats_out"] is stats
+    assert "stats_out" not in seen[1] and "stats_out" not in seen[2]
 
 
 async def test_an_internet_lookup_reports_its_usage() -> None:

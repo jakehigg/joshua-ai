@@ -28,6 +28,7 @@ from typing import Any
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, ValidationError
 
+from joshua_core.engine.types import WorkerStats
 from joshua_core.engine.usage import Usage
 
 logger = get_logger("engine.ephemeral")
@@ -64,6 +65,7 @@ async def run_worker[T: BaseModel](
     max_turns: int = 1,
     hooks: dict[str, Any] | None = None,
     usage_out: list[Usage] | None = None,
+    stats_out: WorkerStats | None = None,
 ) -> T | None:
     """Run one worker and return its answer, or `None`.
 
@@ -77,8 +79,10 @@ async def run_worker[T: BaseModel](
     tools a worker may hold at all.
 
     When `usage_out` is a list, the runner gets it and appends the tokens of
-    the call to it, so the caller learns what the call cost. A runner gets the
-    argument only when the caller gives one.
+    the call to it, so the caller learns what the call cost. When `stats_out`
+    is given to a worker with `tools`, the runner records on it the tool counts
+    and whether the call timed out. A runner gets each of the two arguments
+    only when the caller gives it.
 
     This never raises. Every failure is a warning and a `None`, because the turn
     that called it must continue.
@@ -98,6 +102,7 @@ async def run_worker[T: BaseModel](
                 max_turns=max_turns,
                 hooks=hooks,
                 **extra,
+                **({} if stats_out is None else {"stats_out": stats_out}),
             )
         else:
             call = runner or _default_runner()

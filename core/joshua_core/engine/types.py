@@ -30,6 +30,30 @@ class Attachment:
 
 
 @dataclass
+class WorkerStats:
+    """What one worker session did, for a log line and a report. Counts only.
+
+    `tools` counts the tool calls of the session by tool name. `timed_out` is
+    true when the session passed its timeout, and `timeout_s` is that timeout.
+    """
+
+    tools: dict[str, int] = field(default_factory=dict)
+    timed_out: bool = False
+    timeout_s: float | None = None
+
+    def count(self, tool: str) -> int:
+        return self.tools.get(tool, 0)
+
+    @property
+    def searches(self) -> int:
+        return self.count("WebSearch")
+
+    @property
+    def fetches(self) -> int:
+        return self.count("WebFetch")
+
+
+@dataclass
 class TurnResult:
     text: str
     session_id: str | None = None

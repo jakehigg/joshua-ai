@@ -145,6 +145,8 @@ def test_research_defaults() -> None:
     assert research.dup_sim == 0.85
     assert research.max_holds == 2
     assert research.refresh_days == 180
+    assert research.lookup_timeout_seconds == 300
+    assert research.lookup_max_turns == 20
     assert research.trusted_domains == [".edu", ".gov", ".ac.uk", "extension.", ".int"]
     assert "reddit.com" in research.distrusted_domains
     assert len(research.distrusted_domains) == 7
@@ -162,6 +164,8 @@ def test_research_overrides_load() -> None:
         "    dup_sim: 0.9\n"
         "    max_holds: 3\n"
         "    refresh_days: 30\n"
+        "    lookup_timeout_seconds: 600\n"
+        "    lookup_max_turns: 30\n"
         "    trusted_domains:\n"
         "      - ' .EDU '\n"
         "      - .edu\n"
@@ -177,6 +181,8 @@ def test_research_overrides_load() -> None:
     assert research.dup_sim == 0.9
     assert research.max_holds == 3
     assert research.refresh_days == 30
+    assert research.lookup_timeout_seconds == 600
+    assert research.lookup_max_turns == 30
     assert research.trusted_domains == [".edu"]
     assert research.distrusted_domains == ["example.com"]
 
@@ -188,6 +194,8 @@ def test_research_overrides_load() -> None:
         "  research:\n    questions_per_run: 0\n",
         "  research:\n    dup_sim: 1.5\n",
         "  research:\n    max_holds: 0\n",
+        "  research:\n    lookup_timeout_seconds: 0\n",
+        "  research:\n    lookup_max_turns: 0\n",
         "  research:\n    trusted_domains:\n      - example.com/path\n",
         "  research:\n    exclude:\n      - x.md\n",
     ],

@@ -270,6 +270,10 @@ jobs:
     dup_sim: 0.85          # a new question this close to a known one is a duplicate
     max_holds: 2           # a question held this many times is dropped
     refresh_days: 180      # a researched topic is due again after this many days
+    lookup_timeout_seconds: 300 # one lookup of the researcher or the challenger;
+                           # it replaces internet.timeout_seconds for these lookups
+    lookup_max_turns: 20   # the turn ceiling of one such lookup; it replaces
+                           # internet.max_turns for these lookups
     trusted_domains:       # the editor may not grade a page here weak. An entry
       - .edu               # that starts with a dot matches the end of a host;
       - .gov               # an entry that ends with a dot matches its start

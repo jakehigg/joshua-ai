@@ -39,6 +39,7 @@ from joshua_shared.netblock import block_reason
 from pydantic import BaseModel, Field
 
 from joshua_core.engine.ephemeral import Runner, run_worker
+from joshua_core.engine.types import WorkerStats
 from joshua_core.engine.url_grants import canonical
 from joshua_core.engine.usage import Usage
 
@@ -232,6 +233,9 @@ async def ask(
     urls: list[str] | None = None,
     runner: Runner | None = None,
     usage_out: list[Usage] | None = None,
+    timeout_s: float | None = None,
+    max_turns: int | None = None,
+    stats_out: WorkerStats | None = None,
 ) -> InternetAnswer | None:
     """Look `question` up and return the answer, or `None` when there is none.
 
@@ -240,6 +244,11 @@ async def ask(
     its own searches return. A source the worker names that it was never given
     is dropped from the answer. When `usage_out` is a list, the tokens of the
     lookup are appended to it.
+
+    `timeout_s` and `max_turns` replace `settings.timeout_seconds` and
+    `settings.max_turns` for this lookup; `None` keeps the setting. When
+    `stats_out` is given, it gets the tool counts of the lookup and whether it
+    timed out.
 
     This never raises. A failure, a timeout, or an answer of the wrong shape
     gives `None`, and the turn that asked continues without it.
@@ -263,12 +272,13 @@ async def ask(
         user_text=text,
         answer=InternetAnswer,
         model=settings.model,
-        timeout_s=settings.timeout_seconds,
+        timeout_s=settings.timeout_seconds if timeout_s is None else timeout_s,
         runner=runner,
         tools=tools,
-        max_turns=settings.max_turns,
+        max_turns=settings.max_turns if max_turns is None else max_turns,
         hooks=gate.hooks(),
         usage_out=usage_out,
+        stats_out=stats_out,
     )
     if answer is None:
         return None

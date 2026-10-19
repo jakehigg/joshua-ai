@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from joshua_core.engine import internet
+from joshua_core.engine.types import WorkerStats
 from joshua_shared.config import Fetch, Internet
 
 SOURCE = "https://www.seriouseats.com/short-ribs"
@@ -118,6 +119,23 @@ async def test_the_worker_sees_no_part_of_the_conversation() -> None:
         "max_turns",
         "hooks",
     }
+
+
+async def test_the_limits_come_from_the_settings_unless_the_caller_overrides_them() -> None:
+    settings = _settings()
+    run, calls = _runner(GOOD)
+    await internet.ask("q", settings=settings, runner=run)
+    assert calls[0]["timeout_s"] == settings.timeout_seconds
+    assert calls[0]["max_turns"] == settings.max_turns
+    assert "stats_out" not in calls[0]
+
+    run, calls = _runner(GOOD)
+    stats = WorkerStats()
+    await internet.ask(
+        "q", settings=settings, runner=run, timeout_s=300, max_turns=20, stats_out=stats
+    )
+    assert (calls[0]["timeout_s"], calls[0]["max_turns"]) == (300, 20)
+    assert calls[0]["stats_out"] is stats
 
 
 async def test_a_given_page_is_named_to_the_worker_only_when_it_may_fetch() -> None:

@@ -22,8 +22,8 @@ from typing import Any
 
 from joshua_shared.log import get_logger
 
-from joshua_core.engine.types import OnDelta, TurnResult
-from joshua_core.engine.usage import Usage, note_result
+from joshua_core.engine.types import OnDelta, TurnResult, WorkerStats
+from joshua_core.engine.usage import Usage, UsageMeter
 
 try:  # The SDK is absent in stub mode and in the offline test run.
     from claude_agent_sdk import (
@@ -221,6 +221,7 @@ async def run_worker_session(
     tools: list[str],
     hooks: dict[str, Any] | None = None,
     usage_out: list[Usage] | None = None,
+    stats_out: WorkerStats | None = None,
 ) -> dict[str, Any] | None:
     """Run one worker that may use a tool, and answer with JSON matching ``schema``.
 
@@ -228,7 +229,10 @@ async def run_worker_session(
     reads, and then it answers. It still holds no conversation and no MCP
     server. Returns the structured answer, or None on a failure or a timeout.
     When ``usage_out`` is a list, the tokens of the call are appended to it.
+    When ``stats_out`` is given, it gets the tool counts of the session and
+    whether the session timed out.
     """
+    stats = stats_out if stats_out is not None else WorkerStats()
     cwd = Path(tempfile.mkdtemp(prefix="joshua-worker-"))
     options = build_worker_options(
         system_prompt=system_prompt,
@@ -241,9 +245,21 @@ async def run_worker_session(
     )
     client = ClaudeSDKClient(options=options)
     try:
-        return await asyncio.wait_for(_worker_turn(client, user_text, usage_out), timeout=timeout_s)
+        return await asyncio.wait_for(
+            _worker_turn(client, user_text, usage_out, stats), timeout=timeout_s
+        )
     except TimeoutError:
-        logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
+        stats.timed_out = True
+        stats.timeout_s = timeout_s
+        logger.warning(
+            {
+                "message": "worker timed out",
+                "timeout_s": timeout_s,
+                "searches": stats.searches,
+                "fetches": stats.fetches,
+                "tool_calls": sum(stats.tools.values()),
+            }
+        )
         return None
     except Exception as exc:  # noqa: BLE001 — a worker failure never breaks the turn
         logger.warning({"message": "worker failed", "error": str(exc)})
@@ -257,28 +273,41 @@ async def run_worker_session(
 
 
 async def _worker_turn(
-    client: Any, user_text: str, usage_out: list[Usage] | None = None
+    client: Any,
+    user_text: str,
+    usage_out: list[Usage] | None = None,
+    stats: WorkerStats | None = None,
 ) -> dict[str, Any] | None:
-    """Send the objective, let the worker use its tools, return the answer."""
-    await client.connect()
-    await client.query(user_text)
-    async for msg in client.receive_response():
-        note_result(msg, usage_out)
-        for block in getattr(msg, "content", None) or []:
-            name = getattr(block, "name", None)
-            if name:
-                logger.info({"message": "worker tool", "tool": str(name)})
-        structured = getattr(msg, "structured_output", None)
-        if isinstance(structured, dict):
-            return structured
-        result = getattr(msg, "result", None)
-        if isinstance(result, str) and result.strip().startswith("{"):
-            try:
-                parsed = json.loads(result)
-            except ValueError:
-                return None
-            return parsed if isinstance(parsed, dict) else None
-    return None
+    """Send the objective, let the worker use its tools, return the answer.
+
+    The usage that arrived goes to `usage_out` when the turn ends, also when a
+    timeout cancels it. Each tool call counts on `stats`.
+    """
+    meter = UsageMeter()
+    try:
+        await client.connect()
+        await client.query(user_text)
+        async for msg in client.receive_response():
+            meter.note(msg)
+            for block in getattr(msg, "content", None) or []:
+                name = getattr(block, "name", None)
+                if name:
+                    logger.info({"message": "worker tool", "tool": str(name)})
+                    if stats is not None:
+                        stats.tools[str(name)] = stats.tools.get(str(name), 0) + 1
+            structured = getattr(msg, "structured_output", None)
+            if isinstance(structured, dict):
+                return structured
+            result = getattr(msg, "result", None)
+            if isinstance(result, str) and result.strip().startswith("{"):
+                try:
+                    parsed = json.loads(result)
+                except ValueError:
+                    return None
+                return parsed if isinstance(parsed, dict) else None
+        return None
+    finally:
+        meter.flush(usage_out)
 
 
 async def run_oneshot(
@@ -370,7 +399,11 @@ async def _structured_turn(
     document: bytes | None,
     usage_out: list[Usage] | None = None,
 ) -> dict[str, Any] | None:
-    """Send one user message with its file and return the structured answer."""
+    """Send one user message with its file and return the structured answer.
+
+    The usage that arrived goes to `usage_out` when the turn ends, also when a
+    timeout cancels it.
+    """
     content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
     if image is not None:
         data, media_type = image
@@ -404,26 +437,30 @@ async def _structured_turn(
             "session_id": "default",
         }
 
-    await client.connect()
-    await client.query(_one_message())
-    async for msg in client.receive_response():
-        note_result(msg, usage_out)
-        answer = _structured_answer(msg)
-        if type(msg).__name__ == "ResultMessage":
-            subtype = getattr(msg, "subtype", None)
-            if answer is None or subtype != "success":
-                logger.warning(
-                    {
-                        "message": "worker result without an answer",
-                        "subtype": subtype,
-                        "num_turns": getattr(msg, "num_turns", None),
-                        "is_error": bool(getattr(msg, "is_error", False)),
-                    }
-                )
-            return answer
-        if answer is not None:
-            return answer
-    return None
+    meter = UsageMeter()
+    try:
+        await client.connect()
+        await client.query(_one_message())
+        async for msg in client.receive_response():
+            meter.note(msg)
+            answer = _structured_answer(msg)
+            if type(msg).__name__ == "ResultMessage":
+                subtype = getattr(msg, "subtype", None)
+                if answer is None or subtype != "success":
+                    logger.warning(
+                        {
+                            "message": "worker result without an answer",
+                            "subtype": subtype,
+                            "num_turns": getattr(msg, "num_turns", None),
+                            "is_error": bool(getattr(msg, "is_error", False)),
+                        }
+                    )
+                return answer
+            if answer is not None:
+                return answer
+        return None
+    finally:
+        meter.flush(usage_out)
 
 
 def _structured_answer(msg: Any) -> dict[str, Any] | None:

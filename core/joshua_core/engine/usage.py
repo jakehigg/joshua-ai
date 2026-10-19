@@ -1,14 +1,16 @@
 """The tokens that one model call used, and the sum over many calls.
 
 `Usage` holds the four counts of one call: input, output, cache read, and
-cache write. `Usage.from_sdk` reads them from the `usage` field of the SDK
-result message, and a field that is not there counts as 0.
+cache write. `Usage.from_sdk` reads them from the `usage` field of an SDK
+message, and a field that is not there counts as 0.
 
 A caller learns the usage of a call through the `usage_out` argument of
 `agent.run_structured`, `agent.run_worker_session`, `agent.run_oneshot`,
 `ephemeral.run_worker`, and `internet.ask`: a list that the call appends one
-`Usage` to when the SDK result message arrives. A call that fails before that
-message appends nothing.
+`Usage` to when it ends. A structured call and a worker session read their
+usage with `UsageMeter`, so a call that times out still appends the tokens
+of the model messages that arrived before the timeout. A call that fails
+before any model message appends nothing.
 
 `UsageLedger` sums the calls of one job run by worker name. Its `as_data`
 value goes into `RunReport.data["usage"]`, and its `tokens` into
@@ -94,6 +96,53 @@ def note_result(msg: Any, usage_out: list[Usage] | None) -> None:
     """Append the usage of `msg` to `usage_out` when `msg` is the SDK result message."""
     if usage_out is not None and type(msg).__name__ == "ResultMessage":
         usage_out.append(Usage.from_sdk(getattr(msg, "usage", None)))
+
+
+class UsageMeter:
+    """The usage of one call, read from its messages as they arrive.
+
+    The SDK result message holds the totals of the call. Each assistant
+    message holds the usage of its model message, and the CLI can send one
+    model message as several assistant messages with the same `message_id`,
+    so the meter keeps one usage for each id. `usage` is the usage of the
+    result message when it holds one, else the sum over the model messages.
+    So a call that times out, and has no result message, still counts what
+    it used, and a call that ends counts each token once.
+    """
+
+    def __init__(self) -> None:
+        self._messages: dict[str, Usage] = {}
+        self._result: Usage | None = None
+        self._seen = False
+
+    def note(self, msg: Any) -> None:
+        """Read the usage of one SDK message, if it has one."""
+        kind = type(msg).__name__
+        raw = getattr(msg, "usage", None)
+        if kind == "ResultMessage":
+            self._seen = True
+            if isinstance(raw, dict):
+                self._result = Usage.from_sdk(raw)
+        elif kind == "AssistantMessage" and isinstance(raw, dict):
+            self._seen = True
+            key = getattr(msg, "message_id", None) or f"#{len(self._messages)}"
+            self._messages[str(key)] = Usage.from_sdk(raw)
+
+    @property
+    def seen(self) -> bool:
+        """True when a result message, or a model message with a usage, arrived."""
+        return self._seen
+
+    @property
+    def usage(self) -> Usage:
+        if self._result is not None:
+            return self._result
+        return Usage.sum(self._messages.values())
+
+    def flush(self, usage_out: list[Usage] | None) -> None:
+        """Append `usage` to `usage_out`, when it is a list and a message arrived."""
+        if usage_out is not None and self._seen:
+            usage_out.append(self.usage)
 
 
 @dataclass

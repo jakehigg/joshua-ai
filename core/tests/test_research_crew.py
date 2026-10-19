@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any
 
 import pytest
+from joshua_core.engine.types import WorkerStats
 from joshua_core.engine.usage import UsageLedger
 from joshua_core.jobs.research import crew
 from joshua_core.jobs.research.crew import (
@@ -183,6 +184,68 @@ async def test_no_answer_at_any_step_holds(step: str) -> None:
     result = await _crew(net, workers)
     assert result.page is None and not result.publish
     assert result.hold_reason.startswith("no answer")
+
+
+async def test_the_lookups_take_the_research_limits() -> None:
+    cfg = research_settings(
+        "    lookup_timeout_seconds: 450\n    lookup_max_turns: 25\n"
+    ).jobs.research
+    net = FakeInternet()
+    await crew.research_question(
+        GROUNDED,
+        GROUNDINGS,
+        internet_settings=SETTINGS.internet,
+        research_settings=cfg,
+        editor_model=None,
+        ledger=UsageLedger(),
+        internet_runner=net,
+        editor_runner=FakeWorkers(),
+    )
+    assert [(k["timeout_s"], k["max_turns"]) for k in net.kwargs] == [(450, 25), (450, 25)]
+    assert (CFG.lookup_timeout_seconds, CFG.lookup_max_turns) == (300, 20)
+
+
+def _timed_out(searches: int, fetches: int) -> Any:
+    def answer(**kwargs: Any) -> None:
+        stats = kwargs["stats_out"]
+        stats.tools.update({"WebSearch": searches, "WebFetch": fetches})
+        stats.timed_out = True
+        stats.timeout_s = float(kwargs["timeout_s"])
+
+    return answer
+
+
+class _TimingOut(FakeInternet):
+    """The internet fake, with a lookup that times out on the chosen step."""
+
+    def __init__(self, step: str) -> None:
+        super().__init__()
+        self.step = step
+
+    async def __call__(self, **kwargs: Any) -> dict[str, Any] | None:
+        got = await super().__call__(**kwargs)
+        is_challenge = kwargs["user_text"].startswith("You check an answer")
+        if is_challenge == (self.step == "challenge"):
+            _timed_out(6, 4)(**kwargs)
+            return None
+        return got
+
+
+async def test_a_lookup_that_timed_out_says_so_in_the_hold() -> None:
+    result = await _crew(_TimingOut("draft"), FakeWorkers())
+    assert result.hold_reason == "lookup timed out after 300 s (6 searches, 4 fetches)"
+    result = await _crew(_TimingOut("challenge"), FakeWorkers())
+    assert result.hold_reason == (
+        "the lookup of the challenger timed out after 300 s (6 searches, 4 fetches)"
+    )
+
+
+def test_a_lookup_with_no_answer_and_no_timeout_keeps_its_reason() -> None:
+    assert crew.no_answer_reason("the researcher", WorkerStats()) == (
+        "no answer from the researcher"
+    )
+    stats = WorkerStats(timed_out=True)
+    assert crew.no_answer_reason("the researcher", stats).startswith("lookup timed out after ?")
 
 
 async def test_a_source_the_lookup_never_returned_is_not_given_to_the_editor() -> None:
