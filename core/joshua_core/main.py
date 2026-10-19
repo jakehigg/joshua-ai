@@ -30,6 +30,7 @@ from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
 from joshua_core.engine.tools import curator as curator_tool
 from joshua_core.engine.tools import internet, recall, registration, scheduling
+from joshua_core.engine.tools import research as research_tool
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
 from joshua_core.jobs import JobRunner, build_job_runner
@@ -161,9 +162,11 @@ async def lifespan(app: FastAPI):
         lock=wiki_lock,
         findings=repo,
     )
-    # The `curator` builtin needs the wiki lock, so it registers here and not
-    # with `scheduling` in `_build_manager`.
+    # The `curator` and `research` builtins need the wiki lock, and `research`
+    # the job runner, so they register here and not with `scheduling` in
+    # `_build_manager`.
     curator_tool.register(manager, settings=settings, data_dir=data_dir, lock=wiki_lock)
+    research_tool.register(manager, settings=settings, data_dir=data_dir, lock=wiki_lock, jobs=jobs)
     deliverer = build_deliverer()
     events = EventService(
         repo=repo,

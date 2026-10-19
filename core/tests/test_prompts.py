@@ -191,3 +191,15 @@ def test_default_prompts_dir_resolves_to_the_packaged_files() -> None:
     for name, files in _PROMPT_FILES.items():
         for rel in files:
             assert composer._read(rel), f"{name}: {rel} is empty"
+
+
+def test_base_prompt_has_the_knowledge_rule() -> None:
+    import re
+
+    base = (
+        Path(__file__).resolve().parents[1] / "joshua_core" / "prompts" / "builtin" / "base.md"
+    ).read_text()
+    paragraph = next(p for p in base.split("\n\n") if "knowledge/" in p)
+    assert "search memory first" in paragraph
+    assert "confidence" in paragraph and "queue the" in paragraph
+    assert len(re.findall(r"\S+", paragraph)) < 80
