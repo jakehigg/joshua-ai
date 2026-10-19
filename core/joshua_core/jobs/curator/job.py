@@ -3,27 +3,33 @@
 A run does this, in order:
 
 1. The scan (`scan.py`) over the whole wiki, every run.
-2. The workers (`workers.py`), on the topic pages whose body changed since
-   their last review, within the worker budget
-   (`jobs.curator.max_worker_calls`). The budget goes in this order:
+2. The workers (`workers.py`), on the topic pages whose `curated` pair or
+   `refreshed` pair is old or missing (see `track.py`), within the worker
+   budget (`jobs.curator.max_worker_calls`). The budget goes in this order:
    1. `place` for each page that was never curated (it has no
       `curated_hash`);
-   2. `compare` for each pair of similar pages, the near-duplicates first;
-   3. `refresh` for each page with journal entries about it, the page that
-      was never curated first, then the page with the oldest `curated` day;
+   2. `compare` for each pair of similar pages, the near-duplicates first,
+      except a pair that `compare` read before at the same two body hashes
+      (a `curator_pair` row);
+   3. `refresh` for each page whose `refreshed` pair is old or missing, the
+      page that was never refreshed first, then the page with the oldest
+      `refreshed` day;
    4. `place` for each page that was curated before and changed since.
 3. The apply step (`apply.py`), when the run is not a dry run: every Tier A
    finding, and each Tier B finding whose action the run may apply. A
    dismissed finding is not applied.
-4. The tracking keys, when the run is not a dry run: on each page the run
-   reviewed, and on each page it changed that had current keys before.
-5. The findings, into `curator_finding`, in a dry run too.
+4. The tracking keys, when the run is not a dry run: the `curated` pair on
+   each page that `place` answered for, and on each page that needs no
+   `place` (an index page, a skill, a journal entry); the `refreshed` pair on
+   each topic page whose `refresh` answered or that had no journal entry to
+   read; and the old pairs again on each page the run changed that had
+   current pairs before.
+5. The findings, into `curator_finding`, and a `curator_pair` row for each
+   pair that `compare` answered for, in a dry run too.
 
-A page is reviewed when every worker call due for it answered. A page that is
-not a topic page (an index page, a skill, a journal entry) needs no worker,
-so the scan alone reviews it. A page that the budget or a failed call left
-out keeps its old keys and is reviewed in a later run. A page that a failed
-call or the budget already left out gets no more worker calls in the run.
+Each pass counts on its own. A page that the budget or a failed call left out
+of one pass keeps the pair of that pass old, and a later run does only that
+pass.
 
 Arguments, each optional:
 
@@ -58,13 +64,14 @@ from joshua_core.jobs.bundle import BundleStore, build_bundle
 from joshua_core.jobs.curator import scan, workers
 from joshua_core.jobs.curator.apply import ApplyRefused, Workspace, apply_patch, finds_once
 from joshua_core.jobs.curator.findings import (
+    KINDS_BY_WORKER,
     TIER_A,
     TIER_B,
     TIER_C,
-    WORKER_KINDS,
     Finding,
     FindingStore,
     from_row,
+    pair_fingerprint,
 )
 from joshua_core.jobs.curator.scan import Pair, Tree
 from joshua_core.jobs.curator.track import (
@@ -73,8 +80,10 @@ from joshua_core.jobs.curator.track import (
     curated_day,
     is_untouched,
     may_track,
+    needs_place,
+    needs_refresh,
+    refreshed_day,
 )
-from joshua_core.jobs.curator.track import needs_review as page_needs_review
 from joshua_core.jobs.runner import Clock, Job, JobArgsError, RunReport, current_run_id
 from joshua_core.jobs.topics import Topic, list_topics
 
@@ -169,8 +178,16 @@ def in_scope(rel: str, prefixes: list[str] | None) -> bool:
 
 @dataclass
 class _Run:
-    """The state of one run. `failed` maps `(worker, outcome)` to the pages
-    or pairs of the calls that gave no usable answer."""
+    """The state of one run.
+
+    `place_due`, `refresh_due`, and `compare_due` are the pages and the pairs
+    that each worker was due to read. `placed` and `refreshed` are the pages
+    that get the `curated` pair and the `refreshed` pair. `answered` maps
+    `place` and `refresh` to the pages that worker answered for, and
+    `compared` holds the pairs that `compare` answered for. `failed` maps
+    `(worker, outcome)` to the pages or pairs of the calls that gave no usable
+    answer.
+    """
 
     tree: Tree
     day: date
@@ -178,12 +195,41 @@ class _Run:
     apply: list[str]
     budget: workers.Budget
     findings: list[Finding] = field(default_factory=list)
-    incomplete: set[str] = field(default_factory=set)
-    answered: set[str] = field(default_factory=set)
+    place_due: set[str] = field(default_factory=set)
+    refresh_due: set[str] = field(default_factory=set)
+    compare_due: set[frozenset[str]] = field(default_factory=set)
+    placed: set[str] = field(default_factory=set)
+    refreshed: set[str] = field(default_factory=set)
+    answered: dict[str, set[str]] = field(
+        default_factory=lambda: {"place": set(), "refresh": set()}
+    )
+    compared: list[tuple[str, str]] = field(default_factory=list)
+    pairs_unchanged: int = 0
     skipped: list[str] = field(default_factory=list)
     failed: dict[tuple[str, str], list[str]] = field(default_factory=dict)
     unsent: int = 0
     scope: list[str] | None = None
+
+    def reviewed_again(self, kind: str, paths: list[str]) -> bool:
+        """True when the worker that raises `kind` was due to read `paths` in
+        this run."""
+        if kind in KINDS_BY_WORKER["place"]:
+            return bool(set(paths) & self.place_due)
+        if kind in KINDS_BY_WORKER["refresh"]:
+            return bool(set(paths) & self.refresh_due)
+        if kind in KINDS_BY_WORKER["compare"]:
+            return frozenset(paths) in self.compare_due
+        return False
+
+    def answered_again(self, kind: str, paths: list[str]) -> bool:
+        """True when the worker that raises `kind` answered for `paths` in this run."""
+        if kind in KINDS_BY_WORKER["place"]:
+            return bool(set(paths) & self.answered["place"])
+        if kind in KINDS_BY_WORKER["refresh"]:
+            return bool(set(paths) & self.answered["refresh"])
+        if kind in KINDS_BY_WORKER["compare"]:
+            return frozenset(paths) in {frozenset(pair) for pair in self.compared}
+        return False
 
 
 class CuratorJob(Job):
@@ -240,42 +286,47 @@ class CuratorJob(Job):
         scope = run.scope
 
         texts = {rel: tree.text(rel) for rel in tree.pages}
-        due = {
-            rel
-            for rel, text in texts.items()
-            if in_scope(rel, scope) and may_track(rel, text) and page_needs_review(text)
-        }
-        for rel in sorted(due):
-            if not _keys_fit(texts[rel]):
-                due.discard(rel)
-                run.skipped.append(
-                    f"`{rel}` was not reviewed: its frontmatter is not a YAML mapping."
-                )
         topics = [
             t
             for t in list_topics(self._wiki, self._settings.jobs.topics.exclude)
             if t.path in tree.pages
         ]
-        review = sorted(
-            (t for t in topics if t.path in due),
-            key=lambda t: (
-                curated_day(texts[t.path]) is not None,
-                curated_day(texts[t.path]) or date.min,
-                t.path,
-            ),
+        topic_paths = {t.path for t in topics}
+        tracked_pages = {
+            rel for rel, text in texts.items() if in_scope(rel, scope) and may_track(rel, text)
+        }
+        place_due = {rel for rel in tracked_pages if needs_place(texts[rel])}
+        refresh_due = {rel for rel in tracked_pages & topic_paths if needs_refresh(texts[rel])}
+        for rel in sorted(place_due | refresh_due):
+            if not _keys_fit(texts[rel]):
+                place_due.discard(rel)
+                refresh_due.discard(rel)
+                run.skipped.append(
+                    f"`{rel}` was not reviewed: its frontmatter is not a YAML mapping."
+                )
+        # A page that is not a topic page needs no `place`, so the scan places it.
+        run.placed = place_due - topic_paths
+        run.place_due = place_due & topic_paths
+        run.refresh_due = refresh_due
+        to_place = sorted(
+            (t for t in topics if t.path in run.place_due),
+            key=lambda t: _oldest_first(curated_day(texts[t.path]), t.path),
         )
-        review_paths = {t.path for t in review}
-        never = [t for t in review if not _was_curated(texts[t.path])]
-        again = [t for t in review if _was_curated(texts[t.path])]
+        to_refresh = sorted(
+            (t for t in topics if t.path in run.refresh_due),
+            key=lambda t: _oldest_first(refreshed_day(texts[t.path]), t.path),
+        )
+        never = [t for t in to_place if not _was_curated(texts[t.path])]
+        again = [t for t in to_place if _was_curated(texts[t.path])]
 
         sections = scan.section_map(tree)
-        if not sections and review:
+        if not sections and to_place:
             run.skipped.append("No page was placed: `Home.md` has no `## Sections` list.")
         if sections:
             await self._place_pass(run, never, texts, sections)
-        pairs = await self._pairs(run, topics, review_paths)
-        await self._compare_pass(run, pairs, review_paths, texts)
-        await self._refresh_pass(run, review, texts)
+        pairs = await self._pairs(run, topics, run.place_due | run.refresh_due)
+        await self._compare_pass(run, pairs, texts)
+        await self._refresh_pass(run, to_refresh, texts)
         if sections:
             await self._place_pass(run, again, texts, sections)
         if run.unsent:
@@ -285,9 +336,8 @@ class CuratorJob(Job):
             )
 
         run.findings = _unique(run.findings)
-        reviewed = sorted(
-            rel for rel in due if rel not in run.incomplete and rel not in tree.strays
-        )
+        to_curate = {rel for rel in run.placed if rel not in tree.strays}
+        to_refresh_keys = {rel for rel in run.refreshed if rel not in tree.strays}
         dismissed = {
             row["fingerprint"]
             for row in await self._findings.list_findings("dismissed", ROW_LIMIT)
@@ -297,20 +347,26 @@ class CuratorJob(Job):
 
         applied: list[Finding] = []
         ws: Workspace | None = None
-        tracked = 0
+        tracked = _Tracked()
         if not dry_run:
             ws = Workspace(self._wiki, run.day)
-            applied = self._apply(run, ws, dismissed, open_rows, review_paths)
-            for rel in reviewed:
+            applied = self._apply(run, ws, dismissed, open_rows)
+            for rel in sorted(to_curate | to_refresh_keys):
                 current = ws.current(rel)
-                if current is not None and ws.track(current):
-                    tracked += 1
-            for rel in sorted(ws.clean):
-                ws.track(rel)
+                if current is not None:
+                    tracked.add(
+                        current,
+                        *_track(ws, current, rel in to_curate, rel in to_refresh_keys),
+                    )
+            ws.track_clean()
+        else:
+            for rel in to_curate | to_refresh_keys:
+                tracked.add(rel, rel in to_curate, rel in to_refresh_keys)
 
         final_tree = scan.load_tree(self._wiki) if ws is not None else tree
         await self._record(run, applied, dismissed, open_rows, final_tree, ws)
-        return self._report(run, applied, dismissed, ws, tracked, reviewed, dry_run)
+        await self._record_pairs(run, final_tree, ws)
+        return self._report(run, applied, dismissed, ws, tracked, dry_run)
 
     # -- workers ------------------------------------------------------------
 
@@ -321,7 +377,7 @@ class CuratorJob(Job):
         run.failed.setdefault((worker, outcome), []).append(label)
 
     async def _entries(self, run: _Run, topic: Topic, text: str) -> list[tuple[str, str]] | None:
-        """The journal entries about a topic since its `curated` day, or None
+        """The journal entries about a topic since its `refreshed` day, or None
         when the bundle cannot be built."""
         try:
             bundle = await build_bundle(
@@ -334,7 +390,7 @@ class CuratorJob(Job):
         except Exception as exc:  # noqa: BLE001 — one page must not stop the run
             logger.warning({"message": "curator bundle failed", "error": str(exc)})
             return None
-        since = curated_day(text)
+        since = refreshed_day(text)
         out: list[tuple[str, str]] = []
         for rel in bundle.paths:
             if scan.section_of(rel) != scan.JOURNAL:
@@ -347,19 +403,16 @@ class CuratorJob(Job):
 
     async def _refresh_pass(self, run: _Run, review: list[Topic], texts: dict[str, str]) -> None:
         for topic in review:
-            if topic.path in run.incomplete:
-                continue
             if run.budget.left == 0:
-                run.incomplete.add(topic.path)
                 run.unsent += 1
                 continue
             text = texts[topic.path]
             entries = await self._entries(run, topic, text)
             if entries is None:
-                run.incomplete.add(topic.path)
                 run.skipped.append(f"The journal entries of `{topic.path}` could not be read.")
                 continue
             if not entries:
+                run.refreshed.add(topic.path)
                 continue
             run.budget.spend()
             used: list[Usage] = []
@@ -373,10 +426,10 @@ class CuratorJob(Job):
             )
             run.budget.usage.add("refresh", used)
             if got.answer is None:
-                run.incomplete.add(topic.path)
                 self._skip(run, "refresh", f"`{topic.path}`", got.outcome)
                 continue
-            run.answered.add(topic.path)
+            run.answered["refresh"].add(topic.path)
+            run.refreshed.add(topic.path)
             self._on_refresh(run, topic.path, text, [p for p, _ in entries], got.answer)
 
     def _on_refresh(
@@ -410,10 +463,7 @@ class CuratorJob(Job):
         sections: list[scan.Section],
     ) -> None:
         for topic in review:
-            if topic.path in run.incomplete:
-                continue
             if not run.budget.spend():
-                run.incomplete.add(topic.path)
                 run.unsent += 1
                 continue
             used: list[Usage] = []
@@ -427,10 +477,10 @@ class CuratorJob(Job):
             )
             run.budget.usage.add("place", used)
             if got.answer is None:
-                run.incomplete.add(topic.path)
                 self._skip(run, "place", f"`{topic.path}`", got.outcome)
                 continue
-            run.answered.add(topic.path)
+            run.answered["place"].add(topic.path)
+            run.placed.add(topic.path)
             self._on_place(run, topic.path, got.answer)
 
     def _on_place(self, run: _Run, rel: str, answer: workers.PlaceAnswer) -> None:
@@ -476,15 +526,26 @@ class CuratorJob(Job):
         )
         return [p for p in pairs if p.a in review or p.b in review]
 
-    async def _compare_pass(
-        self, run: _Run, pairs: list[Pair], review: set[str], texts: dict[str, str]
-    ) -> None:
+    async def _known_pairs(self, pairs: list[Pair]) -> dict[str, dict[str, Any]]:
+        """The `curator_pair` rows of `pairs`. A store that fails gives none."""
+        keys = sorted({pair_fingerprint(p.a, p.b) for p in pairs})
+        if not keys:
+            return {}
+        try:
+            return await self._findings.get_curator_pairs(keys)
+        except Exception as exc:  # noqa: BLE001 — no rows means each pair is compared
+            logger.warning({"message": "curator pairs not read", "error": str(exc)})
+            return {}
+
+    async def _compare_pass(self, run: _Run, pairs: list[Pair], texts: dict[str, str]) -> None:
+        known = await self._known_pairs(pairs)
         for pair in pairs:
-            members = {pair.a, pair.b} & review
-            if members & run.incomplete:
+            row = known.get(pair_fingerprint(pair.a, pair.b))
+            if row is not None and _pair_unchanged(row, pair.a, pair.b, texts):
+                run.pairs_unchanged += 1
                 continue
+            run.compare_due.add(frozenset((pair.a, pair.b)))
             if not run.budget.spend():
-                run.incomplete |= members
                 run.unsent += 1
                 continue
             used: list[Usage] = []
@@ -497,10 +558,9 @@ class CuratorJob(Job):
             )
             run.budget.usage.add("compare", used)
             if got.answer is None:
-                run.incomplete |= members
                 self._skip(run, "compare", f"`{pair.a}` and `{pair.b}`", got.outcome)
                 continue
-            run.answered |= members
+            run.compared.append((pair.a, pair.b))
             self._on_compare(run, pair, got.answer)
 
     def _on_compare(self, run: _Run, pair: Pair, answer: workers.CompareAnswer) -> None:
@@ -534,9 +594,12 @@ class CuratorJob(Job):
         ws: Workspace,
         dismissed: set[str],
         open_rows: list[dict[str, Any]],
-        review: set[str],
     ) -> list[Finding]:
-        """Apply the findings the run may apply. Returns the applied ones."""
+        """Apply the findings the run may apply. Returns the applied ones.
+
+        An open Tier B finding of an earlier run applies too, unless the
+        worker that raised it was due to read its pages again in this run.
+        """
         seen = {f.fingerprint for f in run.findings}
         earlier = [
             from_row(row)
@@ -544,7 +607,7 @@ class CuratorJob(Job):
             if row.get("tier") == TIER_B
             and row.get("fingerprint") not in seen
             and row.get("patch")
-            and not set(row.get("paths") or []) & review
+            and not run.reviewed_again(str(row.get("kind")), list(row.get("paths") or []))
         ]
         for finding in earlier:
             finding.detail["earlier"] = True
@@ -629,9 +692,28 @@ class CuratorJob(Job):
             if rid in seen_ids:
                 continue
             paths = list(row.get("paths") or [])
-            superseded = row.get("kind") in WORKER_KINDS and bool(set(paths) & run.answered)
+            superseded = run.answered_again(str(row.get("kind")), paths)
             if superseded or _changed(row, tree):
                 await self._findings.set_finding_status(rid, "stale", at=run.now)
+
+    async def _record_pairs(self, run: _Run, tree: Tree, ws: Workspace | None) -> None:
+        """A `curator_pair` row for each pair that `compare` answered for, with
+        the body hashes after the apply step. A change that the run applied
+        does not send the pair to `compare` again."""
+        for a, b in run.compared:
+            now_a, now_b = (ws.current(a), ws.current(b)) if ws is not None else (a, b)
+            if now_a is None or now_b is None or not {now_a, now_b} <= set(tree.pages):
+                continue
+            first, second = sorted((now_a, now_b))
+            try:
+                await self._findings.upsert_curator_pair(
+                    fingerprint=pair_fingerprint(first, second),
+                    hash_a=body_hash(tree.text(first)),
+                    hash_b=body_hash(tree.text(second)),
+                    checked_at=run.now,
+                )
+            except Exception as exc:  # noqa: BLE001 — a lost row costs one more call later
+                logger.warning({"message": "curator pair not recorded", "error": str(exc)})
 
     # -- report ---------------------------------------------------------------
 
@@ -641,8 +723,7 @@ class CuratorJob(Job):
         applied: list[Finding],
         dismissed: set[str],
         ws: Workspace | None,
-        tracked: int,
-        reviewed: list[str],
+        tracked: _Tracked,
         dry_run: bool,
     ) -> RunReport:
         applied_ids = {id(f) for f in applied}
@@ -660,7 +741,7 @@ class CuratorJob(Job):
         skipped += [
             f"Finding #{f.id} ({f.kind}) is dismissed, so it was not applied." for f in held
         ]
-        review_count = tracked if not dry_run else len(reviewed)
+        review_count = len(tracked.pages)
 
         if dry_run:
             summary = (
@@ -688,8 +769,13 @@ class CuratorJob(Job):
                 ("Proposed (Tier C)", _lines(todo_c)),
             ]
         sections.append(("Skipped", _skipped_text(run, held)))
+        verb = "would get" if dry_run else "got"
         sections.append(
-            ("Reviewed", f"{review_count} pages {'would get' if dry_run else 'got'} tracking keys.")
+            (
+                "Reviewed",
+                f"{len(tracked.curated)} pages {verb} `curated` keys, and "
+                f"{len(tracked.refreshed)} pages {verb} `refreshed` keys.",
+            )
         )
         counts = {
             "pages": len(run.tree.pages),
@@ -701,6 +787,9 @@ class CuratorJob(Job):
             "dismissed": len(held),
             "skipped": len(skipped),
             "reviewed": review_count,
+            "curated": len(tracked.curated),
+            "refreshed": len(tracked.refreshed),
+            "pairs_unchanged": run.pairs_unchanged,
             "calls": run.budget.calls,
         }
         return RunReport(
@@ -729,6 +818,51 @@ class CuratorJob(Job):
                 "skipped": skipped,
             },
         )
+
+
+@dataclass
+class _Tracked:
+    """The pages that got, or in a dry run would get, each pair of keys."""
+
+    curated: set[str] = field(default_factory=set)
+    refreshed: set[str] = field(default_factory=set)
+
+    @property
+    def pages(self) -> set[str]:
+        return self.curated | self.refreshed
+
+    def add(self, rel: str, curated: bool, refreshed: bool) -> None:
+        if curated:
+            self.curated.add(rel)
+        if refreshed:
+            self.refreshed.add(rel)
+
+
+def _track(ws: Workspace, rel: str, curated: bool, refreshed: bool) -> tuple[bool, bool]:
+    """Write the pairs asked for on a page. Returns which pairs it wrote."""
+    if not (ws.root / rel).is_file():
+        return False, False
+    before = ws.read(rel)
+    if not ws.track(rel, curated=curated, refreshed=refreshed):
+        return False, False
+    after = ws.read(rel)
+    return (
+        curated and needs_place(before) and not needs_place(after),
+        refreshed and needs_refresh(before) and not needs_refresh(after),
+    )
+
+
+def _oldest_first(day: date | None, rel: str) -> tuple[bool, date, str]:
+    """The sort key that puts a page with no day first, then the oldest day."""
+    return (day is not None, day or date.min, rel)
+
+
+def _pair_unchanged(row: dict[str, Any], a: str, b: str, texts: dict[str, str]) -> bool:
+    """True when both pages of a pair have the body hashes of its `curator_pair` row."""
+    first, second = sorted((a, b))
+    return row.get("hash_a") == body_hash(texts[first]) and row.get("hash_b") == body_hash(
+        texts[second]
+    )
 
 
 def _was_curated(text: str) -> bool:

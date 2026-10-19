@@ -156,6 +156,17 @@ with the images and the packaged chart, are at
   our pages. The gate rejects a raised question that names a person, holds a
   date from our records, or asks what we did, will do, or should do.
 
+- **The curator keeps the passes it did when the budget runs out.** Each
+  pass now has its own frontmatter pair: `curated` and `curated_hash` after
+  `place`, and the new `refreshed` and `refreshed_hash` after `refresh`. A
+  pair of pages that `compare` read is a row in the new `curator_pair` table,
+  and a run does not read the pair again while both pages are the same.
+  Before, a page counted only when every pass ran, so a run with a small
+  budget wrote no keys, and the next run made the same `place` calls again.
+  The Reviewed section gives the count for each pair. A topic page with
+  `curated` keys from an earlier release has no `refreshed` pair, so the next
+  run reads its journal entries once.
+
 - **A research lookup has time to find its sources.** The lookups of the
   researcher and the challenger now have their own limits:
   `jobs.research.lookup_timeout_seconds` (300) and

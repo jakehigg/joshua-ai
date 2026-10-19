@@ -253,14 +253,16 @@ starts with `/`, or that holds `..` or a part that starts with a dot, gets
 
 1. **The scan**, over the whole wiki, every run. It is Python and costs
    nothing.
-2. **The workers**, on the topic pages whose body changed since their last
-   review. A run makes `jobs.curator.max_worker_calls` (40) worker calls at
-   most, or the `max_worker_calls` of the run.
+2. **The workers**, on the topic pages that have a pass due: the body
+   changed since that pass, or the pass never ran. A run makes
+   `jobs.curator.max_worker_calls` (40) worker calls at most, or the
+   `max_worker_calls` of the run.
 3. **The apply step**, when the run is not a dry run: every Tier A finding,
    and each Tier B finding whose action the run may apply.
-4. **The tracking keys**, when the run is not a dry run, on each page that the
-   run reviewed.
-5. **The findings**, into the `curator_finding` table. A dry run records them
+4. **The tracking keys**, when the run is not a dry run, for each pass that
+   the run did.
+5. **The findings**, into the `curator_finding` table, and a row in
+   `curator_pair` for each pair that `compare` read. A dry run records them
    too.
 
 ### The scan
@@ -301,28 +303,30 @@ changes nothing: the report lists it under "Skipped". The model is
 
 | Worker | Reads | Answers | Finding |
 |---|---|---|---|
-| `refresh` | the page, and the journal entries about it from the memory bundle that are dated after its `curated` day (all of them for a page with no `curated` day) | `status` (`current`, `stale`, `conflict`), `patch` (find and replace pairs, each with `because`), `confidence` | `refresh`, Tier B when the status is `stale`, the confidence is `high`, and each `find` occurs exactly once in the body. Else Tier C, with the patch. |
+| `refresh` | the page, and the journal entries about it from the memory bundle that are dated after its `refreshed` day (all of them for a page with no `refreshed` day) | `status` (`current`, `stale`, `conflict`), `patch` (find and replace pairs, each with `because`), `confidence` | `refresh`, Tier B when the status is `stale`, the confidence is `high`, and each `find` occurs exactly once in the body. Else Tier C, with the patch. |
 | `place` | the page, and the section map: each list line of `## Sections` on `Home.md`, and the first paragraph of its index page | `section`, `folder`, `confidence`, `reason` | `misplaced`, Tier B (`move`) when the folder is not the folder of the page and the confidence is `high`; Tier C for a lower confidence or a folder that is not there. A `section` of `none` is a Tier C `no-section` finding. |
 | `compare` | two topic pages | `relation` (`duplicate`, `overlap`, `conflict`, `unrelated`), `claims`, `canonical`, `confidence` | `duplicate`, Tier B (`merge`) for a duplicate with `high` confidence; `conflict`, Tier C, with the claims. |
 
 A run spends its budget in this order:
 
 1. `place` for each page that was never curated: it has no `curated_hash`.
-2. `compare` for each pair, the near-duplicates first.
-3. `refresh` for each page that has journal entries about it. The page that
-   was never curated goes first, then the page with the oldest `curated` day.
+2. `compare` for each pair, the near-duplicates first. A pair that `compare`
+   read before, at the same two body hashes, is not read again.
+3. `refresh` for each page whose `refreshed` pair is old or missing, when it
+   has journal entries about it. The page that was never refreshed goes
+   first, then the page with the oldest `refreshed` day.
 4. `place` for each page that was curated before and changed since.
 
 The place of a page and its duplicates organize the wiki, so they go before
-the facts that the journal made old. When a call for a page gives no usable
-answer, or the budget runs out before its call, the page gets no more calls
-in that run. A later run reviews it.
+the facts that the journal made old. Each pass counts on its own. When the
+budget runs out after the `place` calls, the pages that got an answer keep
+it, and the next run spends its budget on the passes that are still due.
 
 The `compare` pairs come from the mean vector of the chunks of each topic
 page in the index: two pages at `jobs.curator.duplicate_sim` (0.92) or more
 first, then two pages of one section at `jobs.curator.overlap_sim` (0.70) or
-more. A pair is compared only when one of its two pages needs review. With no
-`## Sections` list on `Home.md`, no page goes to `place`.
+more. A pair is compared only when one of its two pages has a pass due. With
+no `## Sections` list on `Home.md`, no page goes to `place`.
 
 A worker answer is refused when a `replace` is longer than 2 000 characters,
 when a patch has more than 12 pairs, or when a `place` answer names a section
@@ -348,41 +352,62 @@ calls. `report.data.usage` gives the calls and the tokens of each worker.
 - **Tier C** is recorded. A run never applies it.
 
 A run also applies an open Tier B finding from an earlier run, when the run
-names its action and the run did not review its pages again. So a dry run,
-and then `run --arg apply=move`, applies the move that the dry run found.
+names its action and the worker that raised it was not due to read its pages
+again. So a dry run, and then `run --arg apply=move`, applies the move that
+the dry run found.
 
 A move or a merge does not change a link in a journal entry. The next scan
 reports a link that it broke there, as Tier C.
 
 ### The tracking keys
 
-A page that the curator reviewed has two frontmatter keys:
+The curator records each pass on a page with a pair of frontmatter keys:
 
 ```yaml
-curated: 2026-10-19          # the day of the run, in timezone
-curated_hash: 7f3a9c1e04b2   # the body hash at that review
+curated: 2026-10-19            # the day of the run that placed the page, in timezone
+curated_hash: 7f3a9c1e04b2     # the body hash at that pass
+refreshed: 2026-10-19          # the day of the run that refreshed the page
+refreshed_hash: 7f3a9c1e04b2   # the body hash at that pass
 ```
 
 The body hash is the first 12 hex characters of the SHA-256 of the text after
 the frontmatter, with the trailing spaces and line ends removed. A change to
 the frontmatter alone does not change it.
 
-The skip rule: a page whose body hash equals `curated_hash` does not go to a
-worker. The scan still covers every page on every run. A page that a person or
-Joshua edits has a new hash, and the next run reviews it again.
+- The `curated` pair goes on a page when `place` answered for it. A page that
+  is not a topic page (`Home.md`, an index page, a skill, a journal entry)
+  needs no `place`, so the scan gives it the `curated` pair.
+- The `refreshed` pair goes on a topic page when `refresh` answered for it,
+  or when the page has no journal entry to read after its `refreshed` day.
 
-A page is reviewed when each worker call due for it gave an answer. A page
-that is not a topic page (`Home.md`, an index page, a skill, a journal entry)
-needs no worker, so the scan reviews it. A page that the budget or a failed
-call left out keeps its old keys, and a later run reviews it.
+The skip rule: a page whose body hash equals `curated_hash` does not go to
+`place`, and a page whose body hash equals `refreshed_hash` does not go to
+`refresh`. The scan still covers every page on every run. A page that a person
+or Joshua edits has a new hash, so both pairs are old, and the next run does
+both passes again. A pass that the budget or a failed call left out keeps its
+pair old, and a later run does that pass only.
 
-The keys go on each page that the run reviewed, and on each page that the run
-changed when that page had current keys before. So a change the curator
-applied does not make the page go to a worker again. The keys never go on a
-page under `people/` or `joshua-docs/`, on a dot path, or on a journal entry
-that a job run wrote (one with `run_id` in its frontmatter). The curator scans
-such an entry for links, but no worker reads it. A page whose frontmatter is
-not a YAML mapping gets no keys, and the report says so.
+`compare` reads two pages, so its record is not on a page. After `compare`
+answers for a pair, the run writes a row in `curator_pair`:
+
+| Column | What it holds |
+|---|---|
+| `fingerprint` | the SHA-256 of the two sorted paths of the pair |
+| `hash_a`, `hash_b` | the body hash of each page, in the sorted order of the paths |
+| `checked_at` | the time of the run |
+
+A run does not send the pair to `compare` again while both hashes are the
+same. The hashes are the ones after the apply step, so a change that the
+curator applied does not send the pair again.
+
+The pairs go on each page for the passes that the run did, and again on each
+page that the run changed when that page had current pairs before. So a
+change the curator applied does not make the page go to a worker again. The
+keys never go on a page under `people/` or `joshua-docs/`, on a dot path, or
+on a journal entry that a job run wrote (one with `run_id` in its
+frontmatter). The curator scans such an entry for links, but no worker reads
+it. A page whose frontmatter is not a YAML mapping gets no keys, and the
+report says so.
 
 ### The findings
 
@@ -405,7 +430,8 @@ A run that sees a finding again keeps its `first_seen` and its status, and
 sets `last_seen`. A dismissed finding stays dismissed, and a run does not
 apply it. A stale finding that a run sees again is open again. An open finding
 becomes stale when one of its paths is not there, when the body of one of its
-pages changed, or when a worker reviewed its page again and did not raise it.
+pages changed, or when the worker that raised it read its page again and did
+not raise it.
 A Tier A change, and a Tier B change that a run applied, is a finding with the
 status `applied`, so the history stays.
 
@@ -441,7 +467,8 @@ these sections:
   applied because they are dismissed. The calls that gave no usable answer
   are in one line for each worker, with a count, and the pages or pairs are
   in a list under it.
-- **Reviewed**: the number of pages that got tracking keys.
+- **Reviewed**: the number of pages that got the `curated` pair, and the
+  number of pages that got the `refreshed` pair.
 
 A dry run has "To apply (Tier A)" in place of the two "Applied" sections. In
 the report, each text from a page or a worker is in a code span, so the entry
@@ -462,7 +489,7 @@ trash.
   `wiki/.trash/<day>/`.
 - The body of a journal entry. It adds only `date` and the tracking keys to
   the frontmatter of an entry.
-- The frontmatter of a skill, other than `curated` and `curated_hash`.
+- The frontmatter of a skill, other than the tracking keys.
 - Anything outside `wiki/`.
 - Anything at all in a dry run, other than the rows of `curator_finding`.
 

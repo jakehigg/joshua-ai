@@ -869,6 +869,36 @@ class Repo:
             )
             return cur.rowcount > 0
 
+    # --- curator pairs ----------------------------------------------------
+
+    async def get_curator_pairs(self, fingerprints: list[str]) -> dict[str, dict[str, Any]]:
+        """The `curator_pair` rows of `fingerprints`, by fingerprint."""
+        if not fingerprints:
+            return {}
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM curator_pair WHERE fingerprint = ANY(%s)", (list(fingerprints),)
+            )
+            rows = await cur.fetchall()
+        return {row["fingerprint"]: row for row in rows}
+
+    async def upsert_curator_pair(
+        self, *, fingerprint: str, hash_a: str, hash_b: str, checked_at: datetime
+    ) -> None:
+        """Record that `compare` read a pair at these two body hashes."""
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO curator_pair (fingerprint, hash_a, hash_b, checked_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (fingerprint) DO UPDATE SET
+                    hash_a = EXCLUDED.hash_a,
+                    hash_b = EXCLUDED.hash_b,
+                    checked_at = EXCLUDED.checked_at
+                """,
+                (fingerprint, hash_a, hash_b, checked_at),
+            )
+
 
 FINDING_STATUSES = ("open", "applied", "dismissed", "stale")
 _RESOLVED_STATUSES = ("applied", "dismissed", "stale")

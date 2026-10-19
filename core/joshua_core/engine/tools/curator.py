@@ -123,8 +123,7 @@ async def do_apply_finding(
         except ApplyRefused as exc:
             await deps.repo.set_finding_status(fid, "stale", at=now)
             return _reply(f"I did not apply finding #{fid}: {exc}. The finding is stale now.")
-        for rel in sorted(ws.clean):
-            ws.track(rel)
+        ws.track_clean()
         if ws.written and wikigit.is_enabled(ctx.settings):
             wikigit.commit(wiki, ws.paths(), f"curator: finding {fid}")
         await deps.repo.set_finding_status(fid, "applied", at=now, resolved_by=member)

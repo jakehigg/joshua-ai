@@ -12,6 +12,10 @@ person can. The tier says who applies it:
 The fingerprint is the SHA-256 of the kind, the sorted paths, and the
 normalized `key` of the finding. It keeps one finding one row of
 `curator_finding` across runs, so a dismissed finding stays dismissed.
+
+A pair of pages that `compare` read is one row of `curator_pair`: the
+fingerprint of the pair, the body hash of each page, and when. A run does not
+send the pair to `compare` again while both hashes are the same.
 """
 
 from __future__ import annotations
@@ -29,6 +33,12 @@ TIER_C = "C"
 # The kinds that a worker raises. A page that a worker reviews again replaces
 # its earlier findings of these kinds.
 WORKER_KINDS = ("misplaced", "no-section", "duplicate", "conflict", "refresh")
+# The kinds that each worker raises.
+KINDS_BY_WORKER: dict[str, tuple[str, ...]] = {
+    "place": ("misplaced", "no-section"),
+    "compare": ("duplicate", "conflict"),
+    "refresh": ("refresh",),
+}
 
 
 @dataclass
@@ -65,8 +75,13 @@ def fingerprint(kind: str, paths: list[str], key: str | Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def pair_fingerprint(a: str, b: str) -> str:
+    """The fingerprint of a pair of pages for `compare`, in either order."""
+    return fingerprint("compare-pair", [a, b], "")
+
+
 class FindingStore(Protocol):
-    """The `curator_finding` methods of `Repo`."""
+    """The `curator_finding` and `curator_pair` methods of `Repo`."""
 
     async def upsert_finding(
         self,
@@ -97,6 +112,12 @@ class FindingStore(Protocol):
         resolved_by: str | None = None,
         note: str | None = None,
     ) -> bool: ...
+
+    async def get_curator_pairs(self, fingerprints: list[str]) -> dict[str, dict[str, Any]]: ...
+
+    async def upsert_curator_pair(
+        self, *, fingerprint: str, hash_a: str, hash_b: str, checked_at: datetime
+    ) -> None: ...
 
 
 def from_row(row: dict[str, Any]) -> Finding:

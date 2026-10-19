@@ -158,6 +158,7 @@ class FakeFindingStore:
         self.rows: dict[int, dict[str, Any]] = {}
         self.upserts: list[dict[str, Any]] = []
         self.people: dict[str, Any] = {}
+        self.pairs: dict[str, dict[str, Any]] = {}
 
     async def upsert_finding(
         self,
@@ -236,6 +237,19 @@ class FakeFindingStore:
         if note is not None:
             row["detail"] = {**row["detail"], "note": note}
         return True
+
+    async def get_curator_pairs(self, fingerprints: list[str]) -> dict[str, dict[str, Any]]:
+        return {f: dict(self.pairs[f]) for f in fingerprints if f in self.pairs}
+
+    async def upsert_curator_pair(
+        self, *, fingerprint: str, hash_a: str, hash_b: str, checked_at: datetime
+    ) -> None:
+        self.pairs[fingerprint] = {
+            "fingerprint": fingerprint,
+            "hash_a": hash_a,
+            "hash_b": hash_b,
+            "checked_at": checked_at,
+        }
 
     async def get_person(self, pid: str) -> Any:
         return self.people.get(pid)

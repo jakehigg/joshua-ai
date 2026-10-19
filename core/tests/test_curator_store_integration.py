@@ -1,5 +1,5 @@
 """The curator's store methods against a real Postgres: the `curator_finding`
-rows of `Repo`, and `MemoryStore.kb_mean_vectors`."""
+and `curator_pair` rows of `Repo`, and `MemoryStore.kb_mean_vectors`."""
 
 from __future__ import annotations
 
@@ -96,3 +96,15 @@ async def test_kb_mean_vectors_is_the_mean_of_the_chunks(db) -> None:
     assert list(got) == ["wiki/garden/roses.md"]
     assert got["wiki/garden/roses.md"][:3] == pytest.approx([0.5, 0.5, 0.0])
     assert await store.kb_mean_vectors([]) == {}
+
+
+async def test_a_curator_pair_is_recorded_and_replaced(repo) -> None:
+    assert await repo.get_curator_pairs([]) == {}
+    assert await repo.get_curator_pairs(["pair1"]) == {}
+    await repo.upsert_curator_pair(fingerprint="pair1", hash_a="a1", hash_b="b1", checked_at=SEEN)
+    later = SEEN + timedelta(days=1)
+    await repo.upsert_curator_pair(fingerprint="pair1", hash_a="a2", hash_b="b2", checked_at=later)
+    rows = await repo.get_curator_pairs(["pair1", "pair2"])
+    assert list(rows) == ["pair1"]
+    assert (rows["pair1"]["hash_a"], rows["pair1"]["hash_b"]) == ("a2", "b2")
+    assert rows["pair1"]["checked_at"] == later

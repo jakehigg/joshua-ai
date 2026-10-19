@@ -12,7 +12,7 @@ from joshua_core.jobs.curator.apply import ApplyRefused, Workspace, apply_patch
 from joshua_core.jobs.curator.findings import Finding, FindingStore, fingerprint
 from joshua_core.jobs.curator.job import CuratorJob, CuratorStore
 from joshua_core.jobs.curator.scan import Tree, link_graph, load_tree, resolve_link, scan_tree
-from joshua_core.jobs.curator.track import body_hash, needs_review
+from joshua_core.jobs.curator.track import body_hash, needs_place, needs_refresh, needs_review
 
 __all__ = [
     "ApplyRefused",
@@ -27,6 +27,8 @@ __all__ = [
     "fingerprint",
     "link_graph",
     "load_tree",
+    "needs_place",
+    "needs_refresh",
     "needs_review",
     "resolve_link",
     "scan_tree",

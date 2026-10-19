@@ -179,6 +179,13 @@ CREATE TABLE IF NOT EXISTS curator_finding (
     resolved_by  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_curator_finding_status ON curator_finding (status, id DESC);
+
+CREATE TABLE IF NOT EXISTS curator_pair (
+    fingerprint  TEXT PRIMARY KEY,
+    hash_a       TEXT NOT NULL,
+    hash_b       TEXT NOT NULL,
+    checked_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 

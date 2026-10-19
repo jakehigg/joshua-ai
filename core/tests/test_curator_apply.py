@@ -14,7 +14,13 @@ from joshua_core.jobs.curator.apply import (
     apply_patch,
     finds_once,
 )
-from joshua_core.jobs.curator.track import needs_review, with_tracking
+from joshua_core.jobs.curator.track import (
+    needs_place,
+    needs_refresh,
+    needs_review,
+    with_tracking,
+)
+from joshua_shared import frontmatter
 
 DAY = date(2026, 10, 19)
 
@@ -211,3 +217,46 @@ def test_refresh_applies_in_order_or_not_at_all(wiki: Path) -> None:
     ):
         with pytest.raises(ApplyRefused):
             apply_patch(ws, patch)
+
+
+def test_both_pairs_follow_a_move_and_come_back_after_the_change(wiki: Path) -> None:
+    roses = wiki / "garden/roses.md"
+    roses.write_text(with_tracking(roses.read_text(), DAY, curated=True, refreshed=True))
+    ws = _ws(wiki)
+    apply_patch(ws, {"action": "move", "path": "garden/roses.md", "to": "kitchen/roses.md"})
+    assert "kitchen/roses.md" in ws.clean and "kitchen/roses.md" in ws.refreshed_clean
+    ws.track_clean()
+    moved = (wiki / "kitchen/roses.md").read_text()
+    assert not needs_place(moved) and not needs_refresh(moved)
+
+
+def test_track_writes_only_the_pairs_asked_for(wiki: Path) -> None:
+    ws = _ws(wiki)
+    assert ws.track("garden/roses.md", curated=False, refreshed=True)
+    text = (wiki / "garden/roses.md").read_text()
+    assert needs_place(text) and not needs_refresh(text)
+    assert not ws.track("garden/roses.md", curated=False, refreshed=True)
+    assert not ws.track("garden/roses.md", curated=False, refreshed=False)
+    assert ws.track("garden/roses.md")
+    assert not needs_place((wiki / "garden/roses.md").read_text())
+
+
+def test_a_skill_takes_the_refreshed_pair_and_nothing_else(wiki: Path) -> None:
+    ws = _ws(wiki)
+    assert ws.track("skills/s.md", refreshed=True)
+    meta = frontmatter.split((wiki / "skills/s.md").read_text())[0]
+    assert {"refreshed", "refreshed_hash", "curated", "curated_hash"} <= set(meta)
+    with pytest.raises(ApplyRefused):
+        ws.write(
+            "skills/s.md", (wiki / "skills/s.md").read_text().replace("---\n", "---\nx: 1\n", 1)
+        )
+
+
+def test_a_trashed_page_leaves_both_clean_sets(wiki: Path) -> None:
+    roses = wiki / "garden/roses.md"
+    roses.write_text(with_tracking(roses.read_text(), DAY, refreshed=True))
+    ws = _ws(wiki)
+    ws.write("garden/roses.md", roses.read_text() + "More.\n")
+    assert "garden/roses.md" in ws.refreshed_clean
+    ws.trash("garden/roses.md")
+    assert "garden/roses.md" not in ws.clean | ws.refreshed_clean

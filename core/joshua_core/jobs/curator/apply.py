@@ -6,8 +6,8 @@ write that the curator must never make:
 - a path under `people/` or `joshua-docs/`, or a dot path, except the
   destination of a file it moves to `wiki/.trash/<day>/`;
 - a change to the body of a journal entry, and a move of a journal entry;
-- a change to the frontmatter of a skill page other than `curated` and
-  `curated_hash`.
+- a change to the frontmatter of a skill page other than the tracking keys
+  (`track.TRACKING_KEYS`).
 
 `apply_patch` applies one finding's patch. Each action checks again, on the
 disk, that the patch still fits, and raises `ApplyRefused` when it does not:
@@ -41,11 +41,11 @@ from joshua_shared import frontmatter, layout
 from joshua_core.jobs.curator import scan
 from joshua_core.jobs.curator.scan import Tree, load_tree, parse_links, resolve_link, target_for
 from joshua_core.jobs.curator.track import (
-    CURATED_KEY,
-    HASH_KEY,
+    TRACKING_KEYS,
     is_untouched,
     may_track,
-    needs_review,
+    needs_place,
+    needs_refresh,
     with_tracking,
 )
 
@@ -73,7 +73,7 @@ def _body(text: str) -> tuple[str, str]:
 
 
 def _without_tracking(meta: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in meta.items() if k not in (CURATED_KEY, HASH_KEY)}
+    return {k: v for k, v in meta.items() if k not in TRACKING_KEYS}
 
 
 class Workspace:
@@ -81,8 +81,9 @@ class Workspace:
 
     `written` lists each wiki path that changed, in order: a page, the source
     and the destination of a move, and a file in the trash. `clean` holds the
-    current path of each page that had current tracking keys before its first
-    change, so the caller can give it new keys after the change.
+    current path of each page that had a current `curated` pair before its
+    first change, and `refreshed_clean` each page that had a current
+    `refreshed` pair, so the caller can give it new keys after the change.
     """
 
     def __init__(self, wiki_root: Path, day: date) -> None:
@@ -90,6 +91,7 @@ class Workspace:
         self.day = day
         self.written: list[str] = []
         self.clean: set[str] = set()
+        self.refreshed_clean: set[str] = set()
         self.moves: dict[str, str | None] = {}
         self._seen: set[str] = set()
 
@@ -104,8 +106,12 @@ class Workspace:
         if rel in self._seen:
             return
         self._seen.add(rel)
-        if rel.endswith(".md") and not needs_review(text):
+        if not rel.endswith(".md"):
+            return
+        if not needs_place(text):
             self.clean.add(rel)
+        if not needs_refresh(text):
+            self.refreshed_clean.add(rel)
 
     def current(self, rel: str) -> str | None:
         """Where a path of the start of the run is now, or None when it is in the trash."""
@@ -163,9 +169,10 @@ class Workspace:
             raise ApplyRefused(f"the folder of {dst} is not there")
         self._note_clean(src, self.read(src))
         os.replace(source, target)
-        if src in self.clean:
-            self.clean.discard(src)
-            self.clean.add(dst)
+        for held in (self.clean, self.refreshed_clean):
+            if src in held:
+                held.discard(src)
+                held.add(dst)
         self._seen.add(dst)
         self.moves[src] = dst
         self._mark(src, dst)
@@ -190,23 +197,38 @@ class Workspace:
         trash_rel = dest.relative_to(self.root).as_posix()
         self.moves[rel] = None
         self.clean.discard(rel)
+        self.refreshed_clean.discard(rel)
         self._mark(rel, trash_rel)
         return trash_rel
 
-    def track(self, rel: str) -> bool:
-        """Write the tracking keys on a page. Returns False when the page may
-        not have them, its frontmatter is not a mapping, or they are current."""
+    def track(self, rel: str, *, curated: bool = True, refreshed: bool = False) -> bool:
+        """Write the `curated` pair, the `refreshed` pair, or both on a page.
+
+        A pair that is current already is not written again. Returns False
+        when the page may not have the keys, its frontmatter is not a
+        mapping, or each pair asked for is current.
+        """
         path = self.root / rel
         if not path.is_file():
             return False
         text = self.read(rel)
-        if not may_track(rel, text) or not needs_review(text):
+        if not may_track(rel, text):
+            return False
+        curated = curated and needs_place(text)
+        refreshed = refreshed and needs_refresh(text)
+        if not (curated or refreshed):
             return False
         try:
-            new = with_tracking(text, self.day)
+            new = with_tracking(text, self.day, curated=curated, refreshed=refreshed)
         except ValueError:
             return False
         return self.write(rel, new)
+
+    def track_clean(self) -> None:
+        """Give each page in `clean` and `refreshed_clean` its pairs again, so
+        a change the curator made does not send the page to a worker."""
+        for rel in sorted(self.clean | self.refreshed_clean):
+            self.track(rel, curated=rel in self.clean, refreshed=rel in self.refreshed_clean)
 
 
 # -- link rewriting ---------------------------------------------------------

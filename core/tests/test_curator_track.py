@@ -33,6 +33,23 @@ def test_needs_review_and_with_tracking() -> None:
     assert not track.needs_review(frontmatter.update(tracked, tags=["x"]))
 
 
+def test_the_two_pairs_are_checked_on_their_own() -> None:
+    text = "---\ntitle: Roses\n---\n# Roses\n"
+    assert track.needs_place(text) and track.needs_refresh(text)
+    placed = track.with_tracking(text, DAY)
+    assert not track.needs_place(placed) and track.needs_refresh(placed)
+    assert track.refreshed_day(placed) is None
+    both = track.with_tracking(placed, DAY, curated=False, refreshed=True)
+    assert not track.needs_place(both) and not track.needs_refresh(both)
+    assert track.refreshed_day(both) == DAY
+    meta, _ = frontmatter.split(both)
+    assert meta["refreshed_hash"] == meta["curated_hash"] == track.body_hash(text)
+    edited = both + "More.\n"
+    assert track.needs_place(edited) and track.needs_refresh(edited)
+    assert track.with_tracking(text, DAY, curated=False) == text
+    assert track.needs_review(placed) is track.needs_place(placed)
+
+
 def test_a_page_with_no_frontmatter_keeps_its_bytes_as_the_body() -> None:
     text = "Watered the plants.\n"
     tracked = track.with_tracking(text, DAY)

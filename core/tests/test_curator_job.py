@@ -32,7 +32,7 @@ from curator_fakes import (
 from jobs_fakes import NOW, fixed_clock, make_settings
 from joshua_core.jobs import JobArgsError
 from joshua_core.jobs.curator.job import CuratorJob, describe, local_day, parse_apply
-from joshua_core.jobs.curator.track import body_hash, needs_review
+from joshua_core.jobs.curator.track import body_hash, needs_place, needs_refresh, needs_review
 from joshua_core.memory import embed as embed_module
 from joshua_shared import frontmatter
 
@@ -339,7 +339,9 @@ async def test_a_refresh_with_a_long_replace_is_refused(h: Harness) -> None:
     h.workers.refresh[SNAKE]["patch"][0]["replace"] = "x" * 2001
     report = await h.run()
     assert "The `refresh` answer was refused for 1 page:" in dict(report.sections)["Skipped"]
-    assert needs_review(h.text(SNAKE))
+    # The place of the page ran, so it keeps that pass, and the refresh is still due.
+    assert not needs_place(h.text(SNAKE))
+    assert needs_refresh(h.text(SNAKE))
 
 
 async def test_the_budget_limits_the_calls(tmp_path: Path) -> None:
@@ -350,19 +352,32 @@ async def test_the_budget_limits_the_calls(tmp_path: Path) -> None:
     assert "budget of 2 worker calls ran out" in dict(report.sections)["Skipped"]
     # The place of a page that was never curated goes first.
     assert [name for name, _ in h.workers.calls] == ["place", "place"]
-    assert needs_review(h.text(ROSES))
+    assert h.workers.names("place") == [[ROSE_CARE], [ROSES]]
+    assert not needs_place(h.text(ROSES)) and needs_refresh(h.text(ROSES))
+    assert needs_place(h.text(SNAKE))
 
 
-async def test_entries_before_curated_are_left_out_and_never_curated_goes_first(
+async def test_entries_before_refreshed_are_left_out_and_never_curated_goes_first(
     tmp_path: Path,
 ) -> None:
     h = Harness(tmp_path / "data")
     path = h.wiki / SNAKE
-    path.write_text(frontmatter.update(path.read_text(), curated="2026-10-15"))
+    path.write_text(
+        frontmatter.update(path.read_text(), curated="2026-10-15", refreshed="2026-10-15")
+    )
     await h.run()
     # Both entries about the snake plant are dated before 2026-10-15.
     assert h.workers.names("refresh") == []
     assert h.workers.calls[0] == ("place", [ROSE_CARE])
+    assert not needs_refresh(h.text(SNAKE))
+
+
+async def test_the_curated_day_does_not_hide_an_entry_from_refresh(tmp_path: Path) -> None:
+    h = Harness(tmp_path / "data")
+    path = h.wiki / SNAKE
+    path.write_text(frontmatter.update(path.read_text(), curated="2026-10-15"))
+    await h.run(dry_run=True)
+    assert h.workers.names("refresh") == [[SNAKE]]
 
 
 async def test_no_vectors_means_no_compare(h: Harness) -> None:
@@ -620,3 +635,165 @@ def test_patch_block_takes_a_three_backtick_fence_for_plain_text() -> None:
 
     block = patch_block({"find": "a", "replace": "b"}, indent="")
     assert block == "```text\nfind: a\nreplace: b\n```"
+
+
+# -- the two passes and the pair table ----------------------------------------
+
+PLANTS = ("houseplants/fern.md", "houseplants/ivy.md", "houseplants/moss.md")
+
+
+def _passes_wiki() -> dict[str, str]:
+    """Three topic pages, each with one journal entry that names it, and no pair."""
+    pages = {
+        "Home.md": "# Home\n\n## Sections\n\n- [Houseplants](houseplants.md): inside\n",
+        "houseplants.md": "# Houseplants\n\nThe plants inside.\n\n"
+        + "".join(f"- [{rel[12:-3].title()}]({rel})\n" for rel in PLANTS),
+    }
+    for day, rel in enumerate(PLANTS, start=1):
+        name = rel[12:-3].title()
+        pages[rel] = f"# {name}\n\nWater the {name.lower()} every week.\n"
+        pages[f"journal/2026/10/0{day}/{name.lower()}.md"] = (
+            f"---\ndate: 2026-10-0{day}\n---\nThe {name.lower()} is dry by day five.\n"
+        )
+    return pages
+
+
+@pytest.fixture
+def passes(tmp_path: Path) -> Harness:
+    h = Harness(tmp_path / "data")
+    for path in sorted(h.wiki.rglob("*"), reverse=True):
+        if path.is_file():
+            path.unlink()
+    build_curator_wiki(h.data, _passes_wiki())
+    h.store.vectors = {}
+    for rel in PLANTS:
+        h.workers.place[rel] = {
+            "section": "Houseplants",
+            "folder": "houseplants",
+            "confidence": "high",
+            "reason": "It fits.",
+        }
+    return h
+
+
+async def test_a_budget_of_place_calls_keeps_the_place_pass(passes: Harness) -> None:
+    h = passes
+    report = await h.run(max_worker_calls=3)
+    assert h.workers.names("place") == [[rel] for rel in PLANTS]
+    assert h.workers.names("refresh") == []
+    for rel in PLANTS:
+        assert not needs_place(h.text(rel)), rel
+        assert needs_refresh(h.text(rel)), rel
+        assert "refreshed" not in frontmatter.split(h.text(rel))[0]
+    reviewed = dict(report.sections)["Reviewed"]
+    assert "pages got `curated` keys, and 0 pages got `refreshed` keys." in reviewed
+    assert report.data["counts"]["refreshed"] == 0
+    assert report.data["counts"]["curated"] >= 3
+
+    # The next run with the same budget sends no `place` and spends it on `refresh`.
+    start = h.workers.count
+    report = await h.run(max_worker_calls=3)
+    later = h.workers.calls[start:]
+    assert [name for name, _ in later] == ["refresh"] * 3
+    assert sorted(paths[0] for _, paths in later) == list(PLANTS)
+    for rel in PLANTS:
+        meta, _ = frontmatter.split(h.text(rel))
+        assert meta["refreshed_hash"] == meta["curated_hash"] == body_hash(h.text(rel))
+        assert meta["refreshed"] == local_day(NOW, h.settings)
+    assert (
+        "0 pages got `curated` keys, and 3 pages got `refreshed` keys."
+        in (dict(report.sections)["Reviewed"])
+    )
+
+    # A third run has nothing to do.
+    start = h.workers.count
+    await h.run(max_worker_calls=3)
+    assert h.workers.count == start
+
+
+async def test_a_changed_body_resets_both_passes(passes: Harness) -> None:
+    h = passes
+    await h.run()
+    fern = h.wiki / PLANTS[0]
+    assert not needs_place(fern.read_text()) and not needs_refresh(fern.read_text())
+    fern.write_text(fern.read_text() + "\nIt likes the bathroom.\n")
+    assert needs_place(fern.read_text()) and needs_refresh(fern.read_text())
+    start = h.workers.count
+    await h.run()
+    # The entry about the fern is older than its `refreshed` day, so the
+    # refresh pass has nothing to read and costs no call.
+    assert h.workers.calls[start:] == [("place", [PLANTS[0]])]
+    assert not needs_place(fern.read_text()) and not needs_refresh(fern.read_text())
+
+
+async def test_a_dry_run_counts_both_passes(passes: Harness) -> None:
+    report = await passes.run(dry_run=True, max_worker_calls=4)
+    assert report.data["counts"]["refreshed"] == 1
+    assert (
+        "pages would get `curated` keys, and 1 pages would get `refreshed` keys."
+        in (dict(report.sections)["Reviewed"])
+    )
+
+
+async def test_a_page_with_no_entry_to_read_gets_the_refreshed_pair(passes: Harness) -> None:
+    h = passes
+    for path in (h.wiki / "journal").rglob("*.md"):
+        path.unlink()
+    await h.run()
+    assert h.workers.names("refresh") == []
+    for rel in PLANTS:
+        assert not needs_refresh(h.text(rel)), rel
+
+
+async def test_a_compare_pair_runs_once_while_it_is_unchanged(h: Harness) -> None:
+    await h.run(dry_run=True)
+    assert h.workers.names("compare") == [[ROSE_CARE, ROSES]]
+    assert len(h.findings.pairs) == 1
+    # The pages still need review after a dry run, but the pair is not read again.
+    start = h.workers.count
+    report = await h.run(dry_run=True)
+    assert [name for name, _ in h.workers.calls[start:]].count("compare") == 0
+    assert report.data["counts"]["pairs_unchanged"] == 1
+    # A change to one page of the pair sends it to `compare` again.
+    rose = h.wiki / ROSES
+    rose.write_text(rose.read_text() + "\nFeed in May.\n")
+    start = h.workers.count
+    await h.run(dry_run=True)
+    assert h.workers.names("compare")[-1] == [ROSE_CARE, ROSES]
+    assert [name for name, _ in h.workers.calls[start:]].count("compare") == 1
+
+
+async def test_a_pair_with_no_answer_is_not_recorded(h: Harness) -> None:
+    h.workers.compare[(ROSE_CARE, ROSES)] = None
+    await h.run(dry_run=True)
+    assert h.findings.pairs == {}
+
+
+async def test_a_pair_table_that_fails_means_each_pair_is_compared(h: Harness) -> None:
+    async def broken(fingerprints: list[str]) -> dict:
+        raise RuntimeError("no database")
+
+    async def broken_upsert(**kwargs: object) -> None:
+        raise RuntimeError("no database")
+
+    h.findings.get_curator_pairs = broken  # type: ignore[method-assign]
+    h.findings.upsert_curator_pair = broken_upsert  # type: ignore[method-assign]
+    await h.run(dry_run=True)
+    await h.run(dry_run=True)
+    assert h.workers.names("compare") == [[ROSE_CARE, ROSES], [ROSE_CARE, ROSES]]
+
+
+async def test_a_refresh_answer_does_not_make_a_place_finding_stale(h: Harness) -> None:
+    entry = h.wiki / "journal/2026/10/03/tomatoes.md"
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    entry.write_text("---\ndate: 2026-10-03\n---\nThe tomatoes need a stake.\n")
+    await h.run(dry_run=True)
+    row = _row(h, "misplaced", TOMATOES)
+    # Only the refresh pass of the page is due now.
+    page = h.wiki / TOMATOES
+    page.write_text(frontmatter.update(page.read_text(), curated_hash=body_hash(page.read_text())))
+    start = h.workers.count
+    await h.run(dry_run=True)
+    assert ("refresh", [TOMATOES]) in h.workers.calls[start:]
+    assert ("place", [TOMATOES]) not in h.workers.calls[start:]
+    assert h.findings.rows[row["id"]]["status"] == "open"
