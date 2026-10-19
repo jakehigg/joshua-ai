@@ -248,3 +248,13 @@ def test_register_needs_both_switches(tmp_path: Path, world: World) -> None:
         )
         assert got is expected
         assert ("research" in wired) is expected
+
+
+async def test_queue_question_refuses_a_page_about_a_person(world: World) -> None:
+    (world.wiki / "notes").mkdir()
+    (world.wiki / "notes/alex-notes.md").write_text("# Alex\n\nPrefers mornings.\n")
+    got = await do_queue_question(
+        world.deps(), world.ctx, topic="notes/alex-notes.md", question="What does Alex prefer?"
+    )
+    assert "is not a topic page" in _text(got)
+    assert not layout.knowledge_root(world.data).exists()

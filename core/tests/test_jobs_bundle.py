@@ -347,3 +347,14 @@ async def test_bundle_holds_the_answered_questions_of_the_topic_only(
         "Answer: Half strength 10-10-10.\n"
     ) in got.text
     assert "Secret" not in got.text and "Open body" not in got.text
+
+
+async def test_a_roster_name_is_no_alias_and_brings_no_entry(tmp_path: Path, fake_embed) -> None:
+    pages = dict(WIKI)
+    pages[TOPIC] = "---\naliases: [Sansevieria, Alex]\n---\n# Snake plant\n\nGritty mix.\n"
+    pages["journal/2026/10/11/alex.md"] = "Alex went for a long run.\n"
+    wiki = build_wiki(tmp_path / "data", pages)
+    got = await _build(wiki, FakeStore())
+    assert "Alex" not in got.aliases and "Sansevieria" in got.aliases
+    assert "journal/2026/10/11/alex.md" not in got.paths
+    assert "journal/2026/10/07/repot.md" in got.paths

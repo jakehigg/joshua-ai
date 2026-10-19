@@ -19,6 +19,11 @@ gate gives each one its route: a `web` question goes to the dossier, a
 question that our records answer is closed in the report. Nobody gets a
 question: a person answers one later, in chat.
 
+A topic in a person section (`jobs.research.person_sections`) is about
+people. The gate sends each of its raised questions to a person or to our
+records, and a `run` researches only the questions of its dossier that a
+person asked.
+
 `plan` stops there. When it is not a dry run, it writes the dossier,
 `knowledge/README.md`, and each new question page with `questions/README.md`,
 so a later run can name the new slugs. It makes no lookup and writes no
@@ -95,7 +100,12 @@ from joshua_core.jobs.research.questions import (
 from joshua_core.jobs.research.questions import write_index as write_questions_index
 from joshua_core.jobs.research.raise_ import WORKER as RAISE
 from joshua_core.jobs.research.raise_ import raise_questions
-from joshua_core.jobs.research.select import Selection, journal_counts, select_topic
+from joshua_core.jobs.research.select import (
+    Selection,
+    in_person_section,
+    journal_counts,
+    select_topic,
+)
 from joshua_core.jobs.research.text import (
     Grounding,
     bundle_parts,
@@ -294,7 +304,10 @@ class ResearchJob(Job):
         topic = args.get("topic")
         if topic is not None and topic != "":
             if not isinstance(topic, str) or not is_topic_page(
-                topic.strip(), self._wiki, self._settings.jobs.topics.exclude
+                topic.strip(),
+                self._wiki,
+                self._settings.jobs.topics.exclude,
+                people=self._settings.people,
             ):
                 raise JobArgsError(f"not a topic page: {topic}")
             topic = topic.strip()
@@ -328,7 +341,9 @@ class ResearchJob(Job):
         day = local_day(now, self._settings)
         topics = [
             t
-            for t in list_topics(self._wiki, self._settings.jobs.topics.exclude)
+            for t in list_topics(
+                self._wiki, self._settings.jobs.topics.exclude, people=self._settings.people
+            )
             if researchable(t.path, self._data_dir)
         ]
         dossiers = load_dossiers(self._data_dir)
@@ -410,7 +425,13 @@ class ResearchJob(Job):
     ) -> Selection:
         if "topic" in args:
             return Selection(args["topic"], RULE_GIVEN, None, "The run named the topic.")
-        counts = journal_counts(topics, self._wiki, day, self._settings.jobs.bundle.recent_days)
+        counts = journal_counts(
+            topics,
+            self._wiki,
+            day,
+            self._settings.jobs.bundle.recent_days,
+            people=self._settings.people,
+        )
         return select_topic(topics, dossiers, counts, day, self._settings)
 
     async def _raise(self, run: _Run, topic: Topic, bundle: Bundle, dossier: Dossier) -> None:
@@ -438,7 +459,7 @@ class ResearchJob(Job):
             return
         gate = Gate(
             bundle_text=bundle.text,
-            terms=topic_names(topic, bundle.aliases),
+            terms=topic_names(topic, bundle.aliases, people=self._settings.people),
             existing=[q.question for q in dossier.questions],
             store=self._store,
             dup_sim=cfg.dup_sim,
@@ -450,6 +471,7 @@ class ResearchJob(Job):
                 AskedQuestion(q.page.question, q.page.status, q.rel)
                 for q in load_questions(self._data_dir, topic.path)
             ],
+            person_section=self._about_people(topic),
         )
         for candidate in raised.candidates:
             verdict = await gate.check(candidate)
@@ -506,7 +528,9 @@ class ResearchJob(Job):
         )
         return _PersonQuestion(f"{section}/{slug}", page, verdict)
 
-    def _chosen(self, run: _Run, dossier: Dossier, args: dict[str, Any]) -> list[Question]:
+    def _chosen(
+        self, run: _Run, topic: Topic, dossier: Dossier, args: dict[str, Any]
+    ) -> list[Question]:
         cfg = self._settings.jobs.research
         limit = min(cfg.questions_per_run, args.get("max_questions") or cfg.questions_per_run)
         if "questions" in args:
@@ -519,8 +543,17 @@ class ResearchJob(Job):
                     run.notes.append(f"`{slug}` is {question.status}, so it was not researched.")
                 else:
                     chosen.append(question)
-            return chosen[:limit]
-        return research_order(dossier.questions, run.day, cfg.lookup_max_age_days)[:limit]
+        else:
+            chosen = research_order(dossier.questions, run.day, cfg.lookup_max_age_days)
+        if self._about_people(topic):
+            for question in chosen:
+                if not question.by_person:
+                    run.notes.append(
+                        f"`{question.slug}` is a question of a person section that no "
+                        "person asked, so it was not researched."
+                    )
+            chosen = [q for q in chosen if q.by_person]
+        return chosen[:limit]
 
     async def _research(
         self,
@@ -532,7 +565,7 @@ class ResearchJob(Job):
     ) -> None:
         cfg = self._settings.jobs.research
         parts = bundle_parts(bundle)
-        chosen = self._chosen(run, dossier, args)
+        chosen = self._chosen(run, topic, dossier, args)
         for question in chosen:
             groundings = extract_sentences(question.grounded_in, parts)
             kept = question.kept_lookups(run.day, cfg.lookup_max_age_days)
@@ -629,16 +662,23 @@ class ResearchJob(Job):
             lines.append(f"- `{o.question.slug}`: {steps}")
         return "\n".join(lines)
 
-    def _topic_lines(self, run: _Run) -> str:
+    def _about_people(self, topic: Topic) -> bool:
+        return in_person_section(topic, self._settings.jobs.research.person_sections)
+
+    def _topic_lines(self, run: _Run, topic: Topic) -> str:
         sel = run.selection
         runner_up = f"`{sel.runner_up}`" if sel.runner_up else "none"
-        return "\n".join(
-            [
-                f"- Topic: `{sel.topic}`",
-                f"- Rule: `{sel.rule}`. {sel.reason}",
-                f"- Runner-up: {runner_up}",
-            ]
-        )
+        lines = [
+            f"- Topic: `{sel.topic}`",
+            f"- Rule: `{sel.rule}`. {sel.reason}",
+            f"- Runner-up: {runner_up}",
+        ]
+        if self._about_people(topic):
+            lines.append(
+                f"- Person section: `{topic.section}`. Each raised question goes to a "
+                "person or to our records, never to the web."
+            )
+        return "\n".join(lines)
 
     def _empty_report(self, run: _Run, dry_run: bool) -> RunReport:
         return RunReport(
@@ -681,7 +721,7 @@ class ResearchJob(Job):
         cut = ", cut at jobs.bundle.max_chars" if bundle.truncated else ""
         bundle_lines.append(f"- {bundle.chars} characters{cut}")
         sections = [
-            ("Topic", self._topic_lines(run)),
+            ("Topic", self._topic_lines(run, topic)),
             ("Bundle", "\n".join(bundle_lines)),
             ("Questions", "\n".join(question_lines) or "None."),
             ("For a person", self._person_lines(run, dry_run)),

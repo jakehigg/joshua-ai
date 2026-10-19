@@ -9,7 +9,12 @@ A topic is a `wiki/**.md` page that is none of these:
 - a page with a part of its path that starts with a dot;
 - a page that a glob in `jobs.topics.exclude` matches. A glob is an
   `fnmatch` pattern, matched case-sensitively against the path relative to the
-  wiki root, and its `*` matches a `/` too.
+  wiki root, and its `*` matches a `/` too;
+- a person page: a page whose file stem is the id of a person on the roster,
+  or whose title, or a name from its title or file stem, is the id or the
+  display name of a person. The comparison is the whole name, in any case.
+  The caller gives the roster (`settings.people`); with no roster, this rule
+  does not apply.
 
 `houseplants/snake-plant.md` is a topic. `houseplants.md` is not, because the
 folder `houseplants/` is beside it.
@@ -21,6 +26,11 @@ stem of one word is a name too. `names_pattern` finds a name in a text as whole
 words in any case, with any white space between the words. It also finds the
 name with a plural `s` or `es`, and without one when the name ends in `s` or
 `es`. A name shorter than three characters is not matched.
+
+With a roster, a name that is the id or the display name of a person is not a
+name of the topic, so a person's name never makes a text about a topic. A name
+that starts with a person's name and `'s` also gives the rest of the name:
+`Alex's caldo verde` gives `caldo verde`.
 """
 
 from __future__ import annotations
@@ -33,6 +43,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from joshua_shared import frontmatter, layout
+from joshua_shared.config import Person
 
 HOME_PAGE = "Home.md"
 # The top-level wiki folders that hold no topic. Each has its own writer or
@@ -88,10 +99,39 @@ def _shape_ok(rel_path: str) -> bool:
     return not (len(parts) > 1 and parts[0] in RESERVED_FOLDERS)
 
 
-def is_topic_page(rel_path: str, wiki_root: Path, exclude: Sequence[str]) -> bool:
+def roster_keys(people: Sequence[Person] | None) -> set[str]:
+    """The id and the display name of each person, in one case and one space."""
+    keys: set[str] = set()
+    for person in people or ():
+        for name in (person.id, person.name):
+            key = " ".join(str(name).split()).casefold()
+            if key:
+                keys.add(key)
+    return keys
+
+
+def is_person_page(topic: Topic, people: Sequence[Person] | None) -> bool:
+    """True when `topic` is a page about one person on the roster. See the
+    module docstring."""
+    keys = roster_keys(people)
+    if not keys:
+        return False
+    if PurePosixPath(topic.path).stem.casefold() in keys:
+        return True
+    return any(name.casefold() in keys for name in _raw_names(topic, ()))
+
+
+def is_topic_page(
+    rel_path: str,
+    wiki_root: Path,
+    exclude: Sequence[str],
+    *,
+    people: Sequence[Person] | None = None,
+) -> bool:
     """True when `rel_path`, relative to `wiki_root`, is a topic page.
 
-    The page must be a file on the disk. See the module docstring for the rules.
+    The page must be a file on the disk. `people` is the roster for the
+    person page rule. See the module docstring for the rules.
     """
     if not _shape_ok(rel_path):
         return False
@@ -100,7 +140,9 @@ def is_topic_page(rel_path: str, wiki_root: Path, exclude: Sequence[str]) -> boo
         return False
     if absolute.with_suffix("").is_dir():
         return False
-    return not _excluded(rel_path, exclude)
+    if _excluded(rel_path, exclude):
+        return False
+    return not (people and is_person_page(load_topic(rel_path, wiki_root), people))
 
 
 def page_title(text: str, stem: str) -> str:
@@ -133,8 +175,11 @@ def load_topic(rel_path: str, wiki_root: Path) -> Topic:
     return Topic(path=rel_path, section=section, title=title)
 
 
-def list_topics(wiki_root: Path, exclude: Sequence[str]) -> list[Topic]:
-    """Every topic page under `wiki_root`, sorted by path."""
+def list_topics(
+    wiki_root: Path, exclude: Sequence[str], *, people: Sequence[Person] | None = None
+) -> list[Topic]:
+    """Every topic page under `wiki_root`, sorted by path. `people` is the
+    roster for the person page rule."""
     wiki_root = Path(wiki_root)
     if not wiki_root.is_dir():
         return []
@@ -149,7 +194,7 @@ def list_topics(wiki_root: Path, exclude: Sequence[str]) -> list[Topic]:
         ]
         for name in files:
             rel = name if rel_dir == "." else f"{rel_dir}/{name}"
-            if is_topic_page(rel, wiki_root, exclude):
+            if is_topic_page(rel, wiki_root, exclude, people=people):
                 found.append(rel)
     return [load_topic(rel, wiki_root) for rel in sorted(found)]
 
@@ -170,22 +215,53 @@ def section_slug(topic_rel: str) -> str:
 # -- names --------------------------------------------------------------------
 
 
-def topic_names(topic: Topic, aliases: Sequence[str] = ()) -> list[str]:
-    """The names of `topic`, once each, in order. See the module docstring."""
-    found = [topic.title, _PAREN_TAIL_RE.sub("", topic.title), *aliases]
-    words = PurePosixPath(topic.path).stem.replace("-", " ").split()
-    if len(words) == 1:
-        found.append(words[0])
-    found.extend(" ".join(words[:n]) for n in STEM_PHRASE_WORDS if n <= len(words))
+def _unique(names: Sequence[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
-    for name in found:
+    for name in names:
         name = " ".join(str(name).split())
         key = name.casefold()
         if name and key not in seen:
             seen.add(key)
             out.append(name)
     return out
+
+
+def _raw_names(topic: Topic, aliases: Sequence[str]) -> list[str]:
+    """The names of `topic` before the roster rule."""
+    found = [topic.title, _PAREN_TAIL_RE.sub("", topic.title), *aliases]
+    words = PurePosixPath(topic.path).stem.replace("-", " ").split()
+    if len(words) == 1:
+        found.append(words[0])
+    found.extend(" ".join(words[:n]) for n in STEM_PHRASE_WORDS if n <= len(words))
+    return _unique(found)
+
+
+def drop_people(names: Sequence[str], people: Sequence[Person] | None) -> list[str]:
+    """`names` with each bare name of a person removed, and the rest of each
+    name that starts with a person's name and `'s` added. See the module
+    docstring."""
+    keys = roster_keys(people)
+    if not keys:
+        return _unique(names)
+    found: list[str] = []
+    for raw in names:
+        name = " ".join(str(raw).split())
+        if name.casefold() in keys:
+            continue
+        found.append(name)
+        head, sep, rest = name.replace("\u2019", "'").partition("'s ")
+        if sep and head.casefold() in keys and rest.strip():
+            found.append(rest)
+    return [n for n in _unique(found) if n.casefold() not in keys]
+
+
+def topic_names(
+    topic: Topic, aliases: Sequence[str] = (), *, people: Sequence[Person] | None = None
+) -> list[str]:
+    """The names of `topic`, once each, in order. With `people`, no name is a
+    bare name of a person. See the module docstring."""
+    return drop_people(_raw_names(topic, aliases), people)
 
 
 def _forms(name: str) -> list[str]:

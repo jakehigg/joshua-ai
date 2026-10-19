@@ -10,6 +10,7 @@ from joshua_core.jobs.research.gate import (
     DISMISSED_BEFORE,
     NO_RECORD,
     PERSON,
+    PERSON_SECTION,
     RECORD,
     RULE_DATE,
     RULE_OPENING,
@@ -309,7 +310,7 @@ def _window_wiki(tmp_path: Path) -> Path:
     return wiki
 
 
-def _window_gate(tmp_path: Path, *, near=None, asked=(), store=None) -> Gate:
+def _window_gate(tmp_path: Path, *, near=None, asked=(), store=None, **kwargs) -> Gate:
     return Gate(
         bundle_text=WINDOW_BUNDLE,
         terms=WINDOW_TERMS,
@@ -321,6 +322,7 @@ def _window_gate(tmp_path: Path, *, near=None, asked=(), store=None) -> Gate:
         people=["Alex", "alex"],
         record_sim=0.80,
         asked=list(asked),
+        **kwargs,
     )
 
 
@@ -472,3 +474,25 @@ def test_the_roster_names_are_the_names_and_the_ids() -> None:
 
     assert roster_names(make_settings()) == ["Alex", "alex"]
     assert roster_names(object()) == []
+
+
+# -- a person section ---------------------------------------------------------
+
+
+async def test_a_person_section_routes_a_web_question_to_a_person(tmp_path: Path) -> None:
+    gate = _window_gate(tmp_path, person_section=True)
+    verdict = await gate.check(Candidate(GOOD_WORLD, GOOD_PHRASES, audience=WEB))
+    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, PERSON_SECTION)
+
+
+async def test_a_person_section_question_for_a_person_needs_no_why(tmp_path: Path) -> None:
+    gate = _window_gate(tmp_path, person_section=True)
+    verdict = await gate.check(Candidate(GOOD_WORLD, GOOD_PHRASES, why="", audience=PERSON))
+    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, PERSON_SECTION)
+
+
+async def test_a_person_section_still_allows_a_record_question(tmp_path: Path) -> None:
+    _window_wiki(tmp_path)
+    gate = _window_gate(tmp_path, near={f"wiki/{FEED_ENTRY}": 0.95}, person_section=True)
+    verdict = await gate.check(Candidate(RECORD_Q, GOOD_PHRASES, audience=RECORD))
+    assert (verdict.route, verdict.answered_by) == (RECORD, FEED_ENTRY)

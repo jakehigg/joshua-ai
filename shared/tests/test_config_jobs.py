@@ -29,7 +29,7 @@ def test_jobs_defaults_are_off_and_documented_values() -> None:
     assert jobs.bundle.exclude_slugs == []
     assert jobs.bundle.max_chars == 24000
     assert jobs.bundle.recent_days == 14
-    assert jobs.topics.exclude == ["vocabulary.md", "*/README.md"]
+    assert jobs.topics.exclude == ["vocabulary.md", "*/README.md", "coach/profiles/*"]
     assert jobs.curator.enabled is False
     assert jobs.research.enabled is False
     assert jobs.insights.enabled is False
@@ -60,6 +60,14 @@ def test_jobs_overrides_load() -> None:
     assert cfg.jobs.bundle.max_chars == 1000
     assert cfg.jobs.bundle.recent_days == 30
     assert cfg.jobs.topics.exclude == ["drafts/*"]
+
+
+def test_research_person_sections_load_and_normalize() -> None:
+    text = BASE + (
+        "jobs:\n  research:\n    person_sections:\n      - ' health '\n      - health\n      - ''\n"
+    )
+    research = config.parse(text, {}, source="test.yaml").jobs.research
+    assert research.person_sections == ["health"]
 
 
 @pytest.mark.parametrize(
@@ -153,6 +161,7 @@ def test_research_defaults() -> None:
     assert research.trusted_domains == [".edu", ".gov", ".ac.uk", "extension.", ".int"]
     assert "reddit.com" in research.distrusted_domains
     assert len(research.distrusted_domains) == 7
+    assert research.person_sections == ["coach", "people"]
 
 
 def test_research_overrides_load() -> None:
@@ -209,6 +218,8 @@ def test_research_overrides_load() -> None:
         "  research:\n    lookup_max_age_days: 0\n",
         "  research:\n    editor_timeout_seconds: 0\n",
         "  research:\n    trusted_domains:\n      - example.com/path\n",
+        "  research:\n    person_sections:\n      - coach/profiles\n",
+        "  research:\n    person_sections:\n      - .hidden\n",
         "  research:\n    exclude:\n      - x.md\n",
     ],
 )

@@ -398,7 +398,9 @@ class InsightsJob(Job):
         if not isinstance(topic, str) or not topic.strip():
             raise JobArgsError("topic is required: a wiki page path such as garden/irrigation.md")
         topic = topic.strip()
-        if not is_topic_page(topic, self._wiki, self._settings.jobs.topics.exclude):
+        if not is_topic_page(
+            topic, self._wiki, self._settings.jobs.topics.exclude, people=self._settings.people
+        ):
             raise JobArgsError(f"not a topic page: {topic}")
         return {"topic": topic}
 

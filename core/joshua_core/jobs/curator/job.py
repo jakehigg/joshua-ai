@@ -288,7 +288,9 @@ class CuratorJob(Job):
         texts = {rel: tree.text(rel) for rel in tree.pages}
         topics = [
             t
-            for t in list_topics(self._wiki, self._settings.jobs.topics.exclude)
+            for t in list_topics(
+                self._wiki, self._settings.jobs.topics.exclude, people=self._settings.people
+            )
             if t.path in tree.pages
         ]
         topic_paths = {t.path for t in topics}

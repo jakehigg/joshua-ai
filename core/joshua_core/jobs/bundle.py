@@ -29,6 +29,11 @@ links to the topic page names one term: the text before the first colon on
 that line, with list marks, emphasis, code marks, and link syntax removed. A
 line with no colon names no term.
 
+A name or an alias that is the id or the display name of a person on the
+roster (`settings.people`) is not a name of the topic (`topics.drop_people`),
+so a journal entry that only names a person is not about the topic, and
+`Bundle.aliases` holds no bare name of a person.
+
 A journal entry names the topic when it holds a name of the topic by the rule
 of `topics.names_pattern`. A name from the title or the file stem is a `title`
 match, and an alias is an `alias` match. `Bundle.journal_via` says, for each
@@ -58,12 +63,13 @@ from urllib.parse import unquote
 from zoneinfo import ZoneInfo
 
 from joshua_shared import frontmatter, layout
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import JoshuaConfig, Person
 from joshua_shared.log import get_logger
 
 from joshua_core.jobs.topics import (
     RESERVED_FOLDERS,
     Topic,
+    drop_people,
     names_pattern,
     read_page,
     topic_names,
@@ -258,11 +264,15 @@ def topic_aliases(topic: Topic, meta: dict[str, Any], wiki_root: Path) -> list[s
     return out
 
 
-def topic_pattern(topic: Topic, wiki_root: Path) -> re.Pattern[str] | None:
+def topic_pattern(
+    topic: Topic, wiki_root: Path, *, people: Sequence[Person] | None = None
+) -> re.Pattern[str] | None:
     """The pattern that finds a name of `topic` in a text, by the rule of
-    `topics.names_pattern`, or None when no name is long enough."""
+    `topics.names_pattern`, or None when no name is long enough. With
+    `people`, no bare name of a person is a name of the topic."""
     meta, _ = frontmatter.split(read_page(Path(wiki_root) / topic.path))
-    return names_pattern(topic_names(topic, topic_aliases(topic, meta, Path(wiki_root))))
+    aliases = topic_aliases(topic, meta, Path(wiki_root))
+    return names_pattern(topic_names(topic, aliases, people=people))
 
 
 # -- journal ----------------------------------------------------------------
@@ -347,7 +357,7 @@ def _about_topic(
 ) -> dict[str, str]:
     """`{entry path: how it got in}` for the journal entries of the bundle."""
     cfg = settings.jobs.bundle
-    by_title = names_pattern(topic_names(topic))
+    by_title = names_pattern(topic_names(topic, people=settings.people))
     by_alias = names_pattern(aliases)
     via: dict[str, str] = {}
     vector_only: list[_Entry] = []
@@ -447,7 +457,7 @@ async def build_bundle(
         raise ValueError(f"not a wiki root: {wiki_root}")
     topic_text = read_page(wiki_root / topic.path)
     meta, _ = frontmatter.split(topic_text)
-    aliases = topic_aliases(topic, meta, wiki_root)
+    aliases = drop_people(topic_aliases(topic, meta, wiki_root), settings.people)
 
     parts: list[_Part] = [_Part(topic.path, topic_text)]
     parts.extend(

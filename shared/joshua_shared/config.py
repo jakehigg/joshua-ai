@@ -530,9 +530,10 @@ class JobsBundle(_Model):
 
 class JobsTopics(_Model):
     """Which wiki pages are topics. `exclude` holds `fnmatch` globs, relative
-    to the wiki root, for the pages that are not."""
+    to the wiki root, for the pages that are not. The default list holds
+    `coach/profiles/*`, because a page about one person is not a topic."""
 
-    exclude: list[str] = ["vocabulary.md", "*/README.md"]
+    exclude: list[str] = ["vocabulary.md", "*/README.md", "coach/profiles/*"]
 
 
 # The Tier B actions of the curator that `jobs.curator.apply` can turn on.
@@ -591,6 +592,8 @@ RESEARCH_DISTRUSTED_DOMAINS = (
     "facebook.com",
     "reddit.com",
 )
+# The wiki sections whose pages are about people.
+RESEARCH_PERSON_SECTIONS = ("coach", "people")
 
 
 class JobsResearch(_Model):
@@ -616,7 +619,10 @@ class JobsResearch(_Model):
     `refresh_after` after a run. `lookup_max_age_days` is how long the
     lookups of a held question stay good: a later run gives them to the editor
     again and does not repeat them. `trusted_domains` and `distrusted_domains`
-    are the trust rubric of the editor. See `docs/jobs.md`.
+    are the trust rubric of the editor. `person_sections` lists the wiki
+    sections, by their first path segment, whose pages are about people: the
+    researcher asks a person about a topic there, never the web. See
+    `docs/jobs.md`.
     """
 
     enabled: bool = False
@@ -631,6 +637,17 @@ class JobsResearch(_Model):
     refresh_days: int = Field(default=180, ge=1)
     trusted_domains: list[str] = list(RESEARCH_TRUSTED_DOMAINS)
     distrusted_domains: list[str] = list(RESEARCH_DISTRUSTED_DOMAINS)
+    person_sections: list[str] = list(RESEARCH_PERSON_SECTIONS)
+
+    @field_validator("person_sections")
+    @classmethod
+    def _sections(cls, value: list[str]) -> list[str]:
+        out = [item.strip() for item in value if item.strip()]
+        bad = [item for item in out if "/" in item or item.startswith(".")]
+        if bad:
+            raise ValueError(f"not a wiki section: {', '.join(bad)}")
+        return list(dict.fromkeys(out))
+
     lookup_timeout_seconds: int = Field(default=300, ge=1)
     lookup_max_turns: int = Field(default=14, ge=1)
     lookup_max_age_days: int = Field(default=7, ge=1)

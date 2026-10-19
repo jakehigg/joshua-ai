@@ -13,6 +13,16 @@ a topic:
 4. `refresh`: the dossier with the oldest `refresh_after` that is before the
    day of the run.
 
+A person section is a first path segment in `jobs.research.person_sections`:
+its pages are about people. Each rule takes a topic in a person section only
+when no topic outside one qualifies under the same rule, and the reason then
+says so.
+
+A journal entry is about a topic when it holds a name of the topic
+(`bundle.topic_pattern`). With the roster, the id or the display name of a
+person is never a name of a topic, so an entry that only names a person
+counts for no topic.
+
 Each remaining tie goes to the seeded pick: a shuffle of the sorted topic
 paths with `random.Random(f"{run_date}:{sha256 of the sorted paths}")`. So the
 same wiki on the same day gives the same topic, and another day can give
@@ -28,6 +38,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
+
+from joshua_shared.config import Person
 
 from joshua_core.jobs.bundle import journal_entries, topic_pattern
 from joshua_core.jobs.research.dossier import Dossier
@@ -65,25 +77,42 @@ def coverage_of(path: str, dossiers: Mapping[str, Dossier]) -> float:
     return dossier.compute_coverage() if dossier is not None else 0.0
 
 
+def in_person_section(topic: Topic, person_sections: Sequence[str]) -> bool:
+    """True when the first path segment of `topic` is a person section."""
+    return bool(topic.section) and topic.section in person_sections
+
+
 def journal_counts(
-    topics: Sequence[Topic], wiki_root: Path, today: date, days: int
+    topics: Sequence[Topic],
+    wiki_root: Path,
+    today: date,
+    days: int,
+    *,
+    people: Sequence[Person] | None = None,
 ) -> dict[str, int]:
     """`{topic path: count}` of the journal entries of the last `days` days,
     up to `today`, that hold a name of the topic. The bundle
-    rule for title and alias matches. The journal is read once."""
+    rule for title and alias matches. With `people`, the name of a person is
+    not a name of a topic. The journal is read once."""
     since = today - timedelta(days=days)
     entries = [e for e in journal_entries(wiki_root, today) if e.day > since]
     counts: dict[str, int] = {}
     if not entries:
         return counts
     for topic in topics:
-        pattern = topic_pattern(topic, wiki_root)
+        pattern = topic_pattern(topic, wiki_root, people=people)
         if pattern is None:
             continue
         found = sum(1 for e in entries if pattern.search(e.text))
         if found:
             counts[topic.path] = found
     return counts
+
+
+# The end of a reason for a topic in a person section.
+PERSON_SECTION_TAIL = (
+    " It is in a person section, and no topic outside a person section qualifies under this rule."
+)
 
 
 def _ordered(candidates: Sequence[str], key: Callable[[str], Any]) -> list[str]:
@@ -108,18 +137,19 @@ def select_topic(
     rank = seed_ranks(paths, run_date)
     cfg = settings.jobs.research
     cov = {p: coverage_of(p, dossiers) for p in paths}
+    about_people = {t.path for t in topics if in_person_section(t, cfg.person_sections)}
 
     def person() -> list[str]:
         found = [p for p in paths if p in dossiers and dossiers[p].has_person_question()]
-        return _ordered(found, lambda p: rank[p])
+        return _ordered(found, lambda p: (p in about_people, rank[p]))
 
     def journal() -> list[str]:
         found = [p for p in paths if journal_recent.get(p, 0) > 0]
-        return _ordered(found, lambda p: (cov[p], -journal_recent[p], rank[p]))
+        return _ordered(found, lambda p: (p in about_people, cov[p], -journal_recent[p], rank[p]))
 
     def coverage() -> list[str]:
         found = [p for p in paths if cov[p] < cfg.coverage_target]
-        return _ordered(found, lambda p: (cov[p], rank[p]))
+        return _ordered(found, lambda p: (p in about_people, cov[p], rank[p]))
 
     def refresh() -> list[str]:
         found = [
@@ -129,7 +159,7 @@ def select_topic(
             and dossiers[p].refresh_after is not None
             and dossiers[p].refresh_after < run_date
         ]
-        return _ordered(found, lambda p: (dossiers[p].refresh_after, rank[p]))
+        return _ordered(found, lambda p: (p in about_people, dossiers[p].refresh_after, rank[p]))
 
     days = settings.jobs.bundle.recent_days
     reasons: dict[str, Callable[[str], str]] = {
@@ -159,7 +189,10 @@ def select_topic(
                 if others:
                     runner_up = others[0]
                     break
-        return Selection(topic, rule, runner_up, reasons[rule](topic))
+        reason = reasons[rule](topic)
+        if topic in about_people:
+            reason += PERSON_SECTION_TAIL
+        return Selection(topic, rule, runner_up, reason)
     return Selection(
         None,
         None,

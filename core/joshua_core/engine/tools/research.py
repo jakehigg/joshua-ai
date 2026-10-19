@@ -137,14 +137,15 @@ async def do_queue_question(
         return _reply(NOT_AVAILABLE)
     topic = (topic or "").strip()
     wiki = layout.wiki_root(ctx.data_dir)
-    if not is_topic_page(topic, wiki, ctx.settings.jobs.topics.exclude) or not researchable(
-        topic, ctx.data_dir
-    ):
+    people = ctx.settings.people
+    if not is_topic_page(
+        topic, wiki, ctx.settings.jobs.topics.exclude, people=people
+    ) or not researchable(topic, ctx.data_dir):
         return _reply(f"{topic or 'That'} is not a topic page, such as houseplants/snake-plant.md.")
     text = " ".join((question or "").split())
     page = load_topic(topic, wiki)
     meta, _ = frontmatter.split(read_page(wiki / topic))
-    terms = topic_names(page, topic_aliases(page, meta, wiki))
+    terms = topic_names(page, topic_aliases(page, meta, wiki), people=people)
     reason = shape_reason(text, terms)
     if reason:
         return _reply(

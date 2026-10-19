@@ -30,6 +30,11 @@ one of these is true (`world_rule` names the rule in `route_reason`):
 - it holds `we`, `our`, or `us` as a word (`asks about us`). `US` in capitals
   is a country and does not count.
 
+A topic in a person section (`jobs.research.person_sections`) is about
+people, so its questions go to `person` too, whatever the worker said, with
+`route_reason: person section`. A `record` question of such a topic still
+goes to the record search, because the search stays inside the instance.
+
 A `web` question goes to the dossier. A `record` question goes to the memory
 search over the `wiki`, `journal`, and `knowledge` kinds: a hit at
 `jobs.research.record_sim` or more closes it with `answered_by: <path>`, and
@@ -84,6 +89,7 @@ RULE_DATE = "names a record date"
 RULE_OPENING = "asks what we did or will do"
 RULE_US = "asks about us"
 ROUTE_WORKER = "the raise worker asks a person"
+PERSON_SECTION = "person section"
 NO_RECORD = "no record found"
 ALREADY_ASKED = "already asked"
 DISMISSED_BEFORE = "dismissed before"
@@ -312,6 +318,7 @@ class Gate:
         people: Sequence[str] = (),
         record_sim: float = DEFAULT_RECORD_SIM,
         asked: Sequence[AskedQuestion] = (),
+        person_section: bool = False,
     ) -> None:
         self._bundle_text = bundle_text
         self._terms = [t for t in terms if t.strip()]
@@ -323,6 +330,7 @@ class Gate:
         self._embed = embed
         self._record_sim = record_sim
         self._asked: list[AskedQuestion] = list(asked)
+        self._person_section = person_section
         self._vectors: dict[str, list[list[float]]] = {}
         self.notes: list[str] = []
         self._vectors_off = False
@@ -433,6 +441,8 @@ class Gate:
         route_reason = world_rule(question, self._people)
         if route_reason:
             audience = PERSON
+        elif self._person_section and audience != RECORD:
+            audience, route_reason = PERSON, PERSON_SECTION
         elif audience == PERSON:
             if not candidate.why.strip():
                 return Verdict(candidate, False, "a question for a person needs `why`")

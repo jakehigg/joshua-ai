@@ -240,6 +240,7 @@ jobs:
     exclude:
       - vocabulary.md
       - "*/README.md"
+      - "coach/profiles/*" # a page about one person is not a topic
   curator:
     # The curator keeps the wiki and the journal correct and organized: links,
     # index pages, stray files, the place of a page, duplicates, and pages the
@@ -293,6 +294,9 @@ jobs:
       - wikihow.com
       - facebook.com
       - reddit.com
+    person_sections:       # wiki sections (first path segment) whose pages are
+      - coach              # about people: the researcher asks a person about a
+      - people             # topic there, never the web
   insights:
     # The insights job keeps wiki/insights/: where what we do, in the wiki and
     # the journal, disagrees with what is known in knowledge/, for the date and

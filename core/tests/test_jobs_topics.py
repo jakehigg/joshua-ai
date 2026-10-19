@@ -7,13 +7,17 @@ from pathlib import Path
 import pytest
 from joshua_core.jobs.topics import (
     Topic,
+    drop_people,
+    is_person_page,
     is_topic_page,
     list_topics,
     load_topic,
     names_pattern,
     page_title,
+    roster_keys,
     topic_names,
 )
+from joshua_shared.config import Jobs, Person
 
 EXCLUDE = ["vocabulary.md", "*/README.md"]
 
@@ -196,3 +200,77 @@ def test_a_name_is_matched_with_and_without_its_plural() -> None:
 def test_a_short_name_is_not_matched() -> None:
     assert names_pattern(["ab", "", " "]) is None
     assert names_pattern(["ivy"]) is not None
+
+
+# -- a person is not a topic --------------------------------------------------
+
+ROSTER = [Person(id="alex", name="Alex"), Person(id="bo", name="Bo")]
+PERSON_TREE = {
+    "coach/profiles/alex-profile.md": "# Alex\n\nResting heart rate and goals.\n",
+    "coach/profiles/bo.md": "# Training notes\n\nBo walks daily.\n",
+    "fitness/coach-notes.md": "---\ntitle: alex\n---\nNotes.\n",
+    "recipes/caldo-verde.md": "# Alex's caldo verde\n\nKale and potatoes.\n",
+    "recipes/alexs-stew.md": "# Alex’s stew\n\nBeans.\n",
+    "garden/roses.md": "---\naliases: [Alex, Rosie]\n---\n# Roses\n",
+}
+
+
+@pytest.fixture
+def people_wiki(tmp_path: Path) -> Path:
+    root = tmp_path / "wiki"
+    for rel, text in PERSON_TREE.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
+
+
+def test_a_page_titled_with_a_roster_name_is_not_a_topic(people_wiki: Path) -> None:
+    paths = [t.path for t in list_topics(people_wiki, EXCLUDE, people=ROSTER)]
+    assert paths == ["garden/roses.md", "recipes/alexs-stew.md", "recipes/caldo-verde.md"]
+    # The title is a name, the frontmatter title is an id, or the stem is an id.
+    for rel in ("coach/profiles/alex-profile.md", "coach/profiles/bo.md", "fitness/coach-notes.md"):
+        assert is_topic_page(rel, people_wiki, EXCLUDE, people=ROSTER) is False
+
+
+def test_with_no_roster_a_person_page_is_a_topic_as_before(people_wiki: Path) -> None:
+    assert is_topic_page("coach/profiles/alex-profile.md", people_wiki, EXCLUDE) is True
+    assert len(list_topics(people_wiki, EXCLUDE)) == len(PERSON_TREE)
+    assert len(list_topics(people_wiki, EXCLUDE, people=[])) == len(PERSON_TREE)
+
+
+def test_the_default_exclude_holds_the_coach_profiles(people_wiki: Path) -> None:
+    exclude = Jobs().topics.exclude
+    assert "coach/profiles/*" in exclude
+    assert is_topic_page("coach/profiles/alex-profile.md", people_wiki, exclude) is False
+
+
+def test_is_person_page() -> None:
+    assert is_person_page(Topic("coach/alex.md", "coach", "Weekly plan"), ROSTER)
+    assert is_person_page(Topic("coach/plan.md", "coach", "  BO "), ROSTER)
+    assert not is_person_page(Topic("coach/plan.md", "coach", "Bo's plan"), ROSTER)
+    assert not is_person_page(Topic("coach/alex.md", "coach", "Alex"), None)
+    assert roster_keys(ROSTER) == {"alex", "bo"}
+
+
+def test_a_recipe_with_a_name_in_its_title_keeps_no_bare_name() -> None:
+    recipe = Topic("recipes/caldo-verde.md", "recipes", "Alex's caldo verde")
+    names = topic_names(recipe, people=ROSTER)
+    assert names == ["Alex's caldo verde", "caldo verde"]
+    assert "alex" not in {n.casefold() for n in names}
+    stew = Topic("recipes/alexs-stew.md", "recipes", "Alex’s stew")
+    assert topic_names(stew, people=ROSTER) == ["Alex’s stew", "stew", "alexs stew"]
+    # Without a roster the names are as before.
+    assert topic_names(recipe) == ["Alex's caldo verde", "caldo verde"]
+
+
+def test_an_alias_that_is_a_roster_name_is_not_a_name() -> None:
+    roses = Topic("garden/roses.md", "garden", "Roses")
+    assert topic_names(roses, ["Alex", "Rosie", "bo"], people=ROSTER) == ["Roses", "Rosie"]
+    assert "Alex" in topic_names(roses, ["Alex"])
+    pattern = names_pattern(topic_names(roses, ["Alex"], people=ROSTER))
+    assert pattern is not None and pattern.search("Alex went for a run.") is None
+
+
+def test_drop_people_without_a_roster_keeps_every_name() -> None:
+    assert drop_people(["Alex", " Alex ", "Roses"], None) == ["Alex", "Roses"]
