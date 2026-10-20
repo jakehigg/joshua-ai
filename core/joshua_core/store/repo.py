@@ -937,7 +937,7 @@ class Repo:
             cur = await conn.execute(
                 """
                 UPDATE curator_finding
-                SET status = %s, resolved_at = %s, resolved_by = %s, detail = detail || %s
+                SET status = %s, resolved_at = %s, resolved_by = %s, detail = detail || %s::jsonb
                 WHERE id = %s
                 """,
                 (status, resolved, who, extra, finding_id),
