@@ -171,9 +171,29 @@ async def test_plan_picks_the_journal_topic_and_writes_only_the_dossier_and_read
     assert report.calls == 1 and report.tokens == RAISE_USAGE.total
 
 
-async def test_plan_sends_a_question_that_names_a_person_to_a_person(h: Harness) -> None:
+async def test_plan_rejects_a_general_question_that_names_a_person(h: Harness) -> None:
     named = "Will Alex check the snake plant for leaf flop in the hall?"
     h.workers = FakeWorkers(raise_answer=raised((named, SECOND_PHRASES), (THIRD, THIRD_PHRASES)))
+    report = await h.run(mode="plan", topic=SNAKE)
+    assert [r["question"] for r in report.data["rejected"]] == [named]
+    assert report.data["rejected"][0]["reason"].startswith("names a person: ")
+    assert report.data["person"] == []
+    assert [q.question for q in h.dossier().questions] == [THIRD]
+
+
+async def test_plan_sends_a_person_question_that_names_a_person_to_a_person(h: Harness) -> None:
+    named = "Will Alex check the snake plant for leaf flop in the hall?"
+    answer = raised((THIRD, THIRD_PHRASES))
+    answer["questions"].append(
+        {
+            "question": named,
+            "grounded_in": SECOND_PHRASES,
+            "why": "It sets the next check.",
+            "audience": "person",
+            "about_person": False,
+        }
+    )
+    h.workers = FakeWorkers(raise_answer=answer)
     report = await h.run(mode="plan", topic=SNAKE)
     assert report.data["rejected"] == []
     assert len(report.data["person"]) == 1
@@ -244,7 +264,7 @@ async def test_run_writes_pages_the_dossier_and_the_readme(h: Harness) -> None:
     )[0]
     assert second["context"] == [LEAF, SNAKE]
     readme = layout.knowledge_index(h.data).read_text()
-    assert "| 1.00 | 3/3 | 2026-10-19 | 0 |" in readme
+    assert "| 1.00 | 3/3 | 0 | 2026-10-19 | 0 |" in readme
     dossier_text = layout.knowledge_dossier(SNAKE, h.data).read_text()
     assert "About every 4 weeks in winter" in dossier_text
     assert report.summary.startswith(f"research: {SNAKE} (3 pages, 0 held, 0 dropped)")
@@ -417,16 +437,19 @@ async def test_the_usage_shows_the_tokens_of_each_question(h: Harness) -> None:
     report = await h.run(mode="run", topic=SNAKE, max_questions=2)
     first, second = held[0], report.data["pages"][1].rsplit("/", 1)[1][:-3]
     assert report.data["usage_by_question"] == {
-        first: {"researcher": 0, "challenger": 0, "editor": EDITOR_USAGE.total},
+        first: {"apply": 0, "researcher": 0, "challenger": 0, "editor": EDITOR_USAGE.total},
         second: {
+            "apply": 0,
             "researcher": LOOKUP_USAGE.total,
             "challenger": LOOKUP_USAGE.total,
             "editor": EDITOR_USAGE.total,
         },
     }
     usage = dict(report.sections)["Usage"]
-    assert f"- `{first}`: researcher 0 tokens, challenger 0 tokens, editor 250 tokens" in usage
-    assert f"- `{second}`: researcher 60 tokens, challenger 60 tokens, editor 250 tokens" in usage
+    steps = "researcher 0 tokens, challenger 0 tokens, editor 250 tokens"
+    assert f"- `{first}`: apply 0 tokens, {steps}" in usage
+    steps = "researcher 60 tokens, challenger 60 tokens, editor 250 tokens"
+    assert f"- `{second}`: apply 0 tokens, {steps}" in usage
 
 
 def test_the_research_order() -> None:

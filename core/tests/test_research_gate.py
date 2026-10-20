@@ -38,6 +38,7 @@ from research_fakes import (
     GENERIC,
     GROUNDED,
     GROUNDED_PHRASES,
+    LOCAL,
     SNAKE,
     WIKI,
     FakeStore,
@@ -46,6 +47,12 @@ from research_fakes import (
 
 BUNDLE = f"## {SNAKE}\n\n{WIKI[SNAKE]}"
 TERMS = ["Snake plant", "Snakey"]
+
+
+def web(*args: object, **kwargs: object) -> Candidate:
+    """A candidate with the local context of the fixture wiki, unless the
+    test gives its own."""
+    return Candidate(*args, **{"local_context": LOCAL, **kwargs})  # type: ignore[arg-type]
 
 
 async def _embed(text: str) -> list[list[float]]:
@@ -65,19 +72,19 @@ def _gate(tmp_path: Path, *, existing=(), near=None, embed=_embed) -> Gate:
 
 
 async def test_a_generic_question_is_rejected_for_ungrounded_phrases(tmp_path: Path) -> None:
-    verdict = await _gate(tmp_path).check(Candidate(GENERIC, []))
+    verdict = await _gate(tmp_path).check(web(GENERIC, []))
     assert not verdict.accepted
     assert "grounded_in has 0 phrases" in verdict.reason
 
 
 async def test_a_grounded_question_passes(tmp_path: Path) -> None:
-    verdict = await _gate(tmp_path).check(Candidate(GROUNDED, GROUNDED_PHRASES))
+    verdict = await _gate(tmp_path).check(web(GROUNDED, GROUNDED_PHRASES))
     assert verdict.accepted and verdict.reason == ""
 
 
 async def test_a_phrase_not_in_the_bundle_rejects(tmp_path: Path) -> None:
     phrases = ["gritty soil mix", "bottom watering tray"]
-    verdict = await _gate(tmp_path).check(Candidate(GROUNDED, phrases))
+    verdict = await _gate(tmp_path).check(web(GROUNDED, phrases))
     assert "`bottom watering tray` is not in the bundle" in verdict.reason
 
 
@@ -106,8 +113,43 @@ def test_a_phrase_may_have_160_characters() -> None:
 
 async def test_a_question_without_the_topic_name_rejects(tmp_path: Path) -> None:
     question = "How often should a plant in a gritty soil mix be watered in winter?"
-    verdict = await _gate(tmp_path).check(Candidate(question, GROUNDED_PHRASES))
-    assert verdict.reason == "the question does not name the topic"
+    verdict = await _gate(tmp_path).check(web(question, GROUNDED_PHRASES))
+    assert verdict.reason == "the question does not name the topic or a subject"
+
+
+async def test_a_general_question_may_hold_a_subject_in_place_of_the_topic_name(
+    tmp_path: Path,
+) -> None:
+    question = "How often should a Sansevieria in a gritty soil mix be watered in winter?"
+    verdict = await _gate(tmp_path).check(web(question, GROUNDED_PHRASES, subject="Sansevieria"))
+    assert verdict.accepted, verdict.reason
+    assert verdict.candidate.subject == "Sansevieria"
+    missing = await _gate(tmp_path).check(web(question, GROUNDED_PHRASES, subject="cactus"))
+    assert missing.reason == "the question does not hold its subject `cactus`"
+    long = await _gate(tmp_path).check(web(question, GROUNDED_PHRASES, subject="x" * 81))
+    assert "the subject has 81 characters" in long.reason
+
+
+async def test_with_no_subject_the_gate_keeps_the_topic_name_it_found(tmp_path: Path) -> None:
+    verdict = await _gate(tmp_path).check(web(GROUNDED, GROUNDED_PHRASES))
+    assert verdict.candidate.subject == "snake plant"
+
+
+@pytest.mark.parametrize("size", [39, 601])
+async def test_a_web_question_needs_a_local_context_of_40_to_600_characters(
+    tmp_path: Path, size: int
+) -> None:
+    verdict = await _gate(tmp_path).check(web(GROUNDED, GROUNDED_PHRASES, local_context="x" * size))
+    assert not verdict.accepted
+    assert verdict.reason == f"local_context has {size} characters; it must have 40 to 600"
+
+
+async def test_the_pair_rule_is_only_for_a_web_question(tmp_path: Path) -> None:
+    question = "Which liquid fertilizer is on the shelf for the snake plant?"
+    verdict = await _gate(tmp_path).check(
+        Candidate(question, GROUNDED_PHRASES, "To set the dose.", PERSON)
+    )
+    assert verdict.accepted and verdict.route == PERSON
 
 
 def test_the_shape_rules() -> None:
@@ -122,14 +164,14 @@ def test_the_shape_rules() -> None:
 
 async def test_a_question_in_the_dossier_is_a_duplicate(tmp_path: Path) -> None:
     gate = _gate(tmp_path, existing=[GROUNDED.upper().rstrip("?")])
-    verdict = await gate.check(Candidate(GROUNDED, GROUNDED_PHRASES))
+    verdict = await gate.check(web(GROUNDED, GROUNDED_PHRASES))
     assert verdict.reason == "the same question is in the dossier"
     assert normalize("A  b?") == "a b"
 
 
 async def test_a_near_question_of_the_dossier_is_a_duplicate(tmp_path: Path) -> None:
     other = "In winter, should the gritty snake plant be watered to runoff?"
-    verdict = await _gate(tmp_path, existing=[other]).check(Candidate(GROUNDED, GROUNDED_PHRASES))
+    verdict = await _gate(tmp_path, existing=[other]).check(web(GROUNDED, GROUNDED_PHRASES))
     assert not verdict.accepted and "a question of the dossier is this close" in verdict.reason
     assert verdict.answered_by is None
 
@@ -145,26 +187,26 @@ async def test_a_near_duplicate_of_a_knowledge_page_is_answered_by(tmp_path: Pat
         "wiki/knowledge/houseplants/snake-plant/winter-watering.md": 0.9,
         "people/alex/x.md": 0.95,
     }
-    verdict = await _gate(tmp_path, near=near).check(Candidate(GROUNDED, GROUNDED_PHRASES))
+    verdict = await _gate(tmp_path, near=near).check(web(GROUNDED, GROUNDED_PHRASES))
     assert not verdict.accepted
     assert verdict.answered_by == "knowledge/houseplants/snake-plant/winter-watering.md"
 
 
 async def test_a_far_knowledge_chunk_is_not_a_duplicate(tmp_path: Path) -> None:
     near = {"wiki/knowledge/houseplants/snake-plant/x.md": 0.5}
-    verdict = await _gate(tmp_path, near=near).check(Candidate(GROUNDED, GROUNDED_PHRASES))
+    verdict = await _gate(tmp_path, near=near).check(web(GROUNDED, GROUNDED_PHRASES))
     assert verdict.accepted
 
 
 async def test_an_accepted_question_counts_for_the_next(tmp_path: Path) -> None:
     gate = _gate(tmp_path)
-    assert (await gate.check(Candidate(GROUNDED, GROUNDED_PHRASES))).accepted
-    assert not (await gate.check(Candidate(GROUNDED, GROUNDED_PHRASES))).accepted
+    assert (await gate.check(web(GROUNDED, GROUNDED_PHRASES))).accepted
+    assert not (await gate.check(web(GROUNDED, GROUNDED_PHRASES))).accepted
 
 
 async def test_a_person_question_skips_the_grounding_and_duplicate_rules(tmp_path: Path) -> None:
     gate = _gate(tmp_path, existing=[GENERIC])
-    verdict = await gate.check(Candidate(GENERIC, []), person=True)
+    verdict = await gate.check(web(GENERIC, []), person=True)
     assert verdict.accepted
 
 
@@ -175,7 +217,7 @@ async def test_with_no_embedding_model_only_the_text_rules_run(tmp_path: Path) -
     gate = _gate(
         tmp_path, existing=["In winter, should the gritty snake plant go to runoff?"], embed=broken
     )
-    verdict = await gate.check(Candidate(GROUNDED, GROUNDED_PHRASES))
+    verdict = await gate.check(web(GROUNDED, GROUNDED_PHRASES))
     assert verdict.accepted
     assert gate.notes and "no embedding model" in gate.notes[0]
 
@@ -194,7 +236,7 @@ async def test_an_index_that_fails_does_not_stop_the_gate(tmp_path: Path) -> Non
         data_root=tmp_path,
         embed=_embed,
     )
-    assert (await gate.check(Candidate(GROUNDED, GROUNDED_PHRASES))).accepted
+    assert (await gate.check(web(GROUNDED, GROUNDED_PHRASES))).accepted
     assert gate.notes == ["The index check for duplicates did not run."]
 
 
@@ -281,13 +323,16 @@ def test_the_date_forms() -> None:
 
 async def test_the_gate_sends_a_person_question_to_a_person(tmp_path: Path) -> None:
     gate = _window_gate(tmp_path)
-    person = Candidate("Will Alex check the snake plants in one pass?", GOOD_PHRASES)
-    verdict = await gate.check(person)
+    text = "Will Alex check the snake plants in one pass?"
+    rejected = await gate.check(web(text, GOOD_PHRASES))
+    assert not rejected.accepted and rejected.route == ""
+    assert rejected.reason.startswith(f"{RULE_PERSON}: ")
+    verdict = await gate.check(web(text, GOOD_PHRASES, "w", PERSON))
     assert verdict.accepted and verdict.route == PERSON
     assert verdict.route_reason == RULE_PERSON
-    good = await gate.check(Candidate(GOOD_WORLD, GOOD_PHRASES))
+    good = await gate.check(web(GOOD_WORLD, GOOD_PHRASES))
     assert good.accepted and good.route == WEB, good.reason
-    asked = await gate.check(Candidate("Should we feed Snake Plants in May?", []), person=True)
+    asked = await gate.check(web("Should we feed Snake Plants in May?", []), person=True)
     assert asked.accepted and asked.route == WEB
 
 
@@ -332,11 +377,11 @@ def _window_gate(tmp_path: Path, *, near=None, asked=(), store=None, **kwargs) -
 @pytest.mark.parametrize(
     ("question", "audience", "route", "reason"),
     [
-        (RUN3_DOSE, "web", PERSON, RULE_DATE),
-        (RUN3_CHECK, "web", PERSON, RULE_PERSON),
+        (RUN3_DOSE, "person", PERSON, RULE_DATE),
+        (RUN3_CHECK, "person", PERSON, RULE_PERSON),
         (RUN3_CHECK, "record", PERSON, RULE_PERSON),
         (GOOD_WORLD, "web", WEB, ""),
-        ("Did we feed the snake plants at quarter strength?", "web", PERSON, RULE_OPENING),
+        ("Did we feed the snake plants at quarter strength?", "person", PERSON, RULE_OPENING),
         ("Is our snake plant mix too gritty for winter?", "record", PERSON, RULE_US),
         (GOOD_WORLD, "bogus", WEB, ""),
     ],
@@ -345,16 +390,35 @@ async def test_the_live_questions_route(
     tmp_path: Path, question: str, audience: str, route: str, reason: str
 ) -> None:
     _window_wiki(tmp_path)
-    verdict = await _window_gate(tmp_path).check(Candidate(question, GOOD_PHRASES, "w", audience))
+    verdict = await _window_gate(tmp_path).check(web(question, GOOD_PHRASES, "w", audience))
     assert verdict.accepted, verdict.reason
     assert (verdict.route, verdict.route_reason) == (route, reason)
+
+
+@pytest.mark.parametrize(
+    ("question", "rule"),
+    [
+        (RUN3_DOSE, RULE_DATE),
+        (RUN3_CHECK, RULE_PERSON),
+        ("Did we feed the snake plants at quarter strength?", RULE_OPENING),
+        ("Is our snake plant mix too gritty for winter?", RULE_US),
+    ],
+)
+async def test_a_general_question_that_fails_a_floor_rule_is_rejected_not_routed(
+    tmp_path: Path, question: str, rule: str
+) -> None:
+    gate = _window_gate(tmp_path)
+    verdict = await gate.check(web(question, GOOD_PHRASES))
+    assert not verdict.accepted
+    assert (verdict.route, verdict.route_reason) == ("", "")
+    assert verdict.reason.startswith(f"{rule}: ")
 
 
 async def test_a_record_question_with_a_strong_hit_is_answered_by_it(tmp_path: Path) -> None:
     _window_wiki(tmp_path)
     store = FakeStore({f"wiki/{FEED_ENTRY}": 0.91, f"wiki/{WINDOW}": 0.83})
     gate = _window_gate(tmp_path, store=store)
-    verdict = await gate.check(Candidate(RECORD_Q, GOOD_PHRASES, "w", "record"))
+    verdict = await gate.check(web(RECORD_Q, GOOD_PHRASES, "w", "record"))
     assert verdict.accepted and verdict.route == RECORD
     assert verdict.answered_by == FEED_ENTRY
     assert {"kinds": ["wiki", "journal", "knowledge"], "min_sim": 0.80} in store.calls
@@ -364,7 +428,7 @@ async def test_a_record_question_with_no_hit_goes_to_a_person(tmp_path: Path) ->
     _window_wiki(tmp_path)
     store = FakeStore({f"wiki/{FEED_ENTRY}": 0.79})
     verdict = await _window_gate(tmp_path, store=store).check(
-        Candidate(RECORD_Q, GOOD_PHRASES, "", "record")
+        web(RECORD_Q, GOOD_PHRASES, "", "record")
     )
     assert verdict.accepted and verdict.route == PERSON
     assert verdict.route_reason == NO_RECORD
@@ -386,13 +450,11 @@ async def test_a_record_is_a_topic_page_an_entry_or_an_answer_page(tmp_path: Pat
     near["wiki/houseplants/gone.md"] = 0.97
     near["shared/notes.md"] = 0.99
     verdict = await _window_gate(tmp_path, near=near).check(
-        Candidate(RECORD_Q, GOOD_PHRASES, "", "record")
+        web(RECORD_Q, GOOD_PHRASES, "", "record")
     )
     assert verdict.route == PERSON and verdict.route_reason == NO_RECORD
     near[f"wiki/{WINDOW}"] = 0.81
-    again = await _window_gate(tmp_path, near=near).check(
-        Candidate(RECORD_Q, GOOD_PHRASES, "", "record")
-    )
+    again = await _window_gate(tmp_path, near=near).check(web(RECORD_Q, GOOD_PHRASES, "", "record"))
     assert again.route == RECORD and again.answered_by == WINDOW
 
 
@@ -404,7 +466,7 @@ async def test_a_record_search_that_fails_goes_to_a_person(tmp_path: Path) -> No
             return {}
 
     gate = _window_gate(tmp_path, store=Broken())
-    verdict = await gate.check(Candidate(RECORD_Q, GOOD_PHRASES, "", "record"))
+    verdict = await gate.check(web(RECORD_Q, GOOD_PHRASES, "", "record"))
     assert verdict.route == PERSON and verdict.route_reason == NO_RECORD
     assert "The record search did not run." in gate.notes
 
@@ -412,21 +474,21 @@ async def test_a_record_search_that_fails_goes_to_a_person(tmp_path: Path) -> No
 async def test_a_worker_person_question_needs_why(tmp_path: Path) -> None:
     question = "Which liquid fertilizer is in the cupboard for the snake plants?"
     gate = _window_gate(tmp_path)
-    bare = await gate.check(Candidate(question, GOOD_PHRASES, " ", "person"))
+    bare = await gate.check(web(question, GOOD_PHRASES, " ", "person"))
     assert not bare.accepted and "needs `why`" in bare.reason
-    told = await gate.check(Candidate(question, GOOD_PHRASES, "To set the dose.", "person"))
+    told = await gate.check(web(question, GOOD_PHRASES, "To set the dose.", "person"))
     assert told.accepted and told.route == PERSON
     assert told.route_reason == "the raise worker asks a person"
 
 
 async def test_the_shape_rules_still_reject_a_person_question(tmp_path: Path) -> None:
     gate = _window_gate(tmp_path)
-    ungrounded = await gate.check(Candidate(RUN3_DOSE, [], "w", "person"))
+    ungrounded = await gate.check(web(RUN3_DOSE, [], "w", "person"))
     assert not ungrounded.accepted and "grounded_in" in ungrounded.reason
-    nameless = await gate.check(Candidate("What dose went on 2026-10-04?", GOOD_PHRASES))
+    nameless = await gate.check(web("What dose went on 2026-10-04?", GOOD_PHRASES))
     assert not nameless.accepted and "name the topic" in nameless.reason
-    assert (await gate.check(Candidate(RUN3_DOSE, GOOD_PHRASES))).route == PERSON
-    twice = await gate.check(Candidate(RUN3_DOSE, GOOD_PHRASES))
+    assert (await gate.check(web(RUN3_DOSE, GOOD_PHRASES, "w", PERSON))).route == PERSON
+    twice = await gate.check(web(RUN3_DOSE, GOOD_PHRASES, "w", PERSON))
     assert not twice.accepted and twice.route == ""
 
 
@@ -439,7 +501,9 @@ async def test_a_person_question_asked_before_is_not_asked_again(
 ) -> None:
     page = "questions/houseplants/product-dose.md"
     asked = [AskedQuestion(RUN3_DOSE.upper(), status, page)]
-    verdict = await _window_gate(tmp_path, asked=asked).check(Candidate(RUN3_DOSE, GOOD_PHRASES))
+    verdict = await _window_gate(tmp_path, asked=asked).check(
+        web(RUN3_DOSE, GOOD_PHRASES, "w", PERSON)
+    )
     assert not verdict.accepted and verdict.route == PERSON
     assert verdict.reason == reason and verdict.page == page
 
@@ -448,12 +512,12 @@ async def test_a_near_person_question_counts_as_asked(tmp_path: Path) -> None:
     near_text = "Which feed went on the snake plants at the watering to runoff in the gritty mix?"
     asked = [AskedQuestion("A gritty mix watered to runoff?", "open", "questions/h/x.md")]
     verdict = await _window_gate(tmp_path, asked=asked).check(
-        Candidate(near_text, GOOD_PHRASES, "w", "person")
+        web(near_text, GOOD_PHRASES, "w", "person")
     )
     assert verdict.reason == ALREADY_ASKED
     far = [AskedQuestion("Which pest showed up on the leaf?", "open", "questions/h/y.md")]
     fresh = await _window_gate(tmp_path, asked=far).check(
-        Candidate(near_text, GOOD_PHRASES, "w", "person")
+        web(near_text, GOOD_PHRASES, "w", "person")
     )
     assert fresh.accepted and fresh.route == PERSON
 
@@ -484,20 +548,20 @@ def test_the_roster_names_are_the_names_and_the_ids() -> None:
 
 async def test_a_person_section_routes_a_web_question_to_a_person(tmp_path: Path) -> None:
     gate = _window_gate(tmp_path, person_section=True)
-    verdict = await gate.check(Candidate(GOOD_WORLD, GOOD_PHRASES, audience=WEB))
+    verdict = await gate.check(web(GOOD_WORLD, GOOD_PHRASES, audience=WEB))
     assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, PERSON_SECTION)
 
 
 async def test_a_person_section_question_for_a_person_needs_no_why(tmp_path: Path) -> None:
     gate = _window_gate(tmp_path, person_section=True)
-    verdict = await gate.check(Candidate(GOOD_WORLD, GOOD_PHRASES, why="", audience=PERSON))
+    verdict = await gate.check(web(GOOD_WORLD, GOOD_PHRASES, why="", audience=PERSON))
     assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, PERSON_SECTION)
 
 
 async def test_a_person_section_still_allows_a_record_question(tmp_path: Path) -> None:
     _window_wiki(tmp_path)
     gate = _window_gate(tmp_path, near={f"wiki/{FEED_ENTRY}": 0.95}, person_section=True)
-    verdict = await gate.check(Candidate(RECORD_Q, GOOD_PHRASES, audience=RECORD))
+    verdict = await gate.check(web(RECORD_Q, GOOD_PHRASES, audience=RECORD))
     assert (verdict.route, verdict.answered_by) == (RECORD, FEED_ENTRY)
 
 
@@ -541,26 +605,27 @@ async def test_a_web_question_about_a_person_goes_to_a_person(
 ) -> None:
     # No rule of the floor catches these: only the worker's judgement does.
     assert world_rule(question, ["Alex", "Bo"]) == ""
-    candidate = Candidate(question, PLAN_PHRASES, audience=WEB, about_person=True)
+    candidate = web(question, PLAN_PHRASES, audience=WEB, about_person=True)
     verdict = await _plan_gate(tmp_path).check(candidate)
     assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, ABOUT_PERSON)
 
 
 async def test_a_thing_question_tagged_false_stays_web(tmp_path: Path) -> None:
-    verdict = await _plan_gate(tmp_path).check(Candidate(THING, PLAN_PHRASES, about_person=False))
+    verdict = await _plan_gate(tmp_path).check(web(THING, PLAN_PHRASES, about_person=False))
     assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, WEB, "")
 
 
 async def test_the_name_rule_holds_when_the_worker_says_false(tmp_path: Path) -> None:
     question = "Which endurance plan pace on the river loop suits Bo in the cold?"
     verdict = await _plan_gate(tmp_path).check(
-        Candidate(question, PLAN_PHRASES, audience=WEB, about_person=False)
+        web(question, PLAN_PHRASES, audience=WEB, about_person=False)
     )
-    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, RULE_PERSON)
+    assert (verdict.accepted, verdict.route) == (False, "")
+    assert verdict.reason.startswith(f"{RULE_PERSON}: ")
 
 
 async def test_a_person_question_about_a_person_needs_no_why(tmp_path: Path) -> None:
-    candidate = Candidate(RUN11[0], PLAN_PHRASES, why="", audience=PERSON, about_person=True)
+    candidate = web(RUN11[0], PLAN_PHRASES, why="", audience=PERSON, about_person=True)
     verdict = await _plan_gate(tmp_path).check(candidate)
     assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, ABOUT_PERSON)
 
@@ -610,7 +675,7 @@ def _caldo_gate(tmp_path: Path) -> Gate:
 async def test_a_run_12_web_question_stays_web_with_the_generic_name(
     tmp_path: Path, question: str
 ) -> None:
-    verdict = await _caldo_gate(tmp_path).check(Candidate(question, CALDO_PHRASES))
+    verdict = await _caldo_gate(tmp_path).check(web(question, CALDO_PHRASES))
     assert verdict.accepted and verdict.route == WEB, verdict.reason
     assert verdict.generic_name
     assert "alex" not in verdict.candidate.question.casefold()
@@ -623,22 +688,26 @@ async def test_a_run_12_web_question_stays_web_with_the_generic_name(
 async def test_a_run_12_person_question_stays_person(
     tmp_path: Path, question: str, rule: str
 ) -> None:
-    verdict = await _caldo_gate(tmp_path).check(Candidate(question, CALDO_PHRASES))
+    # A person question keeps its own text, possessive and all.
+    verdict = await _caldo_gate(tmp_path).check(web(question, CALDO_PHRASES, "w", PERSON))
     assert verdict.accepted and verdict.route == PERSON
-    assert verdict.route_reason == rule
+    assert verdict.candidate.question == question
+    assert verdict.route_reason in (rule, RULE_PERSON)
+    as_web = await _caldo_gate(tmp_path).check(web(question, CALDO_PHRASES))
+    assert not as_web.accepted and as_web.reason.startswith(f"{rule}: ")
 
 
 async def test_the_generic_name_is_only_for_a_web_question(tmp_path: Path) -> None:
     gate = _caldo_gate(tmp_path)
     question = "Which stock does Alex's Caldo Verde take in the recipe page?"
-    asked = await gate.check(Candidate(question, CALDO_PHRASES), person=True)
+    asked = await gate.check(web(question, CALDO_PHRASES), person=True)
     assert asked.candidate.question == question and not asked.generic_name
     record = await _caldo_gate(tmp_path).check(
-        Candidate("Which potato goes into Alex's Caldo Verde?", CALDO_PHRASES, audience=RECORD)
+        web("Which potato goes into Alex's Caldo Verde?", CALDO_PHRASES, audience=RECORD)
     )
     assert not record.generic_name and record.route == PERSON
     plain = await _caldo_gate(tmp_path).check(
-        Candidate("What is a classic Caldo Verde broth?", CALDO_PHRASES)
+        web("What is a classic Caldo Verde broth?", CALDO_PHRASES)
     )
     assert plain.route == WEB and not plain.generic_name
 

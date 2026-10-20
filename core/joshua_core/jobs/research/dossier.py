@@ -6,6 +6,13 @@ topic, its questions, and when it was last researched. Python writes its body
 again on each save, from the frontmatter and the pages of the answered
 questions. No worker writes a dossier.
 
+A question holds the general question, which went to the web, in `question`,
+and our specifics in `local_context`, which stays inside the instance.
+`subject` is the generic name of the thing that the general question holds. A
+question that a published page of another topic answers is `answered` with
+`shared: true`, and its `page` is that page. A dossier from before these
+fields loads with `local_context: ""`, `subject: ""`, and `shared: false`.
+
 A question that was held or dropped after its lookups ran keeps the answers of
 the two lookups in `draft` and `challenge`, and the day of the lookups in
 `looked_up_at`. The body shows the draft of a held question in a collapsed
@@ -58,12 +65,15 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 class Question(BaseModel):
-    """One question of a dossier."""
+    """One question of a dossier. `question` is the general question."""
 
     model_config = ConfigDict(extra="allow")
 
     slug: str
     question: str
+    local_context: str = ""
+    subject: str = ""
+    shared: bool = False
     status: QuestionStatus = "open"
     page: str | None = None
     grounded_in: list[str] = Field(default_factory=list)
@@ -135,6 +145,10 @@ class Dossier(BaseModel):
 
     def find(self, slug: str) -> Question | None:
         return next((q for q in self.questions if q.slug == slug), None)
+
+    def shared_count(self) -> int:
+        """The answered questions that a page of another topic answers."""
+        return sum(1 for q in self.questions if q.status == "answered" and q.shared)
 
     def compute_coverage(self) -> float:
         """`answered / len(questions)`, or 0.0 when there is no question."""
@@ -227,10 +241,13 @@ def new_dossier(topic_rel: str, title: str) -> Dossier:
 # -- write -------------------------------------------------------------------
 
 
-def _rel_link(from_file: str, to_file: str) -> str:
+def rel_link(from_file: str, to_file: str) -> str:
     """A relative link from one wiki-relative file to another."""
     start = PurePosixPath(from_file).parent.as_posix()
     return os.path.relpath(to_file, start if start != "." else os.curdir).replace(os.sep, "/")
+
+
+_rel_link = rel_link
 
 
 def _cell(text: str) -> str:
@@ -283,7 +300,8 @@ def render_body(dossier: Dossier, answers: Mapping[str, str]) -> str:
         short = inline(strip_links(answers.get(q.page, ""), set()))
         tail = f": {short}" if short else ""
         target = _rel_link(me, f"{layout.KNOWLEDGE}/{q.page}")
-        lines.append(f"- [{inline(strip_links(q.question, set()))}]({target}){tail}")
+        mark = " (shared with another topic)" if q.shared else ""
+        lines.append(f"- [{inline(strip_links(q.question, set()))}]({target}){mark}{tail}")
     if not answered:
         lines.append("None yet.")
     for heading, status in (("Open", "open"), ("Held", "held")):
@@ -345,6 +363,7 @@ class IndexRow:
     total: int
     researched_at: date | None
     open: int
+    shared: int = 0
 
 
 def index_rows(dossiers: Iterable[Dossier]) -> list[IndexRow]:
@@ -353,6 +372,7 @@ def index_rows(dossiers: Iterable[Dossier]) -> list[IndexRow]:
             topic=d.topic,
             coverage=d.compute_coverage(),
             answered=d.count("answered"),
+            shared=d.shared_count(),
             total=len(d.questions),
             researched_at=d.researched_at,
             open=d.count("open"),
@@ -369,10 +389,11 @@ def render_index(dossiers: Iterable[Dossier]) -> str:
         "# Knowledge",
         "",
         "What the researcher found, one dossier for each topic. The researcher "
-        "writes this page again on each run.",
+        "writes this page again on each run. Shared counts the answers that a "
+        "page of another topic gives.",
         "",
-        "| Topic | Coverage | Answered | Last researched | Open |",
-        "|---|---|---|---|---|",
+        "| Topic | Coverage | Answered | Shared | Last researched | Open |",
+        "|---|---|---|---|---|---|",
     ]
     rows = index_rows(dossiers)
     for row in rows:
@@ -380,10 +401,10 @@ def render_index(dossiers: Iterable[Dossier]) -> str:
         day = row.researched_at.isoformat() if row.researched_at else "never"
         lines.append(
             f"| [{_cell(row.topic)}]({link}) | {row.coverage:.2f} | "
-            f"{row.answered}/{row.total} | {day} | {row.open} |"
+            f"{row.answered}/{row.total} | {row.shared} | {day} | {row.open} |"
         )
     if not rows:
-        lines.append("| none | | | | |")
+        lines.append("| none | | | | | |")
     return frontmatter.update("\n".join(lines) + "\n", source=SOURCE)
 
 

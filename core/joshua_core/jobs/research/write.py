@@ -4,7 +4,10 @@ The page is at `layout.knowledge_page(topic, slug)`. Python writes the
 frontmatter and puts the parts of the editor's answer under fixed headings,
 in this order: the question as the title, **Answer**, **Where this differs
 for us** (when there is a local note), **Evidence**, **Disagreements** (when
-there are some), and **Sources**.
+there are some), and **Sources**. A page that uses knowledge we already hold
+ends with the line "Applied from:" and a link to each such page, and its
+frontmatter lists them in `applies`. The frontmatter holds the
+`local_context` of the question: our specifics, which never went to the web.
 
 A link in the text of a worker stays only when its URL is one of the sources
 of the page. Every other link, picture, and wikilink is reduced to its text,
@@ -13,7 +16,7 @@ so a worker cannot put a link into the wiki. A page is 64 KB or less.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -21,11 +24,11 @@ from pathlib import Path
 from joshua_shared import frontmatter, layout
 
 from joshua_core.jobs.research.crew import EditorAnswer
-from joshua_core.jobs.research.dossier import SOURCE, write_text
+from joshua_core.jobs.research.dossier import SOURCE, rel_link, write_text
+from joshua_core.jobs.research.known import STATUS_PUBLISHED
 from joshua_core.jobs.research.text import allowed_urls, inline, strip_links
 
 MAX_PAGE_BYTES = 64 * 1024
-STATUS_PUBLISHED = "published"
 
 
 class PageTooLong(ValueError):
@@ -55,8 +58,17 @@ def render_page(
     day: date,
     refresh_days: int,
     run_id: int | None,
+    local_context: str = "",
+    applies: Sequence[str] = (),
+    self_path: str = "",
+    retrieved: Mapping[str, date] | None = None,
 ) -> str:
-    """The text of a knowledge page: the frontmatter and the body."""
+    """The text of a knowledge page: the frontmatter and the body.
+
+    `applies` lists the knowledge pages that the answer uses, relative to the
+    wiki root, and `self_path` is the path of this page, relative to the wiki
+    root, for the links to them. `retrieved` gives the day a source was
+    retrieved, by its URL; any other source was retrieved on `day`."""
     allowed = allowed_urls([s.url for s in answer.sources])
     title = inline(strip_links(question, set()), 300)
     lines = [f"# {title}", "", "## Answer", "", _block(answer.answer, allowed), ""]
@@ -75,11 +87,17 @@ def render_page(
         name = inline(strip_links(source.title, set()), 300).replace("[", "(").replace("]", ")")
         target = source.url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
         lines.append(f"- [{name or target}]({target}), {source.trust}")
+    if applies:
+        links = ", ".join(
+            f"[{path}]({rel_link(self_path, path) if self_path else path})" for path in applies
+        )
+        lines += ["", f"Applied from: {links}"]
     body = "\n".join(lines).rstrip() + "\n"
     meta = {
         "question": title,
         "answer_short": inline(strip_links(answer.answer_short, set()), 160),
         "topic": topic,
+        "local_context": inline(strip_links(local_context, set()), 1000),
         "context": list(context),
         "grounded_in": list(grounded_in),
         "researched_at": day,
@@ -87,12 +105,19 @@ def render_page(
         "confidence": answer.confidence,
         "status": STATUS_PUBLISHED,
         "sources": [
-            {"url": s.url, "title": inline(s.title, 300), "trust": s.trust, "retrieved": day}
+            {
+                "url": s.url,
+                "title": inline(s.title, 300),
+                "trust": s.trust,
+                "retrieved": (retrieved or {}).get(s.url, day),
+            }
             for s in answer.sources
         ],
         "source": SOURCE,
         "run_id": run_id,
     }
+    if applies:
+        meta["applies"] = list(applies)
     if run_id is None:
         del meta["run_id"]
     text = frontmatter.update(body, **meta)

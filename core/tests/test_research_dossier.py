@@ -116,9 +116,9 @@ def test_the_index_has_one_row_for_each_dossier_sorted(tmp_path: Path) -> None:
     text = path.read_text()
     rows = [line for line in text.splitlines() if line.startswith("| [")]
     assert rows == [
-        "| [garden/roses.md](garden/roses.md) | 0.00 | 0/0 | never | 0 |",
+        "| [garden/roses.md](garden/roses.md) | 0.00 | 0/0 | 0 | never | 0 |",
         "| [houseplants/snake-plant.md](houseplants/snake-plant.md) "
-        "| 0.20 | 1/5 | 2026-10-19 | 2 |",
+        "| 0.20 | 1/5 | 0 | 2026-10-19 | 2 |",
     ]
     assert frontmatter.split(text)[0] == {"source": "research"}
     assert "| none |" in render_index([])

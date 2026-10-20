@@ -14,10 +14,12 @@ Arguments:
 Both modes choose the topic, build its memory bundle, and load or start its
 dossier. When the dossier has fewer than `questions_per_run` open questions,
 and the run names no `questions`, the `raise` worker proposes new ones and the
-gate gives each one its route: a `web` question goes to the dossier, a
-`person` question becomes a page under `wiki/questions/`, and a `record`
-question that our records answer is closed in the report. Nobody gets a
-question: a person answers one later, in chat.
+gate gives each one its route: a `web` question goes to the dossier with its
+general question and its local context, a `person` question becomes a page
+under `wiki/questions/`, and a `record` question that our records answer is
+closed in the report. A `web` question that a published page of another
+topic answers goes to the dossier as `answered`, with that page and
+`shared: true`. Nobody gets a question: a person answers one later, in chat.
 
 A topic in a person section (`jobs.research.person_sections`) is about
 people. The gate sends each of its raised questions to a person or to our
@@ -33,8 +35,13 @@ knowledge page.
 names, or else the questions in the order of `research_order`. The held
 questions that need only the editor come first, then the open questions that
 a person asked, the other open questions, and the other held questions. Each
-question goes to the crew. A held question that kept its two lookups, not
-older than `jobs.research.lookup_max_age_days`, goes to the editor alone. A held or
+question goes to the crew, which first looks for the answer in the
+knowledge we hold (`crew.py`). Before a lookup, the general question must
+pass the floor rules of the gate (`gate.world_reason`) and the length rule:
+a question that fails one, such as a question that a person asked with a
+name in it, is held with that reason and is not sent. A held question that
+kept its two lookups, not older than `jobs.research.lookup_max_age_days`,
+goes to the editor alone. A held or
 dropped question keeps the lookups of the run, and a published one loses
 them. A published answer becomes a page, and the dossier and `README.md` get their
 new state. A dry run does all of this and writes nothing; its report holds
@@ -84,8 +91,11 @@ from joshua_core.jobs.research.gate import (
     Gate,
     Verdict,
     default_embedder,
+    form_reason,
     roster_names,
+    world_reason,
 )
+from joshua_core.jobs.research.known import KnowledgeSearch
 from joshua_core.jobs.research.questions import (
     QuestionPage,
     counts,
@@ -130,7 +140,9 @@ logger = get_logger("jobs.research")
 MODES = ("plan", "run")
 RULE_GIVEN = "given"
 EDITOR_ONLY = "editor only"
-FULL_CREW = "full crew"
+FULL_CREW = crew.MODE_FULL
+APPLIED = "applied, no lookup"
+NOT_SENT = "not sent"
 _ARGS = {"mode", "topic", "questions", "max_questions", "then_insights"}
 _TRUE = ("true", "yes", "1", "on")
 _FALSE = ("false", "no", "0", "off")
@@ -232,11 +244,18 @@ class _Outcome:
     dropped_urls: list[str] = field(default_factory=list)
     reused: bool = False
     usage: dict[str, Usage] = field(default_factory=dict)
+    mode: str = crew.MODE_FULL
+    sent: bool = True
 
     @property
     def crew(self) -> str:
-        """`editor only` or `full crew`: which steps ran for the question."""
-        return EDITOR_ONLY if self.reused else FULL_CREW
+        """Which steps ran for the question: `editor only`, `applied, no
+        lookup`, `narrowed`, `full crew`, or `not sent`."""
+        if not self.sent:
+            return NOT_SENT
+        if self.reused:
+            return EDITOR_ONLY
+        return APPLIED if self.mode == crew.MODE_APPLIED else self.mode
 
     def tokens(self) -> dict[str, int]:
         """The tokens of each step of the crew; 0 for a step that did not run."""
@@ -264,6 +283,8 @@ class _Run:
     added: list[Question] = field(default_factory=list)
     # The slugs of the new questions that got the generic name of the topic.
     generic: set[str] = field(default_factory=set)
+    # The slugs of the new questions that a page of another topic answers.
+    shared: set[str] = field(default_factory=set)
     rejected: list[Verdict] = field(default_factory=list)
     person: list[_PersonQuestion] = field(default_factory=list)
     asked_before: list[Verdict] = field(default_factory=list)
@@ -484,6 +505,7 @@ class ResearchJob(Job):
             person_section=self._about_people(topic),
             possessives=possessive_forms(topic.title, self._settings.people),
             generic=generic_title(topic.title, self._settings.people),
+            topic=topic.path,
         )
         for raised_candidate in raised.candidates:
             verdict = await gate.check(raised_candidate)
@@ -503,9 +525,16 @@ class ResearchJob(Job):
             question = Question(
                 slug=question_slug(candidate.question, (q.slug for q in dossier.questions)),
                 question=candidate.question,
+                local_context=candidate.local_context,
+                subject=candidate.subject,
                 grounded_in=list(candidate.grounded_in),
                 raised_at=run.day,
             )
+            if verdict.shared and verdict.answered_by:
+                question.status = "answered"
+                question.shared = True
+                question.page = verdict.answered_by.removeprefix(f"{layout.KNOWLEDGE}/")
+                run.shared.add(question.slug)
             dossier.questions.append(question)
             run.added.append(question)
             if verdict.generic_name:
@@ -581,9 +610,25 @@ class ResearchJob(Job):
         cfg = self._settings.jobs.research
         parts = bundle_parts(bundle)
         chosen = self._chosen(run, topic, dossier, args)
+        people = roster_names(self._settings)
+
+        def floor(text: str) -> str:
+            return form_reason(text) or world_reason(text, people)
+
+        knowledge = KnowledgeSearch(
+            store=self._store,
+            embed=default_embedder(self._settings, topic.title),
+            data_root=self._data_dir,
+            min_sim=cfg.apply_sim,
+            limit=cfg.apply_pages,
+        )
         for question in chosen:
             groundings = extract_sentences(question.grounded_in, parts)
             kept = question.kept_lookups(run.day, cfg.lookup_max_age_days)
+            why = floor(question.question)
+            if why and kept is None:
+                self._hold(run, question, f"{NOT_SENT}: {why}", sent=False)
+                continue
             result = await crew.research_question(
                 question.question,
                 groundings,
@@ -595,7 +640,11 @@ class ResearchJob(Job):
                 editor_runner=self._runner,
                 draft=kept[0] if kept else None,
                 challenge=kept[1] if kept else None,
+                local_context=question.local_context,
+                knowledge=knowledge,
+                floor=floor,
             )
+            run.notes.extend(f"`{question.slug}`: {note}" for note in result.notes)
             page = self._page(topic, question, groundings, result, run)
             if page is not None and result.page is not None:
                 question.status = "answered"
@@ -611,28 +660,33 @@ class ResearchJob(Job):
                         dropped_urls=result.dropped_urls,
                         reused=kept is not None,
                         usage=result.usage,
+                        mode=result.mode,
                     )
                 )
                 continue
-            question.holds += 1
-            question.hold_reason = result.hold_reason or crew.NO_ANSWER
-            question.status = "dropped" if question.holds >= cfg.max_holds else "held"
+            outcome = self._hold(run, question, result.hold_reason or crew.NO_ANSWER)
+            outcome.dropped_urls = result.dropped_urls
+            outcome.reused = kept is not None
+            outcome.usage = result.usage
+            outcome.mode = result.mode
             if kept is None:
                 question.keep_lookups(result.draft, result.challenge, run.day)
-            run.outcomes.append(
-                _Outcome(
-                    question,
-                    question.status,
-                    reason=question.hold_reason,
-                    dropped_urls=result.dropped_urls,
-                    reused=kept is not None,
-                    usage=result.usage,
-                )
-            )
         if chosen:
             dossier.researched_at = run.day
             dossier.refresh_after = run.day + timedelta(days=cfg.refresh_days)
             dossier.runs += 1
+
+    def _hold(self, run: _Run, question: Question, reason: str, *, sent: bool = True) -> _Outcome:
+        """Hold `question` with `reason`, or drop it at `jobs.research.max_holds`,
+        and give its outcome."""
+        question.holds += 1
+        question.hold_reason = reason
+        question.status = (
+            "dropped" if question.holds >= self._settings.jobs.research.max_holds else "held"
+        )
+        outcome = _Outcome(question, question.status, reason=reason, sent=sent)
+        run.outcomes.append(outcome)
+        return outcome
 
     def _page(
         self,
@@ -646,7 +700,13 @@ class ResearchJob(Job):
         if not result.publish or result.page is None:
             return None
         context = list(dict.fromkeys(g.path for g in groundings)) or [topic.path]
+        retrieved = {
+            str(s["url"]): s["retrieved"]
+            for s in result.applied_sources
+            if isinstance(s.get("retrieved"), date)
+        }
         try:
+            self_path = layout.knowledge_page(topic.path, question.slug, self._data_dir)
             text = render_page(
                 question=question.question,
                 topic=topic.path,
@@ -656,6 +716,10 @@ class ResearchJob(Job):
                 day=run.day,
                 refresh_days=self._settings.jobs.research.refresh_days,
                 run_id=current_run_id(),
+                local_context=question.local_context,
+                applies=result.applies,
+                self_path=self_path.relative_to(self._wiki).as_posix(),
+                retrieved=retrieved,
             )
             return page_for(topic.path, question.slug, self._data_dir, text)
         except (PageTooLong, ValueError) as exc:
@@ -721,12 +785,7 @@ class ResearchJob(Job):
         dry_run: bool,
     ) -> RunReport:
         added = {q.slug for q in run.added}
-        question_lines = [
-            f"- `{q.slug}` ({q.status}{', new' if q.slug in added else ''}"
-            f"{', asked by ' + q.asked_by if q.by_person else ''}): {code_span(q.question)}"
-            f"{' (generic name)' if q.slug in run.generic else ''}"
-            for q in dossier.questions
-        ]
+        question_lines = [self._question_line(run, q, q.slug in added) for q in dossier.questions]
         rejected_lines = []
         for verdict in run.rejected:
             line = f"- {code_span(verdict.candidate.question)}: {verdict.reason}"
@@ -825,12 +884,35 @@ class ResearchJob(Job):
                 "held": [o.question.slug for o in held],
                 "dropped": [o.question.slug for o in dropped],
                 "editor_only": [o.question.slug for o in run.outcomes if o.reused],
+                "shared": sorted(run.shared),
+                "applied": [
+                    o.question.slug
+                    for o in run.outcomes
+                    if o.crew == APPLIED and o.page is not None
+                ],
+                "narrowed": [o.question.slug for o in run.outcomes if o.crew == crew.MODE_NARROWED],
+                "not_sent": [o.question.slug for o in run.outcomes if not o.sent],
                 "coverage": dossier.compute_coverage(),
                 "usage": run.ledger.as_data(),
                 "usage_by_question": {o.question.slug: o.tokens() for o in run.outcomes},
                 "insights": self._insights_data(run),
             },
         )
+
+    def _question_line(self, run: _Run, q: Question, new: bool) -> str:
+        """One line of the `Questions` section: the general question and the
+        local context."""
+        shared = ", shared" if q.shared else ""
+        head = (
+            f"- `{q.slug}` ({q.status}{', new' if new else ''}{shared}"
+            f"{', asked by ' + q.asked_by if q.by_person else ''})"
+        )
+        generic = " (generic name)" if q.slug in run.generic else ""
+        local = code_span(q.local_context) if q.local_context else "none"
+        line = f"{head}: general: {code_span(q.question)}{generic}; local: {local}"
+        if q.shared and q.page:
+            line += f"; answered by `{layout.KNOWLEDGE}/{q.page}`"
+        return line
 
     def _person_lines(self, run: _Run, dry_run: bool) -> str:
         """The body of the `For a person` section."""

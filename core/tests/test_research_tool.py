@@ -180,7 +180,19 @@ async def test_queue_question_adds_a_person_question(world: World) -> None:
     assert question.status == "open"
     assert question.grounded_in == []
     assert str(question.raised_at) == "2026-10-19"
+    assert (question.local_context, question.subject, question.shared) == ("", "Snake plant", False)
+    assert question.question == "Is the snake plant safe for a cat?"
+    assert "will not send it to the web" not in _text(reply)
     assert layout.knowledge_index(world.data).is_file()
+
+
+async def test_queue_question_says_when_a_floor_rule_will_hold_it(world: World) -> None:
+    text = "Should Alex move the snake plant away from the door in winter?"
+    reply = await do_queue_question(world.deps(), world.ctx, topic=SNAKE, question=text)
+    assert "Queued the question" in _text(reply)
+    assert "will not send it to the web as it is: the question names a person" in _text(reply)
+    dossier = load_dossier(SNAKE, world.data)
+    assert dossier is not None and dossier.questions[0].question == text
 
 
 async def test_queue_question_checks_the_length_and_the_topic_name(world: World) -> None:

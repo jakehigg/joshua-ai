@@ -14,7 +14,13 @@ core does not know, gets a "not available" reply and nothing changes.
 share, writes the dossier and ``knowledge/README.md``, and commits the wiki
 with the message ``research: question from <person>``. A person may ask a
 general question: the question must have 20 to 300 characters, end with a
-question mark, and name the topic, and no other rule of the gate applies.
+question mark, and name the topic, and no other rule of the gate applies when
+it is queued. The dossier keeps it as given, with ``local_context: ""`` and
+the generic name of the topic as its ``subject``, and the crew gets it as
+given. Before a lookup, the floor rules of the gate still apply: a question
+that names a person, holds a date of our records, or asks about us is held
+with that reason and never goes to the web. The reply says so when the
+question fails a floor rule.
 
 Core registers this server only when ``jobs.enabled`` and
 ``jobs.research.enabled`` are both true.
@@ -43,10 +49,16 @@ from joshua_core.jobs.research.dossier import (
     save_dossier,
     write_index,
 )
-from joshua_core.jobs.research.gate import shape_reason
+from joshua_core.jobs.research.gate import roster_names, shape_reason, world_reason
 from joshua_core.jobs.research.job import local_day, researchable
 from joshua_core.jobs.runner import Clock, JobArgsError, JobBusy, JobRunner, UnknownJob, utc_now
-from joshua_core.jobs.topics import is_topic_page, load_topic, read_page, topic_names
+from joshua_core.jobs.topics import (
+    generic_title,
+    is_topic_page,
+    load_topic,
+    read_page,
+    topic_names,
+)
 
 logger = get_logger("tools.research")
 
@@ -163,6 +175,8 @@ async def do_queue_question(
             Question(
                 slug=slug,
                 question=text,
+                local_context="",
+                subject=generic_title(page.title, people) or page.title,
                 asked_by=member,
                 raised_at=local_day(now, ctx.settings),
             )
@@ -174,9 +188,16 @@ async def do_queue_question(
         if wikigit.is_enabled(ctx.settings):
             wikigit.commit(wiki, written, f"research: question from {member}")
     logger.info({"message": "research question queued", "person": member})
+    floor = world_reason(text, roster_names(ctx.settings))
+    held = (
+        f" The researcher will not send it to the web as it is: {floor}. Ask it again "
+        "about the thing only, or answer it in the topic page."
+        if floor
+        else ""
+    )
     return _reply(
         f"Queued the question as `{slug}` for {topic}. The next research run takes "
-        "a topic with an open question from a person first."
+        f"a topic with an open question from a person first.{held}"
     )
 
 

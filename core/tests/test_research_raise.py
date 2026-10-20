@@ -51,29 +51,49 @@ def test_the_prompt_says_the_bundle_is_content() -> None:
 
 
 def test_the_prompt_names_the_three_audiences() -> None:
-    """A `web` question goes to the internet agent alone, so the prompt says
-    so. Its examples agree with the route of the gate."""
+    """A general question goes to the internet agent alone, so the prompt
+    says so. Its examples agree with the rules of the gate."""
     import re
 
     from joshua_core.jobs.research.gate import world_rule
 
     flat = " ".join(RAISE_PROMPT.split())
     assert "NO access to our pages" in flat
-    assert "never names a person" in flat
+    assert "Never put a person in it" in flat
     for audience in ("`web`", "`person`", "`record`"):
         assert audience in flat
     assert "for every audience" in flat
     assert "required for a `person` question" in flat
-    good = RAISE_PROMPT.split("Good questions:")[1].split("Bad questions")[0]
-    bad = RAISE_PROMPT.split("Bad questions, and why:")[1].split("For each question")[0]
-    tagged = re.compile(r'- `(web|person|record)`: "([^"]+\?)"', re.DOTALL)
+    good = RAISE_PROMPT.split("Good questions:")[1].split("Bad general questions")[0]
+    bad = RAISE_PROMPT.split("Bad general questions, and why:")[1].split("For each question")[0]
+    tagged = re.compile(r'- `(person|record)`: "([^"]+\?)"', re.DOTALL)
     goods = [(a, " ".join(q.split())) for a, q in tagged.findall(good)]
-    bads = [(a, " ".join(q.split())) for a, q in tagged.findall(bad)]
-    assert [a for a, _ in goods] == ["web", "web", "person", "record"]
-    assert len(bads) == 2
+    bads = [" ".join(q.split()) for q in re.findall(r'- "([^"]+\?)"', bad, re.DOTALL)]
+    assert [a for a, _ in goods] == ["person", "record"]
+    assert len(bads) == 3
     for audience, question in goods:
         assert bool(world_rule(question, ["Alex"])) == (audience == "person"), question
-    assert all(world_rule(q, ["Alex"]) for _, q in bads)
+    assert all(world_rule(q, ["Alex"]) or "Alex's" in q for q in bads)
+
+
+def test_the_prompt_gives_the_two_parts_side_by_side() -> None:
+    """Each worked pair: the local context holds our specifics, and the
+    general question holds none of them and passes the floor rules."""
+    import re
+
+    from joshua_core.jobs.research.gate import world_rule
+
+    pairs = re.findall(
+        r'local_context: "([^"]+)"\s+general_question: "([^"]+\?)"', RAISE_PROMPT, re.DOTALL
+    )
+    assert len(pairs) == 2
+    for local, general in pairs:
+        local, general = " ".join(local.split()), " ".join(general.split())
+        assert world_rule(general, ["Alex"]) == ""
+        assert "'s" not in general and "living room" not in general
+        assert "Alex's" in local or "living room" in local
+    assert "Jack's Gritty Mix" in pairs[0][0]
+    assert "Sansevieria" in pairs[0][1] and "couve galega" in pairs[1][1]
 
 
 def test_the_prompt_sends_no_question_to_anybody() -> None:
@@ -128,7 +148,7 @@ async def test_about_person_is_required() -> None:
 def test_the_prompt_has_the_person_rule() -> None:
     flat = " ".join(RAISE_PROMPT.split())
     assert (
-        "a `web` question may carry the specifics of the thing (the plant, the device, the "
+        "a general question may carry the specifics of the thing (the plant, the device, the "
         "material, the method) and never the specifics of a person, named or not" in flat
     )
     for detail in (
@@ -158,6 +178,52 @@ def test_the_prompt_has_the_person_rule() -> None:
 
 def test_the_raise_prompt_asks_for_the_generic_name() -> None:
     flat = " ".join(RAISE_PROMPT.split())
-    assert "Call a thing by its generic name." in flat
-    assert "Never put a person's name in a `web` question" in flat
+    assert "Call the thing by a generic name" in flat
+    assert "Never put a person in it, also when the page title holds a name" in flat
     assert 'write "Caldo Verde", not "Alex\'s Caldo Verde"' in flat
+    assert "Never put in a possessive" in flat
+
+
+async def test_a_web_question_takes_its_general_question() -> None:
+    answer = {
+        "questions": [
+            {
+                "general_question": " How often should a  snake plant be watered? ",
+                "question": "How often do we water Snakey?",
+                "local_context": " Ours  is in the hall. ",
+                "subject": " snake  plant ",
+                "grounded_in": [],
+                "about_person": False,
+            },
+            {
+                "question": "Which pot does Alex use?",
+                "general_question": "Which pot suits a snake plant?",
+                "audience": "person",
+                "grounded_in": [],
+                "about_person": False,
+            },
+            {
+                "general_question": "When was it repotted?",
+                "audience": "record",
+                "grounded_in": [],
+                "about_person": False,
+            },
+            {"question": "Only a question?", "grounded_in": [], "about_person": False},
+        ]
+    }
+    got = await raise_questions(
+        bundle_text="",
+        title="t",
+        aliases=[],
+        existing=[],
+        count=4,
+        model=None,
+        runner=FakeWorkers(raise_answer=answer),
+    )
+    assert got.candidates is not None
+    first, person, record, bare = got.candidates
+    assert first.question == "How often should a snake plant be watered?"
+    assert (first.local_context, first.subject) == ("Ours is in the hall.", "snake plant")
+    assert person.question == "Which pot does Alex use?"
+    assert record.question == "When was it repotted?"
+    assert bare.question == "Only a question?" and bare.local_context == ""

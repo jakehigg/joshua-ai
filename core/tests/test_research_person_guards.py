@@ -55,7 +55,8 @@ def raised(*questions: str, audience: str = "web", about_person: bool = False) -
     return {
         "questions": [
             {
-                "question": q,
+                ("general_question" if audience == "web" else "question"): q,
+                "local_context": "The plan is the river loop, 3 miles, at dawn, on gravel.",
                 "grounded_in": PHRASES,
                 "why": "",
                 "audience": audience,
@@ -207,4 +208,7 @@ async def test_a_possessive_title_gives_web_questions_the_generic_name(tmp_path:
         "How should lacinato kale be blanched for a soup like Caldo Verde?"
     ]
     assert "Caldo Verde?` (generic name)" in _section(report, "Questions")
-    assert [p.page.question for p in load_questions(h.data, CALDO)] == [BROTH]
+    # A general question that names a person is rejected, not routed.
+    assert load_questions(h.data, CALDO) == []
+    assert [r["question"] for r in report.data["rejected"]] == [BROTH]
+    assert report.data["rejected"][0]["reason"].startswith("names a person: ")

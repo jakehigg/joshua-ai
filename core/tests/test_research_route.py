@@ -19,6 +19,7 @@ from research_fakes import (
     GROUNDED,
     GROUNDED_PHRASES,
     LEAF,
+    LOCAL,
     SNAKE,
     FakeInternet,
     FakeStore,
@@ -44,9 +45,18 @@ def fake_embed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _raised(*items: tuple[str, list[str], str, str]) -> dict[str, Any]:
+    """A `raise` answer. A `web` question gets its general question and the
+    local context of the fixture wiki; another keeps its own `question`."""
     return {
         "questions": [
-            {"question": q, "grounded_in": g, "why": why, "audience": a, "about_person": False}
+            {
+                ("general_question" if a == "web" else "question"): q,
+                "local_context": LOCAL if a == "web" else "",
+                "grounded_in": g,
+                "why": why,
+                "audience": a,
+                "about_person": False,
+            }
             for q, g, why, a in items
         ]
     }
@@ -54,7 +64,7 @@ def _raised(*items: tuple[str, list[str], str, str]) -> dict[str, Any]:
 
 ANSWER = _raised(
     (GROUNDED, GROUNDED_PHRASES, "It sets the cadence.", "web"),
-    (PERSON_Q, PERSON_PHRASES, "", "web"),
+    (PERSON_Q, PERSON_PHRASES, "", "person"),
     (RECORD_Q, RECORD_PHRASES, "", "record"),
     (ASK_Q, ASK_PHRASES, "The pot size sets how fast the mix dries.", "person"),
 )

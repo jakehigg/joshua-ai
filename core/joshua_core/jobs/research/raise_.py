@@ -1,12 +1,16 @@
-"""The `raise` worker: questions made specific to one topic, each for one audience.
+"""The `raise` worker: questions about one topic, each for one audience.
 
-A `web` question goes to the internet agent, which searches the open web and
-has none of our pages, so it asks what an expert source can answer and carries
-our conditions in its words. It carries the specifics of a thing and never the
-specifics of a person: the worker sets `about_person` on each question, and the
-gate sends a question with `about_person: true` to a person. A `person`
-question asks what only somebody here knows. A `record` question asks what our
-own pages and journal already hold.
+A `web` question is a pair. The general question (`general_question`) goes to
+the internet agent, which searches the open web and has none of our pages. It
+names the class of the thing and its public specifics only: the species, the
+product model, the technique, the material, the season, the condition of the
+thing. `local_context` holds our specifics and why we ask, and it stays inside
+the instance: the editor reads it, and the lookups never do. `subject` is the
+generic name of the thing, when the general question holds no name of the
+topic. The worker sets `about_person` on each question, and the gate sends a
+question with `about_person: true` to a person. A `person` question asks, in
+its own `question` text, what only somebody here knows. A `record` question
+asks what our own pages and journal already hold.
 
 The worker reads the memory bundle of the topic, its title and aliases, and
 the questions the dossier holds. It has no tools. The gate in `gate.py` then
@@ -23,20 +27,32 @@ from pydantic import Field
 from joshua_core.engine.ephemeral import Runner, run_worker
 from joshua_core.engine.sanitize import CleanModel
 from joshua_core.engine.usage import Usage
-from joshua_core.jobs.research.gate import WEB, Candidate
+from joshua_core.jobs.research.gate import PERSON, RECORD, WEB, Candidate
 from joshua_core.jobs.research.prompts import RAISE_PROMPT
 
 WORKER = "raise"
 TIMEOUT_S = 120.0
 # What one answer may hold, before Python keeps only the number asked for.
 MAX_RAISED = 20
+# The schema limits are wide, so that the gate, not the schema, rejects a
+# text that is too long, and gives the reason.
+_TEXT_CHARS = 1000
+_LOCAL_CHARS = 4000
+_SUBJECT_CHARS = 400
 
 
 class RaisedQuestion(CleanModel):
     """One question as the worker gives it. Each text field is cleaned of
-    leaked markup."""
+    leaked markup.
 
-    question: str = Field(max_length=1000)
+    A `web` question has `general_question` and `local_context`. A `person`
+    or a `record` question has `question`. When the field of the audience is
+    empty, the other text field takes its place."""
+
+    question: str = Field(default="", max_length=_TEXT_CHARS)
+    general_question: str = Field(default="", max_length=_TEXT_CHARS)
+    local_context: str = Field(default="", max_length=_LOCAL_CHARS)
+    subject: str = Field(default="", max_length=_SUBJECT_CHARS)
     grounded_in: list[str] = Field(default_factory=list, max_length=12)
     why: str = Field(default="", max_length=1000)
     # `web`, `person`, or `record`. The gate reads any other value as `web`.
@@ -99,15 +115,23 @@ async def raise_questions(
     )
     if answer is None:
         return Raised(None)
-    return Raised(
-        [
-            Candidate(
-                question=" ".join(q.question.split()),
-                grounded_in=[p for p in q.grounded_in if isinstance(p, str)],
-                why=" ".join(q.why.split()),
-                audience=q.audience.strip().lower(),
-                about_person=q.about_person,
-            )
-            for q in answer.questions[:count]
-        ]
+    return Raised([candidate(q) for q in answer.questions[:count]])
+
+
+def candidate(raised: RaisedQuestion) -> Candidate:
+    """The gate's candidate of one raised question. A `web` question takes
+    its general question as its text."""
+    audience = raised.audience.strip().lower()
+    if audience in (PERSON, RECORD):
+        text = raised.question or raised.general_question
+    else:
+        text = raised.general_question or raised.question
+    return Candidate(
+        question=" ".join(text.split()),
+        grounded_in=[p for p in raised.grounded_in if isinstance(p, str)],
+        why=" ".join(raised.why.split()),
+        audience=audience,
+        about_person=raised.about_person,
+        local_context=" ".join(raised.local_context.split()),
+        subject=" ".join(raised.subject.split()),
     )

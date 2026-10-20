@@ -16,7 +16,12 @@ from typing import Any
 
 from jobs_fakes import make_settings
 from joshua_core.engine.usage import Usage
-from joshua_core.jobs.research.prompts import CHALLENGE_BRIEF, EDITOR_PROMPT, RAISE_PROMPT
+from joshua_core.jobs.research.prompts import (
+    APPLY_PROMPT,
+    CHALLENGE_BRIEF,
+    EDITOR_PROMPT,
+    RAISE_PROMPT,
+)
 
 SNAKE = "houseplants/snake-plant.md"
 POTHOS = "houseplants/pothos.md"
@@ -66,7 +71,11 @@ GROUNDED = (
 GROUNDED_PHRASES = ["gritty soil mix", "water to runoff", "65 to 68 F in winter"]
 GENERIC = "How often should I water a snake plant?"
 
+# The local context of a raised `web` question of the fixture wiki.
+LOCAL = "Our snake plant lives in the hall in a gritty soil mix, watered to runoff."
+
 RAISE_USAGE = Usage(input=100, output=10)
+APPLY_USAGE = Usage(input=80, output=8)
 LOOKUP_USAGE = Usage(input=50, output=5, cache_read=5)
 EDITOR_USAGE = Usage(input=200, output=40, cache_write=10)
 
@@ -87,7 +96,13 @@ def research_settings(extra: str = "") -> Any:
 def raised(*questions: tuple[str, list[str]]) -> dict[str, Any]:
     return {
         "questions": [
-            {"question": q, "grounded_in": g, "why": "It matters.", "about_person": False}
+            {
+                "general_question": q,
+                "local_context": LOCAL,
+                "grounded_in": g,
+                "why": "It matters.",
+                "about_person": False,
+            }
             for q, g in questions
         ]
     }
@@ -128,15 +143,20 @@ GOOD_EDITOR = editor((PRIMARY, "primary"), (SECONDARY, "secondary"))
 
 
 class FakeWorkers:
-    """The tool-less workers: `raise` and `editor`."""
+    """The tool-less workers: `raise`, `apply`, and `editor`. With no
+    `apply_answer`, the apply worker says `none`."""
 
     def __init__(
         self,
         raise_answer: Any = None,
         editor_answer: Any = None,
+        apply_answer: Any = None,
     ) -> None:
         self.raise_answer = raise_answer if raise_answer is not None else raised()
         self.editor_answer: Any = GOOD_EDITOR if editor_answer is None else editor_answer
+        self.apply_answer: Any = (
+            {"verdict": "none", "cites": []} if apply_answer is None else apply_answer
+        )
         self.calls: list[tuple[str, str]] = []
 
     def names(self) -> list[str]:
@@ -150,6 +170,14 @@ class FakeWorkers:
             if out is not None:
                 out.append(RAISE_USAGE)
             return copy.deepcopy(self.raise_answer)
+        if prompt == APPLY_PROMPT:
+            self.calls.append(("apply", kwargs["user_text"]))
+            if out is not None:
+                out.append(APPLY_USAGE)
+            value = self.apply_answer
+            if callable(value):
+                value = value(kwargs["user_text"])
+            return copy.deepcopy(value)
         if prompt == EDITOR_PROMPT:
             self.calls.append(("editor", kwargs["user_text"]))
             if out is not None:

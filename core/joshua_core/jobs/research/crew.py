@@ -1,13 +1,32 @@
-"""The crew of one question: the researcher, the challenger, and the editor.
+"""The crew of one question: knowledge first, then the researcher, the
+challenger, and the editor.
 
-1. The **researcher** is the internet agent with the question and
-   `RESEARCH_BRIEF`. It gets the question and nothing else from the wiki.
-2. The **challenger** is the internet agent with `CHALLENGE_BRIEF`: the
+0. **Knowledge first.** Before any lookup, `known.find_known` searches the
+   published knowledge pages of any topic near the general question
+   (`jobs.research.apply_sim`, at most `jobs.research.apply_pages`). With
+   one hit or more, the tool-less **apply** worker gets the general
+   question, the local context, and the whole text of each page. Its
+   verdict:
+   - `answered`: the page is written from its answer, with no lookup. Its
+     sources are the sources of the pages it cites, with their trust, and
+     its confidence is the lowest confidence of those pages.
+   - `partial`: the lookups ask its `narrowed_question`, and the editor also
+     gets the short answer of each page it cites. A narrowed question that
+     fails the floor rules (`floor`) is not sent: the crew asks the general
+     question.
+   - `none`: the crew runs as below.
+   A cited path that is not one of the pages it got is dropped. A verdict
+   of `answered` or `partial` with no cite left counts as `none`.
+1. The **researcher** is the internet agent with the general question (or
+   the narrowed one) and `RESEARCH_BRIEF`. It gets that question and nothing
+   else: no page of the wiki and no local context.
+2. The **challenger** is the internet agent with `CHALLENGE_BRIEF`: the same
    question and the draft answer, turned over.
-3. The **editor** is a tool-less worker. It gets the question, the local
-   context (each `grounded_in` phrase with its sentence of the bundle), the
-   draft and the challenge with their sources, and the trust rubric. It
-   writes the page.
+3. The **editor** is a tool-less worker. It gets the general question, the
+   local context (our specifics, then each `grounded_in` phrase with its
+   sentence of the bundle), the draft and the challenge with their sources,
+   the short answers of the cited pages, and the trust rubric. It writes the
+   page.
 
 Python then checks the editor's answer. Each of these is a hold, with a reason:
 
@@ -23,16 +42,18 @@ at any step is a hold with the reason `no answer`. A lookup that timed out is
 a hold that says so, with the searches and the fetches it made.
 
 When the caller gives a `draft` and a `challenge` that an earlier run kept,
-the crew does not look up again: the editor gets those two.
+the crew does not look up again and does not search the knowledge we hold:
+the editor gets those two.
 
 The two lookups take `jobs.research.lookup_timeout_seconds` and
 `jobs.research.lookup_max_turns` in place of the limits of the `internet`
-section. The editor takes `jobs.research.editor_timeout_seconds`.
+section. The editor takes `jobs.research.editor_timeout_seconds`, and the
+apply worker takes `APPLY_TIMEOUT_S`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -47,7 +68,14 @@ from joshua_core.engine.sanitize import CleanModel, note, recover_fields, recove
 from joshua_core.engine.types import WorkerStats
 from joshua_core.engine.url_grants import canonical
 from joshua_core.engine.usage import Usage, UsageLedger
+from joshua_core.jobs.research.known import (
+    KnowledgeSearch,
+    KnownPage,
+    find_known,
+    lowest_confidence,
+)
 from joshua_core.jobs.research.prompts import (
+    APPLY_PROMPT,
     CHALLENGE_BRIEF,
     EDITOR_PROMPT,
     RESEARCH_BRIEF,
@@ -55,10 +83,16 @@ from joshua_core.jobs.research.prompts import (
 )
 from joshua_core.jobs.research.text import Grounding, inline
 
+APPLY = "apply"
 EDITOR = "editor"
 RESEARCHER = "researcher"
 CHALLENGER = "challenger"
-STEPS = (RESEARCHER, CHALLENGER, EDITOR)
+STEPS = (APPLY, RESEARCHER, CHALLENGER, EDITOR)
+APPLY_TIMEOUT_S = 120.0
+# Which steps answered a question.
+MODE_FULL = "full crew"
+MODE_APPLIED = "applied"
+MODE_NARROWED = "narrowed"
 INTERNET = internet.WORKER
 NO_ANSWER = "no answer"
 # `internet.ask` keeps this many characters of the question text.
@@ -201,6 +235,48 @@ class EditorAnswer(CleanModel):
         return cut_list(value, SOURCE_ITEMS)
 
 
+ApplyVerdict = Literal["answered", "partial", "none"]
+CITE_ITEMS = 20
+NARROWED_CHARS = 1000
+
+
+class ApplyAnswer(CleanModel):
+    """The answer of the `apply` worker. Each text field is cleaned of leaked
+    markup, and a longer value is cut to its limit."""
+
+    verdict: ApplyVerdict
+    answer_short: str = Field(default="", max_length=ANSWER_SHORT_CHARS)
+    answer: str = Field(default="", max_length=ANSWER_CHARS)
+    local_notes: str = Field(default="", max_length=LOCAL_NOTES_CHARS)
+    cites: list[str] = Field(default_factory=list, max_length=CITE_ITEMS)
+    narrowed_question: str = Field(default="", max_length=NARROWED_CHARS)
+
+    @field_validator("answer_short", mode="before")
+    @classmethod
+    def _cut_short(cls, value: object) -> object:
+        return cut_text(value, ANSWER_SHORT_CHARS)
+
+    @field_validator("answer", mode="before")
+    @classmethod
+    def _cut_answer(cls, value: object) -> object:
+        return cut_text(value, ANSWER_CHARS)
+
+    @field_validator("local_notes", mode="before")
+    @classmethod
+    def _cut_local_notes(cls, value: object) -> object:
+        return cut_text(value, LOCAL_NOTES_CHARS)
+
+    @field_validator("narrowed_question", mode="before")
+    @classmethod
+    def _cut_narrowed(cls, value: object) -> object:
+        return cut_text(value, NARROWED_CHARS)
+
+    @field_validator("cites", mode="before")
+    @classmethod
+    def _cut_cites(cls, value: object) -> object:
+        return cut_list(value, CITE_ITEMS, 500)
+
+
 def _string(limit: int) -> dict[str, str]:
     return {"type": "string", "description": f"At most {limit} characters."}
 
@@ -244,6 +320,20 @@ EDITOR_SCHEMA: dict[str, Any] = {
         "reason": _string(REASON_CHARS),
     },
     "required": ["verdict", "confidence", "answer_short", "sources", "answer"],
+}
+
+
+APPLY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "verdict": _enum("answered", "partial", "none"),
+        "answer_short": _string(ANSWER_SHORT_CHARS),
+        "answer": _string(ANSWER_CHARS),
+        "local_notes": _string(LOCAL_NOTES_CHARS),
+        "cites": _array({"type": "string"}, CITE_ITEMS),
+        "narrowed_question": _string(300),
+    },
+    "required": ["verdict", "cites"],
 }
 
 
@@ -310,7 +400,13 @@ class CrewResult:
     no answer. `holds` lists the reasons to hold; it is empty for a page that
     may be published. `dropped_urls` are the sources the editor named that no
     lookup returned. `usage` holds the tokens of each step that ran, by step
-    name: `researcher`, `challenger`, and `editor`.
+    name: `apply`, `researcher`, `challenger`, and `editor`.
+
+    `mode` says which steps answered: `full crew`, `applied` (the apply
+    worker answered, with no lookup), or `narrowed` (the lookups asked
+    `narrowed_question`). `applies` lists the knowledge pages that the answer
+    uses, relative to the wiki root, and `applied_sources` holds their
+    sources as their frontmatter holds them. `notes` says what did not run.
     """
 
     page: EditorAnswer | None
@@ -319,6 +415,11 @@ class CrewResult:
     draft: internet.InternetAnswer | None = None
     challenge: internet.InternetAnswer | None = None
     usage: dict[str, Usage] = field(default_factory=dict)
+    mode: str = MODE_FULL
+    applies: list[str] = field(default_factory=list)
+    applied_sources: list[dict[str, Any]] = field(default_factory=list)
+    narrowed_question: str = ""
+    notes: list[str] = field(default_factory=list)
 
     @property
     def publish(self) -> bool:
@@ -404,14 +505,30 @@ def editor_text(
     draft: internet.InternetAnswer,
     challenge: internet.InternetAnswer,
     settings: JobsResearch,
+    *,
+    local_context: str = "",
+    known: Sequence[KnownPage] = (),
+    narrowed: str = "",
 ) -> str:
-    """The user text of the editor."""
-    local = "\n".join(f'- "{g.phrase}" ({g.path}): {g.sentence}' for g in groundings) or "- none"
+    """The user text of the editor. `local_context` is our specifics,
+    `known` the cited pages of a `partial` verdict, and `narrowed` the
+    question that the lookups asked in place of `question`."""
+    phrases = [f'- "{g.phrase}" ({g.path}): {g.sentence}' for g in groundings]
+    ours = [inline(local_context, 1000)] if local_context.strip() else []
+    local = "\n".join([*ours, *phrases]) or "- none"
     trusted = ", ".join(settings.trusted_domains) or "none"
     distrusted = ", ".join(settings.distrusted_domains) or "none"
+    held = ""
+    if known:
+        lines = "\n".join(
+            f"- {p.path}: {inline(p.answer_short, 300) or 'no short answer'}" for p in known
+        )
+        asked = f"\nThe lookups asked only: {narrowed}" if narrowed else ""
+        held = f"<known_answers>\n{lines}{asked}\n</known_answers>\n\n"
     return (
         f"<question>\n{question}\n</question>\n\n"
         f"<local_context>\n{local}\n</local_context>\n\n"
+        f"{held}"
         f'<draft confidence="{draft.confidence}">\n{draft.answer}\n\n'
         f"Disagreements: {draft.disagreements or 'none'}\n\nSources:\n{_sources_block(draft)}\n"
         f"</draft>\n\n"
@@ -421,6 +538,85 @@ def editor_text(
         f"<trust_rubric>\n{TRUST_RUBRIC}\n\nTrusted domains: {trusted}\n"
         f"Distrusted domains: {distrusted}\n</trust_rubric>"
     )
+
+
+def apply_text(question: str, local_context: str, pages: Sequence[KnownPage]) -> str:
+    """The user text of the `apply` worker."""
+    blocks = "\n\n".join(f'<page path="{p.path}">\n{p.text.strip()}\n</page>' for p in pages)
+    local = inline(local_context, 1000) or "none"
+    return (
+        f"<question>\n{question}\n</question>\n\n"
+        f"<local_context>\n{local}\n</local_context>\n\n"
+        f"<pages>\n{blocks}\n</pages>"
+    )
+
+
+def applied_page(answer: ApplyAnswer, pages: Sequence[KnownPage]) -> EditorAnswer:
+    """The page of an `answered` verdict: the answer of the apply worker, the
+    sources of the cited pages with their trust, once each, and the lowest
+    confidence of those pages."""
+    sources: list[EditorSource] = []
+    seen: set[str] = set()
+    for page in pages:
+        for raw in page.sources:
+            url = str(raw.get("url") or "")
+            key = canonical(url) or url
+            trust = raw.get("trust")
+            if not url or key in seen or trust not in ("primary", "secondary", "weak"):
+                continue
+            seen.add(key)
+            sources.append(
+                EditorSource.model_validate(
+                    {"url": url, "title": str(raw.get("title") or ""), "trust": trust}
+                )
+            )
+    names = ", ".join(p.path for p in pages)
+    return EditorAnswer.model_validate(
+        {
+            "verdict": "publish",
+            "confidence": lowest_confidence(pages),
+            "answer_short": answer.answer_short,
+            "sources": [s.model_dump() for s in sources],
+            "answer": answer.answer,
+            "local_notes": answer.local_notes,
+            "evidence": [],
+            "disagreements": "",
+            "reason": f"Applied from knowledge we hold: {names}",
+        }
+    )
+
+
+async def _apply(
+    question: str,
+    local_context: str,
+    pages: Sequence[KnownPage],
+    *,
+    model: str | None,
+    runner: Runner | None,
+    ledger: UsageLedger,
+    steps: dict[str, Usage],
+) -> tuple[ApplyAnswer | None, list[KnownPage]]:
+    """Run the apply worker. Gives its answer and the pages it cites that it
+    got; a cite of any other path is dropped."""
+    used: list[Usage] = []
+    answer = await run_worker(
+        name=f"research-{APPLY}",
+        system_prompt=APPLY_PROMPT,
+        user_text=apply_text(question, local_context, pages),
+        answer=ApplyAnswer,
+        schema=APPLY_SCHEMA,
+        model=model,
+        timeout_s=APPLY_TIMEOUT_S,
+        runner=runner,
+        usage_out=used,
+    )
+    ledger.add(APPLY, used)
+    steps[APPLY] = Usage.sum(used)
+    if answer is None:
+        return None, []
+    by_path = {p.path: p for p in pages}
+    cited = [by_path[c.strip()] for c in dict.fromkeys(answer.cites) if c.strip() in by_path]
+    return answer, cited
 
 
 async def research_question(
@@ -435,14 +631,65 @@ async def research_question(
     editor_runner: Runner | None = None,
     draft: internet.InternetAnswer | None = None,
     challenge: internet.InternetAnswer | None = None,
+    local_context: str = "",
+    knowledge: KnowledgeSearch | None = None,
+    floor: Callable[[str], str] | None = None,
 ) -> CrewResult:
-    """Run the crew for one question. Each call is counted on `ledger`, and
-    the tokens of each step are on `CrewResult.usage`.
+    """Run the crew for one general question. Each call is counted on
+    `ledger`, and the tokens of each step are on `CrewResult.usage`.
+
+    `local_context` goes to the apply worker and the editor, never to a
+    lookup. With `knowledge`, the crew first searches the knowledge we hold
+    (see the module docstring). `floor` gives the reason why a narrowed
+    question must not go to the web, or `""`.
 
     When both `draft` and `challenge` are given, the two lookups do not run,
     and the editor gets these two answers.
     """
     steps: dict[str, Usage] = {}
+    notes: list[str] = []
+    mode = MODE_FULL
+    cited: list[KnownPage] = []
+    asked = question
+    if knowledge is not None and (draft is None or challenge is None):
+        pages = await find_known(question, knowledge)
+        notes.extend(knowledge.notes)
+        knowledge.notes.clear()
+        if pages:
+            applied, cited = await _apply(
+                question,
+                local_context,
+                pages,
+                model=editor_model,
+                runner=editor_runner,
+                ledger=ledger,
+                steps=steps,
+            )
+            verdict = applied.verdict if applied is not None and cited else "none"
+            if applied is None:
+                notes.append(f"{NO_ANSWER} from the apply worker; the full crew ran")
+            if verdict == "answered" and applied is not None:
+                return CrewResult(
+                    page=applied_page(applied, cited),
+                    holds=["the confidence is low"] if lowest_confidence(cited) == "low" else [],
+                    usage=steps,
+                    mode=MODE_APPLIED,
+                    applies=[p.path for p in cited],
+                    applied_sources=[s for p in cited for s in p.sources],
+                    notes=notes,
+                )
+            if verdict == "partial" and applied is not None:
+                narrowed = " ".join(applied.narrowed_question.split())
+                why = floor(narrowed) if floor is not None else ""
+                if narrowed and not why:
+                    asked, mode = narrowed, MODE_NARROWED
+                else:
+                    notes.append(
+                        "the narrowed question was not sent"
+                        f" ({why or 'it was empty'}); the lookups asked the general question"
+                    )
+            else:
+                cited = []
 
     async def lookup(step: str, text: str, stats: WorkerStats) -> internet.InternetAnswer | None:
         used: list[Usage] = []
@@ -459,28 +706,40 @@ async def research_question(
         steps[step] = Usage.sum(used)
         return got
 
+    def result(**kwargs: Any) -> CrewResult:
+        return CrewResult(
+            usage=steps,
+            mode=mode,
+            applies=[p.path for p in cited],
+            narrowed_question=asked if mode == MODE_NARROWED else "",
+            notes=notes,
+            **kwargs,
+        )
+
     if draft is None or challenge is None:
         stats = WorkerStats()
-        draft = await lookup(RESEARCHER, research_text(question), stats)
+        draft = await lookup(RESEARCHER, research_text(asked), stats)
         if draft is None:
-            return CrewResult(
-                page=None, holds=[no_answer_reason("the researcher", stats)], usage=steps
-            )
+            return result(page=None, holds=[no_answer_reason("the researcher", stats)])
         stats = WorkerStats()
-        challenge = await lookup(CHALLENGER, challenge_text(question, draft.answer), stats)
+        challenge = await lookup(CHALLENGER, challenge_text(asked, draft.answer), stats)
         if challenge is None:
-            return CrewResult(
-                page=None,
-                holds=[no_answer_reason("the challenger", stats)],
-                draft=draft,
-                usage=steps,
-            )
+            return result(page=None, holds=[no_answer_reason("the challenger", stats)], draft=draft)
 
     used: list[Usage] = []
     edited = await run_worker(
         name=f"research-{EDITOR}",
         system_prompt=EDITOR_PROMPT,
-        user_text=editor_text(question, groundings, draft, challenge, research_settings),
+        user_text=editor_text(
+            question,
+            groundings,
+            draft,
+            challenge,
+            research_settings,
+            local_context=local_context,
+            known=cited,
+            narrowed=asked if mode == MODE_NARROWED else "",
+        ),
         answer=EditorAnswer,
         schema=EDITOR_SCHEMA,
         model=editor_model,
@@ -491,16 +750,15 @@ async def research_question(
     ledger.add(EDITOR, used)
     steps[EDITOR] = Usage.sum(used)
     if edited is None:
-        return CrewResult(
-            page=None,
-            holds=[f"{NO_ANSWER} from the editor"],
-            draft=draft,
-            challenge=challenge,
-            usage=steps,
+        return result(
+            page=None, holds=[f"{NO_ANSWER} from the editor"], draft=draft, challenge=challenge
         )
     given = [s.url for s in draft.sources] + [s.url for s in challenge.sources]
-    result = check_editor(edited, given, research_settings)
-    result.draft = draft
-    result.challenge = challenge
-    result.usage = steps
-    return result
+    checked = check_editor(edited, given, research_settings)
+    return result(
+        page=checked.page,
+        holds=checked.holds,
+        dropped_urls=checked.dropped_urls,
+        draft=draft,
+        challenge=challenge,
+    )
