@@ -16,7 +16,7 @@ from joshua_core.store.repo import Repo
 
 _TABLES = (
     "channels, people, person_handles, conversations, tasks, transcript, kb_event, kb_chunk, "
-    "job_run, curator_finding"
+    "job_run, curator_finding, usage_event"
 )
 
 

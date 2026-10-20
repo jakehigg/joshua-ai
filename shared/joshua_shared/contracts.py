@@ -6,6 +6,8 @@ Core never trusts ``framing`` from user input; only the scheduler and ops set it
 
 ``SearchRequest`` and ``SearchResponse`` are the shapes of core's
 ``POST /v1/memory/search``, which the viewer and an addon call.
+``UsageResponse`` is the shape of core's ``GET /v1/usage``, which the viewer
+calls for its usage page.
 """
 
 from __future__ import annotations
@@ -166,3 +168,47 @@ class SearchHit(_Model):
 
 class SearchResponse(_Model):
     results: list[SearchHit]
+
+
+# The window of ``GET /v1/usage``, in days.
+USAGE_DEFAULT_DAYS = 30
+USAGE_MAX_DAYS = 366
+
+
+class UsageCounts(_Model):
+    """The calls and the tokens of one group. ``total`` is input, output,
+    cache read, and cache write, added."""
+
+    calls: int = 0
+    input: int = 0
+    output: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+    total: int = 0
+
+
+class UsageGroup(UsageCounts):
+    """The counts of one group, and of each worker in it. Only a job group
+    has workers; the map is empty for every other group."""
+
+    workers: dict[str, UsageCounts] = {}
+
+
+class UsageDay(_Model):
+    """One calendar day in the instance timezone, as ``YYYY-MM-DD``, and the
+    groups that used tokens on it."""
+
+    date: str
+    groups: dict[str, UsageGroup]
+
+
+class UsageResponse(_Model):
+    """The tokens of each group by day. ``rows`` is newest first and holds
+    only the days with usage. ``groups`` names every group in the window,
+    sorted."""
+
+    timezone: str
+    days: int
+    groups: list[str]
+    rows: list[UsageDay]
+    totals: dict[str, UsageGroup]

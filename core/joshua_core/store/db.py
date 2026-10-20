@@ -186,6 +186,32 @@ CREATE TABLE IF NOT EXISTS curator_pair (
     hash_b       TEXT NOT NULL,
     checked_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- The tokens of the model calls, for the usage page (see docs/operations.md).
+-- `kind`: 'chat' | 'nightly' | 'internet' | 'describe' | 'job'. `name` is the
+-- job name for a job row, else the kind. `worker` is the worker inside a job
+-- run, else NULL. `calls` is 1 for one call; a job row sums the calls of one
+-- worker in one run. `ref` names the source of the row, such as
+-- 'transcript:<id>' or 'job_run:<id>:<worker>', so a backfill writes a row
+-- once. A row holds counts only: no message, no question, no token.
+CREATE TABLE IF NOT EXISTS usage_event (
+    id              BIGSERIAL PRIMARY KEY,
+    at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    kind            TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    worker          TEXT,
+    model           TEXT,
+    person_id       TEXT,
+    conversation_id UUID,
+    run_id          BIGINT,
+    ref             TEXT UNIQUE,
+    calls           INT NOT NULL DEFAULT 1,
+    input           INT NOT NULL DEFAULT 0,
+    output          INT NOT NULL DEFAULT 0,
+    cache_read      INT NOT NULL DEFAULT 0,
+    cache_write     INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_usage_event_at ON usage_event (at DESC);
 """
 
 

@@ -114,6 +114,10 @@ class FakeJobRunStore:
     def __init__(self) -> None:
         self.rows: dict[int, dict[str, Any]] = {}
         self.fail_finish = False
+        self.usage_events: list[Any] = []
+
+    async def add_usage_event(self, event: Any) -> None:
+        self.usage_events.append(event)
 
     async def create_job_run(
         self, *, job: str, args: dict[str, Any], dry_run: bool, started_at: datetime

@@ -10,6 +10,12 @@ the runner writes the report as a journal entry at
 and every path the job wrote, in one wiki commit. A dry run writes nothing and
 records the report in its row only. A run that fails records its error and
 never raises out of its task.
+
+Each run collects what its workers used in one `UsageLedger` (see
+`usage.collect_run`). When the run ends, also when it fails and also for a dry
+run, the runner writes one `usage_event` row for each worker, with the ref
+`job_run:<run id>:<worker>`. A job that raises keeps its counts this way, and
+they go into the row of the run too.
 """
 
 from __future__ import annotations
@@ -30,6 +36,9 @@ import yaml
 from joshua_shared import layout, wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
+
+from joshua_core.engine.usage import UsageLedger, collect_run
+from joshua_core.store.usage_events import record_job_usage
 
 logger = get_logger("jobs.runner")
 
@@ -181,6 +190,9 @@ class JobRunStore(Protocol):
 
     async def list_job_runs(self, job: str | None, limit: int = 20) -> list[dict[str, Any]]: ...
 
+    # `usage_events.record_job_usage` calls `add_usage_event` too. A store
+    # without it logs a warning for each worker and the run goes on.
+
 
 def journal_slug(job: str, day: date, run_id: int) -> str:
     """`<job>-<YYYYMMDD>-<run id>`, the journal slug of one run."""
@@ -291,20 +303,33 @@ class JobRunner:
     async def _run(
         self, run_id: int, job: Job, args: dict[str, Any], dry_run: bool, started: datetime
     ) -> None:
+        ledger = UsageLedger()
         try:
-            report = await self._execute(run_id, job, args, dry_run, started)
+            report = await self._execute(run_id, job, args, dry_run, started, ledger)
             await self._finish(run_id, report)
         except Exception as exc:  # noqa: BLE001 — a run must never raise out of its task
             logger.error({"message": "job run not recorded", "run_id": run_id, "error": str(exc)})
         finally:
-            self._lock.release()
+            try:
+                await record_job_usage(
+                    self._repo, job=job.name, run_id=run_id, ledger=ledger, at=started
+                )
+            finally:
+                self._lock.release()
 
     async def _execute(
-        self, run_id: int, job: Job, args: dict[str, Any], dry_run: bool, started: datetime
+        self,
+        run_id: int,
+        job: Job,
+        args: dict[str, Any],
+        dry_run: bool,
+        started: datetime,
+        ledger: UsageLedger,
     ) -> RunReport:
         token = _CURRENT_RUN_ID.set(run_id)
         try:
-            report = await job.run_once(args=args, dry_run=dry_run, clock=self._clock)
+            with collect_run(ledger):
+                report = await job.run_once(args=args, dry_run=dry_run, clock=self._clock)
         except Exception as exc:  # noqa: BLE001 — the error goes into the report
             report = RunReport(
                 job=job.name,
@@ -312,7 +337,10 @@ class JobRunner:
                 dry_run=dry_run,
                 args=args,
                 summary="The run failed.",
+                calls=ledger.calls,
+                tokens=ledger.tokens,
                 error=str(exc) or repr(exc),
+                data={"usage": ledger.as_data()},
             )
         finally:
             _CURRENT_RUN_ID.reset(token)

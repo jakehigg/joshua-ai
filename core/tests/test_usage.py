@@ -153,8 +153,22 @@ def test_the_ledger_sums_by_worker() -> None:
     assert ledger.calls == 3
     assert ledger.tokens == 20
     assert ledger.as_data() == {
-        "internet": {"calls": 2, "tokens": 10},
-        "raise": {"calls": 1, "tokens": 10},
+        "internet": {
+            "calls": 2,
+            "tokens": 10,
+            "input": 5,
+            "output": 5,
+            "cache_read": 0,
+            "cache_write": 0,
+        },
+        "raise": {
+            "calls": 1,
+            "tokens": 10,
+            "input": 10,
+            "output": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+        },
     }
 
 

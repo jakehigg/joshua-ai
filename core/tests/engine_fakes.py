@@ -41,6 +41,7 @@ class FakeRepo:
         self.transcripts: list[dict[str, Any]] = []
         self.sdk_sessions: dict[str, str] = {}
         self.touched: list[str] = []
+        self.usage_events: list[Any] = []
         self._people = {
             "alex": Person(id="alex", display_name="Alex", role="member"),
             "mia": Person(id="mia", display_name="Mia", role="member"),
@@ -56,7 +57,7 @@ class FakeRepo:
         content: str,
         status: str = "ok",
         meta: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> int:
         self.transcripts.append(
             {
                 "conversation_id": conversation_id,
@@ -66,6 +67,10 @@ class FakeRepo:
                 "meta": meta or {},
             }
         )
+        return len(self.transcripts)
+
+    async def add_usage_event(self, event: Any) -> None:
+        self.usage_events.append(event)
 
     async def set_sdk_session(
         self, conversation_id: str, session_id: str, last_channel_id: str | None = None

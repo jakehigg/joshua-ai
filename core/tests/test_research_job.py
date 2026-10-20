@@ -275,11 +275,12 @@ async def test_run_tokens_are_the_sum_over_every_worker(h: Harness) -> None:
     expected = RAISE_USAGE.total + 2 * LOOKUP_USAGE.total + EDITOR_USAGE.total
     assert report.tokens == expected
     assert report.calls == 4
-    assert report.data["usage"] == {
-        "editor": {"calls": 1, "tokens": EDITOR_USAGE.total},
-        "internet": {"calls": 2, "tokens": 2 * LOOKUP_USAGE.total},
-        "raise": {"calls": 1, "tokens": RAISE_USAGE.total},
+    assert {w: (d["calls"], d["tokens"]) for w, d in report.data["usage"].items()} == {
+        "editor": (1, EDITOR_USAGE.total),
+        "internet": (2, 2 * LOOKUP_USAGE.total),
+        "raise": (1, RAISE_USAGE.total),
     }
+    assert report.data["usage"]["internet"]["input"] == 2 * LOOKUP_USAGE.input
 
 
 async def test_max_questions_caps_the_run(h: Harness) -> None:

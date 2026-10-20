@@ -41,6 +41,15 @@ from joshua_shared import frontmatter, layout
 from research_fakes import changed, snapshot
 
 
+def _split(used: Any) -> dict[str, int]:
+    return {
+        "input": used.input,
+        "output": used.output,
+        "cache_read": used.cache_read,
+        "cache_write": used.cache_write,
+    }
+
+
 @pytest.fixture(autouse=True)
 def fake_embed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(embed_module, "embed", lambda text, model="": claim_vector(text))
@@ -136,7 +145,9 @@ async def test_a_summer_program_in_autumn_raises_one_insight(h: Harness) -> None
     assert rows and found.id in rows[0] and "2026-11-30" in rows[0]
     assert set(report.written) == {found.path, layout.insights_index(h.data)}
     assert report.calls == 1 and report.tokens == INSIGHT_USAGE.total
-    assert report.data["usage"] == {"insight": {"calls": 1, "tokens": INSIGHT_USAGE.total}}
+    assert report.data["usage"] == {
+        "insight": {"calls": 1, "tokens": INSIGHT_USAGE.total, **_split(INSIGHT_USAGE)}
+    }
     assert [s[0] for s in report.sections] == [
         "Knowledge",
         "New",

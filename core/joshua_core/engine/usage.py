@@ -14,12 +14,20 @@ before any model message appends nothing.
 
 `UsageLedger` sums the calls of one job run by worker name. Its `as_data`
 value goes into `RunReport.data["usage"]`, and its `tokens` into
-`RunReport.tokens`.
+`RunReport.tokens`. For each worker, `as_data` gives `calls`, `tokens` (the
+total), and the four counts `input`, `output`, `cache_read`, and
+`cache_write`.
+
+`collect_run` makes one ledger the ledger of the run: each `UsageLedger.add`
+in its context also adds to that ledger. The job runner uses it, so it knows
+what a run used also when the job raises before it returns its report.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -158,10 +166,20 @@ class UsageLedger:
         self._by_worker: dict[str, _WorkerUsage] = {}
 
     def add(self, worker: str, usages: Iterable[Usage] = (), *, calls: int = 1) -> None:
-        """Count `calls` calls of `worker` and add the tokens of `usages`."""
+        """Count `calls` calls of `worker` and add the tokens of `usages`.
+
+        The ledger of the run (see `collect_run`) gets the same counts, when
+        there is one and it is not this ledger."""
+        used = Usage.sum(usages)
+        self._add(worker, used, calls)
+        outer = _RUN_LEDGER.get()
+        if outer is not None and outer is not self:
+            outer._add(worker, used, calls)
+
+    def _add(self, worker: str, used: Usage, calls: int) -> None:
         entry = self._by_worker.setdefault(worker, _WorkerUsage())
         entry.calls += calls
-        entry.usage = entry.usage + Usage.sum(usages)
+        entry.usage = entry.usage + used
 
     @property
     def calls(self) -> int:
@@ -175,9 +193,35 @@ class UsageLedger:
     def tokens(self) -> int:
         return self.usage.total
 
+    def workers(self) -> list[tuple[str, int, Usage]]:
+        """`(worker, calls, usage)` for each worker, sorted by worker name."""
+        return [(name, e.calls, e.usage) for name, e in sorted(self._by_worker.items())]
+
     def as_data(self) -> dict[str, dict[str, int]]:
-        """`{worker: {"calls": n, "tokens": m}}`, sorted by worker name."""
+        """`{worker: {"calls", "tokens", "input", "output", "cache_read",
+        "cache_write"}}`, sorted by worker name. `tokens` is the total."""
         return {
-            name: {"calls": entry.calls, "tokens": entry.usage.total}
-            for name, entry in sorted(self._by_worker.items())
+            name: {
+                "calls": calls,
+                "tokens": used.total,
+                "input": used.input,
+                "output": used.output,
+                "cache_read": used.cache_read,
+                "cache_write": used.cache_write,
+            }
+            for name, calls, used in self.workers()
         }
+
+
+# The ledger of the run that works in this context, or None. See `collect_run`.
+_RUN_LEDGER: ContextVar[UsageLedger | None] = ContextVar("usage_run_ledger", default=None)
+
+
+@contextmanager
+def collect_run(ledger: UsageLedger) -> Iterator[UsageLedger]:
+    """Make `ledger` the ledger of the run for the code in this context."""
+    token = _RUN_LEDGER.set(ledger)
+    try:
+        yield ledger
+    finally:
+        _RUN_LEDGER.reset(token)

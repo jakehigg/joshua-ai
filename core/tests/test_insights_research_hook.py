@@ -107,7 +107,8 @@ async def test_a_published_page_runs_the_insight_pass_in_the_same_run(h: Harness
     written = {p.relative_to(h.wiki).as_posix() for p in report.written}
     assert f"insights/{found.id}.md" in written and "insights/README.md" in written
     assert any(p.startswith("knowledge/houseplants/snake-plant/") for p in written)
-    assert report.data["usage"]["insight"] == {"calls": 1, "tokens": INSIGHT_USAGE.total}
+    insight = report.data["usage"]["insight"]
+    assert (insight["calls"], insight["tokens"]) == (1, INSIGHT_USAGE.total)
     assert report.tokens == sum(v["tokens"] for v in report.data["usage"].values())
     sections = dict(report.sections)
     assert "(1 new, 0 refreshed" in sections["Insights"]
