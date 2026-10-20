@@ -106,8 +106,8 @@ For each question, answer with:
   page: the generic name of the thing, as the general question writes it,
   such as "snake plant" or "Portuguese kale". 80 characters or less.
 - `question`: for `person` and `record` only. One question, 20 to 300
-  characters, that names the page title or one of its other names and ends
-  with a question mark.
+  characters, that ends with a question mark. It need not name the page:
+  the question keeps its page and its context.
 - `about_person`: true when the question carries a specific of a person,
   named or not, by the rule above; else false. It is required for every
   question.

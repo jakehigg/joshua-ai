@@ -774,9 +774,18 @@ and rejects it with a reason at the first rule that it fails:
 2. The general question has 20 to 300 characters and ends with `?`.
 3. It holds a name of the topic (see
    [Topics and the memory bundle](#topics-and-the-memory-bundle)), or the
-   `subject` that the worker gave. A `subject` that the question does not
-   hold is a rejection. With no `subject`, the dossier keeps the name of the
-   topic that the question holds as its `subject`.
+   `subject` that the worker gave. The question holds the subject when it
+   holds the subject as a phrase, or when it holds at least 2 of the content
+   words of the subject and at least 60 percent of them. The content words
+   are the words of the subject in lower case, split at each hyphen, with no
+   small word such as "a", "the", "of", "for", "in", or "inside". A word
+   matches when a word of the question starts with its stem: the word with no
+   `ing`, `ed`, `es`, or `s` at its end, when 3 letters or more stay. So
+   "Buildah image build inside a container" matches "building container
+   images inside a container". A `subject` that the question does not hold is
+   a rejection, and the reason names the missing words. With no `subject`,
+   the dossier keeps the name of the topic that the question holds as its
+   `subject`.
 4. `local_context` has 40 to 600 characters.
 5. `grounded_in` has two phrases or more. Each phrase has 3 to 160 characters
    and occurs word for word in the bundle text. Case and line breaks do not
@@ -813,8 +822,9 @@ can answer.
 #### The gate on a `person` or a `record` question
 
 A `person` or a `record` question keeps its own `question` text, and the pair
-rules do not apply to it. It must have the length of rule 2, name the topic,
-pass rule 5, and not be a duplicate. A `person` question from the worker has a
+rules do not apply to it. It must have the length of rule 2, pass rule 5, and
+not be a duplicate. It need not name the topic, because its page stores the
+topic and the context. A `person` question from the worker has a
 `why`. When the question fails a floor rule, it goes to `person`, and its
 `route_reason` is the name of the rule. A question of a person section that is
 not `record` goes to `person` (`person section`), and so does a question with

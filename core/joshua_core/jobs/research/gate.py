@@ -17,9 +17,11 @@ in this order, and rejects it at the first rule it fails:
 2. The general question is 20 to 300 characters and ends with `?`.
 3. It holds a name of the topic by the rule of `topics.names_pattern`, or
    the `subject` that the worker gives: a generic name of the thing, such as
-   "a snake plant". A `subject` that the question does not hold is a
-   rejection. With no `subject`, the gate keeps the topic name it found as
-   the subject.
+   "a snake plant". The question holds the subject when it holds the subject
+   as a phrase by the same rule, or when it holds the content words of the
+   subject (see `holds_subject`). A `subject` that the question does not
+   hold is a rejection that names the missing words. With no `subject`, the
+   gate keeps the topic name it found as the subject.
 4. `local_context` is 40 to 600 characters.
 5. `grounded_in` has 2 phrases or more, each 3 to 160 characters, and each
    occurs verbatim in the bundle text. Case and white space do not count.
@@ -51,8 +53,9 @@ the worker judges, and the floor rules still apply when the worker says
 `false`. Every other `web` question goes to the dossier.
 
 A `person` or a `record` question keeps its own `question` text, which may
-name a person, and the pair rules do not apply to it. It must hold a name of
-the topic, have the shape of rule 2, and pass rule 5 and rule 7 (with no
+name a person, and the pair rules do not apply to it. The topic rule does
+not apply either, because the page of the question stores its topic and its
+context. It must have the shape of rule 2 and pass rule 5 and rule 7 (with no
 shared answer). When it fails a floor rule, it goes to `person`, and
 `route_reason` names the rule. A question of a person section that is not
 `record` goes to `person` (`person section`), and so does one with
@@ -102,6 +105,19 @@ QUESTION_MAX_CHARS = 300
 LOCAL_MIN_CHARS = 40
 LOCAL_MAX_CHARS = 600
 SUBJECT_MAX_CHARS = 80
+# The words of a subject that are not content words.
+SUBJECT_STOP_WORDS = frozenset(
+    "a an the of for in on to and or with inside into from by at is are".split()
+)
+# A question holds a subject by its content words when it holds this many of
+# them, and this share of them.
+SUBJECT_MIN_WORDS = 2
+SUBJECT_MIN_SHARE = 0.6
+# The endings that a stem drops, in this order. A stem keeps at least
+# `_STEM_MIN_CHARS` characters.
+_STEM_ENDINGS = ("ing", "ed", "es", "s")
+_STEM_MIN_CHARS = 3
+_WORD_RE = re.compile(r"[^\W_]+")
 # The kinds of the index that hold our records.
 RECORD_KINDS = ("wiki", "journal", "knowledge")
 # The folders of the wiki where a record can be: the topic pages, the journal,
@@ -306,6 +322,61 @@ def shape_reason(question: str, terms: Sequence[str]) -> str:
     return ""
 
 
+def _words(text: str) -> list[str]:
+    """The words of `text` in lower case. A hyphen or a mark splits a word."""
+    return _WORD_RE.findall(text.casefold())
+
+
+def stem(word: str) -> str:
+    """`word` without the first of `_STEM_ENDINGS` that it ends with, when at
+    least `_STEM_MIN_CHARS` characters stay."""
+    for ending in _STEM_ENDINGS:
+        if word.endswith(ending) and len(word) - len(ending) >= _STEM_MIN_CHARS:
+            return word[: -len(ending)]
+    return word
+
+
+def subject_words(subject: str) -> list[str]:
+    """The content words of `subject`, once each, in order: its words in lower
+    case, with no word of `SUBJECT_STOP_WORDS`."""
+    return list(dict.fromkeys(w for w in _words(subject) if w not in SUBJECT_STOP_WORDS))
+
+
+def missing_subject_words(question: str, subject: str) -> list[str]:
+    """The content words of `subject` that `question` does not hold. The
+    question holds a word when one of its words starts with the stem of it."""
+    held = _words(question)
+    return [w for w in subject_words(subject) if not any(h.startswith(stem(w)) for h in held)]
+
+
+def holds_subject(question: str, subject: str) -> bool:
+    """True when `question` holds `subject`: as a phrase by the rule of
+    `topics.names_pattern`, or by its content words. By its content words,
+    the question holds `SUBJECT_MIN_WORDS` of them or more, and
+    `SUBJECT_MIN_SHARE` of them or more."""
+    pattern = names_pattern([subject])
+    if pattern is not None and pattern.search(question) is not None:
+        return True
+    words = subject_words(subject)
+    found = len(words) - len(missing_subject_words(question, subject))
+    return found >= SUBJECT_MIN_WORDS and found >= SUBJECT_MIN_SHARE * len(words)
+
+
+def subject_reason(question: str, subject: str) -> str:
+    """Why `question` does not hold `subject`, with the missing content
+    words, or `""`."""
+    if holds_subject(question, subject):
+        return ""
+    reason = f"the question does not hold its subject `{subject[:100]}`"
+    missing = missing_subject_words(question, subject)
+    if missing:
+        return f"{reason}; missing words: {', '.join(f'`{w}`' for w in missing)}"
+    return (
+        f"{reason}; a subject with fewer than {SUBJECT_MIN_WORDS} content words "
+        "must occur as a phrase"
+    )
+
+
 def subject_of(question: str, terms: Sequence[str], subject: str) -> tuple[str, str]:
     """The subject of a general question and why it fails the topic rule, as
     `(reason, subject)`. See rule 3 of the module docstring."""
@@ -313,10 +384,8 @@ def subject_of(question: str, terms: Sequence[str], subject: str) -> tuple[str, 
     if given:
         if len(given) > SUBJECT_MAX_CHARS:
             return f"the subject has {len(given)} characters; at most {SUBJECT_MAX_CHARS}", ""
-        pattern = names_pattern([given])
-        if pattern is None or pattern.search(question) is None:
-            return f"the question does not hold its subject `{given[:100]}`", ""
-        return "", given
+        reason = subject_reason(question, given)
+        return (reason, "") if reason else ("", given)
     pattern = names_pattern(terms)
     found = pattern.search(question) if pattern is not None else None
     if found is None:
@@ -605,7 +674,7 @@ class Gate:
 
     async def _check(self, candidate: Candidate, *, person: bool) -> Verdict:
         question = candidate.question
-        reason = shape_reason(question, self._terms)
+        reason = shape_reason(question, self._terms) if person else form_reason(question)
         if reason:
             return Verdict(candidate, False, reason)
         if person:

@@ -24,10 +24,14 @@ from joshua_core.jobs.research.gate import (
     cosine,
     generic_question,
     grounding_reason,
+    holds_subject,
+    missing_subject_words,
     names_topic,
     normalize,
     roster_names,
     shape_reason,
+    stem,
+    subject_words,
     world_reason,
     world_rule,
 )
@@ -125,7 +129,14 @@ async def test_a_general_question_may_hold_a_subject_in_place_of_the_topic_name(
     assert verdict.accepted, verdict.reason
     assert verdict.candidate.subject == "Sansevieria"
     missing = await _gate(tmp_path).check(web(question, GROUNDED_PHRASES, subject="cactus"))
-    assert missing.reason == "the question does not hold its subject `cactus`"
+    assert missing.reason == (
+        "the question does not hold its subject `cactus`; missing words: `cactus`"
+    )
+    stemmed = await _gate(tmp_path).check(web(question, GROUNDED_PHRASES, subject="water"))
+    assert stemmed.reason == (
+        "the question does not hold its subject `water`; a subject with fewer than "
+        "2 content words must occur as a phrase"
+    )
     long = await _gate(tmp_path).check(web(question, GROUNDED_PHRASES, subject="x" * 81))
     assert "the subject has 81 characters" in long.reason
 
@@ -723,3 +734,140 @@ def test_generic_question() -> None:
     assert generic_question("Is Alex's stew spicy?", forms, "Caldo Verde") == (
         "Is Alex's stew spicy?"
     )
+
+
+# The topic and the questions of research run 13.
+APPDAEMON_BUNDLE = (
+    "## AppDaemon\n\nThe apps live in apps.yaml. device_unavailable.py is a stub. "
+    "fish_tracker.py is not registered. motion_lights.py and room_control.py both "
+    "drive the lights. The image builds with buildah in CI. Postgres runs as a "
+    "StatefulSet. The fan curve uses a power curve on the temperature difference."
+)
+APPDAEMON_LOCAL = "The AppDaemon apps run on the cluster and build in CI with buildah."
+RUN13_WEB = [
+    (
+        "Buildah image build inside a container",
+        "Why does Buildah need the vfs storage driver and chroot isolation when building "
+        "container images inside a container that lacks nested overlayfs support?",
+        ["The image builds with buildah", "in CI"],
+    ),
+    (
+        "Kubernetes StatefulSet pod anti-affinity",
+        "What is the purpose of configuring pod anti-affinity for a Kubernetes StatefulSet "
+        "to spread it away from other stateful applications across nodes?",
+        ["runs as a StatefulSet", "Postgres"],
+    ),
+    (
+        "temperature-based fan speed power curve",
+        "What exponent is commonly used in a power-curve formula mapping temperature "
+        "difference to fan speed percentage for quiet, gradual cooling response?",
+        ["power curve", "temperature difference"],
+    ),
+]
+RUN13_PERSON = [
+    (
+        "Is 'device_unavailable.py' planned to be finished and registered in 'apps.yaml', "
+        "or will it remain a stub?",
+        ["device_unavailable.py is a stub", "apps.yaml"],
+    ),
+    (
+        "Why is 'fish_tracker.py' not currently registered in 'apps.yaml'?",
+        ["fish_tracker.py is not registered", "apps.yaml"],
+    ),
+    (
+        "Is 'motion_lights.py' intended to replace or complement 'room_control.py'?",
+        ["motion_lights.py", "room_control.py"],
+    ),
+]
+
+
+def _appdaemon_gate(tmp_path: Path) -> Gate:
+    return Gate(
+        bundle_text=APPDAEMON_BUNDLE,
+        terms=["AppDaemon"],
+        existing=[],
+        store=FakeStore(),
+        dup_sim=0.85,
+        data_root=tmp_path,
+        embed=_embed,
+        people=["Alex", "alex", "Bo", "bo"],
+    )
+
+
+@pytest.mark.parametrize(("subject", "question", "phrases"), RUN13_WEB)
+async def test_a_question_holds_its_subject_by_its_content_words(
+    tmp_path: Path, subject: str, question: str, phrases: list[str]
+) -> None:
+    assert holds_subject(question, subject)
+    candidate = Candidate(question, phrases, local_context=APPDAEMON_LOCAL, subject=subject)
+    verdict = await _appdaemon_gate(tmp_path).check(candidate)
+    assert verdict.accepted, verdict.reason
+    assert verdict.route == WEB and verdict.candidate.subject == subject
+
+
+async def test_a_question_with_other_content_words_does_not_hold_the_subject(
+    tmp_path: Path,
+) -> None:
+    question = "How often should a pothos be watered?"
+    assert not holds_subject(question, "snake plant watering")
+    assert missing_subject_words(question, "snake plant watering") == ["snake", "plant"]
+    candidate = Candidate(
+        question, GROUNDED_PHRASES, local_context=LOCAL, subject="snake plant watering"
+    )
+    verdict = await _gate(tmp_path).check(candidate)
+    assert verdict.reason == (
+        "the question does not hold its subject `snake plant watering`; "
+        "missing words: `snake`, `plant`"
+    )
+
+
+def test_the_content_words_and_the_stems_of_a_subject() -> None:
+    assert subject_words("Buildah image build inside a container") == [
+        "buildah",
+        "image",
+        "build",
+        "container",
+    ]
+    assert subject_words("temperature-based fan curve") == ["temperature", "based", "fan", "curve"]
+    assert subject_words("the of and") == []
+    assert [stem(w) for w in ("building", "watered", "boxes", "curves", "bus", "is")] == [
+        "build",
+        "water",
+        "box",
+        "curv",
+        "bus",
+        "is",
+    ]
+    # The share rule: 2 of 4 content words is less than 60 percent.
+    assert not holds_subject("Which fan suits a curve?", "temperature-based fan curve")
+    assert holds_subject("Which fan suits a temperature curve?", "temperature-based fan curve")
+    assert not holds_subject("Is the a of?", "the of and")
+
+
+@pytest.mark.parametrize(("question", "phrases"), RUN13_PERSON)
+async def test_a_person_question_need_not_name_the_topic(
+    tmp_path: Path, question: str, phrases: list[str]
+) -> None:
+    assert not names_topic(question, ["AppDaemon"])
+    candidate = Candidate(question, phrases, why="To know the plan for the app.", audience=PERSON)
+    verdict = await _appdaemon_gate(tmp_path).check(candidate)
+    assert verdict.accepted, verdict.reason
+    assert verdict.route == PERSON
+
+
+async def test_a_record_question_need_not_name_the_topic(tmp_path: Path) -> None:
+    question, phrases = RUN13_PERSON[1]
+    verdict = await _appdaemon_gate(tmp_path).check(Candidate(question, phrases, audience=RECORD))
+    assert verdict.accepted, verdict.reason
+    assert verdict.route == PERSON and verdict.route_reason == NO_RECORD
+
+
+async def test_a_web_question_and_a_person_asked_question_must_name_the_topic(
+    tmp_path: Path,
+) -> None:
+    question, phrases = RUN13_PERSON[1]
+    gate = _appdaemon_gate(tmp_path)
+    web_verdict = await gate.check(Candidate(question, phrases, local_context=APPDAEMON_LOCAL))
+    assert web_verdict.reason == "the question does not name the topic or a subject"
+    asked = await gate.check(Candidate(question), person=True)
+    assert asked.reason == "the question does not name the topic"

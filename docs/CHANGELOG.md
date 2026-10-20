@@ -175,6 +175,16 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **The research gate accepts a question that holds its subject in other
+  words.** A web question had to hold its `subject` as an exact phrase, so
+  "Why does Buildah need the vfs storage driver when building container
+  images inside a container?" did not hold "Buildah image build inside a
+  container". Now the question holds the subject when it holds most of the
+  content words of the subject, and a rejection names the missing words. A
+  question for a person or for the records need not name the topic now,
+  because its page stores the topic. See
+  [docs/jobs.md](jobs.md#the-gate-on-a-web-question).
+
 - **A research question never carries the specifics of a person.** A run
   with no topic could take the coaching profile of one person as its topic,
   and the `raise` worker then wrote web questions with that person's health
