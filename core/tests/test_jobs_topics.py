@@ -8,12 +8,14 @@ import pytest
 from joshua_core.jobs.topics import (
     Topic,
     drop_people,
+    generic_title,
     is_person_page,
     is_topic_page,
     list_topics,
     load_topic,
     names_pattern,
     page_title,
+    possessive_forms,
     roster_keys,
     topic_names,
 )
@@ -256,12 +258,92 @@ def test_is_person_page() -> None:
 def test_a_recipe_with_a_name_in_its_title_keeps_no_bare_name() -> None:
     recipe = Topic("recipes/caldo-verde.md", "recipes", "Alex's caldo verde")
     names = topic_names(recipe, people=ROSTER)
-    assert names == ["Alex's caldo verde", "caldo verde"]
-    assert "alex" not in {n.casefold() for n in names}
+    assert names == ["caldo verde"]
     stew = Topic("recipes/alexs-stew.md", "recipes", "Alex’s stew")
-    assert topic_names(stew, people=ROSTER) == ["Alex’s stew", "stew", "alexs stew"]
-    # Without a roster the names are as before.
+    assert topic_names(stew, people=ROSTER) == ["stew"]
+    # Without a roster no name is a person's name.
     assert topic_names(recipe) == ["Alex's caldo verde", "caldo verde"]
+
+
+CALDO = Topic("recipes/alex-s-caldo-verde.md", "recipes", "Alex's Caldo Verde")
+
+
+def test_a_possessive_title_names_the_thing_and_not_the_owner() -> None:
+    assert topic_names(CALDO) == [
+        "Alex's Caldo Verde",
+        "alex s",
+        "alex s caldo",
+        "alex s caldo verde",
+    ]
+    assert topic_names(CALDO, people=ROSTER) == ["Caldo Verde"]
+
+
+def test_the_caldo_verde_pattern_does_not_match_the_bare_name() -> None:
+    pattern = names_pattern(topic_names(CALDO, people=ROSTER))
+    assert pattern is not None
+    assert pattern.search("Tonight we made caldo verde.")
+    assert pattern.search("Alex watered the plants.") is None
+    assert pattern.search("Alex's dinner was pizza.") is None
+
+
+def test_a_stem_phrase_that_starts_with_a_name_is_not_a_name() -> None:
+    soup = Topic("recipes/bo-tomato-soup.md", "recipes", "Tomato soup")
+    assert topic_names(soup, people=ROSTER) == ["Tomato soup"]
+    plural = Topic("recipes/bos-chili.md", "recipes", "Chili")
+    assert topic_names(plural, people=ROSTER) == ["Chili"]
+
+
+@pytest.mark.parametrize(
+    ("title", "generic"),
+    [
+        ("Alex's Caldo Verde", "Caldo Verde"),
+        ("alex’s caldo verde", "caldo verde"),
+        ("Alexs' soup", "soup"),
+        ("Pancakes, Alex's way", "Pancakes"),
+        ("Pancakes (Alex's way) for two", "Pancakes for two"),
+        ("Chili in Bo's style", "Chili"),
+        ("Bo's and Alex's chili", "chili"),
+        ("Alex's", ""),
+        ("Caldo Verde", "Caldo Verde"),
+        ("Alexander's soup", "Alexander's soup"),
+    ],
+)
+def test_generic_title(title: str, generic: str) -> None:
+    assert generic_title(title, ROSTER) == generic
+
+
+def test_generic_title_without_a_roster_is_the_title() -> None:
+    assert generic_title("Alex's  Caldo Verde", None) == "Alex's Caldo Verde"
+
+
+def test_a_name_that_ends_in_s_takes_an_apostrophe_alone() -> None:
+    roster = [Person(id="alexis", name="Alexis")]
+    assert generic_title("Alexis' bread", roster) == "bread"
+    assert generic_title("Alexis's bread", roster) == "bread"
+
+
+def test_possessive_forms() -> None:
+    assert possessive_forms("Alex's Caldo Verde", ROSTER) == ["Alex's Caldo Verde"]
+    assert possessive_forms("Alex's Caldo Verde (winter)", ROSTER) == [
+        "Alex's Caldo Verde (winter)",
+        "Alex's Caldo Verde",
+    ]
+    assert possessive_forms("Pancakes, Alex's way", ROSTER) == ["Pancakes, Alex's way"]
+    assert possessive_forms("Caldo Verde", ROSTER) == []
+    assert possessive_forms("Alex's Caldo Verde", None) == []
+
+
+def test_drop_people_drops_a_name_with_s_and_a_name_that_starts_with_one() -> None:
+    names = ["alexs", "alex s", "Alex's", "Bo’s", "alex s caldo", "alexs stew", "Alex garden"]
+    assert drop_people(names, ROSTER) == ["Alex garden"]
+    assert drop_people(["Pancakes, Alex's way", "Pancakes"], ROSTER) == ["Pancakes"]
+
+
+def test_a_last_word_that_is_only_the_plural_end_is_kept() -> None:
+    pattern = names_pattern(["alex s"])
+    assert pattern is not None
+    assert pattern.search("Alex watered the plants.") is None
+    assert pattern.search("alex s")
 
 
 def test_an_alias_that_is_a_roster_name_is_not_a_name() -> None:
@@ -274,3 +356,12 @@ def test_an_alias_that_is_a_roster_name_is_not_a_name() -> None:
 
 def test_drop_people_without_a_roster_keeps_every_name() -> None:
     assert drop_people(["Alex", " Alex ", "Roses"], None) == ["Alex", "Roses"]
+
+
+def test_a_display_name_of_two_words_is_matched_whole() -> None:
+    roster = [Person(id="ax", name="Alex Smith")]
+    assert drop_people(["Alex Smiths garden", "Alex garden", "pond"], roster) == [
+        "Alex garden",
+        "pond",
+    ]
+    assert generic_title("Alex  Smith's pie", roster) == "pie"

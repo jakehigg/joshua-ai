@@ -19,9 +19,9 @@ when no topic outside one qualifies under the same rule, and the reason then
 says so.
 
 A journal entry is about a topic when it holds a name of the topic
-(`bundle.topic_pattern`). With the roster, the id or the display name of a
-person is never a name of a topic, so an entry that only names a person
-counts for no topic.
+(`bundle.topic_pattern`). With the roster, a person's name is never a name
+of a topic, by the roster rule of `topics`, so an entry that only names a
+person counts for no topic. A possessive title counts by its generic name.
 
 Each remaining tie goes to the seeded pick: a shuffle of the sorted topic
 paths with `random.Random(f"{run_date}:{sha256 of the sorted paths}")`. So the

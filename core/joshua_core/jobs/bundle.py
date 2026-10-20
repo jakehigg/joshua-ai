@@ -29,10 +29,12 @@ links to the topic page names one term: the text before the first colon on
 that line, with list marks, emphasis, code marks, and link syntax removed. A
 line with no colon names no term.
 
-A name or an alias that is the id or the display name of a person on the
-roster (`settings.people`) is not a name of the topic (`topics.drop_people`),
-so a journal entry that only names a person is not about the topic, and
-`Bundle.aliases` holds no bare name of a person.
+A name or an alias that holds a person's name by the roster rule of
+`topics` is not a name of the topic (`topics.topic_names`,
+`topics.drop_people`), so a journal entry that only names a person is not
+about the topic, and `Bundle.aliases` holds no bare name of a person. A
+possessive title gives its generic name: `Alex's Caldo Verde` gives `Caldo
+Verde`.
 
 A journal entry names the topic when it holds a name of the topic by the rule
 of `topics.names_pattern`. A name from the title or the file stem is a `title`

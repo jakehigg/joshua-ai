@@ -189,3 +189,18 @@ def test_journal_counts_give_0_for_an_entry_with_only_the_name(tmp_path: Path) -
     assert journal_counts(topics, wiki, DAY, 14, people=ROSTER)[soup] == 1
     # Without the roster, the name alone counts the run entry too.
     assert journal_counts(topics, wiki, DAY, 14)[soup] == 2
+
+
+def test_journal_counts_for_a_possessive_title_count_only_the_thing(tmp_path: Path) -> None:
+    wiki = build_research_wiki(tmp_path)
+    (wiki / "recipes").mkdir()
+    soup = "recipes/alex-s-caldo-verde.md"
+    (wiki / soup).write_text("# Alex's Caldo Verde\n\nKale, potato, and chorizo.\n")
+    day = wiki / "journal/2026/10/18"
+    day.mkdir(parents=True)
+    (day / "plants.md").write_text("Alex watered the plants.\n")
+    (day / "dinner.md").write_text("Alex's dinner was pizza.\n")
+    (day / "alexs.md").write_text("Alex s list for the week.\n")
+    (day / "soup.md").write_text("We made caldo verde for Bo.\n")
+    topics = list_topics(wiki, ["vocabulary.md"], people=ROSTER)
+    assert journal_counts(topics, wiki, DAY, 14, people=ROSTER)[soup] == 1

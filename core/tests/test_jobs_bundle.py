@@ -358,3 +358,25 @@ async def test_a_roster_name_is_no_alias_and_brings_no_entry(tmp_path: Path, fak
     assert "Alex" not in got.aliases and "Sansevieria" in got.aliases
     assert "journal/2026/10/11/alex.md" not in got.paths
     assert "journal/2026/10/07/repot.md" in got.paths
+
+
+async def test_a_possessive_title_brings_in_only_the_entries_about_the_thing(
+    tmp_path: Path, fake_embed
+) -> None:
+    soup = "recipes/alex-s-caldo-verde.md"
+    pages = {
+        "Home.md": "# Home\n",
+        "recipes.md": "# Recipes\n",
+        soup: "# Alex's Caldo Verde\n\nKale, potato, and chorizo.\n",
+    }
+    made, text = _entry(2, "soup", "We made caldo verde again.\n")
+    pages[made] = text
+    plants, text = _entry(3, "plants", "Alex watered the plants.\n")
+    pages[plants] = text
+    dinner, text = _entry(4, "dinner", "Alex's dinner was pizza.\n")
+    pages[dinner] = text
+    wiki = build_wiki(tmp_path / "data", pages)
+    got = await build_bundle(
+        load_topic(soup, wiki), wiki_root=wiki, repo=FakeStore(), settings=make_settings(), now=NOW
+    )
+    assert got.journal_via == {made: "title"}

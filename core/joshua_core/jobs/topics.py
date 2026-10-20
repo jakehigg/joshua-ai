@@ -27,10 +27,23 @@ words in any case, with any white space between the words. It also finds the
 name with a plural `s` or `es`, and without one when the name ends in `s` or
 `es`. A name shorter than three characters is not matched.
 
-With a roster, a name that is the id or the display name of a person is not a
-name of the topic, so a person's name never makes a text about a topic. A name
-that starts with a person's name and `'s` also gives the rest of the name:
-`Alex's caldo verde` gives `caldo verde`.
+With a roster, a person's name never makes a text about a topic. These are not
+names of the topic:
+
+- the id or the display name of a person;
+- that name with `s` or `'s` after it (`alexs`, `alex s`, `Alex's`), and a
+  name whose first words are such a form (`alex s caldo`);
+- a phrase of the file stem that starts with a person's name, with or without
+  an `s` after it.
+
+A possessive names the thing, not its owner. A possessive is a person's name
+with `'s` or `s'` after it, or with `'` alone after a name that ends in `s`.
+The generic name of a title (`generic_title`) is the title without its
+possessive: `Alex's Caldo Verde` gives `Caldo Verde`, and `Pancakes, Alex's
+way` gives `Pancakes`. A name that holds a possessive gives its generic name
+in its place, so `Alex's Caldo Verde` is not a name and `Caldo Verde` is.
+`possessive_forms` gives the forms of the title that hold a possessive, for
+the research gate.
 """
 
 from __future__ import annotations
@@ -63,6 +76,15 @@ MIN_NAME_CHARS = 3
 # The phrases of the file stem that name the topic: its first 2 to 4 words.
 STEM_PHRASE_WORDS = (2, 3, 4)
 _PAREN_TAIL_RE = re.compile(r"\s*\([^()]*\)\s*$")
+# An apostrophe, straight or curly.
+_APOSTROPHE = "['\u2019]"
+# The separators and the short words that join a possessive to the rest of a
+# title (`Pancakes, Alex's way`, `Chili in Bo's style`).
+_JOIN_CHARS = " ,;:()[]-\u2013\u2014/&+"
+_JOIN_WORDS = frozenset(
+    {"a", "an", "and", "the", "by", "in", "of", "for", "from", "with", "la", "\u00e0"}
+)
+_SEPARATOR_RE = re.compile(r"[,;:()\[\]\u2013\u2014]|\s-\s")
 # The section of a topic page at the wiki root, for a job page that has a section.
 ROOT_SECTION = "general"
 _SECTION_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
@@ -227,50 +249,138 @@ def _unique(names: Sequence[str]) -> list[str]:
     return out
 
 
+def _title_names(topic: Topic, aliases: Sequence[str]) -> list[str]:
+    """The title, the title without its parenthetical tail, and each alias."""
+    return [topic.title, _PAREN_TAIL_RE.sub("", topic.title), *aliases]
+
+
+def _stem_names(rel_path: str) -> list[str]:
+    """The phrases of the file stem that name the topic."""
+    words = PurePosixPath(rel_path).stem.replace("-", " ").split()
+    found = [words[0]] if len(words) == 1 else []
+    found.extend(" ".join(words[:n]) for n in STEM_PHRASE_WORDS if n <= len(words))
+    return found
+
+
 def _raw_names(topic: Topic, aliases: Sequence[str]) -> list[str]:
     """The names of `topic` before the roster rule."""
-    found = [topic.title, _PAREN_TAIL_RE.sub("", topic.title), *aliases]
-    words = PurePosixPath(topic.path).stem.replace("-", " ").split()
-    if len(words) == 1:
-        found.append(words[0])
-    found.extend(" ".join(words[:n]) for n in STEM_PHRASE_WORDS if n <= len(words))
-    return _unique(found)
+    return _unique([*_title_names(topic, aliases), *_stem_names(topic.path)])
+
+
+def _possessive_re(people: Sequence[Person] | None) -> re.Pattern[str] | None:
+    """The pattern that finds a possessive of a person in a text, or None with
+    no roster. See the module docstring."""
+    forms: list[str] = []
+    for key in sorted(roster_keys(people), key=lambda k: (-len(k), k)):
+        words = r"\s+".join(re.escape(word) for word in key.split())
+        forms.extend([f"{words}{_APOSTROPHE}s", f"{words}s{_APOSTROPHE}"])
+        if key.endswith("s"):
+            forms.append(f"{words}{_APOSTROPHE}")
+    if not forms:
+        return None
+    return re.compile(rf"(?<!\w)(?:{'|'.join(forms)})(?!\w)", re.IGNORECASE)
+
+
+def _strip_join(text: str, *, end: int) -> str:
+    """`text` without the separators and the short joining words at its last
+    word (`end=-1`) or at its first word (`end=0`)."""
+    words = text.strip(_JOIN_CHARS).split()
+    while words and words[end].strip(_JOIN_CHARS).casefold() in _JOIN_WORDS | {""}:
+        words.pop(end)
+    return " ".join(words).strip(_JOIN_CHARS)
+
+
+def generic_title(title: str, people: Sequence[Person] | None) -> str:
+    """The generic name of `title`: the title without each possessive of a
+    person on the roster, or `""` when nothing is left. A title with no
+    possessive is unchanged. See the module docstring.
+
+    A possessive at the start leaves the words after it: `Alex's Caldo
+    Verde` gives `Caldo Verde`. A possessive after the start removes itself
+    and the words after it up to the next separator: `Pancakes, Alex's way`
+    gives `Pancakes`.
+    """
+    text = " ".join(str(title).split())
+    pattern = _possessive_re(people)
+    if pattern is None:
+        return text
+    while (match := pattern.search(text)) is not None:
+        before = _strip_join(text[: match.start()], end=-1)
+        after = text[match.end() :]
+        if before:
+            cut = _SEPARATOR_RE.search(after)
+            after = after[cut.end() :] if cut is not None else ""
+            text = " ".join(p for p in (before, after.strip(_JOIN_CHARS)) if p)
+        else:
+            text = _strip_join(after, end=0)
+    return " ".join(text.split())
+
+
+def possessive_forms(title: str, people: Sequence[Person] | None) -> list[str]:
+    """The forms of `title` that hold a possessive of a person: the title and
+    the title without its parenthetical tail, longest first. A title with no
+    possessive gives `[]`."""
+    pattern = _possessive_re(people)
+    if pattern is None:
+        return []
+    forms = _unique([title, _PAREN_TAIL_RE.sub("", title)])
+    return sorted((f for f in forms if pattern.search(f)), key=len, reverse=True)
+
+
+def _starts_with_person(name: str, keys: set[str], *, bare: bool) -> bool:
+    """True when the first words of `name` are a person's name with `s` or
+    `'s` after it, or, with `bare`, the person's name alone."""
+    tokens = name.casefold().replace("\u2019", "'").split()
+    for key in keys:
+        head = key.split()
+        size = len(head)
+        if len(tokens) < size or tokens[: size - 1] != head[:-1]:
+            continue
+        last = tokens[size - 1]
+        if last in {f"{head[-1]}s", f"{head[-1]}'s", f"{head[-1]}s'"}:
+            return True
+        if last == head[-1] and (bare or tokens[size : size + 1] == ["s"]):
+            return True
+    return False
 
 
 def drop_people(names: Sequence[str], people: Sequence[Person] | None) -> list[str]:
-    """`names` with each bare name of a person removed, and the rest of each
-    name that starts with a person's name and `'s` added. See the module
-    docstring."""
+    """`names` by the roster rule of the module docstring: no bare name of a
+    person, no name that starts with a person's name and `s` or `'s`, and the
+    generic name in place of each name that holds a possessive."""
     keys = roster_keys(people)
     if not keys:
         return _unique(names)
     found: list[str] = []
     for raw in names:
-        name = " ".join(str(raw).split())
-        if name.casefold() in keys:
+        name = generic_title(str(raw), people)
+        if not name or name.casefold() in keys or _starts_with_person(name, keys, bare=False):
             continue
         found.append(name)
-        head, sep, rest = name.replace("\u2019", "'").partition("'s ")
-        if sep and head.casefold() in keys and rest.strip():
-            found.append(rest)
-    return [n for n in _unique(found) if n.casefold() not in keys]
+    return _unique(found)
 
 
 def topic_names(
     topic: Topic, aliases: Sequence[str] = (), *, people: Sequence[Person] | None = None
 ) -> list[str]:
-    """The names of `topic`, once each, in order. With `people`, no name is a
-    bare name of a person. See the module docstring."""
-    return drop_people(_raw_names(topic, aliases), people)
+    """The names of `topic`, once each, in order. With `people`, no name holds
+    a person's name by the roster rule. See the module docstring."""
+    keys = roster_keys(people)
+    if not keys:
+        return _raw_names(topic, aliases)
+    stems = [s for s in _stem_names(topic.path) if not _starts_with_person(s, keys, bare=True)]
+    return drop_people([*_title_names(topic, aliases), *stems], people)
 
 
 def _forms(name: str) -> list[str]:
-    """`name`, and `name` without the plural end of its last word."""
+    """`name`, and `name` without the plural end of its last word. A last
+    word that is only the plural end keeps it."""
     forms = [name]
     lower = name.casefold()
-    if lower.endswith("es"):
+    last = lower.split()[-1] if lower.split() else ""
+    if last.endswith("es") and len(last) > 2:
         forms.append(name[:-2])
-    if lower.endswith("s") and not lower.endswith("ss"):
+    if last.endswith("s") and not last.endswith("ss") and len(last) > 1:
         forms.append(name[:-1])
     return [f for f in forms if len(f) >= MIN_NAME_CHARS]
 
