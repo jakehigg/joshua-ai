@@ -37,6 +37,7 @@ from joshua_core.jobs.bundle_job import BundleJob as BundleJobClass
 from joshua_core.jobs.runner import journal_slug, run_row_json, utc_now
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.nightly import NightlyReflector
+from joshua_core.memory.sources.files import FilesSource
 from joshua_shared import frontmatter, wikigit
 from nightly_fakes import FakeIndexer, FakeManager, FakeReflectRepo
 
@@ -135,6 +136,19 @@ async def test_a_real_run_writes_the_entry_and_commits_once(data_root: Path) -> 
     assert row["report"]["summary"] == "Echoed."
     assert row["report"]["commit_sha"] == row["commit_sha"]
     assert runner.busy is False
+
+
+async def test_the_entry_of_a_run_is_not_memory(data_root: Path) -> None:
+    runner = _runner(data_root, EchoJob(data_root))
+    run_id = await runner.start("echo", {"say": "hello"}, dry_run=False)
+    await runner.wait(run_id)
+
+    entry = f"wiki/journal/2026/10/19/echo-20261019-{run_id}.md"
+    source = FilesSource(data_root)
+    listed = [d.uri async for d in source.list_documents()]
+    assert entry not in listed
+    assert "wiki/echo.md" in listed
+    assert entry in source.left_out()
 
 
 async def test_a_dry_run_writes_nothing(data_root: Path) -> None:

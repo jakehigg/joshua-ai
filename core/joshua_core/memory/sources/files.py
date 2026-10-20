@@ -23,6 +23,14 @@ name. ``doc_date`` is the journal day a path belongs to
 Frontmatter ``date``/``tags``/``provenance`` are honored when present. A dot
 entry (``.trash/``, ``.git/``, and so on, at any depth) and a ``*.meta.json``
 metadata file are ignored.
+
+Two kinds of page are not memory, and the listing leaves them out
+(:func:`not_memory`): a journal entry whose frontmatter holds ``run_id``, which
+is the report of a job run, and any page whose frontmatter holds
+``index: false``, such as a dossier or the README list of a job folder. The
+page stays on the disk. ``left_out`` names the pages the last listing left
+out, so the indexer can report them, and the indexer purges their rows as it
+does the rows of a deleted file.
 """
 
 from __future__ import annotations
@@ -47,7 +55,23 @@ logger = get_logger("memory.sources.files")
 # copy, may still have some.
 _TREES = ("wiki", "shared")
 
+_JOURNAL_PREFIX = "wiki/journal/"
+
 _H1 = re.compile(r"^#\s+(.+?)\s*#*\s*$")
+
+
+def _frontmatter_lines(text: str) -> tuple[list[str], str] | None:
+    """The lines of a leading ``---`` frontmatter block and the body, or None
+    when the text has no block."""
+    if not text.startswith("---"):
+        return None
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return lines[1:i], "\n".join(lines[i + 1 :]).lstrip("\n")
+    return None
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -56,21 +80,47 @@ def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
     Returns ``({}, text)`` when there is no frontmatter. Only simple
     ``key: value`` lines are read — enough for ``date``/``tags``/``provenance``.
     """
-    if not text.startswith("---"):
+    found = _frontmatter_lines(text)
+    if found is None:
         return {}, text
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}, text
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            meta: dict[str, str] = {}
-            for line in lines[1:i]:
-                if ":" in line:
-                    key, _, value = line.partition(":")
-                    meta[key.strip().lower()] = value.strip()
-            body = "\n".join(lines[i + 1 :]).lstrip("\n")
-            return meta, body
-    return {}, text
+    lines, body = found
+    meta: dict[str, str] = {}
+    for line in lines:
+        if ":" in line:
+            key, _, value = line.partition(":")
+            meta[key.strip().lower()] = value.strip()
+    return meta, body
+
+
+def _top_level(text: str) -> dict[str, str]:
+    """The top-level ``key: value`` pairs of the frontmatter block.
+
+    An indented line belongs to the value of a key above it, such as one
+    question in the list of a dossier, so it is not read.
+    """
+    found = _frontmatter_lines(text)
+    if found is None:
+        return {}
+    meta: dict[str, str] = {}
+    for line in found[0]:
+        if line[:1].isspace() or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        meta[key.strip().lower()] = value.strip().strip("'\"")
+    return meta
+
+
+def not_memory(path: str, text: str) -> bool:
+    """True when the page at the data-relative ``path`` is not memory.
+
+    A journal entry whose frontmatter holds ``run_id`` is the report of a job
+    run. A page whose frontmatter holds ``index: false`` asks to stay out of
+    the index.
+    """
+    meta = _top_level(text)
+    if meta.get("index", "").lower() == "false":
+        return True
+    return path.startswith(_JOURNAL_PREFIX) and bool(meta.get("run_id"))
 
 
 def _first_heading(body: str) -> str:
@@ -105,6 +155,11 @@ class FilesSource:
     def __init__(self, data_dir: Path | str, *, index_attachments: bool = True):
         self._data_dir = Path(data_dir)
         self._index_attachments = index_attachments
+        self._left_out: list[str] = []
+
+    def left_out(self) -> list[str]:
+        """The paths of the pages the last listing left out as not memory."""
+        return list(self._left_out)
 
     def _markdown(self, base: Path) -> Iterator[Path]:
         if not base.is_dir():
@@ -114,10 +169,13 @@ class FilesSource:
                 continue
             yield file
 
-    def _document(self, file: Path, *, path: str) -> Document:
+    def _document(self, file: Path, *, path: str) -> Document | None:
+        """The document of a page, or None when the page is not memory."""
         raw = file.read_bytes()
-        rev = hashlib.sha256(raw).hexdigest()
         text = raw.decode("utf-8", errors="replace")
+        if not_memory(path, text):
+            return None
+        rev = hashlib.sha256(raw).hexdigest()
         meta, body = _split_frontmatter(text)
         mtime = datetime.fromtimestamp(file.stat().st_mtime, tz=UTC)
         title = _first_heading(body) or file.stem
@@ -177,10 +235,16 @@ class FilesSource:
         )
 
     async def list_documents(self) -> AsyncIterator[Document]:
+        left_out: list[str] = []
         for tree in _TREES:
             for file in self._markdown(self._data_dir / tree):
                 path = str(file.relative_to(self._data_dir))
-                yield self._document(file, path=path)
+                document = self._document(file, path=path)
+                if document is None:
+                    left_out.append(path)
+                    continue
+                yield document
+        self._left_out = left_out
         if not self._index_attachments:
             return
         for file in self._attachments():

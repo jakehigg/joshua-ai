@@ -20,6 +20,11 @@ Either way the revision is held in the process, and the document is passed
 over until its content changes, a full reindex asks for it, or the process
 restarts.
 
+A source can also leave a document out of its listing because it is not
+memory, such as the report of a job run. Its rows are purged as the rows of a
+deleted document are. A source that does this has a ``left_out()`` method, and
+the status counts and names those documents (**not_memory**).
+
 The startup pass makes every deploy self-heal (a first-boot empty index is just
 the degenerate diff where everything is new). The interval loop keeps the
 ``files`` source fresh; other adapters run on their own schedule.
@@ -116,6 +121,19 @@ def _held_report(
     return {"count": len(paths), "paths": paths[:20]}
 
 
+def _paths_report(paths: Sequence[str]) -> dict[str, Any]:
+    """The count and the first paths of a list of paths."""
+    ordered = sorted(paths)
+    return {"count": len(ordered), "paths": ordered[:20]}
+
+
+def _left_out(source: Source) -> list[str] | None:
+    """The paths the last listing of `source` left out as not memory, or None
+    when the source does not leave a document out."""
+    method = getattr(source, "left_out", None)
+    return list(method()) if callable(method) else None
+
+
 def _is_unindexable(exc: BaseException) -> bool:
     """True when the document is at fault, and a retry gives the same answer.
 
@@ -163,6 +181,8 @@ class Indexer:
         self._held: dict[str, dict[tuple[str | None, str], tuple[str, str]]] = {
             name: {} for name in sources
         }
+        # source -> the paths its last full listing left out as not memory.
+        self._not_memory: dict[str, list[str]] = {name: [] for name in sources}
 
     @property
     def sources(self) -> dict[str, Source]:
@@ -178,6 +198,8 @@ class Indexer:
         ``unindexable`` is a fault to act on, so it names the paths. ``empty``
         is a file with nothing to index, which is not a fault; it is counted
         and named so that a pass which reports no work is explainable.
+        ``not_memory`` is the same for a document that the source left out of
+        its listing, such as the report of a job run.
         """
         out: dict[str, Any] = {}
         for name, state in self._status.items():
@@ -186,6 +208,7 @@ class Indexer:
                 **state,
                 "unindexable": _held_report(held, "unindexable"),
                 "empty": _held_report(held, "empty"),
+                "not_memory": _paths_report(self._not_memory[name]),
             }
         return out
 
@@ -311,6 +334,9 @@ class Indexer:
             self._status[name]["running"] = True
             try:
                 docs = [doc async for doc in source.list_documents()]
+                left_out = _left_out(source)
+                if left_out is not None and person is None:
+                    self._not_memory[name] = left_out
                 if person is not None:
                     docs = [d for d in docs if d.person_id == person]
                 if name == "files" and person is None:
@@ -414,6 +440,7 @@ class Indexer:
                     "skipped": len(skipped),
                     "unindexable": sum(1 for _, reason in held.values() if reason == "unindexable"),
                     "empty": sum(1 for _, reason in held.values() if reason == "empty"),
+                    "not_memory": len(self._not_memory[name]),
                 }
                 self._status[name].update(
                     last_run=_now_iso(),

@@ -125,6 +125,7 @@ async def test_bootstrap_indexes_everything(_count_embeds) -> None:
         "skipped": 0,
         "unindexable": 0,
         "empty": 0,
+        "not_memory": 0,
     }
     assert set(store.replaced) == {(None, "shared/s.md"), ("alice", "wiki/a.md")}
     assert store.purged == [["files"]]
