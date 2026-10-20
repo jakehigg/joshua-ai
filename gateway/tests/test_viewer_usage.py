@@ -7,6 +7,7 @@ is the same as in `test_viewer_search.py`.
 from __future__ import annotations
 
 import textwrap
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +112,12 @@ def _get(**params: Any) -> httpx.Response:
     return TestClient(viewer.build_app()).get("/usage", params=params, auth=ALEX)
 
 
+@pytest.fixture(autouse=True)
+def _fixed_today(monkeypatch) -> None:
+    """The chart ends on today; the fixture answer ends on 2026-10-20."""
+    monkeypatch.setattr(usage_mod, "_today", lambda timezone: date(2026, 10, 20))
+
+
 def test_the_nav_links_the_usage_page(data) -> None:
     html = TestClient(viewer.build_app()).get("/", auth=ALEX).text
     nav = html[html.index("<nav>") : html.index("</nav>")]
@@ -153,12 +160,15 @@ def test_the_page_renders_the_tables_and_the_chart(data, monkeypatch) -> None:
     assert usage_mod.exact(31600 + 7900) in html
     # The totals row: everything in the window.
     assert usage_mod.exact(31615 + 7900) in html
-    # Three bars: two groups on the 20th, one on the 18th. The 19th is an
-    # empty slot, so the 20th is the third of three slots.
+    # Three bars: two groups on the 20th, one on the 18th. The window is the
+    # 30 days core answered with, so a slot is a thirtieth of the plot, and
+    # the axis starts 29 days before today.
     assert html.count("<rect") == 3
     assert "2026-10-20 · research: 7\u2009900 tokens" in html
     plot = usage_mod._CHART_W - usage_mod._PAD_L - usage_mod._PAD_R
-    assert f'width="{plot / 3 * 0.8:.1f}"' in html
+    assert f'width="{plot / 30 * 0.8:.1f}"' in html
+    assert ">2026-09-21</text>" in html and ">2026-10-20</text>" in html
+    assert "no usage in this window" not in html
     assert "Cache read" in html
     assert '<span class="chip on">7 days</span>' in html
 
@@ -184,7 +194,10 @@ def test_an_empty_window_says_so(data, monkeypatch) -> None:
     _with_core(monkeypatch, FakeCore(empty))
     html = _get().text
     assert "No usage in this window." in html
-    assert "<svg" not in html
+    # The chart still shows the window, with no bar, and says it is empty.
+    assert "<svg" in html and "<rect" not in html
+    assert "no usage in this window" in html
+    assert ">2026-09-21</text>" in html and ">2026-10-20</text>" in html
 
 
 def test_an_unknown_shape_is_a_failure(data, monkeypatch) -> None:
@@ -221,6 +234,19 @@ def test_days_and_numbers() -> None:
     ]
 
 
-def test_the_chart_is_empty_with_no_rows() -> None:
-    body = UsageResponse(timezone="UTC", days=1, groups=[], rows=[], totals={})
-    assert usage_mod.chart_svg(body) == ""
+def test_the_chart_spans_the_window_without_rows() -> None:
+    body = UsageResponse(timezone="UTC", days=90, groups=[], rows=[], totals={})
+    html = usage_mod.chart_svg(body, today=date(2026, 10, 20))
+    assert "<rect" not in html and "no usage in this window" in html
+    assert ">2026-07-23</text>" in html and ">2026-10-20</text>" in html
+
+
+def test_a_row_outside_the_window_draws_no_bar() -> None:
+    body = UsageResponse.model_validate({**ANSWER, "days": 1})
+    html = usage_mod.chart_svg(body, today=date(2026, 10, 20))
+    # Only the 20th is in a one-day window: two bars, none for the 18th.
+    assert html.count("<rect") == 2
+
+
+def test_today_falls_back_to_utc_for_a_bad_zone() -> None:
+    assert usage_mod._today("Not/AZone") == usage_mod._today("UTC")

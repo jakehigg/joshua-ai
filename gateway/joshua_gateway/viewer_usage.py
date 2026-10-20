@@ -22,9 +22,10 @@ The functions here build data and HTML only. The route lives in ``viewer``.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from html import escape
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 import httpx
 from joshua_shared.contracts import (
@@ -161,16 +162,27 @@ def _parse_date(text: str) -> date | None:
         return None
 
 
-def chart_svg(body: UsageResponse) -> str:
-    """A bar for each day from the oldest day with usage to the newest, stacked
-    by group. A day with no usage is an empty slot."""
+def _today(timezone: str) -> date:
+    """Today in ``timezone``; in UTC when the name is not a zone."""
+    try:
+        return datetime.now(ZoneInfo(timezone)).date()
+    except (KeyError, ValueError):
+        return datetime.now(UTC).date()
+
+
+def chart_svg(body: UsageResponse, *, today: date | None = None) -> str:
+    """A bar for each day of the window, today included, stacked by group.
+
+    The window is ``body.days`` days back from today in ``body.timezone``, so
+    a longer window shows a longer axis also when the usage stops short of it.
+    A day with no usage is an empty slot, and a window with no usage at all
+    is an empty chart that says so.
+    """
     series = _series(body.groups)
     by_day = {row.date: row for row in body.rows}
-    dates = [d for d in (_parse_date(row.date) for row in body.rows) if d is not None]
-    if not dates:
-        return ""
-    first, last = min(dates), max(dates)
-    span = min((last - first).days + 1, USAGE_MAX_DAYS)
+    last = today or _today(body.timezone)
+    span = max(1, min(body.days, USAGE_MAX_DAYS))
+    first = last - timedelta(days=span - 1)
     days = [(first + timedelta(days=n)).isoformat() for n in range(span)]
     totals = [sum(g.total for g in by_day[d].groups.values()) if d in by_day else 0 for d in days]
     peak = max(totals) or 1
@@ -204,6 +216,11 @@ def chart_svg(body: UsageResponse) -> str:
                 f'<rect class="{series[name]}" x="{x:.1f}" y="{base:.1f}" '
                 f'width="{bar:.1f}" height="{height:.1f}"><title>{escape(label)}</title></rect>'
             )
+    if not any(totals):
+        parts.append(
+            f'<text class=axis x="{_CHART_W / 2:.0f}" y="{_PAD_T + plot_h / 2:.0f}" '
+            'text-anchor="middle">no usage in this window</text>'
+        )
     bottom = _CHART_H - 8
     parts.append(
         f'<text class=axis x="{_PAD_L}" y="{bottom}">{escape(days[0])}</text>'
@@ -286,7 +303,7 @@ def page_html(body: UsageResponse | None, *, days: int, configured: bool) -> str
         f"{escape(body.timezone)}. A day with no usage is not in the tables.</p>"
     )
     if not body.rows:
-        return f"{head}{intro}<p>No usage in this window.</p>"
+        return f"{head}{intro}{chart_svg(body)}<p>No usage in this window.</p>"
     per_day = "".join(
         f"<details class=day><summary>{escape(row.date)}</summary>"
         f"{_counts_table(row.groups)}</details>"
