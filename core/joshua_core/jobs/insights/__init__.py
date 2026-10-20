@@ -1,4 +1,5 @@
-"""Insights: where what we do disagrees with what is known, now.
+"""Insights: where what we do disagrees with what is known, or misses a step
+that it names, now.
 
 `page` holds the insight page, the table of every insight, and expiry,
 `knowledge` the published knowledge pages of a topic, `worker` the `insight`

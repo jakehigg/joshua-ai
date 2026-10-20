@@ -1,4 +1,5 @@
-"""The `insights` job: where what we do disagrees with what is known, for one topic.
+"""The `insights` job: where what we do disagrees with what is known, or misses
+a step that it names, for one topic.
 
 Arguments: `{"topic": "<path>"}`, a topic page relative to the wiki root.
 

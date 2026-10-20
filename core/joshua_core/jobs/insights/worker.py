@@ -1,10 +1,13 @@
-"""The `insight` worker: where what we do disagrees with what is known.
+"""The `insight` worker: where what we do disagrees with what is known, or
+misses a step that it names.
 
 The worker has no tools and a timeout of 120 seconds. It reads the parts of
 the memory bundle that say what we do, the full text of each published
 knowledge page of the topic, the day, the timezone, the instance name, and
-the open insights of the topic. The gate in `gate.py` then decides which
-insights are written.
+the open insights of the topic. Above the text of each knowledge page are two
+labelled lines: its short answer, and the editor's note for us (the section
+`## Where this differs for us`, see `knowledge.py`) when the page has one.
+The gate in `gate.py` then decides which insights are written.
 
 The model is asked for the `InsightAnswer` schema. Python checks each item of
 the answer on its own, so an item that does not match the schema is a
@@ -83,6 +86,23 @@ def _preview(item: Any) -> str:
     return "(no claim)"
 
 
+SHORT_LABEL = "Short answer:"
+NOTE_LABEL = "Editor's note for us:"
+
+
+def _known_block(page: KnownPage) -> str:
+    """One knowledge page as the worker reads it: the path, the labelled short
+    answer and note for us, then the whole text."""
+    head = [f"## {page.rel}", ""]
+    if page.answer_short.strip():
+        head.append(f"{SHORT_LABEL} {inline(page.answer_short, 600)}")
+    if page.us_note:
+        head.append(f"{NOTE_LABEL} {page.us_note}")
+    if len(head) > 2:
+        head.append("")
+    return "\n".join(head) + "\n" + page.text.strip()
+
+
 def insight_text(
     *,
     topic: str,
@@ -103,7 +123,7 @@ def insight_text(
         )
         or "- none"
     )
-    pages = "\n\n".join(f"## {page.rel}\n\n{page.text.strip()}" for page in known)
+    pages = "\n\n".join(_known_block(page) for page in known)
     bundle = "\n\n".join(f"## {part.path}\n\n{part.text}" for part in parts)
     return (
         f"Today: {today.isoformat()} ({today:%A, %B})\n"

@@ -11,6 +11,11 @@ these:
   they are on the disk.
 
 Each path is relative to `wiki/knowledge/`, as the dossier writes it.
+
+Each page also gives its note for us: the text under the heading
+`## Where this differs for us` that `jobs/research/write.py` writes, on one
+line and cut at a sentence end to `NOTE_MAX_CHARS` or less. A page without
+that section gives an empty note.
 """
 
 from __future__ import annotations
@@ -25,23 +30,63 @@ from joshua_core.jobs.research.dossier import load_dossier
 from joshua_core.jobs.research.write import STATUS_PUBLISHED
 from joshua_core.jobs.topics import read_page
 
+# The heading that `render_page` in `jobs/research/write.py` puts above the
+# editor's local note. A test renders a page and reads the note back.
+LOCAL_HEADING = "Where this differs for us"
+
+# The longest note for us that the worker sees, in characters.
+NOTE_MAX_CHARS = 600
+_SENTENCE_ENDS = (". ", "! ", "? ", ".) ")
+
 
 @dataclass(frozen=True)
 class KnownPage:
     """One published knowledge page: its path relative to `wiki/knowledge/`,
-    its whole text, and its one-line short answer."""
+    its whole text, its one-line short answer, and the editor's note for us."""
 
     rel: str
     text: str
     answer_short: str
+    us_note: str = ""
+
+
+def cut_at_sentence(text: str, limit: int = NOTE_MAX_CHARS) -> str:
+    """`text` on one line, cut to `limit` characters or less. The cut is at the
+    last sentence end before the limit, else at the last space."""
+    flat = " ".join(text.split())
+    if len(flat) <= limit:
+        return flat
+    head = flat[: limit + 1]
+    end = max(head.rfind(mark) for mark in _SENTENCE_ENDS)
+    if end > 0:
+        return head[: end + 1].rstrip()
+    space = head.rfind(" ")
+    return (head[:space] if space > 0 else flat[:limit]).rstrip()
+
+
+def us_note(body: str, limit: int = NOTE_MAX_CHARS) -> str:
+    """The text under `## Where this differs for us` in the body of a page, up
+    to the next heading of level 2 or 1, cut by `cut_at_sentence`. Empty when
+    the page has no such section."""
+    lines = body.splitlines()
+    heading = f"## {LOCAL_HEADING}"
+    for at, line in enumerate(lines):
+        if line.strip() == heading:
+            kept: list[str] = []
+            for rest in lines[at + 1 :]:
+                if rest.startswith("## ") or rest.startswith("# "):
+                    break
+                kept.append(rest)
+            return cut_at_sentence("\n".join(kept), limit)
+    return ""
 
 
 def _known(rel: str, text: str) -> KnownPage | None:
-    meta, _ = frontmatter.split(text)
+    meta, body = frontmatter.split(text)
     if meta.get("status") != STATUS_PUBLISHED:
         return None
     short = meta.get("answer_short")
-    return KnownPage(rel, text, short if isinstance(short, str) else "")
+    return KnownPage(rel, text, short if isinstance(short, str) else "", us_note(body))
 
 
 def _safe_rel(rel: str, data_root: Path) -> Path | None:

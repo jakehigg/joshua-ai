@@ -188,6 +188,14 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **The insights job raises a gap.** An insight is now also a gap: a knowledge
+  page names a step or a protection for our situation, and the wiki shows that
+  we have not done it, or marks it "to be added". Before this change, the
+  worker raised only a disagreement, so a missing alert or a default password
+  gave no insight. The worker also reads the editor's note for us (the
+  section `## Where this differs for us`) of each knowledge page as a labelled
+  line. See [docs/jobs.md](jobs.md#insights).
+
 - **Job reports and list pages are not memory.** The memory index leaves out
   a journal entry with `run_id` in its frontmatter, which is the report of a
   job run, and any page with `index: false`. The jobs write `index: false` on

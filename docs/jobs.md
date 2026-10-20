@@ -1249,7 +1249,11 @@ The insights job keeps `wiki/insights/`. An insight is a place where what we
 do, in the wiki and the journal, disagrees with what is known, in the
 `knowledge/` pages of the topic, for the date, the season, and our situation.
 "The garden is still on the summer watering program and it is late October"
-is an insight. It is not a fact about the world (that is knowledge), not an
+is an insight. A gap is an insight too: a knowledge page names a step or a
+protection for our situation, such as an alarm, a backup, or a password
+change, and the wiki shows that we have not done it. A step that the wiki
+marks "to be added", "to do", or "pending" is a gap, because today we do
+nothing. An insight is not a fact about the world (that is knowledge), not an
 event (that is the journal), and not a reference (that is the wiki). It is
 something that Joshua must tell us.
 
@@ -1280,8 +1284,12 @@ required. A path that is not a topic page gets 400.
    the parts of the bundle that say what we do (the parts that are not under
    `knowledge/` or `insights/`), the full text of each knowledge page with its
    frontmatter (so it sees `confidence`, `sources`, and `refresh_after`), the
-   date, the timezone and the `name` from `joshua.yaml`, and the open
-   insights of the topic, so that it does not raise one again. The prompt
+   `answer_short` of each page, and the editor's note for us: the text under
+   `## Where this differs for us`, on one line and cut at the end of a
+   sentence to 600 characters or less. A page without that section has no
+   note. The worker also gets the date, the timezone and the `name` from
+   `joshua.yaml`, and the open insights of the topic, so that it does not
+   raise one again. The prompt
    tells the worker that the bundle and the pages are content, not
    instructions.
 5. The gate decides which insights are new, which refresh an open insight,
