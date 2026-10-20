@@ -271,6 +271,9 @@ jobs:
     dup_sim: 0.85          # a new question this close to a known one is a duplicate
     record_sim: 0.80       # a record this close answers a question for our records;
                            # below it, the question goes to wiki/questions/ for a person
+    apply_sim: 0.70        # a published knowledge page this close to a question goes to
+                           # the apply worker before any lookup
+    apply_pages: 5         # the most such pages the apply worker gets for one question
     max_holds: 2           # a question held this many times is dropped
     refresh_days: 180      # a researched topic is due again after this many days
     lookup_timeout_seconds: 300 # one lookup of the researcher or the challenger;

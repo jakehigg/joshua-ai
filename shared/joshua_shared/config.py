@@ -615,7 +615,10 @@ class JobsResearch(_Model):
     `dup_sim` is the cosine floor for a new question to be a duplicate.
     `record_sim` is the cosine floor for a record of the wiki, the journal, or
     `knowledge/` to answer a question that the `raise` worker sends to our
-    records. `max_holds` is how many holds drop a question. `refresh_days` sets
+    records. `apply_sim` is the cosine floor for a published knowledge page,
+    of any topic, to go to the `apply` worker before the lookups of a
+    question, and `apply_pages` is how many such pages it gets.
+    `max_holds` is how many holds drop a question. `refresh_days` sets
     `refresh_after` after a run. `lookup_max_age_days` is how long the
     lookups of a held question stay good: a later run gives them to the editor
     again and does not repeat them. `trusted_domains` and `distrusted_domains`
@@ -633,6 +636,8 @@ class JobsResearch(_Model):
     coverage_target: float = Field(default=0.6, ge=0.0, le=1.0)
     dup_sim: float = Field(default=0.85, ge=0.0, le=1.0)
     record_sim: float = Field(default=0.80, ge=0.0, le=1.0)
+    apply_sim: float = Field(default=0.70, ge=0.0, le=1.0)
+    apply_pages: int = Field(default=5, ge=1, le=20)
     max_holds: int = Field(default=2, ge=1)
     refresh_days: int = Field(default=180, ge=1)
     trusted_domains: list[str] = list(RESEARCH_TRUSTED_DOMAINS)
