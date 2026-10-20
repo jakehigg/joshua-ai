@@ -173,10 +173,23 @@ plant" and "snake plants", but not "the plants". A name shorter than three
 characters does not count.
 
 The id or the display name of a person on the roster is never a name of a
-topic, and never an alias. A name that starts with the name of a person and
-`'s` also gives the rest: "Alex's caldo verde" gives "caldo verde", and never
-"Alex". So a journal entry that only names a person is not about a topic. It
-does not come into a bundle, and it does not count for the selection.
+topic, and never an alias. The name with `s` or `'s` after it ("alexs", "alex
+s", "Alex's") is not a name either, and a name that starts with such a form is
+not a name. A phrase of the file name that starts with the name of a person,
+with or without an `s` after it, is not a name. So a journal entry that only
+names a person is not about a topic. It does not come into a bundle, and it
+does not count for the selection.
+
+A possessive title names the thing, not the person who owns it. A possessive
+is the name of a person with `'s` or `s'` after it, or with `'` alone after a
+name that ends in `s`. The generic name is the title without the possessive:
+"Alex's Caldo Verde" gives "Caldo Verde", and "Pancakes, Alex's way" gives
+"Pancakes". The generic name is a name of the topic, and the full title is
+not. So for `recipes/alex-s-caldo-verde.md` the only name is "Caldo Verde",
+and "Alex watered the plants" is not about the recipe. The researcher's gate
+also puts the generic name in place of the title in a `web` question, before
+the route rules. See
+[The questions and the route](#the-questions-and-the-route).
 
 The aliases are the frontmatter `aliases` list of the page, and the terms
 that `vocabulary.md` gives it. A line of
@@ -725,10 +738,18 @@ or the gate rejects it with a reason:
   gives `answered_by: <path>` for a question that a knowledge page answers.
 - A `person` question from the worker has a `why`.
 
-Then the gate gives the route. The web cannot answer a question about us, so
-the gate sends a question to `person`, whatever the worker said, when one of
-these rules is true. The page and the report name the rule in
-`route_reason`:
+Then the gate gives the route. First, a `web` question gets the generic name
+of the topic in place of the possessive title, in any case: for "Alex's
+Caldo Verde", the question "How should lacinato kale be blanched for a soup
+like Alex's Caldo Verde?" becomes "... for a soup like Caldo Verde?". The
+dossier and the pages keep the new text, and the Questions section of the
+report marks the question `(generic name)`. A name of a person in any other
+use stays, and the rules below still apply to it: "Does Alex use homemade
+broth for Caldo Verde?" goes to `person`.
+
+The web cannot answer a question about us, so the gate sends a question to
+`person`, whatever the worker said, when one of these rules is true. The page
+and the report name the rule in `route_reason`:
 
 | Rule | `route_reason` |
 |---|---|
@@ -1002,7 +1023,7 @@ The report of a research run is the journal entry of the run, and
 |---|---|
 | Topic | the topic, the rule that selected it and why, the runner-up, and for a topic in a person section, a line that says so |
 | Bundle | each path of the bundle, its size, and if it was cut |
-| Questions | each question of the dossier, with its slug and status: the `web` questions |
+| Questions | each question of the dossier, with its slug and status: the `web` questions. A new question that got the generic name of the topic ends with `(generic name)` |
 | For a person | each new question page, with its id, `for`, `route_reason`, and `why`, and each question that was `already asked` or `dismissed before` |
 | Answered by our records | each `record` question with its `answered_by` path |
 | Rejected | each rejected question with the reason |

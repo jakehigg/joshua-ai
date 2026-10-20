@@ -161,6 +161,16 @@ with the images and the packaged chart, are at
   person, never to the web. If you set `jobs.topics.exclude` in
   `joshua.yaml`, add `coach/profiles/*` to your list.
 
+- **A possessive title names the thing, not the person.** For a recipe with
+  the title "Alex's Caldo Verde", the name "alex s" from the file name
+  matched each journal entry that named Alex. So the selection counted those
+  entries for the recipe, and the bundle filled with them. Also each web
+  question that said "Alex's Caldo Verde" went to a person. Now the only name
+  of such a topic is its generic name, "Caldo Verde". A `web` question gets
+  the generic name in place of the title before the route rules, and the
+  report marks it `(generic name)`. The `raise` worker is told to use the
+  generic name. See [docs/jobs.md](jobs.md#the-questions-and-the-route).
+
 - **No worker markup on a page.** A model sometimes wrote its next fields as
   tags inside one field, so a knowledge page showed
   `</answer><answer_short>...` in its Answer and "None given" for Evidence.
