@@ -33,6 +33,21 @@ too: reading is not what separates a guest from a member. Writing is.
 `.trash/` directories are not indexed, and a `*.meta.json` file is never a
 document of its own.
 
+Two kinds of page are not memory, and the index leaves them out:
+
+- A journal entry whose frontmatter holds `run_id`. A job run writes one as
+  its report. It records the run, not something that happened.
+- A page whose frontmatter holds `index: false`. The jobs write this key on
+  each dossier and on `README.md` in `wiki/knowledge/`, `wiki/questions/`,
+  and `wiki/insights/`. These pages list questions, and the pages they link
+  to hold the answers. A member can set the key on any page.
+
+Such a page stays on the disk and in the wiki history, the viewer shows it,
+and the agent can open it with the files tool. A search does not find it, and
+a turn does not get it. When a page gets one of these keys, the next index
+pass removes its chunks, the same as for a deleted file. Remove the key, and
+the next pass indexes the page again.
+
 The index also holds the text of an attachment. A PDF with a text layer and a
 text file are read when they arrive; the words on a picture and on a scan come
 from the describer. That text lives in the metadata file beside the
@@ -63,8 +78,9 @@ Three folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   Its body has the headings **Answer**, **Where this differs for us**,
   **Evidence**, **Disagreements**, and **Sources**. When Joshua uses a
   knowledge page in an answer, it says so and gives the confidence.
-  `wiki/knowledge/README.md` is the table of every dossier. See
-  [the researcher](jobs.md#the-researcher).
+  `wiki/knowledge/README.md` is the table of every dossier. A dossier and
+  the table hold `index: false`, so the index holds only the knowledge pages.
+  See [the researcher](jobs.md#the-researcher).
 - `wiki/questions/` holds the questions that the researcher job could not
   answer from the web or from our records: what was done, used, intended, or
   preferred, or a record that is missing. The index gives these chunks the
@@ -79,7 +95,7 @@ Three folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   and Joshua lists the open questions. `wiki/questions/README.md` lists every
   question, the oldest open question first. The memory bundle of a topic
   holds its answered questions, so the next research run reads what a person
-  said. See [questions for a person](jobs.md#questions-for-a-person).
+  said. The list holds `index: false`, so it is not indexed. See [questions for a person](jobs.md#questions-for-a-person).
 - `wiki/insights/` holds what the insights job raised: a place where what we
   do is different from what the knowledge says, for the date and the season.
   The index gives these chunks the kind `insight`. An insight is one page at
@@ -91,7 +107,7 @@ Three folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   `found_at` and `seen_at`. Its body has the headings **Why it matters**,
   **What to do**, **What we do**, **What is known**, and **Evidence**.
   `wiki/insights/README.md` is the table of every insight, open insights
-  first. See [insights](jobs.md#insights).
+  first. The table holds `index: false`, so it is not indexed. See [insights](jobs.md#insights).
 
 The agent finds them the same way it finds any wiki page: through the
 injection before a turn, and through `search_memory`. The agent cannot write
@@ -156,6 +172,10 @@ with their paths. A document gets there when the fault is its own, such as a
 until its content changes, a full reindex asks for it, or core restarts, so
 one bad document does not make the same failure on every pass. When the count
 is not zero, look at the paths and fix the source, or add the person.
+
+The `files` source also reports `not_memory`: the pages that its last listing
+left out because they are not memory, with their paths. See
+[What is in the index](#what-is-in-the-index). These pages are not a fault.
 
 ### Tuning it
 

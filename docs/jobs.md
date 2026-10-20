@@ -87,8 +87,19 @@ message `<job>: run <id>`. The row keeps the SHA, so you undo a bad run with
 one `git revert` in `/data/wiki`. With `wiki.git: false` core writes the entry
 and makes no commit.
 
-The memory bundle leaves out a journal entry that has `run_id` in its
-frontmatter, so the report of one run never becomes input to the next.
+A journal entry with `run_id` in its frontmatter is not memory. The memory
+index leaves it out, so a search, the per-turn injection, and the memory
+bundle do not return it. The memory bundle also leaves it out when it reads the
+journal. Thus the report of one run never becomes input to the next, and a
+report that repeats a question does not take the place of the page that
+answers it. To read a report, use `scripts/jobs.sh runs <id>`, the viewer, or
+the file in `/data/wiki`.
+
+The dossiers and the `README.md` lists that the jobs write hold
+`index: false` for the same reason: they list questions, and Joshua answers
+from the pages they link to. The knowledge pages, the question pages, and the
+insight pages are indexed. See
+[What is in the index](memory.md#what-is-in-the-index).
 
 ### Dry runs
 
@@ -671,6 +682,7 @@ questions:
 person_open: 1                   # the open questions of the topic in wiki/questions/
 person_answered: 0               # the answered questions of the topic in wiki/questions/
 source: research
+index: false                     # the memory index leaves the dossier out
 ```
 
 `question` is the general question, the text that went to the web.

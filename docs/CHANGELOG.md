@@ -175,6 +175,17 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **Job reports and list pages are not memory.** The memory index leaves out
+  a journal entry with `run_id` in its frontmatter, which is the report of a
+  job run, and any page with `index: false`. The jobs write `index: false` on
+  each dossier and on `README.md` in `wiki/knowledge/`, `wiki/questions/`,
+  and `wiki/insights/`. Before this change, the report entries of research
+  runs repeated the questions of a dossier and took the place of the knowledge
+  page that answers them. The pages stay in the wiki and in the viewer. The
+  next index pass removes their old chunks. `GET /admin/kb/status` reports
+  these pages under `not_memory`. See
+  [docs/memory.md](memory.md#what-is-in-the-index).
+
 - **The research gate accepts a question that holds its subject in other
   words.** A web question had to hold its `subject` as an exact phrase, so
   "Why does Buildah need the vfs storage driver when building container
