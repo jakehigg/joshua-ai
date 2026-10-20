@@ -71,6 +71,7 @@ from joshua_shared.log import get_logger
 from joshua_core.engine.ephemeral import Runner
 from joshua_core.engine.usage import Usage, UsageLedger
 from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle
+from joshua_core.jobs.models import LOOKUP, research_model
 from joshua_core.jobs.research import crew
 from joshua_core.jobs.research.dossier import (
     Dossier,
@@ -151,10 +152,9 @@ _WHY_NO_RECORD = "The researcher looked for this in our pages and the journal an
 _WHY_ABOUT_US = "Only somebody here knows this: the web cannot answer a question about us."
 
 
-def worker_model(settings: JoshuaConfig) -> str | None:
-    """`jobs.research.model`, else `jobs.model`, else `core.reflection_model`."""
-    jobs = settings.jobs
-    return jobs.research.model or jobs.model or settings.core.reflection_model
+def worker_model(settings: JoshuaConfig, worker: str | None = None) -> str | None:
+    """The model of the research worker `worker`; see `jobs/models.py`."""
+    return research_model(settings, worker)
 
 
 def local_day(now: datetime, settings: JoshuaConfig) -> date:
@@ -480,11 +480,11 @@ class ResearchJob(Job):
             aliases=bundle.aliases,
             existing=[q.question for q in dossier.questions],
             count=count,
-            model=worker_model(self._settings),
+            model=worker_model(self._settings, RAISE),
             runner=self._runner,
             usage_out=used,
         )
-        run.ledger.add(RAISE, used)
+        run.ledger.add(RAISE, used, model=worker_model(self._settings, RAISE))
         if raised.candidates is None:
             run.notes.append("The raise worker gave no answer, so no question was added.")
             return
@@ -634,7 +634,9 @@ class ResearchJob(Job):
                 groundings,
                 internet_settings=self._settings.internet,
                 research_settings=cfg,
-                editor_model=worker_model(self._settings),
+                editor_model=worker_model(self._settings, crew.EDITOR),
+                apply_model=worker_model(self._settings, crew.APPLY),
+                lookup_model=worker_model(self._settings, LOOKUP),
                 ledger=run.ledger,
                 internet_runner=self._internet_runner,
                 editor_runner=self._runner,
@@ -732,9 +734,10 @@ class ResearchJob(Job):
         data = run.ledger.as_data()
         if not data:
             return "No worker call."
-        lines = [
-            f"- `{name}`: {v['calls']} calls, {v['tokens']} tokens" for name, v in data.items()
-        ]
+        lines = []
+        for name, v in data.items():
+            model = f" (`{v['model']}`)" if v.get("model") else ""
+            lines.append(f"- `{name}`{model}: {v['calls']} calls, {v['tokens']} tokens")
         lines.append(f"- Total: {run.ledger.calls} calls, {run.ledger.tokens} tokens")
         for o in run.outcomes:
             steps = ", ".join(f"{step} {n} tokens" for step, n in o.tokens().items())

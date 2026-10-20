@@ -61,6 +61,7 @@ from joshua_core.jobs.insights.page import (
     write_text,
 )
 from joshua_core.jobs.insights.worker import WORKER, insight_text, raise_insights
+from joshua_core.jobs.models import insights_model
 from joshua_core.jobs.research.dossier import question_slug
 from joshua_core.jobs.research.gate import default_embedder
 from joshua_core.jobs.research.text import bundle_parts, code_span, fenced
@@ -73,9 +74,8 @@ NO_KNOWLEDGE = "no knowledge for this topic"
 
 
 def insight_model(settings: JoshuaConfig) -> str | None:
-    """`jobs.insights.model`, else `jobs.model`, else `core.reflection_model`."""
-    jobs = settings.jobs
-    return jobs.insights.model or jobs.model or settings.core.reflection_model
+    """The model of the insight worker; see `jobs/models.py`."""
+    return insights_model(settings)
 
 
 def local_day(now: datetime, settings: JoshuaConfig) -> date:
@@ -242,7 +242,7 @@ class InsightPass:
             runner=self._runner,
             usage_out=used,
         )
-        self._ledger.add(WORKER, used)
+        self._ledger.add(WORKER, used, model=insight_model(self._settings))
         if raised.candidates is None:
             result.notes.append("The insight worker gave no answer, so nothing changed.")
             return result
@@ -366,7 +366,10 @@ def usage_lines(ledger: UsageLedger) -> str:
     data = ledger.as_data()
     if not data:
         return "No worker call."
-    lines = [f"- `{name}`: {v['calls']} calls, {v['tokens']} tokens" for name, v in data.items()]
+    lines = []
+    for name, v in data.items():
+        model = f" (`{v['model']}`)" if v.get("model") else ""
+        lines.append(f"- `{name}`{model}: {v['calls']} calls, {v['tokens']} tokens")
     lines.append(f"- Total: {ledger.calls} calls, {ledger.tokens} tokens")
     return "\n".join(lines)
 

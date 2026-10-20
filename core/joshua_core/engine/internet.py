@@ -245,6 +245,7 @@ async def ask(
     question: str,
     *,
     settings: InternetConfig,
+    model: str | None = None,
     urls: list[str] | None = None,
     runner: Runner | None = None,
     usage_out: list[Usage] | None = None,
@@ -261,8 +262,9 @@ async def ask(
     fetched become the sources, with no title. When `usage_out` is a list, the tokens of the
     lookup are appended to it.
 
-    `timeout_s` and `max_turns` replace `settings.timeout_seconds` and
-    `settings.max_turns` for this lookup; `None` keeps the setting. When
+    `model`, `timeout_s`, and `max_turns` replace `settings.model`,
+    `settings.timeout_seconds`, and `settings.max_turns` for this lookup;
+    `None` keeps the setting. When
     `stats_out` is given, it gets the tool counts of the lookup and whether it
     timed out.
 
@@ -287,7 +289,7 @@ async def ask(
         system_prompt=SYSTEM_PROMPT,
         user_text=text,
         answer=InternetAnswer,
-        model=settings.model,
+        model=settings.model if model is None else model,
         timeout_s=settings.timeout_seconds if timeout_s is None else timeout_s,
         runner=runner,
         tools=tools,

@@ -540,12 +540,24 @@ class JobsTopics(_Model):
 CURATOR_ACTIONS = ("move", "merge", "refresh")
 
 
+class JobsCuratorModels(_Model):
+    """The model of each curator worker. `None` uses `jobs.curator.model`,
+    then `jobs.model`, then `core.reflection_model`. `place` finds the
+    section of a stray page, `compare` reads two pages that overlap, and
+    `refresh` writes a stale page again."""
+
+    place: str | None = None
+    compare: str | None = None
+    refresh: str | None = None
+
+
 class JobsCurator(_Model):
     """The curator job: it keeps the wiki and the journal correct and organized.
 
     `enabled` registers the job and the `curator` chat tool. `model` is the
     model of its workers; `None` uses `jobs.model`, then
-    `core.reflection_model`. `max_worker_calls` is the worker budget of one
+    `core.reflection_model`. `models` sets the model of one worker, before
+    `model`. `max_worker_calls` is the worker budget of one
     run. `duplicate_sim` is the cosine floor for two topic pages to be a
     near-duplicate pair, and `overlap_sim` the floor for two pages of one
     section to be compared after the near-duplicates. `apply` names the Tier B
@@ -555,6 +567,7 @@ class JobsCurator(_Model):
 
     enabled: bool = False
     model: str | None = None
+    models: JobsCuratorModels = JobsCuratorModels()
     max_worker_calls: int = Field(default=40, ge=0)
     duplicate_sim: float = Field(default=0.92, ge=0.0, le=1.0)
     overlap_sim: float = Field(default=0.70, ge=0.0, le=1.0)
@@ -596,12 +609,33 @@ RESEARCH_DISTRUSTED_DOMAINS = (
 RESEARCH_PERSON_SECTIONS = ("coach", "people")
 
 
+class JobsResearchModels(_Model):
+    """The model of each research worker.
+
+    `raise`, `apply`, and `editor` are the tool-less workers: `None` uses
+    `jobs.research.model`, then `jobs.model`, then `core.reflection_model`.
+    `lookup` is the model of the researcher and the challenger, the two
+    lookups through the internet agent: `None` uses `jobs.research.model`,
+    then `jobs.model`, then `internet.model`.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    # `raise` is a Python keyword, so the field has another name.
+    raise_: str | None = Field(default=None, alias="raise")
+    apply: str | None = None
+    editor: str | None = None
+    lookup: str | None = None
+
+
 class JobsResearch(_Model):
     """The researcher job: cited, challenged facts about one topic at a time.
 
     `enabled` registers the job and the `research` chat tool. `model` is the
-    model of the two tool-less workers, `raise` and `editor`; `None` uses
-    `jobs.model`, then `core.reflection_model`. The lookups use the
+    model of every worker of the job; `None` uses `jobs.model`, then
+    `core.reflection_model` for the tool-less workers, `raise`, `apply`, and
+    `editor`, and `internet.model` for the lookups. `models` sets the model of
+    one worker, before `model`. The lookups use the
     `internet` section, except for two limits of their own:
     `lookup_timeout_seconds` and `lookup_max_turns` replace
     `internet.timeout_seconds` and `internet.max_turns` for the researcher
@@ -630,6 +664,7 @@ class JobsResearch(_Model):
 
     enabled: bool = False
     model: str | None = None
+    models: JobsResearchModels = JobsResearchModels()
     topics_per_run: int = Field(default=1, ge=1, le=1)
     questions_per_topic: int = Field(default=8, ge=1, le=50)
     questions_per_run: int = Field(default=3, ge=1, le=50)

@@ -186,6 +186,20 @@ with the images and the packaged chart, are at
   four counts of each worker. See
   [docs/operations.md](operations.md#the-usage-page).
 
+- **Each job worker can have its own model.** The new keys
+  `jobs.research.models` (`raise`, `apply`, `editor`, `lookup`) and
+  `jobs.curator.models` (`place`, `compare`, `refresh`) set the model of one
+  worker, so you can give a worker that judges a stronger model and leave the
+  others alone. A key that is not set falls back to `jobs.<job>.model`, then
+  `jobs.model`, then `core.reflection_model`. The research lookups now follow
+  `jobs.research.model` and `jobs.model` too, and use `internet.model` only
+  when neither is set; the `use_internet` chat tool keeps `internet.model`. If
+  you set `jobs.model` or `jobs.research.model` and want the lookups to stay
+  on `internet.model`, set `jobs.research.models.lookup` to that model.
+  `report.data.usage` holds the `model` of each worker, the journal entry of a
+  run shows it, and each `job` row of `usage_event` keeps it. See
+  [docs/jobs.md](jobs.md#which-model-runs-which-worker).
+
 ### Fixed
 
 - **The insights job raises a gap.** An insight is now also a gap: a knowledge

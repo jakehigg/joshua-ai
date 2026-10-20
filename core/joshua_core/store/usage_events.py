@@ -131,8 +131,8 @@ async def record_job_usage(
     store: Any, *, job: str, run_id: int, ledger: UsageLedger, at: datetime | None = None
 ) -> int:
     """Write one `job` row for each worker in `ledger`, with the ref
-    `job_run:<run id>:<worker>`, and return how many rows were written.
-    This never raises."""
+    `job_run:<run id>:<worker>` and the model of the worker in `ledger`,
+    and return how many rows were written. This never raises."""
     written = 0
     for worker, calls, used in ledger.workers():
         event = UsageEvent(
@@ -141,6 +141,7 @@ async def record_job_usage(
             usage=used,
             calls=calls,
             worker=worker,
+            model=ledger.model(worker),
             run_id=run_id,
             ref=f"job_run:{run_id}:{worker}",
             at=at,

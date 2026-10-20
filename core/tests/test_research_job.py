@@ -283,6 +283,22 @@ async def test_run_tokens_are_the_sum_over_every_worker(h: Harness) -> None:
     assert report.data["usage"]["internet"]["input"] == 2 * LOOKUP_USAGE.input
 
 
+async def test_each_worker_runs_on_its_own_model(tmp_path: Path) -> None:
+    h = Harness(
+        tmp_path / "data",
+        "    model: m-research\n    models:\n      editor: m-editor\n      lookup: m-lookup\n",
+    )
+    report = await h.run(mode="run", topic=SNAKE, max_questions=1)
+    assert h.workers.models == {"raise": "m-research", "editor": "m-editor"}
+    assert {kw["model"] for kw in h.internet.kwargs} == {"m-lookup"}
+    assert {w: d["model"] for w, d in report.data["usage"].items()} == {
+        "editor": "m-editor",
+        "internet": "m-lookup",
+        "raise": "m-research",
+    }
+    assert "`editor` (`m-editor`): 1 calls" in report.to_markdown()
+
+
 async def test_max_questions_caps_the_run(h: Harness) -> None:
     report = await h.run(mode="run", topic=SNAKE, max_questions=1)
     assert len(report.data["pages"]) == 1

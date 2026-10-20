@@ -12,7 +12,7 @@ from curator_fakes import FakeCuratorStore, FakeFindingStore, FakeWorkers, build
 from jobs_fakes import fixed_clock, make_settings
 from joshua_core.engine import agent, ephemeral, internet
 from joshua_core.engine.types import WorkerStats
-from joshua_core.engine.usage import Usage, UsageLedger, UsageMeter, note_result
+from joshua_core.engine.usage import Usage, UsageLedger, UsageMeter, collect_run, note_result
 from joshua_core.jobs.curator import workers
 from joshua_core.jobs.curator.job import CuratorJob
 from joshua_core.memory import embed as embed_module
@@ -160,6 +160,7 @@ def test_the_ledger_sums_by_worker() -> None:
             "output": 5,
             "cache_read": 0,
             "cache_write": 0,
+            "model": None,
         },
         "raise": {
             "calls": 1,
@@ -168,8 +169,23 @@ def test_the_ledger_sums_by_worker() -> None:
             "output": 0,
             "cache_read": 0,
             "cache_write": 0,
+            "model": None,
         },
     }
+
+
+def test_the_ledger_keeps_the_model_of_each_worker() -> None:
+    run = UsageLedger()
+    inner = UsageLedger()
+    with collect_run(run):
+        inner.add("editor", [Usage(input=1)], model="m-editor")
+        inner.add("editor", [Usage(input=1)])
+        inner.add("raise", [Usage(input=1)])
+    assert inner.model("editor") == "m-editor"
+    assert inner.model("raise") is None
+    assert inner.model("nobody") is None
+    assert run.as_data()["editor"]["model"] == "m-editor"
+    assert run.as_data()["editor"]["calls"] == 2
 
 
 def test_only_the_result_message_counts() -> None:
@@ -394,6 +410,19 @@ async def test_an_internet_lookup_reports_its_usage() -> None:
     got = await internet.ask("q?", settings=Internet(), runner=runner, usage_out=out)
     assert got is not None
     assert sum(u.total for u in out) == 42
+
+
+async def test_an_internet_lookup_takes_a_model_of_its_own() -> None:
+    seen: list[Any] = []
+
+    async def runner(**kwargs: Any) -> dict[str, Any]:
+        seen.append(kwargs["model"])
+        return {"answer": "a", "sources": [], "confidence": "low"}
+
+    settings = Internet(model="m-internet")
+    await internet.ask("q?", settings=settings, runner=runner)
+    await internet.ask("q?", settings=settings, model="m-lookup", runner=runner)
+    assert seen == ["m-internet", "m-lookup"]
 
 
 # -- the curator ------------------------------------------------------------------

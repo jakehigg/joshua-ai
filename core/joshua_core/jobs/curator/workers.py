@@ -26,6 +26,7 @@ from joshua_core.engine.sanitize import CleanModel
 from joshua_core.engine.usage import Usage, UsageLedger
 from joshua_core.jobs.curator.prompts import COMPARE_PROMPT, PLACE_PROMPT, REFRESH_PROMPT
 from joshua_core.jobs.curator.scan import Section, render_section_map
+from joshua_core.jobs.models import curator_model
 
 TIMEOUT_S = 90.0
 MAX_PATCH_PAIRS = 12
@@ -36,10 +37,9 @@ Confidence = Literal["low", "medium", "high"]
 Outcome = Literal["answered", "no-answer", "refused"]
 
 
-def worker_model(settings: JoshuaConfig) -> str | None:
-    """`jobs.curator.model`, else `jobs.model`, else `core.reflection_model`."""
-    jobs = settings.jobs
-    return jobs.curator.model or jobs.model or settings.core.reflection_model
+def worker_model(settings: JoshuaConfig, worker: str | None = None) -> str | None:
+    """The model of the curator worker `worker`; see `jobs/models.py`."""
+    return curator_model(settings, worker)
 
 
 class Budget:

@@ -372,8 +372,8 @@ class CuratorJob(Job):
 
     # -- workers ------------------------------------------------------------
 
-    def _model(self) -> str | None:
-        return workers.worker_model(self._settings)
+    def _model(self, worker: str) -> str | None:
+        return workers.worker_model(self._settings, worker)
 
     def _skip(self, run: _Run, worker: str, label: str, outcome: str) -> None:
         run.failed.setdefault((worker, outcome), []).append(label)
@@ -422,11 +422,11 @@ class CuratorJob(Job):
                 topic.path,
                 text,
                 entries,
-                model=self._model(),
+                model=self._model("refresh"),
                 runner=self._runner,
                 usage_out=used,
             )
-            run.budget.usage.add("refresh", used)
+            run.budget.usage.add("refresh", used, model=self._model("refresh"))
             if got.answer is None:
                 self._skip(run, "refresh", f"`{topic.path}`", got.outcome)
                 continue
@@ -473,11 +473,11 @@ class CuratorJob(Job):
                 topic.path,
                 texts[topic.path],
                 sections,
-                model=self._model(),
+                model=self._model("place"),
                 runner=self._runner,
                 usage_out=used,
             )
-            run.budget.usage.add("place", used)
+            run.budget.usage.add("place", used, model=self._model("place"))
             if got.answer is None:
                 self._skip(run, "place", f"`{topic.path}`", got.outcome)
                 continue
@@ -554,11 +554,11 @@ class CuratorJob(Job):
             got = await workers.compare(
                 (pair.a, texts[pair.a]),
                 (pair.b, texts[pair.b]),
-                model=self._model(),
+                model=self._model("compare"),
                 runner=self._runner,
                 usage_out=used,
             )
-            run.budget.usage.add("compare", used)
+            run.budget.usage.add("compare", used, model=self._model("compare"))
             if got.answer is None:
                 self._skip(run, "compare", f"`{pair.a}` and `{pair.b}`", got.outcome)
                 continue

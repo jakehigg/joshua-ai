@@ -516,6 +516,10 @@ jobs:
   curator:
     enabled: false
     model: claude-sonnet-5
+    models:
+      place: claude-sonnet-5
+      compare: claude-opus-5
+      refresh: claude-sonnet-5
     max_worker_calls: 40
     duplicate_sim: 0.92
     overlap_sim: 0.70
@@ -525,6 +529,11 @@ jobs:
   research:
     enabled: false
     model: claude-sonnet-5
+    models:
+      raise: claude-opus-5
+      apply: claude-sonnet-5
+      editor: claude-opus-5
+      lookup: claude-sonnet-5
     topics_per_run: 1
     questions_per_topic: 8
     questions_per_run: 3
@@ -565,7 +574,7 @@ jobs:
 | Key | Default | What it does |
 |---|---|---|
 | `enabled` | `false` | `true` makes the `/admin/jobs/*` routes live. `false` makes each of them answer 404. Nothing else changes. |
-| `model` | not set | The model for the workers of a job that have no tools. When it is not set, a job uses `core.reflection_model`. |
+| `model` | not set | The model for the workers of every job. When it is not set, a worker with no tools uses `core.reflection_model`, and a research lookup uses `internet.model`. [docs/jobs.md](jobs.md#which-model-runs-which-worker) has the table of each worker and its chain. |
 | `bundle.sim` | `0.78` | A journal entry with a chunk this close to a chunk of the topic page is part of the memory bundle of that topic. |
 | `bundle.max_vector_entries` | `6` | The most journal entries that only `bundle.sim` brings into a bundle, the closest first. An entry that names the topic is not in this count. |
 | `bundle.exclude_slugs` | empty | `fnmatch` globs on the file name of a journal entry, without `.md`. No bundle takes an entry that a glob matches. The names belong to one instance, for example `garden-weather-log-*` for a daily log. |
@@ -574,13 +583,20 @@ jobs:
 | `topics.exclude` | `vocabulary.md`, `*/README.md`, `coach/profiles/*` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. A list that you set replaces the default list, so keep `coach/profiles/*` in it. |
 | `curator.enabled` | `false` | `true` adds the `curator` job and the `curator` chat tool for members. Both also need `jobs.enabled`. |
 | `curator.model` | not set | The model of the curator workers. When it is not set, the curator uses `jobs.model`, then `core.reflection_model`. |
+| `curator.models.place` | not set | The model of the `place` worker. When it is not set, the worker uses `curator.model`, then `jobs.model`, then `core.reflection_model`. |
+| `curator.models.compare` | not set | The model of the `compare` worker, with the same chain as `place`. |
+| `curator.models.refresh` | not set | The model of the `refresh` worker, with the same chain as `place`. |
 | `curator.max_worker_calls` | `40` | The maximum number of worker calls in one curator run. `0` makes a run that only scans. |
 | `curator.duplicate_sim` | `0.92` | Two topic pages with mean vectors this close are a near-duplicate pair, and the `compare` worker reads them. |
 | `curator.overlap_sim` | `0.70` | Two topic pages of one section this close are also compared, after the near-duplicate pairs, while the budget lasts. It must not be above `duplicate_sim`. |
 | `curator.apply` | none | The Tier B actions that a run applies: `move`, `merge`, `refresh`. Any other value is an error. The `apply` argument of a run replaces this list for that run. |
 | `curator.trash` | `true` | `true` moves a stray file to `wiki/.trash/<day>/`. `false` records it as a finding and leaves it. |
 | `research.enabled` | `false` | `true` adds the `research` job and the `research` chat tool for members. Both also need `jobs.enabled`. A `run` also needs `internet.enabled`. |
-| `research.model` | not set | The model of the two research workers that have no tools, `raise` and `editor`. When it is not set, the researcher uses `jobs.model`, then `core.reflection_model`. The two lookups use `internet.model`. |
+| `research.model` | not set | The model of every research worker. When it is not set, a worker uses `jobs.model`. When that is not set too, the `raise`, `apply`, and `editor` workers use `core.reflection_model`, and the two lookups use `internet.model`. |
+| `research.models.raise` | not set | The model of the `raise` worker. When it is not set, the worker uses `research.model`, then `jobs.model`, then `core.reflection_model`. |
+| `research.models.apply` | not set | The model of the `apply` worker, with the same chain as `raise`. |
+| `research.models.editor` | not set | The model of the `editor`, with the same chain as `raise`. |
+| `research.models.lookup` | not set | The model of the two lookups, the researcher and the challenger. When it is not set, the lookups use `research.model`, then `jobs.model`, then `internet.model`. The `use_internet` chat tool always uses `internet.model`. |
 | `research.topics_per_run` | `1` | The topics that one run works on. Only `1` is supported. |
 | `research.questions_per_topic` | `8` | The most questions that one `raise` call may add to a dossier, less the open questions. |
 | `research.questions_per_run` | `3` | The most questions that one run researches. The `max_questions` argument of a run can make it lower. A `plan` or a `run` calls `raise` only when the dossier has fewer open questions than this. |

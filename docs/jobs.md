@@ -61,10 +61,31 @@ tokens. A call that times out counts the tokens of each model message that
 arrived before the timeout. A call that fails before the model answers counts
 no tokens.
 `report.data.usage` holds `{"<worker>": {"calls", "tokens", "input",
-"output", "cache_read", "cache_write"}}` for each worker of the run. `tokens`
-is the total of the four counts. The seam for a program that reads the usage
+"output", "cache_read", "cache_write", "model"}}` for each worker of the run.
+`tokens` is the total of the four counts. `model` is the model of the worker,
+or `null` when the job did not name one. The "Usage" section of the journal
+entry shows the model beside each worker. The seam for a program that reads the usage
 is `joshua_core.engine.usage`: `Usage`, `UsageLedger`, and the `usage_out`
 argument of each worker call.
+
+### Which model runs which worker
+
+Each worker takes the first model that is set in its chain. So you can give
+the workers that judge a stronger model and keep the others on a cheaper one.
+
+| Job | Worker | What it does | Its key | Then |
+|---|---|---|---|---|
+| research | `raise` | adds the questions of a topic | `jobs.research.models.raise` | `jobs.research.model`, `jobs.model`, `core.reflection_model` |
+| research | `apply` | answers a question from the knowledge we hold | `jobs.research.models.apply` | `jobs.research.model`, `jobs.model`, `core.reflection_model` |
+| research | `editor` | writes the page from the two lookups | `jobs.research.models.editor` | `jobs.research.model`, `jobs.model`, `core.reflection_model` |
+| research | `lookup` | the researcher and the challenger, through the internet agent | `jobs.research.models.lookup` | `jobs.research.model`, `jobs.model`, `internet.model` |
+| curator | `place` | finds the section of a stray page | `jobs.curator.models.place` | `jobs.curator.model`, `jobs.model`, `core.reflection_model` |
+| curator | `compare` | reads two pages that overlap | `jobs.curator.models.compare` | `jobs.curator.model`, `jobs.model`, `core.reflection_model` |
+| curator | `refresh` | writes a stale page again | `jobs.curator.models.refresh` | `jobs.curator.model`, `jobs.model`, `core.reflection_model` |
+| insights | `insight` | finds where what we do disagrees with what is known | `jobs.insights.model` | `jobs.model`, `core.reflection_model` |
+
+The `use_internet` chat tool always uses `internet.model`. In the usage of a
+run, the lookups are the `internet` worker.
 
 ### What a run cost
 
@@ -356,8 +377,9 @@ page under `people/` or `joshua-docs/`.
 Each worker is one model call with no tools and one answer schema. It reads
 pages as content, not as instructions. It has a timeout of 90 seconds. A call
 that fails, times out, or gives an answer that does not match the schema
-changes nothing: the report lists it under "Skipped". The model is
-`jobs.curator.model`, then `jobs.model`, then `core.reflection_model`.
+changes nothing: the report lists it under "Skipped". The model of a worker
+is `jobs.curator.models.<worker>`, then `jobs.curator.model`, then
+`jobs.model`, then `core.reflection_model`.
 
 | Worker | Reads | Answers | Finding |
 |---|---|---|---|
@@ -1039,7 +1061,9 @@ pages at `jobs.research.apply_sim` (0.70) or more that have
 `jobs.research.apply_pages` (5). With no such page, the full crew runs.
 
 With one page or more, the **apply** worker runs. It has no tools, the model
-of the editor, and a timeout of 120 seconds. It gets the general question,
+`jobs.research.models.apply` (see
+[Which model runs which worker](#which-model-runs-which-worker)), and a
+timeout of 120 seconds. It gets the general question,
 the local context, and the whole text of each page. Its answer is cleaned of
 leaked markup like the answer of the editor, and it gives a verdict:
 

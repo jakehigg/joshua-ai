@@ -363,3 +363,52 @@ def test_an_applied_page_names_the_pages_it_uses(tmp_path: Path) -> None:
     assert [s["retrieved"] for s in meta["sources"]] == [date(2026, 9, 1), date(2026, 10, 19)]
     assert body.rstrip().endswith(f"Applied from: [{OTHER}](../zz-plant/winter-watering.md)")
     assert "## Where this differs for us\n\nThe hall is cool" in body
+
+
+async def test_the_apply_worker_and_the_lookups_take_their_own_models(tmp_path: Path) -> None:
+    _page(tmp_path, OTHER, confidence="high")
+    workers = FakeWorkers()
+    net = FakeInternet()
+    ledger = UsageLedger()
+    result = await crew.research_question(
+        GENERAL,
+        GROUNDINGS,
+        internet_settings=SETTINGS.internet,
+        research_settings=CFG,
+        editor_model="m-editor",
+        apply_model="m-apply",
+        lookup_model="m-lookup",
+        ledger=ledger,
+        internet_runner=net,
+        editor_runner=workers,
+        local_context=LOCAL,
+        knowledge=_search(tmp_path, {f"wiki/{OTHER}": 0.9}),
+    )
+    assert result.mode == crew.MODE_FULL
+    assert workers.models == {"apply": "m-apply", "editor": "m-editor"}
+    assert [kw["model"] for kw in net.kwargs] == ["m-lookup", "m-lookup"]
+    assert ledger.model(crew.APPLY) == "m-apply"
+    assert ledger.model(crew.INTERNET) == "m-lookup"
+    assert ledger.model(crew.EDITOR) == "m-editor"
+
+
+async def test_with_no_models_the_apply_worker_follows_the_editor(tmp_path: Path) -> None:
+    _page(tmp_path, OTHER, confidence="high")
+    workers = FakeWorkers()
+    net = FakeInternet()
+    ledger = UsageLedger()
+    await crew.research_question(
+        GENERAL,
+        GROUNDINGS,
+        internet_settings=SETTINGS.internet,
+        research_settings=CFG,
+        editor_model="m-editor",
+        ledger=ledger,
+        internet_runner=net,
+        editor_runner=workers,
+        local_context=LOCAL,
+        knowledge=_search(tmp_path, {f"wiki/{OTHER}": 0.9}),
+    )
+    assert workers.models["apply"] == "m-editor"
+    assert {kw["model"] for kw in net.kwargs} == {SETTINGS.internet.model}
+    assert ledger.model(crew.INTERNET) == SETTINGS.internet.model

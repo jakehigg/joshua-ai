@@ -15,8 +15,8 @@ before any model message appends nothing.
 `UsageLedger` sums the calls of one job run by worker name. Its `as_data`
 value goes into `RunReport.data["usage"]`, and its `tokens` into
 `RunReport.tokens`. For each worker, `as_data` gives `calls`, `tokens` (the
-total), and the four counts `input`, `output`, `cache_read`, and
-`cache_write`.
+total), the four counts `input`, `output`, `cache_read`, and `cache_write`,
+and `model`: the model that the caller named in `UsageLedger.add`, or None.
 
 `collect_run` makes one ledger the ledger of the run: each `UsageLedger.add`
 in its context also adds to that ledger. The job runner uses it, so it knows
@@ -157,6 +157,7 @@ class UsageMeter:
 class _WorkerUsage:
     calls: int = 0
     usage: Usage = field(default_factory=Usage)
+    model: str | None = None
 
 
 class UsageLedger:
@@ -165,21 +166,32 @@ class UsageLedger:
     def __init__(self) -> None:
         self._by_worker: dict[str, _WorkerUsage] = {}
 
-    def add(self, worker: str, usages: Iterable[Usage] = (), *, calls: int = 1) -> None:
+    def add(
+        self,
+        worker: str,
+        usages: Iterable[Usage] = (),
+        *,
+        calls: int = 1,
+        model: str | None = None,
+    ) -> None:
         """Count `calls` calls of `worker` and add the tokens of `usages`.
+        `model` is the model of the calls; the worker keeps the last model
+        that a call named.
 
         The ledger of the run (see `collect_run`) gets the same counts, when
         there is one and it is not this ledger."""
         used = Usage.sum(usages)
-        self._add(worker, used, calls)
+        self._add(worker, used, calls, model)
         outer = _RUN_LEDGER.get()
         if outer is not None and outer is not self:
-            outer._add(worker, used, calls)
+            outer._add(worker, used, calls, model)
 
-    def _add(self, worker: str, used: Usage, calls: int) -> None:
+    def _add(self, worker: str, used: Usage, calls: int, model: str | None) -> None:
         entry = self._by_worker.setdefault(worker, _WorkerUsage())
         entry.calls += calls
         entry.usage = entry.usage + used
+        if model:
+            entry.model = model
 
     @property
     def calls(self) -> int:
@@ -197,9 +209,15 @@ class UsageLedger:
         """`(worker, calls, usage)` for each worker, sorted by worker name."""
         return [(name, e.calls, e.usage) for name, e in sorted(self._by_worker.items())]
 
-    def as_data(self) -> dict[str, dict[str, int]]:
+    def model(self, worker: str) -> str | None:
+        """The model of `worker`, or None when no call named one."""
+        entry = self._by_worker.get(worker)
+        return entry.model if entry is not None else None
+
+    def as_data(self) -> dict[str, dict[str, int | str | None]]:
         """`{worker: {"calls", "tokens", "input", "output", "cache_read",
-        "cache_write"}}`, sorted by worker name. `tokens` is the total."""
+        "cache_write", "model"}}`, sorted by worker name. `tokens` is the
+        total."""
         return {
             name: {
                 "calls": calls,
@@ -208,6 +226,7 @@ class UsageLedger:
                 "output": used.output,
                 "cache_read": used.cache_read,
                 "cache_write": used.cache_write,
+                "model": self.model(name),
             }
             for name, calls, used in self.workers()
         }

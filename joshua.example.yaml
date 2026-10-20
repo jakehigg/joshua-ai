@@ -222,8 +222,8 @@ jobs:
   # scripts/jobs.sh, and nothing schedules one. Each run writes one journal
   # entry and makes one wiki commit. docs/jobs.md explains them.
   enabled: false           # false: every /admin/jobs/* route answers 404
-  # model: claude-sonnet-5 # the model of a job's tool-less workers; when it is
-  #                        # not set, core.reflection_model
+  # model: claude-sonnet-5 # the model of every job worker; when it is not set,
+  #                        # core.reflection_model (internet.model for a lookup)
   bundle:
     # The memory bundle: what a job reads about one topic.
     sim: 0.78              # a journal chunk this close to the topic page is about it
@@ -248,6 +248,10 @@ jobs:
     enabled: false         # true: the curator job and the curator chat tool
     # model: claude-sonnet-5 # the model of its workers; when it is not set,
     #                        # jobs.model, then core.reflection_model
+    # models:                # the model of one worker, before model
+    #   place: claude-sonnet-5   # finds the section of a stray page
+    #   compare: claude-opus-5   # reads two pages that overlap
+    #   refresh: claude-sonnet-5 # writes a stale page again
     max_worker_calls: 40   # the worker calls one run may make
     duplicate_sim: 0.92    # two topic pages this close are a near-duplicate pair
     overlap_sim: 0.70      # two pages of one section this close are compared too
@@ -261,9 +265,15 @@ jobs:
     # The researcher keeps wiki/knowledge/: cited, challenged facts about one
     # topic at a time, in a dossier per topic. docs/jobs.md explains it.
     enabled: false         # true: the research job and the research chat tool
-    # model: claude-sonnet-5 # the model of its two tool-less workers (raise,
-    #                        # editor); when it is not set, jobs.model, then
-    #                        # core.reflection_model. The lookups use internet.
+    # model: claude-sonnet-5 # the model of its workers; when it is not set,
+    #                        # jobs.model, then core.reflection_model, or
+    #                        # internet.model for the lookups
+    # models:                # the model of one worker, before model
+    #   raise: claude-opus-5     # adds the questions of a topic
+    #   apply: claude-sonnet-5   # answers from the knowledge we hold
+    #   editor: claude-opus-5    # writes the page from the two lookups
+    #   lookup: claude-sonnet-5  # the researcher and the challenger; the chat
+    #                            # tool use_internet keeps internet.model
     topics_per_run: 1      # the topics one run works on; only 1 is supported
     questions_per_topic: 8 # the questions one raise call may add, less the open ones
     questions_per_run: 3   # the questions one run researches

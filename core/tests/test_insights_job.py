@@ -165,7 +165,12 @@ async def test_a_summer_program_in_autumn_raises_one_insight(h: Harness) -> None
     assert set(report.written) == {found.path, layout.insights_index(h.data)}
     assert report.calls == 1 and report.tokens == INSIGHT_USAGE.total
     assert report.data["usage"] == {
-        "insight": {"calls": 1, "tokens": INSIGHT_USAGE.total, **_split(INSIGHT_USAGE)}
+        "insight": {
+            "calls": 1,
+            "tokens": INSIGHT_USAGE.total,
+            **_split(INSIGHT_USAGE),
+            "model": insight_model(h.settings),
+        }
     }
     assert [s[0] for s in report.sections] == [
         "Knowledge",

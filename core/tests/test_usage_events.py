@@ -118,8 +118,8 @@ async def test_a_job_kind_is_not_a_call_kind() -> None:
 async def test_a_job_row_for_each_worker() -> None:
     store = Store()
     ledger = UsageLedger()
-    ledger.add("lookup", [Usage(input=3, output=1)])
-    ledger.add("lookup", [Usage(input=2, cache_write=5)])
+    ledger.add("lookup", [Usage(input=3, output=1)], model="m-lookup")
+    ledger.add("lookup", [Usage(input=2, cache_write=5)], model="m-lookup")
     ledger.add("editor", [Usage(output=9)])
     started = datetime(2026, 10, 19, 12, tzinfo=UTC)
 
@@ -130,6 +130,8 @@ async def test_a_job_row_for_each_worker() -> None:
     assert by_worker["lookup"].calls == 2
     assert by_worker["lookup"].usage == Usage(input=5, output=1, cache_write=5)
     assert by_worker["lookup"].ref == "job_run:4:lookup"
+    assert by_worker["lookup"].model == "m-lookup"
+    assert by_worker["editor"].model is None
     assert {(e.kind, e.name, e.run_id, e.at) for e in store.events} == {
         ("job", "research", 4, started)
     }
@@ -362,7 +364,7 @@ class SpendJob(Job):
         ledger = UsageLedger()
         ledger.add("lookup", [Usage(input=10, output=2)])
         ledger.add("lookup", [Usage(input=5, cache_read=50)])
-        ledger.add("editor", [Usage(output=7, cache_write=3)])
+        ledger.add("editor", [Usage(output=7, cache_write=3)], model="m-editor")
         if self._fail:
             raise RuntimeError("the worker broke")
         return RunReport(
@@ -404,6 +406,7 @@ async def test_a_job_run_writes_one_row_per_worker(
     assert by_worker["lookup"].usage == Usage(input=15, output=2, cache_read=50)
     assert {(e.kind, e.name, e.run_id) for e in store.usage_events} == {("job", "spend", run_id)}
     assert by_worker["editor"].ref == f"job_run:{run_id}:editor"
+    assert (by_worker["editor"].model, by_worker["lookup"].model) == ("m-editor", None)
 
 
 async def test_a_failed_run_still_counts_what_it_used(tmp_path: Path) -> None:

@@ -610,7 +610,7 @@ async def _apply(
         runner=runner,
         usage_out=used,
     )
-    ledger.add(APPLY, used)
+    ledger.add(APPLY, used, model=model)
     steps[APPLY] = Usage.sum(used)
     if answer is None:
         return None, []
@@ -627,6 +627,8 @@ async def research_question(
     research_settings: JobsResearch,
     editor_model: str | None,
     ledger: UsageLedger,
+    apply_model: str | None = None,
+    lookup_model: str | None = None,
     internet_runner: Runner | None = None,
     editor_runner: Runner | None = None,
     draft: internet.InternetAnswer | None = None,
@@ -637,6 +639,10 @@ async def research_question(
 ) -> CrewResult:
     """Run the crew for one general question. Each call is counted on
     `ledger`, and the tokens of each step are on `CrewResult.usage`.
+
+    `editor_model` is the model of the editor. `apply_model` is the model of
+    the apply worker; `None` uses `editor_model`. `lookup_model` is the model
+    of the researcher and the challenger; `None` uses `internet_settings.model`.
 
     `local_context` goes to the apply worker and the editor, never to a
     lookup. With `knowledge`, the crew first searches the knowledge we hold
@@ -660,7 +666,7 @@ async def research_question(
                 question,
                 local_context,
                 pages,
-                model=editor_model,
+                model=apply_model or editor_model,
                 runner=editor_runner,
                 ledger=ledger,
                 steps=steps,
@@ -696,13 +702,14 @@ async def research_question(
         got = await internet.ask(
             text,
             settings=internet_settings,
+            model=lookup_model,
             runner=internet_runner,
             usage_out=used,
             timeout_s=research_settings.lookup_timeout_seconds,
             max_turns=research_settings.lookup_max_turns,
             stats_out=stats,
         )
-        ledger.add(INTERNET, used)
+        ledger.add(INTERNET, used, model=lookup_model or internet_settings.model)
         steps[step] = Usage.sum(used)
         return got
 
@@ -747,7 +754,7 @@ async def research_question(
         runner=editor_runner,
         usage_out=used,
     )
-    ledger.add(EDITOR, used)
+    ledger.add(EDITOR, used, model=editor_model)
     steps[EDITOR] = Usage.sum(used)
     if edited is None:
         return result(

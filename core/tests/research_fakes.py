@@ -158,6 +158,8 @@ class FakeWorkers:
             {"verdict": "none", "cites": []} if apply_answer is None else apply_answer
         )
         self.calls: list[tuple[str, str]] = []
+        # The model of the last call of each worker.
+        self.models: dict[str, Any] = {}
 
     def names(self) -> list[str]:
         return [name for name, _ in self.calls]
@@ -165,6 +167,9 @@ class FakeWorkers:
     async def __call__(self, **kwargs: Any) -> dict[str, Any] | None:
         prompt = kwargs["system_prompt"]
         out = kwargs.get("usage_out")
+        names = {RAISE_PROMPT: "raise", APPLY_PROMPT: "apply", EDITOR_PROMPT: "editor"}
+        if prompt in names:
+            self.models[names[prompt]] = kwargs.get("model")
         if prompt == RAISE_PROMPT:
             self.calls.append(("raise", kwargs["user_text"]))
             if out is not None:
