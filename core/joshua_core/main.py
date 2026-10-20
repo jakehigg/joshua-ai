@@ -227,9 +227,11 @@ async def lifespan(app: FastAPI):
 
 
 async def _backfill_usage(repo: Repo) -> None:
-    """Write the usage rows of the calls made before `usage_event` existed.
+    """Write the usage rows of the calls made before `usage_event` existed,
+    and give the old `nightly` rows the kind `reflection`.
 
-    Each row has a source ref, so a second start adds nothing. A failure is a
+    Each row has a source ref, so a second start adds nothing. The log line
+    counts the rows added by kind and the `nightly` rows renamed. A failure is a
     warning: the usage page then misses the old calls, and core starts.
     """
     try:
@@ -237,7 +239,8 @@ async def _backfill_usage(repo: Repo) -> None:
     except Exception as exc:  # noqa: BLE001 — the backfill never stops a start
         logger.warning({"message": "usage backfill failed", "error": str(exc)})
         return
-    logger.info({"message": "usage backfill", "added": added})
+    renamed = added.pop("reflection", 0)
+    logger.info({"message": "usage backfill", "added": added, "renamed": renamed})
 
 
 def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> ConversationManager:

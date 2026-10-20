@@ -30,11 +30,24 @@ async def test_insert_and_sum_by_local_day(repo) -> None:
             kind="job",
             name="research",
             worker="lookup",
+            model="m-lookup",
             usage=Usage(input=7),
             calls=3,
             run_id=9,
             at=NOON,
             ref="job_run:9:lookup",
+        )
+    )
+    await repo.add_usage_event(
+        UsageEvent(
+            kind="job",
+            name="research",
+            worker="editor",
+            model="m-editor",
+            usage=Usage(output=2),
+            run_id=9,
+            at=NOON,
+            ref="job_run:9:editor",
         )
     )
     # The same ref again is skipped.
@@ -48,8 +61,11 @@ async def test_insert_and_sum_by_local_day(repo) -> None:
     assert [r["date"] for r in body["rows"]] == ["2026-10-20", "2026-10-19"]
     assert body["rows"][1]["groups"]["chat"]["total"] == 12
     assert body["rows"][0]["groups"]["chat"]["total"] == 5
-    assert body["rows"][0]["groups"]["research"]["calls"] == 3
     assert body["rows"][0]["groups"]["research"]["workers"]["lookup"]["input"] == 7
+    assert body["rows"][0]["groups"]["research"]["calls"] == 4
+    assert body["totals"]["research"]["models"] == ["m-editor", "m-lookup"]
+    assert body["totals"]["research"]["workers"]["lookup"]["models"] == ["m-lookup"]
+    assert body["totals"]["chat"]["models"] == []
     # A row before the window is not counted.
     assert await repo.usage_rows(datetime(2026, 10, 21, tzinfo=UTC), TZ) == []
 
@@ -94,8 +110,8 @@ async def test_backfill_reads_old_rows_once(repo) -> None:
     first = await repo.backfill_usage()
     second = await repo.backfill_usage()
 
-    assert first == {"chat": 1, "job": 2}
-    assert second == {"chat": 0, "job": 0}
+    assert first == {"chat": 1, "job": 2, "reflection": 0}
+    assert second == {"chat": 0, "job": 0, "reflection": 0}
     async with repo._pool.connection() as conn:  # noqa: SLF001 — read the rows back
         cur = await conn.execute("SELECT * FROM usage_event ORDER BY ref")
         rows = {r["ref"]: r for r in await cur.fetchall()}
@@ -111,3 +127,28 @@ async def test_backfill_reads_old_rows_once(repo) -> None:
     assert (review["calls"], review["input"], review["output"]) == (2, 500, 0)
     editor = rows[f"job_run:{new}:editor"]
     assert (editor["input"], editor["output"], editor["worker"]) == (4, 5, "editor")
+
+
+async def test_the_backfill_renames_the_nightly_rows_once(repo) -> None:
+    for ref, kind in (("old-1", "nightly"), ("old-2", "nightly"), ("new-1", "reflection")):
+        await repo.add_usage_event(
+            UsageEvent(kind=kind, name=kind, usage=Usage(input=3), model="m", at=NOON, ref=ref)
+        )
+
+    first = await repo.backfill_usage()
+    second = await repo.backfill_usage()
+
+    assert first["reflection"] == 2
+    assert second["reflection"] == 0
+    async with repo._pool.connection() as conn:  # noqa: SLF001 — read the rows back
+        cur = await conn.execute("SELECT ref, kind, name, input FROM usage_event ORDER BY ref")
+        rows = await cur.fetchall()
+    assert [(r["ref"], r["kind"], r["name"], r["input"]) for r in rows] == [
+        ("new-1", "reflection", "reflection", 3),
+        ("old-1", "reflection", "reflection", 3),
+        ("old-2", "reflection", "reflection", 3),
+    ]
+    body = summarize(await repo.usage_rows(SINCE, TZ), timezone=TZ, days=30).model_dump()
+    assert body["groups"] == ["reflection"]
+    assert body["totals"]["reflection"]["calls"] == 3
+    assert body["totals"]["reflection"]["models"] == ["m"]

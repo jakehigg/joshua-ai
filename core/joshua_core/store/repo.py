@@ -793,18 +793,18 @@ class Repo:
             )
 
     async def usage_rows(self, since: datetime, timezone: str) -> list[dict[str, Any]]:
-        """The sums of `usage_event` since `since`, by day, name, and worker.
-        The day is the date of `at` in `timezone`."""
+        """The sums of `usage_event` since `since`, by day, name, worker, and
+        model. The day is the date of `at` in `timezone`."""
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
-                SELECT (at AT TIME ZONE %s)::date AS day, name, worker,
+                SELECT (at AT TIME ZONE %s)::date AS day, name, worker, model,
                        SUM(calls) AS calls, SUM(input) AS input, SUM(output) AS output,
                        SUM(cache_read) AS cache_read, SUM(cache_write) AS cache_write
                 FROM usage_event
                 WHERE at >= %s
-                GROUP BY 1, 2, 3
-                ORDER BY 1 DESC, 2, 3
+                GROUP BY 1, 2, 3, 4
+                ORDER BY 1 DESC, 2, 3, 4
                 """,
                 (timezone, since),
             )
@@ -822,11 +822,20 @@ class Repo:
         a worker puts that total in `input`, and 0 in the other counts. The
         model of a backfilled row is NULL. A ref that is already there is
         skipped, so this is safe to run at each start.
+
+        `reflection`: each row of the old kind `nightly` gets the kind and the
+        name `reflection`. The count is the rows that changed, so a second
+        start counts 0.
         """
         async with self._pool.connection() as conn:
             chat = await conn.execute(_BACKFILL_CHAT_SQL)
             job = await conn.execute(_BACKFILL_JOB_SQL)
-        return {"chat": max(chat.rowcount, 0), "job": max(job.rowcount, 0)}
+            reflection = await conn.execute(_RENAME_NIGHTLY_SQL)
+        return {
+            "chat": max(chat.rowcount, 0),
+            "job": max(job.rowcount, 0),
+            "reflection": max(reflection.rowcount, 0),
+        }
 
     # --- curator findings -------------------------------------------------
 
@@ -994,6 +1003,11 @@ def _count_sql(expr: str) -> str:
 
 
 _SDK_USAGE = "t.meta->'usage'"
+
+# The usage rows of the nightly reflection had the kind `nightly`.
+_RENAME_NIGHTLY_SQL = """
+UPDATE usage_event SET kind = 'reflection', name = 'reflection' WHERE kind = 'nightly'
+"""
 
 _BACKFILL_CHAT_SQL = f"""
 INSERT INTO usage_event

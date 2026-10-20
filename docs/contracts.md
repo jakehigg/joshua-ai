@@ -147,26 +147,39 @@ logs the query.
 
 `GET /v1/usage` gives the tokens of the model calls, for each calendar day in
 the instance `timezone` and for each group. The groups are `chat` (the turns
-of the agent), `nightly` (the nightly reflection), `internet` (a lookup that
-the agent makes with `use_internet`), `describe` (the attachment describer),
-and one group for each job, by job name (`curator`, `research`, `insights`).
-A lookup that a job makes counts under the job. `days` is the window, today
-included: default 30, held to 1 to 366.
+of the agent), `reflection` (the nightly reflection), `internet` (a lookup
+that the agent makes with `use_internet`), `describe` (the attachment
+describer), and one group for each job, by job name (`curator`, `research`,
+`insights`). A lookup that a job makes counts under the job. `days` is the
+window, today included: default 30, held to 1 to 366.
 
 ```json
 {"timezone": "America/New_York", "days": 30,
- "groups": ["chat", "curator", "research"],
+ "groups": ["chat", "reflection", "internet", "describe", "research"],
  "rows": [{"date": "2026-10-20",
            "groups": {"chat": {"calls": 12, "input": 900, "output": 400,
                                "cache_read": 52000, "cache_write": 3100,
-                               "total": 56400, "workers": {}}}}],
- "totals": {"chat": {"calls": 12, "...": "..."}}}
+                               "total": 56400, "models": ["claude-opus-5"],
+                               "workers": {}}}}],
+ "totals": {"chat": {"calls": 12, "...": "..."},
+            "reflection": {"calls": 0, "...": "...", "models": [], "workers": {}},
+            "research": {"calls": 4, "...": "...",
+                         "models": ["claude-opus-5", "claude-sonnet-5"],
+                         "workers": {"editor": {"calls": 1, "...": "...",
+                                                "models": ["claude-opus-5"]}}}}}
 ```
 
-`rows` is newest first and holds only a day with usage. `groups` names each
-group in the window, sorted. `total` is input, output, cache read, and cache
-write, added. `workers` gives the same counts for each worker of a job group,
-and is empty for the other groups. The answer holds no person, no message,
+`groups` always holds every feature, also one with no usage: `chat`,
+`reflection`, `internet`, `describe`, then each job that `jobs.enabled` and
+`jobs.<job>.enabled` turn on (`curator`, `research`, `insights`), in that
+order. After them come the other names of the rows in the window, sorted, for
+example a job that is off now. `totals` holds one entry for each name of
+`groups`, with zero counts for a group with no usage. `rows` is newest first
+and holds only a day with usage, and a day holds only the groups with usage
+that day. `total` is input, output, cache read, and cache write, added.
+`models` is the sorted list of the distinct models of the calls of a group,
+and `[]` when no call named one. `workers` gives the same counts and `models`
+for each worker of a job group, and is empty for the other groups. The answer holds no person, no message,
 and no question. An empty list in `usage.allowed_callers` turns the route
 off: every caller gets `403`. `GET /admin/usage` gives the same answer to an
 admin caller.

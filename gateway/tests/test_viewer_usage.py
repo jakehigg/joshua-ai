@@ -250,3 +250,99 @@ def test_a_row_outside_the_window_draws_no_bar() -> None:
 
 def test_today_falls_back_to_utc_for_a_bad_zone() -> None:
     assert usage_mod._today("Not/AZone") == usage_mod._today("UTC")
+
+
+def _full_answer() -> dict[str, Any]:
+    """Every feature in `groups`: `reflection` with no usage, and a job with
+    two workers and their models."""
+    research = {
+        **_counts(5, 7000, 900),
+        "models": ["m-editor", "m-lookup"],
+        "workers": {
+            "editor": _worker(1, 1000, 800, ["m-editor"]),
+            "internet": _worker(4, 6000, 100, ["m-lookup"]),
+        },
+    }
+    chat = {**_counts(14, 1010, 205), "models": ["m-chat"]}
+    return {
+        "timezone": "America/New_York",
+        "days": 30,
+        "groups": ["chat", "reflection", "internet", "describe", "research"],
+        "rows": [{"date": "2026-10-20", "groups": {"chat": chat, "research": research}}],
+        "totals": {
+            "chat": chat,
+            "reflection": _counts(0, 0, 0),
+            "internet": _counts(0, 0, 0),
+            "describe": _counts(0, 0, 0),
+            "research": research,
+        },
+    }
+
+
+def _worker(calls: int, input_: int, output: int, models: list[str]) -> dict[str, Any]:
+    entry = {**_counts(calls, input_, output), "models": models}
+    del entry["workers"]
+    return entry
+
+
+def _section(html: str, start: str, end: str) -> str:
+    return html[html.index(start) : html.index(end, html.index(start))]
+
+
+def test_a_group_with_no_usage_is_in_both_tables(data, monkeypatch) -> None:
+    _with_core(monkeypatch, FakeCore(_full_answer()))
+    html = _get().text
+    days = _section(html, "<h2>Tokens by day</h2>", "</table>")
+    totals = _section(html, "<h2>Totals by group</h2>", "</table>")
+    for name in ("chat", "reflection", "internet", "describe", "research"):
+        assert f"<th>{name}</th>" in days
+        assert f"<tr><th>{name}</th>" in totals
+    zero = _section(totals, "<tr><th>reflection</th>", "</tr>")
+    assert zero.count("<td class=num>0</td>") == 6
+    # The fold-out of a day still holds only the groups with usage that day.
+    fold = _section(html, "<details class=day>", "</details>")
+    assert "<th>reflection</th>" not in fold and "Models" not in fold
+
+
+def test_the_totals_table_has_a_models_column(data, monkeypatch) -> None:
+    _with_core(monkeypatch, FakeCore(_full_answer()))
+    totals = _section(_get().text, "<h2>Totals by group</h2>", "</table>")
+    assert "<th>Models</th>" in totals
+    assert "<td>m-chat</td>" in _section(totals, "<tr><th>chat</th>", "</tr>")
+    assert "<td>m-editor, m-lookup</td>" in _section(totals, "<tr><th>research</th>", "</tr>")
+    assert "<td>—</td>" in _section(totals, "<tr><th>describe</th>", "</tr>")
+
+
+def test_a_job_with_workers_gets_a_worker_table(data, monkeypatch) -> None:
+    _with_core(monkeypatch, FakeCore(_full_answer()))
+    html = _get().text
+    table = _section(html, "<h3>The workers of research</h3>", "</table>")
+    assert "<th>Worker</th>" in table and "<th>Models</th>" in table
+    editor = _section(table, "<tr><th>editor</th>", "</tr>")
+    assert "<td class=num>1</td>" in editor and "<td>m-editor</td>" in editor
+    assert "<td>m-lookup</td>" in _section(table, "<tr><th>internet</th>", "</tr>")
+    # The total row of the worker table sums the workers.
+    assert f"<strong>{usage_mod.exact(7900)}</strong>" in table
+    # A group with no workers gets no table.
+    assert "The workers of chat" not in html
+
+
+def test_a_hostile_worker_name_and_model_are_escaped(data, monkeypatch) -> None:
+    evil = "<img src=x onerror=alert(1)>"
+    answer = _full_answer()
+    answer["totals"]["research"]["workers"] = {evil: _worker(1, 1, 1, [evil])}
+    answer["totals"]["chat"]["models"] = [evil]
+    _with_core(monkeypatch, FakeCore(answer))
+    html = _get().text
+    assert "<img" not in html
+    assert "&lt;img src=x onerror=alert(1)&gt;" in html
+
+
+def test_an_empty_window_still_lists_every_group(data, monkeypatch) -> None:
+    answer = {**_full_answer(), "rows": []}
+    _with_core(monkeypatch, FakeCore(answer))
+    html = _get().text
+    assert "No usage in this window." in html
+    totals = _section(html, "<h2>Totals by group</h2>", "</table>")
+    assert "<tr><th>reflection</th>" in totals
+    assert "<h2>Tokens by day</h2>" not in html

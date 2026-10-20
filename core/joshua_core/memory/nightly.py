@@ -12,7 +12,7 @@ the daily rollover starts the next day's SDK session fresh.
 The reflection is one tool-less LLM call per document (``run_oneshot``), so it
 never touches a live conversation. One person's profile failing never stops
 the others, and never stops the journal page. The tokens of each call go into
-one `nightly` usage row.
+one `reflection` usage row.
 
 Schedule: ``memory.nightly_at`` local time, on the same cron loop as the
 scheduler. ``POST /admin/reflect`` runs or re-runs one day on demand; re-running
@@ -490,7 +490,7 @@ class NightlyReflector:
                     system_prompt=system, user_prompt=user, model=self._model, usage_out=used
                 )
             finally:
-                await record_usage(self._repo, "nightly", used, model=self._model)
+                await record_usage(self._repo, "reflection", used, model=self._model)
             data = _parse_object(raw)
             if data is not None and required in data:
                 return data

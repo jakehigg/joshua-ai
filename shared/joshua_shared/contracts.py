@@ -176,8 +176,10 @@ USAGE_MAX_DAYS = 366
 
 
 class UsageCounts(_Model):
-    """The calls and the tokens of one group. ``total`` is input, output,
-    cache read, and cache write, added."""
+    """The calls and the tokens of one group or one worker. ``total`` is
+    input, output, cache read, and cache write, added. ``models`` is the
+    sorted list of the distinct models of its calls, and empty when no call
+    named one."""
 
     calls: int = 0
     input: int = 0
@@ -185,6 +187,7 @@ class UsageCounts(_Model):
     cache_read: int = 0
     cache_write: int = 0
     total: int = 0
+    models: list[str] = []
 
 
 class UsageGroup(UsageCounts):
@@ -204,8 +207,10 @@ class UsageDay(_Model):
 
 class UsageResponse(_Model):
     """The tokens of each group by day. ``rows`` is newest first and holds
-    only the days with usage. ``groups`` names every group in the window,
-    sorted."""
+    only the days with usage, and a day holds only the groups with usage that
+    day. ``groups`` names each feature, also one with no usage, in the order
+    of the page, then any other group in the window, sorted. ``totals`` holds
+    one entry for each name of ``groups``."""
 
     timezone: str
     days: int

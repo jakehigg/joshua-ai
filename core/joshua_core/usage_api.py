@@ -3,8 +3,10 @@
 The viewer calls ``/v1/usage`` for its usage page. An operator calls
 ``/admin/usage`` with an admin token, for example with ``curl``. Both routes
 give the same answer: for each calendar day in the instance timezone, the
-calls and the tokens of each group (``chat``, ``nightly``, ``internet``,
-``describe``, and one group for each job). See ``store/usage_events.py``.
+calls, the tokens, and the models of each group (``chat``, ``reflection``,
+``internet``, ``describe``, and one group for each job). ``groups`` and
+``totals`` always hold each feature of ``usage_features``, with zero counts
+when it made no call. See ``store/usage_events.py``.
 
 ``?days=N`` is the window, today included: default 30, held to 1..366. A
 value that is not an integer gets 422.
@@ -28,7 +30,7 @@ from joshua_shared.fleet_auth import identify_bearer, load_fleet_tokens
 from joshua_shared.log import get_logger
 
 from joshua_core.admin import authorize_admin
-from joshua_core.store.usage_events import clamp_days, summarize, window_start
+from joshua_core.store.usage_events import clamp_days, summarize, usage_features, window_start
 
 logger = get_logger("usage_api")
 
@@ -78,7 +80,7 @@ async def _answer(request: Request, clock: Clock) -> JSONResponse:
     timezone = ctx.settings.timezone
     since = window_start(clock(), timezone, days)
     rows = await ctx.repo.usage_rows(since, timezone)
-    body = summarize(rows, timezone=timezone, days=days)
+    body = summarize(rows, timezone=timezone, days=days, features=usage_features(ctx.settings))
     return JSONResponse(body.model_dump())
 
 

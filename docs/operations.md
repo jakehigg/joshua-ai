@@ -492,17 +492,29 @@ signed-in person can open it. It shows counts only: no person, no message,
 and no question.
 
 The page has a bar chart of the total tokens of each day, stacked by group, a
-table of the days by group with a total row and a total column, and a table of
-the totals of each group. Each group has six counts: calls, input, output,
-cache read, cache write, and total. The groups are:
+table of the days by group with a total row and a total column, a table of
+the totals of each group, and one table for each job with the counts of each
+of its workers. Each group and each worker has six counts: calls, input,
+output, cache read, cache write, and total. The groups are:
 
 | Group | The model calls |
 |---|---|
 | `chat` | the turns of the agent in a conversation |
-| `nightly` | the nightly reflection |
+| `reflection` | the nightly reflection |
 | `internet` | a lookup that the agent makes with `use_internet` in a conversation |
 | `describe` | the attachment describer |
 | `curator`, `research`, `insights` | the runs of that job, a dry run too. A lookup of a job counts here, not under `internet`. |
+
+The table of days and the table of totals show each of these groups, also a
+group with no usage in the window. A job group is there when `jobs.enabled`
+and `jobs.<job>.enabled` turn the job on, or when the window has a run of it.
+The `Models` column of the totals table lists the models of the calls of each
+group. A dash means that no call of the group named its model, for example an
+old row from before the table kept the model. Under the totals table, each job
+group with usage has a table of its workers, with the `Models` of each worker.
+In the `research` table, the `internet` worker is the two lookups. See
+[jobs.md](jobs.md#which-model-runs-which-worker) for the model of each worker.
+The "Each day" sections show only the groups with usage on that day.
 
 `?days=N` sets the window, today included: default 30, at most 366. The links
 at the top give 7, 30, 90, and 366 days.
@@ -518,7 +530,9 @@ the chat turns from the transcript, and the job runs from `job_run`. An old
 job run kept only the total tokens of each worker, so the page shows that
 total as input, and 0 as output, cache read, and cache write. The nightly
 reflection, the lookups, and the describer kept no count before, so the page
-has no old rows for them. An operator reads the same numbers with an admin
+has no old rows for them. At each start, core also gives each row of the old
+kind `nightly` the kind and the name `reflection`, and the log line
+`usage backfill` counts these rows as `renamed`. An operator reads the same numbers with an admin
 token:
 
 ```

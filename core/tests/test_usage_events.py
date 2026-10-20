@@ -30,11 +30,13 @@ from joshua_core.engine.usage import Usage, UsageLedger, collect_run
 from joshua_core.jobs import Job, JobRunner, RunReport
 from joshua_core.memory.nightly import NightlyReflector
 from joshua_core.store.usage_events import (
+    CALL_GROUPS,
     UsageEvent,
     clamp_days,
     record_job_usage,
     record_usage,
     summarize,
+    usage_features,
     window_start,
 )
 from joshua_shared import config as config_module
@@ -74,13 +76,13 @@ async def test_one_row_for_each_call_with_its_ids() -> None:
     used = [Usage(input=10, output=2), Usage(input=4, cache_read=7)]
 
     written = await record_usage(
-        store, "nightly", used, model="m", person_id="alex", conversation_id=CID, ref="src"
+        store, "reflection", used, model="m", person_id="alex", conversation_id=CID, ref="src"
     )
 
     assert written == 2
     assert [e.ref for e in store.events] == ["src:0", "src:1"]
     assert {(e.kind, e.name, e.model, e.person_id) for e in store.events} == {
-        ("nightly", "nightly", "m", "alex")
+        ("reflection", "reflection", "m", "alex")
     }
     assert store.events[0].conversation_id == CID
     assert store.events[1].usage == Usage(input=4, cache_read=7)
@@ -113,6 +115,9 @@ async def test_a_failed_write_is_a_warning_and_not_an_error() -> None:
 async def test_a_job_kind_is_not_a_call_kind() -> None:
     with pytest.raises(ValueError):
         await record_usage(Store(), "job", [Usage(input=1)])
+    # The reflection kind is `reflection`; the old name is not a kind.
+    with pytest.raises(ValueError):
+        await record_usage(Store(), "nightly", [Usage(input=1)])
 
 
 async def test_a_job_row_for_each_worker() -> None:
@@ -198,6 +203,55 @@ def test_summarize_groups_by_day_and_name_newest_first() -> None:
 def test_summarize_of_nothing_is_empty() -> None:
     body = summarize([], timezone="UTC", days=7).model_dump()
     assert body == {"timezone": "UTC", "days": 7, "groups": [], "rows": [], "totals": {}}
+
+
+def test_summarize_lists_every_feature_with_zero_counts() -> None:
+    features = ["chat", "reflection", "internet", "describe", "research"]
+    rows = [_row(date(2026, 10, 20), "chat", input=4), _row(date(2026, 10, 20), "bundle")]
+    body = summarize(rows, timezone="UTC", days=7, features=features).model_dump()
+    assert body["groups"] == [*features, "bundle"]
+    assert list(body["totals"]) == body["groups"]
+    zero = body["totals"]["describe"]
+    assert zero == {
+        "calls": 0,
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "total": 0,
+        "models": [],
+        "workers": {},
+    }
+    # A day holds only the groups with usage that day.
+    assert list(body["rows"][0]["groups"]) == ["bundle", "chat"]
+
+
+def test_summarize_collects_the_models_of_each_group_and_worker() -> None:
+    day = date(2026, 10, 20)
+    rows = [
+        {**_row(day, "chat", input=1), "model": "m-b"},
+        {**_row(day, "chat", input=1), "model": "m-a"},
+        {**_row(day, "chat", input=1), "model": "m-a"},
+        {**_row(day, "chat", input=1), "model": None},
+        {**_row(day, "research", "editor", output=1), "model": "m-editor"},
+        {**_row(day, "research", "internet", input=1), "model": "m-lookup"},
+        {**_row(date(2026, 10, 19), "research", "editor", output=1), "model": "m-old"},
+    ]
+    body = summarize(rows, timezone="UTC", days=7, features=["chat"]).model_dump()
+    assert body["totals"]["chat"]["models"] == ["m-a", "m-b"]
+    research = body["totals"]["research"]
+    assert research["models"] == ["m-editor", "m-lookup", "m-old"]
+    assert research["workers"]["editor"]["models"] == ["m-editor", "m-old"]
+    assert research["workers"]["internet"]["models"] == ["m-lookup"]
+    assert body["rows"][0]["groups"]["research"]["workers"]["editor"]["models"] == ["m-editor"]
+
+
+def test_usage_features_name_each_job_that_is_on() -> None:
+    assert usage_features(jobs_settings()) == list(CALL_GROUPS)
+    on = "jobs:\n  enabled: true\n  curator:\n    enabled: true\n  insights:\n    enabled: true\n"
+    assert usage_features(jobs_settings(on)) == [*CALL_GROUPS, "curator", "insights"]
+    off = "jobs:\n  enabled: false\n  curator:\n    enabled: true\n"
+    assert usage_features(jobs_settings(off)) == list(CALL_GROUPS)
 
 
 # --- the call sites ----------------------------------------------------------------
@@ -319,7 +373,7 @@ async def test_a_chat_lookup_writes_one_internet_row(monkeypatch: pytest.MonkeyP
     assert event.usage == Usage(input=30, output=3)
 
 
-async def test_each_nightly_call_writes_one_nightly_row(tmp_path: Path) -> None:
+async def test_each_reflection_call_writes_one_reflection_row(tmp_path: Path) -> None:
     layout.bootstrap_wiki(tmp_path)
     layout.bootstrap_shared(tmp_path)
     layout.bootstrap_shared_profile("Test House", tmp_path)
@@ -345,7 +399,7 @@ async def test_each_nightly_call_writes_one_nightly_row(tmp_path: Path) -> None:
     await reflector.reflect(target_date=day)
 
     assert repo.usage_events
-    assert {e.kind for e in repo.usage_events} == {"nightly"}
+    assert {e.kind for e in repo.usage_events} == {"reflection"}
     assert all(e.usage == ONESHOT_USAGE for e in repo.usage_events)
 
 

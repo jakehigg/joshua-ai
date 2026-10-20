@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS curator_pair (
 );
 
 -- The tokens of the model calls, for the usage page (see docs/operations.md).
--- `kind`: 'chat' | 'nightly' | 'internet' | 'describe' | 'job'. `name` is the
+-- `kind`: 'chat' | 'reflection' | 'internet' | 'describe' | 'job'. `name` is the
 -- job name for a job row, else the kind. `worker` is the worker inside a job
 -- run, else NULL. `calls` is 1 for one call; a job row sums the calls of one
 -- worker in one run. `ref` names the source of the row, such as

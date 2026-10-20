@@ -2,17 +2,20 @@
 
 Core keeps a row for each model call in ``usage_event``. The viewer asks
 core's ``GET /v1/usage`` with its own fleet token and shows the tokens of each
-group by day: ``chat``, ``nightly``, ``internet``, ``describe``, and one group
-for each job. The page has a bar chart of the total tokens of each day,
-stacked by group, a table of the days by group, a table of the totals of each
-group, and the counts of each day.
+group by day: ``chat``, ``reflection``, ``internet``, ``describe``, and one
+group for each job that is on. The page has a bar chart of the total tokens of
+each day, stacked by group, a table of the days by group, a table of the
+totals and the models of each group, a table of the workers of each job, and
+the counts of each day. Every group of ``groups`` is in the tables, also with
+no usage.
 
 The viewer needs ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER``. With either one
 missing, :func:`from_env` returns None and the page says so. A call that
 fails returns None too, and the page says so. The page answers 200 in both
 cases.
 
-Every group name and date comes from core, and the HTML escapes each one. The
+Every group name, worker name, model, and date comes from core, and the HTML
+escapes each one. The
 chart is inline SVG with no script, and each color comes from a class in the
 viewer's stylesheet, so the page loads nothing more.
 
@@ -269,23 +272,57 @@ def _days_table(body: UsageResponse) -> str:
     )
 
 
-def _counts_table(groups: Mapping[str, UsageCounts], *, caption: str = "") -> str:
-    """One row for each group, the six counts across, and a total row."""
-    head = "".join(f"<th>{label}</th>" for _, label in _COLUMNS)
+def models_text(models: list[str]) -> str:
+    """The models joined with ``, ``, or ``—`` when there is none. Not escaped."""
+    return ", ".join(models) if models else "—"
+
+
+def _counts_table(
+    groups: Mapping[str, UsageCounts],
+    *,
+    caption: str = "",
+    label: str = "Group",
+    models: bool = False,
+) -> str:
+    """One row for each group, the six counts across, and a total row. With
+    ``models``, a last column holds the models of each row."""
+    head = "".join(f"<th>{name}</th>" for _, name in _COLUMNS)
+    if models:
+        head += "<th>Models</th>"
     rows = []
     for name, counts in groups.items():
         cells = "".join(f"<td class=num>{exact(getattr(counts, key))}</td>" for key, _ in _COLUMNS)
+        if models:
+            cells += f"<td>{escape(models_text(counts.models))}</td>"
         rows.append(f"<tr><th>{escape(name)}</th>{cells}</tr>")
     total = _sum(list(groups.values()))
     foot = "".join(
         f"<td class=num><strong>{exact(getattr(total, key))}</strong></td>" for key, _ in _COLUMNS
     )
+    if models:
+        foot += "<td></td>"
     cap = f"<caption>{escape(caption)}</caption>" if caption else ""
     return (
-        f"<table class=usage>{cap}<thead><tr><th>Group</th>{head}</tr></thead>"
+        f"<table class=usage>{cap}<thead><tr><th>{escape(label)}</th>{head}</tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         f"<tfoot><tr><th>Total</th>{foot}</tr></tfoot></table>"
     )
+
+
+def _totals(body: UsageResponse) -> str:
+    """The totals of each group of ``groups`` with its models, then one table
+    for each job group that has workers."""
+    groups = {name: body.totals.get(name, UsageCounts()) for name in body.groups}
+    parts = [f"<h2>Totals by group</h2>{_counts_table(groups, models=True)}"]
+    for name in body.groups:
+        group = body.totals.get(name)
+        if group is None or not group.workers:
+            continue
+        parts.append(
+            f"<h3>The workers of {escape(name)}</h3>"
+            f"{_counts_table(group.workers, label='Worker', models=True)}"
+        )
+    return "".join(parts)
 
 
 def page_html(body: UsageResponse | None, *, days: int, configured: bool) -> str:
@@ -300,17 +337,17 @@ def page_html(body: UsageResponse | None, *, days: int, configured: bool) -> str
         return f"{head}<p class=snippet>Core did not answer. The usage is not available now.</p>"
     intro = (
         f"<p class=meta>Tokens of the last {body.days} days, by calendar day in "
-        f"{escape(body.timezone)}. A day with no usage is not in the tables.</p>"
+        f"{escape(body.timezone)}. A day with no usage is not in the tables of "
+        "days.</p>"
     )
     if not body.rows:
-        return f"{head}{intro}{chart_svg(body)}<p>No usage in this window.</p>"
+        return f"{head}{intro}{chart_svg(body)}<p>No usage in this window.</p>{_totals(body)}"
     per_day = "".join(
         f"<details class=day><summary>{escape(row.date)}</summary>"
         f"{_counts_table(row.groups)}</details>"
         for row in body.rows
     )
     return (
-        f"{head}{intro}{chart_svg(body)}{_days_table(body)}"
-        f"<h2>Totals by group</h2>{_counts_table(body.totals)}"
+        f"{head}{intro}{chart_svg(body)}{_days_table(body)}{_totals(body)}"
         f"<h2>Each day</h2>{per_day}"
     )

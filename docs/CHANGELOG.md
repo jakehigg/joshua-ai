@@ -200,6 +200,16 @@ with the images and the packaged chart, are at
   run shows it, and each `job` row of `usage_event` keeps it. See
   [docs/jobs.md](jobs.md#which-model-runs-which-worker).
 
+- **The usage page shows every feature and its models.** The table of days
+  and the table of totals now show `chat`, `reflection`, `internet`,
+  `describe`, and each job that is on, also with no usage in the window. The
+  totals table has a `Models` column, and each job has a table of its workers
+  with their counts and models. `GET /v1/usage` always lists these groups in
+  `groups` and `totals`, and each group and worker has `models`. The group of
+  the nightly reflection is now `reflection`, not `nightly`; at each start,
+  core gives the old `nightly` rows the new name. See
+  [docs/operations.md](operations.md#the-usage-page).
+
 ### Fixed
 
 - **The insights job raises a gap.** An insight is now also a gap: a knowledge

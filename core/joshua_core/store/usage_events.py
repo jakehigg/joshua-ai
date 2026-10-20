@@ -10,21 +10,23 @@ the run continues.
 A row holds counts and ids only. It never holds a message, a question, or a
 token.
 
-The groups of the usage page are the `name` of a row: `chat`, `nightly`,
+The groups of the usage page are the `name` of a row: `chat`, `reflection`,
 `internet`, `describe`, and one group for each job by job name.
 `summarize` folds the rows of `Repo.usage_rows` into the `UsageResponse`
-shape, one day in the instance timezone for each row.
+shape, one day in the instance timezone for each row. `usage_features` names
+the groups that the answer always holds, also with no row.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
+from joshua_shared.config import JoshuaConfig
 from joshua_shared.contracts import USAGE_MAX_DAYS, UsageCounts, UsageGroup, UsageResponse
 from joshua_shared.log import get_logger
 
@@ -32,7 +34,12 @@ from joshua_core.engine.usage import Usage, UsageLedger
 
 logger = get_logger("store.usage")
 
-USAGE_KINDS = ("chat", "nightly", "internet", "describe", "job")
+USAGE_KINDS = ("chat", "reflection", "internet", "describe", "job")
+
+# The groups of the features that are always on, in the order of the answer.
+CALL_GROUPS = ("chat", "reflection", "internet", "describe")
+# The jobs that make model calls, in the order of the answer.
+JOB_GROUPS = ("curator", "research", "insights")
 
 _COUNT_FIELDS = ("calls", "input", "output", "cache_read", "cache_write")
 
@@ -99,7 +106,7 @@ async def record_usage(
     """Write one `kind` row for each usage in `usages`, and return how many
     rows were written.
 
-    `kind` is one of `chat`, `nightly`, `internet`, or `describe`; the row
+    `kind` is one of `chat`, `reflection`, `internet`, or `describe`; the row
     name is the kind. `ref` names the source; with more than one usage, each
     row gets `<ref>:<n>`. With no `ref`, each row gets a new random ref.
     A row that cannot be written is a warning. Only a `kind` that is not a
@@ -162,50 +169,82 @@ def window_start(now: datetime, timezone: str, days: int) -> datetime:
     return datetime.combine(first, time.min, tzinfo=tz)
 
 
+def usage_features(settings: JoshuaConfig) -> list[str]:
+    """The groups that `GET /v1/usage` always lists: `CALL_GROUPS`, then each
+    job of `JOB_GROUPS` that `jobs.enabled` and `jobs.<job>.enabled` turn on."""
+    jobs = settings.jobs
+    enabled = [name for name in JOB_GROUPS if jobs.enabled and getattr(jobs, name).enabled]
+    return [*CALL_GROUPS, *enabled]
+
+
 def _counts(values: Mapping[str, Any]) -> dict[str, int]:
     out = {name: int(values.get(name) or 0) for name in _COUNT_FIELDS}
     out["total"] = out["input"] + out["output"] + out["cache_read"] + out["cache_write"]
     return out
 
 
-def _add(into: dict[str, Any], counts: Mapping[str, int]) -> None:
+def _add(into: dict[str, Any], counts: Mapping[str, int], model: str | None) -> None:
     for name in (*_COUNT_FIELDS, "total"):
         into[name] = into.get(name, 0) + counts[name]
+    models = into.setdefault("models", set())
+    if model:
+        models.add(model)
+
+
+def _fields(entry: Mapping[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {k: entry.get(k, 0) for k in (*_COUNT_FIELDS, "total")}
+    out["models"] = sorted(entry.get("models", ()))
+    return out
 
 
 def _group(entry: dict[str, Any]) -> UsageGroup:
-    workers = {name: UsageCounts(**c) for name, c in sorted(entry.get("workers", {}).items())}
-    return UsageGroup(**{k: entry.get(k, 0) for k in (*_COUNT_FIELDS, "total")}, workers=workers)
+    workers = {
+        name: UsageCounts(**_fields(c)) for name, c in sorted(entry.get("workers", {}).items())
+    }
+    return UsageGroup(**_fields(entry), workers=workers)
 
 
-def summarize(rows: Iterable[Mapping[str, Any]], *, timezone: str, days: int) -> UsageResponse:
+def summarize(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    timezone: str,
+    days: int,
+    features: Sequence[str] = (),
+) -> UsageResponse:
     """Fold the rows of `Repo.usage_rows` into the response of `GET /v1/usage`.
 
-    Each row has `day`, `name`, `worker`, and the five counts. A day with no
-    row is not in the answer.
+    Each row has `day`, `name`, `worker`, `model`, and the five counts. A day
+    with no row is not in the answer, and a day holds only the groups with a
+    row that day. `groups` and `totals` hold each name of `features`, in that
+    order and with zero counts when it has no row, then each other name of
+    the rows, sorted. `models` is the sorted list of the distinct models of
+    the rows of a group or a worker; a row with no model adds none.
     """
     by_day: dict[str, dict[str, dict[str, Any]]] = {}
-    totals: dict[str, dict[str, Any]] = {}
+    totals: dict[str, dict[str, Any]] = {name: {} for name in features}
     for row in rows:
         day = row["day"]
         key = day.isoformat() if isinstance(day, date) else str(day)
         name = str(row["name"])
         counts = _counts(row)
+        model = row.get("model") or None
         for target in (
             by_day.setdefault(key, {}).setdefault(name, {}),
             totals.setdefault(name, {}),
         ):
-            _add(target, counts)
+            _add(target, counts, model)
             worker = row.get("worker")
             if worker:
-                _add(target.setdefault("workers", {}).setdefault(str(worker), {}), counts)
+                _add(target.setdefault("workers", {}).setdefault(str(worker), {}), counts, model)
+    names = list(dict.fromkeys(features))
+    names += sorted(name for name in totals if name not in names)
     return UsageResponse(
         timezone=timezone,
         days=clamp_days(days),
-        groups=sorted(totals),
+        groups=names,
         rows=[
             {"date": key, "groups": {n: _group(e) for n, e in sorted(groups.items())}}
             for key, groups in sorted(by_day.items(), reverse=True)
         ],
-        totals={n: _group(e) for n, e in sorted(totals.items())},
+        totals={name: _group(totals[name]) for name in names},
     )
