@@ -120,7 +120,7 @@ def test_the_index_has_one_row_for_each_dossier_sorted(tmp_path: Path) -> None:
         "| [houseplants/snake-plant.md](houseplants/snake-plant.md) "
         "| 0.20 | 1/5 | 0 | 2026-10-19 | 2 |",
     ]
-    assert frontmatter.split(text)[0] == {"source": "research"}
+    assert frontmatter.split(text)[0] == {"source": "research", "index": False}
     assert "| none |" in render_index([])
 
 

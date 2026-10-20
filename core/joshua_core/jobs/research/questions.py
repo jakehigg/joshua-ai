@@ -9,7 +9,8 @@ No worker writes a page.
 
 `questions/README.md` (`layout.questions_index`) is the list of every
 question. `write_index` writes it again on each write of the researcher and of
-the `questions` chat tool.
+the `questions` chat tool. The list holds `index: false`, so the memory index
+leaves it out; each question page is indexed.
 
 Joshua never sends a question. A person answers one in chat, with the
 `questions` chat tool.
@@ -387,7 +388,7 @@ def render_index(items: Iterable[QuestionFile]) -> str:
         )
     if not closed:
         lines.append("| none | | | | |")
-    return frontmatter.update("\n".join(lines) + "\n", source=SOURCE)
+    return frontmatter.update("\n".join(lines) + "\n", source=SOURCE, index=False)
 
 
 def write_index(data_root: Path | str) -> Path:

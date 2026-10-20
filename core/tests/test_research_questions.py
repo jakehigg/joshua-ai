@@ -223,7 +223,7 @@ def test_the_index_order(tmp_path: Path) -> None:
     text = write_index(tmp_path).read_text()
     assert text == render_index(load_questions(tmp_path))
     meta, body = frontmatter.split(text)
-    assert meta == {"source": "research"}
+    assert meta == {"source": "research", "index": False}
     first = body.split("\n\n")[1]
     assert "could not answer from the web or from our records" in first
     assert "Joshua does not send them" in first and "answers one in chat" in first

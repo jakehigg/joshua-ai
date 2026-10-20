@@ -8,7 +8,8 @@ the worker, under fixed headings, in this order: the claim as the title,
 
 `insights/README.md` (`layout.insights_index`) is the table of every insight.
 `write_index` writes it again on each write of the insights job and of the
-`insights` chat tool.
+`insights` chat tool. The table holds `index: false`, so the memory index
+leaves it out; each insight page is indexed.
 """
 
 from __future__ import annotations
@@ -334,7 +335,7 @@ def render_index(insights: Iterable[InsightFile]) -> str:
         )
     if not rows:
         lines.append("| none | | | | | |")
-    return frontmatter.update("\n".join(lines) + "\n", source=SOURCE)
+    return frontmatter.update("\n".join(lines) + "\n", source=SOURCE, index=False)
 
 
 def write_index(data_root: Path | str) -> Path:

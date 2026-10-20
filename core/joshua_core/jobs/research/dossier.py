@@ -20,6 +20,9 @@ section.
 
 `knowledge/README.md` (`layout.knowledge_index`) is the table of every
 dossier. `write_index` writes it again on each write of the researcher.
+
+A dossier and the table both hold `index: false`, so the memory index leaves
+them out: they list questions, and the knowledge pages hold the answers.
 """
 
 from __future__ import annotations
@@ -139,6 +142,9 @@ class Dossier(BaseModel):
     person_open: int = 0
     person_answered: int = 0
     source: str = SOURCE
+    # A dossier is a list of questions, not an answer, so it stays out of the
+    # index. The knowledge pages it links to are indexed.
+    index: bool = False
 
     def count(self, status: str) -> int:
         return sum(1 for q in self.questions if q.status == status)
@@ -405,7 +411,7 @@ def render_index(dossiers: Iterable[Dossier]) -> str:
         )
     if not rows:
         lines.append("| none | | | | | |")
-    return frontmatter.update("\n".join(lines) + "\n", source=SOURCE)
+    return frontmatter.update("\n".join(lines) + "\n", source=SOURCE, index=False)
 
 
 def write_text(path: Path, text: str, data_root: Path | str) -> Path:
