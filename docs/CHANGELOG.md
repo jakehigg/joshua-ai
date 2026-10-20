@@ -173,6 +173,19 @@ with the images and the packaged chart, are at
   that a person queued still meets the floor rules before a lookup, and one
   that fails is held as `not sent`. See [docs/jobs.md](jobs.md#knowledge-first).
 
+- **The viewer shows the tokens of each day.** The new `/usage` page, linked
+  in the menu, shows the tokens of the chat, the nightly reflection, the chat
+  lookups, the attachment describer, and each job, for each day in the
+  instance timezone, with a bar chart and the totals. `?days=N` sets the
+  window, up to 366 days. Core keeps one row for each model call in the new
+  `usage_event` table and serves the sums at `GET /v1/usage`, which the new
+  `usage.allowed_callers` key controls (default `viewer`), and at
+  `GET /admin/usage` for an operator. At each start, core adds the rows of the
+  older chat turns and job runs. An older job run kept only a total, which the
+  page shows as input. `report.data.usage` of a job run now also holds the
+  four counts of each worker. See
+  [docs/operations.md](operations.md#the-usage-page).
+
 ### Fixed
 
 - **Job reports and list pages are not memory.** The memory index leaves out

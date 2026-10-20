@@ -60,10 +60,21 @@ input tokens, the output tokens, the cache read tokens, and the cache write
 tokens. A call that times out counts the tokens of each model message that
 arrived before the timeout. A call that fails before the model answers counts
 no tokens.
-`report.data.usage` holds `{"<worker>": {"calls": n, "tokens": m}}` for each
-worker of the run. The seam for a program that reads the usage is
-`joshua_core.engine.usage`: `Usage`, `UsageLedger`, and the `usage_out`
+`report.data.usage` holds `{"<worker>": {"calls", "tokens", "input",
+"output", "cache_read", "cache_write"}}` for each worker of the run. `tokens`
+is the total of the four counts. The seam for a program that reads the usage
+is `joshua_core.engine.usage`: `Usage`, `UsageLedger`, and the `usage_out`
 argument of each worker call.
+
+### What a run cost
+
+When a run ends, also when it fails and also for a dry run, the runner writes
+one row for each worker of the run to the `usage_event` table. A job that
+raises before it returns its report keeps its counts too: they go into the
+`job_run` row and into those rows. The usage page of the viewer, `/usage`,
+shows the tokens of each job by day, beside the chat. An operator reads the
+same numbers at `GET /admin/usage?days=N`. See
+[operations.md](operations.md#the-usage-page).
 
 ### The journal entry
 
