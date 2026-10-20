@@ -326,17 +326,27 @@ cannot choose where it goes, because the worker fetches no URL it was not
 given. The tool tells the agent to keep private detail out of the question.
 
 **What a research question may never carry.** The researcher job writes its
-own web questions from the wiki and the journal. A web question may carry the
-specifics of a thing, and never the specifics of a person, named or not: not a
-condition, a diagnosis, a symptom, a medication, a diet, a body measurement, a
-mood, a finance, a location, or a relationship. The `raise` worker judges each
-question and tags it `about_person`, and Python enforces the route: a question
-with `about_person: true` goes to a person, never to a lookup. Python also
-holds a floor that does not depend on the model. A page about a person on the
-roster is not a topic, a topic in a section of
-`jobs.research.person_sections` gets no web question, and a question that
-names a person, holds a date from our records, or asks about us goes to a
-person. See [jobs.md](jobs.md#the-questions-and-the-route).
+own web questions from the wiki and the journal. Each web question is general
+by construction. The `raise` worker writes it in two parts: the general
+question, which holds the class of the thing and its public specifics only,
+and the local context, which holds our specifics. Only the general question
+goes to a lookup. The local context stays inside the instance, and only the
+tool-less editor and the tool-less `apply` worker read it. A general question
+may carry the specifics of a thing, and never the specifics of a person,
+named or not: not a condition, a diagnosis, a symptom, a medication, a diet,
+a body measurement, a mood, a finance, a location, or a relationship. The
+`raise` worker judges each question and tags it `about_person`, and Python
+enforces the route: a question with `about_person: true` goes to a person,
+never to a lookup.
+
+Python also holds a floor that does not depend on the model. A page about a
+person on the roster is not a topic, and a topic in a section of
+`jobs.research.person_sections` gets no web question. A general question that
+names a person, holds a date from our records, or asks about us is rejected.
+The same floor applies again before each lookup: to a question that a person
+queued, and to a narrowed question of the `apply` worker. A question that
+fails it is held and not sent. See
+[jobs.md](jobs.md#the-questions-and-the-route).
 
 ### Where a search runs, and where a fetch runs
 

@@ -2,9 +2,10 @@
 
 `dossier` holds the state of a topic and the table of every topic, `select`
 the choice of the topic, `raise_` the worker that raises questions, `gate` the
-specificity gate, `crew` the three steps of one question, `write` the page of
-one answer, `text` the text helpers, and `job` the run itself. See the
-researcher section of `docs/jobs.md`.
+specificity gate, `known` the search for the knowledge we hold, `crew` the
+steps of one question, `write` the page of one answer, `text` the text
+helpers, and `job` the run itself. See the researcher section of
+`docs/jobs.md`.
 """
 
 from __future__ import annotations

@@ -533,8 +533,10 @@ trash.
 
 The researcher keeps `wiki/knowledge/`: facts about one topic at a time, each
 looked up on the web, challenged, and cited. It works on one topic in each
-run, and it asks questions that are about our situation, not about the topic
-in general. It also keeps `wiki/questions/`: the questions that only a person
+run. It asks each question in two parts: a general question, which goes to
+the web, and our local context, which stays inside the instance. Before a
+lookup, it looks for the answer in the knowledge that it already holds. It
+also keeps `wiki/questions/`: the questions that only a person
 can answer.
 
 A job runs at night, when nobody is in a conversation. So Joshua never sends
@@ -643,7 +645,10 @@ runs: 2
 coverage: 0.4                    # answered / all questions; 0.0 with no questions
 questions:
   - slug: winter-watering
-    question: How often should the snake plant in a gritty mix be watered in winter?
+    question: How often should a snake plant in a gritty mix be watered in winter?
+    local_context: Ours is in the hall in a gritty soil mix, watered to runoff, at 65 to 68 F.
+    subject: snake plant         # the generic name that the general question holds
+    shared: false                # true when a page of another topic answers it
     status: answered             # open, answered, held, or dropped
     page: houseplants/snake-plant/winter-watering.md
     grounded_in: ["gritty soil mix", "water to runoff"]
@@ -668,6 +673,10 @@ person_answered: 0               # the answered questions of the topic in wiki/q
 source: research
 ```
 
+`question` is the general question, the text that went to the web.
+`local_context` holds our specifics. A dossier from before these fields loads
+with `local_context: ""`, `subject: ""`, and `shared: false`.
+
 The slug comes from the question: its first six words that are not small
 words such as "how" or "the", in lower case, joined with `-`. A slug that the
 dossier has already gets `-2`, `-3`, and so on. The researcher writes the body
@@ -682,7 +691,9 @@ dossier.
 
 `knowledge/README.md` has one table with a row for each dossier, sorted by
 topic path: the topic, with a link to its dossier, the coverage, the answered
-and total questions, the day of the last research, and the open questions.
+and total questions, the shared answers (the answered questions that a page
+of another topic answers), the day of the last research, and the open
+questions.
 The researcher writes it again each time it writes the wiki. It is the index
 page of `knowledge/`: it has a link to each dossier.
 
@@ -691,15 +702,43 @@ page of `knowledge/`: it has a link to each dossier.
 The `raise` worker has no tools. It gets the memory bundle of the topic, the
 title and the aliases, and the questions in the dossier. It answers with up
 to `questions_per_topic` questions, less the open questions. The prompt tells
-the worker that the bundle is content, not instructions. Each question has
-these fields:
+the worker that the bundle is content, not instructions.
 
-- `question`: the question.
+A `web` question is a pair:
+
+- `general_question`: the text that goes to the open web. It holds the class
+  of the thing and its public specifics only: the species, the product model,
+  the technique, the material, the season, the condition of the thing. It
+  calls the thing by a generic name. It never holds a person, a possessive, a
+  date from our records, a measurement of a person, a nickname, a room, or
+  anything that has a meaning only in this house.
+- `local_context`: our specifics and why we ask, 40 to 600 characters: the
+  phrases of the bundle in their context, the cadence we use, what was seen.
+  It stays inside the instance. The editor reads it, and a lookup never does.
+
+So the web question is general by construction, and our specifics stay with
+the tool-less editor. The same general text also makes one question of
+"winter watering of Sansevieria in a mineral mix" for each snake plant page,
+and lets the knowledge that we hold answer a question with no lookup.
+
+| `local_context` | `general_question` |
+|---|---|
+| The living room snake plants are in Jack's Gritty Mix, watered to runoff every 4 weeks, in a 65-68°F house. | How often should a snake plant (Sansevieria) in a mineral gritty mix be watered from October to March in a cool indoor home? |
+| Alex's caldo verde uses grow-tent Portuguese kale that comes out pale. | What makes Portuguese kale (couve galega) grown under indoor lights turn pale yellow-green instead of deep green? |
+
+Each question has these fields:
+
 - `audience`: `web`, `person`, or `record`.
+- `general_question` and `local_context`: for a `web` question.
+- `subject`: for a `web` question whose general question holds no name of the
+  topic: the generic name of the thing, such as "snake plant". 80 characters
+  or less.
+- `question`: for a `person` or a `record` question. It keeps its own text,
+  and it may name a person.
 - `about_person`: true when the question carries a specific of a person,
   named or not. It is required.
-- `grounded_in`: the phrases from the bundle that make it about us, for every
-  audience. The prompt asks for the shortest span that identifies the
+- `grounded_in`: the phrases from the bundle that motivate the question, for
+  every audience. The prompt asks for the shortest span that identifies the
   specific: a product name, a quantity, a cadence, not a whole sentence.
 - `why`: one or two sentences that say why the researcher wants the answer.
   A `person` question must have it.
@@ -707,94 +746,119 @@ these fields:
 The three audiences are these:
 
 - **`web`**: a question that an expert source outside the house can answer:
-  horticulture, materials, products, methods, standards, seasons, safety. It
-  goes to the internet agent, which searches the open web and has no access
-  to our pages. So the question carries our conditions in its words ("in a
-  gritty mix, watered to runoff, in a 65-68°F house in winter").
-  It carries the specifics of the thing (the plant, the device, the
-  material, the method) and never the specifics of a person, named or not:
-  not a condition, a diagnosis, a symptom, a medication, a diet, a body
-  measurement, a mood, a finance, a location, or a relationship. "What are
-  the early symptoms of a depressive episode for someone who stopped
-  sleeping well in October?" is about a person. "What does the NHS say about
-  sleep hygiene for adults?" is about a thing.
+  horticulture, materials, products, methods, standards, seasons, safety. Its
+  general question goes to the internet agent, which searches the open web
+  and has no access to our pages. It carries the specifics of the thing (the
+  plant, the device, the material, the method) and never the specifics of a
+  person, named or not: not a condition, a diagnosis, a symptom, a
+  medication, a diet, a body measurement, a mood, a finance, a location, or a
+  relationship. "What are the early symptoms of a depressive episode for
+  someone who stopped sleeping well in October?" is about a person. "What
+  does the NHS say about sleep hygiene for adults?" is about a thing.
 - **`person`**: a question that only somebody here can answer: what was done,
   used, intended, or preferred, or a record that is missing. "What product and
   dose went on the snake plants at the October 4 feed?" is one.
 - **`record`**: a question that our own pages and journal already answer.
 
-The gate is Python. Each question, for each audience, must pass these rules,
-or the gate rejects it with a reason:
+#### The gate on a `web` question
 
-- `grounded_in` has two phrases or more. Each phrase has 3 to 160 characters
-  and occurs word for word in the bundle text. Case and line breaks do not
-  count. There is no stemming and no fuzzy match.
-- The question holds a name of the topic (see
-  [Topics and the memory bundle](#topics-and-the-memory-bundle)).
-- The question has 20 to 300 characters and ends with `?`.
-- It is not a duplicate. Its text is not the text of a question of the
-  dossier, and its vector is below `jobs.research.dup_sim` (0.85) to each
-  question of the dossier and to each knowledge page in the index. The report
-  gives `answered_by: <path>` for a question that a knowledge page answers.
-- A `person` question from the worker has a `why`.
+The gate is Python. It checks a `web` question by these rules, in this order,
+and rejects it with a reason at the first rule that it fails:
 
-Then the gate gives the route. First, a `web` question gets the generic name
-of the topic in place of the possessive title, in any case: for "Alex's
-Caldo Verde", the question "How should lacinato kale be blanched for a soup
-like Alex's Caldo Verde?" becomes "... for a soup like Caldo Verde?". The
-dossier and the pages keep the new text, and the Questions section of the
-report marks the question `(generic name)`. A name of a person in any other
-use stays, and the rules below still apply to it: "Does Alex use homemade
-broth for Caldo Verde?" goes to `person`.
+1. The general question gets the generic name of the topic in place of the
+   possessive title, in any case: for "Alex's Caldo Verde", "How should
+   lacinato kale be blanched for a soup like Alex's Caldo Verde?" becomes
+   "... for a soup like Caldo Verde?". The dossier and the pages keep the new
+   text, and the Questions section of the report marks the question
+   `(generic name)`.
+2. The general question has 20 to 300 characters and ends with `?`.
+3. It holds a name of the topic (see
+   [Topics and the memory bundle](#topics-and-the-memory-bundle)), or the
+   `subject` that the worker gave. A `subject` that the question does not
+   hold is a rejection. With no `subject`, the dossier keeps the name of the
+   topic that the question holds as its `subject`.
+4. `local_context` has 40 to 600 characters.
+5. `grounded_in` has two phrases or more. Each phrase has 3 to 160 characters
+   and occurs word for word in the bundle text. Case and line breaks do not
+   count. There is no stemming and no fuzzy match.
+6. The floor rules below. A general question that fails one is rejected, and
+   the reason starts with the name of the rule. It does not go to a person,
+   because the worker was told not to write such a question, and a question
+   for a person has its own text.
+7. It is not a duplicate. See [Duplicates and shared answers](#duplicates-and-shared-answers).
 
-The web cannot answer a question about us, so the gate sends a question to
-`person`, whatever the worker said, when one of these rules is true. The page
-and the report name the rule in `route_reason`:
-
-| Rule | `route_reason` |
+| Floor rule | Name |
 |---|---|
 | The question names a person on the roster: a display name or an id from `people`, as whole words, in any case. | `names a person` |
 | The question holds a date in ISO form (`2026-10-04`) or in month and day form (`October 4`, `Oct 4`). | `names a record date` |
 | The question starts with "what did", "why did", "when did", "will", "should we", "did we", or "do we". | `asks what we did or will do` |
 | The question holds "we", "our", or "us" as a word. "US" in capitals is a country and does not count. | `asks about us` |
 
-These rules are the floor. Two more rules come after them:
+A `web` question that passes goes to the dossier as an `open` question, with
+two exceptions, which send it to `person` with the general question as its
+text:
 
 | Rule | `route_reason` |
 |---|---|
-| The topic is in a person section. This applies to a question that the worker tags `web` or `person`. | `person section` |
-| The worker tags the question `about_person: true`, and tags it `web` or `person`. | `about a person` |
+| The topic is in a person section. | `person section` |
+| The worker tags the question `about_person: true`. | `about a person` |
 
 The worker judges which question is about a person, and Python enforces the
-route. When the worker tags a question `false` but the question names a
-person, the floor still sends it to a person. A `record` question of either
-kind still goes to the record search, because the search stays inside the
-instance. A question for a person that one of these rules sends there needs
-no `why`: its page gets a fixed sentence. The prompt also tells the worker
-not to raise a question about a person that no person here can answer.
+floor: when the worker tags a question `false` but the general question names
+a person, the gate rejects it. A question for a person that one of these rules
+sends there needs no `why`: its page gets a fixed sentence. The prompt also
+tells the worker not to raise a question about a person that no person here
+can answer.
 
-A `person` question that no rule sends there has the `route_reason`
-`the raise worker asks a person`. Each route then does this:
+#### The gate on a `person` or a `record` question
 
-- **`web`**: the question goes into the dossier as an `open` question. A
-  `run` researches it. On a topic in a person section, a `run` researches only
-  the questions that a person asked, and the report has a note for each other
-  question.
+A `person` or a `record` question keeps its own `question` text, and the pair
+rules do not apply to it. It must have the length of rule 2, name the topic,
+pass rule 5, and not be a duplicate. A `person` question from the worker has a
+`why`. When the question fails a floor rule, it goes to `person`, and its
+`route_reason` is the name of the rule. A question of a person section that is
+not `record` goes to `person` (`person section`), and so does a question with
+`about_person: true` (`about a person`). A `person` question that no rule
+sends there has the `route_reason` `the raise worker asks a person`. Then:
+
 - **`record`**: the gate searches the index with the question, over the kinds
   `wiki`, `journal`, and `knowledge`. A hit counts when it is a topic page, a
   journal entry that no job wrote, or a knowledge page with a `question`. When
   the best hit is at `jobs.research.record_sim` (0.80) or more, the report
   closes the question with `answered_by: <path>`, and the run writes nothing
   for it. Below that, nothing holds the answer, so the question goes to
-  `person` with the `route_reason` `no record found`.
+  `person` with the `route_reason` `no record found`. The record search stays
+  inside the instance, so a `record` question of a person section, or one
+  about a person, still goes to it.
 - **`person`**: the question becomes a page under `wiki/questions/`. It never
   goes to a lookup and never goes into the dossier.
 
+On a topic in a person section, a `run` researches only the questions of the
+dossier that a person asked, and the report has a note for each other
+question.
+
+#### Duplicates and shared answers
+
+The duplicate check uses the general question only. A question is a
+duplicate when its text is the text of a question of the dossier, or its
+vector is at `jobs.research.dup_sim` (0.85) or more to a question of the
+dossier or to a chunk of `kind: knowledge` in the index, of any topic. The
+report gives `answered_by: <path>` for a question that a knowledge page of
+the same topic answers.
+
+A match on a published knowledge page of **another** topic is not a
+rejection. The question goes into the dossier as `answered`, with
+`page: <that page>` and `shared: true`, and no run researches it. The
+coverage counts it, the dossier body marks it `(shared with another topic)`,
+and the `Shared` column of `knowledge/README.md` counts it.
+
 So "How often should I water a snake plant?" fails, because no phrase of it
-comes from our pages. "What dose was used on 2026-10-04?" goes to a person,
-because it asks about our records. "How often should the snake plant in a
-gritty soil mix, watered to runoff, be watered in winter?" goes to the web
-when "gritty soil mix" and "water to runoff" are in the topic page.
+comes from our pages. "What dose was used on 2026-10-04?" fails as a `web`
+question, because it holds a date of our records, and goes to a person as a
+`person` question. "How often should a snake plant in a gritty soil mix be
+watered in winter?" goes to the web when "gritty soil mix" and "water to
+runoff" are in the topic page, and its local context says that ours is in the
+hall at 65 to 68 F.
 
 ### Questions for a person
 
@@ -858,22 +922,25 @@ A dry run writes no question page.
 
 ### The crew
 
-For each question, three workers run in this order:
+For each question, the crew first looks at the knowledge we hold (see
+[Knowledge first](#knowledge-first)). Then three workers run in this order:
 
-1. The **researcher** is the internet agent. It gets the question and a brief
+1. The **researcher** is the internet agent. It gets the general question, or
+   the narrowed question of a `partial` verdict, and a brief
    that asks for the primary source, two independent sources or more, the
    numbers, and the disagreements. The brief tells it to read at most four
    pages, and to stop when it has a primary source and one independent second
-   source. It gets nothing from the wiki.
-2. The **challenger** is the internet agent again. It gets the question and
+   source. It gets nothing from the wiki and never the local context.
+2. The **challenger** is the internet agent again. It gets the same question and
    the draft answer, and it looks for the strongest evidence that the draft
    is wrong, old, or not complete. It says so when it finds nothing. The
    brief tells it to read at most three pages.
 3. The **editor** has no tools and a timeout of
-   `jobs.research.editor_timeout_seconds` (240) seconds. It gets the
-   question, each `grounded_in` phrase with its sentence from the bundle, the
-   draft and the challenge with their sources, and the trust rubric with the
-   two domain lists. It writes the page: the answer, a short answer of 160
+   `jobs.research.editor_timeout_seconds` (240) seconds. It gets the general
+   question, the local context, each `grounded_in` phrase with its sentence
+   from the bundle, the draft and the challenge with their sources, the short
+   answers of the pages that a `partial` verdict cites, and the trust rubric
+   with the two domain lists. It writes the page: the answer, a short answer of 160
    characters or less, where our situation is different, the evidence, the
    disagreements, each source with its trust (`primary`, `secondary`, or
    `weak`), the confidence, and the verdict: `publish` or `hold`.
@@ -923,6 +990,45 @@ and fetches than a chat question. Each lookup may take
 `jobs.research.lookup_max_turns` (14) turns, in place of
 `internet.timeout_seconds` and `internet.max_turns`. The `internet` chat tool
 keeps the limits of the `internet` section.
+
+Before a lookup, the general question must have 20 to 300 characters, end
+with `?`, and pass the floor rules. A question that fails, such as a question
+that a person queued with a name in it, is held with the reason
+`not sent: <why>`, and no worker runs for it. The Researched section of the
+report marks it `not sent`, and the report data lists it in `not_sent`.
+
+### Knowledge first
+
+Before the lookups of a question, the crew searches the `kind: knowledge`
+chunks of the index with the vector of the general question. It keeps the
+pages at `jobs.research.apply_sim` (0.70) or more that have
+`status: published`, of any topic, the closest first, at most
+`jobs.research.apply_pages` (5). With no such page, the full crew runs.
+
+With one page or more, the **apply** worker runs. It has no tools, the model
+of the editor, and a timeout of 120 seconds. It gets the general question,
+the local context, and the whole text of each page. Its answer is cleaned of
+leaked markup like the answer of the editor, and it gives a verdict:
+
+- **`answered`**: the pages answer the whole question. The page is written
+  from the answer of the apply worker, with no lookup. Its sources are the
+  sources of the cited pages, each once, with their trust. Its confidence is
+  the lowest confidence of the cited pages, and a `low` confidence is a hold.
+  Its frontmatter has `applies`, and the body has a line `Applied from:` under
+  **Sources**. The Researched section marks it `applied, no lookup`.
+- **`partial`**: the pages answer a part of the question. The two lookups ask
+  the `narrowed_question` of the worker, which asks only for the missing
+  part, and the editor also gets the short answer of each cited page. The
+  frontmatter has `applies`. The Researched section marks it `narrowed`. A
+  narrowed question that is empty or fails the floor rules is not sent: the
+  lookups ask the general question, and the Notes section says so.
+- **`none`**: the full crew runs.
+
+A cited path that is not one of the pages that the worker got, and so not a
+published knowledge page, is dropped. An `answered` or `partial` verdict with
+no cited page left, or no answer, counts as `none`. A held question with kept
+lookups goes to the editor alone, and the crew does not search for it. The
+apply call counts on the usage line of the question, as `apply`.
 
 ### The hold rules
 
@@ -986,9 +1092,10 @@ A published answer is one page at
 `wiki/knowledge/<topic path without .md>/<slug>.md`:
 
 ```yaml
-question: How often should the snake plant in a gritty mix be watered in winter?
+question: How often should a snake plant in a gritty mix be watered in winter?
 answer_short: About every 4 weeks in winter, when the mix is dry.
 topic: houseplants/snake-plant.md
+local_context: Ours is in the hall in a gritty soil mix, watered to runoff, at 65 to 68 F.
 context: [houseplants/snake-plant.md, journal/2026/10/15/snake-plant-leaf-flop.md]
 grounded_in: ["gritty soil mix", "water to runoff"]
 researched_at: 2026-10-19
@@ -1000,6 +1107,7 @@ sources:
     title: Snake plant care
     trust: primary
     retrieved: 2026-10-19
+applies: [knowledge/houseplants/zz-plant/winter-watering.md]  # only with knowledge we hold
 source: research
 run_id: 7
 ```
@@ -1007,9 +1115,12 @@ run_id: 7
 `context` lists the bundle pages that the `grounded_in` phrases come from, or
 the topic page for a question with no phrases. The body has these headings,
 in this order: the question as the title, **Answer**, **Where this differs
-for us** (only when there is a local note), **Evidence**, **Disagreements**
+for us** (only when there is a local note, which the editor writes from the
+local context), **Evidence**, **Disagreements**
 (only when there are some), and **Sources** (the title, the URL, and the
-trust of each source). A link in the text of a worker stays only when its URL
+trust of each source). A page with `applies` ends with the line
+`Applied from:` and a link to each page that it uses. A source of such a page
+keeps the `retrieved` day of the page it came from. A link in the text of a worker stays only when its URL
 is a source of the page. The researcher removes each other link, picture, and
 wikilink, and keeps its text. A page is 64 KB or less, and a longer page is a
 hold.
@@ -1023,21 +1134,23 @@ The report of a research run is the journal entry of the run, and
 |---|---|
 | Topic | the topic, the rule that selected it and why, the runner-up, and for a topic in a person section, a line that says so |
 | Bundle | each path of the bundle, its size, and if it was cut |
-| Questions | each question of the dossier, with its slug and status: the `web` questions. A new question that got the generic name of the topic ends with `(generic name)` |
+| Questions | each question of the dossier, with its slug and status, as `general: <the general question>; local: <the local context>`. A new question that got the generic name of the topic has `(generic name)` after its general question. A shared answer has `shared` in its status and the page that answers it |
 | For a person | each new question page, with its id, `for`, `route_reason`, and `why`, and each question that was `already asked` or `dismissed before` |
 | Answered by our records | each `record` question with its `answered_by` path |
 | Rejected | each rejected question with the reason |
-| Researched | `run` only: the result of each question that the run researched |
+| Researched | `run` only: the result of each question that the run researched, marked `applied, no lookup`, `narrowed`, `full crew`, `editor only`, or `not sent` |
 | Pages | a dry `run` only: the full text of each page it would write |
 | Notes | what did not run, such as the vector check with no embedding model |
 | Insights | the insight pass, when one ran |
-| Usage | the calls and the tokens of each worker, and for each researched question a line `<slug>: researcher N tokens, challenger M tokens, editor K tokens` |
+| Usage | the calls and the tokens of each worker, and for each researched question a line `<slug>: apply A tokens, researcher N tokens, challenger M tokens, editor K tokens` |
 
 The report data has `person`, the ids of the new question pages, and
-`record`, the `answered_by` paths, beside `added` and `rejected`.
+`record`, the `answered_by` paths, beside `added` and `rejected`. `shared`
+lists the new questions that a page of another topic answers, and `applied`,
+`narrowed`, and `not_sent` list the researched questions of each kind.
 `usage_by_question` holds
-`{"<slug>": {"researcher": n, "challenger": m, "editor": k}}` for each
-question that the run researched. A step that did not run has 0.
+`{"<slug>": {"apply": a, "researcher": n, "challenger": m, "editor": k}}` for
+each question that the run researched. A step that did not run has 0.
 
 ### The chat tool
 
@@ -1047,7 +1160,7 @@ The `research` tool server is in core. A member gets four tools:
 |---|---|
 | `plan_research(topic=None)` | starts a `plan` run that is not a dry run, and answers with the run id |
 | `run_research(topic, questions=None, max_questions=None)` | starts a `run` run that is not a dry run, and answers with the run id |
-| `queue_question(topic, question)` | adds an open question with `asked_by: <person id>` to the dossier, writes the dossier and `knowledge/README.md`, and commits the wiki with the message `research: question from <person id>`. The question must have 20 to 300 characters, end with `?`, and name the topic. The other rules of the gate do not apply to a person. |
+| `queue_question(topic, question)` | adds an open question with `asked_by: <person id>` to the dossier, writes the dossier and `knowledge/README.md`, and commits the wiki with the message `research: question from <person id>`. The question must have 20 to 300 characters, end with `?`, and name the topic. The dossier keeps it as given, with `local_context: ""` and the generic name of the topic as its `subject`, and the crew gets it as given. The floor rules apply before a lookup: a question that fails one is held, not sent, and the reply says so. |
 | `research_status()` | gives the summary of the last research run |
 
 A guest, or a speaker that core does not know, gets a refusal from each tool,
@@ -1090,9 +1203,10 @@ them, and that it never raises one on its own.
 - It never takes a person page as a topic. It never gives a lookup a
   question that the worker tags `about_person: true`, or a question of a
   topic in a person section that no person asked.
-- It never gives the bundle, or any page of the wiki, to a lookup. The
-  internet agent gets the question and the brief. The challenger also gets the
-  draft answer.
+- It never gives the bundle, the local context, or any page of the wiki, to
+  a lookup. The internet agent gets the general question (or the narrowed
+  question) and the brief. The challenger also gets the draft answer.
+- It never sends a question that fails a floor rule to the web.
 - It never cites a URL that a lookup did not return.
 - It writes nothing in a dry run.
 

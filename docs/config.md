@@ -531,6 +531,8 @@ jobs:
     coverage_target: 0.6
     dup_sim: 0.85
     record_sim: 0.80
+    apply_sim: 0.70
+    apply_pages: 5
     max_holds: 2
     refresh_days: 180
     lookup_timeout_seconds: 300
@@ -583,8 +585,10 @@ jobs:
 | `research.questions_per_topic` | `8` | The most questions that one `raise` call may add to a dossier, less the open questions. |
 | `research.questions_per_run` | `3` | The most questions that one run researches. The `max_questions` argument of a run can make it lower. A `plan` or a `run` calls `raise` only when the dossier has fewer open questions than this. |
 | `research.coverage_target` | `0.6` | A topic with a coverage below this is due for research (selection rule 3). |
-| `research.dup_sim` | `0.85` | A new question with a vector this close to a question of the dossier, or to a knowledge page, is a duplicate. |
+| `research.dup_sim` | `0.85` | A new general question with a vector this close to a question of the dossier, or to a knowledge page of the topic, is a duplicate. This close to a published knowledge page of another topic, it is a shared answer: the dossier closes it as `answered` with that page. |
 | `research.record_sim` | `0.80` | A question that the `raise` worker sends to our records is closed with `answered_by` when a topic page, a journal entry, or a knowledge page has a chunk this close to it. Below it, the question goes to `wiki/questions/` for a person. |
+| `research.apply_sim` | `0.70` | Before the lookups of a question, a published knowledge page of any topic with a chunk this close to the general question goes to the `apply` worker, which can answer the question with no lookup or narrow it. |
+| `research.apply_pages` | `5` | The most knowledge pages that the `apply` worker gets for one question, the closest first. 1 to 20. |
 | `research.max_holds` | `2` | A question held this many times is `dropped`. |
 | `research.refresh_days` | `180` | The days from a research run to `refresh_after` on the dossier and the page. |
 | `research.lookup_timeout_seconds` | `300` | How long one lookup of the researcher or the challenger may take. It replaces `internet.timeout_seconds` for these lookups, because a lookup that needs a primary source and two independent sources makes more searches and fetches than a chat question. The chat tool keeps `internet.timeout_seconds`. |

@@ -145,6 +145,34 @@ with the images and the packaged chart, are at
   log. The `bundle` job report now says how each journal entry got in:
   `title`, `alias`, or `vector <sim>`.
 
+- **A web question of the researcher is general, and our specifics stay
+  here.** The `raise` worker now writes each `web` question in two parts: a
+  general question, with the class of the thing and its public specifics
+  only, and a local context of 40 to 600 characters with our specifics. Only
+  the general question goes to the lookups. The editor gets both, and the
+  page keeps the local context in its frontmatter and writes "Where this
+  differs for us" from it. A general question may name a generic `subject`
+  in place of the topic name. A general question that names a person, holds
+  a date from our records, or asks about us is now rejected, not sent to a
+  person. The dossier questions get `local_context`, `subject`, and `shared`,
+  and an old dossier loads with empty values. The report shows `general` and
+  `local` for each question. See
+  [docs/jobs.md](jobs.md#the-questions-and-the-route).
+
+- **The researcher looks at the knowledge it holds first.** A new question
+  that a published knowledge page of another topic answers closes as
+  `answered` with `shared: true`, and the coverage and the new `Shared`
+  column of `knowledge/README.md` count it. Before the lookups of a question,
+  the new tool-less `apply` worker reads the published knowledge pages near
+  it, of any topic. It answers from them with no lookup, narrows the question
+  for the lookups, or gives it to the full crew. A page that it writes lists
+  those pages in `applies`. Two new keys set the search:
+  `jobs.research.apply_sim` (0.70) and `jobs.research.apply_pages` (5). The
+  Researched section marks each question `applied, no lookup`, `narrowed`,
+  or `full crew`, and the usage line of a question has `apply`. A question
+  that a person queued still meets the floor rules before a lookup, and one
+  that fails is held as `not sent`. See [docs/jobs.md](jobs.md#knowledge-first).
+
 ### Fixed
 
 - **A research question never carries the specifics of a person.** A run
