@@ -188,3 +188,23 @@ async def test_the_run_11_questions_never_reach_the_web(tmp_path: Path) -> None:
             page.why == "Only somebody here knows this: the web cannot answer a question about us."
         )
     assert f"; {ABOUT_PERSON})" in _section(report, "For a person")
+
+
+CALDO = "recipes/alex-s-caldo-verde.md"
+CALDO_PAGE = "# Alex's Caldo Verde\n\nThe river loop soup: 3 miles of lacinato kale and chorizo.\n"
+BLANCH = "How should lacinato kale be blanched for a soup like Alex's Caldo Verde?"
+BROTH = "Does Alex use homemade broth for Caldo Verde?"
+
+
+async def test_a_possessive_title_gives_web_questions_the_generic_name(tmp_path: Path) -> None:
+    h = Harness(
+        tmp_path / "data", {"recipes.md": "# Recipes\n", CALDO: CALDO_PAGE}, raised(BLANCH, BROTH)
+    )
+    report = await h.run(mode="plan", topic=CALDO)
+    dossier = load_dossier(CALDO, h.data)
+    assert dossier is not None
+    assert [q.question for q in dossier.questions] == [
+        "How should lacinato kale be blanched for a soup like Caldo Verde?"
+    ]
+    assert "Caldo Verde?` (generic name)" in _section(report, "Questions")
+    assert [p.page.question for p in load_questions(h.data, CALDO)] == [BROTH]

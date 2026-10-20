@@ -22,6 +22,7 @@ from joshua_core.jobs.research.gate import (
     Candidate,
     Gate,
     cosine,
+    generic_question,
     grounding_reason,
     names_topic,
     normalize,
@@ -30,8 +31,9 @@ from joshua_core.jobs.research.gate import (
     world_reason,
     world_rule,
 )
-from joshua_core.jobs.topics import Topic, topic_names
+from joshua_core.jobs.topics import Topic, generic_title, possessive_forms, topic_names
 from joshua_shared import layout
+from joshua_shared.config import Person
 from research_fakes import (
     GENERIC,
     GROUNDED,
@@ -561,3 +563,94 @@ async def test_a_person_question_about_a_person_needs_no_why(tmp_path: Path) -> 
     candidate = Candidate(RUN11[0], PLAN_PHRASES, why="", audience=PERSON, about_person=True)
     verdict = await _plan_gate(tmp_path).check(candidate)
     assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, ABOUT_PERSON)
+
+
+# -- a possessive title -----------------------------------------------------------
+
+CALDO_TOPIC = Topic("recipes/alex-s-caldo-verde.md", "recipes", "Alex's Caldo Verde")
+CALDO_BUNDLE = (
+    "## recipes/alex-s-caldo-verde.md\n\n# Alex's Caldo Verde\n\n"
+    "Lacinato kale, Yukon Gold potatoes, and chorizo. The base is chorizo fat.\n"
+)
+CALDO_PHRASES = ["Lacinato kale", "chorizo"]
+# The five web questions of research run 12, with the roster of the tests.
+RUN12_WEB = [
+    "How should lacinato kale be blanched to keep its colour for a soup like Alex's Caldo Verde?",
+    "How long is a potato, kale, and chorizo soup such as Alex's Caldo Verde safe in the fridge?",
+    "Is chorizo fat or olive oil the better base for ALEX'S CALDO VERDE?",
+    "How fine should lacinato kale be cut for Alex’s Caldo Verde to cook in five minutes?",
+    "Which potato variety gives Alex's  caldo verde a smooth, thick broth?",
+]
+# The three person questions of run 12: each names a person in another way,
+# or asks about us.
+RUN12_PERSON = [
+    ("Does Alex use homemade broth for Caldo Verde?", RULE_PERSON),
+    ("Which chorizo does Bo buy for Alex's Caldo Verde?", RULE_PERSON),
+    ("Do we freeze the leftover Alex's Caldo Verde with the kale in it?", RULE_OPENING),
+]
+
+
+def _caldo_gate(tmp_path: Path) -> Gate:
+    people = [Person(id="alex", name="Alex"), Person(id="bo", name="Bo")]
+    return Gate(
+        bundle_text=CALDO_BUNDLE,
+        terms=topic_names(CALDO_TOPIC, people=people),
+        existing=[],
+        store=FakeStore(),
+        dup_sim=0.99,
+        data_root=tmp_path,
+        embed=_embed,
+        people=["Alex", "alex", "Bo", "bo"],
+        possessives=possessive_forms(CALDO_TOPIC.title, people),
+        generic=generic_title(CALDO_TOPIC.title, people),
+    )
+
+
+@pytest.mark.parametrize("question", RUN12_WEB)
+async def test_a_run_12_web_question_stays_web_with_the_generic_name(
+    tmp_path: Path, question: str
+) -> None:
+    verdict = await _caldo_gate(tmp_path).check(Candidate(question, CALDO_PHRASES))
+    assert verdict.accepted and verdict.route == WEB, verdict.reason
+    assert verdict.generic_name
+    assert "alex" not in verdict.candidate.question.casefold()
+    assert "Caldo Verde?" in verdict.candidate.question or "Caldo Verde " in (
+        verdict.candidate.question
+    )
+
+
+@pytest.mark.parametrize(("question", "rule"), RUN12_PERSON)
+async def test_a_run_12_person_question_stays_person(
+    tmp_path: Path, question: str, rule: str
+) -> None:
+    verdict = await _caldo_gate(tmp_path).check(Candidate(question, CALDO_PHRASES))
+    assert verdict.accepted and verdict.route == PERSON
+    assert verdict.route_reason == rule
+
+
+async def test_the_generic_name_is_only_for_a_web_question(tmp_path: Path) -> None:
+    gate = _caldo_gate(tmp_path)
+    question = "Which stock does Alex's Caldo Verde take in the recipe page?"
+    asked = await gate.check(Candidate(question, CALDO_PHRASES), person=True)
+    assert asked.candidate.question == question and not asked.generic_name
+    record = await _caldo_gate(tmp_path).check(
+        Candidate("Which potato goes into Alex's Caldo Verde?", CALDO_PHRASES, audience=RECORD)
+    )
+    assert not record.generic_name and record.route == PERSON
+    plain = await _caldo_gate(tmp_path).check(
+        Candidate("What is a classic Caldo Verde broth?", CALDO_PHRASES)
+    )
+    assert plain.route == WEB and not plain.generic_name
+
+
+def test_generic_question() -> None:
+    forms = ["Alex's Caldo Verde"]
+    assert generic_question("Is alex’s caldo verde spicy?", forms, "Caldo Verde") == (
+        "Is Caldo Verde spicy?"
+    )
+    assert generic_question("Is Alex's Caldo Verde spicy?", forms, "") == (
+        "Is Alex's Caldo Verde spicy?"
+    )
+    assert generic_question("Is Alex's stew spicy?", forms, "Caldo Verde") == (
+        "Is Alex's stew spicy?"
+    )

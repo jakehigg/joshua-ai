@@ -43,6 +43,14 @@ people, so its questions go to `person` too, whatever the worker said, with
 `route_reason: person section`. A `record` question of such a topic still
 goes to the record search, because the search stays inside the instance.
 
+Before these rules, a `web` question gets the generic name of the topic in
+place of each possessive form of its title (`topics.possessive_forms`, in any
+case): "a soup like Alex's Caldo Verde" becomes "a soup like Caldo Verde". So
+a title that holds a person's name does not send a question about the thing to
+a person. The dossier and any page keep the new text, and `Verdict.generic_name`
+is true. A person's name in any other use still sends the question to
+`person`.
+
 A `web` question goes to the dossier. A `record` question goes to the memory
 search over the `wiki`, `journal`, and `knowledge` kinds: a hit at
 `jobs.research.record_sim` or more closes it with `answered_by: <path>`, and
@@ -61,7 +69,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -115,6 +123,10 @@ _MONTH_DAY_RE = re.compile(
 )
 _US_WORD_RE = re.compile(r"(?<!\w)(?:(?i:we|our)|us)(?!\w)")
 _INDEX_WIKI_PREFIX = "wiki/"
+# An apostrophe of a possessive form, straight or curly, and the class that
+# matches either one.
+_APOSTROPHE_RE = re.compile("['\u2019]")
+_APOSTROPHE_CLASS = "['\u2019]"
 
 # Embeds one text and gives its vectors. A test passes its own.
 Embedder = Callable[[str], Awaitable[list[list[float]]]]
@@ -140,7 +152,9 @@ class Verdict:
     rules, and `route_reason` says why a question went to `person`. A
     `record` question names its record in `answered_by`. A `person` question
     that is not accepted, because it was asked before, names that question
-    page in `page`.
+    page in `page`. `generic_name` is true when the gate put the generic name
+    of the topic in place of a possessive form of its title, and `candidate`
+    then holds the new text.
     """
 
     candidate: Candidate
@@ -150,6 +164,7 @@ class Verdict:
     route: str = ""
     route_reason: str = ""
     page: str | None = None
+    generic_name: bool = False
 
 
 @dataclass(frozen=True)
@@ -173,6 +188,22 @@ def names_topic(question: str, terms: Sequence[str]) -> bool:
     `topics.names_pattern`. Give it `topics.topic_names` of the topic."""
     pattern = names_pattern(terms)
     return pattern is not None and pattern.search(question) is not None
+
+
+def generic_question(question: str, possessives: Sequence[str], generic: str) -> str:
+    """`question` with `generic` in place of each of `possessives`, in any
+    case and with any white space. Give it `topics.possessive_forms` and
+    `topics.generic_title` of the topic title. With no `generic`, the question
+    is unchanged."""
+    if not generic.strip():
+        return question
+    text = question
+    for form in sorted({f for f in possessives if f.strip()}, key=len, reverse=True):
+        body = r"\s+".join(
+            _APOSTROPHE_RE.sub(_APOSTROPHE_CLASS, re.escape(word)) for word in form.split()
+        )
+        text = re.sub(rf"(?<!\w){body}(?!\w)", lambda _: generic, text, flags=re.IGNORECASE)
+    return text
 
 
 def roster_names(settings: Any) -> list[str]:
@@ -330,6 +361,8 @@ class Gate:
         record_sim: float = DEFAULT_RECORD_SIM,
         asked: Sequence[AskedQuestion] = (),
         person_section: bool = False,
+        possessives: Sequence[str] = (),
+        generic: str = "",
     ) -> None:
         self._bundle_text = bundle_text
         self._terms = [t for t in terms if t.strip()]
@@ -342,6 +375,8 @@ class Gate:
         self._record_sim = record_sim
         self._asked: list[AskedQuestion] = list(asked)
         self._person_section = person_section
+        self._possessives = [p for p in possessives if p.strip()]
+        self._generic = generic
         self._vectors: dict[str, list[list[float]]] = {}
         self.notes: list[str] = []
         self._vectors_off = False
@@ -434,7 +469,19 @@ class Gate:
     async def check(self, candidate: Candidate, *, person: bool = False) -> Verdict:
         """Check one candidate and give its route. With `person`, a person
         asked it: only the shape rules apply, and it goes to the dossier. A
-        candidate that passed counts as known for the next."""
+        candidate that passed counts as known for the next. A `web` candidate
+        from the worker gets the generic name first (see the module
+        docstring)."""
+        audience = candidate.audience if candidate.audience in AUDIENCES else WEB
+        if person or audience != WEB:
+            return await self._check(candidate, person=person)
+        question = generic_question(candidate.question, self._possessives, self._generic)
+        if question == candidate.question:
+            return await self._check(candidate, person=False)
+        verdict = await self._check(replace(candidate, question=question), person=False)
+        return replace(verdict, generic_name=True)
+
+    async def _check(self, candidate: Candidate, *, person: bool) -> Verdict:
         question = candidate.question
         reason = shape_reason(question, self._terms)
         if reason:

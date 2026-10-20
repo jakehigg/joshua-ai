@@ -31,6 +31,9 @@ Each question has one audience:
   page about the same thing could ask is not useful. A `web` question never
   asks what we did, recorded, planned, or will do, never holds a date from
   our records, never names a person, and never uses "we", "our", or "us".
+  Call a thing by its generic name. Never put a person's name in a `web`
+  question, also when the page title holds it: write "Caldo Verde", not
+  "Alex's Caldo Verde".
 - `person`: a question that only somebody in this house can answer: what was
   done, what was used, what is intended or preferred, or a record that is
   missing. Nobody gets this question now. It is kept in a list, and a person

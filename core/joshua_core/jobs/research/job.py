@@ -115,7 +115,15 @@ from joshua_core.jobs.research.text import (
 )
 from joshua_core.jobs.research.write import Page, PageTooLong, page_for, render_page, write_page
 from joshua_core.jobs.runner import Clock, Job, JobArgsError, RunReport, current_run_id
-from joshua_core.jobs.topics import Topic, is_topic_page, list_topics, load_topic, topic_names
+from joshua_core.jobs.topics import (
+    Topic,
+    generic_title,
+    is_topic_page,
+    list_topics,
+    load_topic,
+    possessive_forms,
+    topic_names,
+)
 
 logger = get_logger("jobs.research")
 
@@ -254,6 +262,8 @@ class _Run:
     selection: Selection
     ledger: UsageLedger = field(default_factory=UsageLedger)
     added: list[Question] = field(default_factory=list)
+    # The slugs of the new questions that got the generic name of the topic.
+    generic: set[str] = field(default_factory=set)
     rejected: list[Verdict] = field(default_factory=list)
     person: list[_PersonQuestion] = field(default_factory=list)
     asked_before: list[Verdict] = field(default_factory=list)
@@ -472,9 +482,12 @@ class ResearchJob(Job):
                 for q in load_questions(self._data_dir, topic.path)
             ],
             person_section=self._about_people(topic),
+            possessives=possessive_forms(topic.title, self._settings.people),
+            generic=generic_title(topic.title, self._settings.people),
         )
-        for candidate in raised.candidates:
-            verdict = await gate.check(candidate)
+        for raised_candidate in raised.candidates:
+            verdict = await gate.check(raised_candidate)
+            candidate = verdict.candidate
             if not verdict.accepted:
                 if verdict.route == PERSON:
                     run.asked_before.append(verdict)
@@ -495,6 +508,8 @@ class ResearchJob(Job):
             )
             dossier.questions.append(question)
             run.added.append(question)
+            if verdict.generic_name:
+                run.generic.add(question.slug)
         run.notes.extend(gate.notes)
 
     def _person_question(
@@ -709,6 +724,7 @@ class ResearchJob(Job):
         question_lines = [
             f"- `{q.slug}` ({q.status}{', new' if q.slug in added else ''}"
             f"{', asked by ' + q.asked_by if q.by_person else ''}): {code_span(q.question)}"
+            f"{' (generic name)' if q.slug in run.generic else ''}"
             for q in dossier.questions
         ]
         rejected_lines = []

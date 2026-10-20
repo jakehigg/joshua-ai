@@ -154,3 +154,10 @@ def test_the_prompt_has_the_person_rule() -> None:
     )
     assert "Ask it as `person` when a person here can answer it" in flat
     assert "When no person can answer it, do not raise it" in flat
+
+
+def test_the_raise_prompt_asks_for_the_generic_name() -> None:
+    flat = " ".join(RAISE_PROMPT.split())
+    assert "Call a thing by its generic name." in flat
+    assert "Never put a person's name in a `web` question" in flat
+    assert 'write "Caldo Verde", not "Alex\'s Caldo Verde"' in flat
