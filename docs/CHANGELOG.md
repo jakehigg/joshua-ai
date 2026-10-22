@@ -212,6 +212,20 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **Only what people say shows what they care about.** The researcher no
+  longer selects a topic by the journal. Its second rule is now `mentioned`:
+  the topic that the messages of people of the last `jobs.bundle.recent_days`
+  days name, with the lowest coverage. A reply of Joshua, a scheduled task,
+  and an event do not count. The nightly reflection leaves out a concern that
+  only Joshua raised, records a change and not a standing state, and keeps a
+  deferred or declined suggestion as one short line. A profile takes a
+  preference only from what the person said. A scheduled task that writes a
+  journal entry on each run records only what changed. The curator `refresh`
+  worker turns an old warning into one plain dated line. Before this change,
+  Joshua's own repeated words could make a topic grow in the journal, get
+  researched, and come back in chat. See
+  [docs/jobs.md](jobs.md#the-topic).
+
 - **The insights job raises a gap.** An insight is now also a gap: a knowledge
   page names a step or a protection for our situation, and the wiki shows that
   we have not done it, or marks it "to be added". Before this change, the

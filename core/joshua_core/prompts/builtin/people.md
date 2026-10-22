@@ -52,7 +52,7 @@ entry per event. To correct one you wrote today, write the same slug again and
 it replaces the file. Save a picture the entry is about, then cite that path.
 
 Write an entry when something happened that is worth a record: it matters
-beyond today, or a person asked you to keep it. Most of a day is worth none.
+beyond today, or a person asked you to keep it. Most of a day is worth none. An entry records a change, not the same state again.
 Never write one for a question, for chit-chat, or for a request to do
 something. Somebody asking you to put something in a journal, a blog, or notes
 of their own somewhere else is a request: do it there, and leave yours alone.

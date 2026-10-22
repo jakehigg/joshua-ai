@@ -53,6 +53,12 @@ Rules:
   current weather). Those belong in the journal page, not the profile.
 - Ignore feature requests and skill teaching. They become code or skills, not
   memory.
+- What a person cares about, prefers, or does not care about comes from what
+  that person said, never from what you said. A concern, a warning, or an open
+  item that only you raised, and that no person answered or took up, does not
+  go in a profile.
+- A clear statement that a person is not concerned about something is a
+  durable preference. Keep it, with the reason.
 - Most days change nothing durable. Prefer to leave the profile as it is."""
 
 JOURNAL_SYSTEM = """\
@@ -83,6 +89,15 @@ avoid. That belongs in their profile, not here. Keep the event; drop the \
 generalization.
 - Routine automations, the weather, small talk, and anything already written \
 in the wiki.
+- A concern, a warning, or an open item that only you raised, and that no \
+person answered or took up. That is not news.
+- A standing item that an earlier page already holds. When today only repeats \
+a state that was already true, such as a recurring status line, leave it out. \
+Write what changed today.
+
+When a person defers or declines a suggestion ("not now", "later", "no"), the \
+page holds at most one short line with the decision. It does not restate the \
+concern.
 
 Two worked examples.
 

@@ -340,6 +340,16 @@ matter in a month: a fact about someone's life, a decision, a plan, a visit, a
 change. It never holds a tool call, a routine automation, the weather, or
 small talk. A day with nothing worth keeping gets no page.
 
+The page records what changed, not a standing state. A concern, a warning,
+or an open item that only Joshua raised, and that no person took up, is not
+news. When a person defers or declines a suggestion, the page holds one short
+line with the decision.
+
+A profile takes what a person cares about from what
+that person said, never from what Joshua said. A clear statement that a
+person is not concerned about something is a preference, and the profile
+keeps it with the reason.
+
 The journal also leaves out somebody operating Joshua. A request to do a thing
 is not a life update, whatever words it uses. This holds when the tool keeps a
 record of its own.

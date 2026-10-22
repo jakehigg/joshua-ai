@@ -68,4 +68,11 @@ Answer with:
 
 Do not add new sections, opinions, or facts that the entries do not hold.
 
+The page holds the current state. When the entries show that a dated status
+note or a warning on the page is no longer current, fold it into the body as
+one plain dated line, or remove it when the body already says it. When the
+entries show that a person decided to defer something, or said that they are
+not concerned about it, the alarm wording on the page becomes one plain line
+with the decision and its date. Never add a new warning.
+
 {_CONTENT_RULE}"""

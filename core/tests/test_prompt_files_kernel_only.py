@@ -46,3 +46,15 @@ def test_file_within_line_budget(path: Path) -> None:
     budget = _BUDGETS.get(path.name, _LINE_BUDGET)
     lines = len(path.read_text().splitlines())
     assert lines <= budget, f"{path.name} is {lines} lines, over its {budget}-line budget"
+
+
+def test_a_scheduled_journal_entry_records_only_what_changed() -> None:
+    flat = " ".join((_PROMPTS_DIR / "scheduled.md").read_text().split())
+    assert "only what is new or changed since the last run" in flat
+    assert "Do not carry a list of standing items forward" in flat
+    assert "Standing state belongs on the wiki page of the thing." in flat
+
+
+def test_a_journal_entry_records_a_change() -> None:
+    text = (_PROMPTS_DIR / "people.md").read_text()
+    assert "An entry records a change, not the same state again." in text
