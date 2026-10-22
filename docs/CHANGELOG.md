@@ -48,6 +48,15 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **The journal holds what people said, and what changed.** The nightly
+  reflection no longer reads the instruction of a scheduled task or an event
+  as words of a person. Joshua's reply to them stays, labelled Joshua. The
+  nightly page leaves out a concern that only Joshua raised and no person took
+  up, records a change and not a standing state, and keeps a deferred or
+  declined suggestion as one short line. A profile takes a preference only
+  from what the person said. A scheduled task that writes a journal entry on
+  each run records only what changed since the last run.
+
 - **A tool server that restarts no longer takes its tools away until the
   session ends.** An `http` upstream drops its sessions when it restarts or
   when a session is idle. The next call failed. The gateway answered core with

@@ -522,7 +522,8 @@ class NightlyReflector:
         A per-person conversation goes to its person. A group conversation goes to
         each member speaker (their turns plus Joshua's replies to them) and, whole,
         to the group bucket. A guest's group turns are never attributed to a
-        member. Skill-teaching exchanges are dropped.
+        member. Skill-teaching exchanges are dropped. The instruction of a
+        scheduled task and an event are not a person, so they are dropped too.
         """
         z = zone(self._tz)
         start = datetime.combine(target, time.min, tzinfo=z)
@@ -566,6 +567,8 @@ class NightlyReflector:
             return
         name = info.get("display_name") or pid
         for row in conv_rows:
+            if row["direction"] not in _READ_DIRECTIONS:
+                continue
             content = _usable(row, skip)
             if content is None:
                 continue
@@ -584,7 +587,7 @@ class NightlyReflector:
         # (same turn_id) lands in the same member's bucket.
         turn_member: dict[str, Any] = {}
         for row in conv_rows:
-            if row["direction"] == "out":
+            if row["direction"] != _PERSON_DIRECTION:
                 continue
             speaker = row["meta"].get("speaker")
             person = by_name.get(speaker) if speaker else None
@@ -592,6 +595,8 @@ class NightlyReflector:
                 turn_member[row["meta"].get("turn_id")] = person
 
         for row in conv_rows:
+            if row["direction"] not in _READ_DIRECTIONS:
+                continue
             content = _usable(row, skip)
             if content is None:
                 continue
@@ -603,6 +608,13 @@ class NightlyReflector:
             member = turn_member.get(row["meta"].get("turn_id"))
             if member is not None:
                 buckets.setdefault(member.id, _Bucket()).add(row["created_at"], label, content)
+
+
+# Only an `in` row is a person speaking. A `task` row (the instruction of a
+# scheduled task) and an `inject` row (an event) operate Joshua, so the
+# reflection does not read them. Joshua's reply to them is an `out` row.
+_PERSON_DIRECTION = "in"
+_READ_DIRECTIONS = frozenset({_PERSON_DIRECTION, "out"})
 
 
 def _is_skill_path(path: str) -> bool:
