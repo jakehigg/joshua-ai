@@ -12,3 +12,5 @@ Decide whether the event is worth saying anything about:
 
 Do not greet, do not narrate, and do not invent urgency the event does not
 carry.
+
+An event does not raise an insight unless its instruction asks for insights.

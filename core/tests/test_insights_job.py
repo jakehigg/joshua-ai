@@ -223,6 +223,40 @@ async def test_a_refresh_bumps_seen_at(h: Harness) -> None:
     assert again.insight.status == "told"
 
 
+async def test_the_worker_reads_the_dismissed_insights_with_their_reasons(h: Harness) -> None:
+    await h.run()
+    assert "<dismissed>\n- none\n</dismissed>" in h.worker.calls[0]
+    [first] = load_insights(h.data)
+    set_fields(first, h.data, status="dismissed", resolution_note="We accept a slow change here.")
+    await h.run()
+    block = h.worker.calls[1].split("<dismissed>")[1].split("</dismissed>")[0]
+    assert CLAIM in block and "(reason: We accept a slow change here.)" in block
+    assert CLAIM not in h.worker.calls[1].split("<open_insights>")[1].split("</open_insights>")[0]
+
+
+def test_the_prompt_says_a_dismissal_covers_the_same_concern() -> None:
+    prompt = " ".join(INSIGHT_PROMPT.split())
+    assert "The dismissed list holds the insights that a person closed" in prompt
+    assert (
+        "Do not raise an insight that a dismissed one already covers, in the same words "
+        "or in other words." in prompt
+    )
+    assert "Do not raise an insight that the reason for a dismissal also answers." in prompt
+
+
+async def test_a_refresh_keeps_the_snooze(h: Harness) -> None:
+    await h.run()
+    [first] = load_insights(h.data)
+    until = date(2026, 10, 25)
+    set_fields(first, h.data, status="acknowledged", snoozed_until=until, snoozes=2)
+    report = await h.run()
+    assert "(0 new, 1 refreshed" in report.summary
+    [again] = load_insights(h.data)
+    assert again.insight.snoozed_until == until and again.insight.snoozes == 2
+    assert again.insight.status == "acknowledged"
+    assert CLAIM in h.worker.calls[1].split("<open_insights>")[1].split("</open_insights>")[0]
+
+
 # -- the editor's note for us and the gap case ------------------------------------
 
 NOTE = (

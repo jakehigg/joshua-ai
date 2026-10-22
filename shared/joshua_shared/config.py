@@ -712,7 +712,9 @@ class JobsInsights(_Model):
     writes. `dup_sim` is the cosine floor for a new claim to be a duplicate of
     an insight of the topic. `default_valid_days` sets `valid_until` when the
     worker gives none. `after_research` runs the insight pass at the end of a
-    research run that published a page. See `docs/jobs.md`.
+    research run that published a page. `snooze_days` is the first snooze of
+    an insight when a person gives no number of days; each later snooze is
+    twice as long, up to `snooze_max_days`. See `docs/jobs.md`.
     """
 
     enabled: bool = False
@@ -721,6 +723,8 @@ class JobsInsights(_Model):
     dup_sim: float = Field(default=0.88, ge=0.0, le=1.0)
     default_valid_days: int = Field(default=60, ge=1)
     after_research: bool = True
+    snooze_days: int = Field(default=7, ge=1)
+    snooze_max_days: int = Field(default=90, ge=1)
 
 
 class Jobs(_Model):

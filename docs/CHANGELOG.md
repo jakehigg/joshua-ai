@@ -212,6 +212,19 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **Snooze an insight, and keep a closed insight out of chat.** A member can
+  say "not now" to an insight: the new `snooze_insight` tool hides it until a
+  later day, and each later snooze of the same insight is twice as long. The
+  new keys `jobs.insights.snooze_days` (7) and `jobs.insights.snooze_max_days`
+  (90) set the lengths. An insight page gets the frontmatter keys
+  `snoozed_until` and `snoozes`. The injection before a turn and
+  `search_memory` no longer give a dismissed, expired, or snoozed insight, or
+  a question that is not open. `list_insights` shows only the due insights by
+  default, ranked by severity and then confidence, and `status: snoozed`
+  lists the snoozed ones. The insight worker reads the dismissed insights of
+  the topic with their reasons, and does not raise the same concern again.
+  See [docs/jobs.md](jobs.md#status-snooze-and-due).
+
 - **Only what people say shows what they care about.** The researcher no
   longer selects a topic by the journal. Its second rule is now `mentioned`:
   the topic that the messages of people of the last `jobs.bundle.recent_days`

@@ -40,6 +40,13 @@ bundle about our situation: that is knowledge, not an insight. Do not raise
 an insight that the open list already holds, in the same words or in other
 words. When there is no insight, answer with an empty list.
 
+The dismissed list holds the insights that a person closed, each with the
+reason they gave. Do not raise an insight that a dismissed one already
+covers, in the same words or in other words. Do not raise an insight that
+the reason for a dismissal also answers. Example: a reason says that the
+person accepts the risk of a slow backup. That reason also covers another
+insight about the same risk.
+
 For each insight, answer with:
 
 - `claim`: one sentence, 15 to 200 characters, that says what is wrong now.

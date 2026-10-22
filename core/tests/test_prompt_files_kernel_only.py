@@ -37,8 +37,9 @@ _LINE_BUDGET = 80
 # people.md carries the skill format the agent writes: the trigger, ``for``,
 # and ``kind``. The format grew when a skill gained an audience and a kind, so
 # the budget grew with it. Every line here is paid on every turn: cut before
-# you raise this again.
-_BUDGETS = {"people.md": 98}
+# you raise this again. The insight follow-up (when to ask, and when to snooze
+# or dismiss) added its paragraph.
+_BUDGETS = {"people.md": 107}
 
 
 @pytest.mark.parametrize("path", _FILES, ids=lambda p: p.name)
@@ -58,3 +59,29 @@ def test_a_scheduled_journal_entry_records_only_what_changed() -> None:
 def test_a_journal_entry_records_a_change() -> None:
     text = (_PROMPTS_DIR / "people.md").read_text()
     assert "An entry records a change, not the same state again." in text
+
+
+def test_the_insight_follow_up_is_in_people_md() -> None:
+    flat = " ".join((_PROMPTS_DIR / "people.md").read_text().split())
+    assert "When a live conversation turns to the topic of a due insight" in flat
+    assert "Never ask in a scheduled task or an event message." in flat
+    assert "If they say not now, call `snooze_insight`." in flat
+    assert "call `dismiss_insight` with their reason" in flat
+    assert "do not write the deferral to the journal: the insight holds it." in flat
+
+
+@pytest.mark.parametrize(
+    ("name", "line"),
+    [
+        (
+            "scheduled.md",
+            "A scheduled task does not raise an insight unless its instruction asks for insights.",
+        ),
+        (
+            "event.md",
+            "An event does not raise an insight unless its instruction asks for insights.",
+        ),
+    ],
+)
+def test_a_task_or_an_event_does_not_raise_an_insight(name: str, line: str) -> None:
+    assert line in " ".join((_PROMPTS_DIR / name).read_text().split())

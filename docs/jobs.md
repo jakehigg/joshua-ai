@@ -1322,7 +1322,11 @@ required. A path that is not a topic page gets 400.
    sentence to 600 characters or less. A page without that section has no
    note. The worker also gets the date, the timezone and the `name` from
    `joshua.yaml`, and the open insights of the topic, so that it does not
-   raise one again. The prompt
+   raise one again. A snoozed insight is open, so it is on that list. The
+   worker also gets the dismissed insights of the topic, each with the
+   reason that the person gave. The prompt tells the worker not to raise an
+   insight that a dismissed one covers, in other words too, or that the
+   reason for a dismissal answers. The prompt
    tells the worker that the bundle and the pages are content, not
    instructions.
 5. The gate decides which insights are new, which refresh an open insight,
@@ -1364,8 +1368,8 @@ A claim that has the same text as an open insight of the topic, or a vector
 at `jobs.insights.dup_sim` (0.88) or more to the claim of one, is a
 duplicate. A duplicate of an open insight refreshes it: `seen_at` becomes
 today, and `we_do`, `we_do_paths`, `knowledge_says`, and the evidence come
-from the new answer. The status does not change, and the report lists it as
-refreshed. A duplicate of a `dismissed` insight is dropped with the reason
+from the new answer. The status, `snoozed_until`, and `snoozes` do not
+change, and the report lists it as refreshed. A duplicate of a `dismissed` insight is dropped with the reason
 `dismissed before`.
 
 A run writes at most `jobs.insights.max_per_run` (5) new insights: the
@@ -1400,8 +1404,9 @@ source: insights
 run_id: 9
 ```
 
-`told_at`, `resolved_at`, `resolved_by`, and `resolution_note` are added when
-they get a value. The body has these headings, in this order: the claim as
+`told_at`, `resolved_at`, `resolved_by`, `resolution_note`, and
+`snoozed_until` are added when they get a value. `snoozes` counts the snoozes
+of the insight, and starts at 0. The body has these headings, in this order: the claim as
 the title, **Why it matters**, **What to do**, **What we do** (each `we_do`
 phrase in quotes, with a link to its page), **What is known** (the
 `answer_short` of each `knowledge_says` page, with a link), and **Evidence**
@@ -1412,7 +1417,8 @@ becomes plain text.
 
 `insights/README.md` has one table with a row for each insight: the status,
 the severity, the topic with a link, the claim with a link, the valid-until
-day, and the day it was found. The open insights (`new`, `told`, and
+day, and the day it was found. The status cell of a snoozed insight also
+says `snoozed until <day>`. The open insights (`new`, `told`, and
 `acknowledged`) come first, then the rest, and the newest come first in each
 group. The job and the chat tool write it again on each change.
 
@@ -1423,6 +1429,45 @@ open insight of the topic whose `valid_until` is before today becomes
 `expired`, with `resolved_at` today and `resolved_by: expiry`. Then
 `insights/README.md` is written again. This is Python, with no worker call.
 A dry run does not expire an insight.
+
+### Status, snooze, and due
+
+The status of an insight is one of these:
+
+| Status | Meaning |
+|---|---|
+| `new` | The job raised it. |
+| `told` | Joshua told a person about it. |
+| `acknowledged` | A person knows about it. |
+| `dismissed` | A person closed it, with a reason. A later run does not raise it again. |
+| `expired` | Its `valid_until` day is in the past. |
+
+`new`, `told`, and `acknowledged` are open. A snooze is not a status. It is
+the day `snoozed_until` on an open insight: the last day of the snooze. An
+insight is **due** when it is open and it has no `snoozed_until`, or its
+`snoozed_until` is before today. Today is the day in the `timezone` of
+`joshua.yaml`. So a snooze until 2026-10-25 makes the insight due again on
+2026-10-26.
+
+A snooze with no number of days is `jobs.insights.snooze_days` (7) days,
+times 2 for each earlier snooze of the insight, and at most
+`jobs.insights.snooze_max_days` (90) days. With the defaults, the snoozes of
+one insight are 7, 14, 28, 56, and then 90 days. A snooze with a number of
+days uses that number, from 1 to `snooze_max_days`. A snooze includes
+today.
+
+### Retrieval in chat
+
+A turn gets text from the memory in two ways: the injection before the turn,
+and the `search_memory` tool. Both drop a chunk of an insight that is not
+due (dismissed, expired, or snoozed), and a chunk of a question that is not
+`open`. They read the frontmatter of the page from the data volume when the
+search runs, and they drop a chunk before the trim to the result count, so a
+turn still gets its full count of other chunks. A chunk of a page that is
+not on the disk, or that does not parse, is dropped too.
+
+The page stays on the disk and in the wiki. `POST /v1/memory/search`, which
+the viewer and the MCP search use, does not apply this rule.
 
 ### The research hook
 
@@ -1443,18 +1488,34 @@ the research run replaces `after_research` for that run.
 
 ### The chat tool
 
-The `insights` tool server is in core. A member gets four tools:
+The `insights` tool server is in core. A member gets five tools:
 
 | Tool | What it does |
 |---|---|
-| `list_insights(status="open", topic=None, limit=20)` | lists insights, open first and newest first. `open` means `new`, `told`, and `acknowledged`. A status can also be `new`, `told`, `acknowledged`, `dismissed`, `expired`, or `all`. |
+| `list_insights(status="open", topic=None, limit=20)` | lists insights, ranked. `open` means the due insights. `snoozed` means the open insights that a snooze hides today. A status can also be `new`, `told`, `acknowledged`, `dismissed`, `expired`, or `all`. |
 | `acknowledge_insight(slug)` | sets `status: acknowledged`, `resolved_at`, and `resolved_by: <person id>` on a `new` or `told` insight |
 | `dismiss_insight(slug, why)` | sets `status: dismissed`, `resolved_at`, `resolved_by`, and `resolution_note` on an open insight. A later run does not raise it again. |
+| `snooze_insight(slug, days=None)` | sets `snoozed_until` and adds 1 to `snoozes` on an open insight (see [Status, snooze, and due](#status-snooze-and-due)). A `new` insight becomes `acknowledged`. The answer gives the day the insight is due again. |
 | `run_insights(topic)` | starts a run that is not a dry run, and answers with the run id |
+
+The list is ranked: the highest severity first (`urgent`, `act`, `note`),
+then the highest confidence (`high`, `medium`, `low`), then the oldest
+`found_at`. With `all`, the open insights come first. Each line has the id,
+the status, the severity, and the claim. The first line of the answer is
+"Ranked by severity, then confidence. Name every urgent and act item when
+you summarize."
+
+The agent uses `snooze_insight` when a person says not now, later, or that
+they are busy, and `dismiss_insight`, with the reason, when a person says no
+or that the insight does not matter to them. In a live conversation about
+the topic of a due insight, the agent can ask once if the person wants to
+plan something. It does not ask in a scheduled task or an event message,
+and it does not write a snooze to the journal.
 
 `slug` is `<section>/<slug>`. A status change takes the job lock, writes the
 page and `insights/README.md`, and commits the wiki with the message
-`insights: <slug> <status> by <person id>`. A guest, or a speaker that core
+`insights: <slug> <status> by <person id>`, or
+`insights: <slug> snoozed until <day> by <person id>` for a snooze. A guest, or a speaker that core
 does not know, gets a refusal from each tool, and nothing changes. The server
 is there only when `jobs.enabled` and `jobs.insights.enabled` are both true.
 

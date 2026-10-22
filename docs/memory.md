@@ -110,7 +110,10 @@ Three folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   first. The table holds `index: false`, so it is not indexed. See [insights](jobs.md#insights).
 
 The agent finds them the same way it finds any wiki page: through the
-injection before a turn, and through `search_memory`. The agent cannot write
+injection before a turn, and through `search_memory`. Both leave out an
+insight that is not due (dismissed, expired, or snoozed) and a question that
+is not open, so a closed concern does not come back in chat (see
+[retrieval in chat](jobs.md#retrieval-in-chat)). The agent cannot write
 them. `write_file` and `rename_file` refuse a path in these folders, so a
 dossier, a question, and an insight keep the frontmatter that their job reads.
 A member answers a question with the `questions` chat tool, which writes the

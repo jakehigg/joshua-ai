@@ -620,6 +620,8 @@ jobs:
 | `insights.dup_sim` | `0.88` | A new claim with a vector this close to the claim of an insight of the topic is a duplicate. |
 | `insights.default_valid_days` | `60` | When the worker gives no `valid_until`, it is the day of the run plus this many days. |
 | `insights.after_research` | `true` | A research `run` that publishes a page also runs the insight pass for the same topic, in the same run and the same commit. The `then_insights` argument of a research run replaces this value for that run. |
+| `insights.snooze_days` | `7` | The first snooze of an insight, in days, when the person gives no number. Each later snooze of the same insight is twice as long. |
+| `insights.snooze_max_days` | `90` | The longest snooze of an insight, in days. A snooze with a number of days is from 1 to this value. |
 
 A domain entry matches a host when the host is the entry, when the host ends
 with the entry (`.edu`, or `reddit.com` for `www.reddit.com`), or, for an

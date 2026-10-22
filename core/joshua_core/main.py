@@ -313,10 +313,10 @@ def _build_memory(
         chunk_chars=memory.chunk_chars,
         known_people=[p.id for p in settings.people],
     )
-    recall.register(manager, store, settings)
+    recall.register(manager, store, settings, data_dir=data_dir)
     if settings.internet.enabled:
         internet.register(manager, settings, manager.url_grants)
-    injection.register(manager, store, settings, repo)
+    injection.register(manager, store, settings, repo, data_dir=data_dir)
     taught_skills.register(manager, store, settings, repo, indexer.skills)
     return indexer, IndexerLoop(indexer, intervals)
 

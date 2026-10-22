@@ -322,6 +322,9 @@ jobs:
     default_valid_days: 60 # valid_until is this many days after today when the worker gives none
     after_research: true   # a research run that published a page runs the insight
                            # pass for the same topic, in the same run and commit
+    snooze_days: 7         # the first snooze of an insight when a person gives no
+                           # days; each later snooze is twice as long
+    snooze_max_days: 90    # the longest snooze
 
 wiki:
   git: true   # keep /data/wiki as a git repository Joshua commits; false leaves

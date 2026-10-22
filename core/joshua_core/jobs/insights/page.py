@@ -10,6 +10,11 @@ the worker, under fixed headings, in this order: the claim as the title,
 `write_index` writes it again on each write of the insights job and of the
 `insights` chat tool. The table holds `index: false`, so the memory index
 leaves it out; each insight page is indexed.
+
+A person can snooze an open insight: `snoozed_until` is the last day of the
+snooze, and `snoozes` counts the snoozes. An insight is *due* when it is open
+and its snooze, if any, ended before today (`is_due`). Chat retrieval and the
+default list of the `insights` tool show only due insights.
 """
 
 from __future__ import annotations
@@ -18,11 +23,13 @@ import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from joshua_shared import frontmatter, layout
+from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -42,6 +49,7 @@ Confidence = Literal["low", "medium", "high"]
 STATUSES: tuple[str, ...] = ("new", "told", "acknowledged", "dismissed", "expired")
 OPEN_STATUSES: tuple[str, ...] = OPEN_INSIGHT_STATUSES
 SEVERITIES: tuple[str, ...] = ("note", "act", "urgent")
+CONFIDENCES: tuple[str, ...] = ("low", "medium", "high")
 
 HEADING_WHY = "Why it matters"
 HEADING_ACTION = "What to do"
@@ -78,11 +86,21 @@ class Insight(BaseModel):
     resolution_note: str | None = None
     source: str = SOURCE
     run_id: int | None = None
+    snoozed_until: date | None = None
+    snoozes: int = Field(default=0, ge=0)
 
     @property
     def is_open(self) -> bool:
         """True for `new`, `told`, and `acknowledged`."""
         return self.status in OPEN_STATUSES
+
+    def is_snoozed(self, today: date) -> bool:
+        """True when the insight is open and its snooze includes `today`."""
+        return self.is_open and self.snoozed_until is not None and self.snoozed_until >= today
+
+    def is_due(self, today: date) -> bool:
+        """True when the insight is open and not snoozed on `today`."""
+        return self.is_open and not self.is_snoozed(today)
 
 
 @dataclass(frozen=True)
@@ -107,6 +125,26 @@ class Body:
     evidence: str
     phrase_paths: Mapping[str, str]
     known: Mapping[str, str]
+
+
+def local_day(now: datetime, settings: JoshuaConfig) -> date:
+    """The day of `now` in the timezone of the instance. A naive `now` is
+    already local."""
+    if now.tzinfo is None:
+        return now.date()
+    return now.astimezone(ZoneInfo(settings.timezone)).date()
+
+
+def rank_key(item: InsightFile) -> tuple[int, int, date, str]:
+    """The sort key of the ranked list: the highest severity first, then the
+    highest confidence, then the oldest `found_at`, then the id."""
+    i = item.insight
+    return (
+        -SEVERITIES.index(i.severity),
+        -CONFIDENCES.index(i.confidence),
+        i.found_at,
+        item.id,
+    )
 
 
 # -- paths ------------------------------------------------------------------
@@ -327,10 +365,13 @@ def render_index(insights: Iterable[InsightFile]) -> str:
     rows = index_order(insights)
     for item in rows:
         i = item.insight
+        status = i.status
+        if i.is_open and i.snoozed_until is not None:
+            status = f"{i.status}, snoozed until {i.snoozed_until.isoformat()}"
         topic = f"[{_cell(i.topic)}]({_rel_link(me, i.topic)})"
         claim = f"[{_cell(_plain(i.claim))}]({_rel_link(me, insight_rel(item.id))})"
         lines.append(
-            f"| {i.status} | {i.severity} | {topic} | {claim} | "
+            f"| {status} | {i.severity} | {topic} | {claim} | "
             f"{i.valid_until.isoformat()} | {i.found_at.isoformat()} |"
         )
     if not rows:

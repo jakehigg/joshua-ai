@@ -1,7 +1,8 @@
 """In-process ``insights`` tool server: read the insights, resolve them, and start a run.
 
-``list_insights`` lists the insights in ``wiki/insights/``,
-``acknowledge_insight`` and ``dismiss_insight`` change the status of one, and
+``list_insights`` lists the insights in ``wiki/insights/``, ranked,
+``acknowledge_insight`` and ``dismiss_insight`` change the status of one,
+``snooze_insight`` hides an open insight until a later day, and
 ``run_insights`` starts a run of the ``insights`` job through the job runner,
 so a run from chat is the same as a run from the laptop. A tool names an
 insight by ``<section>/<slug>``, its path under ``wiki/insights/`` without
@@ -13,6 +14,8 @@ core does not know, gets a "not available" reply and nothing changes.
 A status change takes the lock that the jobs and the nightly reflection
 share, writes the frontmatter of the page and ``insights/README.md``, and
 commits the wiki with the message ``insights: <id> <status> by <person>``.
+A snooze does the same with the message
+``insights: <id> snoozed until <day> by <person>``.
 
 Core registers this server only when ``jobs.enabled`` and
 ``jobs.insights.enabled`` are both true.
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -31,13 +35,14 @@ from joshua_shared.log import get_logger
 
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
-from joshua_core.jobs.insights.job import local_day
 from joshua_core.jobs.insights.page import (
     OPEN_STATUSES,
     STATUSES,
-    index_order,
+    InsightFile,
     load_insight,
     load_insights,
+    local_day,
+    rank_key,
     set_fields,
     write_index,
 )
@@ -50,7 +55,11 @@ JOB = "insights"
 NOT_AVAILABLE = "That is not available to you. Only a member can use the insights."
 BUSY = "A job or the nightly reflection is writing the wiki now. Try again in a few minutes."
 MAX_LIST = 50
-LIST_STATUSES = ("open", "all", *STATUSES)
+SNOOZED = "snoozed"
+LIST_STATUSES = ("open", SNOOZED, "all", *STATUSES)
+LIST_HEADER = (
+    "Ranked by severity, then confidence. Name every urgent and act item when you summarize."
+)
 
 
 @dataclass(frozen=True)
@@ -101,23 +110,35 @@ async def do_list_insights(
     wanted = (status or "open").strip().lower()
     if wanted not in LIST_STATUSES:
         return _reply(f"The status must be one of {', '.join(LIST_STATUSES)}.")
+    today = local_day(ctx.clock(), ctx.settings)
     items = load_insights(ctx.data_dir, (topic or "").strip() or None)
     if wanted == "open":
-        items = [i for i in items if i.insight.status in OPEN_STATUSES]
+        items = [i for i in items if i.insight.is_due(today)]
+    elif wanted == SNOOZED:
+        items = [i for i in items if i.insight.is_snoozed(today)]
     elif wanted != "all":
         items = [i for i in items if i.insight.status == wanted]
-    items = index_order(items)[: _limit(limit)]
+    items = sorted(items, key=rank_key)
+    if wanted == "all":
+        items.sort(key=lambda f: 0 if f.insight.is_open else 1)
+    items = items[: _limit(limit)]
     if not items:
         return _reply(f"There are no {wanted} insights.")
-    lines = []
-    for item in items:
-        i = item.insight
-        lines.append(
-            f"- `{item.id}` [{i.status}, {i.severity}] {inline(i.claim, 300)} "
-            f"(topic {i.topic}, valid until {i.valid_until.isoformat()}, found "
-            f"{i.found_at.isoformat()})"
-        )
-    return _reply("Insights:\n" + "\n".join(lines))
+    return _reply(LIST_HEADER + "\n" + "\n".join(_line(item, today) for item in items))
+
+
+def _line(item: InsightFile, today: date) -> str:
+    """One insight of the list: id, status, severity, claim, and the facts after."""
+    i = item.insight
+    facts = [
+        f"confidence {i.confidence}",
+        f"topic {i.topic}",
+        f"valid until {i.valid_until.isoformat()}",
+        f"found {i.found_at.isoformat()}",
+    ]
+    if i.is_snoozed(today) and i.snoozed_until is not None:
+        facts.insert(0, f"snoozed until {i.snoozed_until.isoformat()}")
+    return f"- `{item.id}` [{i.status}, {i.severity}] {inline(i.claim, 300)} ({', '.join(facts)})"
 
 
 async def _set_status(
@@ -192,6 +213,78 @@ async def do_dismiss_insight(
     )
 
 
+def snooze_length(settings: JoshuaConfig, snoozes: int, days: int | None) -> int:
+    """The days of a snooze. With `days`, that number, clamped to 1 through
+    `snooze_max_days`. Without, `snooze_days` times 2 to the power of the
+    earlier `snoozes`, capped at `snooze_max_days`."""
+    cfg = settings.jobs.insights
+    top = cfg.snooze_max_days
+    if days is not None:
+        return max(1, min(days, top))
+    return min(cfg.snooze_days * 2 ** min(max(snoozes, 0), 16), top)
+
+
+def _days(value: Any) -> int | None:
+    """The `days` argument as a whole number, or None when it is not given.
+    Raises `ValueError` for a value that is not a whole number."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError(value)
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(value)
+        return int(value)
+    return int(str(value).strip())
+
+
+async def do_snooze_insight(
+    deps: ToolDeps, ctx: InsightsContext, *, insight_id: str, days: Any = None
+) -> dict[str, Any]:
+    member = await _member_id(deps)
+    if member is None:
+        return _reply(NOT_AVAILABLE)
+    try:
+        wanted = _days(days)
+    except (TypeError, ValueError):
+        return _reply("Give the days as a whole number, or leave them out.")
+    insight_id = (insight_id or "").strip()
+    if insight_id.endswith(".md"):
+        insight_id = insight_id[:-3]
+    if load_insight(insight_id, ctx.data_dir) is None:
+        return _reply(f"I found no insight `{insight_id}`. Give it as <section>/<slug>.")
+    if ctx.lock.locked():
+        return _reply(BUSY)
+    async with ctx.lock:
+        current = load_insight(insight_id, ctx.data_dir)
+        if current is None:
+            return _reply(f"I found no insight `{insight_id}`.")
+        if not current.insight.is_open:
+            return _reply(
+                f"Insight `{insight_id}` is {current.insight.status}, so I did not snooze it."
+            )
+        today = local_day(ctx.clock(), ctx.settings)
+        length = snooze_length(ctx.settings, current.insight.snoozes, wanted)
+        until = today + timedelta(days=length - 1)
+        keys: dict[str, Any] = {"snoozed_until": until, "snoozes": current.insight.snoozes + 1}
+        if current.insight.status == "new":
+            keys["status"] = "acknowledged"
+        changed = set_fields(current, ctx.data_dir, **keys)
+        written = [changed.path, write_index(ctx.data_dir)]
+        if wikigit.is_enabled(ctx.settings):
+            wikigit.commit(
+                layout.wiki_root(ctx.data_dir),
+                written,
+                f"insights: {insight_id} snoozed until {until.isoformat()} by {member}",
+            )
+    back = until + timedelta(days=1)
+    logger.info({"message": "insight snoozed", "days": length, "person": member})
+    return _reply(
+        f"Insight `{insight_id}` is snoozed until {until.isoformat()}. "
+        f"It comes back on {back.isoformat()}."
+    )
+
+
 async def do_run_insights(deps: ToolDeps, ctx: InsightsContext, *, topic: str) -> dict[str, Any]:
     if await _member_id(deps) is None:
         return _reply(NOT_AVAILABLE)
@@ -216,8 +309,8 @@ _LIST_SCHEMA = {
     "properties": {
         "status": {
             "type": "string",
-            "description": "open (the default: new, told, and acknowledged), new, told, "
-            "acknowledged, dismissed, expired, or all.",
+            "description": "open (the default: new, told, and acknowledged insights that "
+            "are not snoozed), snoozed, new, told, acknowledged, dismissed, expired, or all.",
         },
         "topic": {"type": "string", "description": "Only the insights of this topic page."},
         "limit": {"type": "integer", "description": "How many insights, 1 to 50. Default 20."},
@@ -241,6 +334,19 @@ _DISMISS_SCHEMA = {
     "required": ["slug", "why"],
 }
 
+_SNOOZE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "slug": {"type": "string", "description": "The insight, as <section>/<slug>."},
+        "days": {
+            "type": "integer",
+            "description": "How many days to snooze it. Leave it out unless the person "
+            "gives a time: each later snooze is then longer.",
+        },
+    },
+    "required": ["slug"],
+}
+
 _RUN_SCHEMA = {
     "type": "object",
     "properties": {
@@ -256,7 +362,8 @@ def build_insights_server(deps: ToolDeps, ctx: InsightsContext) -> Any:
     @tool(
         "list_insights",
         "List the insights: places where what we do is different from what is known, "
-        "for the date and the season. Only a member may call this.",
+        "for the date and the season. The list is ranked: the most severe first. "
+        "Only a member may call this.",
         _LIST_SCHEMA,
     )
     async def list_insights(args: dict[str, Any]) -> dict[str, Any]:
@@ -288,6 +395,19 @@ def build_insights_server(deps: ToolDeps, ctx: InsightsContext) -> Any:
         )
 
     @tool(
+        "snooze_insight",
+        "Snooze one open insight until a later day. Use this when a person says not "
+        "now, later, or that they are busy. When they say no, or that it does not "
+        "matter to them, use dismiss_insight with their reason instead. Only a member "
+        "may call this.",
+        _SNOOZE_SCHEMA,
+    )
+    async def snooze_insight(args: dict[str, Any]) -> dict[str, Any]:
+        return await do_snooze_insight(
+            deps, ctx, insight_id=args.get("slug") or "", days=args.get("days")
+        )
+
+    @tool(
         "run_insights",
         "Start an insights run on one topic that has knowledge pages. Only a member may call this.",
         _RUN_SCHEMA,
@@ -298,7 +418,7 @@ def build_insights_server(deps: ToolDeps, ctx: InsightsContext) -> Any:
     return create_sdk_mcp_server(
         name="insights",
         version="1.0.0",
-        tools=[list_insights, acknowledge_insight, dismiss_insight, run_insights],
+        tools=[list_insights, acknowledge_insight, dismiss_insight, snooze_insight, run_insights],
     )
 
 

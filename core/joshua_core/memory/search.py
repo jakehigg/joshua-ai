@@ -2,12 +2,14 @@
 
 ``search`` over-fetches candidates by cosine from the person's scope, then
 applies :func:`rank_chunks` (per-document cap and a recency bonus for
-``journal`` kinds) to return the top ``k`` chunks.
+``journal`` kinds) to return the top ``k`` chunks. A ``keep`` predicate drops
+a candidate before the trim, so the result still holds ``k`` chunks when the
+store has them.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
 from joshua_core.memory.models import KbChunk
@@ -36,8 +38,10 @@ async def search(
     recency_half_life_days: float = 14.0,
     per_doc_cap: int = PER_DOC_CAP,
     now: datetime | None = None,
+    keep: Callable[[KbChunk], bool] | None = None,
 ) -> list[KbChunk]:
-    """Return the top ``k`` chunks visible to ``person_id`` (own + shared)."""
+    """Return the top ``k`` chunks visible to ``person_id`` (own + shared).
+    With ``keep``, only the candidates for which it is True."""
     candidates = await store.kb_search(
         person_id,
         query_vec,
@@ -47,6 +51,8 @@ async def search(
         kinds=kinds,
         exclude_kinds=exclude_kinds,
     )
+    if keep is not None:
+        candidates = [c for c in candidates if keep(c)]
     ranked = rank_chunks(
         candidates,
         limit=k,

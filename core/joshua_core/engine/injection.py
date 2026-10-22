@@ -10,7 +10,9 @@ person's scope of the in-core index (own documents plus shared), and
   three documents so the model can open one with ``read_file``.
 - ``none``  — nothing cleared ``hint_sim``; no note.
 
-Every decision writes one ``kb_event`` audit row. Retrieval never breaks a turn:
+A chunk of an insight that is not due, or of a question that is not open,
+never reaches a turn (``jobs/retrieval.py``). Every decision writes one
+``kb_event`` audit row. Retrieval never breaks a turn:
 an unavailable embedding model or a failed search skips the note and logs a
 warning. The provider is registered on the manager's context-provider hook.
 """
@@ -18,8 +20,10 @@ warning. The provider is registered on the manager's context-provider hook.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -27,6 +31,8 @@ from joshua_shared.attachments import is_no_caption
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
+from joshua_core.jobs.insights.page import local_day
+from joshua_core.jobs.retrieval import ChatFilter
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
@@ -137,8 +143,11 @@ async def kb_context(
     recency_bonus: float,
     recency_half_life_days: float,
     per_doc_cap: int,
+    keep: Callable[[KbChunk], bool] | None = None,
 ) -> str | None:
     """Build the per-turn injection note for one ``TurnCtx``, or None.
+
+    ``keep`` drops a candidate chunk before the top-k trim.
 
     A message shorter than :data:`MIN_QUERY_CHARS`, an unavailable embedding
     model, or a failed retrieval returns None with no audit row (the turn
@@ -172,6 +181,7 @@ async def kb_context(
             recency_bonus=recency_bonus,
             recency_half_life_days=recency_half_life_days,
             per_doc_cap=per_doc_cap,
+            keep=keep,
         )
     except Exception as exc:  # noqa: BLE001 — retrieval must never break a turn
         logger.warning({"message": "kb inject skipped: retrieval failed", "error": str(exc)})
@@ -210,16 +220,27 @@ async def kb_context(
     return None
 
 
-def register(manager: Any, store: MemoryStore, settings: JoshuaConfig, repo: Repo) -> None:
+def register(
+    manager: Any,
+    store: MemoryStore,
+    settings: JoshuaConfig,
+    repo: Repo,
+    *,
+    data_dir: Path | str,
+    clock: Callable[[], datetime] | None = None,
+) -> None:
     """Wire the injection context provider into the conversation manager.
 
-    Does nothing when ``memory.inject.enabled`` is false.
+    Each turn gets a new ``ChatFilter`` for the day of ``clock`` (the
+    instance timezone). Does nothing when ``memory.inject.enabled`` is false.
     """
     memory = settings.memory
     inject = memory.inject
     if not inject.enabled:
         logger.info({"message": "kb injection disabled"})
         return
+
+    now = clock or _utc_now
 
     async def provider(ctx: Any) -> str | None:
         return await kb_context(
@@ -234,6 +255,11 @@ def register(manager: Any, store: MemoryStore, settings: JoshuaConfig, repo: Rep
             recency_bonus=memory.recency_bonus,
             recency_half_life_days=memory.recency_half_life_days,
             per_doc_cap=memory.per_doc_cap,
+            keep=ChatFilter(data_dir, local_day(now(), settings)),
         )
 
     manager.add_context_provider(provider)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)

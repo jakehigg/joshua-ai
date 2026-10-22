@@ -256,13 +256,13 @@ def _settings(enabled: bool) -> Any:
 
 def test_register_wires_provider_when_enabled() -> None:
     manager = FakeManager()
-    injection.register(manager, FakeStore([]), _settings(True), FakeRepo())
+    injection.register(manager, FakeStore([]), _settings(True), FakeRepo(), data_dir="/x")
     assert len(manager.providers) == 1
 
 
 def test_register_skips_when_disabled() -> None:
     manager = FakeManager()
-    injection.register(manager, FakeStore([]), _settings(False), FakeRepo())
+    injection.register(manager, FakeStore([]), _settings(False), FakeRepo(), data_dir="/x")
     assert manager.providers == []
 
 

@@ -4,7 +4,8 @@ misses a step that it names.
 The worker has no tools and a timeout of 120 seconds. It reads the parts of
 the memory bundle that say what we do, the full text of each published
 knowledge page of the topic, the day, the timezone, the instance name, and
-the open insights of the topic. Above the text of each knowledge page are two
+the open insights of the topic, and the insights of the topic that a person
+dismissed, each with the reason the person gave. Above the text of each knowledge page are two
 labelled lines: its short answer, and the editor's note for us (the section
 `## Where this differs for us`, see `knowledge.py`) when the page has one.
 The gate in `gate.py` then decides which insights are written.
@@ -113,13 +114,23 @@ def insight_text(
     today: date,
     timezone: str,
     instance: str,
+    dismissed: Sequence[InsightFile] = (),
 ) -> str:
-    """The user text of the `insight` worker."""
+    """The user text of the `insight` worker. A snoozed insight is open, so
+    it is in `open_insights`."""
     opened = (
         "\n".join(
             f"- {inline(f.insight.claim, 300)} (status {f.insight.status}, valid until "
             f"{f.insight.valid_until.isoformat()})"
             for f in open_insights
+        )
+        or "- none"
+    )
+    closed = (
+        "\n".join(
+            f"- {inline(f.insight.claim, 300)} (reason: "
+            f"{inline(f.insight.resolution_note or 'none given', 600)})"
+            for f in dismissed
         )
         or "- none"
     )
@@ -131,6 +142,7 @@ def insight_text(
         f"Instance: {instance}\n"
         f"Topic: {topic} ({title})\n\n"
         f"<open_insights>\n{opened}\n</open_insights>\n\n"
+        f"<dismissed>\n{closed}\n</dismissed>\n\n"
         f"<knowledge>\n{pages}\n</knowledge>\n\n"
         f"<bundle>\n{bundle}\n</bundle>"
     )

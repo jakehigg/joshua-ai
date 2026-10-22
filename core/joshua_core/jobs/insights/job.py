@@ -30,10 +30,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from joshua_shared import layout
 from joshua_shared.config import JoshuaConfig
@@ -56,6 +55,7 @@ from joshua_core.jobs.insights.page import (
     insight_path,
     insight_section,
     load_insights,
+    local_day,
     render_insight,
     write_index,
     write_text,
@@ -76,12 +76,6 @@ NO_KNOWLEDGE = "no knowledge for this topic"
 def insight_model(settings: JoshuaConfig) -> str | None:
     """The model of the insight worker; see `jobs/models.py`."""
     return insights_model(settings)
-
-
-def local_day(now: datetime, settings: JoshuaConfig) -> date:
-    if now.tzinfo is None:
-        return now.date()
-    return now.astimezone(ZoneInfo(settings.timezone)).date()
 
 
 @dataclass(frozen=True)
@@ -230,6 +224,7 @@ class InsightPass:
         raised = await raise_insights(
             user_text=insight_text(
                 topic=topic.path,
+                dismissed=dismissed,
                 title=topic.title,
                 parts=parts,
                 known=list(known.values()),

@@ -5,12 +5,17 @@ data volume: the wiki (including the journal) plus any of the caller's own
 documents from another source (a memo, for example). A group turn
 (``deps.person_id`` None) sees shared documents only. Read-only — each result
 carries the ``path`` the agent can open with the ``files`` tool ``read_file``.
+A chunk of an insight that is not due, or of a question that is not open, is
+left out (``jobs/retrieval.py``).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
+from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 
 from joshua_shared.config import JoshuaConfig
@@ -18,7 +23,10 @@ from joshua_shared.log import get_logger
 
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
+from joshua_core.jobs.insights.page import local_day
+from joshua_core.jobs.retrieval import ChatFilter
 from joshua_core.memory import embed as embed_module
+from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
 from joshua_core.memory.skills import SKILL_KIND
 from joshua_core.memory.store import MemoryStore
@@ -44,10 +52,12 @@ async def do_search_memory(
     recency_bonus: float = 0.08,
     recency_half_life_days: float = 14.0,
     per_doc_cap: int = 3,
+    keep: Callable[[KbChunk], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Return ``[{path, title, heading, text, score}]`` for the caller's scope.
 
-    An empty query or an unavailable embedding model returns ``[]``.
+    ``keep`` drops a candidate chunk before the trim to ``limit``. An empty
+    query or an unavailable embedding model returns ``[]``.
     """
     query = (query or "").strip()
     if not query:
@@ -67,6 +77,7 @@ async def do_search_memory(
         recency_bonus=recency_bonus,
         recency_half_life_days=recency_half_life_days,
         per_doc_cap=per_doc_cap,
+        keep=keep,
     )
     return [
         {
@@ -105,8 +116,13 @@ def build_recall_server(
     recency_bonus: float,
     recency_half_life_days: float,
     per_doc_cap: int,
+    data_dir: Path | str | None = None,
+    today: Callable[[], date] | None = None,
 ) -> Any:
-    """Build the in-process ``recall`` MCP server bound to one conversation."""
+    """Build the in-process ``recall`` MCP server bound to one conversation.
+
+    With ``data_dir`` and ``today``, each search gets a new ``ChatFilter``
+    for the day that ``today`` gives."""
 
     @tool(
         "search_memory",
@@ -125,15 +141,29 @@ def build_recall_server(
             recency_bonus=recency_bonus,
             recency_half_life_days=recency_half_life_days,
             per_doc_cap=per_doc_cap,
+            keep=ChatFilter(data_dir, today()) if data_dir is not None and today else None,
         )
         return _reply(json.dumps(results))
 
     return create_sdk_mcp_server(name="recall", version="1.0.0", tools=[search_memory])
 
 
-def register(manager: Any, store: MemoryStore, settings: JoshuaConfig) -> None:
-    """Wire the ``recall`` builtin into the conversation manager."""
+def register(
+    manager: Any,
+    store: MemoryStore,
+    settings: JoshuaConfig,
+    *,
+    data_dir: Path | str,
+    clock: Callable[[], datetime] | None = None,
+) -> None:
+    """Wire the ``recall`` builtin into the conversation manager. A search
+    drops the insights and questions that are closed on the day of ``clock``
+    (the instance timezone)."""
     memory = settings.memory
+    now = clock or (lambda: datetime.now(UTC))
+
+    def today() -> date:
+        return local_day(now(), settings)
 
     def factory(deps: ToolDeps) -> Any:
         return build_recall_server(
@@ -144,6 +174,8 @@ def register(manager: Any, store: MemoryStore, settings: JoshuaConfig) -> None:
             recency_bonus=memory.recency_bonus,
             recency_half_life_days=memory.recency_half_life_days,
             per_doc_cap=memory.per_doc_cap,
+            data_dir=data_dir,
+            today=today,
         )
 
     manager.register_builtin("recall", factory)
