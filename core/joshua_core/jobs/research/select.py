@@ -4,10 +4,10 @@
 a topic:
 
 1. `person`: a topic whose dossier has an open question that a person asked.
-2. `journal`: among the topics that a journal entry of the last
-   `jobs.bundle.recent_days` days is about, the lowest coverage. A topic with
-   no dossier has a coverage of 0.0. Ties go to the topic with the most
-   entries.
+2. `mentioned`: among the topics that the messages of people of the last
+   `jobs.bundle.recent_days` days name, the lowest coverage. A topic with no
+   dossier has a coverage of 0.0. Ties go to the topic with the most
+   messages.
 3. `coverage`: among all topics, the lowest coverage below
    `jobs.research.coverage_target`.
 4. `refresh`: the dossier with the oldest `refresh_after` that is before the
@@ -18,10 +18,14 @@ its pages are about people. Each rule takes a topic in a person section only
 when no topic outside one qualifies under the same rule, and the reason then
 says so.
 
-A journal entry is about a topic when it holds a name of the topic
-(`bundle.topic_pattern`). With the roster, a person's name is never a name
-of a topic, by the roster rule of `topics`, so an entry that only names a
-person counts for no topic. A possessive title counts by its generic name.
+Only what people say counts. A message is an inbound transcript row
+(`direction` is `in`) from a person of the roster, a member or a guest. A
+reply of Joshua, a scheduled task, an injected event, and the journal never
+count: Joshua's own words are not a sign that a person cares about a topic.
+A message is about a topic when it holds a name of the topic
+(`bundle.topic_pattern`). A person's name is never a name of a topic, by the
+roster rule of `topics`, so a message that only names a person counts for no
+topic. A possessive title counts by its generic name.
 
 Each remaining tie goes to the seeded pick: a shuffle of the sorted topic
 paths with `random.Random(f"{run_date}:{sha256 of the sorted paths}")`. So the
@@ -33,19 +37,28 @@ from __future__ import annotations
 
 import hashlib
 import random
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from joshua_shared.config import Person
 
-from joshua_core.jobs.bundle import journal_entries, topic_pattern
+from joshua_core.jobs.bundle import topic_pattern
 from joshua_core.jobs.research.dossier import Dossier
 from joshua_core.jobs.topics import Topic
 
-RULES = ("person", "journal", "coverage", "refresh")
+RULES = ("person", "mentioned", "coverage", "refresh")
+
+# The direction of a transcript row that a person sent.
+INBOUND = "in"
+
+
+class MessageStore(Protocol):
+    """The one transcript query of the `mentioned` rule. `Repo` implements it."""
+
+    async def inbound_messages(self, since: datetime) -> list[dict[str, Any]]: ...
 
 
 @dataclass(frozen=True)
@@ -82,28 +95,47 @@ def in_person_section(topic: Topic, person_sections: Sequence[str]) -> bool:
     return bool(topic.section) and topic.section in person_sections
 
 
-def journal_counts(
+def people_messages(rows: Iterable[Mapping[str, Any]], people: Sequence[Person]) -> list[str]:
+    """The text of each row that a person of `people` sent.
+
+    A row counts only when its `direction` is `in` and it comes from a person
+    of the roster: its `person_id` is the id of a person, or its `speaker` is
+    the name of a person. Every other row, and every row of a sender who is
+    not on the roster, is left out.
+    """
+    ids = {p.id for p in people}
+    names = {p.name for p in people}
+    out: list[str] = []
+    for row in rows:
+        if row.get("direction") != INBOUND:
+            continue
+        if row.get("person_id") not in ids and row.get("speaker") not in names:
+            continue
+        text = (row.get("content") or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def mention_counts(
     topics: Sequence[Topic],
     wiki_root: Path,
-    today: date,
-    days: int,
+    messages: Sequence[str],
     *,
     people: Sequence[Person] | None = None,
 ) -> dict[str, int]:
-    """`{topic path: count}` of the journal entries of the last `days` days,
-    up to `today`, that hold a name of the topic. The bundle
-    rule for title and alias matches. With `people`, the name of a person is
-    not a name of a topic. The journal is read once."""
-    since = today - timedelta(days=days)
-    entries = [e for e in journal_entries(wiki_root, today) if e.day > since]
+    """`{topic path: count}` of the `messages` that hold a name of the topic.
+    The bundle rule for title and alias matches. With `people`, the name of a
+    person is not a name of a topic. A topic that no message names is left
+    out."""
     counts: dict[str, int] = {}
-    if not entries:
+    if not messages:
         return counts
     for topic in topics:
         pattern = topic_pattern(topic, wiki_root, people=people)
         if pattern is None:
             continue
-        found = sum(1 for e in entries if pattern.search(e.text))
+        found = sum(1 for text in messages if pattern.search(text))
         if found:
             counts[topic.path] = found
     return counts
@@ -122,14 +154,14 @@ def _ordered(candidates: Sequence[str], key: Callable[[str], Any]) -> list[str]:
 def select_topic(
     topics: Sequence[Topic],
     dossiers: Mapping[str, Dossier],
-    journal_recent: Mapping[str, int],
+    mentions: Mapping[str, int],
     run_date: date,
     settings: Any,
 ) -> Selection:
     """Choose the topic of a run. `settings` is the whole config.
 
     `topics` are the topic pages of the wiki. `dossiers` maps a topic path to
-    its dossier. `journal_recent` is `journal_counts` for the run.
+    its dossier. `mentions` is `mention_counts` for the run.
     """
     paths = [t.path for t in topics]
     if not paths:
@@ -143,9 +175,9 @@ def select_topic(
         found = [p for p in paths if p in dossiers and dossiers[p].has_person_question()]
         return _ordered(found, lambda p: (p in about_people, rank[p]))
 
-    def journal() -> list[str]:
-        found = [p for p in paths if journal_recent.get(p, 0) > 0]
-        return _ordered(found, lambda p: (p in about_people, cov[p], -journal_recent[p], rank[p]))
+    def mentioned() -> list[str]:
+        found = [p for p in paths if mentions.get(p, 0) > 0]
+        return _ordered(found, lambda p: (p in about_people, cov[p], -mentions[p], rank[p]))
 
     def coverage() -> list[str]:
         found = [p for p in paths if cov[p] < cfg.coverage_target]
@@ -164,8 +196,8 @@ def select_topic(
     days = settings.jobs.bundle.recent_days
     reasons: dict[str, Callable[[str], str]] = {
         "person": lambda p: f"A person asked a question about {p} that is still open.",
-        "journal": lambda p: (
-            f"{journal_recent.get(p, 0)} journal entries of the last {days} days are about "
+        "mentioned": lambda p: (
+            f"{mentions.get(p, 0)} messages from people in the last {days} days name "
             f"{p}, and its coverage is {cov[p]:.2f}, the lowest of those topics."
         ),
         "coverage": lambda p: (
@@ -176,7 +208,12 @@ def select_topic(
             f"The dossier of {p} was due for a refresh on {dossiers[p].refresh_after}."
         ),
     }
-    lists = {"person": person(), "journal": journal(), "coverage": coverage(), "refresh": refresh()}
+    lists = {
+        "person": person(),
+        "mentioned": mentioned(),
+        "coverage": coverage(),
+        "refresh": refresh(),
+    }
     for index, rule in enumerate(RULES):
         found = lists[rule]
         if not found:
@@ -198,5 +235,6 @@ def select_topic(
         None,
         None,
         "No topic is due: no open question from a person, no topic in the recent "
-        "journal, every coverage is at the target, and no dossier is due for a refresh.",
+        "messages from people, every coverage is at the target, and no dossier is due "
+        "for a refresh.",
     )

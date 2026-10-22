@@ -575,6 +575,39 @@ class Repo:
             for r in rows
         ]
 
+    async def inbound_messages(self, since: datetime) -> list[dict[str, Any]]:
+        """The inbound transcript rows since ``since``, oldest first.
+
+        Only rows with ``direction = 'in'``: what a sender wrote, never a reply,
+        a task, or an injected event. Each row holds ``direction``,
+        ``content``, ``created_at``, the ``person_id`` of a per-person
+        conversation (else None), and the ``speaker`` of a shared conversation
+        (else None).
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT t.direction, t.content, t.created_at, c.person_id,
+                       t.meta->>'speaker' AS speaker
+                FROM transcript t
+                LEFT JOIN conversations c ON c.id = t.conversation_id
+                WHERE t.created_at >= %s AND t.direction = 'in'
+                ORDER BY t.created_at, t.id
+                """,
+                (since,),
+            )
+            rows = await cur.fetchall()
+        return [
+            {
+                "direction": r["direction"],
+                "content": r["content"],
+                "created_at": r["created_at"],
+                "person_id": r["person_id"],
+                "speaker": r["speaker"],
+            }
+            for r in rows
+        ]
+
     async def transcript_tail(self, conversation_id: str, limit: int = 40) -> list[dict[str, Any]]:
         """The last ``limit`` transcript rows for a conversation, oldest-first."""
         async with self._pool.connection() as conn:

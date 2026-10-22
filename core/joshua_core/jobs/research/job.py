@@ -112,9 +112,11 @@ from joshua_core.jobs.research.questions import write_index as write_questions_i
 from joshua_core.jobs.research.raise_ import WORKER as RAISE
 from joshua_core.jobs.research.raise_ import raise_questions
 from joshua_core.jobs.research.select import (
+    MessageStore,
     Selection,
     in_person_section,
-    journal_counts,
+    mention_counts,
+    people_messages,
     select_topic,
 )
 from joshua_core.jobs.research.text import (
@@ -307,8 +309,10 @@ class ResearchJob(Job):
         data_dir: Path | str,
         runner: Runner | None = None,
         internet_runner: Runner | None = None,
+        messages: MessageStore | None = None,
     ) -> None:
         self._store = store
+        self._messages = messages
         self._settings = settings
         self._data_dir = Path(data_dir)
         self._runner = runner
@@ -378,7 +382,7 @@ class ResearchJob(Job):
             if researchable(t.path, self._data_dir)
         ]
         dossiers = load_dossiers(self._data_dir)
-        selection = self._select(args, topics, dossiers, day)
+        selection = await self._select(args, topics, dossiers, day, now)
         run = _Run(mode=args["mode"], day=day, now=now, selection=selection)
         if selection.topic is None:
             return self._empty_report(run, dry_run)
@@ -447,23 +451,42 @@ class ResearchJob(Job):
             return []
         return list(run.insights.written)
 
-    def _select(
+    async def _select(
         self,
         args: dict[str, Any],
         topics: list[Topic],
         dossiers: dict[str, Dossier],
         day: date,
+        now: datetime,
     ) -> Selection:
         if "topic" in args:
             return Selection(args["topic"], RULE_GIVEN, None, "The run named the topic.")
-        counts = journal_counts(
-            topics,
-            self._wiki,
-            day,
-            self._settings.jobs.bundle.recent_days,
-            people=self._settings.people,
+        mentions = await self._mentions(topics, now)
+        return select_topic(topics, dossiers, mentions, day, self._settings)
+
+    async def _mentions(self, topics: list[Topic], now: datetime) -> dict[str, int]:
+        """`{topic path: count}` of the messages from people of the last
+        `jobs.bundle.recent_days` days that name the topic. Without a message
+        store, or when the query fails, no topic has a mention."""
+        if self._messages is None:
+            return {}
+        since = now - timedelta(days=self._settings.jobs.bundle.recent_days)
+        try:
+            rows = await self._messages.inbound_messages(since)
+        except Exception as exc:  # noqa: BLE001 — the other rules still choose a topic
+            logger.warning({"message": "inbound messages query failed", "error": str(exc)})
+            return {}
+        people = self._settings.people
+        texts = people_messages(rows, people)
+        mentions = mention_counts(topics, self._wiki, texts, people=people)
+        logger.info(
+            {
+                "message": "research mentions",
+                "messages": len(texts),
+                "topics": len(mentions),
+            }
         )
-        return select_topic(topics, dossiers, counts, day, self._settings)
+        return mentions
 
     async def _raise(self, run: _Run, topic: Topic, bundle: Bundle, dossier: Dossier) -> None:
         cfg = self._settings.jobs.research

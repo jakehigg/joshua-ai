@@ -165,6 +165,7 @@ async def lifespan(app: FastAPI):
         data_dir=data_dir,
         lock=wiki_lock,
         findings=repo,
+        messages=repo,
     )
     # The `curator`, `research`, `questions`, and `insights` builtins need the
     # wiki lock, and `research` and `insights` the job runner, so they register

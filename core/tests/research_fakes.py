@@ -1,7 +1,8 @@
 """Offline fakes and a fixture wiki for the researcher tests.
 
 `build_research_wiki` writes a wiki with a snake plant, a pothos, and roses,
-and journal entries about them. `FakeWorkers` answers the `raise` and `editor`
+and journal entries about them. `FakeMessages` answers the inbound messages
+query with canned rows. `FakeWorkers` answers the `raise` and `editor`
 workers, and `FakeInternet` plays the internet agent: it calls the search hook
 with the URLs of its answer, the way the SDK does, so `internet.ask` keeps
 them. Each fake records its calls and adds a fixed usage to `usage_out`.
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -244,6 +246,27 @@ class FakeInternet:
                 None,
             )
         return copy.deepcopy(result)
+
+
+# A message from Alex, a person of the test roster, that names the snake plant.
+SNAKE_MESSAGE = {
+    "direction": "in",
+    "content": "The snake plant leaves flop again.",
+    "person_id": "alex",
+    "speaker": None,
+}
+
+
+class FakeMessages:
+    """Answers `inbound_messages` with `rows`, and keeps each `since`."""
+
+    def __init__(self, rows: Sequence[dict[str, Any]] | None = None) -> None:
+        self.rows = [dict(r) for r in (rows if rows is not None else [SNAKE_MESSAGE])]
+        self.since: list[datetime] = []
+
+    async def inbound_messages(self, since: datetime) -> list[dict[str, Any]]:
+        self.since.append(since)
+        return [dict(r) for r in self.rows]
 
 
 class FakeStore:

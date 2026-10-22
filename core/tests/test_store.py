@@ -199,6 +199,33 @@ async def test_transcript_and_kb_event(repo) -> None:
     await repo.add_kb_event(kind="search", query="weather", conversation_id=conv.id, turn_id="t1")
 
 
+async def test_inbound_messages_hold_only_what_a_sender_wrote(repo) -> None:
+    await repo.upsert_person("alex", "Alex")
+    await repo.upsert_channel("telegram:dmalex", "telegram", default_person_id="alex")
+    await repo.upsert_channel("telegram:group1", "telegram", session_mode="shared")
+    direct = await repo.get_or_create_conversation("telegram:dmalex", "alex")
+    group = await repo.get_or_create_conversation("telegram:group1", None)
+
+    await repo.add_transcript(direct.id, "in", "Is the air filter due?", meta={"turn_id": "t1"})
+    await repo.add_transcript(direct.id, "out", "It is due soon.", meta={"turn_id": "t1"})
+    await repo.add_transcript(direct.id, "task", "Check the air filter.", meta={"turn_id": "t2"})
+    await repo.add_transcript(direct.id, "inject", "Event: a backup check.", meta={})
+    await repo.add_transcript(
+        group.id, "in", "When is the backup check?", meta={"turn_id": "t3", "speaker": "Alex"}
+    )
+
+    rows = await repo.inbound_messages(datetime(2000, 1, 1, tzinfo=UTC))
+    assert [r["content"] for r in rows] == ["Is the air filter due?", "When is the backup check?"]
+    assert {r["direction"] for r in rows} == {"in"}
+    assert (rows[0]["person_id"], rows[0]["speaker"]) == ("alex", None)
+    assert (rows[1]["person_id"], rows[1]["speaker"]) == (None, "Alex")
+    assert all(r["created_at"] is not None for r in rows)
+    assert set(rows[0]) == {"direction", "content", "created_at", "person_id", "speaker"}
+
+    later = datetime.now(UTC) + timedelta(days=1)
+    assert await repo.inbound_messages(later) == []
+
+
 async def test_latest_conversation_for_member(repo) -> None:
     await repo.upsert_person("alex", "Alex")
     await repo.upsert_channel("telegram:dmalex", "telegram", default_person_id="alex")

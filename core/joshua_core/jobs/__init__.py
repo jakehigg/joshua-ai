@@ -20,6 +20,7 @@ from joshua_core.jobs.bundle_job import BundleJob
 from joshua_core.jobs.curator import CuratorJob, CuratorStore, FindingStore
 from joshua_core.jobs.insights import InsightsJob
 from joshua_core.jobs.research import ResearchJob
+from joshua_core.jobs.research.select import MessageStore
 from joshua_core.jobs.runner import (
     Clock,
     Job,
@@ -68,6 +69,7 @@ def build_job_runner(
     lock: asyncio.Lock,
     clock: Clock | None = None,
     findings: FindingStore | None = None,
+    messages: MessageStore | None = None,
 ) -> JobRunner:
     """The runner with every built-in job. `lock` is the nightly reflection's lock.
     `clock` defaults to the current UTC time.
@@ -75,7 +77,8 @@ def build_job_runner(
     The `curator` job is added when `jobs.curator.enabled` is true and
     `findings` holds the `curator_finding` table; `store` must then also
     answer `kb_mean_vectors`. The `research` job is added when
-    `jobs.research.enabled` is true.
+    `jobs.research.enabled` is true. Its `mentioned` rule reads the
+    messages of people from `messages`; without it, the rule gives no topic.
     """
     jobs: list[Job] = [BundleJob(store=store, settings=settings, data_dir=data_dir)]
     if settings.jobs.curator.enabled and findings is not None:
@@ -88,7 +91,9 @@ def build_job_runner(
             )
         )
     if settings.jobs.research.enabled:
-        jobs.append(ResearchJob(store=store, settings=settings, data_dir=data_dir))
+        jobs.append(
+            ResearchJob(store=store, settings=settings, data_dir=data_dir, messages=messages)
+        )
     if settings.jobs.insights.enabled:
         jobs.append(InsightsJob(store=store, settings=settings, data_dir=data_dir))
     return JobRunner(

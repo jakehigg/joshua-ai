@@ -643,15 +643,24 @@ applies:
 
 1. **`person`**: a topic whose dossier has an open question that a person
    asked.
-2. **`journal`**: of the topics that a journal entry of the last
-   `jobs.bundle.recent_days` days is about, the one with the lowest coverage.
-   A topic with no dossier has a coverage of 0. An entry is about a topic when
-   it holds a name of the topic, the same text rule as the bundle. When two topics have the same coverage, the topic with more entries
-   is first.
+2. **`mentioned`**: of the topics that the messages of people of the last
+   `jobs.bundle.recent_days` days name, the one with the lowest coverage. A
+   topic with no dossier has a coverage of 0. A message names a topic when it
+   holds a name of the topic, the same text rule as the bundle. When two
+   topics have the same coverage, the topic with more messages is first.
 3. **`coverage`**: of all the topics, the one with the lowest coverage below
    `jobs.research.coverage_target` (0.6).
 4. **`refresh`**: the dossier with the oldest `refresh_after` that is before
    the day of the run.
+
+Only what people say counts for the `mentioned` rule. A message is a turn
+that a person of the roster sent, a member or a guest. A reply of Joshua, a
+scheduled task, an event, and the journal do not count, because the words of
+Joshua do not show what a person cares about.
+
+The name of a person is never a name of a topic, so a message that only names
+a person counts for no topic. The run logs the number of messages and topics,
+and never the text.
 
 A **person section** is a wiki section, the first part of the path, that
 `jobs.research.person_sections` names. The default list is `coach` and

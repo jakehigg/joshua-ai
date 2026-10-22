@@ -233,7 +233,7 @@ jobs:
     # exclude_slugs:
     #   - "garden-weather-log-*"
     max_chars: 24000       # the bundle text stops here; the topic page is never cut
-    recent_days: 14        # how far back a job looks for what the journal names now
+    recent_days: 14        # how far back the researcher looks for what people name now
   topics:
     # A topic is one leaf page of the wiki. These globs, relative to the wiki
     # root, name the pages that are not topics.

@@ -22,6 +22,7 @@ from research_fakes import (
     SNAKE,
     WIKI,
     FakeInternet,
+    FakeMessages,
     FakeStore,
     FakeWorkers,
     build_research_wiki,
@@ -74,6 +75,7 @@ class Harness:
         self.settings = config_module.parse(ROSTER + RESEARCH_ON, env={}, source="<test>")
         self.workers = FakeWorkers(raise_answer=answer)
         self.internet = FakeInternet()
+        self.messages = FakeMessages()
 
     def job(self) -> ResearchJob:
         return ResearchJob(
@@ -82,6 +84,7 @@ class Harness:
             data_dir=self.data,
             runner=self.workers,
             internet_runner=self.internet,
+            messages=self.messages,
         )
 
     async def run(self, **args: Any):
@@ -100,9 +103,13 @@ async def test_a_page_about_a_person_is_never_the_topic(tmp_path: Path) -> None:
     for n in range(1, 13):
         pages[f"journal/2026/10/{n:02d}/day-{n}.md"] = f"Alex and Bo talked, day {n}.\n"
     h = Harness(tmp_path / "data", pages, raised())
+    h.messages.rows += [
+        {"direction": "in", "content": f"Alex and Bo talked, day {n}.", "person_id": "alex"}
+        for n in range(1, 13)
+    ]
     report = await h.run(mode="plan")
-    assert (report.data["topic"], report.data["rule"]) == (SNAKE, "journal")
-    assert report.data["reason"].startswith("1 journal entries")
+    assert (report.data["topic"], report.data["rule"]) == (SNAKE, "mentioned")
+    assert report.data["reason"].startswith("1 messages from people")
     with pytest.raises(JobArgsError, match="not a topic page"):
         h.job().check_args({"mode": "plan", "topic": "notes/alex-notes.md"})
 

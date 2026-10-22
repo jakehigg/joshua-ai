@@ -517,8 +517,8 @@ class JobsBundle(_Model):
     capped. `exclude_slugs` holds `fnmatch` globs on the file stem of a
     journal entry, for the entries that no bundle takes. `max_chars` is the
     size of the bundle text; the topic page itself is never cut.
-    `recent_days` is how far back a later job looks for the topics the
-    journal names now.
+    `recent_days` is how far back the researcher looks for the topics that
+    the messages of people name.
     """
 
     sim: float = Field(default=0.78, ge=0.0, le=1.0)

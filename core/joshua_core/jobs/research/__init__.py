@@ -38,7 +38,13 @@ from joshua_core.jobs.research.gate import (
 )
 from joshua_core.jobs.research.job import ResearchJob, worker_model
 from joshua_core.jobs.research.raise_ import raise_questions
-from joshua_core.jobs.research.select import Selection, journal_counts, select_topic
+from joshua_core.jobs.research.select import (
+    MessageStore,
+    Selection,
+    mention_counts,
+    people_messages,
+    select_topic,
+)
 from joshua_core.jobs.research.text import Grounding, bundle_parts, extract_sentences, strip_links
 from joshua_core.jobs.research.write import render_page, write_page
 
@@ -48,6 +54,7 @@ __all__ = [
     "Dossier",
     "EditorAnswer",
     "Gate",
+    "MessageStore",
     "Grounding",
     "Question",
     "ResearchJob",
@@ -57,10 +64,11 @@ __all__ = [
     "check_editor",
     "domain_matches",
     "extract_sentences",
-    "journal_counts",
+    "mention_counts",
     "load_dossier",
     "load_dossiers",
     "names_topic",
+    "people_messages",
     "roster_names",
     "question_slug",
     "raise_questions",

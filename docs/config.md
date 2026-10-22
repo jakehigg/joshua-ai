@@ -579,7 +579,7 @@ jobs:
 | `bundle.max_vector_entries` | `6` | The most journal entries that only `bundle.sim` brings into a bundle, the closest first. An entry that names the topic is not in this count. |
 | `bundle.exclude_slugs` | empty | `fnmatch` globs on the file name of a journal entry, without `.md`. No bundle takes an entry that a glob matches. The names belong to one instance, for example `garden-weather-log-*` for a daily log. |
 | `bundle.max_chars` | `24000` | The size limit of the bundle text. The topic page is never cut. |
-| `bundle.recent_days` | `14` | How many days back a job looks for the topics that the journal names now. |
+| `bundle.recent_days` | `14` | How many days back the researcher looks for the topics that the messages of people name. |
 | `topics.exclude` | `vocabulary.md`, `*/README.md`, `coach/profiles/*` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. A list that you set replaces the default list, so keep `coach/profiles/*` in it. |
 | `curator.enabled` | `false` | `true` adds the `curator` job and the `curator` chat tool for members. Both also need `jobs.enabled`. |
 | `curator.model` | not set | The model of the curator workers. When it is not set, the curator uses `jobs.model`, then `core.reflection_model`. |

@@ -3,11 +3,12 @@ run, and the rules it never breaks. No model, no network, no database."""
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-from jobs_fakes import FakeJobRunStore, fixed_clock
+from jobs_fakes import NOW, FakeJobRunStore, fixed_clock
 from joshua_core.engine import agent
 from joshua_core.jobs import JobArgsError, JobRunner, build_job_runner
 from joshua_core.jobs.research.dossier import load_dossier
@@ -24,6 +25,7 @@ from research_fakes import (
     RAISE_USAGE,
     SNAKE,
     FakeInternet,
+    FakeMessages,
     FakeStore,
     FakeWorkers,
     build_research_wiki,
@@ -52,6 +54,7 @@ class Harness:
         self.wiki = build_research_wiki(data)
         self.settings = research_settings(extra)
         self.store = FakeStore()
+        self.messages = FakeMessages()
         self.workers = FakeWorkers(
             raise_answer=raised(
                 (GROUNDED, GROUNDED_PHRASES),
@@ -69,6 +72,7 @@ class Harness:
             data_dir=self.data,
             runner=self.workers,
             internet_runner=self.internet,
+            messages=self.messages,
         )
 
     async def run(self, *, dry_run: bool = False, **args: Any):
@@ -139,7 +143,7 @@ def test_the_model_chain() -> None:
 # -- plan -------------------------------------------------------------------------
 
 
-async def test_plan_picks_the_journal_topic_and_writes_only_the_dossier_and_readme(
+async def test_plan_picks_the_mentioned_topic_and_writes_only_the_dossier_and_readme(
     h: Harness,
 ) -> None:
     before = snapshot(h.wiki)
@@ -152,7 +156,7 @@ async def test_plan_picks_the_journal_topic_and_writes_only_the_dossier_and_read
         "knowledge/README.md",
         "knowledge/houseplants/snake-plant.md",
     ]
-    assert report.data["rule"] == "journal"
+    assert report.data["rule"] == "mentioned"
     assert report.data["topic"] == SNAKE
     assert LEAF in report.data["bundle"]["paths"]
     assert h.internet.texts == []
@@ -223,13 +227,59 @@ async def test_plan_with_no_answer_from_raise_says_so(h: Harness) -> None:
 
 async def test_no_topic_gives_an_empty_report(tmp_path: Path) -> None:
     h = Harness(tmp_path / "data", "    coverage_target: 0.0\n")
-    for rel in list(h.wiki.rglob("*.md")):
-        if rel.relative_to(h.wiki).parts[0] == "journal":
-            rel.unlink()
+    h.messages.rows = []
     report = await h.run(mode="plan")
     assert report.data["topic"] is None
     assert report.written == []
     assert report.summary.startswith("No topic to research.")
+
+
+async def test_the_journal_and_the_words_of_joshua_choose_no_topic(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The fixture journal names the snake plant, and so do these rows. None
+    # of them is a message from a person.
+    h = Harness(tmp_path / "data", "    coverage_target: 0.0\n")
+    text = "The snake plant needs a check."
+    h.messages.rows = [
+        {"direction": "out", "content": text, "person_id": "alex"},
+        {"direction": "task", "content": text, "person_id": "alex"},
+        {"direction": "inject", "content": text, "person_id": "alex"},
+        {"direction": "in", "content": text, "speaker": "Someone else"},
+    ]
+    with caplog.at_level("DEBUG"):
+        report = await h.run(mode="plan")
+    assert report.data["topic"] is None
+    assert "research mentions" in caplog.text
+    assert text not in caplog.text
+
+
+async def test_the_mentions_look_back_recent_days(tmp_path: Path) -> None:
+    h = Harness(tmp_path / "data", "  bundle:\n    recent_days: 3\n")
+    await h.run(mode="plan")
+    assert h.messages.since == [NOW - timedelta(days=3)]
+
+
+async def test_a_failed_messages_query_leaves_the_other_rules(tmp_path: Path) -> None:
+    h = Harness(tmp_path / "data")
+
+    async def broken(since: Any) -> list[dict[str, Any]]:
+        raise RuntimeError("the database is down")
+
+    h.messages.inbound_messages = broken  # type: ignore[method-assign]
+    report = await h.run(mode="plan", dry_run=True)
+    assert report.data["rule"] == "coverage"
+
+
+async def test_a_job_with_no_message_store_never_uses_the_mentioned_rule(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path / "data")
+    job = ResearchJob(store=h.store, settings=h.settings, data_dir=h.data, runner=h.workers)
+    report = await job.run_once(
+        args=job.check_args({"mode": "plan"}), dry_run=True, clock=fixed_clock()
+    )
+    assert report.data["rule"] == "coverage"
 
 
 # -- run --------------------------------------------------------------------------
