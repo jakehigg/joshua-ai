@@ -325,6 +325,18 @@ jobs:
     snooze_days: 7         # the first snooze of an insight when a person gives no
                            # days; each later snooze is twice as long
     snooze_max_days: 90    # the longest snooze
+  digest:
+    # The digest job writes one journal entry for a run of near-duplicate
+    # entries, and the index and the bundles leave the covered entries out.
+    # They stay on the disk. docs/jobs.md explains it.
+    enabled: false         # true: the digest job
+    # model: claude-sonnet-5 # the model of its tool-less digest worker; when it
+    #                        # is not set, jobs.model, then core.reflection_model
+    min_age_days: 30       # only entries older than this many days
+    min_entries: 4         # the fewest entries in a group
+    sim: 0.85              # two entries this close by meaning are in one group
+    max_groups: 5          # the groups that one run digests, largest first
+    max_entries: 40        # the most entries that one digest covers
 
 wiki:
   git: true   # keep /data/wiki as a git repository Joshua commits; false leaves

@@ -24,9 +24,10 @@ Frontmatter ``date``/``tags``/``provenance`` are honored when present. A dot
 entry (``.trash/``, ``.git/``, and so on, at any depth) and a ``*.meta.json``
 metadata file are ignored.
 
-Two kinds of page are not memory, and the listing leaves them out
+Three kinds of page are not memory, and the listing leaves them out
 (:func:`not_memory`): a journal entry whose frontmatter holds ``run_id``, which
-is the report of a job run, and any page whose frontmatter holds
+is the report of a job run, a journal entry whose frontmatter holds
+``digest``, which a digest entry covers, and any page whose frontmatter holds
 ``index: false``, such as a dossier or the README list of a job folder. The
 page stays on the disk. ``left_out`` names the pages the last listing left
 out, so the indexer can report them, and the indexer purges their rows as it
@@ -114,13 +115,15 @@ def not_memory(path: str, text: str) -> bool:
     """True when the page at the data-relative ``path`` is not memory.
 
     A journal entry whose frontmatter holds ``run_id`` is the report of a job
-    run. A page whose frontmatter holds ``index: false`` asks to stay out of
-    the index.
+    run. A journal entry whose frontmatter holds ``digest`` is covered by the
+    digest entry that the key names, and the index keeps the digest instead.
+    A page whose frontmatter holds ``index: false`` asks to stay out of the
+    index.
     """
     meta = _top_level(text)
     if meta.get("index", "").lower() == "false":
         return True
-    return path.startswith(_JOURNAL_PREFIX) and bool(meta.get("run_id"))
+    return path.startswith(_JOURNAL_PREFIX) and bool(meta.get("run_id") or meta.get("digest"))
 
 
 def _first_heading(body: str) -> str:

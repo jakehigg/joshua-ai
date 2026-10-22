@@ -46,6 +46,8 @@ the next bundle:
 
 - an entry that a job run wrote: its frontmatter has `run_id`, or its
   `source` is `curator`, `research`, or `insights`;
+- an entry that a digest covers: its frontmatter has `digest`. The digest
+  entry itself is in a bundle like any other entry;
 - an entry whose file stem a glob in `jobs.bundle.exclude_slugs` matches
   (`fnmatch`, case-sensitive);
 - an entry dated after the day of `now`.
@@ -86,6 +88,8 @@ ANSWERED_QUESTION = "answered"
 JOURNAL_KIND = "journal"
 # The `source` of a journal entry that a job wrote.
 JOB_SOURCES = ("curator", "research", "insights")
+# The frontmatter key of a journal entry that a digest covers.
+COVERED_KEY = "digest"
 VIA_TITLE = "title"
 VIA_ALIAS = "alias"
 VIA_VECTOR = "vector"
@@ -297,7 +301,8 @@ def is_job_entry(meta: dict[str, Any]) -> bool:
 
 
 def _journal_entries(data_root: Path, wiki_root: Path, today: date) -> list[_Entry]:
-    """Every journal page up to `today`, except the pages a job run wrote."""
+    """Every journal page up to `today`, except the pages a job run wrote and
+    the pages that a digest covers."""
     journal = layout.journal_root(data_root)
     entries: list[_Entry] = []
     if not journal.is_dir():
@@ -313,14 +318,15 @@ def _journal_entries(data_root: Path, wiki_root: Path, today: date) -> list[_Ent
                 continue
             text = read_page(path)
             meta, _ = frontmatter.split(text)
-            if is_job_entry(meta):
+            if is_job_entry(meta) or meta.get(COVERED_KEY):
                 continue
             entries.append(_Entry(path.relative_to(wiki_root).as_posix(), day, text))
     return entries
 
 
 def journal_entries(wiki_root: Path, today: date) -> list[JournalEntry]:
-    """Every journal page dated up to `today`, except the pages a job run wrote."""
+    """Every journal page dated up to `today`, except the pages a job run wrote
+    and the pages that a digest covers."""
     wiki_root = Path(wiki_root)
     return _journal_entries(wiki_root.parent, wiki_root, today)
 

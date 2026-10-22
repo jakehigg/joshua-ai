@@ -185,3 +185,48 @@ def test_no_token_exits_2_and_sends_nothing(env) -> None:
     assert result.returncode == 2
     assert "JOSHUA_TOKEN_LAPTOP" in result.stderr
     assert _calls(env) == []
+
+
+@pytest.mark.parametrize(
+    ("args", "body"),
+    [
+        (("digest", "plan"), {"args": {"mode": "plan"}, "dry_run": True}),
+        (("digest", "run"), {"args": {"mode": "run"}, "dry_run": False}),
+        (("digest", "run", "--dry-run"), {"args": {"mode": "run"}, "dry_run": True}),
+        (
+            ("digest", "undo", "journal/2026/03/08/digest-filter-check.md"),
+            {
+                "args": {"mode": "undo", "digest": "journal/2026/03/08/digest-filter-check.md"},
+                "dry_run": False,
+            },
+        ),
+        (
+            ("digest", "undo", "journal/2026/03/08/digest-x.md", "--dry-run"),
+            {"args": {"mode": "undo", "digest": "journal/2026/03/08/digest-x.md"}, "dry_run": True},
+        ),
+    ],
+)
+def test_digest_posts_the_mode(env, args, body) -> None:
+    result = _run(env, *args)
+    assert result.returncode == 0, result.stderr
+    (call,) = _calls(env)
+    assert call["url"] == "http://127.0.0.1:8081/admin/jobs/digest/run"
+    assert json.loads(call["body"]) == body
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("digest",),
+        ("digest", "go"),
+        ("digest", "plan", "--dry-run"),
+        ("digest", "run", "--wat"),
+        ("digest", "undo"),
+        ("digest", "undo", "journal/x.md", "--wat"),
+    ],
+)
+def test_digest_usage_errors_exit_2_and_send_nothing(env, args) -> None:
+    result = _run(env, *args)
+    assert result.returncode == 2
+    assert "scripts/jobs.sh digest plan" in result.stderr
+    assert _calls(env) == []

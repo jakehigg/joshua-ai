@@ -11,6 +11,8 @@ Each worker takes the first model that is set in its chain:
   `jobs.curator.model`, `jobs.model`, `core.reflection_model`.
 - insights `insight`: `jobs.insights.model`, `jobs.model`,
   `core.reflection_model`.
+- digest `digest`: `jobs.digest.model`, `jobs.model`,
+  `core.reflection_model`.
 
 `docs/jobs.md` has the same table.
 """
@@ -59,11 +61,19 @@ def insights_model(settings: JoshuaConfig) -> str | None:
     return jobs.insights.model or jobs.model or settings.core.reflection_model
 
 
+def digest_model(settings: JoshuaConfig) -> str | None:
+    """The model of the digest worker: `jobs.digest.model`, `jobs.model`,
+    `core.reflection_model`."""
+    jobs = settings.jobs
+    return jobs.digest.model or jobs.model or settings.core.reflection_model
+
+
 __all__ = [
     "CURATOR_WORKERS",
     "LOOKUP",
     "RESEARCH_WORKERS",
     "curator_model",
+    "digest_model",
     "insights_model",
     "research_model",
 ]

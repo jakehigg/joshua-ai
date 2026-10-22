@@ -569,6 +569,13 @@ jobs:
     dup_sim: 0.88
     default_valid_days: 60
     after_research: true
+  digest:
+    enabled: false
+    min_age_days: 30
+    min_entries: 4
+    sim: 0.85
+    max_groups: 5
+    max_entries: 40
 ```
 
 | Key | Default | What it does |
@@ -622,6 +629,13 @@ jobs:
 | `insights.after_research` | `true` | A research `run` that publishes a page also runs the insight pass for the same topic, in the same run and the same commit. The `then_insights` argument of a research run replaces this value for that run. |
 | `insights.snooze_days` | `7` | The first snooze of an insight, in days, when the person gives no number. Each later snooze of the same insight is twice as long. |
 | `insights.snooze_max_days` | `90` | The longest snooze of an insight, in days. A snooze with a number of days is from 1 to this value. |
+| `digest.enabled` | `false` | `true` adds the `digest` job. It also needs `jobs.enabled`. |
+| `digest.model` | not set | The model of the `digest` worker, which has no tools. When it is not set, the digest job uses `jobs.model`, then `core.reflection_model`. |
+| `digest.min_age_days` | `30` | Only a journal entry dated before today less this many days is a candidate. |
+| `digest.min_entries` | `4` | The fewest entries in a group. A smaller group gets no digest. At least 2. |
+| `digest.sim` | `0.85` | Two entries with different slug stems are in one group when the cosine of their mean vectors is this value or more. |
+| `digest.max_groups` | `5` | The most groups that one run digests, the largest first. |
+| `digest.max_entries` | `40` | The most entries that one digest covers. A larger group is split into runs in date order. It must not be below `min_entries`. |
 
 A domain entry matches a host when the host is the entry, when the host ends
 with the entry (`.edu`, or `reddit.com` for `www.reddit.com`), or, for an

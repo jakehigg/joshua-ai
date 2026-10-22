@@ -727,6 +727,33 @@ class JobsInsights(_Model):
     snooze_max_days: int = Field(default=90, ge=1)
 
 
+class JobsDigest(_Model):
+    """The digest job: one journal entry for a run of near-duplicate entries.
+
+    `enabled` registers the job. `model` is the model of the tool-less
+    `digest` worker; `None` uses `jobs.model`, then `core.reflection_model`.
+    Only an entry older than `min_age_days` is a candidate. A group needs at
+    least `min_entries` entries. `sim` is the cosine floor for two entries
+    with different slugs to join one group. `max_groups` is how many groups
+    one run digests, and `max_entries` how many entries one digest covers; a
+    larger group is split into runs in date order. See `docs/jobs.md`.
+    """
+
+    enabled: bool = False
+    model: str | None = None
+    min_age_days: int = Field(default=30, ge=1)
+    min_entries: int = Field(default=4, ge=2)
+    sim: float = Field(default=0.85, ge=0.0, le=1.0)
+    max_groups: int = Field(default=5, ge=1, le=50)
+    max_entries: int = Field(default=40, ge=2, le=200)
+
+    @model_validator(mode="after")
+    def _max_not_below_min(self) -> JobsDigest:
+        if self.max_entries < self.min_entries:
+            raise ValueError("jobs.digest.max_entries must not be below min_entries")
+        return self
+
+
 class Jobs(_Model):
     """The jobs that core runs by hand, through the admin routes.
 
@@ -743,6 +770,7 @@ class Jobs(_Model):
     curator: JobsCurator = JobsCurator()
     research: JobsResearch = JobsResearch()
     insights: JobsInsights = JobsInsights()
+    digest: JobsDigest = JobsDigest()
 
 
 class Wiki(_Model):

@@ -33,10 +33,14 @@ too: reading is not what separates a guest from a member. Writing is.
 `.trash/` directories are not indexed, and a `*.meta.json` file is never a
 document of its own.
 
-Two kinds of page are not memory, and the index leaves them out:
+Three kinds of page are not memory, and the index leaves them out:
 
 - A journal entry whose frontmatter holds `run_id`. A job run writes one as
   its report. It records the run, not something that happened.
+- A journal entry whose frontmatter holds `digest`. The digest job wrote one
+  entry for it and for its near-duplicates, and the index keeps that digest
+  entry. A covered entry stays on the disk and leaves the index. See
+  [The digest](jobs.md#the-digest).
 - A page whose frontmatter holds `index: false`. The jobs write this key on
   each dossier and on `README.md` in `wiki/knowledge/`, `wiki/questions/`,
   and `wiki/insights/`. These pages list questions, and the pages they link

@@ -210,6 +210,17 @@ with the images and the packaged chart, are at
   core gives the old `nightly` rows the new name. See
   [docs/operations.md](operations.md#the-usage-page).
 
+- **The digest job folds near-duplicate journal entries into one entry.** Set
+  `jobs.digest.enabled: true` to add it. A run finds the journal entries older
+  than `jobs.digest.min_age_days` that say nearly the same thing: by the slug
+  without its dates, then by meaning. For each group, a worker with no tools
+  writes one digest entry that keeps each distinct fact. Each covered entry
+  gets one frontmatter line, `digest: <digest path>`, and its text does not
+  change otherwise. The index and the memory bundles leave a covered entry
+  out and keep the digest. `scripts/jobs.sh digest plan`, `run`, and `undo`
+  run it, and `undo` brings the entries back. Nothing schedules the job. See
+  [docs/jobs.md](jobs.md#the-digest).
+
 ### Fixed
 
 - **Snooze an insight, and keep a closed insight out of chat.** A member can

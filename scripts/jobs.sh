@@ -5,11 +5,14 @@
 #   scripts/jobs.sh status <job>
 #   scripts/jobs.sh runs <id>
 #   scripts/jobs.sh list <job> [--limit N]
+#   scripts/jobs.sh digest plan | run [--dry-run] | undo <digest path> [--dry-run]
 #
 # `run` starts a run in the background and prints its run id. Without
 # --dry-run the run writes the wiki: a journal entry and one commit. Each
 # --arg is one job argument, and its value is a string. `runs <id>` prints the
 # report of one run. `list <job>` prints the newest runs of that job.
+# `digest plan` is a dry run of the digest job that shows its groups. `digest
+# run` writes the digests, and `digest undo` removes one digest.
 #
 # CORE_URL is the core address (default http://127.0.0.1:8081).
 # JOSHUA_TOKEN_LAPTOP is the laptop token from .env:
@@ -23,7 +26,7 @@ core_url="${CORE_URL:-http://127.0.0.1:8081}"
 core_url="${core_url%/}"
 
 usage() {
-  sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -109,11 +112,36 @@ PY
   return "$rc"
 }
 
+cmd_digest() {
+  [ $# -ge 1 ] || fail_usage "digest needs plan, run, or undo"
+  local mode=$1
+  shift
+  case "$mode" in
+    plan)
+      [ $# -eq 0 ] || fail_usage "digest plan takes no option"
+      cmd_run digest --dry-run --arg mode=plan
+      ;;
+    run)
+      [ $# -eq 0 ] || [ "$*" = "--dry-run" ] || fail_usage "digest run takes only --dry-run"
+      cmd_run digest "$@" --arg mode=run
+      ;;
+    undo)
+      [ $# -ge 1 ] || fail_usage "digest undo needs a digest path"
+      local path=$1
+      shift
+      [ $# -eq 0 ] || [ "$*" = "--dry-run" ] || fail_usage "digest undo takes only --dry-run"
+      cmd_run digest "$@" --arg mode=undo --arg "digest=$path"
+      ;;
+    *) fail_usage "digest needs plan, run, or undo, not: $mode" ;;
+  esac
+}
+
 [ $# -ge 1 ] || usage
 command=$1
 shift
 case "$command" in
   run) cmd_run "$@" ;;
+  digest) cmd_digest "$@" ;;
   status)
     [ $# -eq 1 ] || fail_usage "status needs one job name"
     check_job "$1"

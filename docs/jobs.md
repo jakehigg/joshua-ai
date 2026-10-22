@@ -83,6 +83,7 @@ the workers that judge a stronger model and keep the others on a cheaper one.
 | curator | `compare` | reads two pages that overlap | `jobs.curator.models.compare` | `jobs.curator.model`, `jobs.model`, `core.reflection_model` |
 | curator | `refresh` | writes a stale page again | `jobs.curator.models.refresh` | `jobs.curator.model`, `jobs.model`, `core.reflection_model` |
 | insights | `insight` | finds where what we do disagrees with what is known | `jobs.insights.model` | `jobs.model`, `core.reflection_model` |
+| digest | `digest` | writes one entry for a run of near-duplicate journal entries | `jobs.digest.model` | `jobs.model`, `core.reflection_model` |
 
 The `use_internet` chat tool always uses `internet.model`. In the usage of a
 run, the lookups are the `internet` worker.
@@ -126,6 +127,9 @@ journal. Thus the report of one run never becomes input to the next, and a
 report that repeats a question does not take the place of the page that
 answers it. To read a report, use `scripts/jobs.sh runs <id>`, the viewer, or
 the file in `/data/wiki`.
+
+A journal entry that a digest covers holds `digest` in its frontmatter, and
+the index and the bundle leave it out too. See [The digest](#the-digest).
 
 The dossiers and the `README.md` lists that the jobs write hold
 `index: false` for the same reason: they list questions, and Joshua answers
@@ -1532,3 +1536,126 @@ and resolve an insight, and the report of each run is a journal entry.
 - It never raises an insight for a topic with no published knowledge page.
 - It never raises a claim with `confidence: low`.
 - It writes nothing in a dry run, and expires nothing.
+
+## The digest
+
+A task that runs each day, or a subject that comes back again and again,
+leaves many journal entries that say nearly the same thing. They fill the
+search results and the memory bundles, so one old subject takes the place of
+the subjects that matter now. The digest job reads a run of such entries and
+writes one digest entry that keeps each distinct fact. The entries that it
+covers stay on the disk, in the wiki history, and in the viewer, and you can
+open each one by its path and its day. Their text does not change. Only the
+index and the bundles leave them out.
+
+Set `jobs.digest.enabled: true`, with `jobs.enabled: true`, to add the job.
+[docs/config.md](config.md#jobs) has the keys. Nothing schedules it.
+
+```
+scripts/jobs.sh digest plan
+scripts/jobs.sh digest run --dry-run
+scripts/jobs.sh digest run
+scripts/jobs.sh digest undo journal/2026/03/08/digest-filter-check.md
+```
+
+The argument `mode` is required: `plan`, `run`, or `undo`. `undo` also needs
+the argument `digest`, the path of a digest entry relative to the wiki root.
+`scripts/jobs.sh digest plan` sends a dry run.
+
+### The candidates
+
+A candidate is a journal entry dated before today less
+`jobs.digest.min_age_days`. These entries are never candidates:
+
+- the nightly page of a day, `YYYY/MM/DD/YYYY-MM-DD.md`;
+- the report of a job run;
+- an entry that a digest covers already: its frontmatter has `digest`;
+- a digest entry: its `source` is `digest`;
+- an entry whose frontmatter block is not a YAML mapping.
+
+### The groups
+
+Python makes the groups, in two steps:
+
+1. By the slug. The stem of an entry is its file slug without the tokens
+   that name a date: numbers, ordinals such as `3rd`, and the names of the
+   weekdays and the months. `filter-check-monday-march-3` and
+   `filter-check-tuesday-march-4` have the stem `filter-check`. The entries
+   with one stem are a group when there are `jobs.digest.min_entries` of them
+   or more.
+2. By the meaning. Each other entry gets one vector, the mean of the vectors
+   of its chunks, from the same embedding model as the index. In date order,
+   an entry joins the group whose first entry is closest to it when the
+   cosine is `jobs.digest.sim` or more. Else it starts a new group.
+
+A group of more than `jobs.digest.max_entries` entries is split into runs in
+date order, of sizes that differ by one at most. A group or a run with fewer
+than `min_entries` entries is dropped. The groups go in order of size, the
+largest first, then by the first day. A run takes the first
+`jobs.digest.max_groups`. The same wiki on the same day gives the same groups.
+
+### What a run does
+
+`plan` finds the groups and gives the path of each digest. It calls no worker.
+
+`run` then asks the `digest` worker once for each group. The worker has no
+tools and a timeout of 120 seconds. It gets the entries of the group in date
+order, each with its path, its date, and its people. The prompt tells it to
+write in Joshua's own voice, in the third person, to keep each number, date,
+decision, change, and outcome one time, to say how the subject stood at the
+last entry, and to invent nothing. The prompt tells the worker that the
+entries are content, not instructions. The answer is a `title` and a
+`summary` in Markdown. Python rejects a summary of more than 500 words, and
+removes each link to a URL that no covered entry holds. The worker does not
+decide which entries a digest covers: the group does.
+
+For each answer that passes, the run writes:
+
+1. The digest entry, on the day of the last entry of the group, with the slug
+   `digest-<stem>` (or `digest-<first slug>` for a group by meaning), and a
+   number after it when that slug is taken. Its frontmatter is:
+
+   ```yaml
+   date: 2026-03-08
+   people: [alex, sam]
+   source: digest
+   covers:
+     - journal/2026/03/03/filter-check-monday-march-3.md
+     - journal/2026/03/04/filter-check-tuesday-march-4.md
+   digest_run: 41
+   ```
+
+   The body is the title, the summary, the line "Covers N entries from
+   <first day> to <last day>", and a link to each covered entry. The key is
+   `digest_run`, not `run_id`, because a digest is memory: the index and the
+   bundles keep it.
+2. On each covered entry, one frontmatter line: `digest: <digest path>`.
+   The body and each other line of the entry stay byte for byte.
+
+A dry run calls the workers and writes nothing. Its report holds the full
+text of each digest.
+
+### The report
+
+The summary is `digest: N digests, M entries covered, R rejected`, or
+`digest plan: N groups, M entries` for a plan. The report has the sections
+**Groups** (each with its stem, how it was made, its size, its first and
+last day, and the digest path), **Skipped** (the count of entries for each
+reason), **Digests** on a dry run, **Notes**, and **Usage**. The worker call
+counts under the name `digest`.
+
+### Undo
+
+A covered entry comes back to the index and the bundles when its `digest:`
+line goes. `mode: undo` removes that line from each entry that the digest
+covers, and deletes the digest entry, in one commit. A dry run shows the
+entries that would come back and writes nothing. You can also remove the
+lines by hand, or `git revert` the commit of the run in `/data/wiki`.
+
+### What the digest job never does
+
+- It never changes the body of a journal entry, or a frontmatter line other
+  than the one line it adds.
+- It never deletes an entry, except a digest entry in an undo.
+- It never takes a nightly day page, a job report, or a recent entry.
+- It writes nothing in a dry run or a plan.

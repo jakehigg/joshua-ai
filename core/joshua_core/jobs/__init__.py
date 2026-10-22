@@ -18,6 +18,7 @@ from joshua_shared.config import JoshuaConfig
 from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle
 from joshua_core.jobs.bundle_job import BundleJob
 from joshua_core.jobs.curator import CuratorJob, CuratorStore, FindingStore
+from joshua_core.jobs.digest import DigestJob
 from joshua_core.jobs.insights import InsightsJob
 from joshua_core.jobs.research import ResearchJob
 from joshua_core.jobs.research.select import MessageStore
@@ -41,6 +42,7 @@ __all__ = [
     "BundleStore",
     "Clock",
     "CuratorJob",
+    "DigestJob",
     "InsightsJob",
     "Job",
     "JobArgsError",
@@ -79,6 +81,8 @@ def build_job_runner(
     answer `kb_mean_vectors`. The `research` job is added when
     `jobs.research.enabled` is true. Its `mentioned` rule reads the
     messages of people from `messages`; without it, the rule gives no topic.
+    The `insights` job and the `digest` job are added when their `enabled`
+    key is true.
     """
     jobs: list[Job] = [BundleJob(store=store, settings=settings, data_dir=data_dir)]
     if settings.jobs.curator.enabled and findings is not None:
@@ -96,6 +100,8 @@ def build_job_runner(
         )
     if settings.jobs.insights.enabled:
         jobs.append(InsightsJob(store=store, settings=settings, data_dir=data_dir))
+    if settings.jobs.digest.enabled:
+        jobs.append(DigestJob(settings=settings, data_dir=data_dir))
     return JobRunner(
         repo=repo, settings=settings, data_dir=data_dir, jobs=jobs, lock=lock, clock=clock
     )
