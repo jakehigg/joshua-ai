@@ -223,7 +223,8 @@ with the images and the packaged chart, are at
   default, ranked by severity and then confidence, and `status: snoozed`
   lists the snoozed ones. The insight worker reads the dismissed insights of
   the topic with their reasons, and does not raise the same concern again.
-  See [docs/jobs.md](jobs.md#status-snooze-and-due).
+  The nightly reflection no longer reads the instruction of a scheduled task
+  or an event as words of a person. See [docs/jobs.md](jobs.md#status-snooze-and-due).
 
 - **Only what people say shows what they care about.** The researcher no
   longer selects a topic by the journal. Its second rule is now `mentioned`:
