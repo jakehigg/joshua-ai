@@ -9,7 +9,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from joshua_core.memory.nightly import NightlyReflector
+from joshua_core.memory.nightly import (
+    JOURNAL_SYSTEM,
+    PROFILE_SYSTEM,
+    SHARED_SYSTEM,
+    NightlyReflector,
+)
 from joshua_core.store.models import Person
 from joshua_shared import layout, wikigit
 from nightly_fakes import (
@@ -406,3 +411,33 @@ async def test_journal_status_keeps_the_last_run(tmp_path: Path) -> None:
     last = reflector.journal_status()["last_run"]
     assert last["date"] == DAY.isoformat()
     assert last["posts_written"] == 1
+
+
+# -- the reflection takes concerns from people, and records changes ----------
+
+
+def test_the_journal_prompt_leaves_out_a_concern_only_joshua_raised() -> None:
+    assert "only you raised, and that no person answered or took up" in JOURNAL_SYSTEM
+    assert "That is not news." in JOURNAL_SYSTEM
+
+
+def test_the_journal_prompt_records_what_changed() -> None:
+    assert "A standing item that an earlier page already holds." in JOURNAL_SYSTEM
+    assert "Write what changed today." in JOURNAL_SYSTEM
+
+
+def test_the_journal_prompt_keeps_a_deferred_suggestion_as_one_line() -> None:
+    assert "defers or declines a suggestion" in JOURNAL_SYSTEM
+    assert "at most one short line with the decision" in JOURNAL_SYSTEM
+    assert "It does not restate the" in JOURNAL_SYSTEM
+
+
+@pytest.mark.parametrize("prompt", [PROFILE_SYSTEM, SHARED_SYSTEM], ids=["profile", "shared"])
+def test_a_profile_takes_preferences_only_from_people(prompt: str) -> None:
+    flat = " ".join(prompt.split())
+    assert "comes from what that person said, never from what you said" in flat
+    assert (
+        "only you raised, and that no person answered or took up, does not go in a profile" in flat
+    )
+    assert "not concerned about something is a durable preference" in flat
+    assert "with the reason" in flat
