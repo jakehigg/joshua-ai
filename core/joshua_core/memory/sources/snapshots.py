@@ -109,31 +109,60 @@ def _scalar(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def render_item(item: Any) -> str:
+def render_item(item: Any, fields: Sequence[str] | None = None) -> str:
     """The text of one item: ``key: value`` lines for an object, the string
-    itself for a string, else compact JSON."""
+    itself for a string, else compact JSON. With ``fields``, an object keeps
+    only those keys, in that order."""
     if isinstance(item, str):
         return item.strip()
     if isinstance(item, dict):
-        return "\n".join(
-            f"{key}: {_scalar(value)}" for key, value in item.items() if not _is_empty(value)
-        )
+        pairs = [(key, item.get(key)) for key in fields] if fields else list(item.items())
+        return "\n".join(f"{key}: {_scalar(value)}" for key, value in pairs if not _is_empty(value))
     return _scalar(item)
 
 
-def split_items(text: str, items_path: str | None) -> list[str]:
-    """The item texts of one snapshot output. An empty item is left out."""
+def _json_values(text: str) -> list[Any] | None:
+    """The JSON values of ``text``: one document, or a run of documents one
+    after the other, as an MCP server gives a list in one text part per
+    element. A last value that is cut off is left out. None when the text does
+    not start with a JSON value."""
     try:
-        parsed: Any = json.loads(text)
+        return [json.loads(text)]
     except ValueError:
+        pass
+    decoder = json.JSONDecoder()
+    values: list[Any] = []
+    index = 0
+    end = len(text)
+    while True:
+        while index < end and text[index].isspace():
+            index += 1
+        if index >= end:
+            break
+        try:
+            value, index = decoder.raw_decode(text, index)
+        except ValueError:
+            break
+        values.append(value)
+    return values or None
+
+
+def split_items(
+    text: str, items_path: str | None, fields: Sequence[str] | None = None
+) -> list[str]:
+    """The item texts of one snapshot output. An empty item is left out."""
+    values = _json_values(text)
+    if values is None:
         stripped = text.strip()
         return [stripped] if stripped else []
-    if items_path:
-        found = _dig(parsed, items_path)
-        if found is not None:
-            parsed = found
-    raw = parsed if isinstance(parsed, list) else [parsed]
-    rendered = [render_item(item) for item in raw]
+    raw: list[Any] = []
+    for parsed in values:
+        if items_path:
+            found = _dig(parsed, items_path)
+            if found is not None:
+                parsed = found
+        raw.extend(parsed if isinstance(parsed, list) else [parsed])
+    rendered = [render_item(item, fields) for item in raw]
     return [item for item in rendered if item]
 
 
@@ -181,7 +210,7 @@ def documents_for(snap: Snapshot, row: dict[str, Any], timezone: str) -> list[Do
     local = fetched_at.astimezone(ZoneInfo(timezone))
     header = f"{snap.name}:"
     docs: dict[str, Document] = {}
-    for item_text in split_items(row["text"] or "", snap.items):
+    for item_text in split_items(row["text"] or "", snap.items, snap.fields):
         uri = item_uri(snap.name, item_text)
         docs[uri] = Document(
             source=SOURCE_NAME,

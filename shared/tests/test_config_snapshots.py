@@ -193,3 +193,25 @@ def test_the_bundle_snapshot_knobs() -> None:
     assert (bundle.snapshot_sim, bundle.snapshot_items, bundle.snapshot_chars) == (0.55, 12, 3000)
     with pytest.raises(config.ConfigError):
         config.parse(BASE + "jobs:\n  bundle:\n    snapshot_sim: 1.5\n", {}, source="t.yaml")
+
+
+def test_fields_is_a_list_of_key_names() -> None:
+    from joshua_shared.config import Snapshot
+
+    snap = Snapshot(
+        name="low-items", server="tasks", tool="list", every="5m", fields=[" name ", "status"]
+    )
+    assert snap.fields == ["name", "status"]
+    assert (
+        Snapshot(name="low-items", server="tasks", tool="list", every="5m", fields="").fields
+        is None
+    )
+
+
+def test_fields_rejects_a_value_that_is_not_a_list_of_names() -> None:
+    import pytest
+    from joshua_shared.config import Snapshot
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Snapshot(name="low-items", server="tasks", tool="list", every="5m", fields="name")

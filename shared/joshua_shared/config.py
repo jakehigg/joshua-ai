@@ -396,6 +396,8 @@ class Snapshot(_Model):
     scope: str = "shared"
     # A dotted path into a JSON result that holds the item list.
     items: str | None = None
+    # The keys of an object item to keep, in this order. None keeps every key.
+    fields: list[str] | None = None
     max_chars: int = Field(default=20000, gt=0)
     max_age: str | None = None
     # A job bundle takes a snapshot of one person only when this is true. A
@@ -426,6 +428,17 @@ class Snapshot(_Model):
     @classmethod
     def _empty_is_none(cls, value: Any) -> Any:
         return None if value in (None, "") else value
+
+    @field_validator("fields", mode="before")
+    @classmethod
+    def _check_fields(cls, value: Any) -> Any:
+        if value in (None, "", []):
+            return None
+        if not isinstance(value, list) or not all(
+            isinstance(key, str) and key.strip() for key in value
+        ):
+            raise ValueError("fields must be a list of key names")
+        return [key.strip() for key in value]
 
     @field_validator("every")
     @classmethod

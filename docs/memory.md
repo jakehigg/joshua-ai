@@ -538,15 +538,20 @@ person, so validation refuses `shared` on such a server.
 
 ### Items
 
-Core reads the output as JSON. With `items`, the list is at that dotted path.
-A JSON list is the list of items. Anything else is one item, the whole text.
-An object item becomes short `key: value` lines, with no empty value. Each
+Core reads the output as JSON. An MCP server can give a list as one text part
+for each element, and the gateway joins the parts with a new line, so core
+also reads a run of JSON values one after the other. With `items`, the list is
+at that dotted path. A JSON list is the list of items. Anything else is one
+item, the whole text. An object item becomes short `key: value` lines, with no
+empty value. With `fields`, an object item keeps only those keys, in that
+order. Each
 item is one document, and its first line is `<name>:`. The document holds no
 time, so an item that is the same in the next output keeps its rows and is not
 embedded again. An item that is gone loses its rows.
 
 The text of one output is cut at `max_chars` (default 20000), and core logs
-the cut. A cut JSON output does not parse, so it becomes one item.
+the cut. When the cut falls inside the last JSON value, that value is left
+out and the values before it stay items.
 
 ### Staleness
 

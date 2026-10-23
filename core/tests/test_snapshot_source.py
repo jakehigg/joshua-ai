@@ -79,6 +79,26 @@ def test_plain_text_is_one_item() -> None:
     assert split_items("Backup check\nat noon", None) == ["Backup check\nat noon"]
 
 
+def test_one_text_part_per_element_is_the_item_list() -> None:
+    # An MCP server can give a list as one text part per element, and the
+    # gateway joins the parts with a new line.
+    parts = [
+        json.dumps({"name": "Filter", "status": "low"}, indent=2),
+        json.dumps({"name": "Batteries"}),
+    ]
+    assert split_items("\n".join(parts), None) == ["name: Filter\nstatus: low", "name: Batteries"]
+
+
+def test_a_cut_last_element_is_left_out() -> None:
+    text = json.dumps({"name": "Filter"}) + "\n" + json.dumps({"name": "Batteries"})[:12]
+    assert split_items(text, None) == ["name: Filter"]
+
+
+def test_fields_keep_only_those_keys_in_that_order() -> None:
+    text = json.dumps([{"id": 7, "status": "low", "name": "Filter", "noise": "x"}])
+    assert split_items(text, None, ["name", "status", "missing"]) == ["name: Filter\nstatus: low"]
+
+
 def test_an_empty_list_has_no_item() -> None:
     assert split_items("[]", None) == []
 

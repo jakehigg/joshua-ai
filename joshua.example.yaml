@@ -156,6 +156,9 @@ memory:
   #     every: 15m                 # 1m to 24h
   #     scope: alex                # shared, or a person id the server allows
   #     items: result.tasks        # optional dotted path to the list in JSON
+  #     fields:                    # optional: the keys of each item to keep
+  #       - title
+  #       - due
   #     max_chars: 20000           # the output is cut here
   #     max_age: 45m               # default 3 x every, at least 15m
   #     jobs: false                # true: a job bundle may take a snapshot of one
