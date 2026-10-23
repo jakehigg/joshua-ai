@@ -42,6 +42,7 @@ from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
 from joshua_core.memory.skills import SKILL_KIND
+from joshua_core.memory.sources.snapshots import item_body, shown, snapshot_labels
 from joshua_core.memory.store import SNAPSHOT_KIND, MemoryStore
 from joshua_core.store.repo import Repo
 
@@ -123,18 +124,18 @@ def _hint_note(chunks: Sequence[KbChunk]) -> str:
     return HINT_HEADER.format(files=files)
 
 
-def _snapshot_line(chunk: KbChunk) -> str:
+def _snapshot_line(chunk: KbChunk, labels: dict[str, str]) -> str:
     """``<name> as of <time>: <item>`` on one line, the item cut to
-    ``SNAPSHOT_LINE_CHARS``."""
-    head, _, body = (chunk.text or "").partition("\n")
-    if " as of " not in head:
-        head, body = chunk.title or chunk.path, chunk.text or ""
-    item = " ".join(body.split())[:SNAPSHOT_LINE_CHARS]
+    ``SNAPSHOT_LINE_CHARS``. The time is the latest good fetch, from
+    ``labels``."""
+    head = labels.get(chunk.title, chunk.title)
+    item = " ".join(item_body(chunk.text or "").split())[:SNAPSHOT_LINE_CHARS]
     return f"{head}: {item}" if item else head
 
 
-def _snapshot_note(chunks: Sequence[KbChunk]) -> str:
-    return SNAPSHOT_HEADER + "\n" + "\n".join(_snapshot_line(c) for c in chunks)
+def _snapshot_note(chunks: Sequence[KbChunk], labels: dict[str, str]) -> str:
+    lines = "\n".join(_snapshot_line(c, labels) for c in chunks)
+    return SNAPSHOT_HEADER + "\n" + lines
 
 
 def split_snapshots(ranked: Sequence[KbChunk], top_k: int) -> tuple[list[KbChunk], list[KbChunk]]:
@@ -177,10 +178,13 @@ async def kb_context(
     recency_half_life_days: float,
     per_doc_cap: int,
     keep: Callable[[KbChunk], bool] | None = None,
+    timezone: str = "UTC",
 ) -> str | None:
     """Build the per-turn injection note for one ``TurnCtx``, or None.
 
-    ``keep`` drops a candidate chunk before the top-k trim.
+    ``keep`` drops a candidate chunk before the top-k trim. A snapshot line
+    shows the time of the latest good fetch in ``timezone``, read once for the
+    turn; a snapshot chunk with no good fetch is dropped.
 
     A message shorter than :data:`MIN_QUERY_CHARS`, an unavailable embedding
     model, or a failed retrieval returns None with no audit row (the turn
@@ -220,6 +224,8 @@ async def kb_context(
         logger.warning({"message": "kb inject skipped: retrieval failed", "error": str(exc)})
         return None
 
+    labels = await snapshot_labels(store, ranked, timezone)
+    ranked = shown(ranked, labels)
     # A snapshot chunk takes a slot of `top_k` and is always a short line. The
     # other chunks get the same decision as on a turn with no snapshot.
     snaps, others = split_snapshots(ranked, top_k)
@@ -259,7 +265,7 @@ async def kb_context(
     elif plan.decision == "hint":
         notes.append(_hint_note(plan.injected))
     if snaps:
-        notes.append(_snapshot_note(snaps))
+        notes.append(_snapshot_note(snaps, labels))
     return "\n\n".join(notes) or None
 
 
@@ -299,6 +305,7 @@ def register(
             recency_half_life_days=memory.recency_half_life_days,
             per_doc_cap=memory.per_doc_cap,
             keep=ChatFilter(data_dir, local_day(now(), settings)),
+            timezone=getattr(settings, "timezone", "UTC"),
         )
 
     manager.add_context_provider(provider)

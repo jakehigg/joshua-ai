@@ -258,6 +258,20 @@ class MemoryStore:
             rows = await cur.fetchall()
         return {r["path"]: [float(x) for x in json.loads(r["mean"])] for r in rows}
 
+    async def snapshot_times(self, names: Sequence[str]) -> dict[str, datetime]:
+        """``{name: fetched_at}`` of the latest good fetch of each snapshot in
+        ``names``. A snapshot with no good fetch is not in the answer."""
+        if not names:
+            return {}
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT name, fetched_at FROM snapshot_result "
+                "WHERE name = ANY(%s) AND fetched_at IS NOT NULL",
+                (list(dict.fromkeys(names)),),
+            )
+            rows = await cur.fetchall()
+        return {r["name"]: r["fetched_at"] for r in rows}
+
     async def kb_stats(self) -> list[dict[str, Any]]:
         """Per-source document/chunk counts for ``/admin/kb/status``."""
         async with self._pool.connection() as conn:

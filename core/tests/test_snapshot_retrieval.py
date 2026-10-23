@@ -12,6 +12,7 @@ vector.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,6 +30,8 @@ from joshua_shared.config import Memory, MemorySearch, Snapshot
 from joshua_shared.contracts import SEARCH_KINDS
 from starlette.testclient import TestClient
 
+TZ = "America/New_York"
+FETCHED = datetime(2026, 3, 14, 15, 0, tzinfo=UTC)
 HEAD = "open-tasks as of 2026-03-14 11:00 EDT"
 
 
@@ -38,7 +41,7 @@ def _snapshot(sim: float, item: str = "title: Change the filter", n: int = 1) ->
         kind="snapshot",
         path=f"snapshot/open-tasks/{n:012d}",
         title="open-tasks",
-        text=f"{HEAD}\n{item}",
+        text=f"open-tasks:\n{item}",
         similarity=sim,
     )
 
@@ -52,8 +55,14 @@ def _wiki(
 
 
 class Store:
-    def __init__(self, rows: list[KbChunk]) -> None:
+    def __init__(self, rows: list[KbChunk], times: dict | None = None) -> None:
         self.rows = rows
+        self.times = {"open-tasks": FETCHED} if times is None else times
+        self.time_calls: list[list[str]] = []
+
+    async def snapshot_times(self, names):
+        self.time_calls.append(list(names))
+        return {n: t for n, t in self.times.items() if n in names}
 
     async def kb_search(
         self, person_id, embedding, *, k, min_sim, sources=None, kinds=None, exclude_kinds=None
@@ -83,12 +92,15 @@ def _ctx() -> SimpleNamespace:
     )
 
 
-async def _inject(rows: list[KbChunk], top_k: int = 2) -> tuple[str | None, Repo]:
+async def _inject(
+    rows: list[KbChunk], top_k: int = 2, store: Store | None = None
+) -> tuple[str | None, Repo]:
     repo = Repo()
     note = await kb_context(
         _ctx(),
-        store=Store(rows),
+        store=store or Store(rows),
         repo=repo,
+        timezone=TZ,
         embed_model="m",
         full_sim=0.72,
         hint_sim=0.60,
@@ -156,6 +168,29 @@ async def test_a_snapshot_below_the_top_k_is_left_out() -> None:
     assert SNAPSHOT_HEADER not in note
 
 
+async def test_a_snapshot_with_no_good_fetch_is_dropped() -> None:
+    rows = [_snapshot(0.95), _wiki(0.9)]
+    note, _ = await _inject(rows, store=Store(rows, times={}))
+    assert note is not None
+    assert SNAPSHOT_HEADER not in note
+    assert "Filter size" in note
+
+
+async def test_the_times_are_read_once_for_the_turn() -> None:
+    rows = [_snapshot(0.95, n=1), _snapshot(0.94, "B", n=2)]
+    store = Store(rows)
+    await _inject(rows, store=store)
+    assert store.time_calls == [["open-tasks"]]
+
+
+async def test_an_unchanged_item_shows_the_latest_fetch_time() -> None:
+    rows = [_snapshot(0.95)]
+    later = {"open-tasks": FETCHED + timedelta(days=7)}
+    note, _ = await _inject(rows, store=Store(rows, times=later))
+    line = "open-tasks as of 2026-03-21 11:00 EDT: title: Change the filter"
+    assert note == f"{SNAPSHOT_HEADER}\n{line}"
+
+
 def test_split_snapshots() -> None:
     ranked = [_snapshot(0.9), _wiki(0.8), _snapshot(0.7, n=2)]
     snaps, others = injection.split_snapshots(ranked, 2)
@@ -172,7 +207,7 @@ def _deps() -> ToolDeps:
         repo=None,
         conversation=conv,
         channel=Channel(id="telegram:1", channel_type="telegram"),
-        tz="UTC",
+        tz=TZ,
         person_id="alex",
     )
 
@@ -180,10 +215,12 @@ def _deps() -> ToolDeps:
 SNAPS = [Snapshot(name="open-tasks", server="tasks", tool="list_items", every="5m")]
 
 
-async def _search(rows: list[KbChunk], **kw: Any) -> list[dict[str, Any]]:
+async def _search(
+    rows: list[KbChunk], store: Store | None = None, **kw: Any
+) -> list[dict[str, Any]]:
     return await do_search_memory(
         _deps(),
-        store=Store(rows),
+        store=store or Store(rows),
         embed_model="m",
         min_sim=0.5,
         query="filter",
@@ -197,6 +234,12 @@ async def test_a_snapshot_result_points_at_the_live_tool() -> None:
     assert "path" not in result
     assert result["snapshot"] == f"snapshot {HEAD}; for live data call tasks list_items"
     assert result["title"] == "open-tasks"
+
+
+async def test_search_drops_a_snapshot_with_no_good_fetch() -> None:
+    rows = [_snapshot(0.9), _wiki(0.8)]
+    results = await _search(rows, store=Store(rows, times={}))
+    assert [r.get("path") for r in results] == ["wiki/house/filter.md"]
 
 
 async def test_a_result_is_a_snippet_by_default() -> None:

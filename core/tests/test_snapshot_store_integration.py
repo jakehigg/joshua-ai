@@ -77,3 +77,14 @@ async def test_a_person_snapshot_row_is_found_only_for_that_person(db) -> None:
     assert await paths("alex") == {"snapshot/mine/1", "snapshot/shared/1"}
     assert await paths("mia") == {"snapshot/shared/1"}
     assert await paths(None) == {"snapshot/shared/1"}
+
+
+async def test_snapshot_times_gives_the_latest_good_fetch(db, repo) -> None:
+    store = MemoryStore(db.pool)
+    await repo.save_snapshot_success("open-tasks", None, AT, "A", "s1")
+    await repo.save_snapshot_success("open-tasks", None, AT + timedelta(days=7), "A", "s1")
+    await repo.save_snapshot_failure("open-tasks", None, "down")
+    await repo.save_snapshot_failure("never-good", None, "down")
+    times = await store.snapshot_times(["open-tasks", "never-good", "absent"])
+    assert times == {"open-tasks": AT + timedelta(days=7)}
+    assert await store.snapshot_times([]) == {}

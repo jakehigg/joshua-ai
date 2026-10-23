@@ -32,6 +32,7 @@ from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
 from joshua_core.memory.skills import SKILL_KIND
+from joshua_core.memory.sources.snapshots import shown, snapshot_labels
 from joshua_core.memory.store import SNAPSHOT_KIND, MemoryStore
 
 logger = get_logger("tools.recall")
@@ -46,22 +47,29 @@ def _reply(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
-def snapshot_pointer(chunk: KbChunk, snapshots: Mapping[str, Snapshot]) -> str:
-    """``snapshot <name> as of <time>; for live data call <server> <tool>``."""
-    head = (chunk.text or "").partition("\n")[0]
-    if " as of " not in head:
-        head = chunk.title
+def snapshot_pointer(
+    chunk: KbChunk, snapshots: Mapping[str, Snapshot], labels: Mapping[str, str]
+) -> str:
+    """``snapshot <name> as of <time>; for live data call <server> <tool>``.
+    The time is the latest good fetch, from ``labels``."""
+    head = labels.get(chunk.title, chunk.title)
     snap = snapshots.get(chunk.title)
     if snap is None:
         return f"snapshot {head}"
     return f"snapshot {head}; for live data call {snap.server} {snap.tool}"
 
 
-def _result(chunk: KbChunk, *, full: bool, snapshots: Mapping[str, Snapshot]) -> dict[str, Any]:
+def _result(
+    chunk: KbChunk,
+    *,
+    full: bool,
+    snapshots: Mapping[str, Snapshot],
+    labels: Mapping[str, str],
+) -> dict[str, Any]:
     text = chunk.text or ""
     out: dict[str, Any] = {"title": chunk.title, "heading": chunk.heading}
     if chunk.kind == SNAPSHOT_KIND:
-        out["snapshot"] = snapshot_pointer(chunk, snapshots)
+        out["snapshot"] = snapshot_pointer(chunk, snapshots, labels)
     else:
         out["path"] = chunk.path
     if not full and len(text) > SNIPPET_CHARS:
@@ -93,8 +101,10 @@ async def do_search_memory(
     ``text`` is a snippet of at most ``SNIPPET_CHARS`` characters, with
     ``cut: true`` when it is shorter than the chunk; ``full`` returns the whole
     chunk. A snapshot result carries ``snapshot`` (the live tool to call) in
-    place of ``path``. ``keep`` drops a candidate chunk before the trim to
-    ``limit``. An empty query or an unavailable embedding model returns ``[]``.
+    place of ``path``, with the time of the latest good fetch in ``deps.tz``;
+    a snapshot chunk with no good fetch is dropped. ``keep`` drops a
+    candidate chunk before the trim to ``limit``. An empty query or an
+    unavailable embedding model returns ``[]``.
     """
     query = (query or "").strip()
     if not query:
@@ -116,8 +126,11 @@ async def do_search_memory(
         per_doc_cap=per_doc_cap,
         keep=keep,
     )
+    labels = await snapshot_labels(store, chunks, deps.tz)
     by_name = {snap.name: snap for snap in snapshots}
-    return [_result(c, full=bool(full), snapshots=by_name) for c in chunks]
+    return [
+        _result(c, full=bool(full), snapshots=by_name, labels=labels) for c in shown(chunks, labels)
+    ]
 
 
 _SEARCH_SCHEMA = {

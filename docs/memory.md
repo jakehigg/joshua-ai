@@ -541,9 +541,9 @@ person, so validation refuses `shared` on such a server.
 Core reads the output as JSON. With `items`, the list is at that dotted path.
 A JSON list is the list of items. Anything else is one item, the whole text.
 An object item becomes short `key: value` lines, with no empty value. Each
-item is one document, and its first line is `<name> as of <time>` in the
-instance timezone. An item that is the same in the next output keeps its rows,
-so it is not embedded again. An item that is gone loses its rows.
+item is one document, and its first line is `<name>:`. The document holds no
+time, so an item that is the same in the next output keeps its rows and is not
+embedded again. An item that is gone loses its rows.
 
 The text of one output is cut at `max_chars` (default 20000), and core logs
 the cut. A cut JSON output does not parse, so it becomes one item.
@@ -560,7 +560,11 @@ call succeeds. The index never holds state that is out of date.
 
 The per-turn search finds snapshot rows as it finds any row. A snapshot chunk
 takes one of the `inject.top_k` slots, and it is always one short line:
-`<name> as of <time>: <item>`, at most 200 characters of the item. The lines
+`<name> as of <time>: <item>`, at most 200 characters of the item. The time
+is the latest good fetch of the snapshot, in the instance timezone, read from
+`snapshot_result` when the line is shown. So an item that stays the same for a
+week shows the time of the last fetch, not of the first. A snapshot chunk with
+no good fetch is not shown. The lines
 go under a header that says they are snapshots of live systems and to check
 the live tool before a change. The wiki chunks of the same turn get the same
 decision as on a turn with no snapshot.
