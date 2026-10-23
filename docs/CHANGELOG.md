@@ -256,8 +256,9 @@ with the images and the packaged chart, are at
 - **A snapshot of a list that comes in parts gives one item per element.** An
   MCP server can give a list as one text part for each element. Core now reads
   that output as a run of JSON values, so each element is its own item, and a
-  last value that `max_chars` cuts off is left out. The new snapshot key
-  `fields` keeps only the named keys of each object item.
+  last value that `max_chars` cuts off is left out. Output that is a Markdown
+  list gives one item for each top-level bullet. The new snapshot key `fields`
+  keeps only the named keys of each item.
 - **Snooze an insight, and keep a closed insight out of chat.** A member can
   say "not now" to an insight: the new `snooze_insight` tool hides it until a
   later day, and each later snooze of the same insight is twice as long. The

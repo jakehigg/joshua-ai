@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -147,12 +148,58 @@ def _json_values(text: str) -> list[Any] | None:
     return values or None
 
 
+_TOP_BULLET_RE = re.compile(r"^[-*+] +(?P<text>.+)$")
+_SUB_BULLET_RE = re.compile(r"^\s+[-*+] +(?P<text>.+)$")
+_KEY_VALUE_RE = re.compile(r"^(?P<key>[^:]{1,40}):\s*(?P<value>.*)$")
+
+
+def _markdown_items(text: str, fields: Sequence[str] | None) -> list[str] | None:
+    """The items of a Markdown list: each top-level bullet with the indented
+    lines under it. An indented `- Key: value` line is a field of the item, and
+    `fields` keeps only those keys (case aside), in that order. None when the
+    text has no top-level bullet."""
+    items: list[tuple[str, list[tuple[str, str]], list[str]]] = []
+    for line in text.splitlines():
+        top = _TOP_BULLET_RE.match(line)
+        if top:
+            items.append((top.group("text").strip(), [], []))
+            continue
+        if not items or not line.strip():
+            continue
+        sub = _SUB_BULLET_RE.match(line)
+        body = (sub.group("text") if sub else line).strip()
+        pair = _KEY_VALUE_RE.match(body) if sub else None
+        if pair:
+            items[-1][1].append((pair.group("key").strip(), pair.group("value").strip()))
+        else:
+            items[-1][2].append(body)
+    if not items:
+        return None
+    wanted = [key.casefold() for key in fields] if fields else None
+    out: list[str] = []
+    for title, pairs, extra in items:
+        if wanted is not None:
+            found = {key.casefold(): (key, value) for key, value in pairs}
+            pairs = [found[key] for key in wanted if key in found]
+        lines = [title, *extra] if wanted is None else [title]
+        lines += [f"{key}: {' '.join(value.split())}" for key, value in pairs if value]
+        out.append("\n".join(lines))
+    return out
+
+
 def split_items(
     text: str, items_path: str | None, fields: Sequence[str] | None = None
 ) -> list[str]:
-    """The item texts of one snapshot output. An empty item is left out."""
+    """The item texts of one snapshot output. An empty item is left out.
+
+    JSON (one value or a run of values) gives its list, or one item per value.
+    A Markdown list gives one item per top-level bullet. Any other text is one
+    item."""
     values = _json_values(text)
     if values is None:
+        listed = _markdown_items(text, fields)
+        if listed is not None:
+            return [item for item in listed if item]
         stripped = text.strip()
         return [stripped] if stripped else []
     raw: list[Any] = []

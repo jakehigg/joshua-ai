@@ -316,7 +316,7 @@ The default is an empty list, and then nothing runs. See
 | `every` | required | the cadence: `5m`, `30m`, `2h`. From `1m` to `24h` |
 | `scope` | `shared` | `shared`, or a person id. A person id calls the tool for that person, and only that person finds the rows |
 | `items` | none | a dotted path into a JSON result that holds the list, such as `result.tasks` |
-| `fields` | none | the keys of each object item to keep, in this order, such as `title` and `due`; none keeps every key |
+| `fields` | none | the keys of each item to keep, in this order (for a Markdown item, the `Key:` of its indented lines), such as `title` and `due`; none keeps every key |
 | `max_chars` | `20000` | the output is cut here, and core logs the cut |
 | `max_age` | 3 × `every`, at least `15m` | an output older than this leaves the index |
 | `jobs` | `false` | for a snapshot of one person: `true` lets a job bundle take its items. A bundle feeds wiki pages that every reader can open. A `shared` snapshot is in a bundle always |

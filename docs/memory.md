@@ -541,10 +541,12 @@ person, so validation refuses `shared` on such a server.
 Core reads the output as JSON. An MCP server can give a list as one text part
 for each element, and the gateway joins the parts with a new line, so core
 also reads a run of JSON values one after the other. With `items`, the list is
-at that dotted path. A JSON list is the list of items. Anything else is one
-item, the whole text. An object item becomes short `key: value` lines, with no
-empty value. With `fields`, an object item keeps only those keys, in that
-order. Each
+at that dotted path. A JSON list is the list of items. Text that is not JSON
+but is a Markdown list gives one item for each top-level bullet, with the
+indented lines under it; an indented `- Key: value` line is a field of the
+item. Anything else is one item, the whole text. An object item becomes short `key: value` lines, with no
+empty value. With `fields`, an object item or a Markdown item keeps only those keys,
+in that order. Each
 item is one document, and its first line is `<name>:`. The document holds no
 time, so an item that is the same in the next output keeps its rows and is not
 embedded again. An item that is gone loses its rows.

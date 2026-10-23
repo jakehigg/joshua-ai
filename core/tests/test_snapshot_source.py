@@ -99,6 +99,38 @@ def test_fields_keep_only_those_keys_in_that_order() -> None:
     assert split_items(text, None, ["name", "status", "missing"]) == ["name: Filter\nstatus: low"]
 
 
+MARKDOWN_LIST = """### Tasks (Total: 2)
+
+- [ ] Change the filter
+  - List: House
+  - ID: 1A2B
+  - Due: 2026-03-15
+- [ ] Call Alex
+  - List: Calls
+  - a note with no key
+"""
+
+
+def test_a_markdown_list_gives_one_item_per_top_bullet() -> None:
+    assert split_items(MARKDOWN_LIST, None) == [
+        "[ ] Change the filter\nList: House\nID: 1A2B\nDue: 2026-03-15",
+        "[ ] Call Alex\na note with no key\nList: Calls",
+    ]
+
+
+def test_fields_keep_only_those_keys_of_a_markdown_item() -> None:
+    assert split_items(MARKDOWN_LIST, None, ["due", "List"]) == [
+        "[ ] Change the filter\nDue: 2026-03-15\nList: House",
+        "[ ] Call Alex\nList: Calls",
+    ]
+
+
+def test_text_with_no_top_bullet_is_one_item() -> None:
+    assert split_items("Backup check\n  - indented only", None) == [
+        "Backup check\n  - indented only"
+    ]
+
+
 def test_an_empty_list_has_no_item() -> None:
     assert split_items("[]", None) == []
 
