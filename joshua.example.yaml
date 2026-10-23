@@ -255,7 +255,8 @@ jobs:
     #   - "garden-weather-log-*"
     max_chars: 24000       # the bundle text stops here; the topic page is never cut
     recent_days: 14        # how far back the researcher looks for what people name now
-    # snapshot_sim: 0.55   # a snapshot item this close to the topic page comes in
+    # snapshot_sim: 0.55   # a snapshot item this close to the topic page is a candidate
+    # snapshot_strong_sim: 0.75  # a candidate that does not name the topic needs this
     # snapshot_items: 12   # the most snapshot items in one bundle, the closest first
     # snapshot_chars: 3000 # the size limit of the snapshot block
   topics:

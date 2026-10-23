@@ -276,14 +276,19 @@ How the bundle selects the items:
 
 1. The chunks of the topic page are the query. The bundle embeds them once,
    for the journal match and for the snapshots.
-2. An item comes in when it has a similarity of `jobs.bundle.snapshot_sim`
-   (0.55) or more to a chunk of the topic page. The items are short, so the
-   floor is lower than `jobs.bundle.sim`.
-3. The closest item goes first. The block holds
+2. An item is a candidate when it has a similarity of
+   `jobs.bundle.snapshot_sim` (0.55) or more to a chunk of the topic page.
+   The items are short, so the floor is lower than `jobs.bundle.sim`.
+3. A candidate comes in only when it names the topic, by the title and alias
+   rule of the journal match, or when its similarity is
+   `jobs.bundle.snapshot_strong_sim` (0.75) or more. A short item of live
+   state is close to many pages by meaning alone, so the floor by itself
+   lets in items about other things.
+4. The closest item goes first. The block holds
    `jobs.bundle.snapshot_items` (12) items at most, and it stops at the
    first item that does not fit in `jobs.bundle.snapshot_chars` (3 000)
    characters. The bundle never holds a whole snapshot or every snapshot.
-4. A snapshot with no good fetch is left out.
+5. A snapshot with no good fetch is left out.
 
 The block has one part for each snapshot, at the path `snapshots/<name>`.
 The first line gives the server, the tool, and the local time of the latest

@@ -625,7 +625,8 @@ jobs:
 | `bundle.exclude_slugs` | empty | `fnmatch` globs on the file name of a journal entry, without `.md`. No bundle takes an entry that a glob matches. The names belong to one instance, for example `garden-weather-log-*` for a daily log. |
 | `bundle.max_chars` | `24000` | The size limit of the bundle text. The topic page is never cut. |
 | `bundle.recent_days` | `14` | How many days back the researcher looks for the topics that the messages of people name. |
-| `bundle.snapshot_sim` | `0.55` | A snapshot item this close to a chunk of the topic page comes into the bundle. See [docs/jobs.md](jobs.md#snapshots-in-the-bundle). |
+| `bundle.snapshot_sim` | `0.55` | A snapshot item this close to a chunk of the topic page is a candidate for the bundle. See [docs/jobs.md](jobs.md#snapshots-in-the-bundle). |
+| `bundle.snapshot_strong_sim` | `0.75` | A candidate that does not name the topic comes into the bundle only at this similarity or more. |
 | `bundle.snapshot_items` | `12` | The most snapshot items in one bundle, the closest first. `0` turns the snapshot block off. |
 | `bundle.snapshot_chars` | `3000` | The size limit of the snapshot block. It stops at the first item that does not fit. |
 | `topics.exclude` | `vocabulary.md`, `*/README.md`, `coach/profiles/*` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. A list that you set replaces the default list, so keep `coach/profiles/*` in it. |

@@ -253,6 +253,11 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **A job bundle takes only the snapshot items that are about its topic.** A
+  short item of live state is close to many pages by meaning, so the
+  similarity floor let in items about other things. An item now comes in when
+  it names the topic, or when its similarity is the new
+  `jobs.bundle.snapshot_strong_sim` (0.75) or more.
 - **A snapshot of a list that comes in parts gives one item per element.** An
   MCP server can give a list as one text part for each element. Core now reads
   that output as a run of JSON values, so each element is its own item, and a

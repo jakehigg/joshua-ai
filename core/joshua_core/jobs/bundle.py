@@ -30,7 +30,9 @@ index rows of kind `snapshot`) that are close to the topic page. A job may
 see a snapshot whose scope is `shared`, and a snapshot of one person only
 when its entry sets `jobs: true`, because a bundle feeds wiki pages that every
 reader of the wiki can open. The chunks of the topic page are the query. An
-item comes in at `jobs.bundle.snapshot_sim` or more, the closest first, at
+item comes in when it is at `jobs.bundle.snapshot_sim` or more and either
+names the topic (a title or an alias, by the journal rule) or is at
+`jobs.bundle.snapshot_strong_sim` or more. Items come the closest first, at
 most `jobs.bundle.snapshot_items` items, and the block stops at the first
 item that does not fit in `jobs.bundle.snapshot_chars` characters. A part
 starts with the line `Live snapshot of <server> <tool> as of <local time>.`,
@@ -564,8 +566,32 @@ def snapshot_parts(
     ]
 
 
+def named_or_strong(
+    items: SnapshotItems,
+    patterns: Sequence[re.Pattern[str] | None],
+    *,
+    strong_sim: float,
+    limit: int,
+) -> SnapshotItems:
+    """The items that name the topic (a title or an alias, by `patterns`) or
+    that are at `strong_sim` or more, the closest first, at most `limit`.
+    A short item of live state is close to many pages by meaning alone, so a
+    similarity floor by itself lets in items about other things."""
+    kept = [
+        chunk
+        for chunk in items.chunks
+        if (chunk.similarity or 0.0) >= strong_sim
+        or any(p is not None and p.search(item_body(chunk.text or "")) for p in patterns)
+    ][:limit]
+    names = {chunk.title for chunk in kept}
+    return SnapshotItems(kept, {n: t for n, t in items.times.items() if n in names})
+
+
 async def _snapshot_block(
-    vectors: list[list[float]] | None, repo: BundleStore, settings: JoshuaConfig
+    vectors: list[list[float]] | None,
+    repo: BundleStore,
+    settings: JoshuaConfig,
+    patterns: Sequence[re.Pattern[str] | None] = (),
 ) -> tuple[list[SnapshotPart], list[str]]:
     """The snapshot parts of a bundle and the notes. It never fails."""
     cfg = settings.jobs.bundle
@@ -575,12 +601,19 @@ async def _snapshot_block(
     if vectors is None:
         return [], [NO_SNAPSHOT_MODEL]
     try:
-        items = await near_snapshot_items(
-            repo, vectors, allowed, min_sim=cfg.snapshot_sim, limit=cfg.snapshot_items
+        near = await near_snapshot_items(
+            repo,
+            vectors,
+            allowed,
+            min_sim=cfg.snapshot_sim,
+            limit=cfg.snapshot_items * _SNAPSHOT_QUERY_FACTOR,
         )
     except Exception as exc:  # noqa: BLE001 — a snapshot never fails a bundle
         logger.warning({"message": "bundle snapshot search failed", "error": str(exc)})
         return [], [NO_SNAPSHOT_SEARCH]
+    items = named_or_strong(
+        near, patterns, strong_sim=cfg.snapshot_strong_sim, limit=cfg.snapshot_items
+    )
     return snapshot_parts(items, allowed, settings), []
 
 
@@ -685,7 +718,8 @@ async def build_bundle(
     )
 
     vectors = await _topic_vectors(topic, topic_text, settings)
-    snapshots, notes = await _snapshot_block(vectors, repo, settings)
+    patterns = (names_pattern(topic_names(topic, people=settings.people)), names_pattern(aliases))
+    snapshots, notes = await _snapshot_block(vectors, repo, settings, patterns)
     parts.extend(_Part(part.path, part.text) for part in snapshots)
 
     near = await _near_journal_paths(vectors, repo, settings)

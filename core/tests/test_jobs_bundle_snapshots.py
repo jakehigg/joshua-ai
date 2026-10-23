@@ -121,8 +121,26 @@ ROWS = [
 ]
 
 
-async def _build(wiki: Path, store: SnapStore, extra: str = "", snaps: str = SNAPSHOTS):
-    settings = make_settings(snaps + extra)
+def _settings(text: str, strong: float | None = 0.0) -> Any:
+    """The test config. Most tests check the floor, the order, and the caps, so
+    they turn the name gate off with a strong floor of 0. `strong=None` keeps
+    the default."""
+    settings = make_settings(text)
+    if strong is None:
+        return settings
+    bundle_cfg = settings.jobs.bundle.model_copy(update={"snapshot_strong_sim": strong})
+    jobs_cfg = settings.jobs.model_copy(update={"bundle": bundle_cfg})
+    return settings.model_copy(update={"jobs": jobs_cfg})
+
+
+async def _build(
+    wiki: Path,
+    store: SnapStore,
+    extra: str = "",
+    snaps: str = SNAPSHOTS,
+    strong: float | None = 0.0,
+):
+    settings = _settings(snaps + extra, strong)
     return await build_bundle(
         load_topic(TOPIC, wiki), wiki_root=wiki, repo=store, settings=settings, now=NOW
     )
@@ -157,6 +175,18 @@ async def test_the_floor_the_order_and_the_query(wiki: Path, fake_embed) -> None
     assert "Far away" not in got.text
     assert alex.items == {"snapshot/alex-open/000000000004": 0.8}
     assert got.snapshot_via["snapshot/open-tasks/000000000002"] == 0.9
+
+
+async def test_an_item_needs_the_topic_name_or_a_strong_match(wiki: Path, fake_embed) -> None:
+    rows = [
+        chunk("open-tasks", "title: Water the snake plant", 0.60, key="11"),
+        chunk("open-tasks", "title: Buy milk", 0.70, key="12"),
+        chunk("open-tasks", "title: Change the filter", 0.80, key="13"),
+    ]
+    got = await _build(wiki, SnapStore(rows), strong=None)
+    [tasks] = got.snapshots
+    assert sorted(tasks.items.values()) == [0.6, 0.8]
+    assert "Buy milk" not in tasks.text
 
 
 async def test_the_item_cap(wiki: Path, fake_embed) -> None:
@@ -269,7 +299,7 @@ async def test_the_report_line(wiki: Path, fake_embed) -> None:
 async def test_the_bundle_job_reports_the_items(tmp_path: Path, fake_embed) -> None:
     data = tmp_path / "data"
     build_wiki(data)
-    job = BundleJob(store=SnapStore(ROWS), settings=make_settings(SNAPSHOTS), data_dir=data)
+    job = BundleJob(store=SnapStore(ROWS), settings=_settings(SNAPSHOTS), data_dir=data)
     report = await job.run_once(args={"topic": TOPIC}, dry_run=True, clock=fixed_clock())
     section = dict(report.sections)["Snapshots"]
     assert section.startswith("Snapshots: open-tasks (2 items)")

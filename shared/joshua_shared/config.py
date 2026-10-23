@@ -669,6 +669,8 @@ class JobsBundle(_Model):
     max_chars: int = Field(default=24000, gt=0)
     recent_days: int = Field(default=14, ge=1)
     snapshot_sim: float = Field(default=0.55, ge=0.0, le=1.0)
+    # An item that does not name the topic needs this similarity to come in.
+    snapshot_strong_sim: float = Field(default=0.75, ge=0.0, le=1.0)
     snapshot_items: int = Field(default=12, ge=0)
     snapshot_chars: int = Field(default=3000, ge=0)
 
