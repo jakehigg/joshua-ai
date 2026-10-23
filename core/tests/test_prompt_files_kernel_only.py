@@ -38,8 +38,9 @@ _LINE_BUDGET = 80
 # and ``kind``. The format grew when a skill gained an audience and a kind, so
 # the budget grew with it. Every line here is paid on every turn: cut before
 # you raise this again. The insight follow-up (when to ask, and when to snooze
-# or dismiss) added its paragraph.
-_BUDGETS = {"people.md": 107}
+# or dismiss) added its paragraph. The snapshot rule (offer the action, check
+# the live tool) added three lines.
+_BUDGETS = {"people.md": 110}
 
 
 @pytest.mark.parametrize("path", _FILES, ids=lambda p: p.name)
@@ -54,6 +55,13 @@ def test_a_scheduled_journal_entry_records_only_what_changed() -> None:
     assert "only what is new or changed since the last run" in flat
     assert "Do not carry a list of standing items forward" in flat
     assert "Standing state belongs on the wiki page of the thing." in flat
+
+
+def test_a_snapshot_is_never_acted_on_alone() -> None:
+    flat = " ".join((_PROMPTS_DIR / "people.md").read_text().split())
+    assert "A snapshot line is what a live system held at the time it names." in flat
+    assert "offer the action, such as marking a task done." in flat
+    assert "Call the live tool to check and to act; never act on the snapshot alone." in flat
 
 
 def test_a_journal_entry_records_a_change() -> None:

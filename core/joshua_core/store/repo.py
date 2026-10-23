@@ -403,6 +403,75 @@ class Repo:
             rows = await cur.fetchall()
         return [_task(r) for r in rows]
 
+    async def list_tasks_for_person(self, person_id: str | None) -> list[Task]:
+        """The active and paused tasks of every conversation of ``person_id``.
+
+        None gives the tasks of the conversations with no person, such as a
+        group chat.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT t.* FROM tasks t
+                JOIN conversations c ON c.id = t.conversation_id
+                WHERE c.person_id IS NOT DISTINCT FROM %s
+                  AND t.status IN ('active', 'paused')
+                ORDER BY t.next_run_at
+                """,
+                (person_id,),
+            )
+            rows = await cur.fetchall()
+        return [_task(r) for r in rows]
+
+    # --- snapshots ---------------------------------------------------------
+
+    async def list_snapshot_results(self) -> list[dict[str, Any]]:
+        """Every ``snapshot_result`` row, by name."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT * FROM snapshot_result ORDER BY name")
+            return list(await cur.fetchall())
+
+    async def get_snapshot_result(self, name: str) -> dict[str, Any] | None:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT * FROM snapshot_result WHERE name = %s", (name,))
+            return await cur.fetchone()
+
+    async def save_snapshot_success(
+        self, name: str, person_id: str | None, fetched_at: datetime, text: str, sha256: str
+    ) -> None:
+        """Keep a good output: replace the text and clear the failures."""
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO snapshot_result
+                    (name, person_id, fetched_at, ok, text, sha256, failures, last_error)
+                VALUES (%s, %s, %s, TRUE, %s, %s, 0, NULL)
+                ON CONFLICT (name) DO UPDATE SET
+                    person_id = EXCLUDED.person_id, fetched_at = EXCLUDED.fetched_at,
+                    ok = TRUE, text = EXCLUDED.text, sha256 = EXCLUDED.sha256,
+                    failures = 0, last_error = NULL
+                """,
+                (name, person_id, fetched_at, text, sha256),
+            )
+
+    async def save_snapshot_failure(self, name: str, person_id: str | None, error: str) -> int:
+        """Count one failed call and keep the last good text. Returns the
+        failures in a row."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                INSERT INTO snapshot_result (name, person_id, ok, failures, last_error)
+                VALUES (%s, %s, FALSE, 1, %s)
+                ON CONFLICT (name) DO UPDATE SET
+                    ok = FALSE, failures = snapshot_result.failures + 1,
+                    last_error = EXCLUDED.last_error
+                RETURNING failures
+                """,
+                (name, person_id, error),
+            )
+            row = await cur.fetchone()
+        return int(row["failures"]) if row else 1
+
     async def claim_due_tasks(self, now: datetime, limit: int = 25) -> list[Task]:
         """Atomically grab due tasks so a slow turn can't double-fire.
 

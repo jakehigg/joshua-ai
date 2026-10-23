@@ -142,6 +142,22 @@ memory:
   per_doc_cap: 3
   recency_bonus: 0.08
   recency_half_life_days: 14.0
+  # Snapshots: fixed MCP tool calls that core runs on a cadence, with no
+  # model. The output goes into the index and replaces the last output, so a
+  # turn can see that an open item matches what a person says. The list is
+  # the allowlist: no caller can ask for another tool or other arguments.
+  # Empty (the default) runs nothing. docs/memory.md explains it.
+  # snapshots:
+  #   - name: open-tasks           # a unique slug
+  #     server: tasks              # a name under mcp:, or scheduling (core's own)
+  #     tool: list_open_tasks      # the exact tool; on scheduling only list_tasks
+  #     args:                      # passed as is; every value is text
+  #       list: home
+  #     every: 15m                 # 1m to 24h
+  #     scope: alex                # shared, or a person id the server allows
+  #     items: result.tasks        # optional dotted path to the list in JSON
+  #     max_chars: 20000           # the output is cut here
+  #     max_age: 45m               # default 3 x every, at least 15m
 
 attachments:
   # false: a file a person sends stays in the record of the chat, and the

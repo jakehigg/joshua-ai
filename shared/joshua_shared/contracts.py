@@ -217,3 +217,22 @@ class UsageResponse(_Model):
     groups: list[str]
     rows: list[UsageDay]
     totals: dict[str, UsageGroup]
+
+
+# The path of the gateway snapshot route. ``{name}`` is a configured snapshot.
+SNAPSHOT_PATH = "/v1/snapshots/{name}"
+
+
+class SnapshotResponse(_Model):
+    """The answer of the gateway ``POST /v1/snapshots/{name}``.
+
+    ``text`` joins the text parts of the tool result with a newline.
+    ``is_error`` is the tool's own error flag. ``ok`` is true when the call ran
+    and the tool did not set ``is_error``. ``fetched_at`` is the UTC time of
+    the call, in ISO 8601.
+    """
+
+    ok: bool
+    text: str
+    is_error: bool
+    fetched_at: str

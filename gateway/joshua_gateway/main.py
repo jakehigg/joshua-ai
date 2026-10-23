@@ -5,6 +5,8 @@ identity token. It serves one streamable-HTTP endpoint per upstream at ``/<name>
 authenticates every request with ``joshua_shared.fleet_auth`` (auth is always
 required), admits only ``core`` on the MCP routes, and enforces
 each server's tool filter server-side at both ``tools/list`` and call time.
+``POST /v1/snapshots/{name}`` runs one configured snapshot for core
+(``joshua_gateway.snapshots``).
 
 The catalog is the ``mcp:`` section of joshua.yaml, resolved by
 ``joshua_gateway.catalog.build_catalog``. Each external upstream is owned by a
@@ -36,6 +38,7 @@ from joshua_gateway.admin import (
 )
 from joshua_gateway.catalog import ServerSpec, build_catalog, instance_name, instance_specs
 from joshua_gateway.routes import UpstreamRoute, make_asgi, make_multi_asgi
+from joshua_gateway.snapshots import snapshot_route
 from joshua_gateway.upstream import Upstream
 
 logger = get_logger("gateway")
@@ -295,6 +298,7 @@ def build_app() -> Starlette:
             Route("/admin/calls", admin_calls),
             Route("/admin/inventory", admin_inventory),
             Route("/admin/mcp/install", admin_mcp_install, methods=["POST"]),
+            Route("/v1/snapshots/{name}", snapshot_route, methods=["POST"]),
         ],
     )
 

@@ -145,6 +145,9 @@ Core compares the best match against two thresholds:
 | `hint` | best match ≥ `inject.hint_sim` (0.60) | the names of up to three files to open |
 | `none` | below `inject.hint_sim` | nothing |
 
+A snapshot chunk is always one short line, whatever the decision. See
+[How a snapshot reaches a turn](#how-a-snapshot-reaches-a-turn).
+
 A higher number means a closer match. `full` is the fast path: the agent has the
 text already and answers with no tool call. `hint` names the files, and the agent
 opens the ones it wants.
@@ -482,6 +485,93 @@ memory:
   re-embeds only memos that changed.
 - **Schedule**: `nightly` (the default) re-indexes once a day. `every 6h` or a
   plain number of seconds sets a different cadence.
+
+## Snapshots of live systems
+
+Joshua knows the state of an outside system, such as a list of open tasks,
+only when it calls a tool. A person can say "I changed the filter" while a
+task for it is open, and Joshua does not know that the task is there. A
+**snapshot** gives Joshua that hint. It is one MCP tool call with fixed
+arguments, a cadence, and a scope, written in `memory.snapshots`:
+
+```yaml
+memory:
+  snapshots:
+    - name: open-tasks
+      server: tasks            # a name in the mcp section, or scheduling
+      tool: list_open_tasks    # the exact tool name on that server
+      args:
+        list: home
+      every: 15m
+      scope: alex              # shared, or a person id
+      items: result.tasks      # optional: where the list is in a JSON result
+```
+
+Core runs each snapshot on its `every`, with no model. The output goes into
+the index and replaces the last output. Retrieval then finds an item that
+matches what a person says, and the turn shows it as a short hint. The agent
+calls the live tool to check the item before it changes anything, and it
+never acts on a snapshot alone. [config.md](config.md#snapshots) lists every
+key.
+
+### The config is the allowlist
+
+Core calls `POST /v1/snapshots/{name}` on the gateway, with an empty body. The
+gateway reads the server, the tool, and the arguments from its own copy of
+`joshua.yaml`. So no caller can ask for a tool or arguments that are not in a
+configured snapshot. The gateway refuses a snapshot when the tool filter hides
+the tool, when the `class` map marks it `write-local` or `act`, or when the
+server declares it destructive and not read-only. See
+[mcp-servers.md](mcp-servers.md#a-server-for-a-snapshot).
+
+`server: scheduling` runs a listing tool of core's own scheduling server in
+core, with no gateway. Only `list_tasks` is allowed. Any other tool fails
+validation. The output is a JSON list with one task in each item.
+
+### Scope
+
+`scope: shared` makes rows that every turn can find. A person id makes rows
+that only a turn of that person finds, and the gateway calls the tool for that
+person, so a server with one identity for each person answers with that
+person's data. A server that is not `allow: all` refuses a call with no
+person, so validation refuses `shared` on such a server.
+
+### Items
+
+Core reads the output as JSON. With `items`, the list is at that dotted path.
+A JSON list is the list of items. Anything else is one item, the whole text.
+An object item becomes short `key: value` lines, with no empty value. Each
+item is one document, and its first line is `<name> as of <time>` in the
+instance timezone. An item that is the same in the next output keeps its rows,
+so it is not embedded again. An item that is gone loses its rows.
+
+The text of one output is cut at `max_chars` (default 20000), and core logs
+the cut. A cut JSON output does not parse, so it becomes one item.
+
+### Staleness
+
+A snapshot whose last good output is older than `max_age` lists no item, and
+its rows leave the index. The default `max_age` is three times `every`, and at
+least 15 minutes. A failed call keeps the last good output and counts one
+failure. After three failures in a row, the snapshot lists no item until a
+call succeeds. The index never holds state that is out of date.
+
+### How a snapshot reaches a turn
+
+The per-turn search finds snapshot rows as it finds any row. A snapshot chunk
+takes one of the `inject.top_k` slots, and it is always one short line:
+`<name> as of <time>: <item>`, at most 200 characters of the item. The lines
+go under a header that says they are snapshots of live systems and to check
+the live tool before a change. The wiki chunks of the same turn get the same
+decision as on a turn with no snapshot.
+
+A `search_memory` result of a snapshot has no file. In place of the path, it
+says `snapshot <name> as of <time>; for live data call <server> <tool>`.
+`POST /v1/memory/search` never returns a snapshot row.
+
+`GET /admin/snapshots` shows each snapshot: the server, the tool, the scope,
+`every`, the fetch time, `ok`, the failures, the last error, and the item
+count. It never shows the text.
 
 ## The embedding model
 

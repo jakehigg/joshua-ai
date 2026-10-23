@@ -352,6 +352,116 @@ class MemorySearch(_Model):
     allowed_callers: list[str] = ["viewer", "mcp"]
 
 
+_DURATION_RE = re.compile(r"^(\d+)\s*([smhd])$")
+_DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+SNAPSHOT_NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
+_SNAPSHOT_NAME_RE = re.compile(SNAPSHOT_NAME_PATTERN)
+# The server name of core's own in-process scheduling server. A snapshot on it
+# runs in core and does not go through the gateway.
+SNAPSHOT_SCHEDULING_SERVER = "scheduling"
+# The scheduling tools a snapshot may call: the ones that only list.
+SNAPSHOT_SCHEDULING_TOOLS = ("list_tasks",)
+SNAPSHOT_MIN_EVERY_S = 60
+SNAPSHOT_MAX_EVERY_S = 86400
+SNAPSHOT_MIN_MAX_AGE_S = 900
+
+
+def parse_duration(value: str) -> int:
+    """Seconds in a duration such as ``30s``, ``5m``, ``2h``, or ``1d``.
+
+    Raises ``ValueError`` for any other text.
+    """
+    match = _DURATION_RE.match(str(value).strip().lower())
+    if match is None:
+        raise ValueError(f"duration must be a number and one of s, m, h, d, such as 5m: {value!r}")
+    return int(match.group(1)) * _DURATION_UNITS[match.group(2)]
+
+
+class Snapshot(_Model):
+    """One configured snapshot: a fixed MCP tool call that core runs on a cadence.
+
+    The output goes into the memory index and replaces the last output, so
+    retrieval can show a matching item as a hint. The list of snapshots is the
+    allowlist: no caller can ask for a tool or arguments that are not here.
+    ``JoshuaConfig._check_snapshots`` checks the server and the scope.
+    """
+
+    name: str
+    server: str
+    tool: str
+    # Passed to the tool as is. YAML gives every value as text.
+    args: dict[str, Any] = Field(default_factory=dict)
+    every: str
+    scope: str = "shared"
+    # A dotted path into a JSON result that holds the item list.
+    items: str | None = None
+    max_chars: int = Field(default=20000, gt=0)
+    max_age: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, value: str) -> str:
+        if not _SNAPSHOT_NAME_RE.match(value):
+            raise ValueError(f"snapshot name must match {SNAPSHOT_NAME_PATTERN}")
+        return value
+
+    @field_validator("tool", "server")
+    @classmethod
+    def _check_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be empty")
+        return value.strip()
+
+    @field_validator("args", mode="before")
+    @classmethod
+    def _empty_args(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        return {} if value in (None, "") else value
+
+    @field_validator("items", "max_age", mode="before")
+    @classmethod
+    def _empty_is_none(cls, value: Any) -> Any:
+        return None if value in (None, "") else value
+
+    @field_validator("every")
+    @classmethod
+    def _check_every(cls, value: str) -> str:
+        seconds = parse_duration(value)
+        if not SNAPSHOT_MIN_EVERY_S <= seconds <= SNAPSHOT_MAX_EVERY_S:
+            raise ValueError("every must be from 1m to 24h")
+        return value
+
+    @field_validator("max_age")
+    @classmethod
+    def _check_max_age(cls, value: str | None) -> str | None:
+        if value is not None and parse_duration(value) <= 0:
+            raise ValueError("max_age must be more than zero")
+        return value
+
+    @property
+    def every_seconds(self) -> int:
+        return parse_duration(self.every)
+
+    @property
+    def max_age_seconds(self) -> int:
+        """The age after which the output is stale: ``max_age``, or else three
+        times ``every`` and at least 15 minutes."""
+        if self.max_age is not None:
+            return parse_duration(self.max_age)
+        return max(3 * self.every_seconds, SNAPSHOT_MIN_MAX_AGE_S)
+
+    @property
+    def person_id(self) -> str | None:
+        """The person of the scope, or None for ``shared``."""
+        return None if self.scope == "shared" else self.scope
+
+    @property
+    def in_core(self) -> bool:
+        """True when core runs the tool itself, with no gateway call."""
+        return self.server == SNAPSHOT_SCHEDULING_SERVER
+
+
 class Memory(_Model):
     # No-ops, kept only so a config file written before the journal moved into
     # the wiki still validates. The recency tier holds no journal text now; a
@@ -382,6 +492,14 @@ class Memory(_Model):
     per_doc_cap: int = Field(default=3, ge=1)
     recency_bonus: float = Field(default=0.08, ge=0.0)
     recency_half_life_days: float = Field(default=14.0, gt=0.0)
+    # Fixed MCP tool calls whose output goes into the index. Empty turns the
+    # feature off. See ``Snapshot``.
+    snapshots: list[Snapshot] = []
+
+    @field_validator("snapshots", mode="before")
+    @classmethod
+    def _empty_snapshots(cls, value: Any) -> Any:
+        return [] if value in (None, "") else value
 
     @field_validator("sources")
     @classmethod
@@ -1015,6 +1133,40 @@ class JoshuaConfig(_Model):
                 for pid in server.allow:
                     if pid not in server.identities:
                         raise ValueError(f"mcp.{name}: {pid} is allowed but has no identity")
+        return self
+
+    @model_validator(mode="after")
+    def _check_snapshots(self) -> JoshuaConfig:
+        person_ids = {person.id for person in self.people}
+        seen: set[str] = set()
+        for snap in self.memory.snapshots:
+            where = f"memory.snapshots.{snap.name}"
+            if snap.name in seen:
+                raise ValueError(f"{where}: duplicate snapshot name")
+            seen.add(snap.name)
+            if snap.scope != "shared" and snap.scope not in person_ids:
+                raise ValueError(f"{where}.scope: unknown person id '{snap.scope}'")
+            if snap.in_core:
+                if snap.tool not in SNAPSHOT_SCHEDULING_TOOLS:
+                    raise ValueError(
+                        f"{where}.tool: the scheduling server allows only "
+                        f"{SNAPSHOT_SCHEDULING_TOOLS}"
+                    )
+                continue
+            server = self.mcp.get(snap.server)
+            if server is None:
+                raise ValueError(f"{where}.server: unknown server '{snap.server}'")
+            if server.allow == "all":
+                continue
+            if snap.person_id is None:
+                raise ValueError(
+                    f"{where}.scope: server '{snap.server}' is not open to all, "
+                    "so the scope must be a person"
+                )
+            if snap.person_id not in server.allow:
+                raise ValueError(
+                    f"{where}.scope: '{snap.person_id}' is not allowed on '{snap.server}'"
+                )
         return self
 
     @model_validator(mode="after")

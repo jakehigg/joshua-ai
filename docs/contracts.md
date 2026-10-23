@@ -120,6 +120,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /admin/jobs/runs/{id}` | `ADMIN_CALLERS` | | a run row: `{"id", "job", "started_at", "finished_at", "dry_run", "args", "commit_sha", "report", "calls", "tokens", "error"}` |
 | `GET /admin/jobs/runs?job=&limit=` | `ADMIN_CALLERS` | | `{"runs": […]}`, newest first |
 | `GET /admin/usage?days=` | `ADMIN_CALLERS` | | the same answer as `GET /v1/usage` |
+| `GET /admin/snapshots` | `ADMIN_CALLERS` | | `{"snapshots": [{"name", "server", "tool", "scope", "every", "fetched_at", "ok", "failures", "last_error", "items", "listed"}]}`, no text |
 
 `POST /v1/turns` answers `202` at once and runs the turn in the background. The
 reply reaches the person through `POST /v1/deliver`. A second turn with the
@@ -253,6 +254,7 @@ it.
 | `POST /admin/reload` | `ADMIN_CALLERS` | `{"server": name}` or empty | `{"reloaded": {…}, "failed": {…}}`, `502` when one failed |
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
 | `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
+| `POST /v1/snapshots/{name}` | `core` | empty | `{"ok", "text", "is_error", "fetched_at"}` (below). `404` for a name that is not a gateway snapshot, `403` for a refused tool, `503` when the upstream is down, `504` after 30 seconds. |
 | `POST /admin/mcp/install` | `ADMIN_CALLERS` | `{"server": name, "reinstall": bool}` | `{"server", "package", "resolved", "installed_at", "reconnected": […]}`. `404` for a server with no `package`, `502` with a one-line `error` when the install failed. |
 
 When an upstream loses its session, core's session to the gateway continues.
@@ -270,6 +272,30 @@ The gateway connects to the upstream again:
   (`INTERNAL_ERROR`). The gateway never passes on the upstream's own code: a
   code such as `-32600` would tell core that its request was bad, and HTTP
   then answers `400`.
+
+### The snapshot route
+
+`POST /v1/snapshots/{name}` runs one snapshot of `memory.snapshots` for core.
+The body is empty. The gateway reads the server, the tool, the arguments, and
+the scope from its own copy of `joshua.yaml`, so the config is the allowlist.
+It refuses with `403`, and writes a `denied` row to the call log, in these
+cases:
+
+- The person of the scope may not use the server (`person_not_allowed`).
+- The tool filter hides the tool, or the upstream does not declare it
+  (`tool_not_exposed`).
+- The `class` map marks the tool `write-local` or `act`
+  (`tool_class_write-local`, `tool_class_act`).
+- The upstream declares the tool with `destructiveHint: true` and not
+  `readOnlyHint: true` (`tool_destructive`).
+
+Otherwise the gateway calls the tool one time. It uses the upstream instance
+of the person of the scope, as the MCP route does.
+
+`text` joins the text parts of the result with a newline. `is_error` is the
+flag of the tool. `ok` is true when the call ran and `is_error` is false.
+`fetched_at` is UTC, in ISO 8601. The call log holds the call with the
+snapshot name and no content.
 
 `core` sends two headers with every MCP request:
 

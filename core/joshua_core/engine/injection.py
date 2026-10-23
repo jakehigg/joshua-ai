@@ -10,6 +10,11 @@ person's scope of the in-core index (own documents plus shared), and
   three documents so the model can open one with ``read_file``.
 - ``none``  — nothing cleared ``hint_sim``; no note.
 
+A ``snapshot`` chunk (the state of a live system, ``memory.snapshots``) is
+never shown in full. It takes one slot of ``top_k`` and is one short line
+under a header that says to check the live tool before a change. The other
+chunks get the same decision as on a turn with no snapshot.
+
 A chunk of an insight that is not due, or of a question that is not open,
 never reaches a turn (``jobs/retrieval.py``). Every decision writes one
 ``kb_event`` audit row. Retrieval never breaks a turn:
@@ -37,7 +42,7 @@ from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
 from joshua_core.memory.skills import SKILL_KIND
-from joshua_core.memory.store import MemoryStore
+from joshua_core.memory.store import SNAPSHOT_KIND, MemoryStore
 from joshua_core.store.repo import Repo
 
 logger = get_logger("engine.injection")
@@ -54,6 +59,12 @@ FULL_HEADER = (
     "with read_file for more:]"
 )
 HINT_HEADER = "[Related notes and files may help — open with read_file if useful: {files}]"
+SNAPSHOT_HEADER = (
+    "[Snapshots of live systems, as of the time on each line. They can be out of "
+    "date: call the live tool to check before you change anything:]"
+)
+# A snapshot line holds at most this many characters of the item.
+SNAPSHOT_LINE_CHARS = 200
 
 
 @dataclass
@@ -94,7 +105,7 @@ def plan_injection(ranked: Sequence[KbChunk], *, inject_sim: float, top_k: int) 
     if not ranked:
         return InjectionPlan("none", [], 0.0)
     best_sim = max((c.similarity or 0.0) for c in ranked)
-    if best_sim >= inject_sim:
+    if best_sim >= inject_sim and top_k > 0:
         return InjectionPlan("full", list(ranked[:top_k]), best_sim)
     return InjectionPlan("hint", _distinct_docs(ranked, HINT_MAX_DOCS), best_sim)
 
@@ -112,10 +123,32 @@ def _hint_note(chunks: Sequence[KbChunk]) -> str:
     return HINT_HEADER.format(files=files)
 
 
+def _snapshot_line(chunk: KbChunk) -> str:
+    """``<name> as of <time>: <item>`` on one line, the item cut to
+    ``SNAPSHOT_LINE_CHARS``."""
+    head, _, body = (chunk.text or "").partition("\n")
+    if " as of " not in head:
+        head, body = chunk.title or chunk.path, chunk.text or ""
+    item = " ".join(body.split())[:SNAPSHOT_LINE_CHARS]
+    return f"{head}: {item}" if item else head
+
+
+def _snapshot_note(chunks: Sequence[KbChunk]) -> str:
+    return SNAPSHOT_HEADER + "\n" + "\n".join(_snapshot_line(c) for c in chunks)
+
+
+def split_snapshots(ranked: Sequence[KbChunk], top_k: int) -> tuple[list[KbChunk], list[KbChunk]]:
+    """``(snapshots, others)``: the snapshot chunks among the top ``top_k``,
+    and every chunk that is not a snapshot, in rank order."""
+    snaps = [c for c in ranked[:top_k] if c.kind == SNAPSHOT_KIND]
+    others = [c for c in ranked if c.kind != SNAPSHOT_KIND]
+    return snaps, others
+
+
 def _audit_results(
-    ranked: Sequence[KbChunk], plan: InjectionPlan, max_chars: int
+    ranked: Sequence[KbChunk], injected: Sequence[KbChunk], max_chars: int
 ) -> list[dict[str, Any]]:
-    injected_ids = {id(c) for c in plan.injected}
+    injected_ids = {id(c) for c in injected}
     return [
         {
             "uri": c.path,
@@ -187,15 +220,22 @@ async def kb_context(
         logger.warning({"message": "kb inject skipped: retrieval failed", "error": str(exc)})
         return None
 
-    plan = plan_injection(ranked, inject_sim=full_sim, top_k=top_k)
+    # A snapshot chunk takes a slot of `top_k` and is always a short line. The
+    # other chunks get the same decision as on a turn with no snapshot.
+    snaps, others = split_snapshots(ranked, top_k)
+    plan = plan_injection(others, inject_sim=full_sim, top_k=top_k - len(snaps))
+    decision = plan.decision
+    if snaps and decision == "none":
+        decision = "snapshot"
     duration_ms = round((monotonic() - t0) * 1000)
     logger.info(
         {
             "message": "kb inject",
             "conversation_id": ctx.conversation.id,
-            "decision": plan.decision,
+            "decision": decision,
             "best_sim": round(plan.best_sim, 4),
             "results": len(ranked),
+            "snapshots": len(snaps),
             "duration_ms": duration_ms,
         }
     )
@@ -205,19 +245,22 @@ async def kb_context(
             query=text[:QUERY_CAP],
             conversation_id=ctx.conversation.id,
             turn_id=ctx.turn_id,
-            decision=plan.decision,
+            decision=decision,
             best_sim=plan.best_sim,
             duration_ms=duration_ms,
-            results=_audit_results(ranked, plan, max_chars),
+            results=_audit_results(ranked, [*plan.injected, *snaps], max_chars),
         )
     except Exception as exc:  # noqa: BLE001 — telemetry must never break a turn
         logger.warning({"message": "kb inject audit failed", "error": str(exc)})
 
+    notes: list[str] = []
     if plan.decision == "full":
-        return _full_note(plan.injected, max_chars)
-    if plan.decision == "hint":
-        return _hint_note(plan.injected)
-    return None
+        notes.append(_full_note(plan.injected, max_chars))
+    elif plan.decision == "hint":
+        notes.append(_hint_note(plan.injected))
+    if snaps:
+        notes.append(_snapshot_note(snaps))
+    return "\n\n".join(notes) or None
 
 
 def register(
