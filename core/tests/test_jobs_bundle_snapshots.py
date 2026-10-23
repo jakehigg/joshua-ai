@@ -550,3 +550,11 @@ def test_the_prompts_route_and_cite_a_snapshot() -> None:
     refresh_flat = " ".join(curator_prompts.REFRESH_PROMPT.split())
     assert "or the snapshot path and its time" in refresh_flat
     assert "never a sign that a person cares about something" in " ".join(INSIGHT_PROMPT.split())
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [INSIGHT_PROMPT, RAISE_PROMPT, EDITOR_PROMPT, curator_prompts.REFRESH_PROMPT],
+)
+def test_each_prompt_forbids_a_claim_of_absence_from_the_block(prompt: str) -> None:
+    assert "never say that a live system does not hold something" in " ".join(prompt.split())

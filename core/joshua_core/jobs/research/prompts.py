@@ -27,7 +27,10 @@ line. When it disagrees with a page or an older journal entry, the snapshot
 is the current state, and the page is the thing that is out of date: write
 the `local_context` from the snapshot. A snapshot line is not the words of a
 person, so it is never a sign that a person cares about something. A question
-that a snapshot answers is a `record` question, never a `person` question.
+that a snapshot answers is a `record` question, never a `person` question. A
+`snapshots/` part holds only the few items that are close to this topic, not
+the whole system: never say that a live system does not hold something
+because the part does not show it.
 
 Each question has one audience:
 
@@ -184,7 +187,9 @@ only in the local context.
 A phrase from a `snapshots/` path is what a live system held at the time on
 its first line. When it disagrees with a page or an older journal entry, the
 snapshot is the current state: write `local_notes` from the snapshot. A
-snapshot line is not the words of a person.
+snapshot line is not the words of a person. A `snapshots/` path holds only the
+few items that are close to this topic: never say that a live system does not
+hold something because the path does not show it.
 
 Write the page:
 

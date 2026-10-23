@@ -22,7 +22,9 @@ A `snapshots/` part is what a live system held at the time on its first
 line. When it disagrees with a page or an older journal entry, the snapshot
 is the current state, and the page is the thing that is out of date. A
 snapshot line is not the words of a person, so it is never a sign that a
-person cares about something.
+person cares about something. A `snapshots/` part holds only the few items
+that are close to this topic, not the whole system: never say that a live
+system does not hold something because the part does not show it.
 
 An insight is one of two cases, for the date, the season, and our situation:
 

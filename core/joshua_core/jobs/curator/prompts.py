@@ -58,7 +58,9 @@ A `<snapshot>` block is what a live system held at the time on its first
 line. When it disagrees with the page or an older entry, the snapshot is the
 current state, and the page is the thing that is out of date. A snapshot line
 is not the words of a person, so it is never a sign that a person cares about
-something.
+something. A `<snapshot>` block holds only the few items that are close to
+this page, not the whole system: never say that a live system does not hold
+something because the block does not show it.
 
 Answer with:
 

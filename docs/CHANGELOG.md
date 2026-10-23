@@ -258,6 +258,8 @@ with the images and the packaged chart, are at
   similarity floor let in items about other things. An item now comes in when
   it names the topic, or when its similarity is the new
   `jobs.bundle.snapshot_strong_sim` (0.75) or more.
+  The workers are told that the block holds only the items about the topic, so
+  they never claim that a live system does not hold something.
 - **A snapshot of a list that comes in parts gives one item per element.** An
   MCP server can give a list as one text part for each element. Core now reads
   that output as a run of JSON values, so each element is its own item, and a
