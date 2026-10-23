@@ -13,7 +13,7 @@ and its `usage` ledger sums the tokens of each worker. A worker function takes
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -241,13 +241,18 @@ async def refresh(
     page_text: str,
     entries: list[tuple[str, str]],
     *,
+    snapshots: Sequence[tuple[str, str]] = (),
     model: str | None,
     runner: Runner | None = None,
     usage_out: list[Usage] | None = None,
 ) -> WorkerResult[RefreshAnswer]:
-    """Check a page against its journal entries, each `(path, text)`."""
+    """Check a page against its journal entries and the snapshot parts of its
+    bundle, each `(path, text)`."""
     blocks = "\n\n".join(_page_block("entry", p, t) for p, t in entries)
     user_text = _page_block("page", path, page_text) + "\n\n<journal>\n" + blocks + "\n</journal>"
+    if snapshots:
+        live = "\n\n".join(_page_block("snapshot", p, t) for p, t in snapshots)
+        user_text += "\n\n<snapshots>\n" + live + "\n</snapshots>"
     return await ask_worker(
         "curator-refresh",
         system_prompt=REFRESH_PROMPT,

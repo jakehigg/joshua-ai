@@ -6,7 +6,8 @@ An insight from the `insight` worker passes when all of these are true:
 - `confidence` is not `low`.
 - `we_do` has 1 phrase or more, each 3 to 160 characters, and each occurs
   verbatim in the parts of the bundle that say what we do: the parts that are
-  not under `knowledge/` or `insights/`. Case and white space do not count.
+  not under `knowledge/` or `insights/`, so a `snapshots/<name>` part counts.
+  Case and white space do not count.
 - Each path of `we_do_paths` is one of those parts and holds at least one of
   the phrases. An empty `we_do_paths` becomes the parts that hold the phrases.
 - `knowledge_says` has 1 path or more, each a published knowledge page of
@@ -86,7 +87,7 @@ class Verdict:
 
 def we_do_parts(parts: Sequence[Part]) -> list[Part]:
     """The parts of a bundle that say what we do: not a knowledge page, and
-    not an insight."""
+    not an insight. A snapshot part (`snapshots/<name>`) is one of them."""
     reserved = (f"{layout.KNOWLEDGE}/", f"{layout.INSIGHTS}/")
     return [p for p in parts if not p.path.startswith(reserved)]
 

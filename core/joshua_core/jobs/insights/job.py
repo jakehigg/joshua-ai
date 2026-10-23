@@ -40,7 +40,7 @@ from joshua_shared.log import get_logger
 
 from joshua_core.engine.ephemeral import Runner
 from joshua_core.engine.usage import Usage, UsageLedger
-from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle
+from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle, snapshot_summary
 from joshua_core.jobs.insights.gate import InsightGate, Verdict, cap, we_do_parts
 from joshua_core.jobs.insights.knowledge import KnownPage, published_pages
 from joshua_core.jobs.insights.page import (
@@ -414,7 +414,12 @@ class InsightsJob(Job):
         result = await InsightPass(
             settings=self._settings, data_dir=self._data_dir, ledger=ledger, runner=self._runner
         ).run(topic, bundle, today=today, dry_run=dry_run)
-        sections = [*result.sections(), ("Usage", usage_lines(ledger))]
+        bundle_lines = [snapshot_summary(bundle), *(f"- {note}" for note in bundle.notes)]
+        sections = [
+            ("Bundle", "\n".join(bundle_lines)),
+            *result.sections(),
+            ("Usage", usage_lines(ledger)),
+        ]
         return RunReport(
             job=self.name,
             started_at=now,
@@ -425,7 +430,11 @@ class InsightsJob(Job):
             calls=ledger.calls,
             tokens=ledger.tokens,
             written=list(result.written),
-            data={**result.data(), "usage": ledger.as_data()},
+            data={
+                **result.data(),
+                "snapshot_via": bundle.snapshot_via,
+                "usage": ledger.as_data(),
+            },
         )
 
 

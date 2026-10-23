@@ -258,6 +258,46 @@ class MemoryStore:
             rows = await cur.fetchall()
         return {r["path"]: [float(x) for x in json.loads(r["mean"])] for r in rows}
 
+    async def kb_near_snapshots(
+        self,
+        embeddings: Sequence[list[float]],
+        *,
+        names: Sequence[str],
+        min_sim: float,
+        limit: int,
+    ) -> list[KbChunk]:
+        """The ``snapshot`` chunks of the snapshots in ``names`` at or above
+        ``min_sim`` to any of ``embeddings``, the closest first, at most
+        ``limit``. Each chunk has its best similarity in ``similarity``.
+
+        A job uses it to find the items of live state that are close to a
+        topic page or a question. The caller gives the names that a job may
+        see, so the scope rule is the caller's.
+        """
+        if not embeddings or not names or limit <= 0:
+            return []
+        vectors = [_vec_literal(e) for e in embeddings]
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT c.id, c.person_id, c.source, c.kind, c.path, c.provenance,
+                       c.title, c.heading, c.chunk_index, c.text, c.doc_date,
+                       MAX(1 - (c.embedding <=> q.v)) AS similarity
+                FROM kb_chunk AS c,
+                     (SELECT unnest(%s::text[])::vector AS v) AS q
+                WHERE c.embedding IS NOT NULL
+                  AND c.kind = %s
+                  AND c.title = ANY(%s)
+                  AND 1 - (c.embedding <=> q.v) >= %s
+                GROUP BY c.id
+                ORDER BY similarity DESC, c.path, c.chunk_index
+                LIMIT %s
+                """,
+                (vectors, SNAPSHOT_KIND, list(dict.fromkeys(names)), min_sim, limit),
+            )
+            rows = await cur.fetchall()
+        return [_kb_chunk(r) for r in rows]
+
     async def snapshot_times(self, names: Sequence[str]) -> dict[str, datetime]:
         """``{name: fetched_at}`` of the latest good fetch of each snapshot in
         ``names``. A snapshot with no good fetch is not in the answer."""

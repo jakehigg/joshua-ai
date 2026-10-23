@@ -236,6 +236,21 @@ with the images and the packaged chart, are at
   takes `full: true` for the whole passage. See
   [docs/memory.md](memory.md#snapshots-of-live-systems).
 
+- **The job workers see the live state that matters to their topic.** The
+  memory bundle now holds a small snapshot block after the linked pages and
+  before the journal: the snapshot items closest to the topic page, each on
+  one line, under the time of the latest good fetch. Three new keys,
+  `jobs.bundle.snapshot_sim` (0.55), `snapshot_items` (12), and
+  `snapshot_chars` (3000), set the floor and the caps. A job sees a `shared`
+  snapshot, and a snapshot of one person only when its entry sets the new key
+  `jobs: true`. The insight, research, and curator workers read a snapshot as
+  the current state, and a phrase from one grounds an insight or a question.
+  A `record` question that a snapshot answers closes with
+  `answered_by: snapshots/<name>`. The curator `refresh` worker reads the
+  snapshot block of the page, and a patch can cite it. Each report says
+  `Snapshots: <name> (<n> items)`. The digest does not change. See
+  [docs/jobs.md](jobs.md#snapshots-in-the-bundle).
+
 ### Fixed
 
 - **Snooze an insight, and keep a closed insight out of chat.** A member can

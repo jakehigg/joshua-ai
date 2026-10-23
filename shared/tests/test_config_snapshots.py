@@ -154,3 +154,42 @@ def test_parse_duration(text: str, seconds: int) -> None:
 def test_parse_duration_refuses_other_text() -> None:
     with pytest.raises(ValueError):
         parse_duration("5 minutes")
+
+
+def test_jobs_is_false_by_default_and_a_person_snapshot_stays_out_of_jobs() -> None:
+    cfg = parse(
+        """
+        - name: shared-tasks
+          server: tasks
+          tool: list_tasks
+          every: 5m
+        - name: alex-tasks
+          server: mine
+          tool: list_tasks
+          every: 5m
+          scope: alex
+        - name: alex-open
+          server: mine
+          tool: list_tasks
+          every: 5m
+          scope: alex
+          jobs: true
+        """
+    )
+    shared, private, open_ = cfg.memory.snapshots
+    assert (shared.jobs, private.jobs, open_.jobs) == (False, False, True)
+    assert shared.in_jobs is True
+    assert private.in_jobs is False
+    assert open_.in_jobs is True
+
+
+def test_jobs_must_be_a_boolean() -> None:
+    with pytest.raises(config.ConfigError):
+        parse(ONE + "  jobs: maybe\n")
+
+
+def test_the_bundle_snapshot_knobs() -> None:
+    bundle = config.parse(BASE, {}, source="t.yaml").jobs.bundle
+    assert (bundle.snapshot_sim, bundle.snapshot_items, bundle.snapshot_chars) == (0.55, 12, 3000)
+    with pytest.raises(config.ConfigError):
+        config.parse(BASE + "jobs:\n  bundle:\n    snapshot_sim: 1.5\n", {}, source="t.yaml")

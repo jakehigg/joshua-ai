@@ -318,6 +318,7 @@ The default is an empty list, and then nothing runs. See
 | `items` | none | a dotted path into a JSON result that holds the list, such as `result.tasks` |
 | `max_chars` | `20000` | the output is cut here, and core logs the cut |
 | `max_age` | 3 × `every`, at least `15m` | an output older than this leaves the index |
+| `jobs` | `false` | for a snapshot of one person: `true` lets a job bundle take its items. A bundle feeds wiki pages that every reader can open. A `shared` snapshot is in a bundle always |
 
 Validation refuses a snapshot with an unknown server, a person who is not in
 `people`, a person whom the server does not allow, `shared` on a server that
@@ -541,6 +542,9 @@ jobs:
       - "garden-weather-log-*"
     max_chars: 24000
     recent_days: 14
+    snapshot_sim: 0.55
+    snapshot_items: 12
+    snapshot_chars: 3000
   topics:
     exclude:
       - vocabulary.md
@@ -620,6 +624,9 @@ jobs:
 | `bundle.exclude_slugs` | empty | `fnmatch` globs on the file name of a journal entry, without `.md`. No bundle takes an entry that a glob matches. The names belong to one instance, for example `garden-weather-log-*` for a daily log. |
 | `bundle.max_chars` | `24000` | The size limit of the bundle text. The topic page is never cut. |
 | `bundle.recent_days` | `14` | How many days back the researcher looks for the topics that the messages of people name. |
+| `bundle.snapshot_sim` | `0.55` | A snapshot item this close to a chunk of the topic page comes into the bundle. See [docs/jobs.md](jobs.md#snapshots-in-the-bundle). |
+| `bundle.snapshot_items` | `12` | The most snapshot items in one bundle, the closest first. `0` turns the snapshot block off. |
+| `bundle.snapshot_chars` | `3000` | The size limit of the snapshot block. It stops at the first item that does not fit. |
 | `topics.exclude` | `vocabulary.md`, `*/README.md`, `coach/profiles/*` | `fnmatch` globs, relative to the wiki root, for the pages that are not topics. A list that you set replaces the default list, so keep `coach/profiles/*` in it. |
 | `curator.enabled` | `false` | `true` adds the `curator` job and the `curator` chat tool for members. Both also need `jobs.enabled`. |
 | `curator.model` | not set | The model of the curator workers. When it is not set, the curator uses `jobs.model`, then `core.reflection_model`. |

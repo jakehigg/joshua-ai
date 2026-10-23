@@ -60,9 +60,11 @@ shared answer). When it fails a floor rule, it goes to `person`, and
 `route_reason` names the rule. A question of a person section that is not
 `record` goes to `person` (`person section`), and so does one with
 `about_person: true` (`about a person`). A `record` question goes to the
-memory search over the `wiki`, `journal`, and `knowledge` kinds: a hit at
-`jobs.research.record_sim` or more closes it with `answered_by: <path>`, and
-with no such hit it goes to `person` (`no record found`). A `person` question
+memory search over the `wiki`, `journal`, and `knowledge` kinds, and over the
+items of the snapshots that a job may see (`bundle.job_snapshots`): the
+closest hit at `jobs.research.record_sim` or more closes it with
+`answered_by: <path>`, or `answered_by: snapshots/<name>` for a snapshot
+item, and with no such hit it goes to `person` (`no record found`). A `person` question
 from the worker needs `why`. A `person` question whose text, or whose vector
 at `dup_sim` or more, matches an open or answered question page of the topic
 is `already asked`; a match on a dismissed one is `dismissed before`.
@@ -82,9 +84,15 @@ from pathlib import Path
 from typing import Any
 
 from joshua_shared import frontmatter, layout
+from joshua_shared.config import Snapshot
 from joshua_shared.log import get_logger
 
-from joshua_core.jobs.bundle import BundleStore, is_job_entry
+from joshua_core.jobs.bundle import (
+    BundleStore,
+    is_job_entry,
+    near_snapshot_items,
+    snapshot_part_path,
+)
 from joshua_core.jobs.research.known import (
     KNOWLEDGE_KIND,
     STATUS_PUBLISHED,
@@ -503,6 +511,7 @@ class Gate:
         possessives: Sequence[str] = (),
         generic: str = "",
         topic: str = "",
+        snapshots: dict[str, Snapshot] | None = None,
     ) -> None:
         self._bundle_text = bundle_text
         self._terms = [t for t in terms if t.strip()]
@@ -518,6 +527,7 @@ class Gate:
         self._possessives = [p for p in possessives if p.strip()]
         self._generic = generic
         self._topic = topic
+        self._snapshots = dict(snapshots or {})
         self._vectors: dict[str, list[list[float]]] = {}
         self.notes: list[str] = []
         self._vectors_off = False
@@ -582,10 +592,12 @@ class Gate:
         return _Duplicate()
 
     async def _record(self, question: str) -> str | None:
-        """The closest of our records at `record_sim` or more, or None."""
+        """The closest of our records or of the snapshot items at
+        `record_sim` or more, or None."""
         vectors = await self._vectors_of(question)
         if not vectors:
             return None
+        best: tuple[str, float] | None = None
         try:
             near = await self._store.kb_near_paths(
                 vectors, kinds=list(RECORD_KINDS), min_sim=self._record_sim
@@ -593,14 +605,36 @@ class Gate:
         except Exception as exc:  # noqa: BLE001 — no index means no record
             self.notes.append("The record search did not run.")
             logger.warning({"message": "research record search failed", "error": str(exc)})
-            return None
+            near = {}
         for index_path, sim in sorted(near.items(), key=lambda item: (-item[1], item[0])):
             if sim < self._record_sim:
                 continue
             page = _record_page(index_path, self._data_root)
             if page is not None:
-                return page
-        return None
+                best = (page, sim)
+                break
+        snapshot = await self._snapshot_record(vectors)
+        if snapshot is not None and (best is None or snapshot[1] > best[1]):
+            best = snapshot
+        return best[0] if best is not None else None
+
+    async def _snapshot_record(self, vectors: list[list[float]]) -> tuple[str, float] | None:
+        """`(snapshots/<name>, similarity)` of the closest snapshot item at
+        `record_sim` or more, or None."""
+        if not self._snapshots:
+            return None
+        try:
+            items = await near_snapshot_items(
+                self._store, vectors, self._snapshots, min_sim=self._record_sim, limit=1
+            )
+        except Exception as exc:  # noqa: BLE001 — no index means no snapshot record
+            self.notes.append("The snapshot record search did not run.")
+            logger.warning({"message": "research snapshot record failed", "error": str(exc)})
+            return None
+        if not items.chunks:
+            return None
+        chunk = items.chunks[0]
+        return snapshot_part_path(chunk.title), float(chunk.similarity or 0.0)
 
     async def _asked_before(self, question: str) -> tuple[str, str | None]:
         """`already asked` or `dismissed before` with the question page, or

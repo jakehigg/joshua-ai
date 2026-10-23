@@ -6,22 +6,38 @@ order:
 
 1. the topic page;
 2. the pages it links to inside its own section, one hop, in link order;
-3. the journal entries about it, newest first: each entry that names the
+3. the snapshot block: one part `snapshots/<name>` per snapshot that has an
+   item close to the topic page (see below);
+4. the journal entries about it, newest first: each entry that names the
    topic, and the entries with a chunk at or above `jobs.bundle.sim` to a
    chunk of the topic page. The entries that only the similarity brings in
    are capped at `jobs.bundle.max_vector_entries`, the closest first;
-4. the dossier of the topic and its knowledge pages, when they exist;
-5. the answered questions of the topic: a page in `wiki/questions/` whose
+5. the dossier of the topic and its knowledge pages, when they exist;
+6. the answered questions of the topic: a page in `wiki/questions/` whose
    frontmatter `topic` is this topic and whose `status` is `answered`, as a
    short block of the question and the answer only. An open or a dismissed
    question is never in a bundle;
-6. the open insights of the topic: an insight page whose frontmatter `topic`
+7. the open insights of the topic: an insight page whose frontmatter `topic`
    is this topic and whose `status` is `new`, `told`, or `acknowledged`.
 
 Each part starts with a line `## <path>`, the path relative to the wiki root,
 so a worker can cite it. The text stops at `jobs.bundle.max_chars`: a part that
 does not fit is left out with every part after it, and `truncated` is true.
 The topic page is never cut.
+
+The snapshot block holds the items of live state (`memory.snapshots`, the
+index rows of kind `snapshot`) that are close to the topic page. A job may
+see a snapshot whose scope is `shared`, and a snapshot of one person only
+when its entry sets `jobs: true`, because a bundle feeds wiki pages that every
+reader of the wiki can open. The chunks of the topic page are the query. An
+item comes in at `jobs.bundle.snapshot_sim` or more, the closest first, at
+most `jobs.bundle.snapshot_items` items, and the block stops at the first
+item that does not fit in `jobs.bundle.snapshot_chars` characters. A part
+starts with the line `Live snapshot of <server> <tool> as of <local time>.`,
+the time of the latest good fetch, and then holds one line per item, at most
+`SNAPSHOT_LINE_CHARS` characters. A snapshot with no good fetch is left out.
+With no embedding model there is no block, and `Bundle.notes` says so.
+`Bundle.snapshots` records each part, its items, and their similarity.
 
 The aliases of a topic are its frontmatter `aliases` list and the terms that
 `vocabulary.md` at the wiki root gives it. A line of `vocabulary.md` that
@@ -67,7 +83,7 @@ from urllib.parse import unquote
 from zoneinfo import ZoneInfo
 
 from joshua_shared import frontmatter, layout
-from joshua_shared.config import JoshuaConfig, Person
+from joshua_shared.config import JoshuaConfig, Person, Snapshot
 from joshua_shared.log import get_logger
 
 from joshua_core.jobs.topics import (
@@ -79,6 +95,8 @@ from joshua_core.jobs.topics import (
     topic_names,
 )
 from joshua_core.memory.indexer import embed_document
+from joshua_core.memory.models import KbChunk
+from joshua_core.memory.sources.snapshots import as_of, item_body, shown
 
 logger = get_logger("jobs.bundle")
 
@@ -95,6 +113,15 @@ VIA_ALIAS = "alias"
 VIA_VECTOR = "vector"
 # The index stores a files path relative to the data root.
 _INDEX_WIKI_PREFIX = "wiki/"
+# The folder of a snapshot part in a bundle: `snapshots/<name>`.
+SNAPSHOTS_FOLDER = "snapshots"
+# A snapshot line of a bundle holds at most this many characters of the item.
+SNAPSHOT_LINE_CHARS = 300
+# The snapshot query asks for this many times the item cap, so that the
+# rows that the scope rule or the fetch time drops leave enough items.
+_SNAPSHOT_QUERY_FACTOR = 4
+NO_SNAPSHOT_MODEL = "No snapshot came into the bundle: no embedding model."
+NO_SNAPSHOT_SEARCH = "The snapshot search did not run."
 
 # `[text](target)`, not an image. The target stops at a space or `)`.
 _MD_LINK_RE = re.compile(r"(?<!!)\[(?P<text>[^\]]*)\]\((?P<target>[^)\s]+)(?:\s+[^)]*)?\)")
@@ -105,7 +132,8 @@ _LIST_MARK_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 
 
 class BundleStore(Protocol):
-    """The one index query the bundle needs. `MemoryStore` implements it."""
+    """The index queries the bundle needs. `MemoryStore` implements them.
+    The two snapshot queries run only when a job may see a snapshot."""
 
     async def kb_near_paths(
         self,
@@ -116,6 +144,29 @@ class BundleStore(Protocol):
         source: str = "files",
     ) -> dict[str, float]: ...
 
+    async def kb_near_snapshots(
+        self,
+        embeddings: Sequence[list[float]],
+        *,
+        names: Sequence[str],
+        min_sim: float,
+        limit: int,
+    ) -> list[KbChunk]: ...
+
+    async def snapshot_times(self, names: Sequence[str]) -> dict[str, datetime]: ...
+
+
+@dataclass(frozen=True)
+class SnapshotPart:
+    """One snapshot part of a bundle: the snapshot name, the part path
+    `snapshots/<name>`, the text, and `{item uri: similarity}` of its items,
+    closest first."""
+
+    name: str
+    path: str
+    text: str
+    items: dict[str, float] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class Bundle:
@@ -125,7 +176,8 @@ class Bundle:
     of the text. `chars` is `len(text)`. `truncated` is true when a part was
     left out because of `jobs.bundle.max_chars`. `journal_via` maps each
     journal entry in `paths` to how it got in: `title`, `alias`, or
-    `vector <sim>`.
+    `vector <sim>`. `snapshots` holds each snapshot part in `paths`, with
+    its items and their similarity. `notes` says why a step did not run.
     """
 
     topic: Topic
@@ -135,6 +187,13 @@ class Bundle:
     truncated: bool
     aliases: list[str] = field(default_factory=list)
     journal_via: dict[str, str] = field(default_factory=dict)
+    snapshots: list[SnapshotPart] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def snapshot_via(self) -> dict[str, float]:
+        """`{item uri: similarity}` of every snapshot item in the bundle."""
+        return {uri: sim for part in self.snapshots for uri, sim in part.items.items()}
 
 
 @dataclass(frozen=True)
@@ -331,11 +390,11 @@ def journal_entries(wiki_root: Path, today: date) -> list[JournalEntry]:
     return _journal_entries(wiki_root.parent, wiki_root, today)
 
 
-async def _near_journal_paths(
-    topic: Topic, text: str, repo: BundleStore, settings: JoshuaConfig
-) -> dict[str, float]:
-    """The journal pages with a chunk at or above `jobs.bundle.sim` to the topic
-    page, each with its best similarity."""
+async def _topic_vectors(
+    topic: Topic, text: str, settings: JoshuaConfig
+) -> list[list[float]] | None:
+    """The vectors of the chunks of the topic page, or None when the
+    embedding model is not available."""
     try:
         chunks = await embed_document(
             topic.title,
@@ -345,8 +404,17 @@ async def _near_journal_paths(
         )
     except RuntimeError as exc:
         logger.warning({"message": "bundle has no vector match", "error": str(exc)})
+        return None
+    return [vec for _, _, vec in chunks]
+
+
+async def _near_journal_paths(
+    vectors: list[list[float]] | None, repo: BundleStore, settings: JoshuaConfig
+) -> dict[str, float]:
+    """The journal pages with a chunk at or above `jobs.bundle.sim` to the topic
+    page, each with its best similarity."""
+    if not vectors:
         return {}
-    vectors = [vec for _, _, vec in chunks]
     near = await repo.kb_near_paths(vectors, kinds=[JOURNAL_KIND], min_sim=settings.jobs.bundle.sim)
     return {
         path[len(_INDEX_WIKI_PREFIX) :]: float(sim)
@@ -383,6 +451,148 @@ def _about_topic(
     for entry in vector_only[: cfg.max_vector_entries]:
         via[entry.rel] = f"{VIA_VECTOR} {near[entry.rel]:.2f}"
     return via
+
+
+# -- snapshots --------------------------------------------------------------
+
+
+def job_snapshots(settings: JoshuaConfig) -> dict[str, Snapshot]:
+    """`{name: snapshot}` of the snapshots that a job may see: scope `shared`,
+    or `jobs: true`."""
+    return {snap.name: snap for snap in settings.memory.snapshots if snap.in_jobs}
+
+
+def snapshot_part_path(name: str) -> str:
+    """The bundle path of the part of one snapshot: `snapshots/<name>`."""
+    return f"{SNAPSHOTS_FOLDER}/{name}"
+
+
+def snapshot_line(chunk: KbChunk) -> str:
+    """The item of a snapshot chunk on one line: its lines joined with `; `,
+    at most `SNAPSHOT_LINE_CHARS` characters."""
+    lines = [" ".join(line.split()) for line in item_body(chunk.text or "").splitlines()]
+    return "; ".join(line for line in lines if line)[:SNAPSHOT_LINE_CHARS]
+
+
+@dataclass(frozen=True)
+class SnapshotItems:
+    """The snapshot items near a query: the chunks, the closest first, and
+    `{name: time of the latest good fetch}` of their snapshots."""
+
+    chunks: list[KbChunk]
+    times: dict[str, datetime]
+
+
+async def near_snapshot_items(
+    store: BundleStore,
+    vectors: Sequence[list[float]],
+    allowed: dict[str, Snapshot],
+    *,
+    min_sim: float,
+    limit: int,
+) -> SnapshotItems:
+    """The snapshot items at `min_sim` or more to any of `vectors`, the
+    closest first, at most `limit`, one chunk per item.
+
+    Only the snapshots in `allowed` count, and a row must have the scope of
+    its config entry. A snapshot with no good fetch is left out. A failed
+    query raises; the caller decides what that means.
+    """
+    if not vectors or not allowed or limit <= 0:
+        return SnapshotItems([], {})
+    rows = await store.kb_near_snapshots(
+        vectors,
+        names=sorted(allowed),
+        min_sim=min_sim,
+        limit=limit * _SNAPSHOT_QUERY_FACTOR,
+    )
+    seen: set[str] = set()
+    kept: list[KbChunk] = []
+    for row in sorted(rows, key=lambda c: (-(c.similarity or 0.0), c.path, c.chunk_index)):
+        snap = allowed.get(row.title)
+        if snap is None or row.person_id != snap.person_id or row.path in seen:
+            continue
+        if (row.similarity or 0.0) < min_sim:
+            continue
+        seen.add(row.path)
+        kept.append(row)
+    names = sorted({c.title for c in kept})
+    times = await store.snapshot_times(names) if names else {}
+    kept = shown(kept, times)[:limit]
+    return SnapshotItems(kept, {n: t for n, t in times.items() if n in names})
+
+
+def snapshot_parts(
+    items: SnapshotItems, allowed: dict[str, Snapshot], settings: JoshuaConfig
+) -> list[SnapshotPart]:
+    """One part per snapshot, in the order of its closest item. The block
+    stops at the first item that does not fit in `jobs.bundle.snapshot_chars`."""
+    budget = settings.jobs.bundle.snapshot_chars
+    used = 0
+    lines: dict[str, list[str]] = {}
+    sims: dict[str, dict[str, float]] = {}
+    heads: dict[str, str] = {}
+    for chunk in items.chunks:
+        name = chunk.title
+        line = snapshot_line(chunk)
+        if not line:
+            continue
+        cost = len(line) + 3
+        head = ""
+        if name not in heads:
+            snap = allowed[name]
+            head = (
+                f"Live snapshot of {snap.server} {snap.tool} as of "
+                f"{as_of(items.times[name], settings.timezone)}."
+            )
+            cost += len(head) + 2
+        if used + cost > budget:
+            break
+        used += cost
+        if head:
+            heads[name] = head
+        lines.setdefault(name, []).append(f"- {line}")
+        sims.setdefault(name, {})[chunk.path] = round(float(chunk.similarity or 0.0), 4)
+    return [
+        SnapshotPart(
+            name=name,
+            path=snapshot_part_path(name),
+            text=heads[name] + "\n\n" + "\n".join(lines[name]),
+            items=sims[name],
+        )
+        for name in heads
+    ]
+
+
+async def _snapshot_block(
+    vectors: list[list[float]] | None, repo: BundleStore, settings: JoshuaConfig
+) -> tuple[list[SnapshotPart], list[str]]:
+    """The snapshot parts of a bundle and the notes. It never fails."""
+    cfg = settings.jobs.bundle
+    allowed = job_snapshots(settings)
+    if not allowed or cfg.snapshot_items <= 0 or cfg.snapshot_chars <= 0:
+        return [], []
+    if vectors is None:
+        return [], [NO_SNAPSHOT_MODEL]
+    try:
+        items = await near_snapshot_items(
+            repo, vectors, allowed, min_sim=cfg.snapshot_sim, limit=cfg.snapshot_items
+        )
+    except Exception as exc:  # noqa: BLE001 — a snapshot never fails a bundle
+        logger.warning({"message": "bundle snapshot search failed", "error": str(exc)})
+        return [], [NO_SNAPSHOT_SEARCH]
+    return snapshot_parts(items, allowed, settings), []
+
+
+def snapshot_summary(bundle: Bundle) -> str:
+    """`Snapshots: <name> (<n> items), ...` for a report, or `Snapshots: none.`"""
+    if not bundle.snapshots:
+        return "Snapshots: none."
+    shown_parts = []
+    for part in bundle.snapshots:
+        count = len(part.items)
+        shown_parts.append(f"{part.name} ({count} item{'' if count == 1 else 's'})")
+    return "Snapshots: " + ", ".join(shown_parts) + "."
 
 
 # -- knowledge, questions, and insights ------------------------------------
@@ -455,9 +665,10 @@ async def build_bundle(
     """Build the memory bundle of `topic`. See the module docstring for the rules.
 
     `wiki_root` is `layout.wiki_root(<data root>)`. `repo` answers the vector
-    query; the topic page is embedded with the indexer's own path. When the
-    embedding model is not available, the vector match is left out and the
-    text match still runs. `now` sets the last journal day.
+    queries; the topic page is embedded once, with the indexer's own path.
+    When the embedding model is not available, the vector match and the
+    snapshot block are left out and the text match still runs. `now` sets the
+    last journal day.
     """
     wiki_root = Path(wiki_root)
     data_root = wiki_root.parent
@@ -473,7 +684,11 @@ async def build_bundle(
         for rel in _linked_pages(topic, topic_text, wiki_root)
     )
 
-    near = await _near_journal_paths(topic, topic_text, repo, settings)
+    vectors = await _topic_vectors(topic, topic_text, settings)
+    snapshots, notes = await _snapshot_block(vectors, repo, settings)
+    parts.extend(_Part(part.path, part.text) for part in snapshots)
+
+    near = await _near_journal_paths(vectors, repo, settings)
     every = _journal_entries(data_root, wiki_root, _local_day(now, settings))
     via = _about_topic(every, topic=topic, aliases=aliases, near=near, settings=settings)
     entries = [entry for entry in every if entry.rel in via]
@@ -508,4 +723,6 @@ async def build_bundle(
         truncated=truncated,
         aliases=aliases,
         journal_via={p: via[p] for p in paths if p in via},
+        snapshots=[part for part in snapshots if part.path in paths],
+        notes=notes,
     )

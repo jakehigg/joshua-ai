@@ -13,7 +13,8 @@ A run does this, in order:
       (a `curator_pair` row);
    3. `refresh` for each page whose `refreshed` pair is old or missing, the
       page that was never refreshed first, then the page with the oldest
-      `refreshed` day;
+      `refreshed` day. The worker reads the journal entries of the page since
+      its `refreshed` day and the snapshot parts of its bundle;
    4. `place` for each page that was curated before and changed since.
 3. The apply step (`apply.py`), when the run is not a dry run: every Tier A
    finding, and each Tier B finding whose action the run may apply. A
@@ -21,8 +22,8 @@ A run does this, in order:
 4. The tracking keys, when the run is not a dry run: the `curated` pair on
    each page that `place` answered for, and on each page that needs no
    `place` (an index page, a skill, a journal entry); the `refreshed` pair on
-   each topic page whose `refresh` answered or that had no journal entry to
-   read; and the old pairs again on each page the run changed that had
+   each topic page whose `refresh` answered or that had no journal entry and
+   no snapshot part to read; and the old pairs again on each page the run changed that had
    current pairs before.
 5. The findings, into `curator_finding`, and a `curator_pair` row for each
    pair that `compare` answered for, in a dry run too.
@@ -60,7 +61,7 @@ from joshua_shared.log import get_logger
 
 from joshua_core.engine.ephemeral import Runner
 from joshua_core.engine.usage import Usage
-from joshua_core.jobs.bundle import BundleStore, build_bundle
+from joshua_core.jobs.bundle import BundleStore, build_bundle, snapshot_summary
 from joshua_core.jobs.curator import scan, workers
 from joshua_core.jobs.curator.apply import ApplyRefused, Workspace, apply_patch, finds_once
 from joshua_core.jobs.curator.findings import (
@@ -209,6 +210,8 @@ class _Run:
     failed: dict[tuple[str, str], list[str]] = field(default_factory=dict)
     unsent: int = 0
     scope: list[str] | None = None
+    # `{page: snapshot summary}` of each page whose refresh read a snapshot.
+    snapshots: dict[str, str] = field(default_factory=dict)
 
     def reviewed_again(self, kind: str, paths: list[str]) -> bool:
         """True when the worker that raises `kind` was due to read `paths` in
@@ -378,9 +381,12 @@ class CuratorJob(Job):
     def _skip(self, run: _Run, worker: str, label: str, outcome: str) -> None:
         run.failed.setdefault((worker, outcome), []).append(label)
 
-    async def _entries(self, run: _Run, topic: Topic, text: str) -> list[tuple[str, str]] | None:
-        """The journal entries about a topic since its `refreshed` day, or None
-        when the bundle cannot be built."""
+    async def _entries(
+        self, run: _Run, topic: Topic, text: str
+    ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]] | None:
+        """The journal entries about a topic since its `refreshed` day and the
+        snapshot parts of its bundle, each `(path, text)`, or None when the
+        bundle cannot be built."""
         try:
             bundle = await build_bundle(
                 topic,
@@ -401,7 +407,10 @@ class CuratorJob(Job):
             if since is not None and (day is None or day <= since):
                 continue
             out.append((rel, run.tree.text(rel)))
-        return out
+        snapshots = [(part.path, part.text) for part in bundle.snapshots]
+        if snapshots:
+            run.snapshots[topic.path] = snapshot_summary(bundle)
+        return out, snapshots
 
     async def _refresh_pass(self, run: _Run, review: list[Topic], texts: dict[str, str]) -> None:
         for topic in review:
@@ -409,11 +418,12 @@ class CuratorJob(Job):
                 run.unsent += 1
                 continue
             text = texts[topic.path]
-            entries = await self._entries(run, topic, text)
-            if entries is None:
+            found = await self._entries(run, topic, text)
+            if found is None:
                 run.skipped.append(f"The journal entries of `{topic.path}` could not be read.")
                 continue
-            if not entries:
+            entries, snapshots = found
+            if not entries and not snapshots:
                 run.refreshed.add(topic.path)
                 continue
             run.budget.spend()
@@ -422,6 +432,7 @@ class CuratorJob(Job):
                 topic.path,
                 text,
                 entries,
+                snapshots=snapshots,
                 model=self._model("refresh"),
                 runner=self._runner,
                 usage_out=used,
@@ -432,7 +443,9 @@ class CuratorJob(Job):
                 continue
             run.answered["refresh"].add(topic.path)
             run.refreshed.add(topic.path)
-            self._on_refresh(run, topic.path, text, [p for p, _ in entries], got.answer)
+            self._on_refresh(
+                run, topic.path, text, [p for p, _ in [*entries, *snapshots]], got.answer
+            )
 
     def _on_refresh(
         self,
@@ -770,6 +783,13 @@ class CuratorJob(Job):
                 ("Proposed (Tier B)", _lines(todo_b)),
                 ("Proposed (Tier C)", _lines(todo_c)),
             ]
+        if run.snapshots:
+            sections.append(
+                (
+                    "Snapshots",
+                    "\n".join(f"- `{rel}`: {line}" for rel, line in sorted(run.snapshots.items())),
+                )
+            )
         sections.append(("Skipped", _skipped_text(run, held)))
         verb = "would get" if dry_run else "got"
         sections.append(

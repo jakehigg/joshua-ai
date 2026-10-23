@@ -88,3 +88,39 @@ async def test_snapshot_times_gives_the_latest_good_fetch(db, repo) -> None:
     times = await store.snapshot_times(["open-tasks", "never-good", "absent"])
     assert times == {"open-tasks": AT + timedelta(days=7)}
     assert await store.snapshot_times([]) == {}
+
+
+async def test_kb_near_snapshots_gives_the_closest_items_of_the_named_snapshots(db) -> None:
+    store = MemoryStore(db.pool)
+
+    def vec(*head: float) -> list[float]:
+        return [*head, *([0.0] * (384 - len(head)))]
+
+    rows = (
+        ("open-tasks", "snapshot/open-tasks/a", vec(1.0)),
+        ("open-tasks", "snapshot/open-tasks/b", vec(0.8, 0.6)),
+        ("open-tasks", "snapshot/open-tasks/c", vec(0.0, 1.0)),
+        ("other", "snapshot/other/a", vec(1.0)),
+    )
+    for name, path, vector in rows:
+        await store.kb_replace_item(
+            source="snapshots",
+            person_id=None,
+            path=path,
+            kind="snapshot",
+            title=name,
+            provenance="external",
+            file_sha256=path,
+            file_mtime=AT,
+            doc_date=AT.date(),
+            chunks=[("", f"{name}:\nitem {path}", vector)],
+        )
+    got = await store.kb_near_snapshots([vec(1.0)], names=["open-tasks"], min_sim=0.5, limit=5)
+    assert [c.path for c in got] == ["snapshot/open-tasks/a", "snapshot/open-tasks/b"]
+    assert got[0].similarity == pytest.approx(1.0)
+    assert got[1].similarity == pytest.approx(0.8)
+    assert all(c.kind == "snapshot" and c.title == "open-tasks" for c in got)
+    one = await store.kb_near_snapshots([vec(1.0)], names=["open-tasks"], min_sim=0.5, limit=1)
+    assert [c.path for c in one] == ["snapshot/open-tasks/a"]
+    assert await store.kb_near_snapshots([], names=["open-tasks"], min_sim=0.5, limit=5) == []
+    assert await store.kb_near_snapshots([vec(1.0)], names=[], min_sim=0.5, limit=5) == []

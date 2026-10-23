@@ -573,6 +573,10 @@ A `search_memory` result of a snapshot has no file. In place of the path, it
 says `snapshot <name> as of <time>; for live data call <server> <tool>`.
 `POST /v1/memory/search` never returns a snapshot row.
 
+The job workers have no turn. They see the shared snapshots, and a snapshot
+of one person with `jobs: true`, through the memory bundle
+([docs/jobs.md](jobs.md#snapshots-in-the-bundle)).
+
 `GET /admin/snapshots` shows each snapshot: the server, the tool, the scope,
 `every`, the fetch time, `ok`, the failures, the last error, and the item
 count. It never shows the text.

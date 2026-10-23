@@ -158,6 +158,8 @@ memory:
   #     items: result.tasks        # optional dotted path to the list in JSON
   #     max_chars: 20000           # the output is cut here
   #     max_age: 45m               # default 3 x every, at least 15m
+  #     jobs: false                # true: a job bundle may take a snapshot of one
+  #                                # person; a shared snapshot is in a bundle always
 
 attachments:
   # false: a file a person sends stays in the record of the chat, and the
@@ -250,6 +252,9 @@ jobs:
     #   - "garden-weather-log-*"
     max_chars: 24000       # the bundle text stops here; the topic page is never cut
     recent_days: 14        # how far back the researcher looks for what people name now
+    # snapshot_sim: 0.55   # a snapshot item this close to the topic page comes in
+    # snapshot_items: 12   # the most snapshot items in one bundle, the closest first
+    # snapshot_chars: 3000 # the size limit of the snapshot block
   topics:
     # A topic is one leaf page of the wiki. These globs, relative to the wiki
     # root, name the pages that are not topics.

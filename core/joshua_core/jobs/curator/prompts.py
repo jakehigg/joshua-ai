@@ -54,6 +54,12 @@ date. When an entry shows that something on the page is no longer true (a
 schedule changed, a thing was replaced, a number is different), the page is
 stale.
 
+A `<snapshot>` block is what a live system held at the time on its first
+line. When it disagrees with the page or an older entry, the snapshot is the
+current state, and the page is the thing that is out of date. A snapshot line
+is not the words of a person, so it is never a sign that a person cares about
+something.
+
 Answer with:
 
 - `status`: `current` when the entries change nothing on the page; `stale`
@@ -62,11 +68,13 @@ Answer with:
 - `patch`: a list of exact edits. Each has `find`, a piece of the page text
   copied exactly and long enough to occur only once in the page; `replace`,
   the new text; and `because`, the path and the date of the entry that
-  supports the edit. Keep each edit small. Change only what the entries
-  support. Give an empty list when the status is `current`.
+  supports the edit, or the snapshot path and its time. Keep each edit small.
+  Change only what the entries or the snapshots support. Give an empty list
+  when the status is `current`.
 - `confidence`: `high` only when the entries clearly support every edit.
 
-Do not add new sections, opinions, or facts that the entries do not hold.
+Do not add new sections, opinions, or facts that the entries and the
+snapshots do not hold.
 
 The page holds the current state. When the entries show that a dated status
 note or a warning on the page is no longer current, fold it into the body as

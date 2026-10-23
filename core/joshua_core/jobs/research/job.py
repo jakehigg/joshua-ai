@@ -70,7 +70,13 @@ from joshua_shared.log import get_logger
 
 from joshua_core.engine.ephemeral import Runner
 from joshua_core.engine.usage import Usage, UsageLedger
-from joshua_core.jobs.bundle import Bundle, BundleStore, build_bundle
+from joshua_core.jobs.bundle import (
+    Bundle,
+    BundleStore,
+    build_bundle,
+    job_snapshots,
+    snapshot_summary,
+)
 from joshua_core.jobs.models import LOOKUP, research_model
 from joshua_core.jobs.research import crew
 from joshua_core.jobs.research.dossier import (
@@ -529,6 +535,7 @@ class ResearchJob(Job):
             possessives=possessive_forms(topic.title, self._settings.people),
             generic=generic_title(topic.title, self._settings.people),
             topic=topic.path,
+            snapshots=job_snapshots(self._settings),
         )
         for raised_candidate in raised.candidates:
             verdict = await gate.check(raised_candidate)
@@ -821,6 +828,8 @@ class ResearchJob(Job):
         bundle_lines = [f"- `{p}`" for p in bundle.paths]
         cut = ", cut at jobs.bundle.max_chars" if bundle.truncated else ""
         bundle_lines.append(f"- {bundle.chars} characters{cut}")
+        bundle_lines.append(f"- {snapshot_summary(bundle)}")
+        bundle_lines += [f"- {note}" for note in bundle.notes]
         sections = [
             ("Topic", self._topic_lines(run, topic)),
             ("Bundle", "\n".join(bundle_lines)),
@@ -888,7 +897,11 @@ class ResearchJob(Job):
                 "rule": run.selection.rule,
                 "runner_up": run.selection.runner_up,
                 "reason": run.selection.reason,
-                "bundle": {"paths": bundle.paths, "chars": bundle.chars},
+                "bundle": {
+                    "paths": bundle.paths,
+                    "chars": bundle.chars,
+                    "snapshot_via": bundle.snapshot_via,
+                },
                 "slugs": [q.slug for q in dossier.questions],
                 "questions": [{"slug": q.slug, "status": q.status} for q in dossier.questions],
                 "added": [q.slug for q in run.added],

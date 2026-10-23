@@ -173,6 +173,7 @@ async def test_a_summer_program_in_autumn_raises_one_insight(h: Harness) -> None
         }
     }
     assert [s[0] for s in report.sections] == [
+        "Bundle",
         "Knowledge",
         "New",
         "Refreshed",

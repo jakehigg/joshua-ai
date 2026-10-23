@@ -10,12 +10,19 @@ from __future__ import annotations
 INSIGHT_PROMPT = """You find insights about one topic of a personal wiki.
 
 What we do is in the bundle: our wiki page about the topic, the pages it
-links to, and our journal entries. What is known is in the knowledge pages:
-researched answers, each with its confidence, its sources, and the day after
-which it must be checked again (`refresh_after`). Above the text of each
+links to, the snapshots of live systems, and our journal entries. What is
+known is in the knowledge pages: researched answers, each with its
+confidence, its sources, and the day after which it must be checked again
+(`refresh_after`). Above the text of each
 knowledge page are its short answer and, when the page has one, the editor's
 note for us: the editor's own judgment of where the answer differs for our
 situation. Read that note with care. It often names the gap.
+
+A `snapshots/` part is what a live system held at the time on its first
+line. When it disagrees with a page or an older journal entry, the snapshot
+is the current state, and the page is the thing that is out of date. A
+snapshot line is not the words of a person, so it is never a sign that a
+person cares about something.
 
 An insight is one of two cases, for the date, the season, and our situation:
 

@@ -171,13 +171,15 @@ builds it the same way, in this order:
 
 1. the topic page;
 2. the pages that the topic page links to inside its own section, one hop;
-3. the journal entries about the topic, newest first;
-4. the dossier of the topic and its knowledge pages, when they exist;
-5. the answered questions of the topic: a page in `wiki/questions/` whose
+3. the snapshot block: the items of live systems that are close to the topic
+   page (see [Snapshots in the bundle](#snapshots-in-the-bundle));
+4. the journal entries about the topic, newest first;
+5. the dossier of the topic and its knowledge pages, when they exist;
+6. the answered questions of the topic: a page in `wiki/questions/` whose
    frontmatter `topic` is the topic and whose `status` is `answered`. The
    bundle holds the question and the answer only. An open or a dismissed
    question is not in the bundle;
-6. the open insights of the topic: a page in `wiki/insights/` whose
+7. the open insights of the topic: a page in `wiki/insights/` whose
    frontmatter `topic` is the topic and whose `status` is `new`, `told`, or
    `acknowledged`.
 
@@ -252,7 +254,61 @@ Each part of the bundle starts with a line `## <path>`, the path of the page
 relative to the wiki root, so a worker can cite the page and a report can say
 what the job read. The bundle stops at `jobs.bundle.max_chars` (24 000
 characters). A part that does not fit is left out with every part after it.
-The topic page is never cut.
+The topic page is never cut. The snapshot block comes before the journal
+entries, so the bundle cuts a journal entry before it cuts a snapshot.
+
+### Snapshots in the bundle
+
+A job worker has no tools, so it cannot call a live system. A snapshot
+(`memory.snapshots`, see [docs/memory.md](memory.md)) gives it the live state:
+the bundle holds the few snapshot items that are close to the topic, with
+the time of the fetch. A worker can then see that a page or a journal entry
+is out of date.
+
+Which snapshots a job sees:
+
+- a snapshot with `scope: shared`;
+- a snapshot of one person only when its entry sets `jobs: true`. The
+  default is false, because a bundle feeds wiki pages that every reader of
+  the wiki can open.
+
+How the bundle selects the items:
+
+1. The chunks of the topic page are the query. The bundle embeds them once,
+   for the journal match and for the snapshots.
+2. An item comes in when it has a similarity of `jobs.bundle.snapshot_sim`
+   (0.55) or more to a chunk of the topic page. The items are short, so the
+   floor is lower than `jobs.bundle.sim`.
+3. The closest item goes first. The block holds
+   `jobs.bundle.snapshot_items` (12) items at most, and it stops at the
+   first item that does not fit in `jobs.bundle.snapshot_chars` (3 000)
+   characters. The bundle never holds a whole snapshot or every snapshot.
+4. A snapshot with no good fetch is left out.
+
+The block has one part for each snapshot, at the path `snapshots/<name>`.
+The first line gives the server, the tool, and the local time of the latest
+good fetch. Then each item is one line, with its line breaks folded, at most
+300 characters:
+
+```markdown
+## snapshots/open-tasks
+
+Live snapshot of tasks list_open_tasks as of 2026-03-14 11:00 EDT.
+
+- title: Change the filter; due: 2026-03-20
+- title: Check the backup; due: 2026-03-16
+```
+
+The workers read a `snapshots/` part as what a live system held at its time.
+When it disagrees with a page or an older journal entry, the snapshot is the
+current state, and the page is out of date. A snapshot line is not the words
+of a person, so it never shows that a person cares about something.
+
+With no embedding model, the bundle has no snapshot block, and the report
+says so. `Bundle.snapshots` records each part, its items, and the similarity
+of each item. The report of each job says `Snapshots: <name> (<n> items)`.
+
+The digest job never reads a snapshot.
 
 ## The `bundle` job
 
@@ -265,8 +321,9 @@ path that is not a topic page gets 400.
 
 The report lists the paths in the bundle, the size of the text, the aliases,
 and whether the bundle was cut. Under "Journal entries" it gives, for each
-journal entry, how the entry got in: `title`, `alias`, or `vector <sim>`. The journal entry holds the path list, not the
-bundle text. The `report.data` field of the row holds the same values as JSON.
+journal entry, how the entry got in: `title`, `alias`, or `vector <sim>`.
+Under "Snapshots" it gives the snapshot parts and each item with its
+similarity. The journal entry holds the path list, not the bundle text. The `report.data` field of the row holds the same values as JSON.
 
 ## The routes
 
@@ -387,7 +444,7 @@ is `jobs.curator.models.<worker>`, then `jobs.curator.model`, then
 
 | Worker | Reads | Answers | Finding |
 |---|---|---|---|
-| `refresh` | the page, and the journal entries about it from the memory bundle that are dated after its `refreshed` day (all of them for a page with no `refreshed` day) | `status` (`current`, `stale`, `conflict`), `patch` (find and replace pairs, each with `because`), `confidence` | `refresh`, Tier B when the status is `stale`, the confidence is `high`, and each `find` occurs exactly once in the body. Else Tier C, with the patch. |
+| `refresh` | the page, the journal entries about it from the memory bundle that are dated after its `refreshed` day (all of them for a page with no `refreshed` day), and the snapshot parts of its bundle | `status` (`current`, `stale`, `conflict`), `patch` (find and replace pairs, each with `because`: an entry and its date, or `snapshots/<name>` and its time), `confidence` | `refresh`, Tier B when the status is `stale`, the confidence is `high`, and each `find` occurs exactly once in the body. Else Tier C, with the patch. |
 | `place` | the page, and the section map: each list line of `## Sections` on `Home.md`, and the first paragraph of its index page | `section`, `folder`, `confidence`, `reason` | `misplaced`, Tier B (`move`) when the folder is not the folder of the page and the confidence is `high`; Tier C for a lower confidence or a folder that is not there. A `section` of `none` is a Tier C `no-section` finding. |
 | `compare` | two topic pages | `relation` (`duplicate`, `overlap`, `conflict`, `unrelated`), `claims`, `canonical`, `confidence` | `duplicate`, Tier B (`merge`) for a duplicate with `high` confidence; `conflict`, Tier C, with the claims. |
 
@@ -397,7 +454,7 @@ A run spends its budget in this order:
 2. `compare` for each pair, the near-duplicates first. A pair that `compare`
    read before, at the same two body hashes, is not read again.
 3. `refresh` for each page whose `refreshed` pair is old or missing, when it
-   has journal entries about it. The page that was never refreshed goes
+   has journal entries about it or a snapshot part in its bundle. The page that was never refreshed goes
    first, then the page with the oldest `refreshed` day.
 4. `place` for each page that was curated before and changed since.
 
@@ -551,6 +608,8 @@ these sections:
   applied because they are dismissed. The calls that gave no usable answer
   are in one line for each worker, with a count, and the pages or pairs are
   in a list under it.
+- **Snapshots**: for each page whose `refresh` read a snapshot part, the line
+  `Snapshots: <name> (<n> items)`. The section is not there when no page did.
 - **Reviewed**: the number of pages that got the `curated` pair, and the
   number of pages that got the `refreshed` pair.
 
@@ -846,8 +905,9 @@ and rejects it with a reason at the first rule that it fails:
    `subject`.
 4. `local_context` has 40 to 600 characters.
 5. `grounded_in` has two phrases or more. Each phrase has 3 to 160 characters
-   and occurs word for word in the bundle text. Case and line breaks do not
-   count. There is no stemming and no fuzzy match.
+   and occurs word for word in the bundle text, a `snapshots/<name>` part
+   too. Case and line breaks do not count. There is no stemming and no fuzzy
+   match.
 6. The floor rules below. A general question that fails one is rejected, and
    the reason starts with the name of the rule. It does not go to a person,
    because the worker was told not to write such a question, and a question
@@ -890,11 +950,15 @@ not `record` goes to `person` (`person section`), and so does a question with
 sends there has the `route_reason` `the raise worker asks a person`. Then:
 
 - **`record`**: the gate searches the index with the question, over the kinds
-  `wiki`, `journal`, and `knowledge`. A hit counts when it is a topic page, a
-  journal entry that no job wrote, or a knowledge page with a `question`. When
-  the best hit is at `jobs.research.record_sim` (0.80) or more, the report
-  closes the question with `answered_by: <path>`, and the run writes nothing
-  for it. Below that, nothing holds the answer, so the question goes to
+  `wiki`, `journal`, and `knowledge`, and over the items of the snapshots that
+  a job sees (see [Snapshots in the bundle](#snapshots-in-the-bundle)). A hit
+  counts when it is a topic page, a journal entry that no job wrote, a
+  knowledge page with a `question`, or a snapshot item with a good fetch.
+  When the best hit is at `jobs.research.record_sim` (0.80) or more, the
+  report closes the question with `answered_by: <path>`, or
+  `answered_by: snapshots/<name>` for a snapshot item, and the run writes
+  nothing for it. A question that a snapshot answers never goes to
+  `wiki/questions/`. Below that, nothing holds the answer, so the question goes to
   `person` with the `route_reason` `no record found`. The record search stays
   inside the instance, so a `record` question of a person section, or one
   about a person, still goes to it.
@@ -1203,10 +1267,10 @@ The report of a research run is the journal entry of the run, and
 | Section | What it holds |
 |---|---|
 | Topic | the topic, the rule that selected it and why, the runner-up, and for a topic in a person section, a line that says so |
-| Bundle | each path of the bundle, its size, and if it was cut |
+| Bundle | each path of the bundle, its size, if it was cut, and the line `Snapshots: <name> (<n> items)` |
 | Questions | each question of the dossier, with its slug and status, as `general: <the general question>; local: <the local context>`. A new question that got the generic name of the topic has `(generic name)` after its general question. A shared answer has `shared` in its status and the page that answers it |
 | For a person | each new question page, with its id, `for`, `route_reason`, and `why`, and each question that was `already asked` or `dismissed before` |
-| Answered by our records | each `record` question with its `answered_by` path |
+| Answered by our records | each `record` question with its `answered_by` path, which can be `snapshots/<name>` |
 | Rejected | each rejected question with the reason |
 | Researched | `run` only: the result of each question that the run researched, marked `applied, no lookup`, `narrowed`, `full crew`, `editor only`, or `not sent` |
 | Pages | a dry `run` only: the full text of each page it would write |
@@ -1342,7 +1406,8 @@ expire an insight either: the report lists the insights that would expire.
 The report holds the full text of each page that the run would write.
 
 The summary is `insights: <topic> (N new, M refreshed, K expired, R
-rejected)`. The report has the sections **Knowledge**, **New** (each with its
+rejected)`. The report has the sections **Bundle** (the line
+`Snapshots: <name> (<n> items)`), **Knowledge**, **New** (each with its
 claim, severity, valid days, `we_do`, and `knowledge_says`), **Refreshed**,
 **Expired**, **Rejected** (each with its reason), and **Usage**. The worker
 call counts under the name `insight`.
@@ -1355,8 +1420,10 @@ true:
 - `claim` has 15 to 200 characters, and `action` is not empty.
 - `confidence` is not `low`. The reason is `low confidence`.
 - `we_do` has one phrase or more. Each phrase has 3 to 160 characters and
-  occurs word for word in a part of the bundle that says what we do. Case and
-  line breaks do not count.
+  occurs word for word in a part of the bundle that says what we do: a part
+  that is not under `knowledge/` or `insights/`. A `snapshots/<name>` part
+  is one of them, so `we_do_paths` can name it. Case and line breaks do not
+  count.
 - Each path in `we_do_paths` is one of those parts, and holds at least one of
   the phrases. When `we_do_paths` is empty, it becomes the parts that hold the
   phrases.
@@ -1659,3 +1726,4 @@ lines by hand, or `git revert` the commit of the run in `/data/wiki`.
 - It never deletes an entry, except a digest entry in an undo.
 - It never takes a nightly day page, a job report, or a recent entry.
 - It writes nothing in a dry run or a plan.
+- It never reads a snapshot. Its groups come from the journal only.

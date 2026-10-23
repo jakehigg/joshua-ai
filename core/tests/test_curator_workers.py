@@ -103,4 +103,4 @@ def test_the_refresh_prompt_turns_an_old_warning_into_a_plain_line() -> None:
     assert "Never add a new warning." in flat
     # The patch rules stay: exact edits, each supported by an entry.
     assert "copied exactly" in flat
-    assert "Change only what the entries support." in flat
+    assert "Change only what the entries or the snapshots support." in flat

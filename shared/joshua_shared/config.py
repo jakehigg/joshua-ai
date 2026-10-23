@@ -398,6 +398,9 @@ class Snapshot(_Model):
     items: str | None = None
     max_chars: int = Field(default=20000, gt=0)
     max_age: str | None = None
+    # A job bundle takes a snapshot of one person only when this is true. A
+    # bundle feeds wiki pages that every reader of the wiki can open.
+    jobs: bool = False
 
     @field_validator("name")
     @classmethod
@@ -455,6 +458,12 @@ class Snapshot(_Model):
     def person_id(self) -> str | None:
         """The person of the scope, or None for ``shared``."""
         return None if self.scope == "shared" else self.scope
+
+    @property
+    def in_jobs(self) -> bool:
+        """True when a job bundle may take this snapshot: its scope is
+        ``shared``, or ``jobs`` is true."""
+        return self.person_id is None or self.jobs
 
     @property
     def in_core(self) -> bool:
@@ -636,7 +645,9 @@ class JobsBundle(_Model):
     journal entry, for the entries that no bundle takes. `max_chars` is the
     size of the bundle text; the topic page itself is never cut.
     `recent_days` is how far back the researcher looks for the topics that
-    the messages of people name.
+    the messages of people name. `snapshot_sim` is the cosine floor for a
+    snapshot item to come into the bundle, and `snapshot_items` and
+    `snapshot_chars` cap the snapshot block, the closest items first.
     """
 
     sim: float = Field(default=0.78, ge=0.0, le=1.0)
@@ -644,6 +655,9 @@ class JobsBundle(_Model):
     exclude_slugs: list[str] = []
     max_chars: int = Field(default=24000, gt=0)
     recent_days: int = Field(default=14, ge=1)
+    snapshot_sim: float = Field(default=0.55, ge=0.0, le=1.0)
+    snapshot_items: int = Field(default=12, ge=0)
+    snapshot_chars: int = Field(default=3000, ge=0)
 
 
 class JobsTopics(_Model):
