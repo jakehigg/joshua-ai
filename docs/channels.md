@@ -51,6 +51,9 @@ A reply that arrives while nobody is in a session, for example a reminder,
 goes to `people/<id>/cli/outbox.jsonl`. The next session shows each line first,
 as `[joshua earlier, <time>] <text>`, and marks it read.
 
+A client can read the conversation back, a page at a time, with
+`GET /v1/cli/transcript?person=<id>`. `contracts.md` has the reply.
+
 ## Telegram
 
 ### Make a bot
