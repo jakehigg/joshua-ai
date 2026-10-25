@@ -151,9 +151,9 @@ Four folders of the wiki belong to the jobs. See [docs/jobs.md](jobs.md).
 - `wiki/questions/<section>/<slug>.md` holds one question that only a person
   can answer. The researcher job writes it, and a member answers it in chat.
   `wiki/questions/README.md` lists every question.
-- `wiki/insights/<section>/<slug>.md` holds one insight: a place where what
-  the wiki and the journal say we do is different from what the knowledge
-  says.
+- `wiki/insights/<section>/<slug>.md` holds one insight: a defect in our
+  own setup that the wiki, the journal, a snapshot, or a knowledge page
+  shows.
 - `wiki/job-runs/YYYY/MM/<job>-<YYYYMMDD>-<run id>.md` holds the report of
   one job run, with `index: false`. It is not memory: the index skips the
   whole folder, and no job reads it.

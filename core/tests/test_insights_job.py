@@ -1,6 +1,7 @@
 """The `insights` job on a fixture wiki: one insight from a summer program and
-an autumn knowledge page, no insight without knowledge, the cap, expiry, the
-dry run, and the paths it never writes. No model, no network, no database."""
+an autumn knowledge page, a run with no knowledge, the cap, expiry, the
+verdict examples, the open budget, the dry run, and the paths it never
+writes. No model, no network, no database."""
 
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ from jobs_fakes import FakeJobRunStore, FakeStore, fixed_clock
 from joshua_core.engine import agent
 from joshua_core.jobs import JobArgsError, JobRunner, build_job_runner
 from joshua_core.jobs.insights import knowledge as known_module
+from joshua_core.jobs.insights.gate import NO_KNOWLEDGE_PAGE
 from joshua_core.jobs.insights.job import InsightsJob, insight_model
 from joshua_core.jobs.insights.knowledge import (
     NOTE_MAX_CHARS,
@@ -237,7 +239,7 @@ async def test_the_worker_reads_the_dismissed_insights_with_their_reasons(h: Har
 
 def test_the_prompt_says_a_dismissal_covers_the_same_concern() -> None:
     prompt = " ".join(INSIGHT_PROMPT.split())
-    assert "The dismissed list holds the insights that a person closed" in prompt
+    assert "The dismissed list holds the insights of this topic that a person closed" in prompt
     assert (
         "Do not raise an insight that a dismissed one already covers, in the same words "
         "or in other words." in prompt
@@ -320,9 +322,24 @@ def test_the_parser_reads_the_heading_the_research_job_writes() -> None:
     assert us_note(body) == GOOD_EDITOR["local_notes"]
 
 
-def test_the_prompt_names_a_disagreement_and_a_gap() -> None:
+def test_the_prompt_defines_an_insight_as_a_defect_of_ours() -> None:
     prompt = " ".join(INSIGHT_PROMPT.split())
-    assert "1. A disagreement:" in prompt and "2. A gap:" in prompt
+    assert "An insight is a defect in our own setup that we probably cannot see now." in prompt
+    for kind in (
+        "1. A contradiction:",
+        "2. An unused part:",
+        "3. A silent failure:",
+        "4. A wrong assumption:",
+        "5. Stale state:",
+    ):
+        assert kind in prompt
+    assert "a best practice that we do not follow, when nothing of ours is broken" in prompt
+    assert "The one exception is a risk of harm or loss now" in prompt
+    assert '"I did not know that, and it matters"' in prompt
+    assert "set `valid_until` to the last day of the window" in prompt
+    assert "Raise an insight that is like the kept ones." in prompt
+    assert "Do not raise an insight that is like the dismissed ones." in prompt
+    assert "With `basis: ours`, give two phrases or more" in prompt
     assert '"to be added"' in prompt and "the editor's note for us" in prompt
     assert "when we do nothing against it" not in prompt
     assert "copied word for word from the bundle" in prompt
@@ -356,13 +373,36 @@ async def test_a_gap_insight_passes_the_gate_and_is_written(tmp_path: Path) -> N
 # -- no knowledge -----------------------------------------------------------------
 
 
-async def test_a_topic_with_no_knowledge_raises_nothing(h: Harness) -> None:
+async def test_a_topic_with_no_knowledge_runs_and_rejects_basis_knowledge(h: Harness) -> None:
+    h.worker.value = answer(item(we_do=["Pruned in March"], we_do_paths=[ROSES]))
     before = snapshot(h.wiki)
     report = await h.run(topic=ROSES)
     assert "no knowledge for this topic" in report.summary
-    assert report.written == [] and h.worker.calls == []
-    assert changed(before, snapshot(h.wiki)) == set()
-    assert report.calls == 0
+    assert len(h.worker.calls) == 1 and report.calls == 1
+    assert "<knowledge>\nNo knowledge page.\n</knowledge>" in h.worker.calls[0]
+    assert NO_KNOWLEDGE_PAGE in dict(report.sections)["Rejected"]
+    assert "Only an insight with basis `ours` can pass" in dict(report.sections)["Knowledge"]
+    assert report.written == [] and changed(before, snapshot(h.wiki)) == set()
+
+
+async def test_a_topic_with_no_knowledge_keeps_an_insight_of_ours(h: Harness) -> None:
+    h.worker.value = answer(
+        item(
+            claim="The roses are pruned in March, and the bed by the fence gets no frost check.",
+            basis="ours",
+            we_do=["Pruned in March", "The bed is by the fence"],
+            we_do_paths=[ROSES],
+            knowledge_says=[],
+            valid_until="2026-11-20",
+        )
+    )
+    report = await h.run(topic=ROSES)
+    assert "(1 new, 0 refreshed, 0 expired, 0 rejected)" in report.summary
+    [found] = load_insights(h.data)
+    assert found.insight.basis == "ours" and found.insight.knowledge_says == []
+    assert "No knowledge page. Our own pages show the defect." in found.text
+    assert "basis: ours" in found.text
+    assert "basis ours" in dict(report.sections)["New"]
 
 
 async def test_an_unpublished_page_is_no_knowledge(h: Harness) -> None:
@@ -370,7 +410,7 @@ async def test_an_unpublished_page_is_no_knowledge(h: Harness) -> None:
     assert (layout.knowledge_root(h.data) / DRAFT).is_file()
     report = await h.run()
     assert "no knowledge for this topic" in report.summary
-    assert h.worker.calls == []
+    assert NO_KNOWLEDGE_PAGE in dict(report.sections)["Rejected"]
 
 
 # -- the cap and the schema -------------------------------------------------------

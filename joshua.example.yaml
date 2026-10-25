@@ -336,15 +336,21 @@ jobs:
       - coach              # about people: the researcher asks a person about a
       - people             # topic there, never the web
   insights:
-    # The insights job keeps wiki/insights/: where what we do, in the wiki and
-    # the journal, disagrees with what is known in knowledge/, for the date and
-    # the season. docs/jobs.md explains it.
+    # The insights job keeps wiki/insights/: a defect in our own setup that we
+    # probably cannot see now, such as a contradiction, a part that nothing
+    # uses, or a failure that nothing would tell us about. docs/jobs.md
+    # explains it.
     enabled: false         # true: the insights job and the insights chat tool
     # model: claude-sonnet-5 # the model of its tool-less insight worker; when it
     #                        # is not set, jobs.model, then core.reflection_model
     max_per_run: 5         # the new insights one run writes, highest severity first
     dup_sim: 0.88          # a new claim this close to an insight of the topic is a duplicate
     default_valid_days: 60 # valid_until is this many days after today when the worker gives none
+    max_valid_days: 45     # valid_until is at most this many days after today
+    examples: 12           # the kept insights, and the dismissed ones, of the whole
+                           # instance that the worker reads as examples
+    max_open: 5            # the most open insights of the whole instance; past it,
+                           # the rank worker orders them and the rest expire
     after_research: true   # a research run that published a page runs the insight
                            # pass for the same topic, in the same run and commit
     snooze_days: 7         # the first snooze of an insight when a person gives no

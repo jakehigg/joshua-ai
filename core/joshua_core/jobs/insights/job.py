@@ -1,5 +1,5 @@
-"""The `insights` job: where what we do disagrees with what is known, or misses
-a step that it names, for one topic.
+"""The `insights` job: a defect in our own setup that we probably cannot see
+now, for one topic.
 
 Arguments: `{"topic": "<path>"}`, a topic page relative to the wiki root.
 
@@ -9,20 +9,26 @@ A run does these steps in this order:
 2. It expires each open insight of the topic whose `valid_until` is before
    today (see `page.expire`).
 3. It loads the published knowledge pages of the topic. With none, the
-   report says `no knowledge for this topic` and the run stops. That is not
-   an error.
-4. The `insight` worker reads the bundle, the knowledge pages, the day, and
-   the open insights.
+   report says `no knowledge for this topic`, and the run goes on: only an
+   insight with `basis: ours` can pass the gate.
+4. The `insight` worker reads the bundle, the knowledge pages, the day, the
+   open and the dismissed insights of the topic, and the verdict examples of
+   the whole instance (see `rank.verdict_examples`).
 5. The gate decides which insights are new, which refresh an open insight,
    and which are rejected. At most `jobs.insights.max_per_run` new insights
-   are written.
-6. It writes each new and refreshed page and `insights/README.md`.
+   pass.
+6. The open budget (see `rank.py`): when the open insights of the instance
+   and the new ones are more than `jobs.insights.max_open`, the `rank`
+   worker orders them. A new insight below the line is rejected, and an open
+   insight below the line expires.
+7. It writes each new, refreshed, and ranked-out page and
+   `insights/README.md`.
 
-A dry run does the worker call and the gate, and writes nothing. It does not
-expire an insight either. Its report shows the full text of each page that a
-run would write.
+A dry run does the worker calls and the gate, and writes nothing. It does
+not expire an insight either. Its report shows the full text of each page
+that a run would write, and what the open budget would do.
 
-`InsightPass` is steps 2 to 6 for a topic and a bundle that the caller
+`InsightPass` is steps 2 to 7 for a topic and a bundle that the caller
 gives. The research job runs it at the end of a research run.
 """
 
@@ -56,10 +62,22 @@ from joshua_core.jobs.insights.page import (
     insight_section,
     load_insights,
     local_day,
+    rank_key,
     render_insight,
+    set_fields,
+    updated_text,
     write_index,
     write_text,
 )
+from joshua_core.jobs.insights.rank import (
+    RANKED_OUT,
+    Budget,
+    RankItem,
+    apply_budget,
+    rank_items,
+    verdict_examples,
+)
+from joshua_core.jobs.insights.rank import WORKER as RANK_WORKER
 from joshua_core.jobs.insights.worker import WORKER, insight_text, raise_insights
 from joshua_core.jobs.models import insights_model
 from joshua_core.jobs.research.dossier import question_slug
@@ -102,16 +120,44 @@ class PassResult:
     rejected: list[tuple[str, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     written: list[Path] = field(default_factory=list)
+    # The open budget: the items the rank saw, in the old order, what it
+    # decided, and the open insights below the line.
+    ranked: list[RankItem] = field(default_factory=list)
+    budget: Budget = field(default_factory=Budget)
+    ranked_out: list[InsightFile] = field(default_factory=list)
 
     def summary(self) -> str:
         prefix = "Dry run: " if self.dry_run else ""
-        if self.no_knowledge:
-            tail = f" {len(self.expired)} expired." if self.expired else ""
-            return f"{prefix}insights: {self.topic}: {NO_KNOWLEDGE}.{tail}"
+        expired = len(self.expired) + len(self.ranked_out)
+        tail = f" There is {NO_KNOWLEDGE}." if self.no_knowledge else ""
         return (
             f"{prefix}insights: {self.topic} ({len(self.new)} new, {len(self.refreshed)} "
-            f"refreshed, {len(self.expired)} expired, {len(self.rejected)} rejected)"
+            f"refreshed, {expired} expired, {len(self.rejected)} rejected){tail}"
         )
+
+    def _ranked_lines(self) -> str:
+        """The Ranked section: the order of the rank worker, and the line."""
+        if not self.budget.asked:
+            return ""
+        by_id = {item.id: item for item in self.ranked}
+        if not self.budget.order:
+            kept = [i for i in by_id if i not in dict(self.budget.rejected)]
+            lines = ["The rank worker gave no answer. Every open insight stays."]
+            lines += [f"- `{i}`: {code_span(by_id[i].claim)}" for i in kept]
+            return "\n".join(lines)
+        out_verb = "would expire" if self.dry_run else "expired"
+        lines = []
+        for place, rid in enumerate(self.budget.order, start=1):
+            item = by_id[rid]
+            if rid in self.budget.ranked_out:
+                mark = f"below the line, {out_verb}"
+            elif any(rid == r for r, _ in self.budget.rejected):
+                mark = "below the line, rejected"
+            else:
+                mark = "stays open"
+            label = "new" if item.new else item.status
+            lines.append(f"{place}. `{rid}` ({label}, {mark}): {code_span(item.claim)}")
+        return "\n".join(lines)
 
     def sections(self) -> list[tuple[str, str]]:
         """The report sections, without the usage."""
@@ -120,7 +166,8 @@ class PassResult:
         for item in self.new:
             i = item.insight
             new_lines.append(
-                f"- `{item.id}` ({i.severity}, {i.confidence}, valid {i.valid_from.isoformat()} "
+                f"- `{item.id}` ({i.severity}, {i.confidence}, basis {i.basis}, valid "
+                f"{i.valid_from.isoformat()} "
                 f"to {i.valid_until.isoformat()}): {code_span(i.claim)}; {verb} "
                 f"`{layout.INSIGHTS}/{item.id}.md`\n"
                 f"  - we do: {', '.join(code_span(p, 120) for p in i.we_do)}\n"
@@ -136,20 +183,27 @@ class PassResult:
             f"{item.insight.valid_until.isoformat()}"
             for item in self.expired
         ]
+        expired += [
+            f"- `{item.id}`: {code_span(item.insight.claim)}; below the open budget"
+            for item in self.ranked_out
+        ]
         rejected = [f"- {code_span(claim)}: {reason}" for claim, reason in self.rejected]
         if self.no_knowledge:
-            out = [("Knowledge", f"There is {NO_KNOWLEDGE}. No insight was raised.")]
+            known = f"There is {NO_KNOWLEDGE}. Only an insight with basis `ours` can pass the gate."
         else:
-            out = [
-                ("Knowledge", "\n".join(f"- `knowledge/{p}`" for p in self.known)),
-                ("New", "\n".join(new_lines) or "None."),
-                ("Refreshed", "\n".join(refreshed) or "None."),
-            ]
+            known = "\n".join(f"- `knowledge/{p}`" for p in self.known)
+        out = [
+            ("Knowledge", known),
+            ("New", "\n".join(new_lines) or "None."),
+            ("Refreshed", "\n".join(refreshed) or "None."),
+        ]
         out.append(
             ("Expired" if not self.dry_run else "Would expire", "\n".join(expired) or "None.")
         )
-        if not self.no_knowledge:
-            out.append(("Rejected", "\n".join(rejected) or "None."))
+        out.append(("Rejected", "\n".join(rejected) or "None."))
+        ranked = self._ranked_lines()
+        if ranked:
+            out.append(("Ranked", ranked))
         if self.dry_run and (self.new or self.refreshed):
             pages = "\n\n".join(
                 f"`{layout.INSIGHTS}/{item.id}.md`:\n\n{fenced(item.text)}"
@@ -169,6 +223,8 @@ class PassResult:
             "refreshed": [item.id for item in self.refreshed],
             "expired": [item.id for item in self.expired],
             "rejected": [{"claim": c, "reason": r} for c, r in self.rejected],
+            "ranked": list(self.budget.order),
+            "ranked_out": [item.id for item in self.ranked_out],
         }
 
 
@@ -213,12 +269,12 @@ class InsightPass:
 
         known = published_pages(topic.path, self._data_dir, extra_knowledge)
         result.known = list(known)
-        if not known:
-            result.no_knowledge = True
-            return result
+        result.no_knowledge = not known
 
         open_now = [item for item in mine if item.insight.is_open]
         dismissed = [item for item in mine if item.insight.status == "dismissed"]
+        everywhere = [item for item in load_insights(self._data_dir) if item.id not in gone]
+        kept, dismissed_anywhere = verdict_examples(everywhere, cfg.examples)
         parts = we_do_parts(bundle_parts(bundle))
         used: list[Usage] = []
         raised = await raise_insights(
@@ -232,6 +288,8 @@ class InsightPass:
                 today=today,
                 timezone=self._settings.timezone,
                 instance=self._settings.name,
+                kept=kept,
+                dismissed_anywhere=dismissed_anywhere,
             ),
             model=insight_model(self._settings),
             runner=self._runner,
@@ -249,6 +307,7 @@ class InsightPass:
             dismissed=dismissed,
             today=today,
             default_valid_days=cfg.default_valid_days,
+            max_valid_days=cfg.max_valid_days,
             dup_sim=cfg.dup_sim,
             embed=default_embedder(self._settings, topic.title),
         )
@@ -272,13 +331,86 @@ class InsightPass:
         for verdict in keep:
             result.new.append(self._new(topic, verdict, known, today, taken))
 
-        if not dry_run and (result.new or result.refreshed):
+        open_all = [item for item in everywhere if item.insight.is_open]
+        await self._budget(result, open_all, refreshed, kept, dismissed_anywhere, today)
+
+        if not dry_run and (result.new or result.refreshed or result.ranked_out):
             for item in [*result.new, *result.refreshed]:
                 result.written.append(write_text(item.path, item.text, self._data_dir))
+            for gone_item in result.ranked_out:
+                result.written.append(gone_item.path)
             index = write_index(self._data_dir)
             if index not in result.written:
                 result.written.append(index)
         return result
+
+    async def _budget(
+        self,
+        result: PassResult,
+        open_all: list[InsightFile],
+        refreshed: dict[str, Written],
+        kept: list[InsightFile],
+        dismissed: list[InsightFile],
+        today: date,
+    ) -> None:
+        """Apply the open budget to the open insights of the instance and the
+        new insights of `result`. See `rank.py`."""
+        cfg = self._settings.jobs.insights
+        items = [
+            RankItem(
+                id=f.id,
+                topic=f.insight.topic,
+                claim=f.insight.claim,
+                why=body_sections(f.text).get(HEADING_WHY, ""),
+                status=f.insight.status,
+            )
+            for f in sorted(open_all, key=rank_key)
+        ]
+        items += [
+            RankItem(
+                id=w.id,
+                topic=w.insight.topic,
+                claim=w.insight.claim,
+                why=body_sections(w.text).get(HEADING_WHY, ""),
+                status=w.insight.status,
+                new=True,
+            )
+            for w in result.new
+        ]
+        if len(items) <= cfg.max_open:
+            return
+        used: list[Usage] = []
+        order = await rank_items(
+            items,
+            kept=kept,
+            dismissed=dismissed,
+            model=insight_model(self._settings),
+            runner=self._runner,
+            usage_out=used,
+        )
+        self._ledger.add(RANK_WORKER, used, model=insight_model(self._settings))
+        budget = apply_budget(items, cfg.max_open, order)
+        result.ranked = items
+        result.budget = budget
+        if order is None:
+            result.notes.append("The rank worker gave no answer, so every open insight stays.")
+        reasons = dict(budget.rejected)
+        for written in [w for w in result.new if w.id in reasons]:
+            result.rejected.append((written.insight.claim, reasons[written.id]))
+        result.new = [w for w in result.new if w.id not in reasons]
+        by_id = {f.id: f for f in open_all}
+        for rid in budget.ranked_out:
+            current = by_id[rid]
+            fresh = refreshed.pop(rid, None)
+            if fresh is not None:
+                current = InsightFile(fresh.id, fresh.path, fresh.insight, fresh.text)
+            keys = {"status": "expired", "resolved_at": today, "resolved_by": RANKED_OUT}
+            if result.dry_run:
+                insight, text = updated_text(current, **keys)
+                result.ranked_out.append(InsightFile(current.id, current.path, insight, text))
+            else:
+                result.ranked_out.append(set_fields(current, self._data_dir, **keys))
+        result.refreshed = list(refreshed.values())
 
     def _body(
         self, verdict: Verdict, known: Mapping[str, KnownPage], why: str, action: str
@@ -319,6 +451,7 @@ class InsightPass:
             we_do_paths=checked.we_do_paths,
             knowledge_says=checked.knowledge_says,
             confidence=checked.confidence,  # type: ignore[arg-type]
+            basis=checked.basis,  # type: ignore[arg-type]
             found_at=today,
             seen_at=today,
             run_id=current_run_id(),
@@ -339,6 +472,9 @@ class InsightPass:
                 "we_do": checked.we_do,
                 "we_do_paths": checked.we_do_paths,
                 "knowledge_says": checked.knowledge_says,
+                # The gate caps the new day at today plus max_valid_days. A
+                # refresh never moves the day earlier.
+                "valid_until": max(target.insight.valid_until, checked.valid_until),
             }
         )
         body = self._body(

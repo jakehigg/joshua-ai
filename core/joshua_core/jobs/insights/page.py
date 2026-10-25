@@ -45,6 +45,7 @@ EXPIRY = "expiry"
 
 InsightStatus = Literal["new", "told", "acknowledged", "dismissed", "expired"]
 Severity = Literal["note", "act", "urgent"]
+Basis = Literal["ours", "knowledge"]
 Confidence = Literal["low", "medium", "high"]
 STATUSES: tuple[str, ...] = ("new", "told", "acknowledged", "dismissed", "expired")
 OPEN_STATUSES: tuple[str, ...] = OPEN_INSIGHT_STATUSES
@@ -72,6 +73,10 @@ class Insight(BaseModel):
     claim: str
     status: InsightStatus = "new"
     severity: Severity = "note"
+    # `knowledge`: a knowledge page shows the defect. `ours`: our own pages
+    # show it, and `knowledge_says` can be empty. A page with no key is
+    # `knowledge`.
+    basis: Basis = "knowledge"
     valid_from: date
     valid_until: date
     we_do: list[str] = Field(default_factory=list)
@@ -287,6 +292,8 @@ def render_body(insight_id: str, insight: Insight, body: Body) -> str:
         quote = inline(phrase, 200).replace('"', "'")
         lines.append(f'- "{quote}" in [{path}]({_rel_link(me, path)})')
     lines += ["", f"## {HEADING_KNOWN}", ""]
+    if not insight.knowledge_says:
+        lines.append("No knowledge page. Our own pages show the defect.")
     for page in insight.knowledge_says:
         target = knowledge_rel(page)
         short = inline(_plain(body.known.get(page, "")), 200)

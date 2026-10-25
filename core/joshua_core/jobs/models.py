@@ -9,7 +9,7 @@ Each worker takes the first model that is set in its chain:
   `internet.model`.
 - curator `place`, `compare`, `refresh`: `jobs.curator.models.<worker>`,
   `jobs.curator.model`, `jobs.model`, `core.reflection_model`.
-- insights `insight`: `jobs.insights.model`, `jobs.model`,
+- insights `insight` and `rank`: `jobs.insights.model`, `jobs.model`,
   `core.reflection_model`.
 - digest `digest`: `jobs.digest.model`, `jobs.model`,
   `core.reflection_model`.
@@ -55,7 +55,7 @@ def curator_model(settings: JoshuaConfig, worker: str | None = None) -> str | No
 
 
 def insights_model(settings: JoshuaConfig) -> str | None:
-    """The model of the insight worker: `jobs.insights.model`, `jobs.model`,
+    """The model of the insight and the rank worker: `jobs.insights.model`, `jobs.model`,
     `core.reflection_model`."""
     jobs = settings.jobs
     return jobs.insights.model or jobs.model or settings.core.reflection_model

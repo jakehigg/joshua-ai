@@ -10,11 +10,16 @@ An insight from the `insight` worker passes when all of these are true:
   Case and white space do not count.
 - Each path of `we_do_paths` is one of those parts and holds at least one of
   the phrases. An empty `we_do_paths` becomes the parts that hold the phrases.
-- `knowledge_says` has 1 path or more, each a published knowledge page of
-  this topic (see `knowledge.py`).
+- The `basis` rule. `knowledge` (the default): `knowledge_says` has 1 path or
+  more, each a published knowledge page of this topic (see `knowledge.py`).
+  A topic with no published knowledge page rejects it. `ours`: `we_do` has 2
+  phrases or more, the two sides of the defect, and `knowledge_says` can be
+  empty. Each path it names is still a published knowledge page of this
+  topic.
 - `valid_from` and `valid_until` are ISO days, and `valid_until` is after
   `valid_from` and not before today. A missing `valid_from` is today, and a
   missing `valid_until` is today plus `jobs.insights.default_valid_days`.
+  `valid_until` is at most today plus `jobs.insights.max_valid_days`.
 - It is not a duplicate of an insight of this run that passed.
 
 A claim that is the same as an open insight of the topic, by its normalized
@@ -45,6 +50,9 @@ logger = get_logger("jobs.insights.gate")
 CLAIM_MIN_CHARS = 15
 CLAIM_MAX_CHARS = 200
 MIN_PHRASES = 1
+# An insight with `basis: ours` names the two sides of the defect.
+MIN_OUR_PHRASES = 2
+NO_KNOWLEDGE_PAGE = "basis knowledge needs a published knowledge page, and the topic has none"
 PHRASE_MIN_CHARS = 3
 PHRASE_MAX_CHARS = 160
 DISMISSED_BEFORE = "dismissed before"
@@ -64,6 +72,7 @@ class Checked:
     action: str
     severity: str
     confidence: str
+    basis: str
     valid_from: date
     valid_until: date
     we_do: list[str]
@@ -122,6 +131,7 @@ class InsightGate:
         default_valid_days: int,
         dup_sim: float,
         embed: Embedder,
+        max_valid_days: int | None = None,
     ) -> None:
         self._parts = list(parts)
         self._paths = {p.path: p for p in self._parts}
@@ -130,6 +140,7 @@ class InsightGate:
         self._dismissed = list(dismissed)
         self._today = today
         self._default_days = default_valid_days
+        self._max_days = max_valid_days
         self._dup_sim = dup_sim
         self._embed = embed
         self._accepted: list[str] = []
@@ -175,9 +186,17 @@ class InsightGate:
                     break
         return phrases, paths, found, ""
 
-    def _knowledge(self, raised: RaisedInsight) -> tuple[list[str], str]:
+    def _knowledge(self, raised: RaisedInsight, phrases: Sequence[str]) -> tuple[list[str], str]:
         pages = list(dict.fromkeys(normalize_page(p) for p in raised.knowledge_says if p.strip()))
-        if not pages:
+        if raised.basis == "ours":
+            if len(phrases) < MIN_OUR_PHRASES:
+                return [], (
+                    f"basis ours needs {MIN_OUR_PHRASES} we_do phrases or more, the two "
+                    "sides of the defect"
+                )
+        elif not self._known:
+            return [], NO_KNOWLEDGE_PAGE
+        elif not pages:
             return [], "knowledge_says has no page"
         for page in pages:
             if page not in self._known:
@@ -196,6 +215,8 @@ class InsightGate:
             return self._today, self._today, why
         start = start or self._today
         end = end or self._today + timedelta(days=self._default_days)
+        if self._max_days is not None:
+            end = min(end, self._today + timedelta(days=self._max_days))
         if end <= start:
             return start, end, "valid_until is not after valid_from"
         if end < self._today:
@@ -217,7 +238,7 @@ class InsightGate:
         phrases, paths, found, why = self._we_do(raised)
         if why:
             return None, why
-        pages, why = self._knowledge(raised)
+        pages, why = self._knowledge(raised, phrases)
         if why:
             return None, why
         start, end, why = self._days(raised)
@@ -230,6 +251,7 @@ class InsightGate:
                 action=raised.action.strip(),
                 severity=raised.severity,
                 confidence=raised.confidence,
+                basis=raised.basis,
                 valid_from=start,
                 valid_until=end,
                 we_do=phrases,

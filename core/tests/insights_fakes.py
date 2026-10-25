@@ -16,7 +16,7 @@ from typing import Any
 
 from jobs_fakes import make_settings
 from joshua_core.engine.usage import Usage
-from joshua_core.jobs.insights.prompts import INSIGHT_PROMPT
+from joshua_core.jobs.insights.prompts import INSIGHT_PROMPT, RANK_PROMPT
 
 IRRIGATION = "garden/irrigation.md"
 ROSES = "garden/roses.md"
@@ -129,16 +129,25 @@ def answer(*items: dict[str, Any]) -> dict[str, Any]:
     return {"insights": list(items)}
 
 
-class FakeInsightWorker:
-    """The `insight` worker. `value` is the answer, a callable of the user
-    text, or an exception to raise."""
+RANK_USAGE = Usage(input=120, output=20)
 
-    def __init__(self, value: Any = None) -> None:
+
+class FakeInsightWorker:
+    """The `insight` worker and the `rank` worker. `value` is the answer of
+    the insight worker, a callable of the user text, or an exception to
+    raise. `rank` is the same for the rank worker; with no `rank`, a rank
+    call fails the test."""
+
+    def __init__(self, value: Any = None, rank: Any = None) -> None:
         self.value = answer(item()) if value is None else value
+        self.rank = rank
         self.calls: list[str] = []
+        self.rank_calls: list[str] = []
         self.kwargs: list[dict[str, Any]] = []
 
     async def __call__(self, **kwargs: Any) -> dict[str, Any] | None:
+        if kwargs["system_prompt"] == RANK_PROMPT:
+            return self._rank(kwargs)
         if kwargs["system_prompt"] != INSIGHT_PROMPT:
             raise AssertionError("unknown worker")
         self.calls.append(kwargs["user_text"])
@@ -147,6 +156,20 @@ class FakeInsightWorker:
         if out is not None:
             out.append(INSIGHT_USAGE)
         value = self.value
+        if isinstance(value, Exception):
+            raise value
+        if callable(value):
+            value = value(kwargs["user_text"])
+        return copy.deepcopy(value)
+
+    def _rank(self, kwargs: dict[str, Any]) -> dict[str, Any] | None:
+        if self.rank is None:
+            raise AssertionError("the rank worker was not expected")
+        self.rank_calls.append(kwargs["user_text"])
+        out = kwargs.get("usage_out")
+        if out is not None:
+            out.append(RANK_USAGE)
+        value = self.rank
         if isinstance(value, Exception):
             raise value
         if callable(value):

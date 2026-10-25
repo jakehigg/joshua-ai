@@ -267,6 +267,20 @@ with the images and the packaged chart, are at
   line with the counts only. The `kb_event` table gets the column `topics`.
   See [docs/jobs.md](jobs.md#retrieval-in-chat).
 
+- **An insight is a defect in our own setup, and few stay open.** The
+  insight worker now raises a contradiction, a part that nothing uses, a
+  failure that nothing would tell us about, a wrong assumption, or a stale
+  state, and not a best practice that we do not follow. Each insight has a
+  `basis`: `knowledge` needs a knowledge page, and `ours` needs two phrases
+  of our own pages and no knowledge page. So a topic with no knowledge page
+  runs too. The worker reads the claims that the people of the instance kept
+  and dismissed, from every topic. Three new keys: `jobs.insights.examples`
+  (12), `jobs.insights.max_valid_days` (45), which caps `valid_until`, and
+  `jobs.insights.max_open` (5). When more insights would be open than
+  `max_open`, the new `rank` worker orders them: a new insight below the
+  line is rejected, and an open one expires with `resolved_by: rank`. See
+  [docs/jobs.md](jobs.md#insights).
+
 ### Fixed
 
 - **A job bundle takes only the snapshot items that are about its topic.** A

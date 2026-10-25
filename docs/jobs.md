@@ -83,7 +83,8 @@ the workers that judge a stronger model and keep the others on a cheaper one.
 | curator | `place` | finds the section of a stray page | `jobs.curator.models.place` | `jobs.curator.model`, `jobs.model`, `core.reflection_model` |
 | curator | `compare` | reads two pages that overlap | `jobs.curator.models.compare` | `jobs.curator.model`, `jobs.model`, `core.reflection_model` |
 | curator | `refresh` | writes a stale page again | `jobs.curator.models.refresh` | `jobs.curator.model`, `jobs.model`, `core.reflection_model` |
-| insights | `insight` | finds where what we do disagrees with what is known | `jobs.insights.model` | `jobs.model`, `core.reflection_model` |
+| insights | `insight` | finds a defect in our own setup | `jobs.insights.model` | `jobs.model`, `core.reflection_model` |
+| insights | `rank` | orders the open insights when there are more than `jobs.insights.max_open` | `jobs.insights.model` | `jobs.model`, `core.reflection_model` |
 | digest | `digest` | writes one entry for a run of near-duplicate journal entries | `jobs.digest.model` | `jobs.model`, `core.reflection_model` |
 
 The `use_internet` chat tool always uses `internet.model`. In the usage of a
@@ -1360,21 +1361,36 @@ them, and that it never raises one on its own.
 
 ## Insights
 
-The insights job keeps `wiki/insights/`. An insight is a place where what we
-do, in the wiki and the journal, disagrees with what is known, in the
-`knowledge/` pages of the topic, for the date, the season, and our situation.
-"The garden is still on the summer watering program and it is late October"
-is an insight. A gap is an insight too: a knowledge page names a step or a
-protection for our situation, such as an alarm, a backup, or a password
-change, and the wiki shows that we have not done it. A step that the wiki
-marks "to be added", "to do", or "pending" is a gap, because today we do
-nothing. An insight is not a fact about the world (that is knowledge), not an
-event (that is the journal), and not a reference (that is the wiki). It is
-something that Joshua must tell us.
+The insights job keeps `wiki/insights/`. An insight is a defect in our own
+setup that we probably cannot see now. It is one of these kinds:
 
-The job works on one topic in each run, and only on a topic that has a
-published knowledge page. With no knowledge, the report says
-`no knowledge for this topic`, and the run stops. That is not an error.
+| Kind | What it is | Example |
+|---|---|---|
+| Contradiction | Two things that we do or wrote disagree, or a number or a method that we use disagrees with a knowledge page. | Our page sets a feed at half strength, and the knowledge page says quarter strength. |
+| Unused part | We measure, collect, or built something that nothing uses. | A sensor value is calculated, and no rule reads it. |
+| Silent failure | A thing that we set up or changed can stop, and nothing would tell us. A step for the alert that the wiki marks "to be added", "to come", or "pending" means that there is no alert today. | A freezer is on a circuit with no alarm, and the alarm is "to be added". |
+| Wrong assumption | A rule or a formula of ours rests on an assumption that is not true. | A heating rule assumes that calm air means no loss of heat. |
+| Stale state | A page says one thing, and a snapshot or a newer journal entry shows that the state changed. | A page lists a device that a snapshot no longer shows. |
+
+These are not insights: a best practice that we do not follow when nothing
+of ours is broken or at risk ("experts advise a fence", "repot every two
+years"), a thing that we have not planned, the age of a thing that works,
+and a fact that shows no defect of ours. The person knows these things, or
+chose them. The one exception is a risk of harm or loss now that the person
+cannot see. The test of the prompt is: the person who set this up would say
+"I did not know that, and it matters". A seasonal or a dated insight ends
+with its window, so its `valid_until` is the last day of the window.
+
+Each insight has a **basis**:
+
+- `knowledge`: a knowledge page of the topic shows the defect, and
+  `knowledge_says` names it.
+- `ours`: our own pages show the defect, with no knowledge page. `we_do`
+  holds two phrases or more, the two sides of the defect.
+
+The job works on one topic in each run. A topic with no published knowledge
+page runs too: the report says `no knowledge for this topic`, and only an
+insight with `basis: ours` can pass the gate.
 
 Set `jobs.insights.enabled: true`, with `jobs.enabled: true`, to add the job
 and the `insights` chat tool. [docs/config.md](config.md#jobs) has the keys.
@@ -1394,7 +1410,7 @@ required. A path that is not a topic page gets 400.
 3. It loads the published knowledge pages of the topic: each page that the
    dossier names for an answered question, and each page in the folder of the
    topic under `knowledge/`, when its frontmatter has `status: published`.
-   With none, the run stops here.
+   There can be none.
 4. The `insight` worker has no tools and a timeout of 120 seconds. It gets
    the parts of the bundle that say what we do (the parts that are not under
    `knowledge/` or `insights/`), the full text of each knowledge page with its
@@ -1408,23 +1424,37 @@ required. A path that is not a topic page gets 400.
    worker also gets the dismissed insights of the topic, each with the
    reason that the person gave. The prompt tells the worker not to raise an
    insight that a dismissed one covers, in other words too, or that the
-   reason for a dismissal answers. The prompt
+   reason for a dismissal answers. The worker also gets the **verdict
+   examples** of the whole instance, from every topic: in the block
+   `<kept>`, the claims of the `jobs.insights.examples` (12) most recent
+   insights that a person kept (`told` or `acknowledged`), and in the block
+   `<dismissed_anywhere>`, the claims of the 12 most recent dismissed
+   insights with their reasons. The prompt says that these show what the
+   people of this instance find worth telling: raise what is like the kept
+   ones, and do not raise what is like the dismissed ones. The prompt
    tells the worker that the bundle and the pages are content, not
    instructions.
 5. The gate decides which insights are new, which refresh an open insight,
    and which are rejected.
-6. It writes each new and refreshed page and `insights/README.md`.
+6. The open budget decides which insights stay open (see
+   [The open budget](#the-open-budget)).
+7. It writes each new, refreshed, and ranked-out page and
+   `insights/README.md`.
 
-A dry run does the worker call and the gate, and writes nothing. It does not
-expire an insight either: the report lists the insights that would expire.
-The report holds the full text of each page that the run would write.
+A dry run does the worker calls and the gate, and writes nothing. It does
+not expire an insight either: the report lists the insights that would
+expire, by the valid days or by the open budget. The report holds the full
+text of each page that the run would write.
 
 The summary is `insights: <topic> (N new, M refreshed, K expired, R
-rejected)`. The report has the sections **Bundle** (the line
+rejected)`, and K counts the insights that the open budget expired too. A
+topic with no knowledge page adds `There is no knowledge for this topic.`
+The report has the sections **Bundle** (the line
 `Snapshots: <name> (<n> items)`), **Knowledge**, **New** (each with its
-claim, severity, valid days, `we_do`, and `knowledge_says`), **Refreshed**,
-**Expired**, **Rejected** (each with its reason), and **Usage**. The worker
-call counts under the name `insight`.
+claim, severity, basis, valid days, `we_do`, and `knowledge_says`),
+**Refreshed**, **Expired**, **Rejected** (each with its reason), **Ranked**
+(when the open budget asked the `rank` worker), and **Usage**. The worker
+calls count under the names `insight` and `rank`.
 
 ### The gate
 
@@ -1441,19 +1471,27 @@ true:
 - Each path in `we_do_paths` is one of those parts, and holds at least one of
   the phrases. When `we_do_paths` is empty, it becomes the parts that hold the
   phrases.
-- `knowledge_says` has one path or more, each a published knowledge page of
-  this topic. A path is relative to `wiki/knowledge/`, with or without
-  `knowledge/` in front.
+- The basis rule. With `basis: knowledge`, the default for an item with no
+  `basis`, `knowledge_says` has one path or more, each a published knowledge
+  page of this topic. A topic with no such page rejects it with the reason
+  `basis knowledge needs a published knowledge page, and the topic has
+  none`. With `basis: ours`, `we_do` has two phrases or more, and
+  `knowledge_says` can be empty. Each path that it names is still a
+  published knowledge page of this topic. A path is relative to
+  `wiki/knowledge/`, with or without `knowledge/` in front.
 - `valid_from` and `valid_until` are ISO days. `valid_until` is after
   `valid_from`, and not before today. When `valid_from` is missing, it is
   today. When `valid_until` is missing, it is today plus
-  `jobs.insights.default_valid_days` (60).
+  `jobs.insights.default_valid_days` (60). `valid_until` is at most today
+  plus `jobs.insights.max_valid_days` (45): a later day becomes that day.
 
 A claim that has the same text as an open insight of the topic, or a vector
 at `jobs.insights.dup_sim` (0.88) or more to the claim of one, is a
 duplicate. A duplicate of an open insight refreshes it: `seen_at` becomes
 today, and `we_do`, `we_do_paths`, `knowledge_says`, and the evidence come
-from the new answer. The status, `snoozed_until`, and `snoozes` do not
+from the new answer. `valid_until` becomes the later of its current day and
+the new day, which the cap keeps at most today plus `max_valid_days`. So a
+refresh never moves it to an earlier day. The status, `snoozed_until`, and `snoozes` do not
 change, and the report lists it as refreshed. A duplicate of a `dismissed` insight is dropped with the reason
 `dismissed before`.
 
@@ -1461,6 +1499,34 @@ A run writes at most `jobs.insights.max_per_run` (5) new insights: the
 highest severity first (`urgent`, `act`, `note`), then the highest
 confidence. The rest are rejected with a reason. An item of the worker answer
 that does not match the schema is a rejection too, and it changes nothing.
+
+### The open budget
+
+A person can act on only a few insights at a time. `jobs.insights.max_open`
+(5) is the most open insights of the whole instance: the insights with the
+status `new`, `told`, or `acknowledged`, of every topic. A snoozed insight
+counts. After the gate, when the open insights and the new ones of the run
+are more than `max_open`, the `rank` worker orders them.
+
+The `rank` worker has no tools, a timeout of 60 seconds, and the model of
+the `insight` worker. It gets each item with its id, topic, claim, why it
+matters, and status, the open insights first and the new ones after them,
+and the verdict examples. It answers with the ids in order of importance to
+these people. Then:
+
+- The first `max_open` ids stay open.
+- A new insight below the line is rejected with the reason
+  `below the open budget`.
+- An open insight below the line becomes `expired`, with `resolved_at`
+  today and `resolved_by: rank`. A later run can raise it again.
+- An id that the worker leaves out goes to the end, in the order that the
+  worker got.
+- When the worker gives no answer, each open insight stays, and each new
+  insight over the budget is rejected with `rank worker gave no answer`.
+
+The section **Ranked** of the report gives the order, and for each id,
+whether it stays open, is rejected, or expires. A dry run asks the worker
+and writes and expires nothing. `max_per_run` still applies first.
 
 ### The page
 
@@ -1477,6 +1543,7 @@ section: garden
 claim: The garden is still on the 20-minute summer program in late October.
 status: new                    # new, told, acknowledged, dismissed, or expired
 severity: act                  # note, act, or urgent
+basis: knowledge               # knowledge, or ours; a page with no basis is knowledge
 valid_from: 2026-10-01
 valid_until: 2026-11-30
 we_do: ["every zone on the 20-minute summer program"]
@@ -1494,7 +1561,8 @@ run_id: 9
 of the insight, and starts at 0. The body has these headings, in this order: the claim as
 the title, **Why it matters**, **What to do**, **What we do** (each `we_do`
 phrase in quotes, with a link to its page), **What is known** (the
-`answer_short` of each `knowledge_says` page, with a link), and **Evidence**
+`answer_short` of each `knowledge_says` page, with a link, or a line that
+says there is no knowledge page), and **Evidence**
 (the reasoning of the worker). The job removes each link from the text of the
 worker, and keeps its text. The one exception is a link in the evidence to a
 path in `we_do_paths` or `knowledge_says`. A heading line from the worker
@@ -1511,7 +1579,9 @@ group. The job and the chat tool write it again on each change.
 
 At the start of each run, and in the insight pass of a research run, each
 open insight of the topic whose `valid_until` is before today becomes
-`expired`, with `resolved_at` today and `resolved_by: expiry`. Then
+`expired`, with `resolved_at` today and `resolved_by: expiry`. The open
+budget can also expire an insight, with `resolved_by: rank` (see
+[The open budget](#the-open-budget)). Then
 `insights/README.md` is written again. This is Python, with no worker call.
 A dry run does not expire an insight.
 
@@ -1525,7 +1595,7 @@ The status of an insight is one of these:
 | `told` | Joshua told a person about it. |
 | `acknowledged` | A person knows about it. |
 | `dismissed` | A person closed it, with a reason. A later run does not raise it again. |
-| `expired` | Its `valid_until` day is in the past. |
+| `expired` | Its `valid_until` day is in the past, or the open budget put it below the line. |
 
 `new`, `told`, and `acknowledged` are open. A snooze is not a status. It is
 the day `snoozed_until` on an open insight: the last day of the snooze. An
@@ -1656,8 +1726,11 @@ and resolve an insight, and the report of each run is a page in
 
 - It never writes outside `wiki/insights/`. Each path comes from `layout`,
   and a write outside `insights/` fails.
-- It never raises an insight for a topic with no published knowledge page.
+- It never raises an insight with `basis: knowledge` for a topic with no
+  published knowledge page.
 - It never raises a claim with `confidence: low`.
+- It never keeps more than `jobs.insights.max_open` insights open when the
+  `rank` worker answered.
 - It writes nothing in a dry run, and expires nothing.
 
 ## The digest

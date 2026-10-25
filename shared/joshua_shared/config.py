@@ -861,7 +861,12 @@ class JobsInsights(_Model):
     worker gives none. `after_research` runs the insight pass at the end of a
     research run that published a page. `snooze_days` is the first snooze of
     an insight when a person gives no number of days; each later snooze is
-    twice as long, up to `snooze_max_days`. See `docs/jobs.md`.
+    twice as long, up to `snooze_max_days`. `max_valid_days` caps
+    `valid_until` at today plus that many days. `examples` is how many kept
+    insights, and how many dismissed ones, of the whole instance the worker
+    reads as verdict examples. `max_open` is the most open insights of the
+    whole instance; past it, the `rank` worker orders them. See
+    `docs/jobs.md`.
     """
 
     enabled: bool = False
@@ -869,6 +874,9 @@ class JobsInsights(_Model):
     max_per_run: int = Field(default=5, ge=1, le=50)
     dup_sim: float = Field(default=0.88, ge=0.0, le=1.0)
     default_valid_days: int = Field(default=60, ge=1)
+    max_valid_days: int = Field(default=45, ge=1)
+    examples: int = Field(default=12, ge=0, le=50)
+    max_open: int = Field(default=5, ge=1, le=100)
     after_research: bool = True
     snooze_days: int = Field(default=7, ge=1)
     snooze_max_days: int = Field(default=90, ge=1)

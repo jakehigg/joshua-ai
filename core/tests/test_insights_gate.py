@@ -25,6 +25,7 @@ from insights_fakes import (
 from joshua_core.jobs.insights.gate import (
     DISMISSED_BEFORE,
     LOW_CONFIDENCE,
+    NO_KNOWLEDGE_PAGE,
     InsightGate,
     cap,
     parse_day,
@@ -65,18 +66,27 @@ def _file(claim: str, status: str = "new") -> InsightFile:
     return InsightFile(f"garden/{status}", Path(f"/x/{status}.md"), insight, "")
 
 
-def _gate(tmp_path: Path, *, embed: Any = _embed, opened=(), dismissed=()) -> InsightGate:
+def _gate(
+    tmp_path: Path,
+    *,
+    embed: Any = _embed,
+    opened=(),
+    dismissed=(),
+    known: bool = True,
+    max_valid_days: int | None = None,
+) -> InsightGate:
     data = tmp_path / "data"
     build_insights_wiki(data)
     return InsightGate(
         parts=we_do_parts(PARTS),
-        known=published_pages(IRRIGATION, data),
+        known=published_pages(IRRIGATION, data) if known else {},
         open_insights=list(opened),
         dismissed=list(dismissed),
         today=TODAY,
         default_valid_days=60,
         dup_sim=0.88,
         embed=embed,
+        max_valid_days=max_valid_days,
     )
 
 
@@ -222,3 +232,58 @@ def test_parse_day() -> None:
     assert parse_day(" 2026-10-01 ", "x") == (date(2026, 10, 1), "")
     assert parse_day("2026-10-01T00:00:00Z", "x") == (date(2026, 10, 1), "")
     assert parse_day("nope", "x")[1].startswith("x is not")
+
+
+# -- the basis --------------------------------------------------------------------
+
+
+async def test_basis_ours_with_two_phrases_and_no_knowledge_passes(tmp_path: Path) -> None:
+    raised = item(basis="ours", we_do=[PHRASE, LOG_PHRASE], we_do_paths=[], knowledge_says=[])
+    verdict = await _gate(tmp_path, known=False).check(RaisedInsight.model_validate(raised))
+    assert verdict.kind == "new", verdict.reason
+    assert verdict.checked is not None
+    assert verdict.checked.basis == "ours" and verdict.checked.knowledge_says == []
+
+
+async def test_basis_ours_needs_two_phrases(tmp_path: Path) -> None:
+    raised = item(basis="ours", knowledge_says=[])
+    verdict = await _gate(tmp_path, known=False).check(RaisedInsight.model_validate(raised))
+    assert verdict.kind == "rejected"
+    assert "basis ours needs 2 we_do phrases" in verdict.reason
+
+
+async def test_basis_ours_still_checks_a_knowledge_page_it_names(tmp_path: Path) -> None:
+    raised = item(basis="ours", we_do=[PHRASE, LOG_PHRASE], knowledge_says=[LAWN_PAGE])
+    verdict = await _gate(tmp_path).check(RaisedInsight.model_validate(raised))
+    assert verdict.kind == "rejected" and "not a published knowledge page" in verdict.reason
+
+
+async def test_basis_knowledge_with_no_page_on_the_topic_fails(tmp_path: Path) -> None:
+    verdict = await _gate(tmp_path, known=False).check(RaisedInsight.model_validate(item()))
+    assert verdict.kind == "rejected" and verdict.reason == NO_KNOWLEDGE_PAGE
+
+
+async def test_a_raised_insight_with_no_basis_is_knowledge(tmp_path: Path) -> None:
+    raised = item()
+    raised.pop("basis", None)
+    model = RaisedInsight.model_validate(raised)
+    assert model.basis == "knowledge"
+    assert await _reason(tmp_path, knowledge_says=[]) == "knowledge_says has no page"
+
+
+# -- the valid window ---------------------------------------------------------------
+
+
+async def test_valid_until_is_capped_at_max_valid_days(tmp_path: Path) -> None:
+    gate = _gate(tmp_path, max_valid_days=45)
+    far = await gate.check(RaisedInsight.model_validate(item(valid_until="2027-06-30")))
+    assert far.checked is not None and (far.checked.valid_until - TODAY).days == 45
+    near = await gate.check(
+        RaisedInsight.model_validate(item(claim="Mulch the roses now.", valid_until="2026-10-30"))
+    )
+    assert near.checked is not None and near.checked.valid_until == date(2026, 10, 30)
+    # The default of 60 days is capped too.
+    blank = await gate.check(
+        RaisedInsight.model_validate(item(claim="Frost is near the drip line.", valid_until=None))
+    )
+    assert blank.checked is not None and (blank.checked.valid_until - TODAY).days == 45

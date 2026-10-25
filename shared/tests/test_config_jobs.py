@@ -235,6 +235,9 @@ def test_insights_defaults() -> None:
     assert insights.max_per_run == 5
     assert insights.dup_sim == 0.88
     assert insights.default_valid_days == 60
+    assert insights.max_valid_days == 45
+    assert insights.examples == 12
+    assert insights.max_open == 5
     assert insights.after_research is True
 
 
@@ -247,6 +250,9 @@ def test_insights_overrides_load() -> None:
         "    max_per_run: 2\n"
         "    dup_sim: 0.9\n"
         "    default_valid_days: 30\n"
+        "    max_valid_days: 20\n"
+        "    examples: 0\n"
+        "    max_open: 8\n"
         "    after_research: false\n"
     )
     insights = config.parse(text, {}, source="test.yaml").jobs.insights
@@ -255,6 +261,7 @@ def test_insights_overrides_load() -> None:
     assert insights.max_per_run == 2
     assert insights.dup_sim == 0.9
     assert insights.default_valid_days == 30
+    assert (insights.max_valid_days, insights.examples, insights.max_open) == (20, 0, 8)
     assert insights.after_research is False
 
 
@@ -264,6 +271,9 @@ def test_insights_overrides_load() -> None:
         "  insights:\n    max_per_run: 0\n",
         "  insights:\n    dup_sim: 1.5\n",
         "  insights:\n    default_valid_days: 0\n",
+        "  insights:\n    max_valid_days: 0\n",
+        "  insights:\n    examples: -1\n",
+        "  insights:\n    max_open: 0\n",
         "  insights:\n    bogus: 1\n",
     ],
 )

@@ -606,6 +606,9 @@ jobs:
     max_per_run: 5
     dup_sim: 0.88
     default_valid_days: 60
+    max_valid_days: 45
+    examples: 12
+    max_open: 5
     after_research: true
   digest:
     enabled: false
@@ -664,10 +667,13 @@ jobs:
 | `research.distrusted_domains` | `pinterest.com`, `quora.com`, `answers.com`, `ehow.com`, `wikihow.com`, `facebook.com`, `reddit.com` | A page on these domains is always `weak`. |
 | `research.person_sections` | `coach`, `people` | The wiki sections, by the first part of the path, whose pages are about people. The gate sends each raised question of a topic there to a person or to our records, never to the web. A `run` on such a topic researches only the questions that a person asked. The selection takes such a topic only when no other topic qualifies under the same rule. A section has no `/` and does not start with a dot. |
 | `insights.enabled` | `false` | `true` adds the `insights` job and the `insights` chat tool for members. Both also need `jobs.enabled`. |
-| `insights.model` | not set | The model of the `insight` worker, which has no tools. When it is not set, the insights job uses `jobs.model`, then `core.reflection_model`. |
+| `insights.model` | not set | The model of the `insight` worker and the `rank` worker, which have no tools. When it is not set, the insights job uses `jobs.model`, then `core.reflection_model`. |
 | `insights.max_per_run` | `5` | The most new insights that one run writes. The gate keeps the highest severity first, then the highest confidence. |
 | `insights.dup_sim` | `0.88` | A new claim with a vector this close to the claim of an insight of the topic is a duplicate. |
-| `insights.default_valid_days` | `60` | When the worker gives no `valid_until`, it is the day of the run plus this many days. |
+| `insights.default_valid_days` | `60` | When the worker gives no `valid_until`, it is the day of the run plus this many days. `max_valid_days` caps it. |
+| `insights.max_valid_days` | `45` | `valid_until` is at most the day of the run plus this many days. A refresh moves `valid_until` to at most this day, and never to a day before its current value. |
+| `insights.examples` | `12` | The `insight` worker and the `rank` worker read this many of the most recent insights that a person kept (`told` or `acknowledged`), and this many of the most recent dismissed insights with their reasons, from every topic. `0` gives no examples. |
+| `insights.max_open` | `5` | The most open insights (`new`, `told`, `acknowledged`, snoozed too) of the whole instance. When a run would have more, the `rank` worker orders them, and the insights below the line do not stay open. |
 | `insights.after_research` | `true` | A research `run` that publishes a page also runs the insight pass for the same topic, in the same run and the same commit. The `then_insights` argument of a research run replaces this value for that run. |
 | `insights.snooze_days` | `7` | The first snooze of an insight, in days, when the person gives no number. Each later snooze of the same insight is twice as long. |
 | `insights.snooze_max_days` | `90` | The longest snooze of an insight, in days. A snooze with a number of days is from 1 to this value. |
@@ -687,7 +693,8 @@ A **topic** is one leaf page of the wiki, such as
 `houseplants/snake-plant.md`. These pages are not topics: `Home.md`, a section
 index page (`houseplants.md` beside the folder `houseplants/`), a page in a
 folder whose name starts with a dot, a page under `journal/`, `people/`,
-`joshua-docs/`, `skills/`, `knowledge/`, or `insights/`, a page that a glob
+`joshua-docs/`, `skills/`, `knowledge/`, `insights/`, `questions/`, or
+`job-runs/`, a page that a glob
 in `topics.exclude` matches, and a page about one person on the roster: a
 page whose file name is the id of a person, or whose title is the id or the
 display name of a person.

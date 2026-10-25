@@ -103,12 +103,14 @@ Three folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   question, the oldest open question first. The memory bundle of a topic
   holds its answered questions, so the next research run reads what a person
   said. The list holds `index: false`, so it is not indexed. See [questions for a person](jobs.md#questions-for-a-person).
-- `wiki/insights/` holds what the insights job raised: a place where what we
-  do is different from what the knowledge says, for the date and the season.
+- `wiki/insights/` holds what the insights job raised: a defect in our own
+  setup that we probably cannot see now, such as a contradiction, a part
+  that nothing uses, or a failure that nothing would tell us about.
   The index gives these chunks the kind `insight`. An insight is one page at
   `wiki/insights/<section>/<slug>.md`. Its frontmatter holds the `topic`, the
   `claim`, the `status` (`new`, `told`, `acknowledged`, `dismissed`, or
-  `expired`), the `severity` (`note`, `act`, or `urgent`), `valid_from` and
+  `expired`), the `severity` (`note`, `act`, or `urgent`), the `basis`
+  (`knowledge` or `ours`), `valid_from` and
   `valid_until`, the `we_do` phrases from our pages with their
   `we_do_paths`, the `knowledge_says` pages, the `confidence`, and
   `found_at` and `seen_at`. Its body has the headings **Why it matters**,

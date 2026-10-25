@@ -1,12 +1,15 @@
-"""The `insight` worker: where what we do disagrees with what is known, or
-misses a step that it names.
+"""The `insight` worker: a defect in our own setup that we probably cannot
+see now.
 
 The worker has no tools and a timeout of 120 seconds. It reads the parts of
 the memory bundle that say what we do, the full text of each published
-knowledge page of the topic, the day, the timezone, the instance name, and
-the open insights of the topic, and the insights of the topic that a person
-dismissed, each with the reason the person gave. Above the text of each knowledge page are two
-labelled lines: its short answer, and the editor's note for us (the section
+knowledge page of the topic (there can be none), the day, the timezone, the
+instance name, the open insights of the topic, and the insights of the topic
+that a person dismissed, each with the reason the person gave. It also reads
+the verdict examples of the whole instance: the claims of the insights that
+a person kept, and of the insights that a person dismissed, with their
+reasons. Above the text of each knowledge page are two labelled lines: its
+short answer, and the editor's note for us (the section
 `## Where this differs for us`, see `knowledge.py`) when the page has one.
 The gate in `gate.py` then decides which insights are written.
 
@@ -46,6 +49,7 @@ class RaisedInsight(CleanModel):
     why: str = Field(max_length=4000)
     action: str = Field(max_length=4000)
     severity: Literal["note", "act", "urgent"]
+    basis: Literal["ours", "knowledge"] = "knowledge"
     valid_from: str | None = Field(default=None, max_length=40)
     valid_until: str | None = Field(default=None, max_length=40)
     we_do: list[str] = Field(default_factory=list, max_length=12)
@@ -104,6 +108,23 @@ def _known_block(page: KnownPage) -> str:
     return "\n".join(head) + "\n" + page.text.strip()
 
 
+def kept_lines(kept: Sequence[InsightFile]) -> str:
+    """The `<kept>` block: one claim on each line."""
+    return "\n".join(f"- {inline(f.insight.claim, 300)}" for f in kept) or "- none"
+
+
+def dismissed_lines(dismissed: Sequence[InsightFile]) -> str:
+    """The lines of a dismissed block: each claim with its reason."""
+    return (
+        "\n".join(
+            f"- {inline(f.insight.claim, 300)} (reason: "
+            f"{inline(f.insight.resolution_note or 'none given', 600)})"
+            for f in dismissed
+        )
+        or "- none"
+    )
+
+
 def insight_text(
     *,
     topic: str,
@@ -115,9 +136,12 @@ def insight_text(
     timezone: str,
     instance: str,
     dismissed: Sequence[InsightFile] = (),
+    kept: Sequence[InsightFile] = (),
+    dismissed_anywhere: Sequence[InsightFile] = (),
 ) -> str:
     """The user text of the `insight` worker. A snoozed insight is open, so
-    it is in `open_insights`."""
+    it is in `open_insights`. `dismissed` is of this topic, and `kept` and
+    `dismissed_anywhere` are of the whole instance."""
     opened = (
         "\n".join(
             f"- {inline(f.insight.claim, 300)} (status {f.insight.status}, valid until "
@@ -126,15 +150,7 @@ def insight_text(
         )
         or "- none"
     )
-    closed = (
-        "\n".join(
-            f"- {inline(f.insight.claim, 300)} (reason: "
-            f"{inline(f.insight.resolution_note or 'none given', 600)})"
-            for f in dismissed
-        )
-        or "- none"
-    )
-    pages = "\n\n".join(_known_block(page) for page in known)
+    pages = "\n\n".join(_known_block(page) for page in known) or "No knowledge page."
     bundle = "\n\n".join(f"## {part.path}\n\n{part.text}" for part in parts)
     return (
         f"Today: {today.isoformat()} ({today:%A, %B})\n"
@@ -142,7 +158,9 @@ def insight_text(
         f"Instance: {instance}\n"
         f"Topic: {topic} ({title})\n\n"
         f"<open_insights>\n{opened}\n</open_insights>\n\n"
-        f"<dismissed>\n{closed}\n</dismissed>\n\n"
+        f"<dismissed>\n{dismissed_lines(dismissed)}\n</dismissed>\n\n"
+        f"<kept>\n{kept_lines(kept)}\n</kept>\n\n"
+        f"<dismissed_anywhere>\n{dismissed_lines(dismissed_anywhere)}\n</dismissed_anywhere>\n\n"
         f"<knowledge>\n{pages}\n</knowledge>\n\n"
         f"<bundle>\n{bundle}\n</bundle>"
     )
