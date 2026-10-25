@@ -4,7 +4,8 @@ Every adapter normalizes a platform message into a ``TurnEvent`` and submits it
 here. ``submit_turn`` posts to ``POST /v1/turns`` and expects 202; it never
 retries an unknown sender (403) and retries an overloaded core (429) once before
 it drops the turn. ``stream_turn`` runs a turn inline and yields core's SSE
-events; tests and the later voice path use it.
+events; tests and the later voice path use it. ``read_transcript`` reads one
+page of a conversation from ``GET /v1/transcript``.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ CORE_URL_ENV = "CORE_URL"
 CHANNELS_TOKEN_ENV = "JOSHUA_TOKEN_CHANNELS"
 TURNS_PATH = "/v1/turns"
 STREAM_PATH = "/v1/turns/stream"
+TRANSCRIPT_PATH = "/v1/transcript"
 
 # One retry after core answers 429, then the turn is dropped.
 BUSY_RETRY_AFTER_S = 2.0
@@ -91,6 +93,15 @@ class CoreClient:
         async with self._client.stream("POST", STREAM_PATH, json=body) as response:
             async for frame in _iter_sse(response):
                 yield frame
+
+    async def read_transcript(self, params: Mapping[str, str]) -> tuple[int, dict]:
+        """Read one page from core's ``GET /v1/transcript``.
+
+        Returns core's status and JSON body as they are. A connection failure
+        raises ``httpx.HTTPError``.
+        """
+        response = await self._client.get_json(TRANSCRIPT_PATH, params=dict(params))
+        return response.status_code, _json(response)
 
 
 def _json(response) -> dict:  # type: ignore[no-untyped-def]

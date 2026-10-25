@@ -20,6 +20,9 @@ from joshua_core.store.models import Channel, Conversation, Person, Task
 
 logger = get_logger("store.repo")
 
+# The most rows one ``transcript_page`` call returns.
+TRANSCRIPT_PAGE_MAX = 200
+
 
 def _channel(row: dict[str, Any]) -> Channel:
     return Channel(
@@ -307,6 +310,14 @@ class Repo:
             row = await self._select_conversation(channel_id, person_id)
             assert row is not None
             return _conversation(row)
+
+    async def find_conversation(
+        self, channel_id: str, person_id: str | None
+    ) -> Conversation | None:
+        """The conversation for ``(channel_id, person_id)``, or None. It never
+        creates one. A None ``person_id`` finds the channel's group conversation."""
+        row = await self._select_conversation(channel_id, person_id)
+        return _conversation(row) if row else None
 
     async def get_conversation(self, conversation_id: str) -> Conversation | None:
         async with self._pool.connection() as conn:
@@ -596,6 +607,52 @@ class Repo:
             }
             for r in rows
         ]
+
+    async def transcript_page(
+        self, conversation_id: str, limit: int = 50, before: int | None = None
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        """One page of a conversation's transcript, oldest first.
+
+        The page holds the newest ``limit`` rows with ``id < before``, or the
+        newest rows when ``before`` is None. ``limit`` is clamped to
+        ``[1, TRANSCRIPT_PAGE_MAX]``. The second value is the cursor for the
+        page before this one: the smallest id in this page when older rows
+        exist, else None.
+        """
+        limit = max(1, min(limit, TRANSCRIPT_PAGE_MAX))
+        clauses = ["conversation_id = %s"]
+        params: list[Any] = [conversation_id]
+        if before is not None:
+            clauses.append("id < %s")
+            params.append(before)
+        params.append(limit + 1)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                f"""
+                SELECT id, direction, content, status, meta, created_at
+                FROM transcript
+                WHERE {" AND ".join(clauses)}
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = await cur.fetchall()
+        more = len(rows) > limit
+        page = list(reversed(rows[:limit]))
+        out = [
+            {
+                "id": r["id"],
+                "direction": r["direction"],
+                "content": r["content"],
+                "status": r.get("status") or "ok",
+                "meta": r.get("meta") or {},
+                "created_at": r.get("created_at"),
+            }
+            for r in page
+        ]
+        next_before = out[0]["id"] if more and out else None
+        return out, next_before
 
     async def read_conversation_meta(self, conversation_id: str) -> dict[str, Any] | None:
         """Conversation + channel labels for a conversation id."""

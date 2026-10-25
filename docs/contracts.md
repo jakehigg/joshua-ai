@@ -83,6 +83,7 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `POST /webhook/imessage/{secret}` | none, the path secret | BlueBubbles payload | always `200`. A wrong secret gets `404`. |
 | `POST /v1/cli/turns/stream` | `channels.webhooks.allowed_callers` | `{"person": id, "text": str}` | SSE, or `400`, `403 {"reason": <guard reason>}`, `503 core_unavailable` |
 | `GET /v1/cli/outbox?person=&ack=true` | `channels.webhooks.allowed_callers` | | `{"messages": [{"ts", "text", "attachments"}]}`, `403 unknown_person` |
+| `GET /v1/cli/transcript?person=&limit=&before=` | `channels.webhooks.allowed_callers` | | core's `GET /v1/transcript` reply and status for `cli:<person>`, `400 bad_request`, `403 unknown_person`, `503 core_unavailable` |
 | `POST /v1/voice/chat/completions` | `channels.voice.allowed_callers` | OpenAI chat completions, plus `speaker` and `speaker_confidence` | SSE of `chat.completion.chunk`, or one `chat.completion` for `stream: false`. `400 bad_request`, `404 not_found` with no voice section, `503 core_unavailable` |
 | `GET /v1/models` | `channels.voice.allowed_callers` | | `{"object": "list", "data": [{"id": "joshua", …}]}`, `404 not_found` with no voice section |
 | `GET /admin/guard/stats` | `ADMIN_CALLERS` | | counters: `unknown_sender`, `rate_limited`, `truncated`, `refused_total` |
@@ -103,6 +104,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. |
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
+| `GET /v1/transcript?channel=&person=&limit=&before=` | `channels`, `laptop` | | `{"conversation_id", "messages", "next_before"}` (below), `400 bad_request` with no `channel`, `422` for a bad `limit` or `before` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
@@ -150,6 +152,44 @@ The `delta` frames carry only the answer, and together they are the text of
 `done`. The text that the model writes before it calls a tool, such as "Not
 on the list, adding it", is not sent. Core holds the text of each model
 message until the message ends, so the answer arrives one message at a time.
+
+### The transcript route
+
+`GET /v1/transcript` reads one conversation back, a page at a time. `channel`
+is the channel id, for example `cli:alex`. `person` is the person id. Leave
+it out for a group conversation.
+
+The route finds the conversation for that pair and never creates one. An
+unknown conversation answers `200` with `conversation_id` null and no
+messages.
+
+```json
+{
+  "conversation_id": "<uuid>",
+  "messages": [
+    {"id": 41, "direction": "in", "text": "<the message>", "status": "ok",
+     "at": "2026-03-04T12:00:01+00:00", "meta": {"turn_id": "t-…"}}
+  ],
+  "next_before": 41
+}
+```
+
+The messages are oldest first. `direction` is the stored value: `in` for a
+person's message, `out` for Joshua's reply, `task` for a scheduled task, and
+`inject` for an event. `status` is `ok` or `failed`. `at` is the row time in
+UTC.
+
+`limit` is 1 to 200, default 50. The page holds the newest `limit` rows with an `id` less than
+`before`. `next_before` is the smallest `id` in the page when older rows
+exist, else null. Send it as `before` to get the page before this one.
+
+`meta` holds only these keys: `turn_id`, `tools` (the tool names the turn
+used), `call_count`, `duration_ms`, and `first_output_ms`. Core drops every
+other key, for example the token usage, the cost, the speaker, and the paths
+the turn wrote. Core never logs a message.
+
+`GET /v1/cli/transcript?person=` on channels asks core for `cli:<person>`
+with the channels token, and returns core's body and status as they are.
 
 ### The voice route
 
