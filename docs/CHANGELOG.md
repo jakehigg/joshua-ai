@@ -107,6 +107,13 @@ with the images and the packaged chart, are at
   reads them, and `write_file` and `rename_file` refuse a path in them. The
   researcher job writes the first and the insights job writes the second.
 
+- **A chat client can read a conversation back.** Core has a new route,
+  `GET /v1/transcript`, for `channels` and `laptop`. It returns the messages
+  of one conversation, oldest first, a page at a time. Channels has
+  `GET /v1/cli/transcript?person=<id>` for the terminal conversation. Each
+  message carries only safe `meta` keys, such as the turn id and the tools
+  the turn used. An unknown conversation returns no messages.
+
 - **A voice device with no wake clip can default to a person.** Set
   `channels.voice.device_defaults` to map a device id to a person id. A device
   listed there speaks for that person on any turn that names no speaker, and

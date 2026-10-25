@@ -6,6 +6,10 @@ is a channel, so an unknown person id is refused here and never reaches core.
 
 ``GET /v1/cli/outbox`` returns what core sent to this person while they were
 away, and marks it read.
+
+``GET /v1/cli/transcript`` reads the person's terminal conversation back from
+core, a page at a time. It returns core's body and status as they are, and it
+never logs a message.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from joshua_shared.contracts import Chat, Handle, TurnEvent
@@ -146,5 +151,38 @@ def build_cli_router() -> APIRouter:
             source.unlink()
 
         return JSONResponse({"messages": messages})
+
+    @router.get("/v1/cli/transcript")
+    async def get_cli_transcript(request: Request):  # type: ignore[no-untyped-def]
+        ctx = _context(request)
+        denied = _auth(request, ctx)
+        if denied is not None:
+            return denied
+
+        person_id = str(request.query_params.get("person") or "").strip()
+        if not person_id:
+            return JSONResponse({"reason": "bad_request"}, status_code=400)
+        if ctx.settings.person(person_id) is None:
+            return JSONResponse({"reason": "unknown_person"}, status_code=403)
+        if ctx.core_client is None:
+            return JSONResponse({"reason": "core_unavailable"}, status_code=503)
+
+        params = {"channel": f"{CHANNEL_TYPE}:{person_id}", "person": person_id}
+        for key in ("limit", "before"):
+            value = request.query_params.get(key)
+            if value is not None:
+                params[key] = value
+        try:
+            status, body = await ctx.core_client.read_transcript(params)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                {
+                    "message": "cli transcript: core unavailable",
+                    "person": person_id,
+                    "error": type(exc).__name__,
+                }
+            )
+            return JSONResponse({"reason": "core_unavailable"}, status_code=503)
+        return JSONResponse(body, status_code=status)
 
     return router

@@ -107,6 +107,8 @@ Route allowlists, by default:
 
 - core `POST /v1/turns`, `POST /v1/turns/stream`: `channels`. The stream route
   also accepts `laptop` for a `cli` handle.
+- core `GET /v1/transcript`: `channels`, `laptop`. It never creates a
+  conversation, and it returns only the safe `meta` keys.
 - core `POST /v1/memory/search`: `memory.search.allowed_callers` (default
   `viewer`, `mcp`). An empty list turns it off. It names no person and returns
   only `wiki/` pages of kind `wiki`, `journal`, `profile`, `knowledge`,

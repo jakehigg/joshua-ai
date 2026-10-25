@@ -178,6 +178,66 @@ async def test_task_lifecycle(repo) -> None:
     assert (await repo.get_task(other.id)).status == "active"
 
 
+async def test_find_conversation_never_creates_one(repo) -> None:
+    await repo.upsert_person("alex", "Alex")
+    await repo.upsert_channel("cli:alex", "cli")
+    assert await repo.find_conversation("cli:alex", "alex") is None
+    assert await repo.find_conversation("cli:alex", "alex") is None
+    created = await repo.get_or_create_conversation("cli:alex", "alex")
+    found = await repo.find_conversation("cli:alex", "alex")
+    assert found is not None and found.id == created.id
+    assert await repo.find_conversation("cli:alex", None) is None
+
+
+async def test_transcript_page_pages_back_oldest_first(repo) -> None:
+    await repo.upsert_person("alex", "Alex")
+    await repo.upsert_channel("cli:alex", "cli")
+    conv = await repo.get_or_create_conversation("cli:alex", "alex")
+    other = await repo.get_or_create_conversation("cli:alex", None)
+    for i in range(5):
+        await repo.add_transcript(conv.id, "in" if i % 2 == 0 else "out", f"m{i}")
+    await repo.add_transcript(other.id, "in", "not this conversation")
+
+    page, cursor = await repo.transcript_page(conv.id, limit=2)
+    assert [r["content"] for r in page] == ["m3", "m4"]
+    assert cursor == page[0]["id"]
+    assert page[0]["id"] < page[1]["id"]
+    assert page[0]["created_at"] is not None
+
+    page, cursor = await repo.transcript_page(conv.id, limit=2, before=cursor)
+    assert [r["content"] for r in page] == ["m1", "m2"]
+
+    page, cursor = await repo.transcript_page(conv.id, limit=2, before=cursor)
+    assert [r["content"] for r in page] == ["m0"]
+    assert cursor is None
+
+
+async def test_transcript_page_with_exactly_limit_rows_has_no_cursor(repo) -> None:
+    await repo.upsert_person("alex", "Alex")
+    await repo.upsert_channel("cli:alex", "cli")
+    conv = await repo.get_or_create_conversation("cli:alex", "alex")
+    for i in range(3):
+        await repo.add_transcript(conv.id, "in", f"m{i}")
+    page, cursor = await repo.transcript_page(conv.id, limit=3)
+    assert len(page) == 3
+    assert cursor is None
+
+
+async def test_transcript_page_clamps_the_limit(repo) -> None:
+    from joshua_core.store.repo import TRANSCRIPT_PAGE_MAX
+
+    await repo.upsert_person("alex", "Alex")
+    await repo.upsert_channel("cli:alex", "cli")
+    conv = await repo.get_or_create_conversation("cli:alex", "alex")
+    for i in range(3):
+        await repo.add_transcript(conv.id, "in", f"m{i}")
+    page, cursor = await repo.transcript_page(conv.id, limit=0)
+    assert [r["content"] for r in page] == ["m2"]
+    assert cursor == page[0]["id"]
+    page, _ = await repo.transcript_page(conv.id, limit=TRANSCRIPT_PAGE_MAX + 50)
+    assert len(page) == 3
+
+
 async def test_transcript_and_kb_event(repo) -> None:
     await repo.upsert_channel("voice:office", "voice")
     conv = await repo.get_or_create_conversation("voice:office", None)

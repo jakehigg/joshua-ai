@@ -51,6 +51,7 @@ from joshua_core.snapshots import SnapshotRunner, build_runner
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
 from joshua_core.store.seed import seed_people
+from joshua_core.transcript_api import build_transcript_router
 from joshua_core.turns import TurnService, build_router
 from joshua_core.usage_api import build_usage_router
 
@@ -454,6 +455,7 @@ def build_app() -> FastAPI:
     app.include_router(build_admin_router())
     app.include_router(build_search_router())
     app.include_router(build_usage_router())
+    app.include_router(build_transcript_router())
     return app
 
 
