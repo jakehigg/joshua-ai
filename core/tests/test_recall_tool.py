@@ -104,7 +104,8 @@ async def test_group_turn_sees_shared_only() -> None:
 async def test_skill_rows_excluded_from_search_memory() -> None:
     store = FakeStore()
     results = await _run(_deps("alice"), store)
-    assert store.exclude_seen[0] == ("skill",)  # the exclude filter is forwarded
+    # The exclude filter is forwarded: a skill, an insight, and a question.
+    assert store.exclude_seen[0] == ("skill", "insight", "question")
     assert all("skills/" not in r["path"] for r in results)  # never a taught skill
 
 

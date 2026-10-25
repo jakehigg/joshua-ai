@@ -76,6 +76,9 @@ def test_the_insight_follow_up_is_in_people_md() -> None:
     assert "If they say not now, call `snooze_insight`." in flat
     assert "call `dismiss_insight` with their reason" in flat
     assert "do not write the deferral to the journal: the insight holds it." in flat
+    # The hint line is the sign; the text of an item never comes in a turn.
+    assert "A line `[Open items about <topic> ...]` is the only sign" in flat
+    assert "read them with `list_insights` or `list_questions` first." in flat
 
 
 @pytest.mark.parametrize(

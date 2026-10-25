@@ -8,8 +8,9 @@ carries the ``path`` the agent can open with the ``files`` tool ``read_file``.
 A result is a snippet of at most ``SNIPPET_CHARS`` characters unless the call
 asks for ``full``. A ``snapshot`` result has no file: in place of the path, it
 names the live tool that holds the current data.
-A chunk of an insight that is not due, or of a question that is not open, is
-left out (``jobs/retrieval.py``).
+The kinds ``insight`` and ``question`` are left out (``EXCLUDED_KINDS``):
+``list_insights`` and ``list_questions`` read them. The kind ``knowledge``
+stays, so the agent can search the facts that the researcher found.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from joshua_shared.log import get_logger
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.jobs.insights.page import local_day
-from joshua_core.jobs.retrieval import ChatFilter
+from joshua_core.jobs.retrieval import INSIGHT_KIND, QUESTION_KIND, ChatFilter
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
@@ -41,6 +42,9 @@ DEFAULT_LIMIT = 6
 MAX_LIMIT = 20
 # A result holds at most this many characters of its chunk, unless `full`.
 SNIPPET_CHARS = 400
+# The kinds a search leaves out: a taught skill, and the insights and the
+# questions, which have their own tools.
+EXCLUDED_KINDS = (SKILL_KIND, INSIGHT_KIND, QUESTION_KIND)
 
 
 def _reply(text: str) -> dict[str, Any]:
@@ -120,7 +124,7 @@ async def do_search_memory(
         vec,
         k=limit,
         min_sim=min_sim,
-        exclude_kinds=(SKILL_KIND,),
+        exclude_kinds=EXCLUDED_KINDS,
         recency_bonus=recency_bonus,
         recency_half_life_days=recency_half_life_days,
         per_doc_cap=per_doc_cap,
@@ -181,7 +185,9 @@ def build_recall_server(
         "characters with its title and the file path: open the path with read_file, "
         "or pass full: true for the whole passage. A result with 'snapshot' in place "
         "of a path is the state of a live system at the time it names: call the "
-        "tool it names for the current data.",
+        "tool it names for the current data. The researched facts in knowledge/ are "
+        "in the results. Insights and questions for a person are not: read them with "
+        "list_insights and list_questions.",
         _SEARCH_SCHEMA,
     )
     async def search_memory(args: dict[str, Any]) -> dict[str, Any]:

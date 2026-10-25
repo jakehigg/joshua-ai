@@ -33,10 +33,13 @@ too: reading is not what separates a guest from a member. Writing is.
 `.trash/` directories are not indexed, and a `*.meta.json` file is never a
 document of its own.
 
-Three kinds of page are not memory, and the index leaves them out:
+Four kinds of page are not memory, and the index leaves them out:
 
-- A journal entry whose frontmatter holds `run_id`. A job run writes one as
-  its report. It records the run, not something that happened.
+- Every page under `wiki/job-runs/`. A job run writes its report there. It
+  records the run, not something that happened. See
+  [The run report](jobs.md#the-run-report).
+- A journal entry whose frontmatter holds `run_id`: the report of a job run
+  from before `wiki/job-runs/`.
 - A journal entry whose frontmatter holds `digest`. The digest job wrote one
   entry for it and for its near-duplicates, and the index keeps that digest
   entry. A covered entry stays on the disk and leaves the index. See
@@ -113,13 +116,17 @@ Three folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   `wiki/insights/README.md` is the table of every insight, open insights
   first. The table holds `index: false`, so it is not indexed. See [insights](jobs.md#insights).
 
-The agent finds them the same way it finds any wiki page: through the
-injection before a turn, and through `search_memory`. Both leave out an
-insight that is not due (dismissed, expired, or snoozed) and a question that
-is not open, so a closed concern does not come back in chat (see
+These pages are the work of the jobs, not memory, so a turn does not get
+them as it gets a wiki page. The injection before a turn leaves out the
+three kinds. `search_memory` finds the knowledge pages, and leaves out the
+insights and the questions, which have their own tools: `list_insights` and
+`list_questions`. When a turn that a person sent is about a topic with due
+insights or open questions, the injection adds one line with the counts
+only, and the agent reads the items with those tools (see
 [retrieval in chat](jobs.md#retrieval-in-chat)). The agent cannot write
-them. `write_file` and `rename_file` refuse a path in these folders, so a
-dossier, a question, and an insight keep the frontmatter that their job reads.
+them. `write_file` and `rename_file` refuse a path in these folders and in
+`wiki/job-runs/`, so a dossier, a question, and an insight keep the
+frontmatter that their job reads.
 A member answers a question with the `questions` chat tool, which writes the
 page for them. The search route for the viewer and joshua-mcp,
 `POST /v1/memory/search`, returns these chunks too, with the kinds
@@ -129,7 +136,8 @@ page for them. The search route for the viewer and joshua-mcp,
 
 **The turn brings it.** Before each turn, core searches with the person's
 message and puts what it finds in front of the agent. The agent does not ask for
-this and does not spend a tool call on it.
+this and does not spend a tool call on it. This search leaves out the pages
+of the kinds `knowledge`, `insight`, and `question`, which the jobs write.
 
 **The agent asks for it.** The agent also has a `search_memory` tool. It uses
 this when it wants something the turn did not bring, for example a second search
@@ -162,7 +170,8 @@ curl -s -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" \
 ```
 
 A row holds the question, the decision, and the best match. It also holds each
-chunk core considered, with its file, its score, and whether the turn used it.
+chunk core considered, with its file, its score, and whether the turn used it,
+and, in `topics`, each topic of the topic hint line with its counts.
 Read this when an answer is wrong. It says what Joshua read before it answered.
 
 The viewer and the joshua-mcp addon search the same index by meaning through
@@ -430,7 +439,8 @@ The journal has one writer: `write_journal_entry`. `write_file` and
 right day folder with the front matter the index reads, and the nightly page
 cannot be overwritten by a free write. The same two tools refuse a path under
 `wiki/knowledge/`, `wiki/questions/`, and `wiki/insights/`, which the jobs
-own. See [Knowledge, questions, and insights](#knowledge-questions-and-insights).
+own, and under `wiki/job-runs/`, which holds the run reports. See
+[Knowledge, questions, and insights](#knowledge-questions-and-insights).
 
 The indexer picks up a new or changed journal page like any other wiki page,
 and chunks it into `kb_chunk` at shared scope. A later turn that asks about the

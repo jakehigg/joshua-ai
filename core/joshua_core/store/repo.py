@@ -759,16 +759,19 @@ class Repo:
         best_sim: float | None = None,
         duration_ms: int | None = None,
         results: list[dict[str, Any]] | None = None,
+        topics: list[dict[str, Any]] | None = None,
     ) -> None:
         """One retrieval-audit row per injection decision or kb tool call.
-        Callers wrap this in try/except — telemetry must never break a turn."""
+        ``topics`` names the topics of the hint line of an injection, with
+        their counts. Callers wrap this in try/except — telemetry must never
+        break a turn."""
         async with self._pool.connection() as conn:
             await conn.execute(
                 """
                 INSERT INTO kb_event
                     (conversation_id, turn_id, kind, query, decision,
-                     prefer_recent, best_sim, duration_ms, results)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     prefer_recent, best_sim, duration_ms, results, topics)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     conversation_id,
@@ -780,6 +783,7 @@ class Repo:
                     best_sim,
                     duration_ms,
                     Json(results or []),
+                    Json(topics or []),
                 ),
             )
 
@@ -790,7 +794,7 @@ class Repo:
             cur = await conn.execute(
                 """
                 SELECT id, conversation_id, turn_id, kind, query, decision,
-                       prefer_recent, best_sim, duration_ms, results, created_at
+                       prefer_recent, best_sim, duration_ms, results, topics, created_at
                 FROM kb_event
                 ORDER BY created_at DESC, id DESC
                 LIMIT %s

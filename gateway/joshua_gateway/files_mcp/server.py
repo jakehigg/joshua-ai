@@ -50,6 +50,7 @@ from joshua_shared.layout import (
     attachment_area,
     insights_root,
     is_hidden,
+    job_runs_root,
     journal_entry_path,
     journal_root,
     knowledge_root,
@@ -205,8 +206,7 @@ TOOLS = [
             "exists; overwrite replaces it; append adds to it. Max 256 KB. A "
             "path under wiki/journal/ is refused: the journal has one writer, "
             "write_journal_entry. A path under wiki/knowledge/, wiki/questions/, "
-            "or wiki/insights/ is refused: the researcher job writes the first "
-            "two and the insights job writes the third."
+            "wiki/insights/, or wiki/job-runs/ is refused: the jobs write them."
         ),
         input_schema={
             "type": "object",
@@ -227,7 +227,8 @@ TOOLS = [
         description=(
             "Rename one file in place under wiki/. new_name is a bare filename; "
             "the extension must not change. A file under wiki/journal/, "
-            "wiki/knowledge/, wiki/questions/, or wiki/insights/ cannot be renamed."
+            "wiki/knowledge/, wiki/questions/, wiki/insights/, or wiki/job-runs/ "
+            "cannot be renamed."
         ),
         input_schema={
             "type": "object",
@@ -530,21 +531,29 @@ def _in_journal(abs_path: Path, root_dir: Path) -> bool:
 
 # The refusal for a write into a folder that a job owns.
 _JOB_FOLDER_REFUSAL = (
-    "wiki/knowledge/, wiki/questions/, and wiki/insights/ are read-only: the "
-    "researcher job writes wiki/knowledge/ and wiki/questions/, and the insights "
-    "job writes wiki/insights/. Answer a question with answer_question"
+    "wiki/knowledge/, wiki/questions/, wiki/insights/, and wiki/job-runs/ are "
+    "read-only: the researcher job writes wiki/knowledge/ and wiki/questions/, "
+    "the insights job writes wiki/insights/, and each job run writes its report "
+    "in wiki/job-runs/. Answer a question with answer_question"
 )
 
 
 def _in_job_folder(abs_path: Path, root_dir: Path) -> bool:
     """True when ``abs_path`` is inside ``wiki/knowledge/``,
-    ``wiki/questions/``, or ``wiki/insights/``.
+    ``wiki/questions/``, ``wiki/insights/``, or ``wiki/job-runs/``.
 
     The researcher job owns the first two and the insights job owns the third.
     Each page there carries the state of its job in its frontmatter, so a free
-    write could break a dossier, a question, or an insight.
+    write could break a dossier, a question, or an insight. ``wiki/job-runs/``
+    holds the report of each job run, which is the record of that run.
     """
-    for folder in (knowledge_root(root_dir), questions_root(root_dir), insights_root(root_dir)):
+    folders = (
+        knowledge_root(root_dir),
+        questions_root(root_dir),
+        insights_root(root_dir),
+        job_runs_root(root_dir),
+    )
+    for folder in folders:
         if abs_path == folder or folder in abs_path.parents:
             return True
     return False

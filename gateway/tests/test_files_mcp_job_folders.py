@@ -1,8 +1,8 @@
 """The files MCP refuses a write into `wiki/knowledge/`, `wiki/questions/`,
-and `wiki/insights/`.
+`wiki/insights/`, and `wiki/job-runs/`.
 
-The researcher job and the insights job own these folders. The agent reads
-them and writes neither, through `write_file` or through `rename_file`.
+The jobs own these folders. The agent reads them and writes none of them,
+through `write_file` or through `rename_file`.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from conftest import gateway_session
 from joshua_gateway.files_mcp import server
 from joshua_gateway.main import lifespan
 
-FOLDERS = ("knowledge", "questions", "insights")
+FOLDERS = ("knowledge", "questions", "insights", "job-runs")
 MEMBER = {"X-Joshua-Person": "alex"}
 
 
@@ -39,6 +39,10 @@ def data_root(tmp_path, monkeypatch) -> Path:
     (root / "wiki" / "insights" / "garden" / "autumn.md").write_text(
         "---\nstatus: new\n---\nThe insight.\n"
     )
+    (root / "wiki" / "job-runs" / "2026" / "03").mkdir(parents=True)
+    (root / "wiki" / "job-runs" / "2026" / "03" / "curator-20260314-7.md").write_text(
+        "---\njob: curator\nrun_id: 7\nindex: false\n---\nThe report.\n"
+    )
     monkeypatch.setenv(server.DATA_ENV, str(root))
     return root
 
@@ -55,6 +59,7 @@ EXISTING = {
     "knowledge": "wiki/knowledge/houseplants/snake-plant.md",
     "questions": "wiki/questions/houseplants/feed-dose.md",
     "insights": "wiki/insights/garden/autumn.md",
+    "job-runs": "wiki/job-runs/2026/03/curator-20260314-7.md",
 }
 
 
@@ -77,6 +82,7 @@ async def test_write_file_refuses_a_job_folder(gateway, data_root, folder, mode)
         text = res.content[0].text
         assert "researcher job" in text and "insights job" in text
         assert f"wiki/{folder}/" in text
+        assert "wiki/job-runs/" in text
     assert not (data_root / target).exists()
     assert "clobbered" not in (data_root / EXISTING[folder]).read_text()
 
@@ -92,8 +98,30 @@ async def test_rename_file_refuses_a_job_folder(gateway, data_root, folder) -> N
             )
     assert res.is_error is True
     assert "researcher job" in res.content[0].text
+    assert "wiki/job-runs/" in res.content[0].text
     assert source.exists()
     assert not (source.parent / "renamed.md").exists()
+
+
+async def test_rename_into_a_job_run_name_and_append_to_a_report_are_refused(
+    gateway, data_root
+) -> None:
+    """A report is the record of its run: an append does not add to it."""
+    app = gateway(files_yaml())
+    report = data_root / EXISTING["job-runs"]
+    before = report.read_text()
+    async with lifespan(app):
+        async with gateway_session(app, "/files", "core", MEMBER) as session:
+            appended = await session.call_tool(
+                "write_file",
+                {"path": EXISTING["job-runs"], "content": "more\n", "mode": "append"},
+            )
+            nested = await session.call_tool(
+                "write_file", {"path": "wiki/job-runs/2026/04/new.md", "content": "x\n"}
+            )
+    assert appended.is_error is True and nested.is_error is True
+    assert report.read_text() == before
+    assert not (data_root / "wiki" / "job-runs" / "2026" / "04" / "new.md").exists()
 
 
 @pytest.mark.parametrize("folder", FOLDERS)
@@ -122,7 +150,7 @@ async def test_a_wiki_page_outside_the_job_folders_is_still_written(gateway, dat
     assert (data_root / "wiki" / "houseplants" / "knowledge.md").read_text() == "ok\n"
 
 
-@pytest.mark.parametrize("folder", ["questionsx", "knowledgex", "insightsx"])
+@pytest.mark.parametrize("folder", ["questionsx", "knowledgex", "insightsx", "job-runsx"])
 async def test_a_folder_that_only_starts_like_a_job_folder_is_written(
     gateway, data_root, folder
 ) -> None:
@@ -142,6 +170,9 @@ def test_in_job_folder_unit(tmp_path) -> None:
     assert server._in_job_folder(wiki / "insights" / "g" / "x.md", tmp_path)
     assert server._in_job_folder(wiki / "questions", tmp_path)
     assert server._in_job_folder(wiki / "questions" / "g" / "x.md", tmp_path)
+    assert server._in_job_folder(wiki / "job-runs", tmp_path)
+    assert server._in_job_folder(wiki / "job-runs" / "2026" / "03" / "x.md", tmp_path)
+    assert not server._in_job_folder(wiki / "job-runsx" / "x.md", tmp_path)
     assert not server._in_job_folder(wiki / "questionsx" / "x.md", tmp_path)
     assert not server._in_job_folder(wiki / "knowledge.md", tmp_path)
     assert not server._in_job_folder(wiki / "garden" / "insights" / "x.md", tmp_path)

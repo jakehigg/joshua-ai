@@ -19,9 +19,9 @@ The body hash is the first 12 hex characters of the SHA-256 of the body
 change to the frontmatter alone does not change it. A change to the body
 makes both pairs old.
 
-The keys go on a `wiki/**.md` page only. Never on a page under `people/` or
-`joshua-docs/`, never on a dot path, and never on a journal entry that a job
-run wrote (its frontmatter has `run_id`).
+The keys go on a `wiki/**.md` page only. Never on a page under `people/`,
+`joshua-docs/`, or `job-runs/`, never on a dot path, and never on a journal
+entry that a job run wrote (its frontmatter has `run_id`).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from datetime import date
 from pathlib import PurePosixPath
 from typing import Any
 
-from joshua_shared import frontmatter
+from joshua_shared import frontmatter, layout
 
 CURATED_KEY = "curated"
 HASH_KEY = "curated_hash"
@@ -40,8 +40,9 @@ REFRESHED_HASH_KEY = "refreshed_hash"
 # Every key the curator writes in the frontmatter of a page.
 TRACKING_KEYS = (CURATED_KEY, HASH_KEY, REFRESHED_KEY, REFRESHED_HASH_KEY)
 HASH_CHARS = 12
-# The top-level folders the curator never writes.
-UNTOUCHED_FOLDERS = ("people", "joshua-docs")
+# The top-level folders the curator never writes. `job-runs/` holds the
+# reports of the job runs.
+UNTOUCHED_FOLDERS = ("people", "joshua-docs", layout.JOB_RUNS)
 
 
 def body_hash(text: str) -> str:
@@ -101,7 +102,7 @@ def is_job_report(meta: dict[str, Any]) -> bool:
 
 def is_untouched(rel: str) -> bool:
     """True for a wiki path the curator never writes: `people/`, `joshua-docs/`,
-    or a path with a part that starts with a dot."""
+    `job-runs/`, or a path with a part that starts with a dot."""
     parts = PurePosixPath(rel).parts
     if not parts:
         return True

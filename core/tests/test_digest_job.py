@@ -679,9 +679,9 @@ async def test_the_runner_runs_the_job_in_one_commit(tmp_path: Path) -> None:
     assert frontmatter.split(digest)[0]["digest_run"] == run_id
     assert {e.ref for e in repo.usage_events} == {f"job_run:{run_id}:digest"}
     day = NOW.date()
-    report = wiki / f"journal/{day:%Y/%m/%d}/digest-{day:%Y%m%d}-{run_id}.md"
+    report = wiki / f"job-runs/{day:%Y/%m}/digest-{day:%Y%m%d}-{run_id}.md"
     assert report.is_file()
-    # The report of the run is a job entry, not a digest entry.
+    # The report of the run is a job report, not a digest entry.
     assert groups_module.is_digest_entry(frontmatter.split(report.read_text())[0]) is False
     assert not_memory(f"wiki/{report.relative_to(wiki).as_posix()}", report.read_text())
 

@@ -208,6 +208,24 @@ def test_not_memory_reads_only_the_top_level_keys() -> None:
     assert not not_memory("wiki/journal/2026/10/19/x.md", "---\nrun_id:\n---\n# X\n")
 
 
+def test_every_page_under_job_runs_is_not_memory() -> None:
+    """The folder of the run reports is skipped as a whole, with no key."""
+    assert not_memory("wiki/job-runs/2026/10/curator-20261019-4.md", "# curator run\n")
+    assert not_memory("wiki/job-runs/notes.md", "---\nindex: true\n---\n# A\n")
+    assert not not_memory("wiki/job-runsx/a.md", "# A\n")
+    assert not not_memory("wiki/notes/job-runs/a.md", "# A\n")
+
+
+async def test_the_listing_leaves_out_the_job_runs_folder(tmp_path: Path) -> None:
+    report = tmp_path / "wiki" / "job-runs" / "2026" / "10" / "insights-20261019-5.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# insights run\n\nNo marker in this page.\n", encoding="utf-8")
+    uris, left_out = await _listed(tmp_path)
+    rel = "wiki/job-runs/2026/10/insights-20261019-5.md"
+    assert rel not in uris
+    assert rel in left_out
+
+
 async def test_the_status_counts_the_pages_left_out(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(embed_module, "embed", lambda text, model="": word_vector(text))
     _tree(tmp_path)

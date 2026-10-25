@@ -1,10 +1,11 @@
 """Which job pages a chat turn may get through retrieval.
 
-The per-turn injection and the `search_memory` tool drop a chunk of kind
-`insight` when its insight is not due on the day of the turn (it is
-dismissed, expired, or snoozed), and a chunk of kind `question` when its
-question is not `open`. A chunk whose page is gone or does not parse is
-dropped too. Every other kind is kept.
+The per-turn injection and the `search_memory` tool leave out the kinds
+`insight` and `question` in the search itself. `ChatFilter` is the second
+line: it drops a chunk of kind `insight` when its insight is not due on the
+day of the turn (it is dismissed, expired, or snoozed), and a chunk of kind
+`question` when its question is not `open`. A chunk whose page is gone or
+does not parse is dropped too. Every other kind is kept.
 
 The rule reads the frontmatter of the page from the data volume, through
 `load_insight` and `load_question`, when the search runs. One `ChatFilter`

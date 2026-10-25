@@ -28,6 +28,7 @@ already at the new path stays where it is. See [Migration](#migration).
 /data/wiki/insights/<section>/<slug>.md          one insight; the insights job writes it
 /data/wiki/questions/<section>/<slug>.md         one question for a person; the researcher job writes it
 /data/wiki/questions/README.md                   the list of every question for a person
+/data/wiki/job-runs/YYYY/MM/<job>-<YYYYMMDD>-<id>.md  the report of one job run; the index skips it
 /data/wiki/**.md                                 the rest of the wiki, incl. wiki/skills/*.md
 /data/wiki/.trash/<UTC timestamp>/**             pages the viewer deleted; the index skips it
 /data/wiki/.trash/YYYY-MM-DD/**                  files the curator job moved out; the index skips it
@@ -62,8 +63,8 @@ may write comes from their role, never from the path. See `security.md`.
   `wiki/attachments/`, and `inbox/sessions/`. Core also writes the metadata
   file of an attachment, and renames an attachment after the description.
   Core never writes the bytes of a file that a person sent.
-- core writes `wiki/knowledge/`, `wiki/questions/`, and `wiki/insights/`
-  too, from a job run or from the `questions` chat tool.
+- core writes `wiki/knowledge/`, `wiki/questions/`, `wiki/insights/`, and
+  `wiki/job-runs/` too, from a job run or from the `questions` chat tool.
   See [docs/jobs.md](jobs.md).
 - gateway (files MCP) writes the rest of `wiki/` for a member, and
   `wiki/people/<id>.md` for that person. The `<id>` must be a person on the
@@ -140,7 +141,7 @@ that belongs to the person.
 
 ## Knowledge, questions, and insights
 
-Three folders of the wiki belong to the jobs. See [docs/jobs.md](jobs.md).
+Four folders of the wiki belong to the jobs. See [docs/jobs.md](jobs.md).
 
 - `wiki/knowledge/` holds what the researcher job found. The path of a topic
   dossier is the same as the path of its topic page: the dossier of
@@ -153,13 +154,16 @@ Three folders of the wiki belong to the jobs. See [docs/jobs.md](jobs.md).
 - `wiki/insights/<section>/<slug>.md` holds one insight: a place where what
   the wiki and the journal say we do is different from what the knowledge
   says.
+- `wiki/job-runs/YYYY/MM/<job>-<YYYYMMDD>-<run id>.md` holds the report of
+  one job run, with `index: false`. It is not memory: the index skips the
+  whole folder, and no job reads it.
 
 `layout.knowledge_dossier`, `layout.knowledge_page`, `layout.question_page`,
-and `layout.insight_page` build these paths. A slug and a section match `^[a-z0-9][a-z0-9-]{0,63}$`. A
+`layout.insight_page`, and `layout.job_run_report_path` build these paths. A slug and a section match `^[a-z0-9][a-z0-9-]{0,63}$`. A
 topic path is relative to the wiki and has no `.` or `..` segment. Core does
 not make the folders at start. Each folder appears at its first write.
 
-Every person reads the three folders. The agent cannot write them:
+Every person reads the four folders. The agent cannot write them:
 `write_file` and `rename_file` refuse a path in them.
 
 ## Profiles

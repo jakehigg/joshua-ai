@@ -15,9 +15,13 @@ never shown in full. It takes one slot of ``top_k`` and is one short line
 under a header that says to check the live tool before a change. The other
 chunks get the same decision as on a turn with no snapshot.
 
-A chunk of an insight that is not due, or of a question that is not open,
-never reaches a turn (``jobs/retrieval.py``). Every decision writes one
-``kb_event`` audit row. Retrieval never breaks a turn:
+The pages that the jobs write are not memory, so a chunk of the kinds
+``knowledge``, ``insight``, and ``question`` never reaches a turn this way
+(``JOB_KINDS``). In place of an insight or a question, a turn that a person
+sent gets one short line when it is about a topic with due insights or open
+questions (``jobs/open_items.py``). The line holds only the counts. Every
+decision writes one ``kb_event`` audit row, and the row names the topics of
+the line. Retrieval never breaks a turn:
 an unavailable embedding model or a failed search skips the note and logs a
 warning. The provider is registered on the manager's context-provider hook.
 """
@@ -37,7 +41,8 @@ from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
 from joshua_core.jobs.insights.page import local_day
-from joshua_core.jobs.retrieval import ChatFilter
+from joshua_core.jobs.open_items import OpenItems, TopicItems, hint_line
+from joshua_core.jobs.retrieval import INSIGHT_KIND, QUESTION_KIND, ChatFilter
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
@@ -66,6 +71,13 @@ SNAPSHOT_HEADER = (
 )
 # A snapshot line holds at most this many characters of the item.
 SNAPSHOT_LINE_CHARS = 200
+# The kinds of the pages that the jobs write. They are not memory, and the
+# per-turn search leaves them out.
+KNOWLEDGE_KIND = "knowledge"
+JOB_KINDS = (KNOWLEDGE_KIND, INSIGHT_KIND, QUESTION_KIND)
+# The direction of a turn that a person sent. A scheduled task is `task`,
+# and an event or a webhook is `inject`.
+PERSON_DIRECTION = "in"
 
 
 @dataclass
@@ -179,12 +191,14 @@ async def kb_context(
     per_doc_cap: int,
     keep: Callable[[KbChunk], bool] | None = None,
     timezone: str = "UTC",
+    open_items: OpenItems | None = None,
 ) -> str | None:
     """Build the per-turn injection note for one ``TurnCtx``, or None.
 
     ``keep`` drops a candidate chunk before the top-k trim. A snapshot line
     shows the time of the latest good fetch in ``timezone``, read once for the
-    turn; a snapshot chunk with no good fetch is dropped.
+    turn; a snapshot chunk with no good fetch is dropped. With
+    ``open_items``, a turn that a person sent gets the topic hint line.
 
     A message shorter than :data:`MIN_QUERY_CHARS`, an unavailable embedding
     model, or a failed retrieval returns None with no audit row (the turn
@@ -214,7 +228,7 @@ async def kb_context(
             vec,
             k=max(6, top_k * 3),
             min_sim=hint_sim,
-            exclude_kinds=(SKILL_KIND,),
+            exclude_kinds=(SKILL_KIND, *JOB_KINDS),
             recency_bonus=recency_bonus,
             recency_half_life_days=recency_half_life_days,
             per_doc_cap=per_doc_cap,
@@ -226,6 +240,7 @@ async def kb_context(
 
     labels = await snapshot_labels(store, ranked, timezone)
     ranked = shown(ranked, labels)
+    topics = _open_topics(ctx, text, ranked, open_items)
     # A snapshot chunk takes a slot of `top_k` and is always a short line. The
     # other chunks get the same decision as on a turn with no snapshot.
     snaps, others = split_snapshots(ranked, top_k)
@@ -242,6 +257,7 @@ async def kb_context(
             "best_sim": round(plan.best_sim, 4),
             "results": len(ranked),
             "snapshots": len(snaps),
+            "topics": len(topics),
             "duration_ms": duration_ms,
         }
     )
@@ -255,6 +271,7 @@ async def kb_context(
             best_sim=plan.best_sim,
             duration_ms=duration_ms,
             results=_audit_results(ranked, [*plan.injected, *snaps], max_chars),
+            topics=[item.audit() for item in topics],
         )
     except Exception as exc:  # noqa: BLE001 — telemetry must never break a turn
         logger.warning({"message": "kb inject audit failed", "error": str(exc)})
@@ -266,7 +283,28 @@ async def kb_context(
         notes.append(_hint_note(plan.injected))
     if snaps:
         notes.append(_snapshot_note(snaps, labels))
+    if topics:
+        notes.append(hint_line(topics))
     return "\n\n".join(notes) or None
+
+
+def is_person_turn(ctx: Any) -> bool:
+    """True for a turn that a person sent: not a scheduled task, an event, or
+    a webhook."""
+    return getattr(ctx, "direction", PERSON_DIRECTION) == PERSON_DIRECTION
+
+
+def _open_topics(
+    ctx: Any, text: str, ranked: Sequence[KbChunk], open_items: OpenItems | None
+) -> list[TopicItems]:
+    """The topics of the hint line of this turn. It never breaks a turn."""
+    if open_items is None or not is_person_turn(ctx):
+        return []
+    try:
+        return open_items.about(text, [c.path for c in ranked])
+    except Exception as exc:  # noqa: BLE001 — the hint must never break a turn
+        logger.warning({"message": "topic hint skipped", "error": str(exc)})
+        return []
 
 
 def register(
@@ -281,7 +319,10 @@ def register(
     """Wire the injection context provider into the conversation manager.
 
     Each turn gets a new ``ChatFilter`` for the day of ``clock`` (the
-    instance timezone). Does nothing when ``memory.inject.enabled`` is false.
+    instance timezone). With ``jobs.enabled``, one ``OpenItems`` serves the
+    topic hint of every turn: it counts the insights when the insights job is
+    on, and the questions when the researcher is on. Does nothing when
+    ``memory.inject.enabled`` is false.
     """
     memory = settings.memory
     inject = memory.inject
@@ -290,6 +331,7 @@ def register(
         return
 
     now = clock or _utc_now
+    open_items = _open_items(settings, data_dir, now)
 
     async def provider(ctx: Any) -> str | None:
         return await kb_context(
@@ -306,9 +348,29 @@ def register(
             per_doc_cap=memory.per_doc_cap,
             keep=ChatFilter(data_dir, local_day(now(), settings)),
             timezone=getattr(settings, "timezone", "UTC"),
+            open_items=open_items,
         )
 
     manager.add_context_provider(provider)
+
+
+def _open_items(
+    settings: JoshuaConfig, data_dir: Path | str, now: Callable[[], datetime]
+) -> OpenItems | None:
+    """The `OpenItems` of the topic hint, or None when no job writes an
+    insight or a question."""
+    jobs = getattr(settings, "jobs", None)
+    if jobs is None or not jobs.enabled:
+        return None
+    if not (jobs.insights.enabled or jobs.research.enabled):
+        return None
+    return OpenItems(
+        data_dir,
+        today=lambda: local_day(now(), settings),
+        people=settings.people,
+        insights=jobs.insights.enabled,
+        questions=jobs.research.enabled,
+    )
 
 
 def _utc_now() -> datetime:

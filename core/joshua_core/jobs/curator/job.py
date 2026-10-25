@@ -951,7 +951,7 @@ def _short(text: str) -> str:
 
 def _code(text: Any) -> str:
     """`text`, short, as one code span, so that a link in it is not a link of
-    the journal entry that shows it."""
+    the report that shows it."""
     return "`" + _short(str(text)).replace("`", "'") + "`"
 
 

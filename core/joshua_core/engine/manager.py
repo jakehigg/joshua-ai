@@ -64,6 +64,9 @@ class TurnCtx:
     # whose ``for`` names a role is matched against it. A guest is the safe
     # default, as it is everywhere else.
     role: str = "guest"
+    # Who sent the turn: `in` for a person, `task` for a scheduled task, and
+    # `inject` for an event or a webhook.
+    direction: str = "in"
     # The message embedding, computed once and shared between providers (the
     # injection provider fills it; the taught-skill provider reuses it).
     embedding: list[float] | None = None
@@ -619,6 +622,7 @@ class ConversationManager:
             turn_id=turn_id,
             profile=mc.profile,
             role=role,
+            direction=direction,
         )
         provider_notes: list[str] = []
         for provider in self._context_providers:

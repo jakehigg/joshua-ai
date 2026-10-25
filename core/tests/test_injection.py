@@ -219,7 +219,8 @@ async def test_excludes_skill_rows_from_injection() -> None:
     )
     store, repo = FakeStore([skill, _chunk(0.9)]), FakeRepo()
     note = await _run(_ctx("tell me about pizza dough"), store, repo)
-    assert store.exclude_seen[0] == ("skill",)  # the exclude filter is forwarded
+    # The exclude filter is forwarded: a skill and the three kinds of job page.
+    assert store.exclude_seen[0] == ("skill", "knowledge", "insight", "question")
     assert note is not None
     assert "Dim the lights." not in note  # a skill row never reaches the note
     assert "00 flour" in note

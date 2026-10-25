@@ -251,6 +251,22 @@ with the images and the packaged chart, are at
   `Snapshots: <name> (<n> items)`. The digest does not change. See
   [docs/jobs.md](jobs.md#snapshots-in-the-bundle).
 
+### Changed
+
+- **The report of a job run moves out of the journal, and the job pages
+  leave the chat injection.** A run now writes its report at
+  `wiki/job-runs/YYYY/MM/<job>-<YYYYMMDD>-<run id>.md`, with `job`, `run_id`,
+  and `index: false` in its frontmatter. The index skips the whole folder, no
+  job takes a topic from it, the curator does not read or change it, and the
+  files tool of the agent refuses a write or a rename there. An old report in
+  the journal stays out of the index as before. The injection before a turn
+  now leaves out the knowledge, insight, and question pages, and
+  `search_memory` leaves out the insights and the questions, which
+  `list_insights` and `list_questions` read. In their place, a turn that a
+  person sent about a topic with due insights or open questions gets one
+  line with the counts only. The `kb_event` table gets the column `topics`.
+  See [docs/jobs.md](jobs.md#retrieval-in-chat).
+
 ### Fixed
 
 - **A job bundle takes only the snapshot items that are about its topic.** A

@@ -109,6 +109,8 @@ CREATE TABLE IF NOT EXISTS kb_event (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_kb_event_created ON kb_event (created_at DESC);
+-- The topics of the hint line of an injection, with their open counts.
+ALTER TABLE kb_event ADD COLUMN IF NOT EXISTS topics JSONB NOT NULL DEFAULT '[]'::jsonb;
 -- Join kb_event.turn_id to the outgoing transcript row's meta for per-turn timings.
 CREATE INDEX IF NOT EXISTS idx_transcript_turn
     ON transcript ((meta->>'turn_id')) WHERE direction = 'out';

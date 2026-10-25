@@ -73,6 +73,7 @@ def test_curated_day_reads_a_string_and_refuses_junk() -> None:
         ("journal/2026/10/01/r.md", "---\nrun_id: 4\n---\nReport\n", False),
         ("people/alex.md", "# Alex\n", False),
         ("joshua-docs/jobs.md", "# Jobs\n", False),
+        ("job-runs/2026/10/curator-20261019-3.md", "---\nindex: false\n---\nReport\n", False),
         (".trash/x.md", "x\n", False),
         ("garden/.hidden.md", "x\n", False),
         ("garden/photo.jpg", "x", False),

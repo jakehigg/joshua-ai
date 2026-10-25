@@ -69,6 +69,7 @@ RESERVED_FOLDERS = (
     layout.KNOWLEDGE,
     layout.INSIGHTS,
     layout.QUESTIONS,
+    layout.JOB_RUNS,
     layout.ATTACHMENTS,
 )
 # A shorter name matches too many words to mean the topic.

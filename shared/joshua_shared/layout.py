@@ -85,6 +85,7 @@ _PAGE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
 KNOWLEDGE = "knowledge"
 INSIGHTS = "insights"
 QUESTIONS = "questions"
+JOB_RUNS = "job-runs"
 
 # A pre-single-wiki `blog/` post: the nightly digest, `YYYY-MM-DD.md` ...
 _LEGACY_DIGEST_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\.md\Z")
@@ -326,6 +327,21 @@ def insight_page(section: str, slug: str, root: Path | str | None = None) -> Pat
     """
     folder = _page_slug(section, "insight section")
     return insights_root(root) / folder / f"{_page_slug(slug, 'insight slug')}.md"
+
+
+def job_runs_root(root: Path | str | None = None) -> Path:
+    """`<data>/wiki/job-runs`, the reports of the job runs. They are not memory."""
+    return wiki_root(root) / JOB_RUNS
+
+
+def job_run_report_path(day: date, slug: str, root: Path | str | None = None) -> Path:
+    """`<data>/wiki/job-runs/YYYY/MM/<slug>.md`, the report of one job run.
+
+    `slug` matches `^[a-z0-9][a-z0-9-]{0,63}$`, such as
+    `curator-20261019-12`. Raises `ValueError` for a bad slug.
+    """
+    name = _page_slug(slug, "job run slug")
+    return job_runs_root(root) / f"{day:%Y}" / f"{day:%m}" / f"{name}.md"
 
 
 def questions_root(root: Path | str | None = None) -> Path:

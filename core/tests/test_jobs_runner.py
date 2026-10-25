@@ -1,4 +1,4 @@
-"""The job runner: the lock, the run row, the journal entry, and the commit.
+"""The job runner: the lock, the run row, the report page, and the commit.
 
 The `job_run` table is an in-memory fake. The wiki is a real git repository in
 a temporary directory, so the commit and its SHA are real.
@@ -105,7 +105,8 @@ def _git(wiki: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-ENTRY_DIR = ("wiki", "journal", "2026", "10", "19")
+ENTRY_DIR = ("wiki", "job-runs", "2026", "10")
+JOURNAL_DAY = ("wiki", "journal", "2026", "10", "19")
 
 
 async def test_a_real_run_writes_the_entry_and_commits_once(data_root: Path) -> None:
@@ -118,10 +119,11 @@ async def test_a_real_run_writes_the_entry_and_commits_once(data_root: Path) -> 
     meta, body = frontmatter.split(entry.read_text())
     assert meta == {
         "date": NOW.date(),
-        "people": [],
-        "source": "echo",
+        "job": "echo",
         "run_id": run_id,
+        "index": False,
     }
+    assert not data_root.joinpath(*JOURNAL_DAY).exists()
     assert "# echo run" in body and "Echoed." in body and "## Said" in body
     assert "- Worker calls: 2" in body and "- Tokens: 150" in body
 
@@ -130,7 +132,7 @@ async def test_a_real_run_writes_the_entry_and_commits_once(data_root: Path) -> 
     assert row["commit_sha"] == _git(wiki, "rev-parse", "HEAD")
     assert _git(wiki, "log", "-1", "--format=%s") == f"echo: run {run_id}"
     changed = _git(wiki, "show", "--name-only", "--format=", "HEAD").splitlines()
-    assert sorted(changed) == sorted(["echo.md", f"journal/2026/10/19/echo-20261019-{run_id}.md"])
+    assert sorted(changed) == sorted(["echo.md", f"job-runs/2026/10/echo-20261019-{run_id}.md"])
     assert row["calls"] == 2 and row["tokens"] == 150 and row["error"] is None
     assert row["finished_at"] == NOW
     assert row["report"]["summary"] == "Echoed."
@@ -143,7 +145,8 @@ async def test_the_entry_of_a_run_is_not_memory(data_root: Path) -> None:
     run_id = await runner.start("echo", {"say": "hello"}, dry_run=False)
     await runner.wait(run_id)
 
-    entry = f"wiki/journal/2026/10/19/echo-20261019-{run_id}.md"
+    entry = f"wiki/job-runs/2026/10/echo-20261019-{run_id}.md"
+    assert data_root.joinpath(entry).is_file()
     source = FilesSource(data_root)
     listed = [d.uri async for d in source.list_documents()]
     assert entry not in listed
@@ -271,7 +274,7 @@ async def test_a_failed_commit_is_recorded_as_an_error(data_root: Path, monkeypa
     run_id = await runner.start("echo", {}, dry_run=False)
     await runner.wait(run_id)
     error = repo.rows[run_id]["error"]
-    assert error.startswith("the worker broke; the journal entry or the commit failed")
+    assert error.startswith("the worker broke; the report page or the commit failed")
 
 
 async def test_a_commit_with_nothing_new_stores_no_sha(data_root: Path, monkeypatch) -> None:
@@ -330,7 +333,7 @@ async def test_the_bundle_job_reports_the_paths(data_root: Path) -> None:
     assert data["aliases"] == ["Sansevieria", "Snakey"]
     assert data["truncated"] is False
     assert row["report"]["summary"].startswith(f"The bundle of {TOPIC} holds ")
-    # The journal body is the path list, not the bundle text.
+    # The report body is the path list, not the bundle text.
     entry = data_root.joinpath(*ENTRY_DIR, f"bundle-20261019-{run_id}.md")
     body = frontmatter.split(entry.read_text())[1]
     assert f"- `{TOPIC}`" in body

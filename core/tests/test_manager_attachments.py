@@ -329,3 +329,24 @@ async def test_a_url_in_the_text_of_an_attachment_is_not_granted(
     )
 
     assert grants.granted("c1") == []
+
+
+@pytest.mark.parametrize("direction", ["in", "task", "inject"])
+async def test_a_provider_sees_who_sent_the_turn(tmp_path: Path, direction: str) -> None:
+    """The topic hint reads the direction: only a person's turn gets it."""
+    manager = _manager(FakeRepo(), tmp_path)
+    seen: list[str] = []
+
+    async def provider(ctx: Any) -> str | None:
+        seen.append(ctx.direction)
+        return None
+
+    manager.add_context_provider(provider)
+    await manager.run_turn(
+        make_channel(),
+        make_conversation(person_id="alex"),
+        "check the filter",
+        direction=direction,
+        person_id="alex",
+    )
+    assert seen == [direction]

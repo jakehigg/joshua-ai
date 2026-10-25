@@ -26,8 +26,8 @@ code block opens with three or more backticks or tildes, at most three spaces
 in, and closes at a line of the same mark that is at least as long and holds
 nothing else, as in CommonMark.
 
-The scan does not read the links of a page under `people/` or `joshua-docs/`,
-and it never proposes a change there. A journal entry is read for links, but a
+The scan does not read the links of a page under `people/`, `joshua-docs/`,
+or `job-runs/`, and it never proposes a change there. A journal entry is read for links, but a
 broken link in it is Tier C, because the curator never changes a journal body.
 """
 
@@ -62,6 +62,7 @@ OUT_OF_SCOPE = (
     layout.KNOWLEDGE,
     layout.INSIGHTS,
     layout.QUESTIONS,
+    layout.JOB_RUNS,
     "skills",
     ATTACHMENTS,
 )
@@ -454,8 +455,8 @@ def _line_at(text: str, offset: int) -> str:
 
 
 def link_sources(tree: Tree) -> list[str]:
-    """The pages whose links the scan reads: every page outside `people/` and
-    `joshua-docs/`."""
+    """The pages whose links the scan reads: every page outside `people/`,
+    `joshua-docs/`, and `job-runs/`."""
     return sorted(p for p in tree.pages if section_of(p) not in UNTOUCHED_FOLDERS)
 
 

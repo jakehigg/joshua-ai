@@ -265,7 +265,10 @@ def test_a_job_page_is_never_an_orphan(tmp_path: Path) -> None:
             "insights/houseplants/too-wet.md": "# Insight\n",
             "questions/houseplants/feed-dose.md": "# Question\n",
             "questions/README.md": "# Questions\n",
+            "job-runs/2026/10/curator-20261019-3.md": "# curator run\n\n[gone](gone.md)\n",
         },
     )
     result = scan_tree(load_tree(wiki), trash=False)
     assert [f for f in result.findings if f.kind == "orphan"] == []
+    # The scan reads no link of a run report.
+    assert [f for f in result.findings if f.kind == "broken-link"] == []

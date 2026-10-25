@@ -149,6 +149,7 @@ One volume mounts at `/data` in all three containers:
 /data/wiki/knowledge/**.md                       researched topics; core writes it (a job run)
 /data/wiki/insights/<section>/<slug>.md          insights; core writes it (a job run)
 /data/wiki/questions/<section>/<slug>.md         questions for a person; core writes it (a job run, a chat answer)
+/data/wiki/job-runs/YYYY/MM/<job>-<day>-<id>.md  the report of a job run; core writes it; not memory
 /data/wiki/.git                                  the wiki's git repository; core and gateway write it
 /data/people/<id>/attachments/YYYY/MM/<file>     channels writes it
 /data/people/<id>/cli/outbox.jsonl               channels writes it
@@ -210,11 +211,15 @@ if any, plus everything shared, and a group turn finds the shared scope only.
 starts with `POST /admin/jobs/{job}/run` or `scripts/jobs.sh`. Nothing
 schedules one. `JobRunner` runs one job at a time under the lock that the
 nightly reflection also takes, keeps a row per run in `job_run`, and, for a run
-that is not a dry run, writes the report as a journal entry and makes one wiki
-commit. A job reads a topic through `build_bundle` (`jobs/bundle.py`), lists
+that is not a dry run, writes the report at `wiki/job-runs/YYYY/MM/` and makes
+one wiki commit. The report is not a journal entry, and the index skips the
+folder. A job reads a topic through `build_bundle` (`jobs/bundle.py`), lists
 each path it writes in `RunReport.written`, and writes nothing in a dry run.
-`wiki/knowledge/`, `wiki/questions/`, and `wiki/insights/` belong to the
-jobs; the files MCP refuses an agent write there. A job never sends a
+`wiki/knowledge/`, `wiki/questions/`, `wiki/insights/`, and `wiki/job-runs/`
+belong to the jobs; the files MCP refuses an agent write there. The per-turn
+injection leaves out the kinds `knowledge`, `insight`, and `question`;
+`search_memory` leaves out `insight` and `question`. A turn that a person
+sent gets a topic hint line with the counts only (`jobs/open_items.py`). A job never sends a
 question to a person: it keeps the question under `wiki/questions/`, and a
 person answers it in chat. `docs/jobs.md` is the reference.
 

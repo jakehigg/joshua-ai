@@ -1,8 +1,9 @@
-"""The `knowledge/`, `insights/`, and `questions/` paths in
+"""The `knowledge/`, `insights/`, `questions/`, and `job-runs/` paths in
 `joshua_shared.layout`, and the values they refuse."""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -139,3 +140,12 @@ def test_trash_path_refuses_an_unsafe_path(tmp_path: Path, rel: str) -> None:
 
 def test_knowledge_index_is_the_readme_of_the_knowledge_folder(tmp_path: Path) -> None:
     assert layout.knowledge_index(tmp_path) == tmp_path / "wiki" / "knowledge" / "README.md"
+
+
+def test_the_report_of_a_job_run_is_under_job_runs_by_month(tmp_path: Path) -> None:
+    path = layout.job_run_report_path(date(2026, 3, 14), "curator-20260314-7", tmp_path)
+    assert path == tmp_path / "wiki" / "job-runs" / "2026" / "03" / "curator-20260314-7.md"
+    assert layout.job_runs_root(tmp_path) == tmp_path / "wiki" / layout.JOB_RUNS
+    for bad in ("", "../x", "a/b", "Curator", ".hidden"):
+        with pytest.raises(ValueError):
+            layout.job_run_report_path(date(2026, 3, 14), bad, tmp_path)

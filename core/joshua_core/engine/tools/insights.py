@@ -298,7 +298,7 @@ async def do_run_insights(deps: ToolDeps, ctx: InsightsContext, *, topic: str) -
         return _reply("The insights job is not turned on for this instance.")
     return _reply(
         f"Started insights run {run_id}. It works in the background. When it ends, "
-        "its report is a journal entry, and list_insights shows what it found."
+        "its report is a page in wiki/job-runs/, and list_insights shows what it found."
     )
 
 

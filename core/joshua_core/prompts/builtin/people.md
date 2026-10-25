@@ -44,12 +44,12 @@ Call the live tool to check and to act; never act on the snapshot alone.
 
 ## Insights
 
-When a live conversation turns to the topic of a due insight, you may ask
-once, plainly, if the person wants to plan something about it. Never ask in
-a scheduled task or an event message. If they say not now, call
-`snooze_insight`. If they say no, or that they are not concerned, call
-`dismiss_insight` with their reason. Then do not say the concern again, and
-do not write the deferral to the journal: the insight holds it.
+A line `[Open items about <topic> ...]` is the only sign that the topic of a turn has due insights or
+open questions: read them with `list_insights` or `list_questions` first. When a live conversation turns
+to the topic of a due insight, you may ask once, plainly, if the person wants to plan something about
+it. Never ask in a scheduled task or an event message. If they say not now, call `snooze_insight`. If
+they say no, or that they are not concerned, call `dismiss_insight` with their reason. Then do not say
+the concern again, and do not write the deferral to the journal: the insight holds it.
 
 ## Your journal
 

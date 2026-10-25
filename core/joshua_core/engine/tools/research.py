@@ -2,7 +2,7 @@
 
 ``plan_research`` starts a ``plan`` run and ``run_research`` a ``run`` run of
 the ``research`` job, through the job runner, so a run from chat is the same
-as a run from the laptop: one row, one journal entry, one wiki commit.
+as a run from the laptop: one row, one report page, one wiki commit.
 Neither is a dry run. ``queue_question`` adds an open question that a person
 asked to the dossier of a topic, and ``research_status`` gives the summary of
 the last run.
@@ -105,7 +105,7 @@ async def _start(ctx: ResearchContext, args: dict[str, Any]) -> dict[str, Any]:
         return _reply("The researcher is not turned on for this instance.")
     return _reply(
         f"Started research run {run_id} ({args['mode']}). It works in the background. "
-        "When it ends, its report is a journal entry; call research_status to read "
+        "When it ends, its report is a page in wiki/job-runs/; call research_status to read "
         "the summary."
     )
 
@@ -266,7 +266,7 @@ def build_research_server(deps: ToolDeps, ctx: ResearchContext) -> Any:
         "plan_research",
         "Start a research plan: the researcher chooses a topic (or takes the one you "
         "give), and raises the questions it would research, with no lookup. The report "
-        "is a journal entry. Only a member may call this.",
+        "is a page in wiki/job-runs/. Only a member may call this.",
         _PLAN_SCHEMA,
     )
     async def plan_research(args: dict[str, Any]) -> dict[str, Any]:

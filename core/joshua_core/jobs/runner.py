@@ -5,9 +5,10 @@ the background, under the lock that the nightly reflection also takes, so two
 jobs, or a job and the nightly run, never write the wiki at the same time.
 
 Each run has one row in the `job_run` table. When the run is not a dry run,
-the runner writes the report as a journal entry at
-`wiki/journal/YYYY/MM/DD/<job>-<YYYYMMDD>-<run id>.md` and commits that entry
-and every path the job wrote, in one wiki commit. A dry run writes nothing and
+the runner writes the report at
+`wiki/job-runs/YYYY/MM/<job>-<YYYYMMDD>-<run id>.md` and commits that report
+and every path the job wrote, in one wiki commit. The report is not memory:
+the index leaves the whole folder out. A dry run writes nothing and
 records the report in its row only. A run that fails records its error and
 never raises out of its task.
 
@@ -44,7 +45,7 @@ logger = get_logger("jobs.runner")
 
 Clock = Callable[[], datetime]
 
-# A job name is part of a journal slug, so it is a short slug itself.
+# A job name is part of the file name of a report, so it is a short slug itself.
 JOB_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}\Z")
 
 
@@ -83,13 +84,13 @@ class JobArgsError(JobError):
 
 @dataclass
 class RunReport:
-    """What one run did. It becomes the journal entry of the run.
+    """What one run did. It becomes the report page of the run.
 
-    `summary` is one paragraph. `sections` is the body of the entry: a list of
+    `summary` is one paragraph. `sections` is the body of the page: a list of
     `(heading, markdown)`. `calls` and `tokens` count the worker calls of the
     run. `written` lists every wiki path the run wrote, which the runner
     commits. `data` holds values for a program, such as the bundle paths; it
-    goes into the `job_run` row and not into the journal entry.
+    goes into the `job_run` row and not into the report page.
     """
 
     job: str
@@ -107,7 +108,7 @@ class RunReport:
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_markdown(self) -> str:
-        """The body of the journal entry of this run."""
+        """The body of the report page of this run."""
         lines = [f"# {self.job} run", ""]
         if self.summary:
             lines += [self.summary.strip(), ""]
@@ -195,7 +196,7 @@ class JobRunStore(Protocol):
 
 
 def journal_slug(job: str, day: date, run_id: int) -> str:
-    """`<job>-<YYYYMMDD>-<run id>`, the journal slug of one run."""
+    """`<job>-<YYYYMMDD>-<run id>`, the file slug of the report of one run."""
     return f"{job}-{day:%Y%m%d}-{run_id}"
 
 
@@ -353,17 +354,19 @@ class JobRunner:
             try:
                 report.commit_sha = self._record(run_id, report)
             except Exception as exc:  # noqa: BLE001 — the error goes into the report
-                note = f"the journal entry or the commit failed: {exc}"
+                note = f"the report page or the commit failed: {exc}"
                 report.error = f"{report.error}; {note}" if report.error else note
         return report
 
     def _record(self, run_id: int, report: RunReport) -> str | None:
-        """Write the journal entry of a run, commit it with what the run wrote,
+        """Write the report page of a run, commit it with what the run wrote,
         and return the commit SHA, or None when nothing was committed."""
         assert report.finished_at is not None
         day = report.finished_at.astimezone(ZoneInfo(self._settings.timezone)).date()
-        path = layout.journal_entry_path(day, journal_slug(report.job, day, run_id), self._data_dir)
-        meta = {"date": day, "people": [], "source": report.job, "run_id": run_id}
+        path = layout.job_run_report_path(
+            day, journal_slug(report.job, day, run_id), self._data_dir
+        )
+        meta = {"date": day, "job": report.job, "run_id": run_id, "index": False}
         block = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"---\n{block}---\n\n{report.to_markdown()}", encoding="utf-8")

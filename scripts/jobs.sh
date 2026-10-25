@@ -8,7 +8,7 @@
 #   scripts/jobs.sh digest plan | run [--dry-run] | undo <digest path> [--dry-run]
 #
 # `run` starts a run in the background and prints its run id. Without
-# --dry-run the run writes the wiki: a journal entry and one commit. Each
+# --dry-run the run writes the wiki: a report page and one commit. Each
 # --arg is one job argument, and its value is a string. `runs <id>` prints the
 # report of one run. `list <job>` prints the newest runs of that job.
 # `digest plan` is a dry run of the digest job that shows its groups. `digest

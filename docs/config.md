@@ -529,7 +529,7 @@ place, and no entry turns them off:
 
 A job is work that core does on the wiki when you start it. Nothing schedules a
 job. You start a run from the laptop with `scripts/jobs.sh`, and each run
-writes one journal entry and makes one wiki commit. See
+writes one report page in `wiki/job-runs/` and makes one wiki commit. See
 [docs/jobs.md](jobs.md).
 
 ```yaml

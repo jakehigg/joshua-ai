@@ -2,8 +2,8 @@
 
 A job is work that core does on the wiki when you start it. Nothing schedules
 a job. You start a run from the laptop, the run works in the background, and
-when it ends it writes one journal entry and makes one wiki commit. You read
-the result in the journal, or through the admin routes.
+when it ends it writes one report page and makes one wiki commit. You read
+the result in `wiki/job-runs/`, or through the admin routes.
 
 Jobs are off by default. Set `jobs.enabled: true` in `joshua.yaml` to make the
 routes live. [docs/config.md](config.md#jobs) has every key.
@@ -16,9 +16,10 @@ routes live. [docs/config.md](config.md#jobs) has every key.
 2. The run works in the background. A job reads the wiki through the memory
    bundle of a topic (see below), and writes only what it owns.
 3. The run ends. Core records the report in the row. When the run is not a dry
-   run, core also writes the report as a journal entry and commits the wiki.
+   run, core also writes the report as a page in `wiki/job-runs/` and commits
+   the wiki.
 
-A run that fails records its error in the row, and in the journal entry when it
+A run that fails records its error in the row, and in the report page when it
 is not a dry run. A failure never stops core.
 
 Core cleans the text fields of each worker answer before it uses them: a tag
@@ -63,8 +64,8 @@ no tokens.
 `report.data.usage` holds `{"<worker>": {"calls", "tokens", "input",
 "output", "cache_read", "cache_write", "model"}}` for each worker of the run.
 `tokens` is the total of the four counts. `model` is the model of the worker,
-or `null` when the job did not name one. The "Usage" section of the journal
-entry shows the model beside each worker. The seam for a program that reads the usage
+or `null` when the job did not name one. The "Usage" section of the report
+page shows the model beside each worker. The seam for a program that reads the usage
 is `joshua_core.engine.usage`: `Usage`, `UsageLedger`, and the `usage_out`
 argument of each worker call.
 
@@ -98,35 +99,40 @@ shows the tokens of each job by day, beside the chat. An operator reads the
 same numbers at `GET /admin/usage?days=N`. See
 [operations.md](operations.md#the-usage-page).
 
-### The journal entry
+### The run report
 
 A run that is not a dry run writes its report at
-`wiki/journal/YYYY/MM/DD/<job>-<YYYYMMDD>-<run id>.md`, dated in `timezone`
+`wiki/job-runs/YYYY/MM/<job>-<YYYYMMDD>-<run id>.md`, dated in `timezone`
 when the run ends. The frontmatter is:
 
 ```yaml
 date: 2026-10-19
-people: []
-source: bundle
+job: bundle
 run_id: 12
+index: false
 ```
 
 The body holds the summary of the run, one section for each part of the
 report, and the run facts: when it started and ended, the arguments, the worker
 calls, and the tokens. Nothing goes to a chat.
 
-Core commits the entry and every page the run wrote, in one commit with the
+Core commits the report and every page the run wrote, in one commit with the
 message `<job>: run <id>`. The row keeps the SHA, so you undo a bad run with
-one `git revert` in `/data/wiki`. With `wiki.git: false` core writes the entry
-and makes no commit.
+one `git revert` in `/data/wiki`. With `wiki.git: false` core writes the
+report and makes no commit.
 
-A journal entry with `run_id` in its frontmatter is not memory. The memory
-index leaves it out, so a search, the per-turn injection, and the memory
-bundle do not return it. The memory bundle also leaves it out when it reads the
-journal. Thus the report of one run never becomes input to the next, and a
+A run report is not memory, and it is not a journal entry. The memory index
+leaves out the whole `wiki/job-runs/` folder, so a search and the per-turn
+injection do not return a report, and the memory bundle never reads the
+folder. Thus the report of one run never becomes input to the next, and a
 report that repeats a question does not take the place of the page that
-answers it. To read a report, use `scripts/jobs.sh runs <id>`, the viewer, or
-the file in `/data/wiki`.
+answers it. No topic is in `job-runs/`, the curator does not read or change a
+page there, and the files tool of the agent cannot write there. To read a
+report, use `scripts/jobs.sh runs <id>`, the viewer, or the file in
+`/data/wiki`.
+
+A report from before this folder is a journal entry with `run_id` in its
+frontmatter. The index and the bundle leave such an entry out too.
 
 A journal entry that a digest covers holds `digest` in its frontmatter, and
 the index and the bundle leave it out too. See [The digest](#the-digest).
@@ -134,13 +140,14 @@ the index and the bundle leave it out too. See [The digest](#the-digest).
 The dossiers and the `README.md` lists that the jobs write hold
 `index: false` for the same reason: they list questions, and Joshua answers
 from the pages they link to. The knowledge pages, the question pages, and the
-insight pages are indexed. See
+insight pages are indexed, but a chat turn gets them only in the ways that
+[Retrieval in chat](#retrieval-in-chat) gives. See
 [What is in the index](memory.md#what-is-in-the-index).
 
 ### Dry runs
 
 A dry run does all the reading and all the worker calls of a real run, and
-writes nothing: no page, no journal entry, and no commit. Its report is in its
+writes nothing: no page, no report page, and no commit. Its report is in its
 row only. Read it with `scripts/jobs.sh runs <id>`.
 
 A run is a dry run when the body of `POST /admin/jobs/{job}/run` does not set
@@ -155,7 +162,7 @@ A **topic** is one leaf page of the wiki, such as
 - `Home.md`;
 - a section index page: `houseplants.md` beside the folder `houseplants/`;
 - a page under `journal/`, `people/`, `joshua-docs/`, `skills/`,
-  `knowledge/`, `insights/`, `questions/`, or `attachments/`;
+  `knowledge/`, `insights/`, `questions/`, `job-runs/`, or `attachments/`;
 - a page with a folder or a file name that starts with a dot;
 - a page that a glob in `jobs.topics.exclude` matches. The default globs are
   `vocabulary.md`, `*/README.md`, and `coach/profiles/*`;
@@ -328,7 +335,7 @@ The report lists the paths in the bundle, the size of the text, the aliases,
 and whether the bundle was cut. Under "Journal entries" it gives, for each
 journal entry, how the entry got in: `title`, `alias`, or `vector <sim>`.
 Under "Snapshots" it gives the snapshot parts and each item with its
-similarity. The journal entry holds the path list, not the bundle text. The `report.data` field of the row holds the same values as JSON.
+similarity. The report page holds the path list, not the bundle text. The `report.data` field of the row holds the same values as JSON.
 
 ## The routes
 
@@ -431,12 +438,13 @@ that is only an anchor, or a target outside the wiki. For a target in
 
 The index page of a folder `X/` is `X.md` beside it, and the index page of
 the wiki root is `Home.md`. A page under `journal/`, `people/`,
-`joshua-docs/`, `knowledge/`, `insights/`, `questions/`, `skills/`, or
-`attachments/` is never an orphan, and its links do not make another page reachable.
+`joshua-docs/`, `knowledge/`, `insights/`, `questions/`, `job-runs/`,
+`skills/`, or `attachments/` is never an orphan, and its links do not make
+another page reachable.
 
 A broken link in a journal entry is always Tier C, because the curator never
 changes the body of a journal entry. The scan does not read the links of a
-page under `people/` or `joshua-docs/`.
+page under `people/`, `joshua-docs/`, or `job-runs/`.
 
 ### The workers
 
@@ -549,7 +557,8 @@ curator applied does not send the pair again.
 The pairs go on each page for the passes that the run did, and again on each
 page that the run changed when that page had current pairs before. So a
 change the curator applied does not make the page go to a worker again. The
-keys never go on a page under `people/` or `joshua-docs/`, on a dot path, or
+keys never go on a page under `people/`, `joshua-docs/`, or `job-runs/`, on a
+dot path, or
 on a journal entry that a job run wrote (one with `run_id` in its
 frontmatter). The curator scans such an entry for links, but no worker reads
 it. A page whose frontmatter is not a YAML mapping gets no keys, and the
@@ -596,12 +605,12 @@ and nothing changes. The server is there only when `jobs.enabled` and
 `jobs.curator.enabled` are both true.
 
 The report of a run names each open finding by its id, so you can read the
-journal entry and answer in chat: "apply finding 12", or "dismiss finding 14,
+report page and answer in chat: "apply finding 12", or "dismiss finding 14,
 the two pages are about different roses".
 
 ### The report
 
-The journal entry of a curator run has a summary line with the counts, and
+The report page of a curator run has a summary line with the counts, and
 these sections:
 
 - **Applied (Tier A)** and **Applied (Tier B)**: each change, with its finding
@@ -619,7 +628,7 @@ these sections:
   number of pages that got the `refreshed` pair.
 
 A dry run has "To apply (Tier A)" in place of the two "Applied" sections. In
-the report, each text from a page or a worker is in a code span, so the entry
+the report, each text from a page or a worker is in a code span, so the page
 holds no link of its own. A find and replace pair of a `refresh` patch is in a
 fenced `text` block, with a `find:` line, a `replace:` line, and a `because:`
 line, byte for byte as the patch holds it. The fence is longer than each run
@@ -632,7 +641,7 @@ trash.
 
 ### What the curator never touches
 
-- A page under `people/` or `joshua-docs/`.
+- A page under `people/`, `joshua-docs/`, or `job-runs/`.
 - A dot path, except the destination of a file that it moves to
   `wiki/.trash/<day>/`.
 - The body of a journal entry. It adds only `date` and the tracking keys to
@@ -1266,7 +1275,7 @@ hold.
 
 ### The report
 
-The report of a research run is the journal entry of the run, and
+The report of a research run is the report page of the run, and
 `scripts/jobs.sh runs <id>` shows it. It has these sections, in this order:
 
 | Section | What it holds |
@@ -1534,16 +1543,57 @@ today.
 
 ### Retrieval in chat
 
-A turn gets text from the memory in two ways: the injection before the turn,
-and the `search_memory` tool. Both drop a chunk of an insight that is not
-due (dismissed, expired, or snoozed), and a chunk of a question that is not
-`open`. They read the frontmatter of the page from the data volume when the
-search runs, and they drop a chunk before the trim to the result count, so a
-turn still gets its full count of other chunks. A chunk of a page that is
-not on the disk, or that does not parse, is dropped too.
+The pages that the jobs write are the work of the jobs, not memory. If they
+came into each chat, one concern would come back in a knowledge page, an
+insight, and a question, also in a chat about something else. So a turn gets
+them in these ways only:
 
-The page stays on the disk and in the wiki. `POST /v1/memory/search`, which
-the viewer and the MCP search use, does not apply this rule.
+| Way | Knowledge | Insight | Question |
+|---|---|---|---|
+| The injection before the turn | no | no | no |
+| The `search_memory` tool | yes | no | no |
+| The topic hint line | no | the count | the count |
+| `list_insights`, `list_questions` | no | yes | yes |
+
+The injection leaves out the kinds `knowledge`, `insight`, and `question`.
+`search_memory` leaves out `insight` and `question`, and keeps `knowledge`,
+so a person or Joshua can search the facts that the researcher found. Its
+description tells the agent to read the insights and the questions with
+their own tools.
+
+**The topic hint.** When a turn that a person sent is about a topic with due
+insights or open questions, the injection adds one line:
+
+```
+[Open items about Snake plant (houseplants/snake-plant.md): 1 insight, 2 questions. Read them with list_insights(topic=...) / list_questions(topic=...) before you mention one.]
+```
+
+A turn is about a topic when one of these is true:
+
+- A chunk of the search, at `memory.inject.hint_sim` or more, is the topic
+  page.
+- The text of the turn holds a name of the topic, by the name rule of the
+  `mentioned` selection (see [The topic](#the-topic)).
+
+The chunks of the search come first, in their rank order, then the topics
+that the text names. A line names 2 topics at most. It holds the title, the
+path, and the counts, and never a claim or a question. A scheduled task, an
+event, and a webhook turn get no line. The counts come from the frontmatter
+of the pages on the disk: a due insight (see
+[Status, snooze, and due](#status-snooze-and-due)) and a question with
+`status: open`. Core keeps the counts for 60 seconds, so a turn does not read
+every page. Insights count only when `jobs.insights.enabled` is true, and
+questions only when `jobs.research.enabled` is true. A failure skips the line
+and logs a warning, and the turn goes on. The `kb_event` row of the turn
+holds the topics of the line, with their counts, in `topics`.
+
+By default, `list_insights` lists only the due insights, and
+`list_questions` only the open questions. So a closed concern does not come
+back in chat.
+
+The pages stay on the disk and in the wiki. `POST /v1/memory/search`, which
+the viewer and the MCP search use, returns every kind and does not apply
+these rules.
 
 ### The research hook
 
@@ -1599,7 +1649,8 @@ is there only when `jobs.enabled` and `jobs.insights.enabled` are both true.
 
 An insight with `status: new` waits in `wiki/insights/` for a later delivery
 step, which is not in this release. Now, the chat tools are the way to read
-and resolve an insight, and the report of each run is a journal entry.
+and resolve an insight, and the report of each run is a page in
+`wiki/job-runs/`.
 
 ### What the insights job never does
 
