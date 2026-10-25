@@ -508,6 +508,7 @@ class ResearchJob(Job):
             model=worker_model(self._settings, RAISE),
             runner=self._runner,
             usage_out=used,
+            timeout_s=cfg.raise_timeout_seconds,
         )
         run.ledger.add(RAISE, used, model=worker_model(self._settings, RAISE))
         if raised.candidates is None:

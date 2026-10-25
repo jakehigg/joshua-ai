@@ -7,10 +7,12 @@ and the `rank` worker see what these people find worth telling. Only the
 claims, and the reason of a dismissal, go to a worker.
 
 **The open budget.** `jobs.insights.max_open` is the most open insights
-(`new`, `told`, `acknowledged`; a snoozed insight counts) of the whole
-instance. When the open insights and the new ones of a run are more than
-that, the tool-less `rank` worker gets each item and the verdict examples,
-and answers with the ids in order of importance. The first `max_open` stay.
+that wait for a person (`new` and `told`; a snoozed insight counts) of the
+whole instance. An `acknowledged` insight is one that a person kept: it is
+not in the budget, and the rank never expires it. When the insights in the
+budget and the new ones of a run are more than that, the tool-less `rank`
+worker gets each item and the verdict examples, and answers with the ids in
+order of importance. The first `max_open` stay.
 A new insight below the line is rejected with `below the open budget`. An
 open insight below the line becomes `expired` with `resolved_by: rank`, and
 a later run can raise it again. An id that the worker leaves out goes to the
@@ -42,6 +44,9 @@ RANKED_OUT = "rank"
 BELOW_BUDGET = "below the open budget"
 NO_RANK = "rank worker gave no answer"
 KEPT_STATUSES = ("told", "acknowledged")
+# The open insights that wait for a person. An acknowledged insight is one
+# that a person kept, so it is not in the budget.
+BUDGET_STATUSES = ("new", "told")
 MAX_ITEMS = 200
 
 
@@ -182,6 +187,7 @@ def apply_budget(items: Sequence[RankItem], max_open: int, order: list[str] | No
 
 __all__ = [
     "BELOW_BUDGET",
+    "BUDGET_STATUSES",
     "NO_RANK",
     "RANKED_OUT",
     "WORKER",

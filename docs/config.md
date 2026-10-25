@@ -586,6 +586,7 @@ jobs:
     lookup_max_turns: 14
     lookup_max_age_days: 7
     editor_timeout_seconds: 240
+    raise_timeout_seconds: 240
     trusted_domains:
       - .edu
       - .gov
@@ -664,6 +665,7 @@ jobs:
 | `research.lookup_timeout_seconds` | `300` | How long one lookup of the researcher or the challenger may take. It replaces `internet.timeout_seconds` for these lookups, because a lookup that needs a primary source and two independent sources makes more searches and fetches than a chat question. The chat tool keeps `internet.timeout_seconds`. |
 | `research.lookup_max_turns` | `14` | The turn ceiling of one lookup of the researcher or the challenger. It replaces `internet.max_turns` for these lookups. The chat tool keeps `internet.max_turns`. |
 | `research.lookup_max_age_days` | `7` | How many days the two lookups of a held question stay good. A later run gives them to the editor again and does not repeat them. When the lookups are older than this many days, the run does them again. |
+| `research.raise_timeout_seconds` | `240` | How long one call of the `raise` worker may take. With no answer in time, the run adds no question. |
 | `research.editor_timeout_seconds` | `240` | How long one call of the editor may take. The time includes each try that the validator of the CLI refuses. |
 | `research.trusted_domains` | `.edu`, `.gov`, `.ac.uk`, `extension.`, `.int` | The editor may not grade a page on these domains `weak`. |
 | `research.distrusted_domains` | `pinterest.com`, `quora.com`, `answers.com`, `ehow.com`, `wikihow.com`, `facebook.com`, `reddit.com` | A page on these domains is always `weak`. |
@@ -677,7 +679,7 @@ jobs:
 | `insights.default_valid_days` | `60` | When the worker gives no `valid_until`, it is the day of the run plus this many days. `max_valid_days` caps it. |
 | `insights.max_valid_days` | `45` | `valid_until` is at most the day of the run plus this many days. A refresh moves `valid_until` to at most this day, and never to a day before its current value. |
 | `insights.examples` | `12` | The `insight` worker and the `rank` worker read this many of the most recent insights that a person kept (`told` or `acknowledged`), and this many of the most recent dismissed insights with their reasons, from every topic. `0` gives no examples. |
-| `insights.max_open` | `5` | The most open insights (`new`, `told`, `acknowledged`, snoozed too) of the whole instance. When a run would have more, the `rank` worker orders them, and the insights below the line do not stay open. |
+| `insights.max_open` | `5` | The most open insights that wait for a person (`new` and `told`, snoozed too) of the whole instance. An `acknowledged` insight is not counted. When a run would have more, the `rank` worker orders them, and the insights below the line do not stay open. |
 | `insights.after_research` | `true` | A research `run` that publishes a page also runs the insight pass for the same topic, in the same run and the same commit. The `then_insights` argument of a research run replaces this value for that run. |
 | `insights.snooze_days` | `7` | The first snooze of an insight, in days, when the person gives no number. Each later snooze of the same insight is twice as long. |
 | `insights.snooze_max_days` | `90` | The longest snooze of an insight, in days. A snooze with a number of days is from 1 to this value. |

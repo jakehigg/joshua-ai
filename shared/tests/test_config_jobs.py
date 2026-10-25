@@ -158,6 +158,7 @@ def test_research_defaults() -> None:
     assert research.lookup_max_turns == 14
     assert research.lookup_max_age_days == 7
     assert research.editor_timeout_seconds == 240
+    assert research.raise_timeout_seconds == 240
     assert research.trusted_domains == [".edu", ".gov", ".ac.uk", "extension.", ".int"]
     assert "reddit.com" in research.distrusted_domains
     assert len(research.distrusted_domains) == 7
@@ -181,6 +182,7 @@ def test_research_overrides_load() -> None:
         "    lookup_max_turns: 30\n"
         "    lookup_max_age_days: 30\n"
         "    editor_timeout_seconds: 90\n"
+        "    raise_timeout_seconds: 75\n"
         "    trusted_domains:\n"
         "      - ' .EDU '\n"
         "      - .edu\n"
@@ -201,6 +203,7 @@ def test_research_overrides_load() -> None:
     assert research.lookup_max_turns == 30
     assert research.lookup_max_age_days == 30
     assert research.editor_timeout_seconds == 90
+    assert research.raise_timeout_seconds == 75
     assert research.trusted_domains == [".edu"]
     assert research.distrusted_domains == ["example.com"]
 

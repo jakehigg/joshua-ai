@@ -31,7 +31,7 @@ from joshua_core.jobs.research.gate import PERSON, RECORD, WEB, Candidate
 from joshua_core.jobs.research.prompts import RAISE_PROMPT
 
 WORKER = "raise"
-TIMEOUT_S = 120.0
+TIMEOUT_S = 240.0
 # What one answer may hold, before Python keeps only the number asked for.
 MAX_RAISED = 20
 # The schema limits are wide, so that the gate, not the schema, rejects a
@@ -97,8 +97,10 @@ async def raise_questions(
     model: str | None,
     runner: Runner | None = None,
     usage_out: list[Usage] | None = None,
+    timeout_s: float = TIMEOUT_S,
 ) -> Raised:
-    """Ask the `raise` worker for up to `count` questions."""
+    """Ask the `raise` worker for up to `count` questions, with a timeout of
+    `timeout_s` seconds (`jobs.research.raise_timeout_seconds`)."""
     if count <= 0:
         return Raised([])
     answer = await run_worker(
@@ -109,7 +111,7 @@ async def raise_questions(
         ),
         answer=RaiseAnswer,
         model=model,
-        timeout_s=TIMEOUT_S,
+        timeout_s=timeout_s,
         runner=runner,
         usage_out=usage_out,
     )

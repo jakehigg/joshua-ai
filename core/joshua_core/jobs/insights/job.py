@@ -70,6 +70,7 @@ from joshua_core.jobs.insights.page import (
     write_text,
 )
 from joshua_core.jobs.insights.rank import (
+    BUDGET_STATUSES,
     RANKED_OUT,
     Budget,
     RankItem,
@@ -331,7 +332,7 @@ class InsightPass:
         for verdict in keep:
             result.new.append(self._new(topic, verdict, known, today, taken))
 
-        open_all = [item for item in everywhere if item.insight.is_open]
+        open_all = [item for item in everywhere if item.insight.status in BUDGET_STATUSES]
         await self._budget(result, open_all, refreshed, kept, dismissed_anywhere, today)
 
         if not dry_run and (result.new or result.refreshed or result.ranked_out):

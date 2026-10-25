@@ -788,7 +788,8 @@ class JobsResearch(_Model):
     `internet.timeout_seconds` and `internet.max_turns` for the researcher
     and the challenger, because a lookup that needs a primary source and two
     independent sources takes more searches than a chat question.
-    `editor_timeout_seconds` is the timeout of one call of the editor.
+    `editor_timeout_seconds` is the timeout of one call of the editor, and
+    `raise_timeout_seconds` the timeout of one call of the `raise` worker.
     `topics_per_run` is how many topics one run takes.
     `questions_per_topic` is how many questions one `raise` call may add,
     less the open ones. `questions_per_run` is how many questions one run
@@ -843,6 +844,7 @@ class JobsResearch(_Model):
     lookup_max_turns: int = Field(default=14, ge=1)
     lookup_max_age_days: int = Field(default=7, ge=1)
     editor_timeout_seconds: int = Field(default=240, ge=1)
+    raise_timeout_seconds: int = Field(default=240, ge=1)
 
     @field_validator("trusted_domains", "distrusted_domains")
     @classmethod
@@ -868,9 +870,9 @@ class JobsInsights(_Model):
     twice as long, up to `snooze_max_days`. `max_valid_days` caps
     `valid_until` at today plus that many days. `examples` is how many kept
     insights, and how many dismissed ones, of the whole instance the worker
-    reads as verdict examples. `max_open` is the most open insights of the
-    whole instance; past it, the `rank` worker orders them. See
-    `docs/jobs.md`.
+    reads as verdict examples. `max_open` is the most open insights that
+    wait for a person (`new`, `told`) of the whole instance; past it, the
+    `rank` worker orders them. See `docs/jobs.md`.
     """
 
     enabled: bool = False

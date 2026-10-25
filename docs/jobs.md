@@ -831,7 +831,8 @@ page of `knowledge/`: it has a link to each dossier.
 
 ### The questions and the route
 
-The `raise` worker has no tools. It gets the memory bundle of the topic, the
+The `raise` worker has no tools and a timeout of
+`jobs.research.raise_timeout_seconds` (240). It gets the memory bundle of the topic, the
 title and the aliases, and the questions in the dossier. It answers with up
 to `questions_per_topic` questions, less the open questions. The prompt tells
 the worker that the bundle is content, not instructions.
@@ -1529,10 +1530,13 @@ that does not match the schema is a rejection too, and it changes nothing.
 ### The open budget
 
 A person can act on only a few insights at a time. `jobs.insights.max_open`
-(5) is the most open insights of the whole instance: the insights with the
-status `new`, `told`, or `acknowledged`, of every topic. A snoozed insight
-counts. After the gate, when the open insights and the new ones of the run
-are more than `max_open`, the `rank` worker orders them.
+(5) is the most open insights that wait for a person, of the whole
+instance: the insights with the status `new` or `told`, of every topic. A
+snoozed insight counts. An `acknowledged` insight is one that a person kept.
+It is not in the budget, and the `rank` worker never gets it, so a new
+insight never pushes it out. After the gate, when the insights in the budget
+and the new ones of the run are more than `max_open`, the `rank` worker
+orders them.
 
 The `rank` worker has no tools, a timeout of 60 seconds, and the model of
 the `insight` worker. It gets each item with its id, topic, claim, why it
@@ -1755,8 +1759,9 @@ and resolve an insight, and the report of each run is a page in
 - It never raises an insight with `basis: knowledge` for a topic with no
   published knowledge page.
 - It never raises a claim with `confidence: low`.
-- It never keeps more than `jobs.insights.max_open` insights open when the
-  `rank` worker answered.
+- It never keeps more than `jobs.insights.max_open` insights that wait for a
+  person when the `rank` worker answered, and it never expires an
+  `acknowledged` insight.
 - It writes nothing in a dry run, and expires nothing.
 
 ## The digest

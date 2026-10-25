@@ -318,6 +318,7 @@ jobs:
     lookup_max_age_days: 7 # a held question keeps its two lookups this many
                            # days; a later run gives them to the editor again
     editor_timeout_seconds: 240 # one call of the editor, which has no tools
+    raise_timeout_seconds: 240 # one call of the raise worker, which has no tools
     trusted_domains:       # the editor may not grade a page here weak. An entry
       - .edu               # that starts with a dot matches the end of a host;
       - .gov               # an entry that ends with a dot matches its start
@@ -352,7 +353,7 @@ jobs:
     max_valid_days: 45     # valid_until is at most this many days after today
     examples: 12           # the kept insights, and the dismissed ones, of the whole
                            # instance that the worker reads as examples
-    max_open: 5            # the most open insights of the whole instance; past it,
+    max_open: 5            # the most new or told insights of the instance; past it,
                            # the rank worker orders them and the rest expire
     after_research: true   # a research run that published a page runs the insight
                            # pass for the same topic, in the same run and commit

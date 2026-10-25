@@ -246,3 +246,20 @@ def test_the_prompt_asks_a_person_for_a_decision_not_a_record() -> None:
     assert "Never ask what a tool or a snapshot can show." in flat
     assert "a person would only fill in a record. Do not raise it." in flat
     assert "What product and dose went on" not in flat
+
+
+async def test_raise_passes_its_timeout_to_the_worker(monkeypatch) -> None:
+    import joshua_core.jobs.research.raise_ as raise_module
+
+    seen: dict[str, float] = {}
+
+    async def fake_run_worker(**kwargs):
+        seen["timeout_s"] = kwargs["timeout_s"]
+        return None
+
+    monkeypatch.setattr(raise_module, "run_worker", fake_run_worker)
+    common = dict(bundle_text="## a.md\n\ntext", title="T", aliases=[], existing=[], count=1)
+    await raise_questions(**common, model=None, timeout_s=75)
+    assert seen["timeout_s"] == 75
+    await raise_questions(**common, model=None)
+    assert seen["timeout_s"] == raise_module.TIMEOUT_S == 240.0

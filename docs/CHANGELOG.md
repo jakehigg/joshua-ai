@@ -276,9 +276,11 @@ with the images and the packaged chart, are at
   runs too. The worker reads the claims that the people of the instance kept
   and dismissed, from every topic. Three new keys: `jobs.insights.examples`
   (12), `jobs.insights.max_valid_days` (45), which caps `valid_until`, and
-  `jobs.insights.max_open` (5). When more insights would be open than
-  `max_open`, the new `rank` worker orders them: a new insight below the
-  line is rejected, and an open one expires with `resolved_by: rank`. See
+  `jobs.insights.max_open` (5), the most insights that wait for a person
+  (`new` or `told`). An `acknowledged` insight is one that a person kept, and
+  it is not in the budget. When more insights would wait than `max_open`, the
+  new `rank` worker orders them: a new insight below the line is rejected,
+  and a waiting one expires with `resolved_by: rank`. See
   [docs/jobs.md](jobs.md#insights).
 
 - **A question for a person asks for a decision, not for a record.** The
@@ -294,7 +296,9 @@ with the images and the packaged chart, are at
   `jobs.research.max_open_questions_per_topic` (2), cap the open questions.
   A new question past either is rejected with
   `the open question budget is full`. See
-  [docs/jobs.md](jobs.md#the-questions-and-the-route).
+  [docs/jobs.md](jobs.md#the-questions-and-the-route). The new key
+  `jobs.research.raise_timeout_seconds` (240) sets the timeout of one call
+  of the `raise` worker, which was 120 seconds before.
 
 ### Fixed
 

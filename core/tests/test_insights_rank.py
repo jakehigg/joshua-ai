@@ -306,3 +306,42 @@ async def test_a_dry_run_ranks_and_writes_and_expires_nothing(tmp_path: Path) ->
     sections = dict(report.sections)
     assert "below the line, would expire" in sections["Ranked"]
     assert "below the open budget" in sections["Would expire"]
+
+
+async def test_a_kept_insight_is_not_in_the_budget(tmp_path: Path) -> None:
+    """Four acknowledged insights and a budget of 1: the new insight has room,
+    the rank is not asked, and no kept insight expires."""
+    h = Harness(tmp_path / "data", extra="    max_open: 1\n")
+    kept = [
+        _page(h.data, f"kept-{i}", c, status="acknowledged", resolved_at="2026-10-10")
+        for i, c in enumerate(
+            [
+                "The filter alarm goes to nobody.",
+                "The softener salt level is read and nothing uses it.",
+                "The backup check rests on a wrong path.",
+                "The sump pump has no alert on its new circuit.",
+            ]
+        )
+    ]
+    report = await h.run()
+    assert h.worker.rank_calls == []
+    assert _new_id(report)
+    for kept_id in kept:
+        found = load_insight(kept_id, h.data)
+        assert found is not None and found.insight.status == "acknowledged"
+
+
+async def test_the_rank_never_gets_a_kept_insight(tmp_path: Path) -> None:
+    def order(text: str) -> dict[str, Any]:
+        assert "kitchen/kept" not in text
+        ids = [line.split("id: ")[1].split(";")[0] for line in text.splitlines() if "id: " in line]
+        return {"order": ids}
+
+    h = Harness(tmp_path / "data", rank=order, extra="    max_open: 1\n")
+    _page(h.data, "kept", "The filter alarm goes to nobody.", status="acknowledged")
+    _page(h.data, "waiting", "The backup check rests on a wrong path.")
+    report = await h.run()
+    assert len(h.worker.rank_calls) == 1
+    assert report.data["ranked_out"] in ([], ["kitchen/waiting"])
+    kept = load_insight("kitchen/kept", h.data)
+    assert kept is not None and kept.insight.status == "acknowledged"
