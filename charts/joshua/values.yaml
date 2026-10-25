@@ -144,6 +144,11 @@ core:
   strategy: Recreate
   agentBackend: sdk
   adminCallers: laptop,ci
+  # Your own system prompt snippets, as file name -> Markdown. Each one is a
+  # file in the prompts `user/` directory, so every session's prompt gets it.
+  # A name must end in `.md`; the composer sorts by name, so a `10-` prefix
+  # sets the order. Empty keeps the `user/` directory that ships in the image.
+  userPrompts: {}
   resources:
     requests:
       cpu: 250m

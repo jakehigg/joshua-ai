@@ -23,6 +23,9 @@ spec:
         {{- include "joshua.labels" . | nindent 8 }}
       annotations:
         checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.core.userPrompts }}
+        checksum/user-prompts: {{ toJson . | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
@@ -98,6 +101,13 @@ spec:
             - name: config
               mountPath: /etc/joshua
               readOnly: true
+            {{- if .Values.core.userPrompts }}
+            {{/* Replaces the image's `user/` directory, which holds only its
+                 README and an example. The path is fixed by the core image. */}}
+            - name: user-prompts
+              mountPath: /app/core/joshua_core/prompts/user
+              readOnly: true
+            {{- end }}
             {{- if .Values.persistence.enabled }}
             - name: data
               mountPath: /data
@@ -113,6 +123,11 @@ spec:
         - name: config
           configMap:
             name: {{ include "joshua.configMapName" . }}
+        {{- if .Values.core.userPrompts }}
+        - name: user-prompts
+          configMap:
+            name: joshua-user-prompts
+        {{- end }}
         {{- if .Values.persistence.enabled }}
         - name: data
           persistentVolumeClaim:
