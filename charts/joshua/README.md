@@ -283,6 +283,30 @@ reference for every setting it reads. `docs/enhancements.md` has the Docker
 Compose side of this same choice, and the folder contract every wiki frontend
 follows.
 
+## System prompt snippets
+
+`core.userPrompts` adds your own instructions to the system prompt of every
+session, with no image build. Each key is a file name that ends in `.md`, and
+each value is the Markdown:
+
+```yaml
+core:
+  userPrompts:
+    10-house-rules.md: |
+      ## House rules
+
+      - Keep replies short.
+      - Use metric units.
+```
+
+The chart puts the files in a ConfigMap, `joshua-user-prompts`, and mounts it as
+the prompts `user/` directory of core. The composer sorts the files by name and
+appends them after the kernel files, on every profile. A change to the values
+restarts core. The chart stops with an error when a name does not end in `.md`,
+or when the name is `README.md`, because the composer does not load these
+files. When `userPrompts` is empty, core uses the `user/` directory in the
+image. See [docs/config.md](../../docs/config.md#system-prompt-snippets).
+
 ## What the chart does not expose
 
 Only `channels` has an Ingress, and only when you enable it. `core` holds the

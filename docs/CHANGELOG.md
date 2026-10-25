@@ -8,6 +8,12 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Chart: system prompt snippets from your values file.** Set
+  `core.userPrompts` to a map of file name to Markdown. The chart mounts the
+  files as the prompts `user/` directory, so every session's prompt gets them,
+  and you do not build an image. See
+  [charts/joshua/README.md](../charts/joshua/README.md#system-prompt-snippets).
+
 - **A voice device with no wake clip can default to a person.** Set
   `channels.voice.device_defaults` to map a device id to a person id. A device
   listed there speaks for that person on any turn that names no speaker, and

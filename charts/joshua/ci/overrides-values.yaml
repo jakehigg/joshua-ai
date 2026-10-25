@@ -12,6 +12,12 @@ config: |
         telegram: "123456789"
 core:
   image: registry.example.com/joshua/core:test
+  userPrompts:
+    10-house-rules.md: |
+      ## House rules
+
+      - Keep replies short.
+      - Use metric units.
 channels:
   image: registry.example.com/joshua/channels:test
 gateway:

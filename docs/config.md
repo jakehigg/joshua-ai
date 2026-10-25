@@ -982,7 +982,12 @@ scheduled, voice). You do not edit any Python code or `Profile.prompt_files`.
 Use `user/` for house rules, guidance for a custom MCP server you added to the
 `mcp:` section, or any other instruction.
 
-To add a snippet:
+To add a snippet with the Helm chart, set `core.userPrompts` in your values
+file. Each key is a file name and each value is the Markdown. The chart mounts
+them as the `user/` directory. You do not build an image. See
+[charts/joshua/README.md](../charts/joshua/README.md#system-prompt-snippets).
+
+To add a snippet to the image:
 
 1. Clone the repo.
 2. Add a file such as `core/joshua_core/prompts/user/house-rules.md`.

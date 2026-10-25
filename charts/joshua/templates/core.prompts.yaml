@@ -1,0 +1,25 @@
+{{/* core.userPrompts: the snippets core mounts as its prompts `user/`
+     directory. Only the composer reads this directory, and it loads only
+     `.md` files, so a name that does not end in `.md` would be silently
+     ignored. The chart stops instead. */}}
+{{- with .Values.core.userPrompts }}
+{{- range $name, $_ := . }}
+{{- if not (hasSuffix ".md" $name) }}
+{{- fail (printf "core.userPrompts: %q must end in .md" $name) }}
+{{- end }}
+{{- if eq $name "README.md" }}
+{{- fail "core.userPrompts: README.md is never loaded; use another name" }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: joshua-user-prompts
+  labels:
+    {{- include "joshua.labels" $ | nindent 4 }}
+data:
+  {{- range $name, $text := . }}
+  {{ $name }}: |
+{{ $text | indent 4 }}
+  {{- end }}
+{{- end }}
