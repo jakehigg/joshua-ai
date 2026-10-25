@@ -71,8 +71,9 @@ def test_the_prompt_names_the_three_audiences() -> None:
     bads = [" ".join(q.split()) for q in re.findall(r'- "([^"]+\?)"', bad, re.DOTALL)]
     assert [a for a, _ in goods] == ["person", "record"]
     assert len(bads) == 3
-    for audience, question in goods:
-        assert bool(world_rule(question, ["Alex"])) == (audience == "person"), question
+    # The person example asks for a decision, not for a detail of a record.
+    person = goods[0][1]
+    assert "Should " in person and world_rule(person, ["Alex"]) == ""
     assert all(world_rule(q, ["Alex"]) or "Alex's" in q for q in bads)
 
 
@@ -172,8 +173,8 @@ def test_the_prompt_has_the_person_rule() -> None:
         'About a thing, `about_person: false`: "What does the NHS say about sleep hygiene '
         'for adults?"' in flat
     )
-    assert "Ask it as `person` when a person here can answer it" in flat
-    assert "When no person can answer it, do not raise it" in flat
+    assert "Ask it as `person` only when it is a decision by the rule above." in flat
+    assert "Else do not raise it." in flat
 
 
 def test_the_raise_prompt_asks_for_the_generic_name() -> None:
@@ -227,3 +228,21 @@ async def test_a_web_question_takes_its_general_question() -> None:
     assert person.question == "Which pot does Alex use?"
     assert record.question == "When was it repotted?"
     assert bare.question == "Only a question?" and bare.local_context == ""
+
+
+def test_the_prompt_asks_a_person_for_a_decision_not_a_record() -> None:
+    flat = " ".join(RAISE_PROMPT.split())
+    assert "A `web` question must be able to change something that we do" in flat
+    assert "Do not raise one out of curiosity, about a detail that changes nothing" in flat
+    assert "a question that asks only for what a person must decide or tell" in flat
+    assert '"The hot tub was drained for the winter. Should its heater schedule' in flat
+    assert "a plan whose time passed with no outcome" in flat
+    assert "two records that disagree" in flat
+    assert (
+        "Never ask for a detail of the record: a date, a dose, a label, an exact amount, "
+        "or which item is which." in flat
+    )
+    assert "Never ask for more detail about something that a person reported" in flat
+    assert "Never ask what a tool or a snapshot can show." in flat
+    assert "a person would only fill in a record. Do not raise it." in flat
+    assert "What product and dose went on" not in flat

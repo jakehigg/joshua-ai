@@ -281,6 +281,21 @@ with the images and the packaged chart, are at
   line is rejected, and an open one expires with `resolved_by: rank`. See
   [docs/jobs.md](jobs.md#insights).
 
+- **A question for a person asks for a decision, not for a record.** The
+  `raise` worker now asks a person only what they must decide or tell, when
+  something changed and what depends on it was not addressed, a plan passed
+  with no outcome, or two records disagree. It never asks for a date, a
+  dose, a label, or an amount. A `web` question must be able to change
+  something we do. A `record` question that no record answers is now
+  rejected with `no record found`, and a `web` question in a person section
+  or about a person is rejected too: neither becomes a question for a
+  person, and no page gets a fixed `why`. Two new keys,
+  `jobs.research.max_open_questions` (10) and
+  `jobs.research.max_open_questions_per_topic` (2), cap the open questions.
+  A new question past either is rejected with
+  `the open question budget is full`. See
+  [docs/jobs.md](jobs.md#the-questions-and-the-route).
+
 ### Fixed
 
 - **A job bundle takes only the snapshot items that are about its topic.** A

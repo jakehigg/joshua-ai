@@ -8,6 +8,7 @@ import pytest
 from joshua_core.jobs.research.gate import (
     ABOUT_PERSON,
     ALREADY_ASKED,
+    BUDGET_FULL,
     DISMISSED_BEFORE,
     NO_RECORD,
     PERSON,
@@ -390,10 +391,8 @@ def _window_gate(tmp_path: Path, *, near=None, asked=(), store=None, **kwargs) -
     [
         (RUN3_DOSE, "person", PERSON, RULE_DATE),
         (RUN3_CHECK, "person", PERSON, RULE_PERSON),
-        (RUN3_CHECK, "record", PERSON, RULE_PERSON),
         (GOOD_WORLD, "web", WEB, ""),
         ("Did we feed the snake plants at quarter strength?", "person", PERSON, RULE_OPENING),
-        ("Is our snake plant mix too gritty for winter?", "record", PERSON, RULE_US),
         (GOOD_WORLD, "bogus", WEB, ""),
     ],
 )
@@ -435,15 +434,31 @@ async def test_a_record_question_with_a_strong_hit_is_answered_by_it(tmp_path: P
     assert {"kinds": ["wiki", "journal", "knowledge"], "min_sim": 0.80} in store.calls
 
 
-async def test_a_record_question_with_no_hit_goes_to_a_person(tmp_path: Path) -> None:
+async def test_a_record_question_with_no_hit_is_rejected(tmp_path: Path) -> None:
     _window_wiki(tmp_path)
     store = FakeStore({f"wiki/{FEED_ENTRY}": 0.79})
     verdict = await _window_gate(tmp_path, store=store).check(
         web(RECORD_Q, GOOD_PHRASES, "", "record")
     )
-    assert verdict.accepted and verdict.route == PERSON
-    assert verdict.route_reason == NO_RECORD
-    assert verdict.answered_by is None
+    assert not verdict.accepted and verdict.reason == NO_RECORD
+    assert verdict.route == "" and verdict.answered_by is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [RUN3_CHECK, "Is our snake plant mix too gritty for winter?", RUN3_DOSE],
+)
+async def test_a_floor_rule_never_sends_a_record_question_to_a_person(
+    tmp_path: Path, question: str
+) -> None:
+    """A date or a name in a record question is checked against the records."""
+    _window_wiki(tmp_path)
+    found = await _window_gate(tmp_path, near={f"wiki/{FEED_ENTRY}": 0.95}).check(
+        web(question, GOOD_PHRASES, "w", "record")
+    )
+    assert found.accepted and (found.route, found.answered_by) == (RECORD, FEED_ENTRY)
+    missed = await _window_gate(tmp_path).check(web(question, GOOD_PHRASES, "w", "record"))
+    assert not missed.accepted and missed.reason == NO_RECORD and missed.route == ""
 
 
 async def test_a_record_is_a_topic_page_an_entry_or_an_answer_page(tmp_path: Path) -> None:
@@ -463,13 +478,13 @@ async def test_a_record_is_a_topic_page_an_entry_or_an_answer_page(tmp_path: Pat
     verdict = await _window_gate(tmp_path, near=near).check(
         web(RECORD_Q, GOOD_PHRASES, "", "record")
     )
-    assert verdict.route == PERSON and verdict.route_reason == NO_RECORD
+    assert not verdict.accepted and verdict.reason == NO_RECORD
     near[f"wiki/{WINDOW}"] = 0.81
     again = await _window_gate(tmp_path, near=near).check(web(RECORD_Q, GOOD_PHRASES, "", "record"))
     assert again.route == RECORD and again.answered_by == WINDOW
 
 
-async def test_a_record_search_that_fails_goes_to_a_person(tmp_path: Path) -> None:
+async def test_a_record_search_that_fails_is_a_rejection(tmp_path: Path) -> None:
     class Broken(FakeStore):
         async def kb_near_paths(self, embeddings, *, kinds, min_sim, source="files"):
             if "wiki" in kinds:
@@ -478,7 +493,7 @@ async def test_a_record_search_that_fails_goes_to_a_person(tmp_path: Path) -> No
 
     gate = _window_gate(tmp_path, store=Broken())
     verdict = await gate.check(web(RECORD_Q, GOOD_PHRASES, "", "record"))
-    assert verdict.route == PERSON and verdict.route_reason == NO_RECORD
+    assert not verdict.accepted and verdict.reason == NO_RECORD
     assert "The record search did not run." in gate.notes
 
 
@@ -557,16 +572,18 @@ def test_the_roster_names_are_the_names_and_the_ids() -> None:
 # -- a person section ---------------------------------------------------------
 
 
-async def test_a_person_section_routes_a_web_question_to_a_person(tmp_path: Path) -> None:
+async def test_a_person_section_rejects_a_web_question(tmp_path: Path) -> None:
     gate = _window_gate(tmp_path, person_section=True)
     verdict = await gate.check(web(GOOD_WORLD, GOOD_PHRASES, audience=WEB))
-    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, PERSON_SECTION)
+    assert (verdict.accepted, verdict.route, verdict.reason) == (False, "", PERSON_SECTION)
 
 
-async def test_a_person_section_question_for_a_person_needs_no_why(tmp_path: Path) -> None:
+async def test_a_person_section_question_for_a_person_needs_why(tmp_path: Path) -> None:
     gate = _window_gate(tmp_path, person_section=True)
-    verdict = await gate.check(web(GOOD_WORLD, GOOD_PHRASES, why="", audience=PERSON))
-    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, PERSON_SECTION)
+    bare = await gate.check(web(GOOD_WORLD, GOOD_PHRASES, why="", audience=PERSON))
+    assert not bare.accepted and "needs `why`" in bare.reason
+    told = await gate.check(web(GOOD_WORLD, GOOD_PHRASES, why="To decide.", audience=PERSON))
+    assert (told.accepted, told.route, told.route_reason) == (True, PERSON, PERSON_SECTION)
 
 
 async def test_a_person_section_still_allows_a_record_question(tmp_path: Path) -> None:
@@ -611,14 +628,12 @@ def _plan_gate(tmp_path: Path) -> Gate:
 
 
 @pytest.mark.parametrize("question", RUN11)
-async def test_a_web_question_about_a_person_goes_to_a_person(
-    tmp_path: Path, question: str
-) -> None:
+async def test_a_web_question_about_a_person_is_rejected(tmp_path: Path, question: str) -> None:
     # No rule of the floor catches these: only the worker's judgement does.
     assert world_rule(question, ["Alex", "Bo"]) == ""
     candidate = web(question, PLAN_PHRASES, audience=WEB, about_person=True)
     verdict = await _plan_gate(tmp_path).check(candidate)
-    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, ABOUT_PERSON)
+    assert (verdict.accepted, verdict.route, verdict.reason) == (False, "", ABOUT_PERSON)
 
 
 async def test_a_thing_question_tagged_false_stays_web(tmp_path: Path) -> None:
@@ -635,10 +650,14 @@ async def test_the_name_rule_holds_when_the_worker_says_false(tmp_path: Path) ->
     assert verdict.reason.startswith(f"{RULE_PERSON}: ")
 
 
-async def test_a_person_question_about_a_person_needs_no_why(tmp_path: Path) -> None:
+async def test_a_person_question_about_a_person_needs_why(tmp_path: Path) -> None:
     candidate = web(RUN11[0], PLAN_PHRASES, why="", audience=PERSON, about_person=True)
-    verdict = await _plan_gate(tmp_path).check(candidate)
-    assert (verdict.accepted, verdict.route, verdict.route_reason) == (True, PERSON, ABOUT_PERSON)
+    bare = await _plan_gate(tmp_path).check(candidate)
+    assert not bare.accepted and "needs `why`" in bare.reason
+    told = await _plan_gate(tmp_path).check(
+        web(RUN11[0], PLAN_PHRASES, why="To plan.", audience=PERSON, about_person=True)
+    )
+    assert (told.accepted, told.route, told.route_reason) == (True, PERSON, ABOUT_PERSON)
 
 
 # -- a possessive title -----------------------------------------------------------
@@ -716,7 +735,7 @@ async def test_the_generic_name_is_only_for_a_web_question(tmp_path: Path) -> No
     record = await _caldo_gate(tmp_path).check(
         web("Which potato goes into Alex's Caldo Verde?", CALDO_PHRASES, audience=RECORD)
     )
-    assert not record.generic_name and record.route == PERSON
+    assert not record.generic_name and record.reason == NO_RECORD
     plain = await _caldo_gate(tmp_path).check(
         web("What is a classic Caldo Verde broth?", CALDO_PHRASES)
     )
@@ -858,8 +877,8 @@ async def test_a_person_question_need_not_name_the_topic(
 async def test_a_record_question_need_not_name_the_topic(tmp_path: Path) -> None:
     question, phrases = RUN13_PERSON[1]
     verdict = await _appdaemon_gate(tmp_path).check(Candidate(question, phrases, audience=RECORD))
-    assert verdict.accepted, verdict.reason
-    assert verdict.route == PERSON and verdict.route_reason == NO_RECORD
+    # The shape rules pass with no name of the topic; only the record search fails.
+    assert not verdict.accepted and verdict.reason == NO_RECORD
 
 
 async def test_a_web_question_and_a_person_asked_question_must_name_the_topic(
@@ -871,3 +890,56 @@ async def test_a_web_question_and_a_person_asked_question_must_name_the_topic(
     assert web_verdict.reason == "the question does not name the topic or a subject"
     asked = await gate.check(Candidate(question), person=True)
     assert asked.reason == "the question does not name the topic"
+
+
+# -- the open question budget -------------------------------------------------------
+
+BUDGET_QUESTIONS = [
+    "Should the light reminder for the window stop now that the snake plants moved?",
+    "Should the feed reminder skip the winter while the gritty mix stays dry?",
+    "Should the runoff watering move to the new tray in the hall?",
+]
+
+
+async def _ask_all(gate: Gate) -> list[str]:
+    out = []
+    for text in BUDGET_QUESTIONS:
+        verdict = await gate.check(web(text, GOOD_PHRASES, "To decide.", PERSON))
+        out.append("ok" if verdict.accepted else verdict.reason)
+    return out
+
+
+async def test_the_topic_budget_counts_the_disk_and_the_run(tmp_path: Path) -> None:
+    gate = _window_gate(
+        tmp_path, open_questions=1, open_questions_topic=1, max_open_questions_per_topic=2
+    )
+    assert await _ask_all(gate) == ["ok", BUDGET_FULL, BUDGET_FULL]
+
+
+async def test_the_instance_budget_counts_the_disk_and_the_run(tmp_path: Path) -> None:
+    gate = _window_gate(
+        tmp_path,
+        open_questions=8,
+        open_questions_topic=0,
+        max_open_questions=10,
+        max_open_questions_per_topic=5,
+    )
+    assert await _ask_all(gate) == ["ok", "ok", BUDGET_FULL]
+
+
+async def test_a_full_budget_rejects_no_record_or_web_question(tmp_path: Path) -> None:
+    _window_wiki(tmp_path)
+    gate = _window_gate(
+        tmp_path,
+        near={f"wiki/{FEED_ENTRY}": 0.95},
+        open_questions=10,
+        max_open_questions=10,
+    )
+    record = await gate.check(web(RECORD_Q, GOOD_PHRASES, audience=RECORD))
+    assert record.accepted and record.route == RECORD
+    world = await _window_gate(tmp_path, open_questions=10, max_open_questions=10).check(
+        web(GOOD_WORLD, GOOD_PHRASES)
+    )
+    assert world.accepted and world.route == WEB
+    full = await gate.check(web(BUDGET_QUESTIONS[0], GOOD_PHRASES, "To decide.", PERSON))
+    assert (full.accepted, full.reason, full.route) == (False, BUDGET_FULL, "")

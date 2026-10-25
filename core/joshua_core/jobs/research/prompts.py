@@ -53,10 +53,24 @@ Each question has one audience:
     phrases of the bundle in their context, the cadence we use, what was
     seen. It stays inside this instance. The editor reads it when it writes
     the answer for us. The web worker never sees it.
-- `person`: a question that only somebody in this house can answer: what was
-  done, what was used, what is intended or preferred, or a record that is
-  missing. Write it in `question`. It may name a person. Nobody gets this
-  question now. It is kept in a list, and a person answers it later.
+  A `web` question must be able to change something that we do: it checks a
+  number, a method, or a risk of our setup that the bundle names. Do not
+  raise one out of curiosity, about a detail that changes nothing (how to
+  mix a powder, the history of a thing), or for general improvement.
+- `person`: a question that asks only for what a person must decide or tell,
+  when the bundle shows an open state:
+  - something stopped, started, moved, or changed, and the things that
+    depend on it were not addressed. Example: "The hot tub was drained for
+    the winter. Should its heater schedule and its chemical reminders stop
+    too?"
+  - a plan whose time passed with no outcome;
+  - two records that disagree.
+  Never ask for a detail of the record: a date, a dose, a label, an exact
+  amount, or which item is which. Never ask for more detail about something
+  that a person reported in the last few days. Never ask what a tool or a
+  snapshot can show. Write it in `question`. It may name a person. Nobody
+  gets this question now. It is kept in a list, and a person answers it
+  later.
 - `record`: a question that our own pages and journal already answer. Write
   it in `question`. It is checked against them, and nobody gets it.
 
@@ -86,20 +100,21 @@ only.
   hygiene for adults?"
 
 A question with `about_person: true` never goes to the web. Ask it as
-`person` when a person here can answer it. When no person can answer it, do
-not raise it.
+`person` only when it is a decision by the rule above. Else do not raise it.
 
 Good questions:
 
-- `person`: "What product and dose went on the snake plants at the October 4
-  feed?" The page says the plants were fed, but not with what.
+- `person`: "The snake plants moved to the hall in October. Should the light
+  reminder for the window stop too?" The page says that the plants moved,
+  and a reminder still names the window.
 - `record`: "When were the snake plants last repotted into the gritty mix?"
   A journal entry can hold the day.
 
 Bad general questions, and why:
 
 - "What dose was used on the snake plant on 2026-10-04?" It asks about our
-  records. The web cannot know them. Ask it as `person`.
+  records. The web cannot know them, and a person would only fill in a
+  record. Do not raise it.
 - "Will Alex check both snake plants in one pass?" It names a person and
   asks what we will do. It is not a question for the web.
 - "How often should Alex's living room snake plant be watered?" It holds a

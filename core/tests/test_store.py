@@ -197,6 +197,13 @@ async def test_transcript_and_kb_event(repo) -> None:
 
     # kb_event is write-only; a successful insert is the assertion.
     await repo.add_kb_event(kind="search", query="weather", conversation_id=conv.id, turn_id="t1")
+    # The topics of the hint line of an injection go into their own column.
+    topics = [{"topic": "garden/irrigation.md", "insights": 1, "questions": 0}]
+    await repo.add_kb_event(
+        kind="inject", query="the drip line", conversation_id=conv.id, turn_id="t2", topics=topics
+    )
+    [newest, older] = (await repo.kb_events(2))[:2]
+    assert newest["topics"] == topics and older["topics"] == []
 
 
 async def test_inbound_messages_hold_only_what_a_sender_wrote(repo) -> None:

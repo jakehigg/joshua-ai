@@ -280,3 +280,16 @@ def test_insights_overrides_load() -> None:
 def test_insights_bad_values_fail(fragment: str) -> None:
     with pytest.raises(config.ConfigError):
         config.parse(BASE + "jobs:\n" + fragment, {}, source="test.yaml")
+
+
+def test_the_open_question_budget_defaults_and_bounds() -> None:
+    research = config.Jobs().research
+    assert (research.max_open_questions, research.max_open_questions_per_topic) == (10, 2)
+    text = BASE + (
+        "jobs:\n  research:\n    max_open_questions: 4\n    max_open_questions_per_topic: 1\n"
+    )
+    loaded = config.parse(text, {}, source="test.yaml").jobs.research
+    assert (loaded.max_open_questions, loaded.max_open_questions_per_topic) == (4, 1)
+    for bad in ("max_open_questions: -1", "max_open_questions_per_topic: 51"):
+        with pytest.raises(config.ConfigError):
+            config.parse(BASE + f"jobs:\n  research:\n    {bad}\n", {}, source="test.yaml")

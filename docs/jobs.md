@@ -878,18 +878,29 @@ Each question has these fields:
 The three audiences are these:
 
 - **`web`**: a question that an expert source outside the house can answer:
-  horticulture, materials, products, methods, standards, seasons, safety. Its
-  general question goes to the internet agent, which searches the open web
-  and has no access to our pages. It carries the specifics of the thing (the
+  horticulture, materials, products, methods, standards, seasons, safety. It
+  must be able to change something that we do: it checks a number, a method,
+  or a risk of our setup that the bundle names. The prompt tells the worker
+  not to raise one out of curiosity, about a detail that changes nothing,
+  such as how to mix a powder or the history of a thing, or for general
+  improvement. Its general question goes to the internet agent, which
+  searches the open web and has no access to our pages. It carries the specifics of the thing (the
   plant, the device, the material, the method) and never the specifics of a
   person, named or not: not a condition, a diagnosis, a symptom, a
   medication, a diet, a body measurement, a mood, a finance, a location, or a
   relationship. "What are the early symptoms of a depressive episode for
   someone who stopped sleeping well in October?" is about a person. "What
   does the NHS say about sleep hygiene for adults?" is about a thing.
-- **`person`**: a question that only somebody here can answer: what was done,
-  used, intended, or preferred, or a record that is missing. "What product and
-  dose went on the snake plants at the October 4 feed?" is one.
+- **`person`**: a question that asks only for what a person must decide or
+  tell, when the bundle shows an open state: something stopped, started,
+  moved, or changed, and the things that depend on it were not addressed; a
+  plan whose time passed with no outcome; or two records that disagree. "The
+  hot tub was drained for the winter. Should its heater schedule and its
+  chemical reminders stop too?" is one. The prompt tells the worker never to
+  ask for a detail of the record (a date, a dose, a label, an exact amount,
+  which item is which), never to ask for more detail about something that a
+  person reported in the last few days, and never to ask what a tool or a
+  snapshot can show.
 - **`record`**: a question that our own pages and journal already answer.
 
 #### The gate on a `web` question
@@ -926,7 +937,7 @@ and rejects it with a reason at the first rule that it fails:
 6. The floor rules below. A general question that fails one is rejected, and
    the reason starts with the name of the rule. It does not go to a person,
    because the worker was told not to write such a question, and a question
-   for a person has its own text.
+   for a person has its own text and its own `why`.
 7. It is not a duplicate. See [Duplicates and shared answers](#duplicates-and-shared-answers).
 
 | Floor rule | Name |
@@ -937,32 +948,26 @@ and rejects it with a reason at the first rule that it fails:
 | The question holds "we", "our", or "us" as a word. "US" in capitals is a country and does not count. | `asks about us` |
 
 A `web` question that passes goes to the dossier as an `open` question, with
-two exceptions, which send it to `person` with the general question as its
-text:
+two exceptions, which reject it:
 
-| Rule | `route_reason` |
+| Rule | Reason |
 |---|---|
 | The topic is in a person section. | `person section` |
 | The worker tags the question `about_person: true`. | `about a person` |
 
-The worker judges which question is about a person, and Python enforces the
-floor: when the worker tags a question `false` but the general question names
-a person, the gate rejects it. A question for a person that one of these rules
-sends there needs no `why`: its page gets a fixed sentence. The prompt also
-tells the worker not to raise a question about a person that no person here
-can answer.
+Such a question never becomes a question for a person: only the `person`
+questions of the worker, each with its `why`, become pages. The worker
+judges which question is about a person, and Python enforces the floor: when
+the worker tags a question `false` but the general question names a person,
+the gate rejects it. The prompt tells the worker to ask a question about a
+person as `person` only when it is a decision, and else not to raise it.
 
 #### The gate on a `person` or a `record` question
 
 A `person` or a `record` question keeps its own `question` text, and the pair
 rules do not apply to it. It must have the length of rule 2, pass rule 5, and
 not be a duplicate. It need not name the topic, because its page stores the
-topic and the context. A `person` question from the worker has a
-`why`. When the question fails a floor rule, it goes to `person`, and its
-`route_reason` is the name of the rule. A question of a person section that is
-not `record` goes to `person` (`person section`), and so does a question with
-`about_person: true` (`about a person`). A `person` question that no rule
-sends there has the `route_reason` `the raise worker asks a person`. Then:
+topic and the context. Then:
 
 - **`record`**: the gate searches the index with the question, over the kinds
   `wiki`, `journal`, and `knowledge`, and over the items of the snapshots that
@@ -972,13 +977,30 @@ sends there has the `route_reason` `the raise worker asks a person`. Then:
   When the best hit is at `jobs.research.record_sim` (0.80) or more, the
   report closes the question with `answered_by: <path>`, or
   `answered_by: snapshots/<name>` for a snapshot item, and the run writes
-  nothing for it. A question that a snapshot answers never goes to
-  `wiki/questions/`. Below that, nothing holds the answer, so the question goes to
-  `person` with the `route_reason` `no record found`. The record search stays
-  inside the instance, so a `record` question of a person section, or one
-  about a person, still goes to it.
-- **`person`**: the question becomes a page under `wiki/questions/`. It never
-  goes to a lookup and never goes into the dossier.
+  nothing for it. Below that, nothing holds the answer, and the question is
+  rejected with the reason `no record found`. It never becomes a question for
+  a person, because such a question asks a person to fill in a record. No
+  floor rule sends a `record` question to a person: a date or a name in it is
+  checked against the records. The record search stays inside the instance,
+  so a `record` question of a person section, or one about a person, still
+  goes to it.
+- **`person`**: the question must have a `why`, else it is rejected. Its
+  `route_reason` is the name of the floor rule that it fails, else
+  `person section` for a topic in a person section, else `about a person`
+  for a question with `about_person: true`, else
+  `the raise worker asks a person`. The question becomes a page under
+  `wiki/questions/` when the open question budget has room (see below). It
+  never goes to a lookup and never goes into the dossier.
+
+**The open question budget.** A person can answer only a few questions. A
+new `person` question is rejected with the reason
+`the open question budget is full` when one more open question would be more
+than `jobs.research.max_open_questions` (10) for the whole instance, or more
+than `jobs.research.max_open_questions_per_topic` (2) for the topic. The
+counts are the question pages with `status: open` on the disk at the start of
+the run, plus the questions for a person that the run accepted. A question
+that a person queues with `queue_question` goes to the dossier, so the
+budget does not apply to it.
 
 On a topic in a person section, a `run` researches only the questions of the
 dossier that a person asked, and the report has a note for each other
@@ -1001,9 +1023,10 @@ and the `Shared` column of `knowledge/README.md` counts it.
 
 So "How often should I water a snake plant?" fails, because no phrase of it
 comes from our pages. "What dose was used on 2026-10-04?" fails as a `web`
-question, because it holds a date of our records, and goes to a person as a
-`person` question. "How often should a snake plant in a gritty soil mix be
-watered in winter?" goes to the web when "gritty soil mix" and "water to
+question, because it holds a date of our records. As a `record` question, a
+journal entry can answer it, and else it is rejected: no person gets a
+question that only fills in a record. "How often should a snake plant in a
+gritty soil mix be watered in winter?" goes to the web when "gritty soil mix" and "water to
 runoff" are in the topic page, and its local context says that ours is in the
 hall at 65 to 68 F.
 
@@ -1016,14 +1039,14 @@ question as the slug of a dossier question does, and is unique in its
 section.
 
 ```yaml
-question: What product and dose went on the snake plants at the October 4 feed?
+question: The snake plants moved to the hall in October. Should the light reminder for the window stop too?
 topic: houseplants/snake-plants-living-room-window.md
 section: houseplants
-why: The researcher wants to know whether an early-October feed builds up salt in a gritty mix.
+why: The plants moved, and a reminder still names the window.
 for: everyone                  # everyone, or the id of the person who would know
-context: [houseplants/snake-plants-living-room-window.md, journal/2026/10/04/snake-plants-fed.md]
-grounded_in: ["fed at the October watering", "Liquid rather than granular"]
-route_reason: names a record date
+context: [houseplants/snake-plants-living-room-window.md, journal/2026/10/04/snake-plants-moved.md]
+grounded_in: ["moved to the hall", "window light reminder"]
+route_reason: the raise worker asks a person
 status: open                   # open, answered, or dismissed
 asked_by: research
 raised_at: 2026-10-19
@@ -1037,8 +1060,8 @@ run_id: 6
 `context` lists the bundle pages that the `grounded_in` phrases come from, or
 the topic page. `for` is the id of a person only when the sentences of the
 `grounded_in` phrases name that one person, by a display name or an id from
-`people`. Else it is `everyone`. When the worker gave no `why`, the
-researcher writes a fixed sentence. The body has these headings, in this
+`people`. Else it is `everyone`. `why` is the `why` of the worker. The body
+has these headings, in this
 order: the question as the title, **Why Joshua wants to know**, **Where it
 came from** (a link to each `context` page), and **Answer**, which is empty
 until a person answers.
@@ -1349,6 +1372,9 @@ them, and that it never raises one on its own.
 - It never sends a question to a person. It keeps the question as a page,
   and a person answers it in chat.
 - It never gives a question for a person to a lookup.
+- It never makes a question for a person from a `web` question, or from a
+  `record` question that no record answers.
+- It never writes a new question for a person past the open question budget.
 - It never takes a person page as a topic. It never gives a lookup a
   question that the worker tags `about_person: true`, or a question of a
   topic in a person section that no person asked.

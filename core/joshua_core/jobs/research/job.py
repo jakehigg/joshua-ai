@@ -22,9 +22,9 @@ topic answers goes to the dossier as `answered`, with that page and
 `shared: true`. Nobody gets a question: a person answers one later, in chat.
 
 A topic in a person section (`jobs.research.person_sections`) is about
-people. The gate sends each of its raised questions to a person or to our
-records, and a `run` researches only the questions of its dossier that a
-person asked.
+people. The gate rejects each of its raised `web` questions and keeps only a
+`record` or a `person` question, and a `run` researches only the questions of
+its dossier that a person asked.
 
 `plan` stops there. When it is not a dry run, it writes the dossier,
 `knowledge/README.md`, and each new question page with `questions/README.md`,
@@ -90,7 +90,6 @@ from joshua_core.jobs.research.dossier import (
     write_index,
 )
 from joshua_core.jobs.research.gate import (
-    NO_RECORD,
     PERSON,
     RECORD,
     AskedQuestion,
@@ -155,9 +154,6 @@ NOT_SENT = "not sent"
 _ARGS = {"mode", "topic", "questions", "max_questions", "then_insights"}
 _TRUE = ("true", "yes", "1", "on")
 _FALSE = ("false", "no", "0", "off")
-# The `why` of a question for a person when the worker gave none.
-_WHY_NO_RECORD = "The researcher looked for this in our pages and the journal and did not find it."
-_WHY_ABOUT_US = "Only somebody here knows this: the web cannot answer a question about us."
 
 
 def worker_model(settings: JoshuaConfig, worker: str | None = None) -> str | None:
@@ -517,6 +513,7 @@ class ResearchJob(Job):
         if raised.candidates is None:
             run.notes.append("The raise worker gave no answer, so no question was added.")
             return
+        on_disk = [q for q in load_questions(self._data_dir) if q.page.status == "open"]
         gate = Gate(
             bundle_text=bundle.text,
             terms=topic_names(topic, bundle.aliases, people=self._settings.people),
@@ -536,6 +533,10 @@ class ResearchJob(Job):
             generic=generic_title(topic.title, self._settings.people),
             topic=topic.path,
             snapshots=job_snapshots(self._settings),
+            open_questions=len(on_disk),
+            open_questions_topic=sum(1 for q in on_disk if q.page.topic == topic.path),
+            max_open_questions=cfg.max_open_questions,
+            max_open_questions_per_topic=cfg.max_open_questions_per_topic,
         )
         for raised_candidate in raised.candidates:
             verdict = await gate.check(raised_candidate)
@@ -580,9 +581,8 @@ class ResearchJob(Job):
         section = question_section(topic.path)
         taken = [p.id.split("/", 1)[1] for p in run.person if p.id.startswith(f"{section}/")]
         slug = new_slug(section, candidate.question, self._data_dir, taken)
-        why = candidate.why or (
-            _WHY_NO_RECORD if verdict.route_reason == NO_RECORD else _WHY_ABOUT_US
-        )
+        # The gate takes a question for a person only with the `why` of the worker.
+        why = candidate.why
         page = QuestionPage.model_validate(
             {
                 "question": candidate.question,
@@ -787,7 +787,7 @@ class ResearchJob(Job):
         ]
         if self._about_people(topic):
             lines.append(
-                f"- Person section: `{topic.section}`. Each raised question goes to a "
+                f"- Person section: `{topic.section}`. A raised question goes to a "
                 "person or to our records, never to the web."
             )
         return "\n".join(lines)

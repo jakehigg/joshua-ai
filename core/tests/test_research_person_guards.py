@@ -114,19 +114,30 @@ async def test_a_page_about_a_person_is_never_the_topic(tmp_path: Path) -> None:
         h.job().check_args({"mode": "plan", "topic": "notes/alex-notes.md"})
 
 
-async def test_a_person_section_topic_sends_each_raised_question_to_a_person(
+async def test_a_person_section_topic_rejects_each_raised_web_question(
     tmp_path: Path,
 ) -> None:
     h = Harness(
         tmp_path / "data", {"coach.md": "# Coach\n", COACH: WALK_PAGE}, raised(SHOES, LAYERS)
     )
     report = await h.run(mode="plan", topic=COACH)
-    pages = load_questions(h.data, COACH)
-    assert sorted(p.page.question for p in pages) == sorted([SHOES, LAYERS])
-    assert {p.page.route_reason for p in pages} == {PERSON_SECTION}
+    assert load_questions(h.data, COACH) == []
     dossier = load_dossier(COACH, h.data)
     assert dossier is not None and dossier.questions == []
+    rejected = {r["question"]: r["reason"] for r in report.data["rejected"]}
+    assert rejected == {SHOES: PERSON_SECTION, LAYERS: PERSON_SECTION}
     assert "- Person section: `coach`." in _section(report, "Topic")
+
+
+async def test_a_person_section_keeps_a_decision_for_a_person(tmp_path: Path) -> None:
+    decision = "Should the walking plan move off the river loop while the path is closed?"
+    answer = raised(decision, audience="person")
+    answer["questions"][0]["why"] = "The loop is closed, and the plan still names it."
+    h = Harness(tmp_path / "data", {"coach.md": "# Coach\n", COACH: WALK_PAGE}, answer)
+    report = await h.run(mode="plan", topic=COACH)
+    [page] = load_questions(h.data, COACH)
+    assert page.page.question == decision and page.page.route_reason == PERSON_SECTION
+    assert page.page.why == "The loop is closed, and the plan still names it."
     assert f"; {PERSON_SECTION})" in _section(report, "For a person")
 
 
@@ -184,18 +195,12 @@ async def test_the_run_11_questions_never_reach_the_web(tmp_path: Path) -> None:
     report = await h.run(mode="plan", topic=PLAN)
     dossier = load_dossier(PLAN, h.data)
     assert dossier is not None and [q.question for q in dossier.questions] == [THING]
-    pages = {p.page.question: p.page for p in load_questions(h.data, PLAN)}
-    dropped = {r["question"] for r in report.data["rejected"]}
-    dropped |= {r["question"] for r in report.data["asked_before"]}
-    for question in RUN11:
-        assert (question in pages) != (question in dropped), question
-    assert sorted(pages) == sorted(RUN11)
-    for page in pages.values():
-        assert page.route_reason == ABOUT_PERSON
-        assert (
-            page.why == "Only somebody here knows this: the web cannot answer a question about us."
-        )
-    assert f"; {ABOUT_PERSON})" in _section(report, "For a person")
+    # A web question about a person is rejected: it never becomes a question
+    # for a person with a fixed why.
+    assert load_questions(h.data, PLAN) == []
+    rejected = {r["question"]: r["reason"] for r in report.data["rejected"]}
+    assert rejected == dict.fromkeys(RUN11, ABOUT_PERSON)
+    assert all(question not in text for question in RUN11 for text in h.internet.texts)
 
 
 CALDO = "recipes/alex-s-caldo-verde.md"

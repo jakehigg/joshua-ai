@@ -305,7 +305,7 @@ jobs:
     coverage_target: 0.6   # a topic below this coverage is due for research
     dup_sim: 0.85          # a new question this close to a known one is a duplicate
     record_sim: 0.80       # a record this close answers a question for our records;
-                           # below it, the question goes to wiki/questions/ for a person
+                           # below it, the question is rejected
     apply_sim: 0.70        # a published knowledge page this close to a question goes to
                            # the apply worker before any lookup
     apply_pages: 5         # the most such pages the apply worker gets for one question
@@ -335,6 +335,9 @@ jobs:
     person_sections:       # wiki sections (first path segment) whose pages are
       - coach              # about people: the researcher asks a person about a
       - people             # topic there, never the web
+    max_open_questions: 10 # the most open questions for a person, of the whole instance;
+                           # past it, a new question for a person is rejected
+    max_open_questions_per_topic: 2 # the most open questions for a person of one topic
   insights:
     # The insights job keeps wiki/insights/: a defect in our own setup that we
     # probably cannot see now, such as a contradiction, a part that nothing

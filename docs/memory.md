@@ -89,8 +89,10 @@ Three folders of the wiki hold what the jobs write. See [docs/jobs.md](jobs.md).
   the table hold `index: false`, so the index holds only the knowledge pages.
   See [the researcher](jobs.md#the-researcher).
 - `wiki/questions/` holds the questions that the researcher job could not
-  answer from the web or from our records: what was done, used, intended, or
-  preferred, or a record that is missing. The index gives these chunks the
+  answer from the web or from our records: a decision that a person must
+  make or a thing that a person must tell, such as what to do about the
+  things that depend on something that changed. It never asks a person to
+  fill in a record. The index gives these chunks the
   kind `question`. A question is one page at
   `wiki/questions/<section>/<slug>.md`. Its frontmatter holds the
   `question`, the `topic`, `why` the researcher wants to know, `for`

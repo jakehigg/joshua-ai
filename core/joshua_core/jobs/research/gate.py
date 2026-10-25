@@ -46,28 +46,40 @@ in this order, and rejects it at the first rule it fails:
    `answered_by`.
 
 Then the route of a `web` question that passed. A topic in a person section
-(`jobs.research.person_sections`) is about people, so its question goes to
-`person` with `route_reason: person section`. A question with
-`about_person: true` goes to `person` with `route_reason: about a person`:
-the worker judges, and the floor rules still apply when the worker says
-`false`. Every other `web` question goes to the dossier.
+(`jobs.research.person_sections`) is about people, so its `web` question is
+rejected with the reason `person section`. A question with
+`about_person: true` is rejected with the reason `about a person`: the
+worker judges, and the floor rules still apply when the worker says
+`false`. Neither becomes a question for a person. Every other `web` question
+goes to the dossier.
 
 A `person` or a `record` question keeps its own `question` text, which may
 name a person, and the pair rules do not apply to it. The topic rule does
 not apply either, because the page of the question stores its topic and its
 context. It must have the shape of rule 2 and pass rule 5 and rule 7 (with no
-shared answer). When it fails a floor rule, it goes to `person`, and
-`route_reason` names the rule. A question of a person section that is not
-`record` goes to `person` (`person section`), and so does one with
-`about_person: true` (`about a person`). A `record` question goes to the
-memory search over the `wiki`, `journal`, and `knowledge` kinds, and over the
-items of the snapshots that a job may see (`bundle.job_snapshots`): the
-closest hit at `jobs.research.record_sim` or more closes it with
-`answered_by: <path>`, or `answered_by: snapshots/<name>` for a snapshot
-item, and with no such hit it goes to `person` (`no record found`). A `person` question
-from the worker needs `why`. A `person` question whose text, or whose vector
-at `dup_sim` or more, matches an open or answered question page of the topic
-is `already asked`; a match on a dismissed one is `dismissed before`.
+shared answer).
+
+A `record` question goes to the memory search over the `wiki`, `journal`,
+and `knowledge` kinds, and over the items of the snapshots that a job may see
+(`bundle.job_snapshots`), also in a person section and also with
+`about_person: true`. No floor rule sends it to a person: a date in a
+`record` question is checked against the records. The closest hit at
+`jobs.research.record_sim` or more closes it with `answered_by: <path>`, or
+`answered_by: snapshots/<name>` for a snapshot item. With no such hit, it is
+rejected with the reason `no record found`. It never becomes a question for
+a person.
+
+A `person` question from the worker needs `why`. Its `route_reason` is the
+name of the floor rule that it fails, else `person section`, else
+`about a person`, else `the raise worker asks a person`. A `person` question
+whose text, or whose vector at `dup_sim` or more, matches an open or answered
+question page of the topic is `already asked`; a match on a dismissed one is
+`dismissed before`. A new `person` question is rejected with the reason
+`the open question budget is full` when the open questions of the instance
+are at `jobs.research.max_open_questions`, or the open questions of the topic
+are at `jobs.research.max_open_questions_per_topic`. The counts are the open
+question pages on the disk at the start of the run, plus the questions that
+the run accepts.
 
 A question that a person asks passes the length rule and the topic rule only,
 and it goes to the dossier. Each rejection has a reason, and the report shows
@@ -147,6 +159,7 @@ ABOUT_PERSON = "about a person"
 NO_RECORD = "no record found"
 ALREADY_ASKED = "already asked"
 DISMISSED_BEFORE = "dismissed before"
+BUDGET_FULL = "the open question budget is full"
 DEFAULT_RECORD_SIM = 0.80
 # The openings of a question about what we did, do, or will do.
 US_OPENINGS = ("what did", "why did", "when did", "will", "should we", "did we", "do we")
@@ -512,6 +525,10 @@ class Gate:
         generic: str = "",
         topic: str = "",
         snapshots: dict[str, Snapshot] | None = None,
+        open_questions: int = 0,
+        open_questions_topic: int = 0,
+        max_open_questions: int | None = None,
+        max_open_questions_per_topic: int | None = None,
     ) -> None:
         self._bundle_text = bundle_text
         self._terms = [t for t in terms if t.strip()]
@@ -528,6 +545,13 @@ class Gate:
         self._generic = generic
         self._topic = topic
         self._snapshots = dict(snapshots or {})
+        # The open question budget: the counts at the start of the run, and
+        # the person questions that this run accepted, which are of this topic.
+        self._open_total = open_questions
+        self._open_topic = open_questions_topic
+        self._max_total = max_open_questions
+        self._max_topic = max_open_questions_per_topic
+        self._accepted_person = 0
         self._vectors: dict[str, list[list[float]]] = {}
         self.notes: list[str] = []
         self._vectors_off = False
@@ -687,11 +711,21 @@ class Gate:
         if duplicate.why:
             return Verdict(candidate, False, duplicate.why, answered_by=duplicate.page)
         if self._person_section:
-            return await self._to_person(candidate, PERSON_SECTION)
+            return Verdict(candidate, False, PERSON_SECTION)
         if candidate.about_person:
-            return await self._to_person(candidate, ABOUT_PERSON)
+            return Verdict(candidate, False, ABOUT_PERSON)
         self._texts.append(question)
         return Verdict(candidate, True, route=WEB)
+
+    def _budget_full(self) -> bool:
+        """True when one more open question passes the instance or the topic budget."""
+        if self._max_total is not None and self._open_total + self._accepted_person >= (
+            self._max_total
+        ):
+            return True
+        return self._max_topic is not None and self._open_topic + self._accepted_person >= (
+            self._max_topic
+        )
 
     async def _to_person(self, candidate: Candidate, route_reason: str) -> Verdict:
         """The verdict of a question that goes to a person: `already asked`,
@@ -702,6 +736,9 @@ class Gate:
             return Verdict(
                 candidate, False, before, route=PERSON, route_reason=route_reason, page=page
             )
+        if self._budget_full():
+            return Verdict(candidate, False, BUDGET_FULL, route_reason=route_reason)
+        self._accepted_person += 1
         self._asked.append(AskedQuestion(question, "open"))
         self._texts.append(question)
         return Verdict(candidate, True, route=PERSON, route_reason=route_reason)
@@ -720,22 +757,17 @@ class Gate:
         duplicate = await self._duplicate(question)
         if duplicate.why:
             return Verdict(candidate, False, duplicate.why, answered_by=duplicate.page)
-        audience = candidate.audience if candidate.audience in AUDIENCES else WEB
-        route_reason = world_rule(question, self._people)
-        if route_reason:
-            audience = PERSON
-        elif self._person_section and audience != RECORD:
-            audience, route_reason = PERSON, PERSON_SECTION
-        elif candidate.about_person and audience != RECORD:
-            audience, route_reason = PERSON, ABOUT_PERSON
-        elif audience == PERSON:
-            if not candidate.why.strip():
-                return Verdict(candidate, False, "a question for a person needs `why`")
-            route_reason = ROUTE_WORKER
-        if audience == RECORD:
+        if candidate.audience == RECORD:
             record = await self._record(question)
-            if record is not None:
-                self._texts.append(question)
-                return Verdict(candidate, True, answered_by=record, route=RECORD)
-            audience, route_reason = PERSON, NO_RECORD
-        return await self._to_person(candidate, route_reason)
+            if record is None:
+                return Verdict(candidate, False, NO_RECORD)
+            self._texts.append(question)
+            return Verdict(candidate, True, answered_by=record, route=RECORD)
+        if not candidate.why.strip():
+            return Verdict(candidate, False, "a question for a person needs `why`")
+        route_reason = world_rule(question, self._people)
+        if not route_reason and self._person_section:
+            route_reason = PERSON_SECTION
+        elif not route_reason and candidate.about_person:
+            route_reason = ABOUT_PERSON
+        return await self._to_person(candidate, route_reason or ROUTE_WORKER)

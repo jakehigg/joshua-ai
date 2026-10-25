@@ -600,6 +600,8 @@ jobs:
       - wikihow.com
       - facebook.com
       - reddit.com
+    max_open_questions: 10
+    max_open_questions_per_topic: 2
   insights:
     enabled: false
     model: claude-sonnet-5
@@ -654,7 +656,7 @@ jobs:
 | `research.questions_per_run` | `3` | The most questions that one run researches. The `max_questions` argument of a run can make it lower. A `plan` or a `run` calls `raise` only when the dossier has fewer open questions than this. |
 | `research.coverage_target` | `0.6` | A topic with a coverage below this is due for research (selection rule 3). |
 | `research.dup_sim` | `0.85` | A new general question with a vector this close to a question of the dossier, or to a knowledge page of the topic, is a duplicate. This close to a published knowledge page of another topic, it is a shared answer: the dossier closes it as `answered` with that page. |
-| `research.record_sim` | `0.80` | A question that the `raise` worker sends to our records is closed with `answered_by` when a topic page, a journal entry, or a knowledge page has a chunk this close to it. Below it, the question goes to `wiki/questions/` for a person. |
+| `research.record_sim` | `0.80` | A question that the `raise` worker sends to our records is closed with `answered_by` when a topic page, a journal entry, a knowledge page, or a snapshot item has a chunk this close to it. Below it, the question is rejected with `no record found`, and no person gets it. |
 | `research.apply_sim` | `0.70` | Before the lookups of a question, a published knowledge page of any topic with a chunk this close to the general question goes to the `apply` worker, which can answer the question with no lookup or narrow it. |
 | `research.apply_pages` | `5` | The most knowledge pages that the `apply` worker gets for one question, the closest first. 1 to 20. |
 | `research.max_holds` | `2` | A question held this many times is `dropped`. |
@@ -665,7 +667,9 @@ jobs:
 | `research.editor_timeout_seconds` | `240` | How long one call of the editor may take. The time includes each try that the validator of the CLI refuses. |
 | `research.trusted_domains` | `.edu`, `.gov`, `.ac.uk`, `extension.`, `.int` | The editor may not grade a page on these domains `weak`. |
 | `research.distrusted_domains` | `pinterest.com`, `quora.com`, `answers.com`, `ehow.com`, `wikihow.com`, `facebook.com`, `reddit.com` | A page on these domains is always `weak`. |
-| `research.person_sections` | `coach`, `people` | The wiki sections, by the first part of the path, whose pages are about people. The gate sends each raised question of a topic there to a person or to our records, never to the web. A `run` on such a topic researches only the questions that a person asked. The selection takes such a topic only when no other topic qualifies under the same rule. A section has no `/` and does not start with a dot. |
+| `research.person_sections` | `coach`, `people` | The wiki sections, by the first part of the path, whose pages are about people. The gate rejects a `web` question of a topic there, and sends only a `record` or a `person` question on. A `run` on such a topic researches only the questions that a person asked. The selection takes such a topic only when no other topic qualifies under the same rule. A section has no `/` and does not start with a dot. |
+| `research.max_open_questions` | `10` | The most open questions for a person, of the whole instance. A new question for a person past it is rejected with `the open question budget is full`. The count is the open question pages at the start of the run, plus the questions that the run accepts. `0` lets no new question in. |
+| `research.max_open_questions_per_topic` | `2` | The most open questions for a person of one topic, counted the same way. |
 | `insights.enabled` | `false` | `true` adds the `insights` job and the `insights` chat tool for members. Both also need `jobs.enabled`. |
 | `insights.model` | not set | The model of the `insight` worker and the `rank` worker, which have no tools. When it is not set, the insights job uses `jobs.model`, then `core.reflection_model`. |
 | `insights.max_per_run` | `5` | The most new insights that one run writes. The gate keeps the highest severity first, then the highest confidence. |

@@ -805,8 +805,10 @@ class JobsResearch(_Model):
     again and does not repeat them. `trusted_domains` and `distrusted_domains`
     are the trust rubric of the editor. `person_sections` lists the wiki
     sections, by their first path segment, whose pages are about people: the
-    researcher asks a person about a topic there, never the web. See
-    `docs/jobs.md`.
+    researcher asks a person about a topic there, never the web.
+    `max_open_questions` is the most open questions for a person of the whole
+    instance, and `max_open_questions_per_topic` the most of one topic: past
+    either, a new question for a person is rejected. See `docs/jobs.md`.
     """
 
     enabled: bool = False
@@ -825,6 +827,8 @@ class JobsResearch(_Model):
     trusted_domains: list[str] = list(RESEARCH_TRUSTED_DOMAINS)
     distrusted_domains: list[str] = list(RESEARCH_DISTRUSTED_DOMAINS)
     person_sections: list[str] = list(RESEARCH_PERSON_SECTIONS)
+    max_open_questions: int = Field(default=10, ge=0, le=500)
+    max_open_questions_per_topic: int = Field(default=2, ge=0, le=50)
 
     @field_validator("person_sections")
     @classmethod

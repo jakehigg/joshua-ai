@@ -7,10 +7,10 @@ product model, the technique, the material, the season, the condition of the
 thing. `local_context` holds our specifics and why we ask, and it stays inside
 the instance: the editor reads it, and the lookups never do. `subject` is the
 generic name of the thing, when the general question holds no name of the
-topic. The worker sets `about_person` on each question, and the gate sends a
-question with `about_person: true` to a person. A `person` question asks, in
-its own `question` text, what only somebody here knows. A `record` question
-asks what our own pages and journal already hold.
+topic. The worker sets `about_person` on each question, and the gate rejects
+a `web` question with `about_person: true`. A `person` question asks, in its
+own `question` text, for a decision that only somebody here can make or tell.
+A `record` question asks what our own pages and journal already hold.
 
 The worker reads the memory bundle of the topic, its title and aliases, and
 the questions the dossier holds. It has no tools. The gate in `gate.py` then

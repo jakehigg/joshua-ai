@@ -64,7 +64,7 @@ def _raised(*items: tuple[str, list[str], str, str]) -> dict[str, Any]:
 
 ANSWER = _raised(
     (GROUNDED, GROUNDED_PHRASES, "It sets the cadence.", "web"),
-    (PERSON_Q, PERSON_PHRASES, "", "person"),
+    (PERSON_Q, PERSON_PHRASES, "The dose sets how fast salt builds up in the mix.", "person"),
     (RECORD_Q, RECORD_PHRASES, "", "record"),
     (ASK_Q, ASK_PHRASES, "The pot size sets how fast the mix dries.", "person"),
 )
@@ -131,7 +131,7 @@ async def test_the_question_page(h: Harness) -> None:
     assert page.raised_at.isoformat() == "2026-10-19"
     assert page.context == [SNAKE]
     assert page.grounded_in == PERSON_PHRASES
-    assert "web cannot answer" in page.why
+    assert page.why == "The dose sets how fast salt builds up in the mix."
     meta, body = frontmatter.split(dose.text)
     assert meta["for"] == "everyone" and meta["answer"] is None
     assert body.startswith(f"# {PERSON_Q}\n")
@@ -184,13 +184,46 @@ async def test_a_run_report_has_the_new_sections(h: Harness) -> None:
     assert all(ASK_Q not in text for text in h.internet.texts)
 
 
-async def test_a_record_question_with_no_record_becomes_a_page(tmp_path: Path) -> None:
+async def test_a_record_question_with_no_record_is_rejected(tmp_path: Path) -> None:
     h = Harness(tmp_path / "data", near={})
     report = await h.run(mode="plan", topic=SNAKE)
     assert report.data["record"] == []
-    [page] = [p for p in load_questions(h.data, SNAKE) if p.page.question == RECORD_Q]
-    assert page.page.route_reason == "no record found"
-    assert "did not find it" in page.page.why
+    assert all(p.page.question != RECORD_Q for p in load_questions(h.data, SNAKE))
+    rejected = {r["question"]: r["reason"] for r in report.data["rejected"]}
+    assert rejected == {RECORD_Q: "no record found"}
+    assert "no record found" in dict(report.sections)["Rejected"]
+
+
+async def test_a_person_question_with_no_why_is_rejected(tmp_path: Path) -> None:
+    h = Harness(tmp_path / "data")
+    h.workers = FakeWorkers(raise_answer=_raised((ASK_Q, ASK_PHRASES, "", "person")))
+    report = await h.run(mode="plan", topic=SNAKE)
+    assert load_questions(h.data, SNAKE) == []
+    assert "needs `why`" in report.data["rejected"][0]["reason"]
+
+
+async def test_the_open_question_budget_of_the_topic_and_the_instance(tmp_path: Path) -> None:
+    h = Harness(tmp_path / "data")
+    h.settings.jobs.research.max_open_questions_per_topic = 1
+    report = await h.run(mode="plan", topic=SNAKE)
+    [page] = load_questions(h.data, SNAKE)
+    assert page.page.question == PERSON_Q
+    rejected = {r["question"]: r["reason"] for r in report.data["rejected"]}
+    assert rejected == {ASK_Q: "the open question budget is full"}
+
+    other = Harness(tmp_path / "other")
+    other.settings.jobs.research.max_open_questions = 1
+    page_dir = layout.questions_root(other.data) / "garden"
+    page_dir.mkdir(parents=True)
+    (page_dir / "drip-winter.md").write_text(
+        "---\nquestion: Should the drip line stop for the winter now?\n"
+        "topic: garden/irrigation.md\nsection: garden\nstatus: open\n"
+        "raised_at: 2026-10-01\n---\n# x\n"
+    )
+    report = await other.run(mode="plan", topic=SNAKE)
+    assert load_questions(other.data, SNAKE) == []
+    reasons = {r["reason"] for r in report.data["rejected"]}
+    assert reasons == {"the open question budget is full"}
 
 
 async def test_a_question_asked_before_is_not_written_again(h: Harness) -> None:
