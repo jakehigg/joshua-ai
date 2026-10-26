@@ -97,7 +97,7 @@ def _json_safe_event(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _authorize(request: Request) -> JSONResponse | None:
+def authorize_admin(request: Request) -> JSONResponse | None:
     """Return a 401/403 response when the request is not an admin caller, else None."""
     admin_callers = parse_callers(os.environ.get("ADMIN_CALLERS", DEFAULT_ADMIN_CALLERS))
     status, identity = authenticate(
@@ -115,7 +115,7 @@ def build_admin_router() -> APIRouter:
 
     @router.get("/admin/people")
     async def get_people(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         repo = request.app.state.ctx.repo
@@ -123,7 +123,7 @@ def build_admin_router() -> APIRouter:
 
     @router.post("/admin/people")
     async def post_people(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         try:
@@ -148,7 +148,7 @@ def build_admin_router() -> APIRouter:
 
     @router.get("/admin/pool")
     async def get_pool(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         manager = request.app.state.ctx.manager
@@ -156,7 +156,7 @@ def build_admin_router() -> APIRouter:
 
     @router.post("/admin/sessions/flush")
     async def flush_sessions(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         manager = request.app.state.ctx.manager
@@ -165,7 +165,7 @@ def build_admin_router() -> APIRouter:
 
     @router.get("/admin/transcript/{conversation_id}")
     async def get_transcript(conversation_id: str, request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         repo = request.app.state.ctx.repo
@@ -177,7 +177,7 @@ def build_admin_router() -> APIRouter:
 
     @router.post("/admin/kb/reindex")
     async def kb_reindex(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         try:
@@ -216,7 +216,7 @@ def build_admin_router() -> APIRouter:
 
     @router.get("/admin/kb/status")
     async def kb_status(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         ctx = request.app.state.ctx
@@ -230,7 +230,7 @@ def build_admin_router() -> APIRouter:
 
     @router.get("/admin/kb/events")
     async def kb_events(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         limit = _parse_limit(request.query_params.get("limit"))
@@ -239,14 +239,14 @@ def build_admin_router() -> APIRouter:
 
     @router.get("/admin/journal/status")
     async def journal_status(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         return JSONResponse(request.app.state.ctx.reflector.journal_status())
 
     @router.post("/admin/reflect")
     async def post_reflect(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         try:
@@ -270,7 +270,7 @@ def build_admin_router() -> APIRouter:
 
     @router.post("/admin/turn")
     async def post_turn(request: Request):  # type: ignore[no-untyped-def]
-        denied = _authorize(request)
+        denied = authorize_admin(request)
         if denied is not None:
             return denied
         try:

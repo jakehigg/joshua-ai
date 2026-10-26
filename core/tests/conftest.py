@@ -14,7 +14,10 @@ import pytest
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
 
-_TABLES = "channels, people, person_handles, conversations, tasks, transcript, kb_event, kb_chunk"
+_TABLES = (
+    "channels, people, person_handles, conversations, tasks, transcript, kb_event, kb_chunk, "
+    "usage_event"
+)
 
 
 @pytest.fixture

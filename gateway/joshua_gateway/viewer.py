@@ -4,9 +4,10 @@ A person opens a browser, signs in with HTTP basic, and reads the one wiki
 (which carries Joshua's own journal and its profile of each person), their own
 attachments, and the shared attachments. ``/journal`` shows the journal as a
 feed, newest day first, because the wiki tree is the wrong shape for reading
-what happened. The agent never calls the viewer. The viewer calls core for one
-thing: ``/search`` asks core to search by meaning (``viewer_search``) when
-``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set. It reads the data volume
+what happened. The agent never calls the viewer. The viewer calls core for two
+things, when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set: ``/search`` asks
+core to search by meaning (``viewer_search``), and ``/usage`` shows the tokens
+of each group by day (``viewer_usage``). It reads the data volume
 through the same resolver as the files MCP (``files_mcp.paths``), so the two
 never drift on who reads what.
 
@@ -60,6 +61,7 @@ from starlette.routing import Route
 from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
 from joshua_gateway import viewer_search as search_mod
+from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
 from joshua_gateway.files_mcp.server import IMAGE_MIME, MAX_BYTES, _atomic_write, data_root
@@ -194,6 +196,27 @@ details.kept pre { background: var(--code); padding: .5rem .75rem;
   border-radius: 4px; overflow-x: auto; }
 p.error { color: #c33; }
 p.actions { margin-top: 2rem; font-size: .9rem; }
+table.usage td.num { text-align: right; font-variant-numeric: tabular-nums;
+  white-space: nowrap; }
+table.usage caption { text-align: left; color: var(--muted); }
+figure.usage-chart { margin: 1rem 0; }
+figure.usage-chart svg { width: 100%; height: auto; display: block; }
+figure.usage-chart .grid { stroke: var(--line); stroke-width: 1; }
+figure.usage-chart .axis { fill: var(--muted); font-size: 11px; }
+ul.legend { list-style: none; padding: 0; margin: .5rem 0 0; display: flex;
+  flex-wrap: wrap; gap: .25rem 1rem; font-size: .85rem; }
+ul.legend .sw { display: inline-block; width: .8rem; height: .8rem;
+  border-radius: 2px; margin-right: .35rem; vertical-align: -.1rem; }
+details.day { margin: .25rem 0; }
+details.day > summary { cursor: pointer; }
+.s0 { fill: #2a78c2; background: #2a78c2; }
+.s1 { fill: #e07b39; background: #e07b39; }
+.s2 { fill: #3a9e6f; background: #3a9e6f; }
+.s3 { fill: #b5487a; background: #b5487a; }
+.s4 { fill: #8a6ccf; background: #8a6ccf; }
+.s5 { fill: #c9a227; background: #c9a227; }
+.s6 { fill: #3aa6b9; background: #3aa6b9; }
+.s7 { fill: #8c8c8c; background: #8c8c8c; }
 """
 
 
@@ -388,6 +411,7 @@ def _page(title: str, body: str, *, status: int = 200, nav: bool = True) -> HTML
 
 _NAV = (
     '<nav><a href="/">home</a><a href="/wiki/">wiki</a><a href="/journal">journal</a>'
+    '<a href="/usage">usage</a>'
     '<form action="/search" method="get">'
     '<input name="q" placeholder="search" aria-label="search"></form></nav>'
 )
@@ -691,6 +715,15 @@ async def search(request: Request, person: Person) -> Response:
     if meaning:
         words = f"<section class=words><h2>By words</h2>{words}</section>"
     return _page("search", f"<h1>search</h1>{meaning}{words}")
+
+
+async def usage(request: Request, person: Person) -> Response:
+    """The tokens of each group by day, from core. The page answers 200 also
+    when core is not configured or does not answer, and says so."""
+    days = usage_mod.parse_days(request.query_params.get("days"))
+    core = usage_mod.from_env(os.environ)
+    body = await core.fetch(days) if core is not None else None
+    return _page("usage", usage_mod.page_html(body, days=days, configured=core is not None))
 
 
 def _search(roots: dict[str, Root], query: str) -> list[tuple[str, str, str]]:
@@ -1056,6 +1089,7 @@ def build_app() -> Starlette:
             Route("/shared/{path:path}", _require_auth(shared_page)),
             Route("/attachments/{path:path}", _require_auth(attachments)),
             Route("/search", _require_auth(search)),
+            Route("/usage", _require_auth(usage)),
             Route("/delete", _require_auth(delete), methods=["POST"]),
         ],
     )

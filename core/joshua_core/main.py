@@ -43,6 +43,7 @@ from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
 from joshua_core.store.seed import seed_people
 from joshua_core.turns import TurnService, build_router
+from joshua_core.usage_api import build_usage_router
 
 logger = get_logger("core")
 
@@ -130,6 +131,7 @@ async def lifespan(app: FastAPI):
     await db.connect()
     await db.init_schema()
     repo = Repo(db)
+    await _backfill_usage(repo)
     await seed_people(repo, settings)
     _bootstrap_layout(settings)
 
@@ -190,6 +192,21 @@ async def lifespan(app: FastAPI):
         await turns.drain()
         await manager.shutdown()
         await db.close()
+
+
+async def _backfill_usage(repo: Repo) -> None:
+    """Write the usage rows of the chat turns made before `usage_event` existed.
+
+    Each row has a source ref, so a second start adds nothing. The log line
+    counts the rows added by kind. A failure is a warning: the usage page then
+    misses the old calls, and core starts.
+    """
+    try:
+        added = await repo.backfill_usage()
+    except Exception as exc:  # noqa: BLE001 — the backfill never stops a start
+        logger.warning({"message": "usage backfill failed", "error": str(exc)})
+        return
+    logger.info({"message": "usage backfill", "added": added})
 
 
 def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> ConversationManager:
@@ -353,6 +370,7 @@ def build_app() -> FastAPI:
     app.include_router(build_router())
     app.include_router(build_admin_router())
     app.include_router(build_search_router())
+    app.include_router(build_usage_router())
     return app
 
 

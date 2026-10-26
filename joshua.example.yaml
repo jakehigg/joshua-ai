@@ -267,3 +267,12 @@ viewer:                         # a read-only web viewer for the wiki and a
   # as a member. Add `users` above to bring restrictions back. Uncomment to
   # turn it on:
   # anonymous: true
+
+usage:
+  # Core's GET /v1/usage: the tokens of each day, for the chat, the nightly
+  # reflection, the lookups, and the describer. The usage page of the viewer
+  # reads it. Each caller needs a JOSHUA_TOKEN_<NAME> in .env. An empty value
+  # turns the route off. GET /admin/usage gives the same answer to an admin
+  # caller.
+  allowed_callers:
+    - viewer                   # the web viewer

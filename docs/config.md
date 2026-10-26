@@ -907,8 +907,9 @@ opens a browser, signs in with a password, and reads the wiki, their own
 profile, the journal, their own attachments, and the shared profile. A member
 also writes: they edit any wiki page, make a new one, correct a journal entry,
 and delete a page, which moves it to `wiki/.trash/`. A guest reads and nothing
-more. The agent never reaches the viewer. The viewer calls core for one thing:
-its search page asks core to search by meaning, with the `viewer` fleet token.
+more. The agent never reaches the viewer. The viewer calls core for two
+things, with the `viewer` fleet token: its search page asks core to search by
+meaning, and its usage page reads the tokens of each day (see [usage](#usage)).
 
 The viewer is off by default. Start it with `docker compose --profile viewer
 up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
@@ -947,6 +948,24 @@ The role, member or guest, comes from `people`. It is never set in `viewer`.
   checked against `viewer.users`, so a member can sign in by password too.
   `viewer.users` is how a household adds restrictions back on top of an open
   viewer.
+
+## usage
+
+`usage` controls core's `GET /v1/usage`, which gives the tokens of the model
+calls for each day and each group. The viewer's usage page reads it.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `allowed_callers` | `viewer` | The fleet identities that may call `GET /v1/usage`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the route off, and every caller gets 403. |
+
+```yaml
+usage:
+  allowed_callers:
+    - viewer
+```
+
+`GET /admin/usage` gives the same answer to an admin caller and does not read
+this list. See [contracts.md](contracts.md#the-usage-route).
 
 ## Agent backend
 

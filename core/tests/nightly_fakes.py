@@ -11,8 +11,12 @@ import json
 from datetime import date
 from typing import Any
 
+from joshua_core.engine.usage import Usage
 from joshua_core.store.models import Person
 from joshua_shared import config as config_module
+
+# The tokens that the canned oneshot reports for each call.
+ONESHOT_USAGE = Usage(input=50, output=10, cache_read=5, cache_write=1)
 
 CONFIG = """
 name: Test House
@@ -38,7 +42,11 @@ def canned_oneshot(
     ``{post, profile}`` (each call reads only the key it needs) and the
     shared-profile call with a fixed shared profile."""
 
-    async def _oneshot(*, system_prompt: str, user_prompt: str, model: str | None) -> str:
+    async def _oneshot(
+        *, system_prompt: str, user_prompt: str, model: str | None, usage_out: Any = None
+    ) -> str:
+        if usage_out is not None:
+            usage_out.append(ONESHOT_USAGE)
         if "shared profile" in system_prompt:
             return json.dumps({"profile": "# House\n## About\nQuiet weeknights."})
         return json.dumps({"post": post, "profile": profile})
@@ -47,7 +55,9 @@ def canned_oneshot(
 
 
 def junk_oneshot() -> Any:
-    async def _oneshot(*, system_prompt: str, user_prompt: str, model: str | None) -> str:
+    async def _oneshot(
+        *, system_prompt: str, user_prompt: str, model: str | None, usage_out: Any = None
+    ) -> str:
         return "not json at all"
 
     return _oneshot
@@ -92,6 +102,10 @@ class FakeReflectRepo:
         self._rows = rows or []
         self._conv_meta = conv_meta or {}
         self.conversations = conversations or {}
+        self.usage_events: list[Any] = []
+
+    async def add_usage_event(self, event: Any) -> None:
+        self.usage_events.append(event)
 
     async def list_people(self) -> list[Person]:
         return list(self._people)

@@ -8,6 +8,18 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **A usage page shows the tokens that Joshua used.** Core now writes one row
+  to the new `usage_event` table for each model call: a chat turn, a nightly
+  reflection call, a lookup with `use_internet`, and an attachment
+  description. A row holds counts, the model, and ids only. The new
+  `GET /v1/usage` (callers in the new `usage.allowed_callers`, default
+  `viewer`) and `GET /admin/usage` give the tokens of each group for each day
+  in the instance timezone, with `?days=N` (default 30, at most 366). The
+  viewer has a new `/usage` page with a bar chart by day and a table of the
+  totals and the models of each group. At each start, core adds the rows of
+  the chat turns that it made before the table existed. See
+  [operations.md](operations.md#the-usage-page).
+
 - **Chart: system prompt snippets from your values file.** Set
   `core.userPrompts` to a map of file name to Markdown. The chart mounts the
   files as the prompts `user/` directory, so every session's prompt gets them,

@@ -11,7 +11,8 @@ the daily rollover starts the next day's SDK session fresh.
 
 The reflection is one tool-less LLM call per document (``run_oneshot``), so it
 never touches a live conversation. One person's profile failing never stops
-the others, and never stops the journal page.
+the others, and never stops the journal page. The tokens of each call go into
+one `reflection` usage row.
 
 Schedule: ``memory.nightly_at`` local time, on the same cron loop as the
 scheduler. ``POST /admin/reflect`` runs or re-runs one day on demand; re-running
@@ -32,6 +33,8 @@ from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.cron import compute_next_cron, now_in, zone
+from joshua_core.engine.usage import Usage
+from joshua_core.store.usage_events import record_usage
 
 logger = get_logger("memory.nightly")
 
@@ -483,7 +486,13 @@ class NightlyReflector:
     ) -> dict[str, Any] | None:
         """Run the reflection call and parse it. Retry once on a parse failure."""
         for attempt in (1, 2):
-            raw = await self._oneshot(system_prompt=system, user_prompt=user, model=self._model)
+            used: list[Usage] = []
+            try:
+                raw = await self._oneshot(
+                    system_prompt=system, user_prompt=user, model=self._model, usage_out=used
+                )
+            finally:
+                await record_usage(self._repo, "reflection", used, model=self._model)
             data = _parse_object(raw)
             if data is not None and required in data:
                 return data
@@ -667,9 +676,17 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text)
 
 
-async def _default_oneshot(*, system_prompt: str, user_prompt: str, model: str | None) -> str:
+async def _default_oneshot(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    model: str | None,
+    usage_out: list[Usage] | None = None,
+) -> str:
     """The real reflection call. Imported lazily so the module loads without the
-    SDK in offline tests."""
+    SDK in offline tests. The tokens of the call go to `usage_out`."""
     from joshua_core.engine.agent import run_oneshot
 
-    return await run_oneshot(system_prompt=system_prompt, user_prompt=user_prompt, model=model)
+    return await run_oneshot(
+        system_prompt=system_prompt, user_prompt=user_prompt, model=model, usage_out=usage_out
+    )

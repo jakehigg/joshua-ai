@@ -100,6 +100,14 @@ def test_happy_path_and_defaults() -> None:
     assert cfg.channels.webhooks.allowed_callers == ["laptop", "ci"]
 
 
+def test_usage_callers_default_to_the_viewer_and_an_empty_value_turns_it_off() -> None:
+    assert config.parse(GOOD, env=ENV).usage.allowed_callers == ["viewer"]
+    listed = config.parse(GOOD + "usage:\n  allowed_callers:\n    - viewer\n    - mcp\n", env=ENV)
+    assert listed.usage.allowed_callers == ["viewer", "mcp"]
+    off = config.parse(GOOD + "usage:\n  allowed_callers:\n", env=ENV)
+    assert off.usage.allowed_callers == []
+
+
 def test_example_file_validates() -> None:
     text = (ROOT / "joshua.example.yaml").read_text()
     env = {

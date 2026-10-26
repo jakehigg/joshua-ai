@@ -47,6 +47,7 @@ from joshua_shared.log import get_logger
 from pydantic import BaseModel, Field
 
 from joshua_core.engine.ephemeral import Runner, run_worker
+from joshua_core.engine.usage import Usage
 
 logger = get_logger("engine.describe")
 
@@ -96,12 +97,14 @@ async def describe_attachment(
     timeout_s: float,
     max_text_chars: int = MAX_TEXT_CHARS,
     runner: Runner | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> AttachmentMeta | None:
     """Describe the file at `abs_path` and write the answer to its metadata file.
 
     Returns the metadata, or `None` when the file cannot be described. A file
     that already carries a description is returned as it is, and no call is
-    made.
+    made. When `usage_out` is a list, the tokens of the call are appended to
+    it.
     """
     meta = read_meta(abs_path) or AttachmentMeta(mime=mime)
     if meta.description is not None:
@@ -122,6 +125,7 @@ async def describe_attachment(
         image=image,
         document=document,
         runner=runner,
+        usage_out=usage_out,
     )
     if answer is None:
         return None

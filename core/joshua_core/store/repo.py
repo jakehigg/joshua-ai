@@ -17,6 +17,7 @@ from psycopg.types.json import Json
 
 from joshua_core.store.db import Database
 from joshua_core.store.models import Channel, Conversation, Person, Task
+from joshua_core.store.usage_events import UsageEvent
 
 logger = get_logger("store.repo")
 
@@ -535,15 +536,19 @@ class Repo:
         content: str,
         status: str = "ok",
         meta: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> int:
+        """Insert one transcript row and return its id."""
         async with self._pool.connection() as conn:
-            await conn.execute(
+            cur = await conn.execute(
                 """
                 INSERT INTO transcript (conversation_id, direction, content, status, meta)
                 VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
                 """,
                 (conversation_id, direction, content, status, Json(meta or {})),
             )
+            row = await cur.fetchone()
+        return int(row["id"])
 
     async def recent_transcripts(self, since: datetime) -> list[dict[str, Any]]:
         """All transcript rows since ``since``, ordered for grouping by conversation."""
@@ -691,3 +696,97 @@ class Repo:
                 (limit,),
             )
             return await cur.fetchall()
+
+    # --- usage ----------------------------------------------------------------
+
+    async def add_usage_event(self, event: UsageEvent) -> None:
+        """Insert one `usage_event` row. A row with a `ref` that is already
+        there is skipped."""
+        used = event.usage
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO usage_event
+                    (at, kind, name, worker, model, person_id, conversation_id, run_id,
+                     ref, calls, input, output, cache_read, cache_write)
+                VALUES (COALESCE(%s, now()), %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (ref) DO NOTHING
+                """,
+                (
+                    event.at,
+                    event.kind,
+                    event.name,
+                    event.worker,
+                    event.model,
+                    event.person_id,
+                    event.conversation_id,
+                    event.run_id,
+                    event.ref,
+                    event.calls,
+                    used.input,
+                    used.output,
+                    used.cache_read,
+                    used.cache_write,
+                ),
+            )
+
+    async def usage_rows(self, since: datetime, timezone: str) -> list[dict[str, Any]]:
+        """The sums of `usage_event` since `since`, by day, name, worker, and
+        model. The day is the date of `at` in `timezone`."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT (at AT TIME ZONE %s)::date AS day, name, worker, model,
+                       SUM(calls) AS calls, SUM(input) AS input, SUM(output) AS output,
+                       SUM(cache_read) AS cache_read, SUM(cache_write) AS cache_write
+                FROM usage_event
+                WHERE at >= %s
+                GROUP BY 1, 2, 3, 4
+                ORDER BY 1 DESC, 2, 3, 4
+                """,
+                (timezone, since),
+            )
+            return await cur.fetchall()
+
+    async def backfill_usage(self) -> dict[str, int]:
+        """Write the `usage_event` rows of the calls made before the table
+        existed, and return how many rows each kind added.
+
+        `chat`: one row for each `out` transcript row with a `meta.usage`
+        object, at its `created_at`, with the ref `transcript:<id>`. The
+        model of a backfilled row is NULL. A ref that is already there is
+        skipped, so this is safe to run at each start.
+        """
+        async with self._pool.connection() as conn:
+            chat = await conn.execute(_BACKFILL_CHAT_SQL)
+        return {
+            "chat": max(chat.rowcount, 0),
+        }
+
+
+def _count_sql(expr: str) -> str:
+    """SQL for a token count read from the JSON value `expr`: a number held
+    to the INT range, else 0."""
+    return (
+        f"CASE WHEN jsonb_typeof({expr}) = 'number' "
+        f"THEN LEAST(GREATEST(({expr} #>> '{{}}')::numeric, 0), 2147483647)::int ELSE 0 END"
+    )
+
+
+_SDK_USAGE = "t.meta->'usage'"
+
+_BACKFILL_CHAT_SQL = f"""
+INSERT INTO usage_event
+    (at, kind, name, person_id, conversation_id, ref, calls,
+     input, output, cache_read, cache_write)
+SELECT t.created_at, 'chat', 'chat', c.person_id, t.conversation_id, 'transcript:' || t.id, 1,
+       {_count_sql(_SDK_USAGE + "->'input_tokens'")},
+       {_count_sql(_SDK_USAGE + "->'output_tokens'")},
+       {_count_sql(_SDK_USAGE + "->'cache_read_input_tokens'")},
+       {_count_sql(_SDK_USAGE + "->'cache_creation_input_tokens'")}
+FROM transcript t
+LEFT JOIN conversations c ON c.id = t.conversation_id
+WHERE t.direction = 'out' AND jsonb_typeof({_SDK_USAGE}) = 'object'
+ON CONFLICT (ref) DO NOTHING
+"""

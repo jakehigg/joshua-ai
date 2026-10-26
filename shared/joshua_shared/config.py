@@ -655,6 +655,26 @@ class McpServer(_Model):
                 raise ValueError(f"identities.{pid}: command/args/env apply only to a stdio server")
 
 
+class UsageConfig(_Model):
+    """Core's ``GET /v1/usage``: the tokens of each group by day.
+
+    ``allowed_callers`` names the fleet identities that may call it. Each one
+    needs a ``JOSHUA_TOKEN_<NAME>`` in core's environment. An empty value
+    turns the route off, so every caller gets 403. ``GET /admin/usage`` gives
+    the same answer to an admin caller and does not read this list.
+    """
+
+    allowed_callers: list[str] = ["viewer"]
+
+    @field_validator("allowed_callers", mode="before")
+    @classmethod
+    def _empty_is_none(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        if value is None or value == "":
+            return []
+        return value
+
+
 class Viewer(_Model):
     # The read-only web viewer. ``users`` maps a person id to a password
     # reference: a ``$2`` bcrypt hash, or a literal password, normally injected
@@ -685,6 +705,7 @@ class JoshuaConfig(_Model):
     mcp: dict[str, McpServer] = {}
     modules: list[str] = []
     viewer: Viewer = Viewer()
+    usage: UsageConfig = UsageConfig()
 
     @model_validator(mode="after")
     def _check_unique(self) -> JoshuaConfig:
