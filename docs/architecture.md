@@ -88,6 +88,7 @@ gets 403.
 | channels `POST /v1/cli/turns/stream`, `GET /v1/cli/outbox` | `channels.webhooks.allowed_callers` |
 | channels `POST /webhook/imessage/{secret}` | no bearer; the path secret is the credential |
 | gateway MCP routes | `core` only |
+| gateway `POST /v1/snapshots/{name}` | `core` only |
 | `/admin/*` on every container | `ADMIN_CALLERS` (default `laptop`, `ci`) |
 | `/healthz`, `/readyz` on every container | open, no secrets in the answer |
 

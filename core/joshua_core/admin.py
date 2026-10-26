@@ -22,13 +22,16 @@ Routes:
   day page exists, and the summary of the last nightly run.
 - ``POST /admin/turn`` — run one turn as an operator and return the text. The
   reply is never delivered to a channel.
+- ``GET /admin/snapshots`` — each configured snapshot and its last outcome:
+  the fetch time, ok, the failures, the last error, and the item count. No
+  text.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -43,6 +46,7 @@ from joshua_shared.log import get_logger
 
 from joshua_core import people
 from joshua_core.memory import embed
+from joshua_core.memory.sources.snapshots import is_listed, split_items
 
 logger = get_logger("core.admin")
 
@@ -95,6 +99,26 @@ def _json_safe_event(row: dict[str, Any]) -> dict[str, Any]:
     if out.get("conversation_id") is not None:
         out["conversation_id"] = str(out["conversation_id"])
     return out
+
+
+def _snapshot_status(snap: Any, row: dict[str, Any] | None, now: datetime) -> dict[str, Any]:
+    """One snapshot for ``GET /admin/snapshots``. The text stays out."""
+    row = row or {}
+    fetched_at = row.get("fetched_at")
+    text = row.get("text")
+    return {
+        "name": snap.name,
+        "server": snap.server,
+        "tool": snap.tool,
+        "scope": snap.scope,
+        "every": snap.every,
+        "fetched_at": fetched_at.isoformat() if fetched_at else None,
+        "ok": bool(row.get("ok")),
+        "failures": int(row.get("failures") or 0),
+        "last_error": row.get("last_error"),
+        "items": len(split_items(text, snap.items)) if text is not None else 0,
+        "listed": is_listed(row or None, snap, now),
+    }
 
 
 def authorize_admin(request: Request) -> JSONResponse | None:
@@ -226,6 +250,19 @@ def build_admin_router() -> APIRouter:
                 "stats": await ctx.memory.kb_stats(),
                 "embed": embed.is_available(),
             }
+        )
+
+    @router.get("/admin/snapshots")
+    async def snapshots_status(request: Request):  # type: ignore[no-untyped-def]
+        denied = authorize_admin(request)
+        if denied is not None:
+            return denied
+        ctx = request.app.state.ctx
+        snaps = ctx.settings.memory.snapshots
+        rows = {r["name"]: r for r in await ctx.repo.list_snapshot_results()} if snaps else {}
+        now = datetime.now(UTC)
+        return JSONResponse(
+            {"snapshots": [_snapshot_status(s, rows.get(s.name), now) for s in snaps]}
         )
 
     @router.get("/admin/kb/events")

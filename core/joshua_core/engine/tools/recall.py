@@ -5,32 +5,74 @@ data volume: the wiki (including the journal) plus any of the caller's own
 documents from another source (a memo, for example). A group turn
 (``deps.person_id`` None) sees shared documents only. Read-only — each result
 carries the ``path`` the agent can open with the ``files`` tool ``read_file``.
+A result is a snippet of at most ``SNIPPET_CHARS`` characters unless the call
+asks for ``full``. A ``snapshot`` result has no file: in place of the path, it
+names the live tool that holds the current data.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import JoshuaConfig, Snapshot
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.memory import embed as embed_module
+from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import search
 from joshua_core.memory.skills import SKILL_KIND
-from joshua_core.memory.store import MemoryStore
+from joshua_core.memory.sources.snapshots import shown, snapshot_labels
+from joshua_core.memory.store import SNAPSHOT_KIND, MemoryStore
 
 logger = get_logger("tools.recall")
 
 DEFAULT_LIMIT = 6
 MAX_LIMIT = 20
+# A result holds at most this many characters of its chunk, unless `full`.
+SNIPPET_CHARS = 400
 
 
 def _reply(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
+
+
+def snapshot_pointer(
+    chunk: KbChunk, snapshots: Mapping[str, Snapshot], labels: Mapping[str, str]
+) -> str:
+    """``snapshot <name> as of <time>; for live data call <server> <tool>``.
+    The time is the latest good fetch, from ``labels``."""
+    head = labels.get(chunk.title, chunk.title)
+    snap = snapshots.get(chunk.title)
+    if snap is None:
+        return f"snapshot {head}"
+    return f"snapshot {head}; for live data call {snap.server} {snap.tool}"
+
+
+def _result(
+    chunk: KbChunk,
+    *,
+    full: bool,
+    snapshots: Mapping[str, Snapshot],
+    labels: Mapping[str, str],
+) -> dict[str, Any]:
+    text = chunk.text or ""
+    out: dict[str, Any] = {"title": chunk.title, "heading": chunk.heading}
+    if chunk.kind == SNAPSHOT_KIND:
+        out["snapshot"] = snapshot_pointer(chunk, snapshots, labels)
+    else:
+        out["path"] = chunk.path
+    if not full and len(text) > SNIPPET_CHARS:
+        out["text"] = text[:SNIPPET_CHARS]
+        out["cut"] = True
+    else:
+        out["text"] = text
+    out["score"] = round(chunk.similarity or 0.0, 4)
+    return out
 
 
 async def do_search_memory(
@@ -44,10 +86,17 @@ async def do_search_memory(
     recency_bonus: float = 0.08,
     recency_half_life_days: float = 14.0,
     per_doc_cap: int = 3,
+    full: bool = False,
+    snapshots: Sequence[Snapshot] = (),
 ) -> list[dict[str, Any]]:
     """Return ``[{path, title, heading, text, score}]`` for the caller's scope.
 
-    An empty query or an unavailable embedding model returns ``[]``.
+    ``text`` is a snippet of at most ``SNIPPET_CHARS`` characters, with
+    ``cut: true`` when it is shorter than the chunk; ``full`` returns the whole
+    chunk. A snapshot result carries ``snapshot`` (the live tool to call) in
+    place of ``path``, with the time of the latest good fetch in ``deps.tz``;
+    a snapshot chunk with no good fetch is dropped. An empty query or an
+    unavailable embedding model returns ``[]``.
     """
     query = (query or "").strip()
     if not query:
@@ -68,15 +117,10 @@ async def do_search_memory(
         recency_half_life_days=recency_half_life_days,
         per_doc_cap=per_doc_cap,
     )
+    labels = await snapshot_labels(store, chunks, deps.tz)
+    by_name = {snap.name: snap for snap in snapshots}
     return [
-        {
-            "path": c.path,
-            "title": c.title,
-            "heading": c.heading,
-            "text": c.text,
-            "score": round(c.similarity or 0.0, 4),
-        }
-        for c in chunks
+        _result(c, full=bool(full), snapshots=by_name, labels=labels) for c in shown(chunks, labels)
     ]
 
 
@@ -90,6 +134,13 @@ _SEARCH_SCHEMA = {
         "limit": {
             "type": "integer",
             "description": f"Maximum results to return (default {DEFAULT_LIMIT}).",
+        },
+        "full": {
+            "type": "boolean",
+            "description": (
+                f"True returns the whole text of each passage. The default is a "
+                f"snippet of at most {SNIPPET_CHARS} characters."
+            ),
         },
     },
     "required": ["query"],
@@ -105,13 +156,18 @@ def build_recall_server(
     recency_bonus: float,
     recency_half_life_days: float,
     per_doc_cap: int,
+    snapshots: Sequence[Snapshot] = (),
 ) -> Any:
     """Build the in-process ``recall`` MCP server bound to one conversation."""
 
     @tool(
         "search_memory",
         "Search the memory (the wiki, your journal, and the shared notes) for text "
-        "relevant to a query. Returns matching passages with the file path to open.",
+        f"relevant to a query. Each result is a snippet of at most {SNIPPET_CHARS} "
+        "characters with its title and the file path: open the path with read_file, "
+        "or pass full: true for the whole passage. A result with 'snapshot' in place "
+        "of a path is the state of a live system at the time it names: call the "
+        "tool it names for the current data.",
         _SEARCH_SCHEMA,
     )
     async def search_memory(args: dict[str, Any]) -> dict[str, Any]:
@@ -125,6 +181,8 @@ def build_recall_server(
             recency_bonus=recency_bonus,
             recency_half_life_days=recency_half_life_days,
             per_doc_cap=per_doc_cap,
+            full=args.get("full") is True,
+            snapshots=snapshots,
         )
         return _reply(json.dumps(results))
 
@@ -144,6 +202,7 @@ def register(manager: Any, store: MemoryStore, settings: JoshuaConfig) -> None:
             recency_bonus=memory.recency_bonus,
             recency_half_life_days=memory.recency_half_life_days,
             per_doc_cap=memory.per_doc_cap,
+            snapshots=memory.snapshots,
         )
 
     manager.register_builtin("recall", factory)

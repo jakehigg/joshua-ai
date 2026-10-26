@@ -164,6 +164,19 @@ CREATE TABLE IF NOT EXISTS usage_event (
     cache_write     INT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_usage_event_at ON usage_event (at DESC);
+
+-- The latest output of each configured snapshot (memory.snapshots). A failed
+-- call keeps the last good text and adds one to failures.
+CREATE TABLE IF NOT EXISTS snapshot_result (
+    name        TEXT PRIMARY KEY,
+    person_id   TEXT,
+    fetched_at  TIMESTAMPTZ,
+    ok          BOOLEAN NOT NULL DEFAULT FALSE,
+    text        TEXT,
+    sha256      TEXT,
+    failures    INT NOT NULL DEFAULT 0,
+    last_error  TEXT
+);
 """
 
 

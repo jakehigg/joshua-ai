@@ -159,6 +159,21 @@ automation or restart the house.
 Make the token in Home Assistant: your profile, **Security**, **Long-lived
 access tokens**.
 
+## A server for a snapshot
+
+A snapshot (`memory.snapshots`) calls one tool of a server on a cadence, and
+puts the output in the memory index. See
+[memory.md](memory.md#snapshots-of-live-systems).
+
+Pick a tool that only lists, such as a list of open tasks. A small list is a
+better hint than a large dump. A tool that changes state must not be a
+snapshot, because no person asks for each call.
+
+The gateway refuses a snapshot when the tool filter hides the tool, when
+`tools.class` marks the tool `write-local` or `act`, or when the server
+declares the tool with `destructiveHint: true` and not `readOnlyHint: true`.
+Mark the listing tool `read` in `tools.class`, so that its class is clear.
+
 ## What this mechanism does not run
 
 **Playwright, and anything that needs a browser.** `@playwright/mcp` starts a

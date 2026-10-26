@@ -124,6 +124,9 @@ Route allowlists, by default:
   200 fast, because BlueBubbles never retries.
 - gateway MCP routes: `core` only. `X-Joshua-Person` is trusted only from
   `core`.
+- gateway `POST /v1/snapshots/{name}`: `core` only. The body is empty: the
+  gateway reads the tool and the arguments from `memory.snapshots`, so the
+  config is the allowlist.
 - `/admin/*` on every container: `ADMIN_CALLERS` (default `laptop,ci`), checked
   on every admin route with no exception.
 - `/healthz`: open, `{"ok": true}`. `/readyz`: open, booleans and counts, no

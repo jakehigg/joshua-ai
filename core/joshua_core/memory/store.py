@@ -21,6 +21,9 @@ from joshua_core.memory.models import KbChunk
 
 logger = get_logger("memory.store")
 
+# The kind of a row from the `snapshots` source.
+SNAPSHOT_KIND = "snapshot"
+
 
 def _vec_literal(embedding: list[float]) -> str:
     """Render an embedding as a pgvector text literal for ``%s::vector`` params."""
@@ -154,6 +157,10 @@ class MemoryStore:
         The argument is kept so a caller reads the same, and so a later scope,
         if one is wanted, has somewhere to go.
 
+        One exception: a ``snapshot`` row scoped to a person is the state of a
+        live system for that person, and only a search for that person finds
+        it. A search with no person finds only the shared snapshot rows.
+
         ``kinds`` limits the search to those kinds; ``exclude_kinds`` drops them
         (the taught-skill trigger rows are excluded from ordinary recall this
         way).
@@ -170,6 +177,12 @@ class MemoryStore:
         if exclude_kinds:
             clauses.append("NOT (kind = ANY(%s))")
             params.append(list(exclude_kinds))
+        # A snapshot row of one person is that person's live state, so only
+        # that person finds it.
+        clauses.append(
+            "NOT (kind = %s AND person_id IS NOT NULL AND person_id IS DISTINCT FROM %s)"
+        )
+        params += [SNAPSHOT_KIND, person_id]
         clauses.append("1 - (embedding <=> %s::vector) >= %s")
         params += [vec, min_sim, vec, k]
         async with self._pool.connection() as conn:
@@ -185,6 +198,20 @@ class MemoryStore:
             )
             rows = await cur.fetchall()
         return [_kb_chunk(r) for r in rows]
+
+    async def snapshot_times(self, names: Sequence[str]) -> dict[str, datetime]:
+        """``{name: fetched_at}`` of the latest good fetch of each snapshot in
+        ``names``. A snapshot with no good fetch is not in the answer."""
+        if not names:
+            return {}
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT name, fetched_at FROM snapshot_result "
+                "WHERE name = ANY(%s) AND fetched_at IS NOT NULL",
+                (list(dict.fromkeys(names)),),
+            )
+            rows = await cur.fetchall()
+        return {r["name"]: r["fetched_at"] for r in rows}
 
     async def kb_stats(self) -> list[dict[str, Any]]:
         """Per-source document/chunk counts for ``/admin/kb/status``."""

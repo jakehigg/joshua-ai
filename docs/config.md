@@ -301,6 +301,40 @@ memory:
 
 [memory.md](memory.md#source-adapters) documents the `memos` source.
 
+### Snapshots
+
+`snapshots` is a list of fixed MCP tool calls whose output goes into the index.
+The default is an empty list, and then nothing runs. See
+[memory.md](memory.md#snapshots-of-live-systems).
+
+| Key | Default | What it does |
+|---|---|---|
+| `name` | required | a unique slug: lower-case letters, digits, and hyphens |
+| `server` | required | a name in the `mcp` section, or `scheduling` for core's own scheduling server |
+| `tool` | required | the exact tool name on that server. On `scheduling`, only `list_tasks` |
+| `args` | empty | the arguments, passed as they are. YAML gives each value as text |
+| `every` | required | the cadence: `5m`, `30m`, `2h`. From `1m` to `24h` |
+| `scope` | `shared` | `shared`, or a person id. A person id calls the tool for that person, and only that person finds the rows |
+| `items` | none | a dotted path into a JSON result that holds the list, such as `result.tasks` |
+| `fields` | none | the keys of each item to keep, in this order (for a Markdown item, the `Key:` of its indented lines), such as `title` and `due`; none keeps every key |
+| `max_chars` | `20000` | the output is cut here, and core logs the cut |
+| `max_age` | 3 × `every`, at least `15m` | an output older than this leaves the index |
+
+Validation refuses a snapshot with an unknown server, a person who is not in
+`people`, a person whom the server does not allow, `shared` on a server that
+is not `allow: all`, a name used two times, and, on `scheduling`, any tool but
+`list_tasks`.
+
+```yaml
+memory:
+  snapshots:
+    - name: open-tasks
+      server: tasks
+      tool: list_open_tasks
+      every: 15m
+      scope: alex
+```
+
 ### Writing
 
 | Key | Default | What it does |
@@ -835,7 +869,9 @@ mcp:
 ### Reserved policy fields
 
 These fields are recorded now and enforced later. `/admin/inventory` shows
-them. The proxy does not act on them yet.
+them. The proxy does not act on them yet. The snapshot route does: it refuses
+a tool that `tools.class` marks `write-local` or `act`. See
+[memory.md](memory.md#the-config-is-the-allowlist).
 
 - `url_args`: `none` or `grant-required` (default `grant-required`).
 - `tools.class`: a map of tool or pattern to `read`, `write-local`, or `act`.

@@ -8,6 +8,24 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Snapshots put the state of a live system in the memory index.** A new
+  list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the
+  arguments, a cadence, and a scope. Core runs each one with no model, keeps
+  the latest output in the new `snapshot_result` table, and indexes one row
+  for each item. A JSON list, a run of JSON values, or a Markdown list gives
+  one item for each element, and the key `fields` keeps only the named keys
+  of each item. A turn whose words match an open item gets a short line with
+  the time of the latest good fetch, and the agent checks the live tool
+  before it changes anything. Core calls the new gateway route
+  `POST /v1/snapshots/{name}` with an empty body, so the config is the
+  allowlist. The gateway refuses a tool that its filter hides, that
+  `tools.class` marks `write-local` or `act`, or that the server declares
+  destructive. A snapshot that is stale or that failed three times leaves the
+  index. `GET /admin/snapshots` shows the state of each one. `search_memory`
+  now gives a snippet of 400 characters for each result, and takes
+  `full: true` for the whole passage. See
+  [memory.md](memory.md#snapshots-of-live-systems).
+
 - **A usage page shows the tokens that Joshua used.** Core now writes one row
   to the new `usage_event` table for each model call: a chat turn, a nightly
   reflection call, a lookup with `use_internet`, and an attachment
