@@ -37,9 +37,11 @@ from joshua_core.engine.mcp import allowed_gateway_servers, gateway_servers
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.types import Attachment, OnDelta, TurnResult
 from joshua_core.engine.url_grants import UrlGrants
+from joshua_core.engine.usage import Usage
 from joshua_core.memory import prompt as memory_prompt
 from joshua_core.store.models import Channel, Conversation
 from joshua_core.store.repo import Repo
+from joshua_core.store.usage_events import record_usage
 
 logger = get_logger("engine.manager")
 
@@ -498,13 +500,19 @@ class ConversationManager:
         )
 
     async def _prepare_attachments(
-        self, attachments: list[Attachment] | None, *, role: str
+        self,
+        attachments: list[Attachment] | None,
+        *,
+        role: str,
+        person_id: str | None = None,
+        conversation_id: str | None = None,
     ) -> tuple[list[Attachment], dict[str, AttachmentMeta]]:
         """Describe each attachment, then name it and place it.
 
         Returns the attachments with the paths they carry from now on, and the
         metadata of each, keyed by that path. Never raises: a turn with a file
-        runs even when the describer and the move both fail.
+        runs even when the describer and the move both fail. The tokens of
+        each describe call go into one `describe` usage row.
         """
         if not attachments:
             return [], {}
@@ -517,6 +525,7 @@ class ConversationManager:
             meta: AttachmentMeta | None = None
             abs_path = self._data_dir / rel
             if settings.describe.enabled and layout.attachment_area(rel) is not None:
+                used: list[Usage] = []
                 try:
                     meta = await describe_attachment(
                         abs_path,
@@ -524,9 +533,18 @@ class ConversationManager:
                         model=settings.describe.model,
                         timeout_s=settings.describe.timeout_seconds,
                         max_text_chars=settings.extract.max_chars,
+                        usage_out=used,
                     )
                 except Exception as exc:  # noqa: BLE001 — a description never fails a turn
                     logger.warning({"message": "attachment not described", "error": str(exc)})
+                await record_usage(
+                    self._repo,
+                    "describe",
+                    used,
+                    model=settings.describe.model,
+                    person_id=person_id,
+                    conversation_id=conversation_id,
+                )
             if meta is None:
                 meta = read_meta(abs_path)
             if meta is not None:
@@ -583,7 +601,9 @@ class ConversationManager:
         if self._url_grants is not None and direction == "in":
             # What the person wrote, and nothing the agent found for itself.
             self._url_grants.grant_from_text(conversation.id, text)
-        attachments, described = await self._prepare_attachments(attachments, role=role)
+        attachments, described = await self._prepare_attachments(
+            attachments, role=role, person_id=turn_person_id, conversation_id=conversation.id
+        )
         attach_note = self._attach_note(attachments, described)
         # A turn with a file and no words of its own borrows the subject of the
         # description, so the skill match and the memory search see what the
@@ -684,13 +704,23 @@ class ConversationManager:
                     {"write_failed": failed} if (failed := failed_writes(result.tool_calls)) else {}
                 ),
             }
-            await self._repo.add_transcript(
+            transcript_id = await self._repo.add_transcript(
                 conversation.id,
                 "out",
                 result.text or "",
                 status="failed" if result.is_error else "ok",
                 meta={"usage": result.usage, "cost_usd": result.cost_usd, **metrics},
             )
+            if isinstance(result.usage, dict):
+                await record_usage(
+                    self._repo,
+                    "chat",
+                    [Usage.from_sdk(result.usage)],
+                    model=getattr(mc.profile, "model", None) or self._settings.core.model,
+                    person_id=turn_person_id,
+                    conversation_id=conversation.id,
+                    ref=f"transcript:{transcript_id}" if transcript_id is not None else None,
+                )
             logger.info(
                 {
                     "message": "turn done",

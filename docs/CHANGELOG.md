@@ -8,6 +8,42 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Snapshots put the state of a live system in the memory index.** A new
+  list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the
+  arguments, a cadence, and a scope. Core runs each one with no model, keeps
+  the latest output in the new `snapshot_result` table, and indexes one row
+  for each item. A JSON list, a run of JSON values, or a Markdown list gives
+  one item for each element, and the key `fields` keeps only the named keys
+  of each item. A turn whose words match an open item gets a short line with
+  the time of the latest good fetch, and the agent checks the live tool
+  before it changes anything. Core calls the new gateway route
+  `POST /v1/snapshots/{name}` with an empty body, so the config is the
+  allowlist. The gateway refuses a tool that its filter hides, that
+  `tools.class` marks `write-local` or `act`, or that the server declares
+  destructive. A snapshot that is stale or that failed three times leaves the
+  index. `GET /admin/snapshots` shows the state of each one. `search_memory`
+  now gives a snippet of 400 characters for each result, and takes
+  `full: true` for the whole passage. See
+  [memory.md](memory.md#snapshots-of-live-systems).
+
+- **A usage page shows the tokens that Joshua used.** Core now writes one row
+  to the new `usage_event` table for each model call: a chat turn, a nightly
+  reflection call, a lookup with `use_internet`, and an attachment
+  description. A row holds counts, the model, and ids only. The new
+  `GET /v1/usage` (callers in the new `usage.allowed_callers`, default
+  `viewer`) and `GET /admin/usage` give the tokens of each group for each day
+  in the instance timezone, with `?days=N` (default 30, at most 366). The
+  viewer has a new `/usage` page with a bar chart by day and a table of the
+  totals and the models of each group. At each start, core adds the rows of
+  the chat turns that it made before the table existed. See
+  [operations.md](operations.md#the-usage-page).
+
+- **Chart: system prompt snippets from your values file.** Set
+  `core.userPrompts` to a map of file name to Markdown. The chart mounts the
+  files as the prompts `user/` directory, so every session's prompt gets them,
+  and you do not build an image. See
+  [charts/joshua/README.md](../charts/joshua/README.md#system-prompt-snippets).
+
 - **A voice device with no wake clip can default to a person.** Set
   `channels.voice.device_defaults` to map a device id to a person id. A device
   listed there speaks for that person on any turn that names no speaker, and
@@ -41,6 +77,15 @@ with the images and the packaged chart, are at
   reply is dropped, with one line in the log naming why.
 
 ### Fixed
+
+- **The journal holds what people said, and what changed.** The nightly
+  reflection no longer reads the instruction of a scheduled task or an event
+  as words of a person. Joshua's reply to them stays, labelled Joshua. The
+  nightly page leaves out a concern that only Joshua raised and no person took
+  up, records a change and not a standing state, and keeps a deferred or
+  declined suggestion as one short line. A profile takes a preference only
+  from what the person said. A scheduled task that writes a journal entry on
+  each run records only what changed since the last run.
 
 - **A tool server that restarts no longer takes its tools away until the
   session ends.** An `http` upstream drops its sessions when it restarts or

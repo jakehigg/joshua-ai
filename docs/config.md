@@ -301,6 +301,40 @@ memory:
 
 [memory.md](memory.md#source-adapters) documents the `memos` source.
 
+### Snapshots
+
+`snapshots` is a list of fixed MCP tool calls whose output goes into the index.
+The default is an empty list, and then nothing runs. See
+[memory.md](memory.md#snapshots-of-live-systems).
+
+| Key | Default | What it does |
+|---|---|---|
+| `name` | required | a unique slug: lower-case letters, digits, and hyphens |
+| `server` | required | a name in the `mcp` section, or `scheduling` for core's own scheduling server |
+| `tool` | required | the exact tool name on that server. On `scheduling`, only `list_tasks` |
+| `args` | empty | the arguments, passed as they are. YAML gives each value as text |
+| `every` | required | the cadence: `5m`, `30m`, `2h`. From `1m` to `24h` |
+| `scope` | `shared` | `shared`, or a person id. A person id calls the tool for that person, and only that person finds the rows |
+| `items` | none | a dotted path into a JSON result that holds the list, such as `result.tasks` |
+| `fields` | none | the keys of each item to keep, in this order (for a Markdown item, the `Key:` of its indented lines), such as `title` and `due`; none keeps every key |
+| `max_chars` | `20000` | the output is cut here, and core logs the cut |
+| `max_age` | 3 × `every`, at least `15m` | an output older than this leaves the index |
+
+Validation refuses a snapshot with an unknown server, a person who is not in
+`people`, a person whom the server does not allow, `shared` on a server that
+is not `allow: all`, a name used two times, and, on `scheduling`, any tool but
+`list_tasks`.
+
+```yaml
+memory:
+  snapshots:
+    - name: open-tasks
+      server: tasks
+      tool: list_open_tasks
+      every: 15m
+      scope: alex
+```
+
 ### Writing
 
 | Key | Default | What it does |
@@ -835,7 +869,9 @@ mcp:
 ### Reserved policy fields
 
 These fields are recorded now and enforced later. `/admin/inventory` shows
-them. The proxy does not act on them yet.
+them. The proxy does not act on them yet. The snapshot route does: it refuses
+a tool that `tools.class` marks `write-local` or `act`. See
+[memory.md](memory.md#the-config-is-the-allowlist).
 
 - `url_args`: `none` or `grant-required` (default `grant-required`).
 - `tools.class`: a map of tool or pattern to `read`, `write-local`, or `act`.
@@ -907,8 +943,9 @@ opens a browser, signs in with a password, and reads the wiki, their own
 profile, the journal, their own attachments, and the shared profile. A member
 also writes: they edit any wiki page, make a new one, correct a journal entry,
 and delete a page, which moves it to `wiki/.trash/`. A guest reads and nothing
-more. The agent never reaches the viewer. The viewer calls core for one thing:
-its search page asks core to search by meaning, with the `viewer` fleet token.
+more. The agent never reaches the viewer. The viewer calls core for two
+things, with the `viewer` fleet token: its search page asks core to search by
+meaning, and its usage page reads the tokens of each day (see [usage](#usage)).
 
 The viewer is off by default. Start it with `docker compose --profile viewer
 up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
@@ -948,6 +985,24 @@ The role, member or guest, comes from `people`. It is never set in `viewer`.
   `viewer.users` is how a household adds restrictions back on top of an open
   viewer.
 
+## usage
+
+`usage` controls core's `GET /v1/usage`, which gives the tokens of the model
+calls for each day and each group. The viewer's usage page reads it.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `allowed_callers` | `viewer` | The fleet identities that may call `GET /v1/usage`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the route off, and every caller gets 403. |
+
+```yaml
+usage:
+  allowed_callers:
+    - viewer
+```
+
+`GET /admin/usage` gives the same answer to an admin caller and does not read
+this list. See [contracts.md](contracts.md#the-usage-route).
+
 ## Agent backend
 
 `core` reads the `AGENT_BACKEND` environment variable to pick the session backend.
@@ -982,7 +1037,12 @@ scheduled, voice). You do not edit any Python code or `Profile.prompt_files`.
 Use `user/` for house rules, guidance for a custom MCP server you added to the
 `mcp:` section, or any other instruction.
 
-To add a snippet:
+To add a snippet with the Helm chart, set `core.userPrompts` in your values
+file. Each key is a file name and each value is the Markdown. The chart mounts
+them as the `user/` directory. You do not build an image. See
+[charts/joshua/README.md](../charts/joshua/README.md#system-prompt-snippets).
+
+To add a snippet to the image:
 
 1. Clone the repo.
 2. Add a file such as `core/joshua_core/prompts/user/house-rules.md`.

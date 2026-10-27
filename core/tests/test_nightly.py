@@ -9,7 +9,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from joshua_core.memory.nightly import NightlyReflector
+from joshua_core.memory.nightly import (
+    JOURNAL_SYSTEM,
+    PROFILE_SYSTEM,
+    SHARED_SYSTEM,
+    NightlyReflector,
+)
 from joshua_core.store.models import Person
 from joshua_shared import layout, wikigit
 from nightly_fakes import (
@@ -406,3 +411,77 @@ async def test_journal_status_keeps_the_last_run(tmp_path: Path) -> None:
     last = reflector.journal_status()["last_run"]
     assert last["date"] == DAY.isoformat()
     assert last["posts_written"] == 1
+
+
+# -- the reflection takes concerns from people, and records changes ----------
+
+
+def test_the_journal_prompt_leaves_out_a_concern_only_joshua_raised() -> None:
+    assert "only you raised, and that no person answered or took up" in JOURNAL_SYSTEM
+    assert "That is not news." in JOURNAL_SYSTEM
+
+
+def test_the_journal_prompt_records_what_changed() -> None:
+    assert "A standing item that an earlier page already holds." in JOURNAL_SYSTEM
+    assert "Write what changed today." in JOURNAL_SYSTEM
+
+
+def test_the_journal_prompt_keeps_a_deferred_suggestion_as_one_line() -> None:
+    assert "defers or declines a suggestion" in JOURNAL_SYSTEM
+    assert "at most one short line with the decision" in JOURNAL_SYSTEM
+    assert "It does not restate the" in JOURNAL_SYSTEM
+
+
+@pytest.mark.parametrize("prompt", [PROFILE_SYSTEM, SHARED_SYSTEM], ids=["profile", "shared"])
+def test_a_profile_takes_preferences_only_from_people(prompt: str) -> None:
+    flat = " ".join(prompt.split())
+    assert "comes from what that person said, never from what you said" in flat
+    assert (
+        "only you raised, and that no person answered or took up, does not go in a profile" in flat
+    )
+    assert "not concerned about something is a durable preference" in flat
+    assert "with the reason" in flat
+
+
+TASK = "Check the backup log and tell Alex if a run failed."
+EVENT = "Event: the front door sensor reports a low battery."
+
+
+async def test_a_task_or_an_event_is_never_the_person(tmp_path: Path) -> None:
+    """A scheduled task's instruction and an event operate Joshua: the
+    reflection does not read them, and never under the person's name.
+    Joshua's reply to them stays, labelled Joshua."""
+    _bootstrap(tmp_path)
+    rows = [
+        row("c1", "in", LONG, T10, turn_id="t1"),
+        row("c1", "task", TASK, T10, turn_id="t2"),
+        row("c1", "out", "The backup ran clean last night.", T10, turn_id="t2"),
+        row("c1", "inject", EVENT, T11, turn_id="t3"),
+        row("c1", "out", "[IGNORE]", T11, turn_id="t3"),
+        row("grp", "task", TASK, T10, turn_id="g1", speaker="Alex"),
+        row("grp", "out", "A reminder for the group.", T10, turn_id="g1"),
+        row("grp", "inject", EVENT, T11, turn_id="g2", speaker="Alex"),
+        row("grp", "in", LONG, T11, turn_id="g3", speaker="Alex"),
+    ]
+    repo = FakeReflectRepo(
+        people=PEOPLE,
+        rows=rows,
+        conv_meta={
+            "c1": {"session_mode": "per_person", "person_id": "alex", "display_name": "Alex"},
+            "grp": {"session_mode": "shared", "person_id": None, "display_name": None},
+        },
+    )
+    reflector, _, _ = _reflector(tmp_path, repo)
+    buckets, group = await reflector._collect(DAY)
+
+    mine = buckets["alex"].render()
+    together = group.render()
+    for text in (mine, together):
+        assert TASK not in text and EVENT not in text
+        assert f"Alex: {TASK}" not in text
+    assert f"Alex: {LONG.strip()}" in mine
+    assert "Joshua: The backup ran clean last night." in mine
+    assert "[IGNORE]" not in mine
+    assert "Joshua: A reminder for the group." in together
+    # The group reply to a task has no member speaker, so no member gets it.
+    assert "A reminder for the group." not in mine

@@ -469,6 +469,52 @@ reads and edits the whole wiki: the journal and every profile. Use this only
 on a network you trust, put TLS at the ingress or reverse proxy as always,
 and never expose the viewer to the open internet with `anonymous` set.
 
+### The usage page
+
+`/usage` in the viewer shows the tokens that Joshua used, for each calendar
+day in the instance `timezone`. The `usage` link in the menu opens it. Each
+signed-in person can open it. It shows counts only: no person, no message,
+and no question.
+
+The page has a bar chart of the total tokens of each day, stacked by group, a
+table of the days by group with a total row and a total column, and a table
+of the totals of each group. Each group has six counts: calls, input, output,
+cache read, cache write, and total. The groups are:
+
+| Group | The model calls |
+|---|---|
+| `chat` | the turns of the agent in a conversation |
+| `reflection` | the nightly reflection |
+| `internet` | a lookup that the agent makes with `use_internet` in a conversation |
+| `describe` | the attachment describer |
+
+The table of days and the table of totals show each of these groups, also a
+group with no usage in the window. The `Models` column of the totals table
+lists the models of the calls of each group. A dash means that no call of the
+group named its model, for example an old row from before the table kept the
+model. A group whose rows name a worker gets a table of its workers under the
+totals table. The "Each day" sections show only the groups with usage on that
+day.
+
+`?days=N` sets the window, today included: default 30, at most 366. The links
+at the top give 7, 30, 90, and 366 days.
+
+The page needs the same `CORE_URL` and `JOSHUA_TOKEN_VIEWER` as the search by
+meaning, and `usage.allowed_callers` in `joshua.yaml` must name `viewer`,
+which it does by default. Without them, or when core does not answer, the page
+says so.
+
+Core keeps one row for each call in the `usage_event` table. At each start,
+core also adds the rows of the chat turns that it made before the table
+existed, from the transcript. The nightly reflection, the lookups, and the
+describer kept no count before, so the page has no old rows for them. An
+operator reads the same numbers with an admin token:
+
+```
+curl -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" \
+  "http://127.0.0.1:8081/admin/usage?days=7"
+```
+
 ## Where the data is
 
 | Docker volume | Holds | `make nuke` deletes it |

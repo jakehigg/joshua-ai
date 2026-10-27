@@ -21,6 +21,8 @@ from joshua_core.engine import internet as internet_agent
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.url_grants import UrlGrants
+from joshua_core.engine.usage import Usage
+from joshua_core.store.usage_events import record_usage
 
 logger = get_logger("tools.internet")
 
@@ -93,6 +95,9 @@ async def do_lookup(
     Every answer is text the agent can act on: the answer, a refusal, a line
     saying the internet is off, or a line saying nothing was found. It never
     raises.
+
+    The tokens of the lookup go into one `internet` usage row, with the person
+    and the conversation.
     """
     config = settings.internet
     if not config.enabled:
@@ -111,7 +116,16 @@ async def do_lookup(
             "refused": len(refused),
         }
     )
-    answer = await internet_agent.ask(question, settings=config, urls=allowed)
+    used: list[Usage] = []
+    answer = await internet_agent.ask(question, settings=config, urls=allowed, usage_out=used)
+    await record_usage(
+        deps.repo,
+        "internet",
+        used,
+        model=config.model,
+        person_id=deps.person_id,
+        conversation_id=conversation_id or None,
+    )
     if answer is None:
         return _NOTHING
 

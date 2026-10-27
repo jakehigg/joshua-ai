@@ -35,14 +35,18 @@ from joshua_core.memory.indexer import Indexer, IndexerLoop
 from joshua_core.memory.nightly import NightlyReflector
 from joshua_core.memory.sources.files import FilesSource
 from joshua_core.memory.sources.memos import build_memos_source, schedule_seconds
+from joshua_core.memory.sources.snapshots import SOURCE_NAME as SNAPSHOTS_SOURCE
+from joshua_core.memory.sources.snapshots import SnapshotsSource
 from joshua_core.memory.store import MemoryStore
 from joshua_core.migrate_links import migrate_page_links
 from joshua_core.scheduler import Scheduler
 from joshua_core.search_api import build_search_router
+from joshua_core.snapshots import SnapshotRunner, build_runner
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
 from joshua_core.store.seed import seed_people
 from joshua_core.turns import TurnService, build_router
+from joshua_core.usage_api import build_usage_router
 
 logger = get_logger("core")
 
@@ -51,6 +55,10 @@ AGENT_BACKEND_ENV = "AGENT_BACKEND"
 GATEWAY_URL_ENV = "GATEWAY_URL"
 DATA_DIR_ENV = "JOSHUA_DATA_DIR"
 _AGENT_BACKENDS = ("sdk", "stub")
+# How often the index re-reads the `snapshots` source when nothing asked it
+# to. The runner asks on each change; this pass also takes out a snapshot that
+# went stale while the runner was down.
+SNAPSHOT_INDEX_INTERVAL_S = 300.0
 
 
 @dataclass
@@ -71,6 +79,8 @@ class AppContext:
     memory: MemoryStore
     indexer: Indexer
     reflector: NightlyReflector
+    # The snapshot runner, or None when `memory.snapshots` is empty.
+    snapshots: SnapshotRunner | None = None
 
 
 def _database_url() -> str:
@@ -130,6 +140,7 @@ async def lifespan(app: FastAPI):
     await db.connect()
     await db.init_schema()
     repo = Repo(db)
+    await _backfill_usage(repo)
     await seed_people(repo, settings)
     _bootstrap_layout(settings)
 
@@ -174,9 +185,11 @@ async def lifespan(app: FastAPI):
         memory=memory_store,
         indexer=indexer,
         reflector=reflector,
+        snapshots=_build_snapshots(settings, repo, indexer),
     )
     await scheduler.start()
     indexer_loop.start()
+    _start_snapshots(app.state.ctx.snapshots)
     await reflector.start()
     _log_group_roles(settings)
     logger.info({"message": "joshua-core up", "agent_backend": agent_backend})
@@ -185,11 +198,57 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info({"message": "joshua-core shutting down"})
         await reflector.stop()
+        if app.state.ctx.snapshots is not None:
+            await app.state.ctx.snapshots.stop()
         await indexer_loop.stop()
         await scheduler.stop()
         await turns.drain()
         await manager.shutdown()
         await db.close()
+
+
+async def _backfill_usage(repo: Repo) -> None:
+    """Write the usage rows of the chat turns made before `usage_event` existed.
+
+    Each row has a source ref, so a second start adds nothing. The log line
+    counts the rows added by kind. A failure is a warning: the usage page then
+    misses the old calls, and core starts.
+    """
+    try:
+        added = await repo.backfill_usage()
+    except Exception as exc:  # noqa: BLE001 — the backfill never stops a start
+        logger.warning({"message": "usage backfill failed", "error": str(exc)})
+        return
+    logger.info({"message": "usage backfill", "added": added})
+
+
+def _build_snapshots(settings: JoshuaConfig, repo: Repo, indexer: Indexer) -> SnapshotRunner | None:
+    """The snapshot runner, or None when `memory.snapshots` is empty or the
+    runner cannot be built. A failure here is logged and never stops a start."""
+    if not settings.memory.snapshots:
+        return None
+    try:
+        return build_runner(
+            settings.memory.snapshots,
+            store=repo,
+            indexer=indexer,
+            gateway_url=os.environ.get(GATEWAY_URL_ENV, ""),
+            gateway_token=os.environ.get(CORE_TOKEN_ENV, ""),
+        )
+    except Exception as exc:  # noqa: BLE001 — snapshots never stop a start
+        logger.error({"message": "snapshot runner not built", "error": str(exc)})
+        return None
+
+
+def _start_snapshots(runner: SnapshotRunner | None) -> None:
+    if runner is None:
+        return
+    try:
+        runner.start()
+    except Exception as exc:  # noqa: BLE001 — snapshots never stop a start
+        logger.error({"message": "snapshot runner did not start", "error": str(exc)})
+        return
+    logger.info({"message": "snapshot runner started"})
 
 
 def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> ConversationManager:
@@ -230,7 +289,8 @@ def _build_memory(
     settings: JoshuaConfig, store: MemoryStore, manager: ConversationManager, repo: Repo
 ) -> tuple[Indexer, IndexerLoop]:
     """Wire the in-core RAG: the ``files`` source (always on), any optional
-    source adapter from ``memory.sources``, the indexer, its interval loop, the
+    source adapter from ``memory.sources``, the ``snapshots`` source when
+    ``memory.snapshots`` is not empty, the indexer, its interval loop, the
     ``recall`` builtin tool, the per-turn injection provider, and the taught-skill
     provider. A source with a bad config, or a name with no adapter yet, is logged
     and skipped rather than failing boot."""
@@ -254,6 +314,11 @@ def _build_memory(
                 )
             continue
         logger.warning({"message": "memory source adapter not available yet", "source": name})
+    if memory.snapshots:
+        sources[SNAPSHOTS_SOURCE] = SnapshotsSource(
+            repo, memory.snapshots, timezone=settings.timezone
+        )
+        intervals[SNAPSHOTS_SOURCE] = SNAPSHOT_INDEX_INTERVAL_S
     indexer = Indexer(
         store,
         sources,
@@ -353,6 +418,7 @@ def build_app() -> FastAPI:
     app.include_router(build_router())
     app.include_router(build_admin_router())
     app.include_router(build_search_router())
+    app.include_router(build_usage_router())
     return app
 
 

@@ -82,11 +82,13 @@ gets 403.
 |---|---|
 | core `POST /v1/turns`, `POST /v1/turns/stream` | `channels` (and `laptop` for a `cli` handle) |
 | core `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) |
+| core `GET /v1/usage` | `usage.allowed_callers` (default `viewer`) |
 | channels `POST /v1/deliver`, `GET /v1/channels/resolve` | `core` |
 | channels `POST /v1/events` | `channels.webhooks.allowed_callers` (default `laptop`, `ci`) |
 | channels `POST /v1/cli/turns/stream`, `GET /v1/cli/outbox` | `channels.webhooks.allowed_callers` |
 | channels `POST /webhook/imessage/{secret}` | no bearer; the path secret is the credential |
 | gateway MCP routes | `core` only |
+| gateway `POST /v1/snapshots/{name}` | `core` only |
 | `/admin/*` on every container | `ADMIN_CALLERS` (default `laptop`, `ci`) |
 | `/healthz`, `/readyz` on every container | open, no secrets in the answer |
 

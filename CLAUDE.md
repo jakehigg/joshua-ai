@@ -95,7 +95,8 @@ case, is the caller's identity. A missing or wrong token gets 401. An identity
 that is not on the route's allowlist gets 403. There is no other bearer path.
 
 Identities: `channels`, `core`, `gateway`, plus `laptop` and `ci` for
-operators, and `viewer` and `mcp`, which call core's search by meaning.
+operators, and `viewer` and `mcp`, which call core's search by meaning. The
+`viewer` also reads core's usage by day.
 `make init-env` mints the tokens into `.env`. Each of the three containers gets
 all of them, because each one verifies the callers it trusts. The viewer gets
 only its own. The three containers
@@ -109,6 +110,9 @@ Route allowlists, by default:
 - core `POST /v1/memory/search`: `memory.search.allowed_callers` (default
   `viewer`, `mcp`). An empty list turns it off. It names no person and returns
   only `wiki/` pages of kind `wiki`, `journal`, or `profile`.
+- core `GET /v1/usage`: `usage.allowed_callers` (default `viewer`). An empty
+  list turns it off. It returns token counts by day and group, and no person.
+  `GET /admin/usage` gives the same answer to an admin caller.
 - channels `POST /v1/deliver`, `GET /v1/channels/resolve`: `core`.
 - channels `POST /v1/events`, `POST /v1/cli/*`, `GET /v1/cli/*`:
   `channels.webhooks.allowed_callers` (default `laptop`, `ci`).
@@ -120,6 +124,9 @@ Route allowlists, by default:
   200 fast, because BlueBubbles never retries.
 - gateway MCP routes: `core` only. `X-Joshua-Person` is trusted only from
   `core`.
+- gateway `POST /v1/snapshots/{name}`: `core` only. The body is empty: the
+  gateway reads the tool and the arguments from `memory.snapshots`, so the
+  config is the allowlist.
 - `/admin/*` on every container: `ADMIN_CALLERS` (default `laptop,ci`), checked
   on every admin route with no exception.
 - `/healthz`: open, `{"ok": true}`. `/readyz`: open, booleans and counts, no

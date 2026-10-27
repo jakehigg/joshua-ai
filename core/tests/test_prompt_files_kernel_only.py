@@ -37,8 +37,9 @@ _LINE_BUDGET = 80
 # people.md carries the skill format the agent writes: the trigger, ``for``,
 # and ``kind``. The format grew when a skill gained an audience and a kind, so
 # the budget grew with it. Every line here is paid on every turn: cut before
-# you raise this again.
-_BUDGETS = {"people.md": 98}
+# you raise this again. The snapshot rule (offer the action, check the live
+# tool) added three lines.
+_BUDGETS = {"people.md": 101}
 
 
 @pytest.mark.parametrize("path", _FILES, ids=lambda p: p.name)
@@ -46,3 +47,22 @@ def test_file_within_line_budget(path: Path) -> None:
     budget = _BUDGETS.get(path.name, _LINE_BUDGET)
     lines = len(path.read_text().splitlines())
     assert lines <= budget, f"{path.name} is {lines} lines, over its {budget}-line budget"
+
+
+def test_a_scheduled_journal_entry_records_only_what_changed() -> None:
+    flat = " ".join((_PROMPTS_DIR / "scheduled.md").read_text().split())
+    assert "only what is new or changed since the last run" in flat
+    assert "Do not carry a list of standing items forward" in flat
+    assert "Standing state belongs on the wiki page of the thing." in flat
+
+
+def test_a_snapshot_is_never_acted_on_alone() -> None:
+    flat = " ".join((_PROMPTS_DIR / "people.md").read_text().split())
+    assert "A snapshot line is what a live system held at the time it names." in flat
+    assert "offer the action, such as marking a task done." in flat
+    assert "Call the live tool to check and to act; never act on the snapshot alone." in flat
+
+
+def test_a_journal_entry_records_a_change() -> None:
+    text = (_PROMPTS_DIR / "people.md").read_text()
+    assert "An entry records a change, not the same state again." in text

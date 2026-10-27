@@ -104,6 +104,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
+| `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
@@ -114,6 +115,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /admin/kb/events?limit=` | `ADMIN_CALLERS` | | `{"events": […]}` |
 | `POST /admin/reflect` | `ADMIN_CALLERS` | `{"person"?, "date"?}` | the reflection summary |
 | `POST /admin/turn` | `ADMIN_CALLERS` | `{"channel", "text", "person"?, "framing"?}` | `{"conversation_id", "text"}`. The reply is not delivered. |
+| `GET /admin/usage?days=` | `ADMIN_CALLERS` | | the same answer as `GET /v1/usage` |
+| `GET /admin/snapshots` | `ADMIN_CALLERS` | | `{"snapshots": [{"name", "server", "tool", "scope", "every", "fetched_at", "ok", "failures", "last_error", "items", "listed"}]}`, no text |
 
 `POST /v1/turns` answers `202` at once and runs the turn in the background. The
 reply reaches the person through `POST /v1/deliver`. A second turn with the
@@ -134,6 +137,40 @@ own attachments, a row from another source, or a taught skill. `path` is
 relative to the data volume. `date` is `YYYY-MM-DD` or null. An empty list in
 `allowed_callers` turns the route off: every caller gets `403`. Core never
 logs the query.
+
+### The usage route
+
+`GET /v1/usage` gives the tokens of the model calls, for each calendar day in
+the instance `timezone` and for each group. The groups are `chat` (the turns
+of the agent), `reflection` (the nightly reflection), `internet` (a lookup
+that the agent makes with `use_internet`), and `describe` (the attachment
+describer). `days` is the window, today included: default 30, held to 1 to
+366.
+
+```json
+{"timezone": "America/New_York", "days": 30,
+ "groups": ["chat", "reflection", "internet", "describe"],
+ "rows": [{"date": "2026-10-20",
+           "groups": {"chat": {"calls": 12, "input": 900, "output": 400,
+                               "cache_read": 52000, "cache_write": 3100,
+                               "total": 56400, "models": ["claude-opus-5"],
+                               "workers": {}}}}],
+ "totals": {"chat": {"calls": 12, "...": "..."},
+            "reflection": {"calls": 0, "...": "...", "models": [], "workers": {}}}}
+```
+
+`groups` always holds every feature, also one with no usage: `chat`,
+`reflection`, `internet`, and `describe`, in that order. After them come the
+other names of the rows in the window, sorted. `totals` holds one entry for
+each name of `groups`, with zero counts for a group with no usage. `rows` is
+newest first and holds only a day with usage, and a day holds only the groups
+with usage that day. `total` is input, output, cache read, and cache write,
+added. `models` is the sorted list of the distinct models of the calls of a
+group, and `[]` when no call named one. `workers` gives the same counts and
+`models` for each worker of a group whose rows name a worker, and is empty for
+the other groups. The answer holds no person, no message, and no question. An
+empty list in `usage.allowed_callers` turns the route off: every caller gets
+`403`. `GET /admin/usage` gives the same answer to an admin caller.
 
 ### The stream
 
@@ -204,6 +241,7 @@ it.
 | `POST /admin/reload` | `ADMIN_CALLERS` | `{"server": name}` or empty | `{"reloaded": {…}, "failed": {…}}`, `502` when one failed |
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
 | `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
+| `POST /v1/snapshots/{name}` | `core` | empty | `{"ok", "text", "is_error", "fetched_at"}` (below). `404` for a name that is not a gateway snapshot, `403` for a refused tool, `503` when the upstream is down, `504` after 30 seconds. |
 | `POST /admin/mcp/install` | `ADMIN_CALLERS` | `{"server": name, "reinstall": bool}` | `{"server", "package", "resolved", "installed_at", "reconnected": […]}`. `404` for a server with no `package`, `502` with a one-line `error` when the install failed. |
 
 When an upstream loses its session, core's session to the gateway continues.
@@ -221,6 +259,30 @@ The gateway connects to the upstream again:
   (`INTERNAL_ERROR`). The gateway never passes on the upstream's own code: a
   code such as `-32600` would tell core that its request was bad, and HTTP
   then answers `400`.
+
+### The snapshot route
+
+`POST /v1/snapshots/{name}` runs one snapshot of `memory.snapshots` for core.
+The body is empty. The gateway reads the server, the tool, the arguments, and
+the scope from its own copy of `joshua.yaml`, so the config is the allowlist.
+It refuses with `403`, and writes a `denied` row to the call log, in these
+cases:
+
+- The person of the scope may not use the server (`person_not_allowed`).
+- The tool filter hides the tool, or the upstream does not declare it
+  (`tool_not_exposed`).
+- The `class` map marks the tool `write-local` or `act`
+  (`tool_class_write-local`, `tool_class_act`).
+- The upstream declares the tool with `destructiveHint: true` and not
+  `readOnlyHint: true` (`tool_destructive`).
+
+Otherwise the gateway calls the tool one time. It uses the upstream instance
+of the person of the scope, as the MCP route does.
+
+`text` joins the text parts of the result with a newline. `is_error` is the
+flag of the tool. `ok` is true when the call ran and `is_error` is false.
+`fetched_at` is UTC, in ISO 8601. The call log holds the call with the
+snapshot name and no content.
 
 `core` sends two headers with every MCP request:
 

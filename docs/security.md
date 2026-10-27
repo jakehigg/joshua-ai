@@ -53,6 +53,13 @@ Every route has an allowlist of fleet identities. The list is in
   holds their text in the shared scope. The route checks each row again after
   the database filter, and a test proves it.
 
+- The gateway route `POST /v1/snapshots/{name}` admits only `core`, and its body is
+  empty. The gateway reads the tool and the arguments of the snapshot from its
+  own config, so no caller can ask for another tool. It refuses a tool that
+  the tool filter hides, that the `class` map marks `write-local` or `act`,
+  or that the upstream declares destructive and not read-only. A test proves
+  each refusal. See [memory.md](memory.md#snapshots-of-live-systems).
+
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
 name, a path, or a token.
 

@@ -11,7 +11,8 @@ the daily rollover starts the next day's SDK session fresh.
 
 The reflection is one tool-less LLM call per document (``run_oneshot``), so it
 never touches a live conversation. One person's profile failing never stops
-the others, and never stops the journal page.
+the others, and never stops the journal page. The tokens of each call go into
+one `reflection` usage row.
 
 Schedule: ``memory.nightly_at`` local time, on the same cron loop as the
 scheduler. ``POST /admin/reflect`` runs or re-runs one day on demand; re-running
@@ -32,6 +33,8 @@ from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.cron import compute_next_cron, now_in, zone
+from joshua_core.engine.usage import Usage
+from joshua_core.store.usage_events import record_usage
 
 logger = get_logger("memory.nightly")
 
@@ -50,6 +53,12 @@ Rules:
   current weather). Those belong in the journal page, not the profile.
 - Ignore feature requests and skill teaching. They become code or skills, not
   memory.
+- What a person cares about, prefers, or does not care about comes from what
+  that person said, never from what you said. A concern, a warning, or an open
+  item that only you raised, and that no person answered or took up, does not
+  go in a profile.
+- A clear statement that a person is not concerned about something is a
+  durable preference. Keep it, with the reason.
 - Most days change nothing durable. Prefer to leave the profile as it is."""
 
 JOURNAL_SYSTEM = """\
@@ -80,6 +89,15 @@ avoid. That belongs in their profile, not here. Keep the event; drop the \
 generalization.
 - Routine automations, the weather, small talk, and anything already written \
 in the wiki.
+- A concern, a warning, or an open item that only you raised, and that no \
+person answered or took up. That is not news.
+- A standing item that an earlier page already holds. When today only repeats \
+a state that was already true, such as a recurring status line, leave it out. \
+Write what changed today.
+
+When a person defers or declines a suggestion ("not now", "later", "no"), the \
+page holds at most one short line with the decision. It does not restate the \
+concern.
 
 Two worked examples.
 
@@ -468,7 +486,13 @@ class NightlyReflector:
     ) -> dict[str, Any] | None:
         """Run the reflection call and parse it. Retry once on a parse failure."""
         for attempt in (1, 2):
-            raw = await self._oneshot(system_prompt=system, user_prompt=user, model=self._model)
+            used: list[Usage] = []
+            try:
+                raw = await self._oneshot(
+                    system_prompt=system, user_prompt=user, model=self._model, usage_out=used
+                )
+            finally:
+                await record_usage(self._repo, "reflection", used, model=self._model)
             data = _parse_object(raw)
             if data is not None and required in data:
                 return data
@@ -507,7 +531,8 @@ class NightlyReflector:
         A per-person conversation goes to its person. A group conversation goes to
         each member speaker (their turns plus Joshua's replies to them) and, whole,
         to the group bucket. A guest's group turns are never attributed to a
-        member. Skill-teaching exchanges are dropped.
+        member. Skill-teaching exchanges are dropped. The instruction of a
+        scheduled task and an event are not a person, so they are dropped too.
         """
         z = zone(self._tz)
         start = datetime.combine(target, time.min, tzinfo=z)
@@ -551,6 +576,8 @@ class NightlyReflector:
             return
         name = info.get("display_name") or pid
         for row in conv_rows:
+            if row["direction"] not in _READ_DIRECTIONS:
+                continue
             content = _usable(row, skip)
             if content is None:
                 continue
@@ -569,7 +596,7 @@ class NightlyReflector:
         # (same turn_id) lands in the same member's bucket.
         turn_member: dict[str, Any] = {}
         for row in conv_rows:
-            if row["direction"] == "out":
+            if row["direction"] != _PERSON_DIRECTION:
                 continue
             speaker = row["meta"].get("speaker")
             person = by_name.get(speaker) if speaker else None
@@ -577,6 +604,8 @@ class NightlyReflector:
                 turn_member[row["meta"].get("turn_id")] = person
 
         for row in conv_rows:
+            if row["direction"] not in _READ_DIRECTIONS:
+                continue
             content = _usable(row, skip)
             if content is None:
                 continue
@@ -588,6 +617,13 @@ class NightlyReflector:
             member = turn_member.get(row["meta"].get("turn_id"))
             if member is not None:
                 buckets.setdefault(member.id, _Bucket()).add(row["created_at"], label, content)
+
+
+# Only an `in` row is a person speaking. A `task` row (the instruction of a
+# scheduled task) and an `inject` row (an event) operate Joshua, so the
+# reflection does not read them. Joshua's reply to them is an `out` row.
+_PERSON_DIRECTION = "in"
+_READ_DIRECTIONS = frozenset({_PERSON_DIRECTION, "out"})
 
 
 def _is_skill_path(path: str) -> bool:
@@ -640,9 +676,17 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text)
 
 
-async def _default_oneshot(*, system_prompt: str, user_prompt: str, model: str | None) -> str:
+async def _default_oneshot(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    model: str | None,
+    usage_out: list[Usage] | None = None,
+) -> str:
     """The real reflection call. Imported lazily so the module loads without the
-    SDK in offline tests."""
+    SDK in offline tests. The tokens of the call go to `usage_out`."""
     from joshua_core.engine.agent import run_oneshot
 
-    return await run_oneshot(system_prompt=system_prompt, user_prompt=user_prompt, model=model)
+    return await run_oneshot(
+        system_prompt=system_prompt, user_prompt=user_prompt, model=model, usage_out=usage_out
+    )

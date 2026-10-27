@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 
 from joshua_core.engine.ephemeral import Runner, run_worker
 from joshua_core.engine.url_grants import canonical
+from joshua_core.engine.usage import Usage
 
 logger = get_logger("engine.internet")
 
@@ -230,13 +231,15 @@ async def ask(
     settings: InternetConfig,
     urls: list[str] | None = None,
     runner: Runner | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> InternetAnswer | None:
     """Look `question` up and return the answer, or `None` when there is none.
 
     `urls` are the pages the caller lets this run read. The caller decides
     which ones it may name, and this worker reads no other page but the ones
     its own searches return. A source the worker names that it was never given
-    is dropped from the answer.
+    is dropped from the answer. When `usage_out` is a list, the tokens of the
+    lookup are appended to it.
 
     This never raises. A failure, a timeout, or an answer of the wrong shape
     gives `None`, and the turn that asked continues without it.
@@ -265,6 +268,7 @@ async def ask(
         tools=tools,
         max_turns=settings.max_turns,
         hooks=gate.hooks(),
+        usage_out=usage_out,
     )
     if answer is None:
         return None

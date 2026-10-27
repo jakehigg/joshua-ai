@@ -139,6 +139,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_kb_chunk_doc
 CREATE INDEX IF NOT EXISTS idx_kb_chunk_embedding
     ON kb_chunk USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_kb_chunk_scope ON kb_chunk (person_id, source);
+
+-- The tokens of the model calls, for the usage page (see docs/operations.md).
+-- `kind`: 'chat' | 'reflection' | 'internet' | 'describe'. `name` is the
+-- group of the usage page, the kind. `worker` names a part inside a group, or
+-- NULL. `run_id` is NULL. `calls` is the count of calls the row sums. `ref`
+-- names the source of the row, such as 'transcript:<id>', so a backfill
+-- writes a row once. A row holds counts only: no message, no question, no token.
+CREATE TABLE IF NOT EXISTS usage_event (
+    id              BIGSERIAL PRIMARY KEY,
+    at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    kind            TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    worker          TEXT,
+    model           TEXT,
+    person_id       TEXT,
+    conversation_id UUID,
+    run_id          BIGINT,
+    ref             TEXT UNIQUE,
+    calls           INT NOT NULL DEFAULT 1,
+    input           INT NOT NULL DEFAULT 0,
+    output          INT NOT NULL DEFAULT 0,
+    cache_read      INT NOT NULL DEFAULT 0,
+    cache_write     INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_usage_event_at ON usage_event (at DESC);
+
+-- The latest output of each configured snapshot (memory.snapshots). A failed
+-- call keeps the last good text and adds one to failures.
+CREATE TABLE IF NOT EXISTS snapshot_result (
+    name        TEXT PRIMARY KEY,
+    person_id   TEXT,
+    fetched_at  TIMESTAMPTZ,
+    ok          BOOLEAN NOT NULL DEFAULT FALSE,
+    text        TEXT,
+    sha256      TEXT,
+    failures    INT NOT NULL DEFAULT 0,
+    last_error  TEXT
+);
 """
 
 

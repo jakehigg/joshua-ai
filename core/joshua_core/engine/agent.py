@@ -23,6 +23,7 @@ from typing import Any
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
+from joshua_core.engine.usage import Usage, UsageMeter
 
 try:  # The SDK is absent in stub mode and in the offline test run.
     from claude_agent_sdk import (
@@ -64,6 +65,7 @@ WORKER_TOOLS: frozenset[str] = frozenset({"WebSearch", "WebFetch"})
 __all__ = [
     "AgentSession",
     "TurnResult",
+    "Usage",
     "build_options",
     "create_sdk_mcp_server",
     "build_worker_options",
@@ -211,12 +213,14 @@ async def run_worker_session(
     max_turns: int,
     tools: list[str],
     hooks: dict[str, Any] | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> dict[str, Any] | None:
     """Run one worker that may use a tool, and answer with JSON matching ``schema``.
 
     Unlike ``run_structured``, this worker takes several turns: it searches, it
     reads, and then it answers. It still holds no conversation and no MCP
     server. Returns the structured answer, or None on a failure or a timeout.
+    When ``usage_out`` is a list, the tokens of the call are appended to it.
     """
     cwd = Path(tempfile.mkdtemp(prefix="joshua-worker-"))
     options = build_worker_options(
@@ -230,7 +234,7 @@ async def run_worker_session(
     )
     client = ClaudeSDKClient(options=options)
     try:
-        return await asyncio.wait_for(_worker_turn(client, user_text), timeout=timeout_s)
+        return await asyncio.wait_for(_worker_turn(client, user_text, usage_out), timeout=timeout_s)
     except TimeoutError:
         logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
         return None
@@ -245,32 +249,50 @@ async def run_worker_session(
         shutil.rmtree(cwd, ignore_errors=True)
 
 
-async def _worker_turn(client: Any, user_text: str) -> dict[str, Any] | None:
-    """Send the objective, let the worker use its tools, return the answer."""
-    await client.connect()
-    await client.query(user_text)
-    async for msg in client.receive_response():
-        for block in getattr(msg, "content", None) or []:
-            name = getattr(block, "name", None)
-            if name:
-                logger.info({"message": "worker tool", "tool": str(name)})
-        structured = getattr(msg, "structured_output", None)
-        if isinstance(structured, dict):
-            return structured
-        result = getattr(msg, "result", None)
-        if isinstance(result, str) and result.strip().startswith("{"):
-            try:
-                parsed = json.loads(result)
-            except ValueError:
-                return None
-            return parsed if isinstance(parsed, dict) else None
-    return None
+async def _worker_turn(
+    client: Any, user_text: str, usage_out: list[Usage] | None = None
+) -> dict[str, Any] | None:
+    """Send the objective, let the worker use its tools, return the answer.
+
+    The usage that arrived goes to `usage_out` when the turn ends, also when a
+    timeout cancels it.
+    """
+    meter = UsageMeter()
+    try:
+        await client.connect()
+        await client.query(user_text)
+        async for msg in client.receive_response():
+            meter.note(msg)
+            for block in getattr(msg, "content", None) or []:
+                name = getattr(block, "name", None)
+                if name:
+                    logger.info({"message": "worker tool", "tool": str(name)})
+            structured = getattr(msg, "structured_output", None)
+            if isinstance(structured, dict):
+                return structured
+            result = getattr(msg, "result", None)
+            if isinstance(result, str) and result.strip().startswith("{"):
+                try:
+                    parsed = json.loads(result)
+                except ValueError:
+                    return None
+                return parsed if isinstance(parsed, dict) else None
+        return None
+    finally:
+        meter.flush(usage_out)
 
 
-async def run_oneshot(*, system_prompt: str, user_prompt: str, model: str | None) -> str:
+async def run_oneshot(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    model: str | None,
+    usage_out: list[Usage] | None = None,
+) -> str:
     """One transient, tool-less turn — for cheap side calls such as the nightly
     reflection pass. Spawns a fresh CLI subprocess in an empty scratch dir, runs a
-    single query, and tears down. Returns the result text ("" on failure)."""
+    single query, and tears down. Returns the result text ("" on failure). When
+    ``usage_out`` is a list, the tokens of the turn are appended to it."""
     cwd = Path(tempfile.mkdtemp(prefix="joshua-oneshot-"))
     options = build_options(
         system_prompt=system_prompt,
@@ -283,6 +305,8 @@ async def run_oneshot(*, system_prompt: str, user_prompt: str, model: str | None
     session = AgentSession(options)
     try:
         result = await session.run(user_prompt)
+        if usage_out is not None:
+            usage_out.append(Usage.from_sdk(result.usage))
         return result.text or ""
     finally:
         await session.close()
@@ -298,13 +322,15 @@ async def run_structured(
     timeout_s: float,
     image: tuple[bytes, str] | None = None,
     document: bytes | None = None,
+    usage_out: list[Usage] | None = None,
 ) -> dict[str, Any] | None:
     """Run one tool-less turn that answers with JSON matching ``schema``.
 
     The turn carries ``user_text`` and, when given, one image (bytes and media
     type) or one PDF. There is no conversation history: the CLI starts in an
     empty directory, runs one query, and is torn down. Returns the structured
-    answer, or None when the call fails or passes ``timeout_s``.
+    answer, or None when the call fails or passes ``timeout_s``. When
+    ``usage_out`` is a list, the tokens of the call are appended to it.
 
     This is the only way a worker reaches the model. The options come from
     ``build_options``, so the tool list is empty here too.
@@ -322,7 +348,7 @@ async def run_structured(
     client = ClaudeSDKClient(options=options)
     try:
         return await asyncio.wait_for(
-            _structured_turn(client, user_text, image, document), timeout=timeout_s
+            _structured_turn(client, user_text, image, document, usage_out), timeout=timeout_s
         )
     except TimeoutError:
         logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
@@ -343,8 +369,13 @@ async def _structured_turn(
     user_text: str,
     image: tuple[bytes, str] | None,
     document: bytes | None,
+    usage_out: list[Usage] | None = None,
 ) -> dict[str, Any] | None:
-    """Send one user message with its file and return the structured answer."""
+    """Send one user message with its file and return the structured answer.
+
+    The usage that arrived goes to `usage_out` when the turn ends, also when a
+    timeout cancels it.
+    """
     content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
     if image is not None:
         data, media_type = image
@@ -378,20 +409,25 @@ async def _structured_turn(
             "session_id": "default",
         }
 
-    await client.connect()
-    await client.query(_one_message())
-    async for msg in client.receive_response():
-        structured = getattr(msg, "structured_output", None)
-        if isinstance(structured, dict):
-            return structured
-        result = getattr(msg, "result", None)
-        if isinstance(result, str) and result.strip().startswith("{"):
-            try:
-                parsed = json.loads(result)
-            except ValueError:
-                return None
-            return parsed if isinstance(parsed, dict) else None
-    return None
+    meter = UsageMeter()
+    try:
+        await client.connect()
+        await client.query(_one_message())
+        async for msg in client.receive_response():
+            meter.note(msg)
+            structured = getattr(msg, "structured_output", None)
+            if isinstance(structured, dict):
+                return structured
+            result = getattr(msg, "result", None)
+            if isinstance(result, str) and result.strip().startswith("{"):
+                try:
+                    parsed = json.loads(result)
+                except ValueError:
+                    return None
+                return parsed if isinstance(parsed, dict) else None
+        return None
+    finally:
+        meter.flush(usage_out)
 
 
 def _extract_text_delta(msg: Any) -> str | None:
