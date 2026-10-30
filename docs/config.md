@@ -1003,6 +1003,78 @@ usage:
 `GET /admin/usage` gives the same answer to an admin caller and does not read
 this list. See [contracts.md](contracts.md#the-usage-route).
 
+## inference
+
+`inference` sets the server and the key for the model calls. With no
+section, every job uses the Claude subscription, through
+`CLAUDE_CODE_OAUTH_TOKEN`.
+
+> **Core does not read this section yet.** The loader checks it, but every
+> job still uses the subscription. A later release connects it.
+
+```yaml
+inference:
+  base_url: ${INFERENCE_BASE_URL:-}
+  api_key: ${INFERENCE_API_KEY:-}
+  internet:
+    base_url: http://litellm:4000
+    api_key: ${LITELLM_API_KEY:-}
+    model: local-model
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `base_url` | not set | The server for every job. It must be an `http://` or `https://` URL. An empty value is the same as no value. |
+| `api_key` | not set | The key for `base_url`. With no `base_url`, the key for the Anthropic API. |
+| `<job>.model` | the model setting of the job | The model for this job. |
+| `<job>.base_url` | not set | The server for this job. |
+| `<job>.api_key` | not set | The key for `<job>.base_url`. It must be set when `<job>.base_url` is set. |
+
+The jobs are `chat`, `voice`, `reflection`, `describe`, and `internet`. Any
+other key in `inference` fails the load.
+
+**Three global cases.**
+
+- No `base_url` and no `api_key`: the Claude subscription.
+- `api_key` and no `base_url`: the Anthropic API with that key.
+- `base_url`: every job uses that server and `api_key`. The server must speak
+  the Anthropic Messages API, for example LiteLLM, which can also send a call
+  to Bedrock or Vertex. Joshua removes a trailing `/v1` from the URL, because
+  the CLI adds `/v1/messages`.
+
+**A job inherits.** A job with no block uses the global server and its own
+model setting:
+
+| Job | Model setting |
+|---|---|
+| `chat` | `core.model` |
+| `voice` | `channels.voice.model`, or `core.model` with no `channels.voice` section |
+| `reflection` | `core.reflection_model` |
+| `describe` | `attachments.describe.model` |
+| `internet` | `internet.model` |
+
+A job block that sets only `model` keeps the global server. A job block that
+sets `base_url` uses its own server and its own `api_key`.
+
+**A job `base_url` needs a job `api_key`.** Without it, the global key would
+go to a different server, so the load fails. For a server that needs no key,
+write `api_key: ""`. A job `api_key` with no job `base_url` also fails the
+load.
+
+**The model names must exist on the server.** With `base_url`, Joshua sends
+the model setting of each job as it is, for example `claude-opus-5`. Give each
+name a model on the server, for example a LiteLLM model name, or set
+`<job>.model` to a name that the server has.
+
+**Web search needs Anthropic.** The internet agent searches with `WebSearch`,
+which runs on Anthropic's side. It works on the subscription and on the
+Anthropic API. On another server, the search fails.
+
+**Keys belong in `.env`.** A literal key in `joshua.yaml` fails the load, as
+for every other credential. Each job gets only its own key: a job never gets
+the key of a different job, and a job on another server never gets the
+subscription token.
+
 ## Agent backend
 
 `core` reads the `AGENT_BACKEND` environment variable to pick the session backend.

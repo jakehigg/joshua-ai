@@ -8,6 +8,16 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **An `inference` section names the server and the key for the model
+  calls.** Set `inference.base_url` and `inference.api_key` to send every job
+  to a server that speaks the Anthropic Messages API, such as LiteLLM, or set
+  `api_key` alone to use the Anthropic API. A block for each job (`chat`,
+  `voice`, `reflection`, `describe`, `internet`) can change the model, the
+  server, or both. A job that sets `base_url` must also set `api_key`, so the
+  global key never goes to another server. **The setting has no effect yet:**
+  the loader checks it, but core does not use it until a later change. See
+  [config.md](config.md#inference).
+
 - **Snapshots put the state of a live system in the memory index.** A new
   list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the
   arguments, a cadence, and a scope. Core runs each one with no model, keeps

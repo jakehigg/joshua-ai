@@ -19,6 +19,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import strictyaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -52,6 +53,8 @@ MEMORY_SOURCE_ADAPTERS = ("files", "memos")
 # ``channels.voice.deliver_via``. A voice channel has no outbound send of its
 # own, so a reply core delivers there must go to one of these instead.
 VOICE_DELIVER_VIA_TYPES = ("telegram", "imessage")
+# The jobs that call a model. Each one can have its own block in ``inference``.
+INFERENCE_JOBS = ("chat", "voice", "reflection", "describe", "internet")
 # Reserved policy vocabulary (recorded now, enforced later).
 TOOL_CLASSES = ("read", "write-local", "act")
 URL_ARGS = ("none", "grant-required")
@@ -822,6 +825,97 @@ class Viewer(_Model):
     anonymous: bool = False
 
 
+def _check_base_url(value: str | None) -> str | None:
+    """Return ``value`` as an http(s) URL, or None for an empty value.
+
+    ``${VAR:-}`` expands to an empty string when the variable is not set, so an
+    empty value means "not set".
+    """
+    if value is None or value == "":
+        return None
+    try:
+        parts = urlsplit(value)
+        _ = parts.port  # a port that is not a number raises ValueError
+    except ValueError as exc:
+        raise ValueError(f"base_url is not a valid URL: {exc}") from exc
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("base_url must be an http:// or https:// URL with a host")
+    return value
+
+
+class InferenceJob(_Model):
+    """The server and the model for one job. Each field is optional.
+
+    ``model`` replaces the model setting of the job. ``base_url`` sends the
+    job to a different server, and then ``api_key`` must be set too: without
+    it, the global key would go to that other server. An empty ``api_key``
+    is a server that needs no key.
+    """
+
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _check_url(cls, value: Any) -> Any:
+        return _check_base_url(value)
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def _empty_model_is_none(cls, value: Any) -> Any:
+        return None if value == "" else value
+
+    @model_validator(mode="after")
+    def _check_key(self) -> InferenceJob:
+        if self.base_url is not None and self.api_key is None:
+            raise ValueError(
+                "a job that sets base_url must also set api_key, or the global "
+                'key would go to another server. Use api_key: "" for a server '
+                "with no key"
+            )
+        if self.base_url is None and self.api_key:
+            raise ValueError("a job that sets api_key must also set base_url")
+        return self
+
+
+class Inference(_Model):
+    """Where the model calls go: a server, a key, and a block for each job.
+
+    With no ``base_url`` and no ``api_key``, every job uses the Claude
+    subscription (``CLAUDE_CODE_OAUTH_TOKEN``). With ``api_key`` alone, every
+    job uses the Anthropic API with that key. With ``base_url``, every job uses
+    that server. A job block in ``INFERENCE_JOBS`` can change the model, the
+    server, or both. ``joshua_shared.inference`` resolves one job.
+    """
+
+    base_url: str | None = None
+    api_key: str | None = None
+    chat: InferenceJob = InferenceJob()
+    voice: InferenceJob = InferenceJob()
+    reflection: InferenceJob = InferenceJob()
+    describe: InferenceJob = InferenceJob()
+    internet: InferenceJob = InferenceJob()
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _check_url(cls, value: Any) -> Any:
+        return _check_base_url(value)
+
+    @field_validator(*INFERENCE_JOBS, mode="before")
+    @classmethod
+    def _empty_job(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        return {} if value == "" else value
+
+    def job(self, name: str) -> InferenceJob:
+        """Return the block for job ``name``. Raises ``KeyError`` for an unknown job."""
+        if name not in INFERENCE_JOBS:
+            raise KeyError(f"unknown inference job '{name}'; valid: {INFERENCE_JOBS}")
+        job: InferenceJob = getattr(self, name)
+        return job
+
+
 class JoshuaConfig(_Model):
     name: str
     timezone: str
@@ -837,6 +931,7 @@ class JoshuaConfig(_Model):
     modules: list[str] = []
     viewer: Viewer = Viewer()
     usage: UsageConfig = UsageConfig()
+    inference: Inference = Inference()
 
     @model_validator(mode="after")
     def _check_unique(self) -> JoshuaConfig:

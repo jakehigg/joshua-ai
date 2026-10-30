@@ -295,3 +295,18 @@ usage:
   # caller.
   allowed_callers:
     - viewer                   # the web viewer
+
+# inference:
+#   # Where the model calls go. With no section, every job uses the Claude
+#   # subscription (CLAUDE_CODE_OAUTH_TOKEN in .env). Put each key in .env and
+#   # refer to it here.
+#   base_url: ${INFERENCE_BASE_URL:-}   # empty: Anthropic. Set: every job uses this server
+#   api_key: ${INFERENCE_API_KEY:-}     # with no base_url: the Anthropic API with this key
+#   # One block for each job that needs a change: chat, voice, reflection,
+#   # describe, internet. A block with only `model` keeps the server above. A
+#   # block that sets base_url must set api_key too ("" for a server with no
+#   # key), so the key above never goes to another server.
+#   internet:
+#     base_url: http://litellm:4000
+#     api_key: ${LITELLM_API_KEY:-}
+#     model: local-model               # replaces internet.model for this job
