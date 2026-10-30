@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Any
 
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, ValidationError
 
@@ -55,7 +56,7 @@ async def run_worker[T: BaseModel](
     system_prompt: str,
     user_text: str,
     answer: type[T],
-    model: str | None,
+    inference: ResolvedInference,
     timeout_s: float,
     image: tuple[bytes, str] | None = None,
     document: bytes | None = None,
@@ -68,8 +69,9 @@ async def run_worker[T: BaseModel](
     """Run one worker and return its answer, or `None`.
 
     `answer` is the Pydantic model the reply must match; its JSON schema is what
-    the model is asked for. `image` is `(bytes, media type)` and `document` is a
-    PDF. Give one or neither.
+    the model is asked for. `inference` is the model, the server, and the
+    environment of the job, and the runner gets it as it is. `image` is
+    `(bytes, media type)` and `document` is a PDF. Give one or neither.
 
     A worker with no `tools` answers in one turn from what it was given. A
     worker with `tools` may take up to `max_turns` to search and read first, and
@@ -92,7 +94,7 @@ async def run_worker[T: BaseModel](
                 system_prompt=system_prompt,
                 user_text=user_text,
                 schema=answer.model_json_schema(),
-                model=model,
+                inference=inference,
                 timeout_s=timeout_s,
                 tools=tools,
                 max_turns=max_turns,
@@ -105,7 +107,7 @@ async def run_worker[T: BaseModel](
                 system_prompt=system_prompt,
                 user_text=user_text,
                 schema=answer.model_json_schema(),
-                model=model,
+                inference=inference,
                 timeout_s=timeout_s,
                 image=image,
                 document=document,

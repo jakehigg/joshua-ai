@@ -891,6 +891,9 @@ class Inference(_Model):
 
     base_url: str | None = None
     api_key: str | None = None
+    # The time limit, in seconds, of one chat or voice turn and of one
+    # reflection call. A turn that passes it stops and gets the failure reply.
+    timeout_seconds: float = Field(default=600.0, gt=0)
     chat: InferenceJob = InferenceJob()
     voice: InferenceJob = InferenceJob()
     reflection: InferenceJob = InferenceJob()

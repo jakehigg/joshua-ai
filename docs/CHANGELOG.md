@@ -14,8 +14,14 @@ with the images and the packaged chart, are at
   `api_key` alone to use the Anthropic API. A block for each job (`chat`,
   `voice`, `reflection`, `describe`, `internet`) can change the model, the
   server, or both. A job that sets `base_url` must also set `api_key`, so the
-  global key never goes to another server. **The setting has no effect yet:**
-  the loader checks it, but core does not use it until a later change. See
+  global key never goes to another server. Core removes the provider
+  variables from its own environment at start, gives each call the
+  credential of its job only, and logs the server and the model of each job.
+  `inference.timeout_seconds` (default 600) limits one chat or voice turn and
+  one reflection call. A server change starts a new session for each
+  conversation. A failed call gives the person the failure reply, never the
+  error text. The usage rows name the model and the server of each call, and
+  core keeps the cost of a turn only for a call to Anthropic. See
   [config.md](config.md#inference).
 
 - **Snapshots put the state of a live system in the memory index.** A new

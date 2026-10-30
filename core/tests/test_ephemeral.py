@@ -9,8 +9,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from engine_fakes import resolved
 from joshua_core.engine.ephemeral import run_worker
 from pydantic import BaseModel
+
+INF = resolved("describe")
 
 
 class Answer(BaseModel):
@@ -38,7 +41,7 @@ async def test_a_good_answer_is_returned_as_the_model() -> None:
         system_prompt="s",
         user_text="u",
         answer=Answer,
-        model="m",
+        inference=INF,
         timeout_s=5,
         runner=run,
     )
@@ -55,7 +58,7 @@ async def test_an_answer_that_does_not_match_the_shape_is_refused() -> None:
         system_prompt="s",
         user_text="u",
         answer=Answer,
-        model="m",
+        inference=INF,
         timeout_s=5,
         runner=run,
     )
@@ -71,7 +74,7 @@ async def test_no_answer_gives_none() -> None:
         system_prompt="s",
         user_text="u",
         answer=Answer,
-        model="m",
+        inference=INF,
         timeout_s=5,
         runner=run,
     )
@@ -87,7 +90,7 @@ async def test_a_worker_that_raises_never_raises_into_the_caller() -> None:
         system_prompt="s",
         user_text="u",
         answer=Answer,
-        model="m",
+        inference=INF,
         timeout_s=5,
         runner=run,
     )
@@ -108,7 +111,7 @@ async def test_a_worker_that_hangs_is_given_up_on() -> None:
             system_prompt="s",
             user_text="u",
             answer=Answer,
-            model="m",
+            inference=INF,
             timeout_s=0.01,
             runner=run,
         ),
@@ -126,7 +129,7 @@ async def test_the_file_and_the_objective_reach_the_runner() -> None:
         system_prompt="system",
         user_text="objective",
         answer=Answer,
-        model="claude-haiku-4-5",
+        inference=INF,
         timeout_s=9,
         image=(b"bytes", "image/png"),
         runner=run,
@@ -136,7 +139,7 @@ async def test_the_file_and_the_objective_reach_the_runner() -> None:
     assert call["system_prompt"] == "system"
     assert call["user_text"] == "objective"
     assert call["image"] == (b"bytes", "image/png")
-    assert call["model"] == "claude-haiku-4-5"
+    assert call["inference"] is INF
     assert call["timeout_s"] == 9
 
 
@@ -149,7 +152,7 @@ async def test_the_worker_sees_no_message_of_the_conversation() -> None:
         system_prompt="system",
         user_text="Describe this file.",
         answer=Answer,
-        model="m",
+        inference=INF,
         timeout_s=5,
         image=(b"bytes", "image/png"),
         runner=run,
@@ -161,7 +164,7 @@ async def test_the_worker_sees_no_message_of_the_conversation() -> None:
         "system_prompt",
         "user_text",
         "schema",
-        "model",
+        "inference",
         "timeout_s",
         "image",
         "document",

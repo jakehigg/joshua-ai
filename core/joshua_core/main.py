@@ -23,6 +23,7 @@ from joshua_shared.log import get_logger, install_healthcheck_filter
 
 from joshua_core.admin import build_admin_router
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
+from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import injection, taught_skills
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
@@ -93,9 +94,10 @@ def _database_url() -> str:
 def resolve_agent_backend(env: Mapping[str, str] | None = None) -> str:
     """Return the agent backend to run: ``sdk`` (default) or ``stub``.
 
-    ``sdk`` runs real Claude through the Claude Agent SDK and needs
-    ``CLAUDE_CODE_OAUTH_TOKEN`` and the bundled ``claude`` CLI. ``stub`` streams a
-    canned reply with no SDK, token, or network. An unset value selects ``sdk``.
+    ``sdk`` runs the model through the Claude Agent SDK and the bundled
+    ``claude`` CLI, with the server and the credential of each job from
+    ``inference``. ``stub`` streams a canned reply with no SDK, token, or
+    network. An unset value selects ``sdk``.
     Any other value is an error.
     """
     source = os.environ if env is None else env
@@ -134,6 +136,9 @@ def _log_group_roles(settings) -> None:
 async def lifespan(app: FastAPI):
     install_healthcheck_filter()
     settings = config_module.load()
+    # After the config loads, because the config can refer to a provider
+    # variable. From here on, only the environment of one job reaches the CLI.
+    _take_credentials()
     agent_backend = resolve_agent_backend()
 
     db = Database(_database_url(), max_size=settings.core.pool_max)
@@ -192,6 +197,7 @@ async def lifespan(app: FastAPI):
     _start_snapshots(app.state.ctx.snapshots)
     await reflector.start()
     _log_group_roles(settings)
+    inference_plan.log_plan(settings)
     logger.info({"message": "joshua-core up", "agent_backend": agent_backend})
     try:
         yield
@@ -205,6 +211,13 @@ async def lifespan(app: FastAPI):
         await turns.drain()
         await manager.shutdown()
         await db.close()
+
+
+def _take_credentials() -> None:
+    """Keep the subscription token and remove the provider variables from
+    ``os.environ``. The log line names the variables, never a value."""
+    removed = inference_plan.take_credentials()
+    logger.info({"message": "provider variables removed from the environment", "names": removed})
 
 
 async def _backfill_usage(repo: Repo) -> None:

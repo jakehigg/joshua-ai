@@ -7,10 +7,13 @@ import asyncio
 from typing import Any
 
 import pytest
+from engine_fakes import resolved
 from joshua_core.engine import agent, ephemeral, internet
 from joshua_core.engine.usage import Usage, UsageMeter, note_result
 from joshua_shared.config import Internet
 from pydantic import BaseModel
+
+INF = resolved("describe")
 
 SDK_USAGE = {
     "input_tokens": 100,
@@ -177,7 +180,7 @@ def test_the_meter_appends_nothing_when_no_message_came() -> None:
 async def test_run_structured_appends_the_usage(sdk: None) -> None:
     out: list[Usage] = []
     answer = await agent.run_structured(
-        system_prompt="s", user_text="u", schema={}, model=None, timeout_s=5, usage_out=out
+        system_prompt="s", user_text="u", schema={}, inference=INF, timeout_s=5, usage_out=out
     )
     assert answer == {}
     assert out == [Usage.from_sdk(SDK_USAGE)]
@@ -193,7 +196,7 @@ async def test_a_result_with_no_usage_counts_the_model_messages(
     )
     out: list[Usage] = []
     await agent.run_structured(
-        system_prompt="s", user_text="u", schema={}, model=None, timeout_s=5, usage_out=out
+        system_prompt="s", user_text="u", schema={}, inference=INF, timeout_s=5, usage_out=out
     )
     assert [u.total for u in out] == [999]
 
@@ -208,7 +211,7 @@ async def test_run_structured_with_no_usage_gives_zero(
     )
     out: list[Usage] = []
     await agent.run_structured(
-        system_prompt="s", user_text="u", schema={}, model=None, timeout_s=5, usage_out=out
+        system_prompt="s", user_text="u", schema={}, inference=INF, timeout_s=5, usage_out=out
     )
     assert [u.total for u in out] == [0]
 
@@ -219,7 +222,7 @@ async def test_run_worker_session_appends_the_usage(sdk: None) -> None:
         system_prompt="s",
         user_text="u",
         schema={},
-        model=None,
+        inference=INF,
         timeout_s=5,
         max_turns=2,
         tools=["WebSearch"],
@@ -245,7 +248,7 @@ async def test_a_worker_session_that_times_out_keeps_its_usage(
         system_prompt="s",
         user_text="u",
         schema={},
-        model=None,
+        inference=INF,
         timeout_s=0.05,
         max_turns=2,
         tools=["WebSearch"],
@@ -265,7 +268,7 @@ async def test_a_worker_session_that_ends_counts_the_result_once(
         system_prompt="s",
         user_text="u",
         schema={},
-        model=None,
+        inference=INF,
         timeout_s=5,
         max_turns=2,
         tools=["WebSearch"],
@@ -285,7 +288,7 @@ async def test_a_structured_call_that_times_out_keeps_its_usage(
     )
     out: list[Usage] = []
     got = await agent.run_structured(
-        system_prompt="s", user_text="u", schema={}, model=None, timeout_s=0.05, usage_out=out
+        system_prompt="s", user_text="u", schema={}, inference=INF, timeout_s=0.05, usage_out=out
     )
     assert got is None
     assert out == [Usage(output=7)]
@@ -295,7 +298,9 @@ async def test_run_oneshot_appends_the_usage(sdk: None, monkeypatch: pytest.Monk
     client = FakeClient(None, [ResultMessage(SDK_USAGE, None, "hello")])
     monkeypatch.setattr(agent, "ClaudeSDKClient", lambda options: client)
     out: list[Usage] = []
-    text = await agent.run_oneshot(system_prompt="s", user_prompt="u", model=None, usage_out=out)
+    text = await agent.run_oneshot(
+        system_prompt="s", user_prompt="u", inference=INF, timeout_s=5, usage_out=out
+    )
     assert text == "hello"
     assert sum(u.total for u in out) == 424
 
@@ -315,7 +320,7 @@ async def test_run_worker_passes_the_list_only_when_given() -> None:
 
     out: list[Usage] = []
     base: dict[str, Any] = dict(
-        name="w", system_prompt="s", user_text="u", answer=_Answer, model=None, timeout_s=5
+        name="w", system_prompt="s", user_text="u", answer=_Answer, inference=INF, timeout_s=5
     )
     await ephemeral.run_worker(**base, runner=runner, usage_out=out)
     await ephemeral.run_worker(**base, runner=runner, tools=["WebSearch"], usage_out=out)
@@ -330,6 +335,6 @@ async def test_an_internet_lookup_reports_its_usage() -> None:
         return {"answer": "a", "sources": [], "confidence": "low"}
 
     out: list[Usage] = []
-    got = await internet.ask("q?", settings=Internet(), runner=runner, usage_out=out)
+    got = await internet.ask("q?", settings=Internet(), inference=INF, runner=runner, usage_out=out)
     assert got is not None
     assert sum(u.total for u in out) == 42

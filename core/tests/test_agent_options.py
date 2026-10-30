@@ -10,7 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from engine_fakes import resolved
 from joshua_core.engine import agent
+
+INF = resolved("describe")
 
 
 class FakeOptions:
@@ -31,6 +34,7 @@ def _build(**overrides):
         cwd=Path("/data/inbox/sessions/c1"),
         mcp_servers={},
         model=None,
+        env={},
         max_turns=20,
         resume=None,
     )
@@ -139,7 +143,7 @@ async def test_a_picture_is_sent_as_an_image_block():
     client = FakeClient(FakeResult(structured={"kind": "receipt"}))
 
     answer = await agent._structured_turn(
-        client, "Describe this file.", (b"bytes", "image/png"), None
+        client, "Describe this file.", (b"bytes", "image/png"), None, INF
     )
 
     assert answer == {"kind": "receipt"}
@@ -154,7 +158,7 @@ async def test_a_picture_is_sent_as_an_image_block():
 async def test_a_pdf_is_sent_as_a_document_block():
     client = FakeClient(FakeResult(structured={"kind": "bill"}))
 
-    await agent._structured_turn(client, "Describe this file.", None, b"%PDF-1.7")
+    await agent._structured_turn(client, "Describe this file.", None, b"%PDF-1.7", INF)
 
     content = client.sent[0]["message"]["content"]
     assert content[1]["type"] == "document"
@@ -164,7 +168,7 @@ async def test_a_pdf_is_sent_as_a_document_block():
 async def test_one_message_and_no_history_is_sent():
     client = FakeClient(FakeResult(structured={}))
 
-    await agent._structured_turn(client, "Describe this file.", None, None)
+    await agent._structured_turn(client, "Describe this file.", None, None, INF)
 
     assert len(client.sent) == 1
     assert client.sent[0]["parent_tool_use_id"] is None
@@ -174,13 +178,13 @@ async def test_a_json_answer_in_the_text_is_read():
     """A model that answers in text, not in the structured field, still counts."""
     client = FakeClient(FakeResult(result='{"kind": "photo"}'))
 
-    assert await agent._structured_turn(client, "u", None, None) == {"kind": "photo"}
+    assert await agent._structured_turn(client, "u", None, None, INF) == {"kind": "photo"}
 
 
 async def test_an_answer_that_is_not_json_gives_none():
     client = FakeClient(FakeResult(result="I am sorry, I cannot do that."))
 
-    assert await agent._structured_turn(client, "u", None, None) is None
+    assert await agent._structured_turn(client, "u", None, None, INF) is None
 
 
 # ── the worker boundary ──────────────────────────────────────────────────────
@@ -191,6 +195,7 @@ def _worker(**overrides):
         system_prompt="look up one question",
         cwd=Path("/tmp/worker"),
         model="claude-sonnet-5",
+        env={},
         max_turns=12,
         tools=["WebSearch"],
     )

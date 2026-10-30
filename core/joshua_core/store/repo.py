@@ -52,6 +52,7 @@ def _conversation(row: dict[str, Any]) -> Conversation:
         last_active_at=row.get("last_active_at"),
         last_channel_id=row.get("last_channel_id"),
         session_started_on=row.get("session_started_on"),
+        inference_endpoint=row.get("inference_endpoint"),
     )
 
 
@@ -318,13 +319,19 @@ class Repo:
         return _conversation(row) if row else None
 
     async def set_sdk_session(
-        self, conversation_id: str, session_id: str, last_channel_id: str | None = None
+        self,
+        conversation_id: str,
+        session_id: str,
+        last_channel_id: str | None = None,
+        inference_endpoint: str | None = None,
     ) -> None:
+        """Store the SDK session of a conversation and the server it ran on."""
         async with self._pool.connection() as conn:
             await conn.execute(
                 "UPDATE conversations SET sdk_session_id = %s, last_active_at = now(), "
-                "last_channel_id = COALESCE(%s, last_channel_id) WHERE id = %s",
-                (session_id, last_channel_id, conversation_id),
+                "last_channel_id = COALESCE(%s, last_channel_id), "
+                "inference_endpoint = %s WHERE id = %s",
+                (session_id, last_channel_id, inference_endpoint, conversation_id),
             )
 
     async def touch_conversation(
@@ -777,9 +784,9 @@ class Repo:
                 """
                 INSERT INTO usage_event
                     (at, kind, name, worker, model, person_id, conversation_id, run_id,
-                     ref, calls, input, output, cache_read, cache_write)
+                     ref, calls, input, output, cache_read, cache_write, endpoint)
                 VALUES (COALESCE(%s, now()), %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (ref) DO NOTHING
                 """,
                 (
@@ -797,6 +804,7 @@ class Repo:
                     used.output,
                     used.cache_read,
                     used.cache_write,
+                    event.endpoint,
                 ),
             )
 

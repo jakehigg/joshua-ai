@@ -342,3 +342,17 @@ def test_resolved_inference_is_frozen() -> None:
     resolved = resolve_inference(load(), "chat", oauth_token=OAUTH)
     with pytest.raises(AttributeError):
         resolved.model = "other"  # type: ignore[misc]
+
+
+def test_timeout_seconds_default_is_600() -> None:
+    assert load().inference.timeout_seconds == 600
+
+
+def test_timeout_seconds_is_read() -> None:
+    assert load("\ninference:\n  timeout_seconds: 90\n").inference.timeout_seconds == 90
+
+
+@pytest.mark.parametrize("value", ["0", "-5"])
+def test_timeout_seconds_must_be_more_than_zero(value: str) -> None:
+    with pytest.raises(config.ConfigError):
+        load(f"\ninference:\n  timeout_seconds: {value}\n")

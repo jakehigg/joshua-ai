@@ -34,6 +34,7 @@ from typing import Any, Literal
 
 from joshua_shared.attachments import clean_text
 from joshua_shared.config import Internet as InternetConfig
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 from joshua_shared.netblock import block_reason
 from pydantic import BaseModel, Field
@@ -229,13 +230,15 @@ async def ask(
     question: str,
     *,
     settings: InternetConfig,
+    inference: ResolvedInference,
     urls: list[str] | None = None,
     runner: Runner | None = None,
     usage_out: list[Usage] | None = None,
 ) -> InternetAnswer | None:
     """Look `question` up and return the answer, or `None` when there is none.
 
-    `urls` are the pages the caller lets this run read. The caller decides
+    `inference` is the model and the server of the `internet` job. `urls` are
+    the pages the caller lets this run read. The caller decides
     which ones it may name, and this worker reads no other page but the ones
     its own searches return. A source the worker names that it was never given
     is dropped from the answer. When `usage_out` is a list, the tokens of the
@@ -262,7 +265,7 @@ async def ask(
         system_prompt=SYSTEM_PROMPT,
         user_text=text,
         answer=InternetAnswer,
-        model=settings.model,
+        inference=inference,
         timeout_s=settings.timeout_seconds,
         runner=runner,
         tools=tools,

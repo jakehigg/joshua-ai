@@ -57,8 +57,13 @@ worker was given. [security.md](security.md) has the whole design.
 `core` owns the database and the data volume. It indexes the volume for
 retrieval, writes the nightly reflection, and runs the scheduler.
 
-`core` holds the Claude token and the database password. It reaches the
-Claude API, and, when fetch is on, the pages the internet agent reads.
+`core` holds the model credentials and the database password. For each model
+call, it picks the server and the credential of that job from the
+[`inference`](config.md#inference) section: by default the Claude
+subscription. At start it removes the provider variables from its own
+environment, so the CLI of a job gets the credential of that job and no other.
+It reaches the model server, and, when fetch is on, the pages the internet
+agent reads.
 
 ## gateway
 

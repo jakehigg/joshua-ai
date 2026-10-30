@@ -121,7 +121,11 @@ class TurnsFakeRepo:
         )
 
     async def set_sdk_session(
-        self, conversation_id: str, session_id: str, last_channel_id: str | None = None
+        self,
+        conversation_id: str,
+        session_id: str,
+        last_channel_id: str | None = None,
+        inference_endpoint: str | None = None,
     ) -> None:
         self.sdk_sessions[conversation_id] = session_id
 

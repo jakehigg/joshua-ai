@@ -4,6 +4,7 @@ gate, and ``run_oneshot`` run without the real SDK."""
 from __future__ import annotations
 
 import pytest
+from engine_fakes import resolved
 from joshua_core.engine import agent
 
 
@@ -79,6 +80,7 @@ async def test_run_collects_result_and_tools(sdk):
         cwd="/tmp/x",
         mcp_servers={"weather": {"type": "http", "url": "http://gw/weather"}},
         model="claude-opus-5",
+        env={},
         max_turns=5,
         resume=None,
     )
@@ -100,7 +102,9 @@ async def test_run_collects_result_and_tools(sdk):
 
 
 async def test_run_oneshot_returns_text(sdk):
-    text = await agent.run_oneshot(system_prompt="sys", user_prompt="hi", model=None)
+    text = await agent.run_oneshot(
+        system_prompt="sys", user_prompt="hi", inference=resolved("reflection"), timeout_s=5
+    )
     assert text == "Hello world"
 
 

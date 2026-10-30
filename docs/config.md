@@ -1009,13 +1009,11 @@ this list. See [contracts.md](contracts.md#the-usage-route).
 section, every job uses the Claude subscription, through
 `CLAUDE_CODE_OAUTH_TOKEN`.
 
-> **Core does not read this section yet.** The loader checks it, but every
-> job still uses the subscription. A later release connects it.
-
 ```yaml
 inference:
   base_url: ${INFERENCE_BASE_URL:-}
   api_key: ${INFERENCE_API_KEY:-}
+  timeout_seconds: 600
   internet:
     base_url: http://litellm:4000
     api_key: ${LITELLM_API_KEY:-}
@@ -1026,6 +1024,7 @@ inference:
 |---|---|---|
 | `base_url` | not set | The server for every job. It must be an `http://` or `https://` URL. An empty value is the same as no value. |
 | `api_key` | not set | The key for `base_url`. With no `base_url`, the key for the Anthropic API. |
+| `timeout_seconds` | `600` | The time limit of one chat or voice turn and of one reflection call. It must be more than 0. A turn that passes it stops, and the person gets the failure reply. `attachments.describe.timeout_seconds` and `internet.timeout_seconds` set the limits of those workers. |
 | `<job>.model` | the model setting of the job | The model for this job. |
 | `<job>.base_url` | not set | The server for this job. |
 | `<job>.api_key` | not set | The key for `<job>.base_url`. It must be set when `<job>.base_url` is set. |
@@ -1075,6 +1074,41 @@ for every other credential. Each job gets only its own key: a job never gets
 the key of a different job, and a job on another server never gets the
 subscription token.
 
+**Give each variable to `core`.** `docker-compose.yml` gives `core` the
+variables `INFERENCE_BASE_URL` and `INFERENCE_API_KEY`. For a job key with
+another name, such as `LITELLM_API_KEY`, add it to the `environment` of
+`core`. With the Helm chart, add each variable to `secrets.core.keys`. Use
+`${VAR:-}` in `joshua.yaml`, because `channels` and `gateway` read the same
+file and do not get the variable.
+
+**What core does at start.** Core reads the config, keeps
+`CLAUDE_CODE_OAUTH_TOKEN`, and then removes every provider variable
+(`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, and the
+others that select a server, a credential, or a model) from its own
+environment. After that, the only credential that gets to the CLI is the one
+of the job that the CLI runs. Core then writes one log line that gives, for
+each job, the server (`anthropic` or the host), the model, and the fields of
+the job block that change the global setting. The line holds no key. When
+`internet.enabled` is on and the `internet` job is not on `anthropic`, core
+also writes a warning, because `WebSearch` fails on that server.
+
+**A server change starts a new conversation session.** Each conversation
+keeps the server of its SDK session. When the server of the `chat` or
+`voice` job changes, the next turn of that conversation starts a new
+session, because the new server cannot read the history of the old one.
+The profile and the journal still carry what Joshua knows.
+
+**A failed call.** When the server refuses a call, for example with a wrong
+key or an unknown model, the person gets "Sorry, something went wrong on my
+end. Please try again." The error text can name a host, so it goes neither
+to the person nor to the log. The log gets a short label, such as
+`authentication_failed` or `http_422`, and the server.
+
+**Usage and cost.** Each row of the usage page names the model that the call
+used, and the server, in the `endpoint` column of `usage_event`. The SDK
+prices a model that it does not know at its own rates, so core keeps the
+cost of a chat turn only for a call to `anthropic`.
+
 ## Agent backend
 
 `core` reads the `AGENT_BACKEND` environment variable to pick the session backend.
@@ -1083,7 +1117,7 @@ It is an env var, not a `joshua.yaml` key. `docker-compose.yml` defaults it to
 
 | Value | Runs | Needs |
 |---|---|---|
-| `sdk` (default) | Real Claude through the Claude Agent SDK | `CLAUDE_CODE_OAUTH_TOKEN` and the bundled `claude` CLI (in the core image) |
+| `sdk` (default) | The model through the Claude Agent SDK | The credential that [`inference`](#inference) names (by default `CLAUDE_CODE_OAUTH_TOKEN`) and the bundled `claude` CLI (in the core image) |
 | `stub` | A canned reply, for plumbing tests | Nothing: no SDK, token, or network |
 
 Get a token with `claude setup-token`. For `stub`, set `AGENT_BACKEND=stub` in

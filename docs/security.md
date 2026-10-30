@@ -184,11 +184,22 @@ each one verifies the callers it trusts. The three containers are one trust
 domain.
 
 Compose gives each container only the variables it needs. `core` gets the
-Claude token and the database password. `channels` gets the platform
+model credentials and the database password. `channels` gets the platform
 credentials. `gateway` gets the upstream credentials, from its own
 `.env.gateway` file, which no other service reads. This works because
 `joshua.yaml` references a secret as `${VAR:-}`: a container without the
 variable expands it to the empty string and never holds the credential.
+
+`core` picks the server and the credential of each model call from the
+[`inference`](config.md#inference) section, one job at a time. At start, after
+the config loads, it keeps `CLAUDE_CODE_OAUTH_TOKEN` and removes every
+provider variable from its own environment. The SDK can replace a variable
+that the CLI inherits, but it cannot remove one, so the environment of each
+call sets every provider variable, with an empty value for each one the job
+does not use. Thus a job gets its own key and no other: a job never gets the
+key of a different job, and a job on another server never gets the
+subscription token. Core never logs a key. The text of a failed call can name
+a host, so it goes neither to a person nor to the log.
 
 An entry whose credential expanded to nothing is turned off, not started with an
 empty credential and not retried. `/readyz` counts it in `disabled` and the log

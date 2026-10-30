@@ -99,6 +99,11 @@ services:
       GATEWAY_URL: http://gateway:8000
       CHANNELS_URL: http://channels:8000
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # The server and the key of the `inference` section, when it names them.
+      # Add a job key with another name here too. Core removes the provider
+      # variables from its environment at start.
+      INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-}
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
       # The embedding model is downloaded once into the model-cache volume.
       MEMORY_EMBED_CACHE_DIR: ${MEMORY_EMBED_CACHE_DIR:-/home/app/.cache/fastembed}
       # `sdk` uses the Claude Agent SDK. `stub` needs no Anthropic token.

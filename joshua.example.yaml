@@ -302,6 +302,7 @@ usage:
 #   # refer to it here.
 #   base_url: ${INFERENCE_BASE_URL:-}   # empty: Anthropic. Set: every job uses this server
 #   api_key: ${INFERENCE_API_KEY:-}     # with no base_url: the Anthropic API with this key
+#   timeout_seconds: 600                # the limit of one turn and one reflection call
 #   # One block for each job that needs a change: chat, voice, reflection,
 #   # describe, internet. A block with only `model` keeps the server above. A
 #   # block that sets base_url must set api_key too ("" for a server with no

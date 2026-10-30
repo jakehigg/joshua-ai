@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from joshua_shared import layout, wikigit
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
@@ -29,6 +30,10 @@ ECHO_TOOLS_MARKER = "[[echo-tools]]"
 # ``write_journal_entry`` call, so the on-demand journal flow runs end to end
 # without the SDK.
 JOURNAL_MARKER = "[[journal]]"
+
+# A prompt that contains this marker makes the stub wait until it is cancelled,
+# so a test can run the turn time limit.
+HANG_MARKER = "[[hang]]"
 
 # The files-MCP-relative attachment paths cited in a turn's attach note:
 # ``wiki/attachments/…``, ``people/<id>/attachments/…``, or ``shared/attachments/…``.
@@ -46,6 +51,7 @@ class StubAgentSession:
         resume: str | None = None,
         data_dir: Path | str | None = None,
         wiki_git: bool = True,
+        inference: ResolvedInference | None = None,
     ):
         self._system_prompt = system_prompt
         self._cwd = cwd
@@ -53,6 +59,15 @@ class StubAgentSession:
         self._server_names = sorted(server_names or [])
         self._data_dir = Path(data_dir) if data_dir is not None else None
         self._wiki_git = wiki_git
+        # The job the manager resolved for this session. A test reads it to see
+        # which server and model a turn would use.
+        self.inference = inference
+        # The resume id the session was built with, after the manager's checks.
+        self.resume = resume
+        # Set by a test: the next turn fails the way the CLI reports a failed
+        # call, with ``is_error`` and the error text in the result.
+        self.fail_with: str | None = None
+        self.interrupted = False
         # When built with a resume id, fail the first run once so the manager's
         # resume-retry path (rebuild without resume) is exercised offline.
         self._resume = resume
@@ -72,6 +87,16 @@ class StubAgentSession:
     @property
     def connected(self) -> bool:
         return self._connected
+
+    @property
+    def endpoint(self) -> str | None:
+        """The server label of the session, or None with no resolved job."""
+        return self.inference.endpoint if self.inference is not None else None
+
+    @property
+    def model(self) -> str | None:
+        """The model of the session, or None with no resolved job."""
+        return self.inference.model if self.inference is not None else None
 
     async def failed_mcp_servers(self) -> list[str]:
         """The servers this session reports as failed, as ``AgentSession`` does."""
@@ -93,6 +118,20 @@ class StubAgentSession:
         if self._resume and not self._resume_failed:
             self._resume_failed = True
             raise RuntimeError(f"stub resume failed for session {self._resume}")
+
+        if HANG_MARKER in prompt:
+            await asyncio.Event().wait()
+
+        if self.fail_with is not None:
+            text, self.fail_with = self.fail_with, None
+            return TurnResult(
+                text=text,
+                session_id=self._session_id,
+                is_error=True,
+                usage={"input_tokens": 0, "output_tokens": 0},
+                cost_usd=0.0,
+                error="http_422",
+            )
 
         if JOURNAL_MARKER in prompt:
             self._write_journal(prompt)
@@ -163,6 +202,7 @@ class StubAgentSession:
             wikigit.commit(wiki_root, [entry], f"journal: {rel}")
 
     async def interrupt(self) -> None:
+        self.interrupted = True
         logger.info({"message": "stub interrupt"})
 
     async def close(self) -> None:

@@ -17,6 +17,7 @@ from typing import Any
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
+from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import internet as internet_agent
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
@@ -117,12 +118,16 @@ async def do_lookup(
         }
     )
     used: list[Usage] = []
-    answer = await internet_agent.ask(question, settings=config, urls=allowed, usage_out=used)
+    resolved = inference_plan.resolve(settings, "internet")
+    answer = await internet_agent.ask(
+        question, settings=config, inference=resolved, urls=allowed, usage_out=used
+    )
     await record_usage(
         deps.repo,
         "internet",
         used,
-        model=config.model,
+        model=resolved.model,
+        endpoint=resolved.endpoint,
         person_id=deps.person_id,
         conversation_id=conversation_id or None,
     )

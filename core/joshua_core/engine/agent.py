@@ -5,8 +5,18 @@ to the engine through ``AgentSession`` (one live SDK client per conversation) an
 ``TurnResult``. The import is guarded so stub mode and the offline test run load
 this module without the SDK installed; the SDK-backed paths stay unused there.
 
-The SDK spawns the bundled Claude Code CLI and authenticates with
-``CLAUDE_CODE_OAUTH_TOKEN`` from the environment.
+The SDK starts the bundled Claude Code CLI with ``{**os.environ, **options.env}``.
+Core removes every provider variable from ``os.environ`` at start (see
+``engine/inference.py``), so ``options.env`` is the only source of the server,
+the credential, and the model tiers. Each builder takes ``env`` from a
+``ResolvedInference`` for one job, and each run function takes the
+``ResolvedInference`` itself.
+
+A failed model call does not raise. The CLI ends the turn with a result that
+has ``is_error`` set and the error text in ``result``. That text can name a
+host, so no function here returns it or logs it: ``run_oneshot`` gives ``""``,
+``run_structured`` and ``run_worker_session`` give None, and
+``AgentSession.run`` sets ``TurnResult.is_error`` and a short ``error`` label.
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
@@ -105,6 +116,7 @@ def build_options(
     cwd: Path,
     mcp_servers: dict[str, Any],
     model: str | None,
+    env: dict[str, str],
     max_turns: int,
     resume: str | None,
     output_format: dict[str, Any] | None = None,
@@ -115,11 +127,13 @@ def build_options(
     preset. ``setting_sources=[]`` loads no filesystem CLAUDE.md or settings, so
     the composed prompt is the whole instruction surface. ``permission_mode``
     bypass runs tools without an interactive prompt (this is a headless service).
-    ``tools`` is the empty list: the agent gets no SDK built-in tools.
+    ``tools`` is the empty list: the agent gets no SDK built-in tools. ``env``
+    is the environment of one job, from ``ResolvedInference.env``.
     """
     kwargs: dict[str, Any] = dict(
         system_prompt=system_prompt,
         cwd=str(cwd),
+        env=dict(env),
         mcp_servers=mcp_servers,
         tools=list(_NO_TOOLS),
         permission_mode="bypassPermissions",
@@ -144,6 +158,7 @@ def build_worker_options(
     system_prompt: str,
     cwd: Path,
     model: str | None,
+    env: dict[str, str],
     max_turns: int,
     tools: list[str],
     output_format: dict[str, Any] | None = None,
@@ -155,7 +170,8 @@ def build_worker_options(
     MCP server, so it may hold a built-in tool that the agent may not: the
     internet agent searches the web. The assert below is the boundary. It
     names what a worker may hold, so a file tool, a shell, or anything else
-    fails here rather than in production.
+    fails here rather than in production. ``env`` is the environment of one
+    job, from ``ResolvedInference.env``.
     """
     unknown = sorted(set(tools) - WORKER_TOOLS)
     assert not unknown, f"a worker may not hold these tools: {unknown}"
@@ -163,6 +179,7 @@ def build_worker_options(
     kwargs: dict[str, Any] = dict(
         system_prompt=system_prompt,
         cwd=str(cwd),
+        env=dict(env),
         mcp_servers={},
         tools=list(tools),
         allowed_tools=list(tools),
@@ -208,7 +225,7 @@ async def run_worker_session(
     system_prompt: str,
     user_text: str,
     schema: dict[str, Any],
-    model: str | None,
+    inference: ResolvedInference,
     timeout_s: float,
     max_turns: int,
     tools: list[str],
@@ -219,14 +236,17 @@ async def run_worker_session(
 
     Unlike ``run_structured``, this worker takes several turns: it searches, it
     reads, and then it answers. It still holds no conversation and no MCP
-    server. Returns the structured answer, or None on a failure or a timeout.
-    When ``usage_out`` is a list, the tokens of the call are appended to it.
+    server. ``inference`` gives the model and the environment of the job.
+    Returns the structured answer, or None on a failure, a failed call
+    (``is_error``), or a timeout. When ``usage_out`` is a list, the tokens of
+    the call are appended to it.
     """
     cwd = Path(tempfile.mkdtemp(prefix="joshua-worker-"))
     options = build_worker_options(
         system_prompt=system_prompt,
         cwd=cwd,
-        model=model,
+        model=inference.model,
+        env=inference.env,
         max_turns=max_turns,
         tools=tools,
         output_format={"type": "json_schema", "schema": schema},
@@ -234,12 +254,16 @@ async def run_worker_session(
     )
     client = ClaudeSDKClient(options=options)
     try:
-        return await asyncio.wait_for(_worker_turn(client, user_text, usage_out), timeout=timeout_s)
+        return await asyncio.wait_for(
+            _worker_turn(client, user_text, inference, usage_out), timeout=timeout_s
+        )
     except TimeoutError:
-        logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
+        logger.warning(
+            {"message": "worker timed out", "timeout_s": timeout_s, **_labels(inference)}
+        )
         return None
     except Exception as exc:  # noqa: BLE001 — a worker failure never breaks the turn
-        logger.warning({"message": "worker failed", "error": str(exc)})
+        logger.warning({"message": "worker failed", "error": str(exc), **_labels(inference)})
         return None
     finally:
         try:
@@ -249,8 +273,51 @@ async def run_worker_session(
         shutil.rmtree(cwd, ignore_errors=True)
 
 
+def _labels(inference: ResolvedInference) -> dict[str, str]:
+    """The fields of a log line that name the job and its server. No key."""
+    return {"job": inference.job, "endpoint": inference.endpoint}
+
+
+def _error_label(msg: Any) -> str:
+    """A short label for a failed result, safe to log: never the error text."""
+    status = getattr(msg, "api_error_status", None)
+    if isinstance(status, int):
+        return f"http_{status}"
+    subtype = getattr(msg, "subtype", None)
+    return str(subtype) if isinstance(subtype, str) and subtype else "error"
+
+
+def _answer(msg: Any, inference: ResolvedInference) -> tuple[bool, dict[str, Any] | None]:
+    """Read the structured answer of one message.
+
+    Returns ``(done, answer)``. ``done`` is True when the message ends the
+    turn: a failed result (the answer is None), a structured answer, or a
+    result text that is a JSON object. A failed result is logged with its
+    label and its server, and never with its text.
+    """
+    if bool(getattr(msg, "is_error", False)):
+        logger.warning(
+            {"message": "worker call failed", "error": _error_label(msg), **_labels(inference)}
+        )
+        return True, None
+    structured = getattr(msg, "structured_output", None)
+    if isinstance(structured, dict):
+        return True, structured
+    result = getattr(msg, "result", None)
+    if isinstance(result, str) and result.strip().startswith("{"):
+        try:
+            parsed = json.loads(result)
+        except ValueError:
+            return True, None
+        return True, parsed if isinstance(parsed, dict) else None
+    return False, None
+
+
 async def _worker_turn(
-    client: Any, user_text: str, usage_out: list[Usage] | None = None
+    client: Any,
+    user_text: str,
+    inference: ResolvedInference,
+    usage_out: list[Usage] | None = None,
 ) -> dict[str, Any] | None:
     """Send the objective, let the worker use its tools, return the answer.
 
@@ -267,16 +334,9 @@ async def _worker_turn(
                 name = getattr(block, "name", None)
                 if name:
                     logger.info({"message": "worker tool", "tool": str(name)})
-            structured = getattr(msg, "structured_output", None)
-            if isinstance(structured, dict):
-                return structured
-            result = getattr(msg, "result", None)
-            if isinstance(result, str) and result.strip().startswith("{"):
-                try:
-                    parsed = json.loads(result)
-                except ValueError:
-                    return None
-                return parsed if isinstance(parsed, dict) else None
+            done, answer = _answer(msg, inference)
+            if done:
+                return answer
         return None
     finally:
         meter.flush(usage_out)
@@ -286,27 +346,47 @@ async def run_oneshot(
     *,
     system_prompt: str,
     user_prompt: str,
-    model: str | None,
+    inference: ResolvedInference,
+    timeout_s: float,
     usage_out: list[Usage] | None = None,
 ) -> str:
-    """One transient, tool-less turn — for cheap side calls such as the nightly
-    reflection pass. Spawns a fresh CLI subprocess in an empty scratch dir, runs a
-    single query, and tears down. Returns the result text ("" on failure). When
-    ``usage_out`` is a list, the tokens of the turn are appended to it."""
+    """One transient, tool-less turn, for a side call such as the nightly
+    reflection.
+
+    It starts a new CLI in an empty scratch directory, runs one query with the
+    model and the environment of ``inference``, and stops the CLI. Returns the
+    result text, or ``""`` on a failure, a failed call (``is_error``), or a
+    timeout after ``timeout_s``. A failure is logged with the server label,
+    never with the error text. When ``usage_out`` is a list, the tokens of the
+    turn are appended to it.
+    """
     cwd = Path(tempfile.mkdtemp(prefix="joshua-oneshot-"))
     options = build_options(
         system_prompt=system_prompt,
         cwd=cwd,
         mcp_servers={},
-        model=model,
+        model=inference.model,
+        env=inference.env,
         max_turns=1,
         resume=None,
     )
     session = AgentSession(options)
     try:
-        result = await session.run(user_prompt)
+        try:
+            result = await asyncio.wait_for(session.run(user_prompt), timeout=timeout_s)
+        except TimeoutError:
+            await session.interrupt()
+            logger.warning(
+                {"message": "oneshot timed out", "timeout_s": timeout_s, **_labels(inference)}
+            )
+            return ""
         if usage_out is not None:
             usage_out.append(Usage.from_sdk(result.usage))
+        if result.is_error:
+            logger.warning(
+                {"message": "oneshot call failed", "error": result.error, **_labels(inference)}
+            )
+            return ""
         return result.text or ""
     finally:
         await session.close()
@@ -318,7 +398,7 @@ async def run_structured(
     system_prompt: str,
     user_text: str,
     schema: dict[str, Any],
-    model: str | None,
+    inference: ResolvedInference,
     timeout_s: float,
     image: tuple[bytes, str] | None = None,
     document: bytes | None = None,
@@ -328,9 +408,10 @@ async def run_structured(
 
     The turn carries ``user_text`` and, when given, one image (bytes and media
     type) or one PDF. There is no conversation history: the CLI starts in an
-    empty directory, runs one query, and is torn down. Returns the structured
-    answer, or None when the call fails or passes ``timeout_s``. When
-    ``usage_out`` is a list, the tokens of the call are appended to it.
+    empty directory, runs one query, and is torn down. ``inference`` gives the
+    model and the environment of the job. Returns the structured answer, or
+    None when the call fails, ends with ``is_error``, or passes ``timeout_s``.
+    When ``usage_out`` is a list, the tokens of the call are appended to it.
 
     This is the only way a worker reaches the model. The options come from
     ``build_options``, so the tool list is empty here too.
@@ -340,7 +421,8 @@ async def run_structured(
         system_prompt=system_prompt,
         cwd=cwd,
         mcp_servers={},
-        model=model,
+        model=inference.model,
+        env=inference.env,
         max_turns=1,
         resume=None,
         output_format={"type": "json_schema", "schema": schema},
@@ -348,13 +430,16 @@ async def run_structured(
     client = ClaudeSDKClient(options=options)
     try:
         return await asyncio.wait_for(
-            _structured_turn(client, user_text, image, document, usage_out), timeout=timeout_s
+            _structured_turn(client, user_text, image, document, inference, usage_out),
+            timeout=timeout_s,
         )
     except TimeoutError:
-        logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
+        logger.warning(
+            {"message": "worker timed out", "timeout_s": timeout_s, **_labels(inference)}
+        )
         return None
     except Exception as exc:  # noqa: BLE001 — a worker failure never breaks the turn
-        logger.warning({"message": "worker failed", "error": str(exc)})
+        logger.warning({"message": "worker failed", "error": str(exc), **_labels(inference)})
         return None
     finally:
         try:
@@ -369,6 +454,7 @@ async def _structured_turn(
     user_text: str,
     image: tuple[bytes, str] | None,
     document: bytes | None,
+    inference: ResolvedInference,
     usage_out: list[Usage] | None = None,
 ) -> dict[str, Any] | None:
     """Send one user message with its file and return the structured answer.
@@ -415,16 +501,9 @@ async def _structured_turn(
         await client.query(_one_message())
         async for msg in client.receive_response():
             meter.note(msg)
-            structured = getattr(msg, "structured_output", None)
-            if isinstance(structured, dict):
-                return structured
-            result = getattr(msg, "result", None)
-            if isinstance(result, str) and result.strip().startswith("{"):
-                try:
-                    parsed = json.loads(result)
-                except ValueError:
-                    return None
-                return parsed if isinstance(parsed, dict) else None
+            done, answer = _answer(msg, inference)
+            if done:
+                return answer
         return None
     finally:
         meter.flush(usage_out)
@@ -601,6 +680,7 @@ class AgentSession:
         usage: dict[str, Any] | None = None
         cost: float | None = None
         is_error = False
+        error: str | None = None
         tool_errors: dict[str, bool] = {}
         result_text: str | None = None
 
@@ -638,6 +718,12 @@ class AgentSession:
                 tool_errors.update(_tool_results(msg))
             elif cls == "AssistantMessage":
                 calls.extend(_tool_calls(msg))
+                kind = getattr(msg, "error", None)
+                if kind:
+                    # The CLI writes a failed call as a message whose text is
+                    # the error. It can name a host, so it is not streamed.
+                    error = str(kind)
+                    continue
                 # With partial streaming the assembled message duplicates the
                 # deltas; use it only as a fallback.
                 if not streamed:
@@ -652,6 +738,8 @@ class AgentSession:
                 cost = getattr(msg, "total_cost_usd", None)
                 is_error = bool(getattr(msg, "is_error", False))
                 result_text = getattr(msg, "result", None)
+                if is_error and error is None:
+                    error = _error_label(msg)
 
         # A message with no stop reason seen is sent, not lost.
         await flush()
@@ -683,6 +771,7 @@ class AgentSession:
             cost_usd=cost,
             tools_used=tools_used,
             tool_calls=calls,
+            error=error if is_error else None,
         )
 
     async def interrupt(self) -> None:
