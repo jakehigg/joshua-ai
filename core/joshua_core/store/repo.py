@@ -8,6 +8,7 @@ channel adapters own the platform-specific policy.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import date, datetime
 from typing import Any
 
@@ -17,6 +18,19 @@ from psycopg.types.json import Json
 
 from joshua_core.store.db import Database
 from joshua_core.store.models import Channel, Conversation, Person, Task
+from joshua_core.store.transcript import (
+    BLANK_CHARS,
+    FAILED_STATUS,
+    HEADLINE_OPTIONS,
+    SILENT_REPLY,
+    TS_CONFIG,
+    VISIBLE_DIRECTIONS,
+    TranscriptHit,
+    TranscriptPage,
+    TranscriptRow,
+    decode_cursor,
+    page_rows,
+)
 from joshua_core.store.usage_events import UsageEvent
 
 logger = get_logger("store.repo")
@@ -677,6 +691,129 @@ class Repo:
             }
             for r in rows
         ]
+
+    async def search_transcript(
+        self, conversation_ids: Collection[str], query: str, *, limit: int
+    ) -> list[TranscriptHit]:
+        """Word search over the visible rows of ``conversation_ids``, newest first.
+
+        A row of any other conversation is never returned. An empty
+        collection or an empty query returns ``[]``. ``query`` is web search
+        syntax (``websearch_to_tsquery``): words, ``"a phrase"``, ``or``,
+        ``-word``.
+        """
+        ids = list(conversation_ids)
+        query = (query or "").strip()
+        if not ids or not query or limit < 1:
+            return []
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                f"""
+                SELECT t.id, t.conversation_id, t.direction, t.meta->>'speaker' AS speaker,
+                       t.created_at,
+                       ts_headline('{TS_CONFIG}', t.content, q, %(opts)s) AS snippet
+                FROM transcript t, websearch_to_tsquery('{TS_CONFIG}', %(query)s) AS q
+                WHERE t.conversation_id = ANY(%(ids)s::uuid[])
+                  AND t.direction = ANY(%(dirs)s)
+                  AND t.status <> %(failed)s
+                  AND btrim(t.content, %(ws)s) NOT IN ('', %(silent)s)
+                  AND to_tsvector('{TS_CONFIG}', t.content) @@ q
+                ORDER BY t.created_at DESC, t.id DESC
+                LIMIT %(limit)s
+                """,
+                {
+                    "opts": HEADLINE_OPTIONS,
+                    "query": query,
+                    "ids": ids,
+                    "dirs": list(VISIBLE_DIRECTIONS),
+                    "failed": FAILED_STATUS,
+                    "silent": SILENT_REPLY,
+                    "ws": BLANK_CHARS,
+                    "limit": limit,
+                },
+            )
+            rows = await cur.fetchall()
+        return [
+            TranscriptHit(
+                id=int(r["id"]),
+                conversation_id=str(r["conversation_id"]),
+                direction=r["direction"],
+                speaker=r.get("speaker"),
+                created_at=r["created_at"],
+                snippet=r["snippet"] or "",
+            )
+            for r in rows
+        ]
+
+    async def read_transcript(
+        self,
+        conversation_ids: Collection[str],
+        start: datetime,
+        end: datetime,
+        *,
+        cursor: str | None = None,
+        max_rows: int,
+        max_chars: int,
+    ) -> TranscriptPage:
+        """The visible rows of ``conversation_ids`` from ``start`` (included) to
+        ``end`` (not included), oldest first, one page at a time.
+
+        ``store.transcript.page_rows`` sets the page limits. ``cursor`` is the
+        cursor of the page before. A cursor that names a row of another
+        conversation returns an empty page. A row of any other conversation
+        is never returned. Raises ``ValueError`` for a cursor that is not valid.
+        """
+        ids = list(conversation_ids)
+        after = decode_cursor(cursor)
+        if not ids or max_rows < 1:
+            return TranscriptPage(rows=[], cursor=None)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT t.id, t.conversation_id, t.direction, t.meta->>'speaker' AS speaker,
+                       t.created_at, t.content
+                FROM transcript t
+                WHERE t.conversation_id = ANY(%(ids)s::uuid[])
+                  AND t.direction = ANY(%(dirs)s)
+                  AND t.status <> %(failed)s
+                  AND btrim(t.content, %(ws)s) NOT IN ('', %(silent)s)
+                  AND t.created_at >= %(start)s AND t.created_at < %(end)s
+                  AND (
+                    %(after)s::bigint IS NULL
+                    OR (t.created_at, t.id) > (
+                        SELECT c.created_at, c.id FROM transcript c
+                        WHERE c.id = %(after)s::bigint
+                          AND c.conversation_id = ANY(%(ids)s::uuid[])
+                    )
+                  )
+                ORDER BY t.created_at, t.id
+                LIMIT %(fetch)s
+                """,
+                {
+                    "ids": ids,
+                    "dirs": list(VISIBLE_DIRECTIONS),
+                    "failed": FAILED_STATUS,
+                    "silent": SILENT_REPLY,
+                    "ws": BLANK_CHARS,
+                    "start": start,
+                    "end": end,
+                    "after": after,
+                    "fetch": max_rows + 1,
+                },
+            )
+            rows = await cur.fetchall()
+        found = [
+            TranscriptRow(
+                id=int(r["id"]),
+                conversation_id=str(r["conversation_id"]),
+                direction=r["direction"],
+                speaker=r.get("speaker"),
+                created_at=r["created_at"],
+                content=r["content"],
+            )
+            for r in rows
+        ]
+        return page_rows(found, max_rows=max_rows, max_chars=max_chars)
 
     async def read_conversation_meta(self, conversation_id: str) -> dict[str, Any] | None:
         """Conversation + channel labels for a conversation id."""

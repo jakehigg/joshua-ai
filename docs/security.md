@@ -10,10 +10,16 @@ of abilities that still lets it help.
 The agent has no file tool, no shell, and no web fetch or web search. It cannot
 read the container's environment, so it cannot read a token.
 
+There is one exception. With [tool search](config.md#tool-search) on, the
+tool list is exactly `ToolSearch`, and the code asserts that too. `ToolSearch`
+loads the definition of an MCP tool that the agent already holds. It reads no
+file, runs no command, and reaches no network, so it gives no capability.
+
 Every ability the agent has is an MCP server:
 
-- Inside `core`: `search_memory`, the scheduling tools, `add_user` and
-  `list_users`, and `use_internet`, which asks the internet agent one question.
+- Inside `core`: `search_memory`, `search_history` and `read_history`, the
+  scheduling tools, `add_user` and `list_users`, and `use_internet`, which
+  asks the internet agent one question.
 - Behind `gateway`: the `files` server and every server you add in `mcp:`.
 
 If a task seems to need a built-in tool, the task is wrong. Add an MCP server
@@ -310,8 +316,9 @@ the asserts of `agent.build_worker_options`:
   server.
 
 Tests prove that a file tool, a shell, another MCP server, and another MCP
-tool each fail to build. The agent itself still has no built-in tool at all,
-and that test still passes.
+tool each fail to build. The agent itself has no built-in tool, other than
+`ToolSearch` with tool search on, and a test proves that a worker never
+gets `ToolSearch`.
 
 **The worker has one search tool, and the config chooses it:**
 

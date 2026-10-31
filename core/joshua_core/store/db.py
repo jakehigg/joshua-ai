@@ -95,6 +95,10 @@ CREATE TABLE IF NOT EXISTS transcript (
 CREATE INDEX IF NOT EXISTS idx_transcript_conv ON transcript (conversation_id, created_at);
 -- Recent-window scans over the transcript.
 CREATE INDEX IF NOT EXISTS idx_transcript_created ON transcript (created_at DESC);
+-- Word search over the transcript (the `history` tools). The configuration
+-- must equal `store/transcript.py::TS_CONFIG`.
+CREATE INDEX IF NOT EXISTS idx_transcript_fts
+    ON transcript USING gin (to_tsvector('english', content));
 
 -- KB retrieval audit (phase 4). One row per injection decision or kb tool call;
 -- `results` carries what the model was given. Write-only from the app.

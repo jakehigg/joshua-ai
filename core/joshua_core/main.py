@@ -30,7 +30,7 @@ from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
 from joshua_core.engine.stub_agent import StubOneshot
-from joshua_core.engine.tools import internet, recall, registration, scheduling
+from joshua_core.engine.tools import history, internet, recall, registration, scheduling
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
 from joshua_core.memory import embed
@@ -274,7 +274,7 @@ def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> Co
     """Wire the conversation manager from config and the fleet environment.
 
     The gateway url and the core fleet token route the agent's MCP servers
-    through the gateway. The ``registration`` and ``scheduling`` builtins register
+    through the gateway. The ``registration``, ``scheduling``, and ``history`` builtins register
     here.
     """
     person_prompts = {p.id: p.prompt for p in settings.people if p.prompt}
@@ -301,6 +301,7 @@ def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> Co
     )
     registration.register(manager, data_dir)
     scheduling.register(manager)
+    history.register(manager)
     return manager
 
 

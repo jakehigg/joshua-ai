@@ -59,6 +59,33 @@ with the images and the packaged chart, are at
   only for `none`. See
   [operations.md](operations.md#web-search-off-anthropic-searxng).
 
+- **Tool search for the conversation turns.** A new key,
+  `inference.<job>.tool_search`, for `chat` (default `true`) and `voice`
+  (default `false`). With it on, a model call sends only the names of the MCP
+  tools, and the model loads the definition of a tool when it needs it. With
+  many MCP servers, a call through LiteLLM sent all the definitions on each
+  call (about 90000 tokens in one measured setup), and a turn with tool
+  search used about 8000 tokens in place of about 106000. A turn that uses a
+  tool can need one more model call, which is why it is off for `voice`. Core
+  then gives the agent exactly one CLI tool, `ToolSearch`, and sets
+  `ENABLE_TOOL_SEARCH` for the CLI; with it off, the agent has no tool and
+  the variable is empty. `ToolSearch` gives no capability: it loads only the
+  definition of a tool the agent already holds. The same rule applies on the
+  subscription and on another server. The workers never get it, and a worker
+  block that sets it fails the load. The start log gives `tool_search` for
+  each job. See [config.md](config.md#tool-search).
+
+- **The agent can read back the current conversation.** A new in-process
+  server, `history`, has `search_history(query, limit)`, a word search with
+  a snippet, newest first, and `read_history(start, end, cursor)`, the full
+  messages of a time window in pages of at most 60 messages and 12000
+  characters. Both cover only the conversation of the session: a direct
+  message, a group, or a voice call. Neither tool takes a conversation, a
+  channel, or a person. Failed turns, scheduled task prompts, event texts,
+  and `[IGNORE]` replies are not shown. Core adds the index
+  `idx_transcript_fts` at start, so the first start after the update can take
+  longer on a large transcript. See [memory.md](memory.md#the-history-of-a-conversation).
+
 - **`allow:` with no value on an `mcp` entry is the empty list.** No person
   reaches that server. Before, the value failed the config load.
 
