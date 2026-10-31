@@ -621,6 +621,48 @@ class Fetch(_Model):
         return list(self.blocked)
 
 
+class Search(_Model):
+    """The web search of the internet agent, through one MCP server of the gateway.
+
+    `server` names an entry of the `mcp` section, and `tool` is the search
+    tool of that server. The gateway calls the tool with
+    `{query_arg: <query>, **args}` and gives the internet agent at most
+    `max_results` results. `JoshuaConfig._check_search` checks the server.
+
+    When this block is set, the internet agent searches only through it, on
+    every model server. Set `allow:` with no value on the `mcp` entry, so that
+    no person gets the tool directly.
+    """
+
+    server: str
+    tool: str
+    query_arg: str = "query"
+    # Fixed arguments for each call. YAML gives every value as text; the
+    # gateway converts a value to the type that the tool declares.
+    args: dict[str, Any] = Field(default_factory=dict)
+    max_results: int = Field(default=10, gt=0, le=50)
+    timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+
+    @field_validator("server", "tool", "query_arg")
+    @classmethod
+    def _check_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be empty")
+        return value.strip()
+
+    @field_validator("args", mode="before")
+    @classmethod
+    def _empty_args(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        return {} if value in (None, "") else value
+
+    @model_validator(mode="after")
+    def _check_query_arg(self) -> Search:
+        if self.query_arg in self.args:
+            raise ValueError(f"args must not set '{self.query_arg}', the query argument")
+        return self
+
+
 class Internet(_Model):
     """The internet agent: a worker that searches and reads the open web.
 
@@ -631,6 +673,10 @@ class Internet(_Model):
     It reads only the pages its caller named and the pages its own searches
     returned. What comes back is data from outside. It reaches the agent
     wrapped and named as content, never as an instruction.
+
+    `search` sets the search tool. With no `search` block, the worker uses
+    `WebSearch` when the `internet` job is on the Anthropic server, and has no
+    search on another server.
     """
 
     enabled: bool = True
@@ -640,6 +686,13 @@ class Internet(_Model):
     # then a thought, so this is the ceiling on what one question costs.
     max_turns: int = Field(default=12, ge=1)
     fetch: Fetch = Fetch()
+    search: Search | None = None
+
+    @field_validator("search", mode="before")
+    @classmethod
+    def _empty_search(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        return None if value == "" else value
 
 
 class Wiki(_Model):
@@ -733,6 +786,13 @@ class McpServer(_Model):
         if value not in URL_ARGS:
             raise ValueError(f"url_args must be one of {URL_ARGS}")
         return value
+
+    @field_validator("allow", mode="before")
+    @classmethod
+    def _empty_allow(cls, value: Any) -> Any:
+        # strictyaml has no `[]`. `allow:` with no value is the empty list: no
+        # person reaches the server.
+        return [] if value is None or value == "" else value
 
     @field_validator("allow")
     @classmethod
@@ -1013,6 +1073,25 @@ class JoshuaConfig(_Model):
                 raise ValueError(
                     f"{where}.scope: '{snap.person_id}' is not allowed on '{snap.server}'"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _check_search(self) -> JoshuaConfig:
+        search = self.internet.search
+        if search is None:
+            return self
+        server = self.mcp.get(search.server)
+        if server is None:
+            raise ValueError(f"internet.search.server: unknown server '{search.server}'")
+        if server.kind is not None:
+            raise ValueError(
+                f"internet.search.server: '{search.server}' is a builtin, not a search server"
+            )
+        if server.identities:
+            raise ValueError(
+                f"internet.search.server: '{search.server}' has identities; a search "
+                "server serves no person"
+            )
         return self
 
     @model_validator(mode="after")

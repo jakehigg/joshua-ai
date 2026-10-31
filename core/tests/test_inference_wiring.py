@@ -161,7 +161,28 @@ def test_the_plan_names_each_server_model_and_override() -> None:
     assert no_key_in(plan)
 
 
-def test_the_plan_log_holds_no_key_and_warns_about_web_search(
+SEARCH = """
+internet:
+  search:
+    server: websearch
+    tool: search
+mcp:
+  websearch:
+    type: http
+    url: http://searxng:8080/mcp
+    allow:
+"""
+
+
+def _search_lines(caplog: pytest.LogCaptureFixture) -> list[Any]:
+    return [
+        r.msg
+        for r in caplog.records
+        if isinstance(r.msg, dict) and r.msg["message"] == "internet search"
+    ]
+
+
+def test_the_plan_log_holds_no_key_and_warns_when_there_is_no_search(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level("DEBUG"):
@@ -171,6 +192,7 @@ def test_the_plan_log_holds_no_key_and_warns_about_web_search(
         r for r in caplog.records if isinstance(r.msg, dict) and r.msg["message"] == "inference"
     ]
     assert len(infos) == 1
+    assert _search_lines(caplog)[0]["search"] == "none"
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) == 1
     assert warnings[0].msg["endpoint"] == "litellm:4000"
@@ -178,16 +200,21 @@ def test_the_plan_log_holds_no_key_and_warns_about_web_search(
 
 
 @pytest.mark.parametrize(
-    "extra",
-    ["", "\ninternet:\n  enabled: false\n"],
-    ids=["internet on anthropic", "internet off"],
+    ("section", "extra", "search"),
+    [
+        ("", "", "anthropic"),
+        (ELSEWHERE, "\ninternet:\n  enabled: false\n", "none"),
+        (ELSEWHERE, SEARCH, "mcp:websearch"),
+        ("", SEARCH, "mcp:websearch"),
+    ],
+    ids=["internet on anthropic", "internet off", "search mcp elsewhere", "search mcp"],
 )
-def test_no_web_search_warning_when_it_can_work(
-    caplog: pytest.LogCaptureFixture, extra: str
+def test_no_search_warning_when_search_can_work(
+    caplog: pytest.LogCaptureFixture, section: str, extra: str, search: str
 ) -> None:
-    section = "" if not extra else ELSEWHERE
     with caplog.at_level("DEBUG"):
         inference_plan.log_plan(settings(section, extra))
+    assert _search_lines(caplog)[0]["search"] == search
     assert not [r for r in caplog.records if r.levelname == "WARNING"]
 
 

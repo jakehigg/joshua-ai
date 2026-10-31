@@ -50,9 +50,12 @@ web). The rest sit behind `gateway`.
 
 The `internet` tool asks the internet agent, an ephemeral worker in `core`. The
 worker gets one question and none of the conversation, and it holds the web
-tools and nothing else. A search runs on Anthropic's side. Reading a page runs
-in `core`, only when `internet.fetch.enabled` is on, and only for a page the
-worker was given. [security.md](security.md) has the whole design.
+tools and nothing else. With `internet.search` set, a search goes through the
+gateway route `POST /v1/search` to a search MCP server of the `mcp` section.
+With no `internet.search`, a search runs on Anthropic's side as `WebSearch`,
+and only on the Anthropic server. Reading a page runs in `core`, only when
+`internet.fetch.enabled` is on, and only for a page the worker was given.
+[security.md](security.md) has the whole design.
 
 `core` owns the database and the data volume. It indexes the volume for
 retrieval, writes the nightly reflection, and runs the scheduler.

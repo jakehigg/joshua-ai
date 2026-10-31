@@ -25,6 +25,7 @@ from joshua_core.admin import build_admin_router
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
 from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import injection, taught_skills
+from joshua_core.engine import internet as internet_agent
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
@@ -346,7 +347,12 @@ def _build_memory(
     )
     recall.register(manager, store, settings)
     if settings.internet.enabled:
-        internet.register(manager, settings, manager.url_grants)
+        searcher = internet_agent.build_searcher(
+            settings.internet,
+            os.environ.get(GATEWAY_URL_ENV, ""),
+            os.environ.get(CORE_TOKEN_ENV, ""),
+        )
+        internet.register(manager, settings, manager.url_grants, searcher)
     injection.register(manager, store, settings, repo)
     taught_skills.register(manager, store, settings, repo, indexer.skills)
     return indexer, IndexerLoop(indexer, intervals)

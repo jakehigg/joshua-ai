@@ -243,6 +243,7 @@ it.
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
 | `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
 | `POST /v1/snapshots/{name}` | `core` | empty | `{"ok", "text", "is_error", "fetched_at"}` (below). `404` for a name that is not a gateway snapshot, `403` for a refused tool, `503` when the upstream is down, `504` after 30 seconds. |
+| `POST /v1/search` | `core` | `{"query": str}`, 1 to 500 characters | `{"results": [{"title", "url", "snippet"}]}` (below). `400` for a bad body, `404` when `internet.search` is not set or the internet agent is off, `403` for a refused tool, `502` for a tool error or a failed call, `503` when the upstream is down, `504` after `internet.search.timeout_seconds`. |
 | `POST /admin/mcp/install` | `ADMIN_CALLERS` | `{"server": name, "reinstall": bool}` | `{"server", "package", "resolved", "installed_at", "reconnected": […]}`. `404` for a server with no `package`, `502` with a one-line `error` when the install failed. |
 
 When an upstream loses its session, core's session to the gateway continues.
@@ -284,6 +285,28 @@ of the person of the scope, as the MCP route does.
 flag of the tool. `ok` is true when the call ran and `is_error` is false.
 `fetched_at` is UTC, in ISO 8601. The call log holds the call with the
 snapshot name and no content.
+
+### The web search route
+
+`POST /v1/search` runs the web search of `internet.search` for the internet
+agent in core. The body holds the query and nothing else. The gateway reads
+the server, the tool, `query_arg`, and `args` from its own copy of
+`joshua.yaml`, and calls the tool with `args` plus the query under
+`query_arg`. The route names no person, so the `allow` list of the server
+does not apply. It refuses with `403`, and writes a `denied` row to the call
+log, when the tool filter hides the tool or the upstream does not declare it
+(`tool_not_exposed`), when the `class` map marks the tool `write-local` or
+`act`, and when the upstream declares it destructive and not read-only
+(`tool_destructive`).
+
+The gateway reads the results from the answer of the tool: the structured
+content, then each text part as JSON, then each line as JSON, then, when no
+part is JSON, the plain text, with the first URL of each block. A result has
+a `title` of at most 300 characters, an `http` or `https` `url`, and a
+`snippet` of at most 1000 characters. One URL is kept once, and the list has
+at most `internet.search.max_results` results. An error answer is a short
+fixed text, never the text of the tool. The call log holds the length of the
+query and the count of the results, never the query.
 
 `core` sends two headers with every MCP request:
 

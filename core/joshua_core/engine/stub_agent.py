@@ -256,3 +256,70 @@ class StubOneshot:
                 error_out.append(self.fail[inference.endpoint])
             return ""
         return "ok"
+
+
+class StubWorker:
+    """A stand-in for ``agent.run_worker_session`` with no SDK and no network.
+
+    It takes the same arguments and runs the worker boundary of
+    ``agent.check_worker_tools`` first, so a worker that the real builder
+    refuses fails here too. When it holds the ``search`` server, it calls the
+    real ``web_search`` handler once with the first line of the objective, as
+    the SDK does. Then it asks the ``PreToolUse`` hook about each URL of
+    ``fetch``, as a ``WebFetch`` call would. It answers with the first result
+    URL as its one source, or with no source.
+
+    ``calls`` keeps the tools and the server names of each call,
+    ``search_text`` the text the search tool gave, and ``decisions`` the
+    ``(url, allowed)`` of each fetch. A test sets ``fetch``.
+    """
+
+    def __init__(self, fetch: list[str] | None = None) -> None:
+        self.fetch = list(fetch or [])
+        self.calls: list[dict[str, object]] = []
+        self.search_text: list[str] = []
+        self.decisions: list[tuple[str, bool]] = []
+
+    async def __call__(
+        self,
+        *,
+        system_prompt: str,
+        user_text: str,
+        schema: dict[str, object],
+        inference: ResolvedInference,
+        timeout_s: float,
+        max_turns: int,
+        tools: list[str],
+        hooks: dict[str, list[object]] | None = None,
+        usage_out: list[Usage] | None = None,
+        mcp_servers: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        from joshua_core.engine import agent
+
+        servers = dict(mcp_servers or {})
+        agent.check_worker_tools(tools, servers)
+        self.calls.append({"tools": list(tools), "servers": sorted(servers)})
+        source = ""
+        handler = agent.search_tool_handler(servers.get(agent.SEARCH_SERVER))
+        if handler is not None and agent.SEARCH_TOOL_NAME in tools:
+            result = await handler({"query": user_text.splitlines()[0]})
+            text = result["content"][0]["text"]
+            self.search_text.append(text)
+            match = re.search(r"^\s*URL: (\S+)$", text, re.MULTILINE)
+            source = match.group(1) if match else ""
+        for url in self.fetch:
+            allowed = True
+            for hook in (hooks or {}).get("PreToolUse", []):
+                payload = {"tool_name": "WebFetch", "tool_input": {"url": url}}
+                decision = await hook(payload, "stub", None)  # type: ignore[operator]
+                if decision:
+                    allowed = False
+            self.decisions.append((url, allowed))
+        if usage_out is not None:
+            usage_out.append(Usage(input=1, output=1))
+        return {
+            "answer": "The stub worker answered." if source else "The stub worker found nothing.",
+            "sources": [{"url": source, "title": "stub"}] if source else [],
+            "confidence": "low",
+            "disagreements": "",
+        }

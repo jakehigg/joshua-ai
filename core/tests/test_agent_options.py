@@ -266,3 +266,103 @@ def test_a_matcher_that_is_already_built_is_left_alone(fake_sdk):
     options = _worker(tools=["WebFetch"], hooks={"PreToolUse": [matcher]})
 
     assert options.hooks["PreToolUse"] == [matcher]
+
+
+# ── the search server of a worker ────────────────────────────────────────────
+
+
+async def _search(query: str) -> str:
+    return f"results for {query}"
+
+
+def test_a_worker_may_hold_the_search_server_and_its_one_tool(fake_sdk):
+    server = agent.build_search_server(_search)
+    options = _worker(
+        tools=[agent.SEARCH_TOOL_NAME, "WebFetch"], mcp_servers={agent.SEARCH_SERVER: server}
+    )
+    assert options.tools == ["WebFetch"]
+    assert options.allowed_tools == ["WebFetch", agent.SEARCH_TOOL_NAME]
+    assert list(options.mcp_servers) == ["search"]
+    assert agent.SEARCH_TOOL_NAME == "mcp__search__web_search"
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"type": "http", "url": "http://gateway:8000/websearch"},
+        {"type": "stdio", "command": "search-mcp"},
+        {"type": "sdk", "name": "search", "instance": object()},
+        "search",
+    ],
+    ids=["http", "stdio", "sdk not built here", "not a dict"],
+)
+def test_a_search_server_not_made_by_the_builder_fails_to_build(fake_sdk, server):
+    with pytest.raises(AssertionError, match="build_search_server"):
+        _worker(tools=[agent.SEARCH_TOOL_NAME], mcp_servers={agent.SEARCH_SERVER: server})
+
+
+def test_another_mcp_server_fails_to_build(fake_sdk):
+    """Also a server that `build_search_server` made, under another name."""
+    built = agent.build_search_server(_search)
+    for servers in (
+        {"files": {"type": "http", "url": "http://gateway:8000/files"}},
+        {"recall": built},
+        {agent.SEARCH_SERVER: built, "files": {"type": "http", "url": "http://gateway/files"}},
+    ):
+        with pytest.raises(AssertionError, match="may not reach"):
+            _worker(tools=["WebSearch"], mcp_servers=servers)
+
+
+@pytest.mark.parametrize(
+    "tool", ["mcp__search__other", "mcp__files__read_page", "mcp__recall__search_memory"]
+)
+def test_another_mcp_tool_fails_to_build(fake_sdk, tool):
+    servers = {agent.SEARCH_SERVER: agent.build_search_server(_search)}
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=[agent.SEARCH_TOOL_NAME, tool], mcp_servers=servers)
+
+
+def test_the_search_tool_with_no_search_server_fails_to_build(fake_sdk):
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=[agent.SEARCH_TOOL_NAME])
+
+
+@pytest.mark.parametrize("tool", ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task"])
+def test_a_file_or_shell_tool_beside_the_search_server_fails_to_build(fake_sdk, tool):
+    servers = {agent.SEARCH_SERVER: agent.build_search_server(_search)}
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=[agent.SEARCH_TOOL_NAME, tool], mcp_servers=servers)
+
+
+def test_options_that_were_widened_after_the_build_fail(fake_sdk, monkeypatch):
+    """The asserts read the built options too, not only the arguments."""
+
+    class Widened(FakeOptions):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.mcp_servers = {**kwargs["mcp_servers"], "files": {"type": "http"}}
+
+    monkeypatch.setattr(agent, "ClaudeAgentOptions", Widened)
+    with pytest.raises(AssertionError, match="may not reach"):
+        _worker(tools=["WebSearch"])
+
+
+async def test_the_search_tool_runs_the_search_and_hides_a_failure():
+    handler = agent.search_tool_handler(agent.build_search_server(_search))
+    assert handler is not None
+    assert (await handler({"query": "ribs"}))["content"][0]["text"] == "results for ribs"
+    assert "Give a query" in (await handler({"query": ""}))["content"][0]["text"]
+
+    async def broken(query: str) -> str:
+        raise RuntimeError("https://user:secret@search.example refused")
+
+    failing = agent.search_tool_handler(agent.build_search_server(broken))
+    assert failing is not None
+    text = (await failing({"query": "ribs"}))["content"][0]["text"]
+    assert text == "The search failed. Answer from what you have, and say so."
+
+
+def test_a_server_the_builder_did_not_make_has_no_handler():
+    assert agent.search_tool_handler(None) is None
+    assert agent.search_tool_handler({"instance": object()}) is None
+    assert agent.search_tool_handler({"instance": []}) is None

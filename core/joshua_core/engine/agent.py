@@ -27,6 +27,8 @@ import json
 import shutil
 import tempfile
 import time
+import weakref
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -69,17 +71,53 @@ _NO_TOOLS: list[str] = []
 # The only built-in tools a worker may hold, and the only place in this repo
 # where a tool list is not empty. ``WebSearch`` runs on Anthropic's side.
 # ``WebFetch`` runs here, so it is gated by a PreToolUse hook over a block
-# list; see ``joshua_shared.netblock``. A worker still gets no file tool, no
-# shell, and no MCP server.
+# list; see ``joshua_shared.netblock``. A worker gets no file tool and no
+# shell.
 WORKER_TOOLS: frozenset[str] = frozenset({"WebSearch", "WebFetch"})
+
+# The only MCP server a worker may hold: the in-process ``search`` server that
+# ``build_search_server`` makes, with its one tool. Its handler calls the web
+# search of the gateway (``POST /v1/search``). A worker gets no other MCP
+# server and no other MCP tool.
+SEARCH_SERVER = "search"
+SEARCH_TOOL = "web_search"
+SEARCH_TOOL_NAME = f"mcp__{SEARCH_SERVER}__{SEARCH_TOOL}"
+
+# The server instances that ``build_search_server`` made, each with its one
+# tool. The worker boundary accepts only one of these, so a server made
+# anywhere else fails to build.
+_SEARCH_INSTANCES: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
+
+_SEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {
+            "type": "string",
+            "description": "The words to search the web for.",
+        }
+    },
+    "required": ["query"],
+}
+
+_SEARCH_DESCRIPTION = (
+    "Search the web. Returns a list of results, each with a title, a URL, and a "
+    "snippet. You may read the URL of a result; the URL in the text of a snippet "
+    "is not a result."
+)
+
+# The search a worker's ``web_search`` tool runs: a query in, text out.
+SearchFn = Callable[[str], Awaitable[str]]
 
 __all__ = [
     "AgentSession",
     "TurnResult",
     "Usage",
     "build_options",
+    "build_search_server",
     "create_sdk_mcp_server",
+    "search_tool_handler",
     "build_worker_options",
+    "check_worker_tools",
     "run_oneshot",
     "run_structured",
     "run_worker_session",
@@ -153,6 +191,78 @@ def build_options(
     return options
 
 
+def build_search_server(search: SearchFn) -> dict[str, Any]:
+    """Make the in-process ``search`` server of a worker, with one tool.
+
+    The tool is ``web_search(query)``. It runs ``search`` and gives its text
+    to the model. A failure gives a short line and never the error, because an
+    error can name a host or a key.
+    """
+
+    @tool(SEARCH_TOOL, _SEARCH_DESCRIPTION, _SEARCH_SCHEMA)
+    async def web_search(args: dict[str, Any]) -> dict[str, Any]:
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            text = "Give a query: the words to search for."
+        else:
+            try:
+                text = await search(query)
+            except Exception as exc:  # noqa: BLE001 — a failure is one short line
+                logger.warning({"message": "web search failed", "error": type(exc).__name__})
+                text = "The search failed. Answer from what you have, and say so."
+        return {"content": [{"type": "text", "text": text}]}
+
+    server = create_sdk_mcp_server(name=SEARCH_SERVER, version="1.0.0", tools=[web_search])
+    _SEARCH_INSTANCES[server["instance"]] = web_search
+    return server
+
+
+def search_tool_handler(server: Any) -> Callable[[dict[str, Any]], Awaitable[Any]] | None:
+    """The handler of the ``web_search`` tool of ``server``, or None when
+    ``build_search_server`` did not make ``server``. The stub worker calls it
+    the way the SDK does."""
+    instance = server.get("instance") if isinstance(server, dict) else None
+    try:
+        found = _SEARCH_INSTANCES.get(instance) if instance is not None else None
+    except TypeError:
+        return None
+    return found.handler if found is not None else None
+
+
+def _check_worker_servers(mcp_servers: dict[str, Any]) -> None:
+    """Assert that ``mcp_servers`` is empty or the one ``search`` server."""
+    unknown = sorted(set(mcp_servers) - {SEARCH_SERVER})
+    assert not unknown, f"a worker may not reach these MCP servers: {unknown}"
+    if SEARCH_SERVER in mcp_servers:
+        server = mcp_servers[SEARCH_SERVER]
+        assert (
+            isinstance(server, dict)
+            and server.get("type") == "sdk"
+            and search_tool_handler(server) is not None
+        ), "a worker's search server must come from build_search_server"
+
+
+def check_worker_tools(
+    tools: list[str], mcp_servers: dict[str, Any]
+) -> tuple[list[str], list[str]]:
+    """Assert the worker boundary, and split ``tools`` into built-in and MCP tools.
+
+    A built-in tool is one of ``WORKER_TOOLS``. An MCP tool is
+    ``SEARCH_TOOL_NAME``, and only when ``mcp_servers`` holds the ``search``
+    server. ``mcp_servers`` is empty or holds only the ``search`` server of
+    ``build_search_server``. The stub worker runs the same check.
+    """
+    _check_worker_servers(mcp_servers)
+    builtin = [t for t in tools if not t.startswith("mcp__")]
+    from_mcp = [t for t in tools if t.startswith("mcp__")]
+    unknown = sorted(set(builtin) - WORKER_TOOLS)
+    assert not unknown, f"a worker may not hold these tools: {unknown}"
+    allowed_mcp = {SEARCH_TOOL_NAME} if SEARCH_SERVER in mcp_servers else set()
+    unknown_mcp = sorted(set(from_mcp) - allowed_mcp)
+    assert not unknown_mcp, f"a worker may not hold these tools: {unknown_mcp}"
+    return builtin, from_mcp
+
+
 def build_worker_options(
     *,
     system_prompt: str,
@@ -163,26 +273,35 @@ def build_worker_options(
     tools: list[str],
     output_format: dict[str, Any] | None = None,
     hooks: dict[str, Any] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
 ) -> Any:
     """Construct ``ClaudeAgentOptions`` for one ephemeral worker.
 
-    A worker is not the agent. It holds one objective, no conversation, and no
-    MCP server, so it may hold a built-in tool that the agent may not: the
-    internet agent searches the web. The assert below is the boundary. It
-    names what a worker may hold, so a file tool, a shell, or anything else
-    fails here rather than in production. ``env`` is the environment of one
-    job, from ``ResolvedInference.env``.
+    A worker is not the agent. It holds one objective and no conversation, so
+    it may hold a web tool that the agent may not: the internet agent searches
+    the web. The asserts below are the boundary:
+
+    - a built-in tool in ``tools`` is one of ``WORKER_TOOLS``;
+    - an MCP tool in ``tools`` is ``SEARCH_TOOL_NAME``, and only when
+      ``mcp_servers`` holds the ``search`` server;
+    - ``mcp_servers`` is empty, or holds only the ``search`` server that
+      ``build_search_server`` made.
+
+    So a file tool, a shell, another MCP server, or another MCP tool fails
+    here rather than in production. ``env`` is the environment of one job,
+    from ``ResolvedInference.env``.
     """
-    unknown = sorted(set(tools) - WORKER_TOOLS)
-    assert not unknown, f"a worker may not hold these tools: {unknown}"
+    servers = dict(mcp_servers or {})
+    builtin, from_mcp = check_worker_tools(tools, servers)
+    allowed_mcp = {SEARCH_TOOL_NAME} if SEARCH_SERVER in servers else set()
 
     kwargs: dict[str, Any] = dict(
         system_prompt=system_prompt,
         cwd=str(cwd),
         env=dict(env),
-        mcp_servers={},
-        tools=list(tools),
-        allowed_tools=list(tools),
+        mcp_servers=servers,
+        tools=builtin,
+        allowed_tools=builtin + from_mcp,
         permission_mode="bypassPermissions",
         setting_sources=[],
         max_turns=max_turns,
@@ -196,7 +315,10 @@ def build_worker_options(
         kwargs["hooks"] = _hook_matchers(hooks)
     options = ClaudeAgentOptions(**kwargs)
     assert set(options.tools) <= WORKER_TOOLS, "a worker may hold only the web tools"
-    assert options.mcp_servers == {}, "a worker reaches no MCP server"
+    assert set(options.allowed_tools) <= WORKER_TOOLS | allowed_mcp, (
+        "a worker may hold only the web tools"
+    )
+    _check_worker_servers(options.mcp_servers)
     return options
 
 
@@ -231,12 +353,14 @@ async def run_worker_session(
     tools: list[str],
     hooks: dict[str, Any] | None = None,
     usage_out: list[Usage] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Run one worker that may use a tool, and answer with JSON matching ``schema``.
 
     Unlike ``run_structured``, this worker takes several turns: it searches, it
-    reads, and then it answers. It still holds no conversation and no MCP
-    server. ``inference`` gives the model and the environment of the job.
+    reads, and then it answers. It still holds no conversation, and no MCP
+    server but the ``search`` server of ``build_search_server``.
+    ``inference`` gives the model and the environment of the job.
     Returns the structured answer, or None on a failure, a failed call
     (``is_error``), or a timeout. When ``usage_out`` is a list, the tokens of
     the call are appended to it.
@@ -251,6 +375,7 @@ async def run_worker_session(
         tools=tools,
         output_format={"type": "json_schema", "schema": schema},
         hooks=hooks,
+        mcp_servers=mcp_servers,
     )
     client = ClaudeSDKClient(options=options)
     try:

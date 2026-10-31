@@ -187,10 +187,12 @@ model_list:
 
 Know these limits:
 
-- **Web search does not work.** The internet agent searches with `WebSearch`,
-  a tool that runs on Anthropic's side. Through LiteLLM or Bedrock the search
-  fails, and core writes a warning at start. `WebFetch` runs in `core`, so it
-  works on every server when `internet.fetch.enabled` is on.
+- **`WebSearch` is not available.** `WebSearch` runs on Anthropic's side, so
+  the internet agent gets it only on the Anthropic server. On another server
+  it has no search, and core writes a warning at start. To search on every
+  server, give it a search MCP server: see "Web search for the internet
+  agent". `WebFetch` runs in `core`, so it works on every server when
+  `internet.fetch.enabled` is on.
 - **A PDF can fail.** The `describe` job sends a PDF as a document block. A
   model that is not Claude can refuse it through LiteLLM. Keep `describe` on
   a Claude model.
@@ -305,6 +307,119 @@ To read a failure:
 | `http_404`, `http_400` | Make sure that the server has a model with the name in `model`. |
 | `timeout` | Make sure that `core` can reach the server, and that the model loads in time. |
 | `CLIConnectionError`, another exception name | Read the `core` log. |
+
+## Web search for the internet agent
+
+The internet agent can search through a search MCP server that the gateway
+hosts. Then it searches on every model server: Anthropic, LiteLLM, Bedrock, or
+Ollama. The agent does not get the search tool. It asks the internet agent,
+as before, and reads the answer, never the raw results.
+
+With an `internet.search` block, the internet agent always uses that server,
+also on the Anthropic server. With no block, it uses `WebSearch` on the
+Anthropic server and has no search on another server.
+
+Do these steps:
+
+1. Add the search server to the `mcp` section. Set `allow:` with no value, so
+   that no person gets the tool directly.
+2. Put the provider key, if the server needs one, in `.env.gateway` (or in
+   `secrets.gateway` of the Helm chart). Only the gateway gets it. Write it as
+   `${VAR:-}` in `joshua.yaml`.
+3. Add the `internet.search` block. `server` is the name of the `mcp` entry
+   and `tool` is its search tool.
+4. Restart the gateway and core.
+5. Read the core log. The line `"message": "internet search"` must show
+   `"search": "mcp:<the entry name>"`.
+
+[docs/config.md](config.md#web-search) explains each key. Each entry below
+pins an exact version. Read the README of the server before you change the
+version, because a tool name or an argument can change.
+
+### SearXNG
+
+SearXNG is a search engine that you host yourself, so this needs no provider
+key. The MCP server is `mcp-searxng`, and its search tool is
+`searxng_web_search`. `response_format: json` makes it answer in JSON:
+
+```yaml
+internet:
+  search:
+    server: websearch
+    tool: searxng_web_search
+    args:
+      response_format: json
+mcp:
+  websearch:
+    type: stdio
+    package: npm:mcp-searxng@2.9.0
+    env:
+      SEARXNG_URL: http://searxng:8080
+    allow:
+```
+
+`SEARXNG_URL` is the address of your SearXNG instance, not of the MCP server.
+The SearXNG instance must allow the JSON output format (`search.formats` in
+its `settings.yml`).
+
+### Brave Search
+
+The official Brave Search MCP server is `@brave/brave-search-mcp-server`, and
+its web search tool is `brave_web_search`. It needs a Brave Search API key:
+
+```yaml
+internet:
+  search:
+    server: websearch
+    tool: brave_web_search
+    args:
+      count: 10
+mcp:
+  websearch:
+    type: stdio
+    package: npm:@brave/brave-search-mcp-server@2.1.4
+    env:
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+    allow:
+```
+
+Put `BRAVE_API_KEY=...` in `.env.gateway`. A search with no result is a tool
+error on this server, so the internet agent then reads "The search failed".
+
+### Tavily
+
+The official Tavily MCP server is `tavily-mcp`, and its search tool is
+`tavily_search`. It needs a Tavily API key:
+
+```yaml
+internet:
+  search:
+    server: websearch
+    tool: tavily_search
+    args:
+      max_results: 10
+mcp:
+  websearch:
+    type: stdio
+    package: npm:tavily-mcp@0.2.22
+    env:
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+    allow:
+```
+
+Put `TAVILY_API_KEY=...` in `.env.gateway`.
+
+### When the search does not work
+
+| Symptom | Do this |
+|---|---|
+| The start log shows `"search": "none"` and a warning | The `internet` job is not on the Anthropic server and `internet.search` is not set. Add the block. |
+| The answer says "The search failed" | Read the gateway log for `"search": true`. `error` is `timeout`, `upstream_unavailable`, `tool error`, or a refusal reason. |
+| The gateway refuses with `tool_not_exposed` | The `tools` filter of the entry hides the tool, or `tool` is not the name the server declares. `GET /admin/inventory` on the gateway lists the tools. |
+| The gateway refuses with `tool_class_act` or `tool_class_write-local` | The `class` map of the entry marks the tool. Remove that line, or mark the tool `read`. |
+| The search gives no result | The server answered in a shape that the gateway cannot read. Use the JSON output of the server when it has one. |
+
+The gateway log holds the length of each query, never the query.
 
 ## Change the config
 

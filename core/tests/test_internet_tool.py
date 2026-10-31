@@ -241,3 +241,34 @@ async def test_a_question_with_no_url_is_unaffected(monkeypatch) -> None:
     await do_lookup(_deps(), settings=_settings(), question="q", grants=_grants())
 
     assert seen["urls"] == []
+
+
+async def test_the_searcher_reaches_the_worker_and_the_agent_gets_no_raw_result(
+    monkeypatch,
+) -> None:
+    """The agent reads the answer of the worker, never the search results."""
+    from joshua_core.engine.stub_agent import StubWorker
+    from joshua_core.engine.tools.internet import build_internet_server
+    from joshua_shared.contracts import WebSearchResult
+
+    async def searcher(query: str) -> list[WebSearchResult]:
+        return [WebSearchResult(title="T", url="https://example.com/r", snippet="RAW SNIPPET")]
+
+    worker = StubWorker()
+    real_ask = internet_agent.ask
+
+    async def ask(question: str, **kwargs: Any) -> Any:
+        return await real_ask(question, runner=worker, **kwargs)
+
+    monkeypatch.setattr(internet_agent, "ask", ask)
+    settings = _settings(
+        "\ninternet:\n  search:\n    server: websearch\n    tool: search\n"
+        "mcp:\n  websearch:\n    type: http\n    url: http://searxng:8080/mcp\n    allow:\n"
+    )
+
+    text = await do_lookup(_deps(), settings=settings, question="q", searcher=searcher)
+
+    assert "https://example.com/r" in text
+    assert "RAW SNIPPET" not in text
+    assert "RAW SNIPPET" in worker.search_text[0]
+    assert build_internet_server(_deps(), settings=settings, searcher=searcher) is not None

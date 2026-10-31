@@ -36,6 +36,11 @@ imagePullSecrets: []
 #         base_url: http://ollama:11434
 #         api_key: ${LOCAL_INFERENCE_API_KEY:-}
 #         model: llama3.1
+#
+# With the internet job on a server other than Anthropic, the internet agent
+# has no WebSearch. Add `internet.search` and a search MCP server to the `mcp`
+# section, and put the provider key in secrets.gateway. docs/operations.md has
+# the recipe.
 config: ""
 
 # Use a ConfigMap you made yourself. It must hold the key joshua.yaml.

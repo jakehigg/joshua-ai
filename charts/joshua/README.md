@@ -203,6 +203,35 @@ Each upstream credential is a key in `secrets.gateway`, as `${VAR:-}` in your
 `joshua.yaml`. An entry whose credential is empty is turned off, and `/readyz`
 counts it in `disabled`.
 
+**A search server for the internet agent.** The key of a search provider is
+an upstream credential like any other, so it goes in `secrets.gateway` and
+only the gateway gets it:
+
+```yaml
+secrets:
+  gateway:
+    keys:
+      BRAVE_API_KEY: {}
+
+config: |
+  ...
+  internet:
+    search:
+      server: websearch
+      tool: brave_web_search
+  mcp:
+    websearch:
+      type: stdio
+      package: npm:@brave/brave-search-mcp-server@2.1.4
+      env:
+        BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      allow:
+```
+
+`allow:` with no value keeps the tool away from every person. The internet
+agent then searches through it on every model server. `docs/operations.md`
+has entries for SearXNG, Brave Search, and Tavily.
+
 ## The viewer
 
 The chart can also run the read-only web viewer, which is the gateway image

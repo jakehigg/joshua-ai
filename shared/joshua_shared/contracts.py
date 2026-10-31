@@ -7,7 +7,9 @@ Core never trusts ``framing`` from user input; only the scheduler and ops set it
 ``SearchRequest`` and ``SearchResponse`` are the shapes of core's
 ``POST /v1/memory/search``, which the viewer and an addon call.
 ``UsageResponse`` is the shape of core's ``GET /v1/usage``, which the viewer
-calls for its usage page.
+calls for its usage page. ``WebSearchRequest`` and ``WebSearchResponse`` are
+the shapes of the gateway ``POST /v1/search``, which core calls for the
+internet agent.
 """
 
 from __future__ import annotations
@@ -228,3 +230,36 @@ class SnapshotResponse(_Model):
     text: str
     is_error: bool
     fetched_at: str
+
+
+# The path of the gateway web search route, and the limits of its shapes.
+WEB_SEARCH_PATH = "/v1/search"
+WEB_SEARCH_MAX_QUERY_CHARS = 500
+WEB_SEARCH_MAX_TITLE_CHARS = 300
+WEB_SEARCH_MAX_SNIPPET_CHARS = 1000
+WEB_SEARCH_MAX_URL_CHARS = 2000
+
+
+class WebSearchRequest(_Model):
+    """The body of the gateway ``POST /v1/search``: one query, and nothing else.
+
+    The gateway reads the server, the tool, and the arguments from
+    ``internet.search``, so the caller cannot choose them.
+    """
+
+    query: str = Field(min_length=1, max_length=WEB_SEARCH_MAX_QUERY_CHARS)
+
+
+class WebSearchResult(_Model):
+    """One result of a web search. ``url`` is always ``http`` or ``https``."""
+
+    title: str = Field(default="", max_length=WEB_SEARCH_MAX_TITLE_CHARS)
+    url: str = Field(max_length=WEB_SEARCH_MAX_URL_CHARS)
+    snippet: str = Field(default="", max_length=WEB_SEARCH_MAX_SNIPPET_CHARS)
+
+
+class WebSearchResponse(_Model):
+    """The answer of the gateway ``POST /v1/search``, at most
+    ``internet.search.max_results`` results."""
+
+    results: list[WebSearchResult]

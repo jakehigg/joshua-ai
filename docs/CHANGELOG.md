@@ -41,6 +41,23 @@ with the images and the packaged chart, are at
   an Anthropic API key. An empty job key on the global server sends no key,
   and does not fall back to the global key. See [config.md](config.md#inference).
 
+- **The internet agent can search through a search MCP server, on every model
+  server.** A new block, `internet.search`, names an entry of the `mcp`
+  section and its search tool, with `query_arg`, fixed `args`, `max_results`
+  (default 10), and `timeout_seconds` (default 20). The worker then holds one
+  in-process tool, `web_search`, which calls the new gateway route
+  `POST /v1/search` with the token of core. The gateway calls the configured
+  tool, reads the results from JSON or plain text, and keeps only `http` and
+  `https` URLs. The provider key stays in the gateway, and the agent never sees
+  a raw result. Each result URL may be fetched, and a URL in a snippet may
+  not. With `internet.search` set, the worker never uses `WebSearch`. With no
+  block, the worker gets `WebSearch` only when the `internet` job is on the
+  Anthropic server. On another server it has no search and says so. Core logs
+  the search at start (`mcp:<server>`, `anthropic`, or `none`) and warns only
+  for `none`. `allow:` with no value on an `mcp` entry now means no person.
+  [operations.md](operations.md#web-search-for-the-internet-agent) has entries
+  for SearXNG, Brave Search, and Tavily.
+
 - **Snapshots put the state of a live system in the memory index.** A new
   list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the
   arguments, a cadence, and a scope. Core runs each one with no model, keeps

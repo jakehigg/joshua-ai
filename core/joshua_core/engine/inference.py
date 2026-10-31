@@ -22,7 +22,6 @@ from urllib.parse import urlsplit
 
 from joshua_shared.config import INFERENCE_JOBS, JoshuaConfig
 from joshua_shared.inference import (
-    ANTHROPIC_ENDPOINT,
     AUTH_KEYS,
     ENV_KEYS,
     ResolvedInference,
@@ -30,6 +29,7 @@ from joshua_shared.inference import (
 )
 from joshua_shared.log import get_logger, redact
 
+from joshua_core.engine import internet as internet_agent
 from joshua_core.engine.usage import Usage
 from joshua_core.store.usage_events import record_usage
 
@@ -96,20 +96,31 @@ def plan(settings: JoshuaConfig) -> dict[str, dict[str, Any]]:
 
 
 def log_plan(settings: JoshuaConfig) -> None:
-    """Log the plan of each job in one INFO line, and warn about web search.
+    """Log the plan of each job in one INFO line, then the search of the internet job.
 
-    The internet agent searches with ``WebSearch``, which runs on Anthropic's
-    side. On another server the search fails, so this warns at start.
+    The search line says how the internet agent searches: ``mcp:<server>``
+    for ``internet.search``, ``anthropic`` for ``WebSearch`` on the Anthropic
+    server, or ``none``. A warning follows only for ``none`` while the
+    internet agent is on, because it then cannot search.
     """
     jobs = plan(settings)
     logger.info({"message": "inference", "jobs": jobs})
-    internet = jobs["internet"]["endpoint"]
-    if settings.internet.enabled and internet != ANTHROPIC_ENDPOINT:
+    mode = internet_agent.search_mode(settings.internet, jobs["internet"]["endpoint"])
+    search = settings.internet.search
+    label = f"mcp:{search.server}" if mode == "mcp" and search is not None else mode
+    logger.info(
+        {
+            "message": "internet search",
+            "search": label,
+            "enabled": settings.internet.enabled,
+        }
+    )
+    if settings.internet.enabled and mode == "none":
         logger.warning(
             {
-                "message": "internet job is not on anthropic; WebSearch runs on "
-                "Anthropic's side and will fail on this server",
-                "endpoint": internet,
+                "message": "internet agent has no search: the internet job is not on "
+                "anthropic and internet.search is not set",
+                "endpoint": jobs["internet"]["endpoint"],
             }
         )
 
