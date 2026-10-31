@@ -139,6 +139,15 @@ def test_startup_takes_the_credentials_and_logs_the_names_only(
 # ── the plan at start ────────────────────────────────────────────────────────
 
 
+def test_the_plan_names_a_job_key_on_the_global_server() -> None:
+    cfg = settings(ELSEWHERE + "  chat:\n    api_key: ${LITELLM_API_KEY}\n")
+    plan = inference_plan.plan(cfg)
+    assert plan["chat"]["override"] == ["key"]
+    assert plan["chat"]["endpoint"] == "litellm:4000"
+    assert plan["voice"]["override"] == []
+    assert no_key_in(plan)
+
+
 def test_the_plan_names_each_server_model_and_override() -> None:
     plan = inference_plan.plan(settings(SPLIT, VOICE))
 

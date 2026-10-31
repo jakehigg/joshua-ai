@@ -94,6 +94,10 @@ config: |
       model: llama3.1
 ```
 
+For one LiteLLM key for each job, add `INFERENCE_KEY_CHAT: {}` and a key for
+each other job to `secrets.core.keys`, and set only `api_key` in each job
+block. Each job then uses `inference.base_url` with its own key.
+
 Write each key as `${VAR:-}`, with the `:-` default. Channels and gateway read
 the same file and do not get the key, and a `${VAR}` with no value and no
 default stops them at start. `docs/operations.md` has the recipes and the check

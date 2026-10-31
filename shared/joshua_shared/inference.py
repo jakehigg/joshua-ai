@@ -119,10 +119,13 @@ def resolve_inference(config: JoshuaConfig, job: str, *, oauth_token: str) -> Re
     """Return the model, the CLI environment, and the server label for ``job``.
 
     The model is ``inference.<job>.model``, or else the model setting of the
-    job. The server is the job's ``base_url`` and ``api_key`` when the job sets
-    ``base_url``, or else the global ones. ``oauth_token`` is the subscription
-    token, and it is used only when there is no ``base_url`` and no
-    ``api_key``. Raises ``KeyError`` for an unknown job.
+    job. When the job sets ``base_url``, the server is the job's ``base_url``
+    and ``api_key``. When the job sets only ``api_key``, the server is the
+    global ``base_url`` with the job's key, and the global key is not used;
+    with no global ``base_url``, the job's key is an Anthropic API key. Else
+    the job uses the global ``base_url`` and ``api_key``. ``oauth_token`` is
+    the subscription token, and it is used only when there is no
+    ``base_url`` and no key. Raises ``KeyError`` for an unknown job.
     """
     inference = config.inference
     block = inference.job(job)
@@ -130,6 +133,9 @@ def resolve_inference(config: JoshuaConfig, job: str, *, oauth_token: str) -> Re
     if block.base_url is not None:
         base_url: str | None = block.base_url
         api_key = block.api_key or ""
+    elif block.api_key is not None:
+        base_url = inference.base_url
+        api_key = block.api_key
     else:
         base_url = inference.base_url
         api_key = inference.api_key or ""

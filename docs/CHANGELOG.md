@@ -13,7 +13,7 @@ with the images and the packaged chart, are at
   to a server that speaks the Anthropic Messages API, such as LiteLLM, or set
   `api_key` alone to use the Anthropic API. A block for each job (`chat`,
   `voice`, `reflection`, `describe`, `internet`) can change the model, the
-  server, or both. A job that sets `base_url` must also set `api_key`, so the
+  server, the key, or all three. A job that sets `base_url` must also set `api_key`, so the
   global key never goes to another server. Core removes the provider
   variables from its own environment at start, gives each call the
   credential of its job only, and logs the server and the model of each job.
@@ -32,8 +32,14 @@ with the images and the packaged chart, are at
   the number of job blocks that set `base_url` or `model`. The Helm chart
   (0.0.9) shows the `inference` keys in `secrets.core.keys` and the
   `inference` section with `${VAR:-}`. [operations.md](operations.md#the-model-server)
-  has recipes for the subscription, LiteLLM in front of Bedrock, and a local
-  model for one job.
+  has recipes for the subscription, LiteLLM in front of Bedrock, one LiteLLM
+  key for each job, and a local model for one job.
+
+- **A job block can set `api_key` alone.** The job then uses the global
+  `base_url` with its own key, and never gets the global key, so LiteLLM can
+  count the use of each job apart. With no global `base_url`, the job key is
+  an Anthropic API key. An empty job key on the global server sends no key,
+  and does not fall back to the global key. See [config.md](config.md#inference).
 
 - **Snapshots put the state of a live system in the memory index.** A new
   list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the

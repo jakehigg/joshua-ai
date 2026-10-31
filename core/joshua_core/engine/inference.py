@@ -77,8 +77,8 @@ def plan(settings: JoshuaConfig) -> dict[str, dict[str, Any]]:
     """For each job: the server label, the model, and what its block changes.
 
     ``override`` names the fields that the job block sets (``server``,
-    ``model``), or is empty when the job uses the global setting. It holds no
-    key.
+    ``key`` for a job key on the global server, ``model``), or is empty when
+    the job uses the global setting. It holds no key.
     """
     out: dict[str, dict[str, Any]] = {}
     for job in INFERENCE_JOBS:
@@ -87,6 +87,8 @@ def plan(settings: JoshuaConfig) -> dict[str, dict[str, Any]]:
         override = []
         if block.base_url is not None:
             override.append("server")
+        elif block.api_key is not None:
+            override.append("key")
         if block.model is not None:
             override.append("model")
         out[job] = {"endpoint": resolved.endpoint, "model": resolved.model, "override": override}

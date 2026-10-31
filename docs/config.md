@@ -1027,7 +1027,7 @@ inference:
 | `timeout_seconds` | `600` | The time limit of one chat or voice turn and of one reflection call. It must be more than 0. A turn that passes it stops, and the person gets the failure reply. `attachments.describe.timeout_seconds` and `internet.timeout_seconds` set the limits of those workers. |
 | `<job>.model` | the model setting of the job | The model for this job. |
 | `<job>.base_url` | not set | The server for this job. |
-| `<job>.api_key` | not set | The key for `<job>.base_url`. It must be set when `<job>.base_url` is set. |
+| `<job>.api_key` | not set | The key for `<job>.base_url`. It must be set when `<job>.base_url` is set. With no `<job>.base_url`, the key of this job on the global server, in place of the global `api_key`. |
 
 The jobs are `chat`, `voice`, `reflection`, `describe`, and `internet`. Any
 other key in `inference` fails the load.
@@ -1057,8 +1057,30 @@ sets `base_url` uses its own server and its own `api_key`.
 
 **A job `base_url` needs a job `api_key`.** Without it, the global key would
 go to a different server, so the load fails. For a server that needs no key,
-write `api_key: ""`. A job `api_key` with no job `base_url` also fails the
-load.
+write `api_key: ""`.
+
+**A job `api_key` alone replaces the global key for that job.** The job uses
+the global `base_url` with its own key, and never gets the global key. Use it
+to give each job its own LiteLLM key, so LiteLLM counts the use of each job
+apart. With no global `base_url`, the job key is an Anthropic API key. An
+empty job key (for example `${VAR:-}` with `VAR` not set) sends no key on the
+global server: it does not fall back to the global key. With no global
+`base_url`, an empty job key uses the subscription.
+
+```yaml
+inference:
+  base_url: http://litellm:4000
+  chat:
+    api_key: ${INFERENCE_KEY_CHAT:-}
+  voice:
+    api_key: ${INFERENCE_KEY_VOICE:-}
+  reflection:
+    api_key: ${INFERENCE_KEY_REFLECTION:-}
+  describe:
+    api_key: ${INFERENCE_KEY_DESCRIBE:-}
+  internet:
+    api_key: ${INFERENCE_KEY_INTERNET:-}
+```
 
 **The model names must exist on the server.** With `base_url`, Joshua sends
 the model setting of each job as it is, for example `claude-opus-5`. Give each
@@ -1079,7 +1101,8 @@ variables `INFERENCE_BASE_URL` and `INFERENCE_API_KEY`. For a job key with
 another name, such as `LITELLM_API_KEY`, add it to the `environment` of
 `core`. With the Helm chart, add each variable to `secrets.core.keys`. Use
 `${VAR:-}` in `joshua.yaml`, because `channels` and `gateway` read the same
-file and do not get the variable.
+file and do not get the variable. A job key that `core` does not get is empty,
+and the job then sends no key.
 
 **What core does at start.** Core reads the config, keeps
 `CLAUDE_CODE_OAUTH_TOKEN`, and then removes every provider variable

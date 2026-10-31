@@ -78,6 +78,12 @@ secrets:
       # refers to:
       # INFERENCE_API_KEY: {}
       # LOCAL_INFERENCE_API_KEY: {name: local-model-server, key: api-key}
+      # One LiteLLM key for each job, on the server in `inference.base_url`:
+      # INFERENCE_KEY_CHAT: {}
+      # INFERENCE_KEY_VOICE: {}
+      # INFERENCE_KEY_REFLECTION: {}
+      # INFERENCE_KEY_DESCRIBE: {}
+      # INFERENCE_KEY_INTERNET: {}
   channels:
     name: joshua-channels-secrets
     keys:

@@ -213,9 +213,76 @@ def test_job_base_url_without_api_key_is_refused() -> None:
         )
 
 
-def test_job_api_key_without_base_url_is_refused() -> None:
-    with pytest.raises(config.ConfigError, match="must also set base_url"):
-        load("\ninference:\n  chat:\n    api_key: ${JOB_API_KEY}\n")
+def test_job_api_key_uses_the_global_server_with_the_job_key() -> None:
+    cfg = load(
+        "\ninference:\n  base_url: http://litellm:4000\n  api_key: ${INFERENCE_API_KEY}\n"
+        "  chat:\n    api_key: ${JOB_API_KEY}\n"
+    )
+    chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
+    assert chat.endpoint == "litellm:4000"
+    assert chat.env == expected_env(
+        ANTHROPIC_BASE_URL="http://litellm:4000",
+        ANTHROPIC_AUTH_TOKEN=JOB_KEY,
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
+        **dict.fromkeys(MODEL_TIER_KEYS, "chat-model"),
+    )
+    for value in chat.env.values():
+        assert GLOBAL_KEY not in value
+        assert OAUTH not in value
+
+
+def test_a_job_with_no_key_still_gets_the_global_key() -> None:
+    cfg = load(
+        "\ninference:\n  base_url: http://litellm:4000\n  api_key: ${INFERENCE_API_KEY}\n"
+        "  chat:\n    api_key: ${JOB_API_KEY}\n"
+    )
+    voice = resolve_inference(cfg, "voice", oauth_token=OAUTH)
+    assert voice.env["ANTHROPIC_AUTH_TOKEN"] == GLOBAL_KEY
+    assert JOB_KEY not in repr(voice.env)
+
+
+def test_one_key_for_each_job_on_one_server() -> None:
+    keys = {job: f"key-of-{job}" for job in config.INFERENCE_JOBS}
+    env = {f"KEY_{job.upper()}": key for job, key in keys.items()}
+    section = "\ninference:\n  base_url: http://litellm:4000\n" + "".join(
+        f"  {job}:\n    api_key: ${{KEY_{job.upper()}}}\n" for job in config.INFERENCE_JOBS
+    )
+    cfg = load(section, env=env)
+    for job in config.INFERENCE_JOBS:
+        resolved = resolve_inference(cfg, job, oauth_token=OAUTH)
+        assert resolved.env["ANTHROPIC_AUTH_TOKEN"] == keys[job]
+        others = [k for j, k in keys.items() if j != job]
+        assert not any(other in repr(resolved.env) for other in others)
+
+
+def test_an_empty_job_key_on_the_global_server_sends_no_key() -> None:
+    """An unset job variable never falls back to the global key."""
+    cfg = load(
+        "\ninference:\n  base_url: http://litellm:4000\n  api_key: ${INFERENCE_API_KEY}\n"
+        "  chat:\n    api_key: ${UNSET_KEY:-}\n"
+    )
+    chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
+    assert chat.env["ANTHROPIC_AUTH_TOKEN"] == ""
+    assert GLOBAL_KEY not in repr(chat.env)
+
+
+def test_job_api_key_with_no_server_is_an_anthropic_api_key() -> None:
+    cfg = load(
+        "\ninference:\n  api_key: ${INFERENCE_API_KEY}\n  chat:\n    api_key: ${JOB_API_KEY}\n"
+    )
+    chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
+    assert chat.endpoint == "anthropic"
+    assert chat.env == expected_env(ANTHROPIC_API_KEY=JOB_KEY)
+    reflection = resolve_inference(cfg, "reflection", oauth_token=OAUTH)
+    assert reflection.env == expected_env(ANTHROPIC_API_KEY=GLOBAL_KEY)
+
+
+def test_job_api_key_on_the_subscription_never_holds_the_token() -> None:
+    cfg = load("\ninference:\n  chat:\n    api_key: ${JOB_API_KEY}\n")
+    chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
+    assert chat.env == expected_env(ANTHROPIC_API_KEY=JOB_KEY)
+    voice = resolve_inference(cfg, "voice", oauth_token=OAUTH)
+    assert voice.env == expected_env(CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
 
 
 def test_empty_api_key_is_an_empty_string() -> None:

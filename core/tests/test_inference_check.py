@@ -156,6 +156,23 @@ def test_a_job_with_a_different_model_gets_its_own_call(monkeypatch: pytest.Monk
     assert sorted(c.model for c in client.ctx.oneshot.calls) == ["bedrock-claude-sonnet", "other"]
 
 
+def test_jobs_with_different_keys_on_one_server_get_their_own_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    section = ONE_TARGET.replace(
+        "  chat:\n    model: bedrock-claude-sonnet",
+        "  chat:\n    api_key: ${LOCAL_API_KEY}\n    model: bedrock-claude-sonnet",
+    )
+    client = make_client(monkeypatch, section)
+    body = post(client).json()
+
+    calls = client.ctx.oneshot.calls
+    assert len(calls) == 2
+    assert {c.endpoint for c in calls} == {"litellm:4000"}
+    assert sorted(c.env["ANTHROPIC_AUTH_TOKEN"] for c in calls) == sorted([JOB_KEY, GLOBAL_KEY])
+    assert no_key_in(body)
+
+
 def test_each_call_writes_one_usage_row(monkeypatch: pytest.MonkeyPatch) -> None:
     client = make_client(monkeypatch, TWO_TARGETS)
     post(client)

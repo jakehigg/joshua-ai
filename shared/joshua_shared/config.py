@@ -848,8 +848,11 @@ class InferenceJob(_Model):
 
     ``model`` replaces the model setting of the job. ``base_url`` sends the
     job to a different server, and then ``api_key`` must be set too: without
-    it, the global key would go to that other server. An empty ``api_key``
-    is a server that needs no key.
+    it, the global key would go to that other server. ``api_key`` with no
+    ``base_url`` replaces the global key for this job only: the job uses the
+    global ``base_url`` with this key, or, with no global ``base_url``, the
+    Anthropic API with this key. An empty ``api_key`` is a server that needs
+    no key.
     """
 
     base_url: str | None = None
@@ -874,8 +877,6 @@ class InferenceJob(_Model):
                 'key would go to another server. Use api_key: "" for a server '
                 "with no key"
             )
-        if self.base_url is None and self.api_key:
-            raise ValueError("a job that sets api_key must also set base_url")
         return self
 
 

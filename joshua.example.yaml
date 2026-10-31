@@ -306,7 +306,11 @@ usage:
 #   # One block for each job that needs a change: chat, voice, reflection,
 #   # describe, internet. A block with only `model` keeps the server above. A
 #   # block that sets base_url must set api_key too ("" for a server with no
-#   # key), so the key above never goes to another server.
+#   # key), so the key above never goes to another server. A block that sets
+#   # only api_key uses the server above with its own key, for example one
+#   # LiteLLM key for each job:
+#   # chat:
+#   #   api_key: ${INFERENCE_KEY_CHAT:-}
 #   internet:
 #     base_url: http://litellm:4000
 #     api_key: ${LITELLM_API_KEY:-}

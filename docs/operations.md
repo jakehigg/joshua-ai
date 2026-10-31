@@ -195,6 +195,54 @@ Know these limits:
   model that is not Claude can refuse it through LiteLLM. Keep `describe` on
   a Claude model.
 
+### One LiteLLM key for each job
+
+LiteLLM counts the use of each key. To see the use of each job in LiteLLM,
+give each job its own key and keep the one server. A job block that sets only
+`api_key` uses the global `base_url` with that key, and never gets the global
+key:
+
+```yaml
+inference:
+  base_url: http://litellm:4000
+  chat:
+    api_key: ${INFERENCE_KEY_CHAT:-}
+  voice:
+    api_key: ${INFERENCE_KEY_VOICE:-}
+  reflection:
+    api_key: ${INFERENCE_KEY_REFLECTION:-}
+  describe:
+    api_key: ${INFERENCE_KEY_DESCRIBE:-}
+  internet:
+    api_key: ${INFERENCE_KEY_INTERNET:-}
+```
+
+Do these steps:
+
+1. Make one key in LiteLLM for each job.
+2. Put each key in `.env`, for example `INFERENCE_KEY_CHAT=...`.
+3. Give each variable to `core`. `docker-compose.yml` gives `core` only
+   `INFERENCE_BASE_URL` and `INFERENCE_API_KEY`, so add the job keys to the
+   `environment` of `core` in `docker-compose.yml`:
+
+```yaml
+services:
+  core:
+    environment:
+      INFERENCE_KEY_CHAT: ${INFERENCE_KEY_CHAT:-}
+      INFERENCE_KEY_VOICE: ${INFERENCE_KEY_VOICE:-}
+      INFERENCE_KEY_REFLECTION: ${INFERENCE_KEY_REFLECTION:-}
+      INFERENCE_KEY_DESCRIBE: ${INFERENCE_KEY_DESCRIBE:-}
+      INFERENCE_KEY_INTERNET: ${INFERENCE_KEY_INTERNET:-}
+```
+
+   With the Helm chart, add each variable to `secrets.core.keys`.
+4. Restart `core`, then run the check (see "Check the model server").
+
+A job key that `core` does not get is empty. The job then sends no key, and
+the check shows `http_401` for that job. Jobs with different keys get
+different check calls.
+
 ### A local model for one job
 
 Ollama and LiteLLM can serve a local model through the Anthropic Messages
