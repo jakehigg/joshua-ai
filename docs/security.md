@@ -191,7 +191,10 @@ credentials. `gateway` gets the upstream credentials, from its own
 variable expands it to the empty string and never holds the credential.
 
 `core` picks the server and the credential of each model call from the
-[`inference`](config.md#inference) section, one job at a time. At start, after
+[`inference`](config.md#inference) section, one job at a time. Each key of
+that section is in `.env`, or in a Secret named by `secrets.core` with the
+Helm chart, and `joshua.yaml` refers to it as `${VAR:-}`. A literal key in
+`joshua.yaml` fails the load. At start, after
 the config loads, it keeps `CLAUDE_CODE_OAUTH_TOKEN` and removes every
 provider variable from its own environment. The SDK can replace a variable
 that the CLI inherits, but it cannot remove one, so the environment of each
@@ -199,7 +202,9 @@ call sets every provider variable, with an empty value for each one the job
 does not use. Thus a job gets its own key and no other: a job never gets the
 key of a different job, and a job on another server never gets the
 subscription token. Core never logs a key. The text of a failed call can name
-a host, so it goes neither to a person nor to the log.
+a host, so it goes neither to a person nor to the log. Only
+`POST /admin/inference/check` returns it, to an admin caller, after core
+removes every key and token of the `inference` section from it.
 
 An entry whose credential expanded to nothing is turned off, not started with an
 empty credential and not retried. `/readyz` counts it in `disabled` and the log

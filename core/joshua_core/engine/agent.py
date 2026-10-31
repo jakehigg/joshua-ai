@@ -349,6 +349,7 @@ async def run_oneshot(
     inference: ResolvedInference,
     timeout_s: float,
     usage_out: list[Usage] | None = None,
+    error_out: list[tuple[str, str]] | None = None,
 ) -> str:
     """One transient, tool-less turn, for a side call such as the nightly
     reflection.
@@ -358,7 +359,10 @@ async def run_oneshot(
     result text, or ``""`` on a failure, a failed call (``is_error``), or a
     timeout after ``timeout_s``. A failure is logged with the server label,
     never with the error text. When ``usage_out`` is a list, the tokens of the
-    turn are appended to it.
+    turn are appended to it. When ``error_out`` is a list, a failed call or a
+    timeout appends ``(label, text)`` to it: the short label and the error
+    text. The text can hold a host or a key, so the caller must clean it
+    before it shows it. An exception from the CLI is raised, not appended.
     """
     cwd = Path(tempfile.mkdtemp(prefix="joshua-oneshot-"))
     options = build_options(
@@ -379,6 +383,8 @@ async def run_oneshot(
             logger.warning(
                 {"message": "oneshot timed out", "timeout_s": timeout_s, **_labels(inference)}
             )
+            if error_out is not None:
+                error_out.append(("timeout", ""))
             return ""
         if usage_out is not None:
             usage_out.append(Usage.from_sdk(result.usage))
@@ -386,6 +392,8 @@ async def run_oneshot(
             logger.warning(
                 {"message": "oneshot call failed", "error": result.error, **_labels(inference)}
             )
+            if error_out is not None:
+                error_out.append((result.error or "error", result.text or ""))
             return ""
         return result.text or ""
     finally:

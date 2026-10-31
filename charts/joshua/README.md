@@ -72,6 +72,33 @@ upstream credential an MCP server reads as `${VAR}`. Every variable is optional
 unless the key says `{optional: false}`, so a container starts without a
 credential it does not use.
 
+**A model server other than the subscription.** The keys of the `inference`
+section go in `secrets.core`, and only core gets them. Add one key for each
+variable that your `joshua.yaml` refers to:
+
+```yaml
+secrets:
+  core:
+    keys:
+      INFERENCE_API_KEY: {}
+      LOCAL_INFERENCE_API_KEY: {name: local-model-server, key: api-key}
+
+config: |
+  ...
+  inference:
+    base_url: http://litellm:4000
+    api_key: ${INFERENCE_API_KEY:-}
+    internet:
+      base_url: http://ollama:11434
+      api_key: ${LOCAL_INFERENCE_API_KEY:-}
+      model: llama3.1
+```
+
+Write each key as `${VAR:-}`, with the `:-` default. Channels and gateway read
+the same file and do not get the key, and a `${VAR}` with no value and no
+default stops them at start. `docs/operations.md` has the recipes and the check
+route.
+
 `make init-env` in the repository mints the `JOSHUA_TOKEN_*` values. To make
 the Secrets by hand:
 

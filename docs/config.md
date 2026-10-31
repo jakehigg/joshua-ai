@@ -1104,6 +1104,15 @@ end. Please try again." The error text can name a host, so it goes neither
 to the person nor to the log. The log gets a short label, such as
 `authentication_failed` or `http_422`, and the server.
 
+**Check the server.** After a change to this section, run
+`POST /admin/inference/check` on `core`. It sends one short prompt to each
+job and returns, for each job, the server, the model, `ok`, and a short
+error with no key. `/readyz` on `core` gives `inference_overrides`, the
+number of job blocks that set `base_url` or `model`.
+[operations.md](operations.md#the-model-server) has recipes for the
+subscription, LiteLLM in front of Bedrock, and a local model for one job,
+and tells how to read the check.
+
 **Usage and cost.** Each row of the usage page names the model that the call
 used, and the server, in the `endpoint` column of `usage_event`. The SDK
 prices a model that it does not know at its own rates, so core keeps the

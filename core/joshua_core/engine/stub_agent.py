@@ -18,6 +18,7 @@ from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
+from joshua_core.engine.usage import Usage
 
 logger = get_logger("engine.stub")
 
@@ -218,3 +219,40 @@ def _unique(items: list[str]) -> list[str]:
             seen.add(item)
             out.append(item)
     return out
+
+
+class StubOneshot:
+    """A stand-in for ``agent.run_oneshot`` with no SDK and no network.
+
+    It takes the same arguments and answers ``"ok"``. It keeps each
+    ``ResolvedInference`` it was called with in ``calls``, so a test sees how
+    many calls a check made. ``fail`` maps a server label to the
+    ``(label, text)`` of a failed call, and ``raise_for`` maps a server label
+    to an exception to raise. A test sets them.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[ResolvedInference] = []
+        self.fail: dict[str, tuple[str, str]] = {}
+        self.raise_for: dict[str, Exception] = {}
+
+    async def __call__(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        inference: ResolvedInference,
+        timeout_s: float,
+        usage_out: list[Usage] | None = None,
+        error_out: list[tuple[str, str]] | None = None,
+    ) -> str:
+        self.calls.append(inference)
+        if usage_out is not None:
+            usage_out.append(Usage(input=3, output=1))
+        if inference.endpoint in self.raise_for:
+            raise self.raise_for[inference.endpoint]
+        if inference.endpoint in self.fail:
+            if error_out is not None:
+                error_out.append(self.fail[inference.endpoint])
+            return ""
+        return "ok"

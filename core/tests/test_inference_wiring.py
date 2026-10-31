@@ -537,6 +537,49 @@ async def test_a_turn_that_passes_the_limit_is_interrupted_and_fails(
     assert manager._pool["c1"].session is not old
 
 
+async def test_a_failed_oneshot_gives_the_label_and_the_text_to_error_out(
+    sdk: type[Client],
+) -> None:
+    sdk.messages = [ResultMessage(result=ERROR_TEXT, is_error=True, status=422)]
+    errors: list[tuple[str, str]] = []
+    text = await agent.run_oneshot(
+        system_prompt="s",
+        user_prompt="u",
+        inference=inference_plan.resolve(settings(SPLIT), "internet"),
+        timeout_s=5,
+        error_out=errors,
+    )
+    assert text == ""
+    assert errors == [("http_422", ERROR_TEXT)]
+
+
+async def test_a_good_oneshot_gives_nothing_to_error_out(sdk: type[Client]) -> None:
+    errors: list[tuple[str, str]] = []
+    await agent.run_oneshot(
+        system_prompt="s",
+        user_prompt="u",
+        inference=inference_plan.resolve(settings(), "reflection"),
+        timeout_s=5,
+        error_out=errors,
+    )
+    assert errors == []
+
+
+async def test_a_oneshot_that_passes_the_limit_gives_timeout_to_error_out(
+    sdk: type[Client],
+) -> None:
+    sdk.hang = True
+    errors: list[tuple[str, str]] = []
+    await agent.run_oneshot(
+        system_prompt="s",
+        user_prompt="u",
+        inference=inference_plan.resolve(settings(), "reflection"),
+        timeout_s=0.05,
+        error_out=errors,
+    )
+    assert errors == [("timeout", "")]
+
+
 async def test_a_oneshot_that_passes_the_limit_gives_empty_text(sdk: type[Client]) -> None:
     sdk.hang = True
     text = await agent.run_oneshot(

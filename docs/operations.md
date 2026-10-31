@@ -17,7 +17,7 @@ Each container answers two open routes on its port:
 | Container | `/readyz` checks |
 |---|---|
 | `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` while a poll error stands, and `ok: true` again after the next good poll. iMessage reports whether BlueBubbles answers a ping. The code stays `200`: channels serves `core` and the webhook while a poller is failing, and a `503` would stop the webhook that works because of an upstream that does not. |
-| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable). Either one false is a `503`. `embed` reports the model and does not hold `ok` down: a lost model costs the memory and not the turn. |
+| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable). Either one false is a `503`. `embed` reports the model and does not hold `ok` down: a lost model costs the memory and not the turn. `inference_overrides` is the number of `inference` job blocks that set `base_url` or `model`. It names no server and no model. |
 | `gateway` | `connected`, `errored`, `total`: the MCP upstreams. The code stays `200`: the `files` builtin answers whatever an upstream is doing, and a `503` would take away every tool because one failed to connect. |
 
 From the host:
@@ -102,6 +102,7 @@ message text and no sender handle.
 | `POST /admin/reflect` | run the nightly reflection now. `{"date": "2026-08-27", "person": "sam"}` re-runs one day for one person. |
 | `GET /admin/journal/status` | today's journal: entries written, whether the nightly page landed, and the last nightly run |
 | `POST /admin/turn` | run one turn with no channel: `{"channel", "text", "person"}`. The reply comes back in the response and is not delivered. |
+| `POST /admin/inference/check` | send one short prompt to the server and the model of each `inference` job. See "Check the model server". |
 
 Example:
 
@@ -121,6 +122,141 @@ add a port to a compose override for a debugging session.
 | `GET /admin/inventory` | every MCP server, its status, its tools, and who may use it |
 | `GET /admin/calls?identity=&tool=&limit=200` | the last tool calls: who, which tool, how long, success or denied |
 | `POST /admin/reload` | reconnect the upstreams after a change to `mcp:` in `joshua.yaml`. `{"server": "name"}` reloads one. |
+
+## The model server
+
+The [`inference`](config.md#inference) section of `joshua.yaml` sets the
+server, the key, and the model of each model call. Each recipe here is a
+complete `inference` section. Put each key in `.env` (or in `secrets.core` of
+the Helm chart), never in `joshua.yaml`, and write it as `${VAR:-}`.
+
+### The Claude subscription
+
+Do not write an `inference` section. Set `CLAUDE_CODE_OAUTH_TOKEN` in `.env`.
+Every job uses the subscription. This is the default.
+
+### LiteLLM in front of Bedrock
+
+LiteLLM speaks the Anthropic Messages API and sends each call to the model
+that its config names, for example a model on Bedrock. Joshua sends every job
+to LiteLLM:
+
+```yaml
+inference:
+  base_url: http://litellm:4000
+  api_key: ${INFERENCE_API_KEY:-}
+```
+
+`INFERENCE_API_KEY` in `.env` is a LiteLLM key. `docker-compose.yml` gives it
+to `core`.
+
+Joshua sends the model setting of each job as it is, for example
+`claude-opus-5`. Each name must be a `model_name` in the LiteLLM config.
+Thus do one of these:
+
+- Give LiteLLM a `model_name` for each model that a job asks for.
+- Set `model` in each job block to a LiteLLM name:
+
+```yaml
+inference:
+  base_url: http://litellm:4000
+  api_key: ${INFERENCE_API_KEY:-}
+  chat:
+    model: bedrock-claude-sonnet
+  voice:
+    model: bedrock-claude-haiku
+  reflection:
+    model: bedrock-claude-sonnet
+  describe:
+    model: bedrock-claude-haiku
+  internet:
+    model: bedrock-claude-haiku
+```
+
+The LiteLLM config then names each alias:
+
+```yaml
+model_list:
+  - model_name: bedrock-claude-sonnet
+    litellm_params:
+      model: bedrock/<the Bedrock model id>
+  - model_name: bedrock-claude-haiku
+    litellm_params:
+      model: bedrock/<the Bedrock model id>
+```
+
+Know these limits:
+
+- **Web search does not work.** The internet agent searches with `WebSearch`,
+  a tool that runs on Anthropic's side. Through LiteLLM or Bedrock the search
+  fails, and core writes a warning at start. `WebFetch` runs in `core`, so it
+  works on every server when `internet.fetch.enabled` is on.
+- **A PDF can fail.** The `describe` job sends a PDF as a document block. A
+  model that is not Claude can refuse it through LiteLLM. Keep `describe` on
+  a Claude model.
+
+### A local model for one job
+
+Ollama and LiteLLM can serve a local model through the Anthropic Messages
+API. Send one job there, and keep the other jobs on the global setting. A
+job that sets `base_url` must also set `api_key`. Write `api_key: ""` for a
+server that needs no key:
+
+```yaml
+inference:
+  reflection:
+    base_url: http://ollama:11434
+    api_key: ""
+    model: llama3.1
+```
+
+The other jobs use the subscription. The nightly reflection uses the local
+model. A small model can write a weak journal page. Read the next page that
+it writes.
+
+### Check the model server
+
+`POST /admin/inference/check` on `core` sends the prompt "Reply with the word
+ok." to each job. Jobs with the same server, model, and key share one call.
+Each call has a limit of 30 seconds, or `inference.timeout_seconds` when that
+is less. The calls run at the same time. Each call that ends writes one usage
+row, in the usage group of its first job.
+
+Run it after a change to the `inference` section:
+
+```
+curl -s -H "$auth" -X POST 127.0.0.1:8081/admin/inference/check
+```
+
+The answer has one row for each job. This example shows two of the five:
+
+```json
+{
+  "ok": false,
+  "jobs": [
+    {"job": "chat", "endpoint": "litellm:4000", "model": "bedrock-claude-sonnet",
+     "ok": true, "seconds": 1.42},
+    {"job": "reflection", "endpoint": "ollama:11434", "model": "llama3.1",
+     "ok": false, "seconds": 0.08, "error": "http_404: model 'llama3.1' not found"}
+  ]
+}
+```
+
+- `ok` at the top is `true` only when every job is `ok`.
+- `endpoint` is the host and the port of the server, or `anthropic`.
+- `error` is a short label, such as `http_401`, `http_404`, `timeout`, or the
+  name of an exception, then the start of the error text. Core removes every
+  key and token from the text and cuts it to 200 characters. The log gets the
+  label and the server, never the text.
+
+To read a failure:
+
+| `error` starts with | Do this |
+|---|---|
+| `http_401`, `authentication_failed` | Make sure that the key in `.env` is correct and that `core` gets it. |
+| `http_404`, `http_400` | Make sure that the server has a model with the name in `model`. |
+| `timeout` | Make sure that `core` can reach the server, and that the model loads in time. |
+| `CLIConnectionError`, another exception name | Read the `core` log. |
 
 ## Change the config
 

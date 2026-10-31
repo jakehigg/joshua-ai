@@ -28,6 +28,7 @@ from joshua_core.engine import injection, taught_skills
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
+from joshua_core.engine.stub_agent import StubOneshot
 from joshua_core.engine.tools import internet, recall, registration, scheduling
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
@@ -82,6 +83,9 @@ class AppContext:
     reflector: NightlyReflector
     # The snapshot runner, or None when `memory.snapshots` is empty.
     snapshots: SnapshotRunner | None = None
+    # The call of `POST /admin/inference/check`, or None for `run_oneshot`.
+    # The stub backend sets a call with no SDK and no network.
+    oneshot: Any = None
 
 
 def _database_url() -> str:
@@ -191,6 +195,7 @@ async def lifespan(app: FastAPI):
         indexer=indexer,
         reflector=reflector,
         snapshots=_build_snapshots(settings, repo, indexer),
+        oneshot=StubOneshot() if agent_backend == "stub" else None,
     )
     await scheduler.start()
     indexer_loop.start()
@@ -404,6 +409,9 @@ async def readyz(request: Request) -> JSONResponse:
     answers. The check makes the loss visible to a probe, because the symptom
     is otherwise a healthy container that remembers nothing.
 
+    ``inference_overrides`` is the number of ``inference`` job blocks that set
+    ``base_url`` or ``model``. It names no server and no model.
+
     No secrets, no inventory.
     """
     ctx: AppContext | None = getattr(request.app.state, "ctx", None)
@@ -418,8 +426,14 @@ async def readyz(request: Request) -> JSONResponse:
     layout_ok = not layout.validate_layout()
     embed_ok = embed.is_available()
     ok = db_ok and layout_ok
+    settings = getattr(ctx, "settings", None)
+    overrides = inference_plan.override_count(settings) if settings is not None else 0
     return JSONResponse(
-        {"ok": ok, "checks": {"db": db_ok, "layout": layout_ok, "embed": embed_ok}},
+        {
+            "ok": ok,
+            "checks": {"db": db_ok, "layout": layout_ok, "embed": embed_ok},
+            "inference_overrides": overrides,
+        },
         status_code=200 if ok else 503,
     )
 

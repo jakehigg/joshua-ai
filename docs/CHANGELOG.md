@@ -24,6 +24,17 @@ with the images and the packaged chart, are at
   core keeps the cost of a turn only for a call to Anthropic. See
   [config.md](config.md#inference).
 
+- **`POST /admin/inference/check` tests the server of each job.** Core sends
+  one short prompt to each distinct server, model, and key of the
+  `inference` jobs, and returns for each job the server, the model, `ok`,
+  the seconds, and a short error. The error has no key and no token. Each
+  call writes one usage row. `/readyz` on core gives `inference_overrides`,
+  the number of job blocks that set `base_url` or `model`. The Helm chart
+  (0.0.9) shows the `inference` keys in `secrets.core.keys` and the
+  `inference` section with `${VAR:-}`. [operations.md](operations.md#the-model-server)
+  has recipes for the subscription, LiteLLM in front of Bedrock, and a local
+  model for one job.
+
 - **Snapshots put the state of a live system in the memory index.** A new
   list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the
   arguments, a cadence, and a scope. Core runs each one with no model, keeps

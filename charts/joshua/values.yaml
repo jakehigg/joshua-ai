@@ -21,6 +21,21 @@ imagePullSecrets: []
 # docs/config.md. The chart writes it to a ConfigMap and mounts it read-only in
 # all three containers. Leave it empty to supply your own ConfigMap through
 # config.existingConfigMap.
+#
+# To send the model calls to a server other than the Claude subscription, add
+# an `inference` section. Refer to each key as ${VAR:-}, never as a literal.
+# The `:-` default is necessary: channels and gateway read the same file and do
+# not get the key. docs/operations.md has the recipes.
+#
+#   config: |
+#     ...
+#     inference:
+#       base_url: http://litellm:4000
+#       api_key: ${INFERENCE_API_KEY:-}
+#       internet:
+#         base_url: http://ollama:11434
+#         api_key: ${LOCAL_INFERENCE_API_KEY:-}
+#         model: llama3.1
 config: ""
 
 # Use a ConfigMap you made yourself. It must hold the key joshua.yaml.
@@ -58,6 +73,11 @@ secrets:
       # The callers of POST /v1/memory/search. Core verifies them.
       JOSHUA_TOKEN_VIEWER: {}
       JOSHUA_TOKEN_MCP: {}
+      # The key of the model server in `inference.base_url`, and the key of
+      # one job block. Only core gets them. Add the keys that your joshua.yaml
+      # refers to:
+      # INFERENCE_API_KEY: {}
+      # LOCAL_INFERENCE_API_KEY: {name: local-model-server, key: api-key}
   channels:
     name: joshua-channels-secrets
     keys:
