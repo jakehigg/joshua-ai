@@ -374,6 +374,7 @@ class ConversationManager:
             env=resolved.env,
             max_turns=getattr(profile, "max_turns", 0) or self._settings.core.max_turns,
             resume=resume,
+            tool_search=resolved.tool_search,
         )
         return _Built(AgentSession(options), deps, profile, mem_paths, mem_mtime, resolved)
 

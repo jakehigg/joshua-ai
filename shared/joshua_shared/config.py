@@ -55,6 +55,8 @@ MEMORY_SOURCE_ADAPTERS = ("files", "memos")
 VOICE_DELIVER_VIA_TYPES = ("telegram", "imessage")
 # The jobs that call a model. Each one can have its own block in ``inference``.
 INFERENCE_JOBS = ("chat", "voice", "reflection", "describe", "internet")
+# The jobs of a conversation turn. Only these can use tool search.
+CONVERSATION_JOBS = ("chat", "voice")
 # Reserved policy vocabulary (recorded now, enforced later).
 TOOL_CLASSES = ("read", "write-local", "act")
 URL_ARGS = ("none", "grant-required")
@@ -911,19 +913,23 @@ class InferenceJob(_Model):
     ``base_url`` replaces the global key for this job only: the job uses the
     global ``base_url`` with this key, or, with no global ``base_url``, the
     Anthropic API with this key. An empty ``api_key`` is a server that needs
-    no key.
+    no key. ``tool_search`` is for the conversation jobs (``chat`` and
+    ``voice``) only: ``true`` sends the MCP tool definitions to the model only
+    when it asks for them, through the CLI tool ``ToolSearch``. None keeps the
+    default of the job (on for ``chat``, off for ``voice``).
     """
 
     base_url: str | None = None
     api_key: str | None = None
     model: str | None = None
+    tool_search: bool | None = None
 
     @field_validator("base_url", mode="before")
     @classmethod
     def _check_url(cls, value: Any) -> Any:
         return _check_base_url(value)
 
-    @field_validator("model", mode="before")
+    @field_validator("model", "tool_search", mode="before")
     @classmethod
     def _empty_model_is_none(cls, value: Any) -> Any:
         return None if value == "" else value
@@ -970,6 +976,18 @@ class Inference(_Model):
     def _empty_job(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.
         return {} if value == "" else value
+
+    @model_validator(mode="after")
+    def _check_tool_search(self) -> Inference:
+        for name in INFERENCE_JOBS:
+            if name in CONVERSATION_JOBS:
+                continue
+            if self.job(name).tool_search is not None:
+                raise ValueError(
+                    f"inference.{name}.tool_search is not allowed: tool_search is "
+                    f"only for the conversation jobs {CONVERSATION_JOBS}"
+                )
+        return self
 
     def job(self, name: str) -> InferenceJob:
         """Return the block for job ``name``. Raises ``KeyError`` for an unknown job."""

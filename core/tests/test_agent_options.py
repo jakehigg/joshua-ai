@@ -79,6 +79,61 @@ def test_assertion_fires_when_tools_widened(fake_sdk, monkeypatch):
         _build()
 
 
+# ── tool search ─────────────────────────────────────────────────────────────
+
+
+def test_tool_search_on_gives_only_toolsearch_and_sets_the_variable(fake_sdk):
+    options = _build(tool_search=True)
+    assert options.tools == ["ToolSearch"]
+    assert options.env["ENABLE_TOOL_SEARCH"] == "true"
+
+
+def test_tool_search_off_gives_no_tools_and_clears_the_variable(fake_sdk):
+    # A value in the job environment cannot turn tool search on.
+    options = _build(env={"ENABLE_TOOL_SEARCH": "true"}, tool_search=False)
+    assert options.tools == []
+    assert options.env["ENABLE_TOOL_SEARCH"] == ""
+
+
+def test_tool_search_off_is_the_default(fake_sdk):
+    options = _build()
+    assert options.tools == []
+    assert options.env["ENABLE_TOOL_SEARCH"] == ""
+
+
+@pytest.mark.parametrize(
+    "widened",
+    [["Bash"], ["ToolSearch", "Read"], ["WebFetch"], ["Read"], ["ToolSearch", "ToolSearch"]],
+)
+def test_assertion_fires_for_any_other_tool_list(fake_sdk, monkeypatch, widened):
+    monkeypatch.setattr(agent, "_TOOL_SEARCH_TOOLS", widened)
+    with pytest.raises(AssertionError):
+        _build(tool_search=True)
+
+
+def test_check_refuses_toolsearch_without_the_variable():
+    with pytest.raises(AssertionError, match="together"):
+        agent.check_agent_tools(["ToolSearch"], {"ENABLE_TOOL_SEARCH": ""})
+    with pytest.raises(AssertionError, match="together"):
+        agent.check_agent_tools([], {"ENABLE_TOOL_SEARCH": "true"})
+    agent.check_agent_tools([], {})
+    agent.check_agent_tools(["ToolSearch"], {"ENABLE_TOOL_SEARCH": "true"})
+
+
+def test_check_refuses_another_builtin_beside_toolsearch():
+    for tools in (["ToolSearch", "Bash"], ["Grep"], ["WebSearch"]):
+        with pytest.raises(AssertionError):
+            agent.check_agent_tools(tools, {"ENABLE_TOOL_SEARCH": "true"})
+
+
+def test_a_oneshot_build_never_has_tool_search(fake_sdk):
+    """A side call passes no ``tool_search``, so a chat environment with tool
+    search on still builds with no tools."""
+    options = _build(env=resolved("chat", env={"ENABLE_TOOL_SEARCH": "true"}).env)
+    assert options.tools == []
+    assert options.env["ENABLE_TOOL_SEARCH"] == ""
+
+
 # ── the worker options ───────────────────────────────────────────────────────
 
 
@@ -222,6 +277,30 @@ def test_a_worker_with_a_file_or_shell_tool_fails_to_build(fake_sdk, tool):
     """The assert is the boundary: a file tool never reaches a worker."""
     with pytest.raises(AssertionError, match="may not hold"):
         _worker(tools=["WebSearch", tool])
+
+
+def test_a_worker_with_toolsearch_fails_to_build(fake_sdk):
+    """Tool search is for the agent only. A worker never holds it."""
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=["ToolSearch"])
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=["WebSearch", "ToolSearch"])
+
+
+@pytest.mark.parametrize("job", ["internet", "describe", "reflection"])
+def test_a_worker_environment_never_turns_tool_search_on(fake_sdk, job):
+    """The resolver gives a worker job an empty ``ENABLE_TOOL_SEARCH``, even
+    with tool search on for chat."""
+    from engine_fakes import make_settings
+    from joshua_shared.inference import resolve_inference
+
+    settings = make_settings()
+    assert resolve_inference(settings, "chat", oauth_token="t").tool_search is True
+    env = resolve_inference(settings, job, oauth_token="t").env
+    options = _worker(env=env)
+    assert options.env["ENABLE_TOOL_SEARCH"] == ""
+    assert "ToolSearch" not in options.tools
+    assert "ToolSearch" not in options.allowed_tools
 
 
 def test_the_agent_itself_still_gets_no_tool_at_all(fake_sdk):

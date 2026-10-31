@@ -43,7 +43,8 @@ BlueBubbles password. It holds no upstream tool credential.
 ## core
 
 `core` runs the agent. It keeps one session per conversation, composes the
-system prompt, and calls the Claude Agent SDK. The SDK gets an empty tool list.
+system prompt, and calls the Claude Agent SDK. The SDK gets an empty tool list,
+or only `ToolSearch` with [tool search](config.md#tool-search) on.
 Every capability the agent has is an MCP server. Some run inside `core`
 (memory search, reminders, adding a person, looking something up on the open
 web). The rest sit behind `gateway`.

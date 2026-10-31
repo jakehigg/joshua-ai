@@ -24,6 +24,7 @@ from joshua_shared.config import INFERENCE_JOBS, JoshuaConfig
 from joshua_shared.inference import (
     AUTH_KEYS,
     ENV_KEYS,
+    TOOL_SEARCH_KEY,
     ResolvedInference,
     resolve_inference,
 )
@@ -74,11 +75,12 @@ def turn_job(profile: Any) -> str:
 
 
 def plan(settings: JoshuaConfig) -> dict[str, dict[str, Any]]:
-    """For each job: the server label, the model, and what its block changes.
+    """For each job: the server label, the model, tool search, and what its
+    block changes.
 
     ``override`` names the fields that the job block sets (``server``,
-    ``key`` for a job key on the global server, ``model``), or is empty when
-    the job uses the global setting. It holds no key.
+    ``key`` for a job key on the global server, ``model``, ``tool_search``),
+    or is empty when the job uses the global setting. It holds no key.
     """
     out: dict[str, dict[str, Any]] = {}
     for job in INFERENCE_JOBS:
@@ -91,7 +93,14 @@ def plan(settings: JoshuaConfig) -> dict[str, dict[str, Any]]:
             override.append("key")
         if block.model is not None:
             override.append("model")
-        out[job] = {"endpoint": resolved.endpoint, "model": resolved.model, "override": override}
+        if block.tool_search is not None:
+            override.append("tool_search")
+        out[job] = {
+            "endpoint": resolved.endpoint,
+            "model": resolved.model,
+            "tool_search": resolved.tool_search,
+            "override": override,
+        }
     return out
 
 
@@ -176,8 +185,10 @@ def scrub(text: str, secrets: list[str]) -> str:
 
 def _target(resolved: ResolvedInference) -> tuple[str, str, tuple[tuple[str, str], ...]]:
     """The key of one distinct target: the server, the model, and the CLI
-    environment, which holds the URL and the credential. It stays in memory."""
-    return (resolved.endpoint, resolved.model, tuple(sorted(resolved.env.items())))
+    environment, which holds the URL and the credential. It stays in memory.
+    Tool search is not part of the key: a check call holds no tool."""
+    env = {k: v for k, v in resolved.env.items() if k != TOOL_SEARCH_KEY}
+    return (resolved.endpoint, resolved.model, tuple(sorted(env.items())))
 
 
 async def _check_one(

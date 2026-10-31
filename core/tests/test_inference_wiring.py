@@ -151,13 +151,27 @@ def test_the_plan_names_a_job_key_on_the_global_server() -> None:
 def test_the_plan_names_each_server_model_and_override() -> None:
     plan = inference_plan.plan(settings(SPLIT, VOICE))
 
-    assert plan["chat"] == {"endpoint": "anthropic", "model": "claude-opus-5", "override": []}
+    assert plan["chat"] == {
+        "endpoint": "anthropic",
+        "model": "claude-opus-5",
+        "tool_search": True,
+        "override": [],
+    }
     assert plan["voice"]["model"] == "voice-model"
+    assert plan["voice"]["tool_search"] is False
     assert plan["internet"] == {
         "endpoint": "litellm:4000",
         "model": "local-model",
+        "tool_search": False,
         "override": ["server", "model"],
     }
+
+
+def test_the_plan_names_a_tool_search_override() -> None:
+    plan = inference_plan.plan(settings(ELSEWHERE + "  voice:\n    tool_search: true\n", VOICE))
+    assert plan["voice"]["tool_search"] is True
+    assert plan["voice"]["override"] == ["tool_search"]
+    assert plan["chat"]["override"] == []
     assert no_key_in(plan)
 
 
@@ -805,3 +819,73 @@ async def test_an_internet_lookup_uses_the_internet_job(monkeypatch: pytest.Monk
     assert seen["inference"].endpoint == "litellm:4000"
     (row,) = repo.usage_events
     assert (row.model, row.endpoint) == ("local-model", "litellm:4000")
+
+
+# ── tool search on a turn ───────────────────────────────────────────────────
+
+
+def _voice_profile(person: Any, channel: Any) -> Any:
+    return SimpleNamespace(name="voice-dm", job="voice", max_turns=0)
+
+
+@pytest.mark.parametrize("section", ["", ELSEWHERE])
+async def test_a_chat_turn_gets_toolsearch_and_the_variable(
+    sdk: type[Client], tmp_path: Path, section: str
+) -> None:
+    """On the subscription and on another server, the same rule applies."""
+    manager = sdk_manager(FakeRepo(), tmp_path, section)
+    await manager.run_turn(make_channel(), make_conversation(), "hi")
+
+    options = sdk.built[0].options
+    assert options.tools == ["ToolSearch"]
+    assert options.env["ENABLE_TOOL_SEARCH"] == "true"
+
+
+async def test_a_voice_turn_gets_no_tool_and_an_empty_variable(
+    sdk: type[Client], tmp_path: Path
+) -> None:
+    manager = sdk_manager(
+        FakeRepo(), tmp_path, ELSEWHERE, extra=VOICE, derive_profile=_voice_profile
+    )
+    await manager.run_turn(make_channel(), make_conversation(), "hi")
+
+    options = sdk.built[0].options
+    assert options.tools == []
+    assert options.env["ENABLE_TOOL_SEARCH"] == ""
+
+
+async def test_an_inherited_variable_never_reaches_a_job_with_tool_search_off(
+    sdk: type[Client], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SDK starts the CLI with ``{**os.environ, **options.env}``. The scrub
+    removes the variable, and the empty value in ``options.env`` wins over a
+    value that comes back after it."""
+    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "true")
+    removed = inference_plan.take_credentials()
+    assert "ENABLE_TOOL_SEARCH" in removed
+    assert "ENABLE_TOOL_SEARCH" not in os.environ
+    monkeypatch.setattr(inference_plan, "_oauth_token", OAUTH)
+    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "true")
+
+    manager = sdk_manager(FakeRepo(), tmp_path, ELSEWHERE + "  chat:\n    tool_search: false\n")
+    await manager.run_turn(make_channel(), make_conversation(), "hi")
+
+    options = sdk.built[0].options
+    assert options.tools == []
+    child_env = {**os.environ, **options.env}
+    assert child_env["ENABLE_TOOL_SEARCH"] == ""
+
+
+async def test_the_check_shares_one_call_when_only_tool_search_differs() -> None:
+    """Chat and voice on the same server and model are one target."""
+    calls: list[Any] = []
+
+    async def oneshot(**kwargs: Any) -> str:
+        calls.append(kwargs["inference"].job)
+        return "ok"
+
+    cfg = settings(ELSEWHERE + "  voice:\n    model: claude-opus-5\n")
+    result = await inference_plan.check(cfg, oneshot=oneshot)
+    assert result["ok"] is True
+    assert "voice" not in calls
+    assert "chat" in calls

@@ -196,6 +196,15 @@ Know these limits:
 - **A PDF can fail.** The `describe` job sends a PDF as a document block. A
   model that is not Claude can refuse it through LiteLLM. Keep `describe` on
   a Claude model.
+- **The tool definitions are a large part of each call.** Without tool
+  search, each model call sends the definition of every MCP tool. With many
+  servers, that can be tens of thousands of tokens, and the cache of the
+  prompt is written again on most turns. Tool search is on for `chat` by
+  default: a call then sends the tool names only, and the model loads a
+  definition when it needs the tool, with one more model call. It is off for
+  `voice`, because a spoken reply must be fast. Set
+  `inference.voice.tool_search: true` to turn it on there too. See
+  [Tool search](config.md#tool-search).
 
 ### One LiteLLM key for each job
 

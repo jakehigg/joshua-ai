@@ -53,8 +53,11 @@ def load(section: str = "", *, voice: bool = True, env: dict[str, str] | None = 
     return config.parse(text, ENV if env is None else env, source="test.yaml")
 
 
-def expected_env(**values: str) -> dict[str, str]:
+def expected_env(job: str, **values: str) -> dict[str, str]:
+    """The full environment of ``job``. Only ``chat`` has tool search on by default."""
     env = dict.fromkeys(ENV_KEYS, "")
+    if job == "chat":
+        env["ENABLE_TOOL_SEARCH"] = "true"
     env.update(values)
     return env
 
@@ -69,7 +72,7 @@ def test_no_section_is_the_subscription() -> None:
     cfg = load()
     for job in config.INFERENCE_JOBS:
         resolved = resolve_inference(cfg, job, oauth_token=OAUTH)
-        assert resolved.env == expected_env(CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
+        assert resolved.env == expected_env(job, CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
         assert resolved.model == JOB_MODELS[job]
         assert resolved.endpoint == "anthropic"
         assert resolved.job == job
@@ -81,14 +84,14 @@ def test_empty_values_from_unset_variables_are_the_subscription() -> None:
         env={},
     )
     resolved = resolve_inference(cfg, "chat", oauth_token=OAUTH)
-    assert resolved.env == expected_env(CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
+    assert resolved.env == expected_env("chat", CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
 
 
 def test_api_key_alone_is_the_anthropic_api() -> None:
     cfg = load("\ninference:\n  api_key: ${INFERENCE_API_KEY}\n")
     for job in config.INFERENCE_JOBS:
         resolved = resolve_inference(cfg, job, oauth_token=OAUTH)
-        assert resolved.env == expected_env(ANTHROPIC_API_KEY=GLOBAL_KEY)
+        assert resolved.env == expected_env(job, ANTHROPIC_API_KEY=GLOBAL_KEY)
         assert resolved.env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
         assert resolved.endpoint == "anthropic"
         assert resolved.model == JOB_MODELS[job]
@@ -102,6 +105,7 @@ def test_global_base_url_is_inherited_by_every_job() -> None:
         assert resolved.model == model
         assert resolved.endpoint == "litellm:4000"
         assert resolved.env == expected_env(
+            job,
             ANTHROPIC_BASE_URL="http://litellm:4000",
             ANTHROPIC_AUTH_TOKEN=GLOBAL_KEY,
             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
@@ -127,7 +131,7 @@ def test_model_only_override_on_the_subscription() -> None:
     cfg = load("\ninference:\n  chat:\n    model: other-model\n")
     resolved = resolve_inference(cfg, "chat", oauth_token=OAUTH)
     assert resolved.model == "other-model"
-    assert resolved.env == expected_env(CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
+    assert resolved.env == expected_env("chat", CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
 
 
 def test_full_override_uses_the_job_server_and_key() -> None:
@@ -140,6 +144,7 @@ def test_full_override_uses_the_job_server_and_key() -> None:
     assert resolved.model == "local-model"
     assert resolved.endpoint == "llm.example"
     assert resolved.env == expected_env(
+        "internet",
         ANTHROPIC_BASE_URL="https://llm.example",
         ANTHROPIC_AUTH_TOKEN=JOB_KEY,
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
@@ -147,7 +152,7 @@ def test_full_override_uses_the_job_server_and_key() -> None:
     )
     # The other jobs keep the global setting.
     chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
-    assert chat.env == expected_env(ANTHROPIC_API_KEY=GLOBAL_KEY)
+    assert chat.env == expected_env("chat", ANTHROPIC_API_KEY=GLOBAL_KEY)
 
 
 def test_job_env_never_holds_another_key() -> None:
@@ -178,7 +183,7 @@ def test_subscription_job_never_holds_a_job_key() -> None:
     )
     chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
     assert JOB_KEY not in chat.env.values()
-    assert chat.env == expected_env(CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
+    assert chat.env == expected_env("chat", CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
     internet = resolve_inference(cfg, "internet", oauth_token=OAUTH)
     assert OAUTH not in internet.env.values()
 
@@ -199,7 +204,7 @@ def test_at_most_one_auth_variable_is_set() -> None:
 
 
 def test_env_has_exactly_the_full_key_set() -> None:
-    assert len(set(ENV_KEYS)) == len(ENV_KEYS) == 24
+    assert len(set(ENV_KEYS)) == len(ENV_KEYS) == 25
     cfg = load('\ninference:\n  internet:\n    base_url: http://litellm:4000\n    api_key: ""\n')
     for job in config.INFERENCE_JOBS:
         assert set(resolve_inference(cfg, job, oauth_token=OAUTH).env) == set(ENV_KEYS)
@@ -221,6 +226,7 @@ def test_job_api_key_uses_the_global_server_with_the_job_key() -> None:
     chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
     assert chat.endpoint == "litellm:4000"
     assert chat.env == expected_env(
+        "chat",
         ANTHROPIC_BASE_URL="http://litellm:4000",
         ANTHROPIC_AUTH_TOKEN=JOB_KEY,
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
@@ -272,17 +278,17 @@ def test_job_api_key_with_no_server_is_an_anthropic_api_key() -> None:
     )
     chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
     assert chat.endpoint == "anthropic"
-    assert chat.env == expected_env(ANTHROPIC_API_KEY=JOB_KEY)
+    assert chat.env == expected_env("chat", ANTHROPIC_API_KEY=JOB_KEY)
     reflection = resolve_inference(cfg, "reflection", oauth_token=OAUTH)
-    assert reflection.env == expected_env(ANTHROPIC_API_KEY=GLOBAL_KEY)
+    assert reflection.env == expected_env("reflection", ANTHROPIC_API_KEY=GLOBAL_KEY)
 
 
 def test_job_api_key_on_the_subscription_never_holds_the_token() -> None:
     cfg = load("\ninference:\n  chat:\n    api_key: ${JOB_API_KEY}\n")
     chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
-    assert chat.env == expected_env(ANTHROPIC_API_KEY=JOB_KEY)
+    assert chat.env == expected_env("chat", ANTHROPIC_API_KEY=JOB_KEY)
     voice = resolve_inference(cfg, "voice", oauth_token=OAUTH)
-    assert voice.env == expected_env(CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
+    assert voice.env == expected_env("voice", CLAUDE_CODE_OAUTH_TOKEN=OAUTH)
 
 
 def test_empty_api_key_is_an_empty_string() -> None:
@@ -423,3 +429,49 @@ def test_timeout_seconds_is_read() -> None:
 def test_timeout_seconds_must_be_more_than_zero(value: str) -> None:
     with pytest.raises(config.ConfigError):
         load(f"\ninference:\n  timeout_seconds: {value}\n")
+
+
+# --- tool search ------------------------------------------------------------
+
+LITELLM = "\ninference:\n  base_url: http://litellm:4000\n  api_key: ${INFERENCE_API_KEY}\n"
+
+
+@pytest.mark.parametrize("section", ["", LITELLM])
+def test_tool_search_is_on_for_chat_and_off_for_voice_by_default(section: str) -> None:
+    cfg = load(section)
+    chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
+    voice = resolve_inference(cfg, "voice", oauth_token=OAUTH)
+    assert chat.tool_search is True
+    assert chat.env["ENABLE_TOOL_SEARCH"] == "true"
+    assert voice.tool_search is False
+    assert voice.env["ENABLE_TOOL_SEARCH"] == ""
+
+
+def test_tool_search_can_be_changed_for_each_conversation_job() -> None:
+    cfg = load(LITELLM + "  chat:\n    tool_search: false\n  voice:\n    tool_search: true\n")
+    chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
+    voice = resolve_inference(cfg, "voice", oauth_token=OAUTH)
+    assert chat.tool_search is False
+    assert chat.env["ENABLE_TOOL_SEARCH"] == ""
+    assert voice.tool_search is True
+    assert voice.env["ENABLE_TOOL_SEARCH"] == "true"
+
+
+def test_an_empty_tool_search_keeps_the_default() -> None:
+    cfg = load("\ninference:\n  chat:\n    tool_search: ${UNSET:-}\n", env={})
+    assert cfg.inference.chat.tool_search is None
+    assert resolve_inference(cfg, "chat", oauth_token=OAUTH).tool_search is True
+
+
+@pytest.mark.parametrize("job", ["reflection", "describe", "internet"])
+def test_a_worker_job_never_gets_tool_search(job: str) -> None:
+    cfg = load(LITELLM)
+    resolved = resolve_inference(cfg, job, oauth_token=OAUTH)
+    assert resolved.tool_search is False
+    assert resolved.env["ENABLE_TOOL_SEARCH"] == ""
+
+
+@pytest.mark.parametrize("job", ["reflection", "describe", "internet"])
+def test_tool_search_on_a_worker_job_is_refused(job: str) -> None:
+    with pytest.raises(config.ConfigError, match="only for the conversation jobs"):
+        load(f"\ninference:\n  {job}:\n    tool_search: true\n")

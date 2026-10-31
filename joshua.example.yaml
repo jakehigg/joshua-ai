@@ -326,6 +326,11 @@ usage:
 #   # LiteLLM key for each job:
 #   # chat:
 #   #   api_key: ${INFERENCE_KEY_CHAT:-}
+#   # TOOL SEARCH: a chat turn sends only the MCP tool names, and the model
+#   # loads a definition when it needs the tool (one more model call). On for
+#   # chat, off for voice by default; only chat and voice have this key.
+#   # voice:
+#   #   tool_search: true
 #   internet:
 #     base_url: http://litellm:4000
 #     api_key: ${LITELLM_API_KEY:-}

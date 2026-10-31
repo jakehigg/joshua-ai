@@ -32,7 +32,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from joshua_shared.inference import ResolvedInference
+from joshua_shared.inference import TOOL_SEARCH_KEY, TOOL_SEARCH_ON, ResolvedInference
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
@@ -64,9 +64,15 @@ _MAX_BUFFER_SIZE = 32 * 1024 * 1024
 
 # The agent has NO SDK built-in tools. Every capability is an MCP server (gateway
 # or in-process builtin). ``build_options`` hard-codes this list and asserts the
-# built options carry it; there is no parameter to widen it (decided 2026-08-25
-# core has no direct web egress).
+# built options carry it. Core has no direct web egress. The one other list is
+# ``_TOOL_SEARCH_TOOLS``, and ``check_agent_tools`` refuses any other.
 _NO_TOOLS: list[str] = []
+
+# The one CLI tool the agent may hold, and only with tool search on. It loads
+# the definition of an MCP tool that the agent already holds. It reads no file,
+# runs no command, and reaches no network, so it gives no capability.
+TOOL_SEARCH_TOOL = "ToolSearch"
+_TOOL_SEARCH_TOOLS: list[str] = [TOOL_SEARCH_TOOL]
 
 # The only built-in tools a worker may hold, and the only place in this repo
 # where a tool list is not empty. ``WebSearch`` runs on Anthropic's side.
@@ -117,7 +123,9 @@ __all__ = [
     "create_sdk_mcp_server",
     "search_tool_handler",
     "build_worker_options",
+    "check_agent_tools",
     "check_worker_tools",
+    "TOOL_SEARCH_TOOL",
     "run_oneshot",
     "run_structured",
     "run_worker_session",
@@ -158,6 +166,7 @@ def build_options(
     max_turns: int,
     resume: str | None,
     output_format: dict[str, Any] | None = None,
+    tool_search: bool = False,
 ) -> Any:
     """Construct ``ClaudeAgentOptions`` for one conversation.
 
@@ -165,15 +174,20 @@ def build_options(
     preset. ``setting_sources=[]`` loads no filesystem CLAUDE.md or settings, so
     the composed prompt is the whole instruction surface. ``permission_mode``
     bypass runs tools without an interactive prompt (this is a headless service).
-    ``tools`` is the empty list: the agent gets no SDK built-in tools. ``env``
-    is the environment of one job, from ``ResolvedInference.env``.
+    ``tools`` is the empty list: the agent gets no SDK built-in tools. With
+    ``tool_search`` (``ResolvedInference.tool_search``), ``tools`` is
+    ``["ToolSearch"]`` and ``ENABLE_TOOL_SEARCH`` is ``"true"``; without it,
+    that variable is ``""``. ``env`` is the environment of one job, from
+    ``ResolvedInference.env``.
     """
+    run_env = dict(env)
+    run_env[TOOL_SEARCH_KEY] = TOOL_SEARCH_ON if tool_search else ""
     kwargs: dict[str, Any] = dict(
         system_prompt=system_prompt,
         cwd=str(cwd),
-        env=dict(env),
+        env=run_env,
         mcp_servers=mcp_servers,
-        tools=list(_NO_TOOLS),
+        tools=list(_TOOL_SEARCH_TOOLS if tool_search else _NO_TOOLS),
         permission_mode="bypassPermissions",
         setting_sources=[],
         max_turns=max_turns,
@@ -187,8 +201,22 @@ def build_options(
     if output_format:
         kwargs["output_format"] = output_format
     options = ClaudeAgentOptions(**kwargs)
-    assert options.tools == [], "core agent must expose no SDK built-in tools"
+    check_agent_tools(options.tools, options.env)
     return options
+
+
+def check_agent_tools(tools: Any, env: dict[str, str]) -> None:
+    """Assert the agent boundary: ``tools`` is ``[]`` or exactly ``["ToolSearch"]``.
+
+    ``ToolSearch`` is allowed only together with ``ENABLE_TOOL_SEARCH`` set to
+    ``"true"``, and that value only together with ``ToolSearch``.
+    """
+    # Literal lists, so a change to a module list cannot widen the check.
+    assert tools in ([], ["ToolSearch"]), (
+        f"core agent must expose no SDK built-in tools, got {tools}"
+    )
+    on = env.get(TOOL_SEARCH_KEY, "") == TOOL_SEARCH_ON
+    assert on == (tools == ["ToolSearch"]), "ToolSearch and ENABLE_TOOL_SEARCH must be set together"
 
 
 def build_search_server(search: SearchFn) -> dict[str, Any]:

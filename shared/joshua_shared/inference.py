@@ -7,6 +7,10 @@ the CLI reads an empty value as not set. So the environment that this module
 gives holds every key in ``ENV_KEYS``, with ``""`` for each key that the job
 does not use. Then no variable that the container inherits can change the
 server or the credential of a job.
+
+``ENABLE_TOOL_SEARCH`` is in ``ENV_KEYS`` for the same reason. It is ``"true"``
+only for a conversation job with tool search on, and ``""`` for every other
+job, so an inherited value cannot turn tool search on or off.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from joshua_shared.config import INFERENCE_JOBS, JoshuaConfig
+from joshua_shared.config import CONVERSATION_JOBS, INFERENCE_JOBS, JoshuaConfig
 
 # The variables that select a credential. At most one has a value.
 AUTH_KEYS = (
@@ -56,9 +60,20 @@ MODEL_KEYS = ("ANTHROPIC_MODEL", *MODEL_TIER_KEYS)
 
 NONESSENTIAL_TRAFFIC_KEY = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
 
+# Tool search: the CLI sends the MCP tool definitions to the model only when
+# the model asks for them with the CLI tool ``ToolSearch``. The CLI needs both
+# this variable and ``ToolSearch`` in the tool list. On a server that is not
+# Anthropic, the CLI keeps tool search off unless this variable is set.
+TOOL_SEARCH_KEY = "ENABLE_TOOL_SEARCH"
+TOOL_SEARCH_ON = "true"
+
+# The tool search setting of each conversation job when its block sets none.
+# A voice turn must answer fast, and tool search adds one model call.
+TOOL_SEARCH_DEFAULTS = {"chat": True, "voice": False}
+
 # The full set. Each environment from ``resolve_inference`` holds exactly these
 # keys, and a caller can remove them from ``os.environ`` with the same list.
-ENV_KEYS = (*PROVIDER_KEYS, *MODEL_KEYS, NONESSENTIAL_TRAFFIC_KEY)
+ENV_KEYS = (*PROVIDER_KEYS, *MODEL_KEYS, NONESSENTIAL_TRAFFIC_KEY, TOOL_SEARCH_KEY)
 
 ANTHROPIC_ENDPOINT = "anthropic"
 
@@ -68,13 +83,16 @@ class ResolvedInference:
     """The model, the CLI environment, and the server label for one job.
 
     ``endpoint`` is safe to log: it is the host of the server, or
-    ``"anthropic"``. It never holds a key or a path.
+    ``"anthropic"``. It never holds a key or a path. ``tool_search`` is True
+    only for a conversation job with tool search on; ``env`` then holds
+    ``ENABLE_TOOL_SEARCH``.
     """
 
     job: str
     model: str
     env: dict[str, str]
     endpoint: str
+    tool_search: bool = False
 
 
 def job_model_setting(config: JoshuaConfig, job: str) -> str:
@@ -91,6 +109,21 @@ def job_model_setting(config: JoshuaConfig, job: str) -> str:
     if job == "internet":
         return config.internet.model
     raise KeyError(f"unknown inference job '{job}'; valid: {INFERENCE_JOBS}")
+
+
+def job_tool_search(config: JoshuaConfig, job: str) -> bool:
+    """Return True when ``job`` uses tool search.
+
+    It is ``inference.<job>.tool_search``, or else the default of the job in
+    ``TOOL_SEARCH_DEFAULTS``. A job that is not a conversation job never uses
+    tool search. Raises ``KeyError`` for an unknown job.
+    """
+    block = config.inference.job(job)
+    if job not in CONVERSATION_JOBS:
+        return False
+    if block.tool_search is not None:
+        return block.tool_search
+    return TOOL_SEARCH_DEFAULTS[job]
 
 
 def cli_base_url(base_url: str) -> str:
@@ -125,7 +158,8 @@ def resolve_inference(config: JoshuaConfig, job: str, *, oauth_token: str) -> Re
     with no global ``base_url``, the job's key is an Anthropic API key. Else
     the job uses the global ``base_url`` and ``api_key``. ``oauth_token`` is
     the subscription token, and it is used only when there is no
-    ``base_url`` and no key. Raises ``KeyError`` for an unknown job.
+    ``base_url`` and no key. Tool search follows ``job_tool_search`` on every
+    server. Raises ``KeyError`` for an unknown job.
     """
     inference = config.inference
     block = inference.job(job)
@@ -152,7 +186,17 @@ def resolve_inference(config: JoshuaConfig, job: str, *, oauth_token: str) -> Re
     else:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
 
+    tool_search = job_tool_search(config, job)
+    if tool_search:
+        env[TOOL_SEARCH_KEY] = TOOL_SEARCH_ON
+
     set_auth = [key for key in AUTH_KEYS if env[key]]
     if len(set_auth) > 1:
         raise AssertionError(f"more than one credential variable is set: {set_auth}")
-    return ResolvedInference(job=job, model=model, env=env, endpoint=endpoint_label(base_url))
+    return ResolvedInference(
+        job=job,
+        model=model,
+        env=env,
+        endpoint=endpoint_label(base_url),
+        tool_search=tool_search,
+    )

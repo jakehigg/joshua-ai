@@ -1076,6 +1076,7 @@ inference:
 | `<job>.model` | the model setting of the job | The model for this job. |
 | `<job>.base_url` | not set | The server for this job. |
 | `<job>.api_key` | not set | The key for `<job>.base_url`. It must be set when `<job>.base_url` is set. With no `<job>.base_url`, the key of this job on the global server, in place of the global `api_key`. |
+| `chat.tool_search`, `voice.tool_search` | `true` for `chat`, `false` for `voice` | Tool search for the turns of this job. See [Tool search](#tool-search). The other jobs do not have this key, and the load fails when one sets it. |
 
 The jobs are `chat`, `voice`, `reflection`, `describe`, and `internet`. Any
 other key in `inference` fails the load.
@@ -1191,6 +1192,37 @@ and tells how to read the check.
 used, and the server, in the `endpoint` column of `usage_event`. The SDK
 prices a model that it does not know at its own rates, so core keeps the
 cost of a chat turn only for a call to `anthropic`.
+
+### Tool search
+
+Each MCP tool has a definition: its name, its description, and its
+arguments. Without tool search, each model call of a turn sends the
+definition of every tool that the agent holds. With many MCP servers, that
+is a large part of each call. With tool search, a call sends only the tool
+names. When the model needs a tool, it asks for the definition with the CLI
+tool `ToolSearch`, and then it calls the tool.
+
+```yaml
+inference:
+  chat:
+    tool_search: true    # the default
+  voice:
+    tool_search: false   # the default
+```
+
+- With tool search on, a turn sends fewer tokens, but a turn that uses a tool
+  can need one more model call. That is why it is on for `chat` and off for
+  `voice`, where a reply must be fast.
+- One rule applies on every server. With tool search on, core gives the agent
+  the tool `ToolSearch` and sets `ENABLE_TOOL_SEARCH=true` for the CLI. With
+  it off, the agent gets no tool and the variable is empty, so a value in the
+  environment of the container has no effect. On a server that is not
+  Anthropic, the CLI keeps tool search off unless the variable is set.
+- `ToolSearch` gives the agent no new capability. It loads only the
+  definition of an MCP tool that the agent already holds. It reads no file,
+  runs no command, and reaches no network.
+- The workers (`reflection`, `describe`, `internet`) never get tool search.
+- The start log line of each job gives `tool_search` (`true` or `false`).
 
 ## Agent backend
 
