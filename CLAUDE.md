@@ -128,9 +128,9 @@ Route allowlists, by default:
   gateway reads the tool and the arguments from `memory.snapshots`, so the
   config is the allowlist.
 - gateway `POST /v1/search`: `core` only. The body is `{query}`: the gateway
-  reads the server, the tool, and the arguments from `internet.search`. It
-  names no person, so the server's `allow` does not apply; the docs tell the
-  operator to set `allow:` with no value (no person) on that server.
+  calls the SearXNG JSON API of `internet.search` (`GET {url}/search`,
+  `format=json`), not an MCP upstream. The URL, the parameters, and the
+  optional key come from the config, and only the gateway holds the key.
 - `/admin/*` on every container: `ADMIN_CALLERS` (default `laptop,ci`), checked
   on every admin route with no exception.
 - `/healthz`: open, `{"ok": true}`. `/readyz`: open, booleans and counts, no
@@ -234,14 +234,15 @@ fails to build:
   `build_search_server` made;
 - the only MCP tool is `mcp__search__web_search`, and only beside that server.
 
-The worker gets one search tool. With `internet.search` set, it is
-`web_search`: its handler calls the gateway `POST /v1/search` with core's
-token, adds each result URL to the fetch allowlist of the run, and gives the
-model title, URL, and snippet. It never gets `WebSearch` then, on any server.
-With no `internet.search`, it gets `WebSearch` (on Anthropic's side) only when
-the `internet` job is on `anthropic`; on another server it has no search, and
-the prompt tells it to say so. `WebFetch` runs in the container, is off unless
-`internet.fetch.enabled` is on, and is gated by a `PreToolUse` hook. The hook
+The worker gets at most one search tool, chosen by the server of the
+`internet` job. On `anthropic` it is `WebSearch` (on Anthropic's side), also
+when `internet.search` is set. On another server with `internet.search` set,
+it is `web_search`: its handler calls the gateway `POST /v1/search` with
+core's token, adds each result URL to the fetch allowlist of the run, and
+gives the model title, URL, and snippet. On another server with no
+`internet.search`, it has no search, and the prompt tells it to say so.
+`WebFetch` runs in the container, is off unless `internet.fetch.enabled` is
+on, and is gated by a `PreToolUse` hook. The hook
 reads only a URL the caller passed or a result URL of a search of that run,
 then checks the block list in `joshua_shared.netblock`, and a hook that fails
 denies. Never widen `WORKER_TOOLS` or the worker's MCP servers, never give a

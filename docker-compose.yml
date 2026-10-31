@@ -76,7 +76,9 @@ services:
     # `NAME=value` line per variable in `.env.gateway`, which is yours and is
     # gitignored. It is optional, so a stack with no upstream credential starts
     # without it. This file, not `.env`, is where an MCP server's token goes:
-    # the gateway is the only container that may hold one.
+    # the gateway is the only container that may hold one. The optional key of
+    # the SearXNG instance of `internet.search` (`SEARXNG_API_KEY`) goes here
+    # too: the gateway calls SearXNG, and core never gets the key.
     env_file:
       - path: .env.gateway
         required: false

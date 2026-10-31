@@ -187,12 +187,12 @@ model_list:
 
 Know these limits:
 
-- **`WebSearch` is not available.** `WebSearch` runs on Anthropic's side, so
-  the internet agent gets it only on the Anthropic server. On another server
-  it has no search, and core writes a warning at start. To search on every
-  server, give it a search MCP server: see "Web search for the internet
-  agent". `WebFetch` runs in `core`, so it works on every server when
-  `internet.fetch.enabled` is on.
+- **Web search stops.** On the Anthropic server the internet agent uses
+  Anthropic's own `WebSearch`, which needs nothing. Through LiteLLM, Bedrock,
+  or Ollama there is no `WebSearch`, so the internet agent has no search, and
+  core writes a warning at start. To search again, point `internet.search` at
+  a SearXNG instance: see "Web search off Anthropic: SearXNG". `WebFetch` runs
+  in `core`, so it works on every server when `internet.fetch.enabled` is on.
 - **A PDF can fail.** The `describe` job sends a PDF as a document block. A
   model that is not Claude can refuse it through LiteLLM. Keep `describe` on
   a Claude model.
@@ -308,118 +308,64 @@ To read a failure:
 | `timeout` | Make sure that `core` can reach the server, and that the model loads in time. |
 | `CLIConnectionError`, another exception name | Read the `core` log. |
 
-## Web search for the internet agent
+## Web search off Anthropic: SearXNG
 
-The internet agent can search through a search MCP server that the gateway
-hosts. Then it searches on every model server: Anthropic, LiteLLM, Bedrock, or
-Ollama. The agent does not get the search tool. It asks the internet agent,
-as before, and reads the answer, never the raw results.
+On the Anthropic server (the subscription or an Anthropic API key), the
+internet agent uses Anthropic's own `WebSearch`. You set nothing, and
+`internet.search` is not used.
 
-With an `internet.search` block, the internet agent always uses that server,
-also on the Anthropic server. With no block, it uses `WebSearch` on the
-Anthropic server and has no search on another server.
+When the `internet` job moves to another server, such as Bedrock through
+LiteLLM or Ollama, web search stops. To search again, give the internet agent
+a SearXNG instance. The gateway calls the JSON API of SearXNG, and the agent
+reads the answer of the internet agent, never the raw results.
 
 Do these steps:
 
-1. Add the search server to the `mcp` section. Set `allow:` with no value, so
-   that no person gets the tool directly.
-2. Put the provider key, if the server needs one, in `.env.gateway` (or in
-   `secrets.gateway` of the Helm chart). Only the gateway gets it. Write it as
-   `${VAR:-}` in `joshua.yaml`.
-3. Add the `internet.search` block. `server` is the name of the `mcp` entry
-   and `tool` is its search tool.
-4. Restart the gateway and core.
-5. Read the core log. The line `"message": "internet search"` must show
-   `"search": "mcp:<the entry name>"`.
+1. Run a SearXNG instance that the gateway can reach, for example the
+   container `searxng` on port 8080 of the compose network.
+2. Turn on the `json` format of SearXNG. In its `settings.yml`, add `json` to
+   `search.formats`:
 
-[docs/config.md](config.md#web-search) explains each key. Each entry below
-pins an exact version. Read the README of the server before you change the
-version, because a tool name or an argument can change.
+   ```yaml
+   search:
+     formats:
+       - html
+       - json
+   ```
 
-### SearXNG
+   Restart SearXNG. Without `json`, SearXNG answers `403`, and the gateway
+   gives the error "searxng refused the json format (403)".
+3. Add the `search` block to the `internet` section of `joshua.yaml`:
 
-SearXNG is a search engine that you host yourself, so this needs no provider
-key. The MCP server is `mcp-searxng`, and its search tool is
-`searxng_web_search`. `response_format: json` makes it answer in JSON:
+   ```yaml
+   internet:
+     search:
+       url: http://searxng:8080
+   ```
 
-```yaml
-internet:
-  search:
-    server: websearch
-    tool: searxng_web_search
-    args:
-      response_format: json
-mcp:
-  websearch:
-    type: stdio
-    package: npm:mcp-searxng@2.9.0
-    env:
-      SEARXNG_URL: http://searxng:8080
-    allow:
-```
+4. If a reverse proxy in front of SearXNG checks a key, add
+   `api_key: ${SEARXNG_API_KEY:-}` to the block. Put
+   `SEARXNG_API_KEY=<the key>` in `.env.gateway` (or in `secrets.gateway` of
+   the Helm chart). The gateway sends it as `Authorization: Bearer <the key>`.
+   Do not give the key to `core`.
+5. Restart the gateway and core.
+6. Read the core log. The line `"message": "internet search"` must show
+   `"search": "searxng"`.
 
-`SEARXNG_URL` is the address of your SearXNG instance, not of the MCP server.
-The SearXNG instance must allow the JSON output format (`search.formats` in
-its `settings.yml`).
+[docs/config.md](config.md#web-search) explains each key, including
+`categories`, `language`, and `max_results`.
 
-### Brave Search
+To read a failure, find the gateway log line with `"search": true`:
 
-The official Brave Search MCP server is `@brave/brave-search-mcp-server`, and
-its web search tool is `brave_web_search`. It needs a Brave Search API key:
-
-```yaml
-internet:
-  search:
-    server: websearch
-    tool: brave_web_search
-    args:
-      count: 10
-mcp:
-  websearch:
-    type: stdio
-    package: npm:@brave/brave-search-mcp-server@2.1.4
-    env:
-      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
-    allow:
-```
-
-Put `BRAVE_API_KEY=...` in `.env.gateway`. A search with no result is a tool
-error on this server, so the internet agent then reads "The search failed".
-
-### Tavily
-
-The official Tavily MCP server is `tavily-mcp`, and its search tool is
-`tavily_search`. It needs a Tavily API key:
-
-```yaml
-internet:
-  search:
-    server: websearch
-    tool: tavily_search
-    args:
-      max_results: 10
-mcp:
-  websearch:
-    type: stdio
-    package: npm:tavily-mcp@0.2.22
-    env:
-      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
-    allow:
-```
-
-Put `TAVILY_API_KEY=...` in `.env.gateway`.
-
-### When the search does not work
-
-| Symptom | Do this |
+| `error` | Do this |
 |---|---|
-| The start log shows `"search": "none"` and a warning | The `internet` job is not on the Anthropic server and `internet.search` is not set. Add the block. |
-| The answer says "The search failed" | Read the gateway log for `"search": true`. `error` is `timeout`, `upstream_unavailable`, `tool error`, or a refusal reason. |
-| The gateway refuses with `tool_not_exposed` | The `tools` filter of the entry hides the tool, or `tool` is not the name the server declares. `GET /admin/inventory` on the gateway lists the tools. |
-| The gateway refuses with `tool_class_act` or `tool_class_write-local` | The `class` map of the entry marks the tool. Remove that line, or mark the tool `read`. |
-| The search gives no result | The server answered in a shape that the gateway cannot read. Use the JSON output of the server when it has one. |
+| `searxng refused the json format (403)...` | Add `json` to `search.formats` of SearXNG, or make sure that the proxy accepts the key. |
+| `searxng refused the key (401)` | Make sure that `SEARXNG_API_KEY` in `.env.gateway` is correct. |
+| `searxng unreachable: ConnectError` | Make sure that the gateway can reach `search.url`. |
+| `timeout` | Make sure that SearXNG answers in `search.timeout_seconds`. |
+| `searxng answer is not json` | Make sure that `search.url` is the SearXNG instance, not a login page. |
 
-The gateway log holds the length of each query, never the query.
+The gateway log holds the length of each query, never the query or the key.
 
 ## Change the config
 

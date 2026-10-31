@@ -243,7 +243,7 @@ it.
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
 | `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
 | `POST /v1/snapshots/{name}` | `core` | empty | `{"ok", "text", "is_error", "fetched_at"}` (below). `404` for a name that is not a gateway snapshot, `403` for a refused tool, `503` when the upstream is down, `504` after 30 seconds. |
-| `POST /v1/search` | `core` | `{"query": str}`, 1 to 500 characters | `{"results": [{"title", "url", "snippet"}]}` (below). `400` for a bad body, `404` when `internet.search` is not set or the internet agent is off, `403` for a refused tool, `502` for a tool error or a failed call, `503` when the upstream is down, `504` after `internet.search.timeout_seconds`. |
+| `POST /v1/search` | `core` | `{"query": str}`, 1 to 500 characters | `{"results": [{"title", "url", "snippet"}]}` (below). `400` for a bad body, `404` when `internet.search` is not set or the internet agent is off, `502` when SearXNG refuses, fails, or does not answer JSON, `504` after `internet.search.timeout_seconds`. |
 | `POST /admin/mcp/install` | `ADMIN_CALLERS` | `{"server": name, "reinstall": bool}` | `{"server", "package", "resolved", "installed_at", "reconnected": […]}`. `404` for a server with no `package`, `502` with a one-line `error` when the install failed. |
 
 When an upstream loses its session, core's session to the gateway continues.
@@ -288,25 +288,32 @@ snapshot name and no content.
 
 ### The web search route
 
-`POST /v1/search` runs the web search of `internet.search` for the internet
-agent in core. The body holds the query and nothing else. The gateway reads
-the server, the tool, `query_arg`, and `args` from its own copy of
-`joshua.yaml`, and calls the tool with `args` plus the query under
-`query_arg`. The route names no person, so the `allow` list of the server
-does not apply. It refuses with `403`, and writes a `denied` row to the call
-log, when the tool filter hides the tool or the upstream does not declare it
-(`tool_not_exposed`), when the `class` map marks the tool `write-local` or
-`act`, and when the upstream declares it destructive and not read-only
-(`tool_destructive`).
+`POST /v1/search` runs the SearXNG search of `internet.search` for the
+internet agent in core. The body holds the query and nothing else. The gateway
+calls `GET <url>/search` with `q=<query>`, `format=json`, and `categories` and
+`language` when they are set. It sends `Authorization: Bearer <api_key>` only
+when `api_key` is set. The URL, the parameters, and the key come from the
+config of the gateway, never from the caller.
 
-The gateway reads the results from the answer of the tool: the structured
-content, then each text part as JSON, then each line as JSON, then, when no
-part is JSON, the plain text, with the first URL of each block. A result has
-a `title` of at most 300 characters, an `http` or `https` `url`, and a
-`snippet` of at most 1000 characters. One URL is kept once, and the list has
-at most `internet.search.max_results` results. An error answer is a short
-fixed text, never the text of the tool. The call log holds the length of the
-query and the count of the results, never the query.
+The gateway reads `results` of the SearXNG answer, and takes `url`, `title`,
+and `content` (as `snippet`) of each result. A result has a `title` of at
+most 300 characters, an `http` or `https` `url`, and a `snippet` of at most
+1000 characters. One URL is kept once, and the list has at most
+`internet.search.max_results` results.
+
+An error is a short fixed text, never the text of SearXNG:
+
+| `error` | Status | Cause |
+|---|---|---|
+| `searxng refused the json format (403): ...` | `502` | SearXNG answered `403`: `json` is not in `search.formats` of its `settings.yml`, or a proxy refused the key |
+| `searxng refused the key (401)` | `502` | a proxy refused the key |
+| `searxng answered <status>` | `502` | another status that is not `200` |
+| `searxng answer is not json`, `searxng answer has no results list` | `502` | the answer is not a SearXNG JSON answer |
+| `searxng unreachable: <exception>` | `502` | the connection failed |
+| `timeout` | `504` | no answer in `timeout_seconds` |
+
+The call log holds the length of the query and the count of the results,
+never the query and never the key.
 
 `core` sends two headers with every MCP request:
 

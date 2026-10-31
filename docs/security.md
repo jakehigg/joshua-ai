@@ -61,12 +61,10 @@ Every route has an allowlist of fleet identities. The list is in
   each refusal. See [memory.md](memory.md#snapshots-of-live-systems).
 
 - The gateway route `POST /v1/search` admits only `core`, and its body holds
-  one query. The gateway reads the server, the tool, and the fixed arguments
-  from `internet.search`, so no caller can ask for another tool or other
-  arguments. It refuses a tool by the same rules as a snapshot. The route
-  names no person, so the `allow` list of the server does not apply. Set
-  `allow:` with no value on that server, and no person reaches it through an
-  MCP route. Tests prove each refusal and the `403` for a person.
+  one query. The gateway reads the SearXNG URL, its parameters, and its
+  optional key from `internet.search`, so no caller can choose the host, the
+  path, or another parameter. A test proves the `403` for every other
+  caller.
 
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
 name, a path, or a token.
@@ -317,15 +315,15 @@ and that test still passes.
 
 **The worker has one search tool, and the config chooses it:**
 
-- With `internet.search` set, the tool is `web_search`. It calls the gateway
-  route `POST /v1/search` with the token of `core`, and the gateway calls the
-  search MCP server of the config. The worker holds no credential: the
-  provider key is in the environment of the gateway alone. The tool gives the
-  model a title, a URL, and a snippet for each result, and never an error
-  text, because an error can name a host or a key. This is the tool on every
-  model server, also on the Anthropic server.
-- With no `internet.search` and the `internet` job on the Anthropic server,
-  the tool is `WebSearch`.
+- With the `internet` job on the Anthropic server, the tool is `WebSearch`,
+  also when `internet.search` is set.
+- On another server with `internet.search` set, the tool is `web_search`. It
+  calls the gateway route `POST /v1/search` with the token of `core`, and the
+  gateway calls the SearXNG instance of the config. The worker holds no
+  credential: the optional key of SearXNG is in the environment of the
+  gateway alone. The tool gives the model a title, a URL, and a snippet for
+  each result, and never an error text, because an error can name a host or
+  a key.
 - On another server with no `internet.search`, the worker has no search. It
   reads only the pages it was given, and it says that it cannot search.
 
@@ -380,7 +378,7 @@ proves that.
 
 **What the question can still carry.** The agent writes the question, and a
 search sends a query to the search provider: Anthropic for `WebSearch`, or
-the provider of the search MCP server. A compromised turn can put a private
+your SearXNG instance, which sends it on to the search engines it uses. A compromised turn can put a private
 detail in the question, and that detail then leaves in a search query. It
 cannot choose where it goes, because the worker fetches no URL it was not
 given. The tool tells the agent to keep private detail out of the question.
@@ -392,9 +390,8 @@ This distinction decides the whole design, and it was measured, not assumed:
 - **`WebSearch` runs on Anthropic's servers.** The container makes no
   connection. Nothing on your network is reachable that way.
 - **`web_search` runs in the gateway.** Core sends the query to the gateway,
-  and the gateway calls the search MCP server of the config. That server
-  connects to its provider, or to the SearXNG instance you host. It reaches
-  only that one server and that one tool, never a URL of the worker's
+  and the gateway calls the SearXNG instance of the config. It reaches only
+  that one URL, with the path `/search`, never a URL of the worker's
   choosing.
 - **`WebFetch` runs in the container.** A fetch of `http://127.0.0.1:8477/`
   reached a server on the machine that ran the CLI. So a page Joshua reads can

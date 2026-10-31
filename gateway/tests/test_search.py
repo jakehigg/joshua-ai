@@ -1,60 +1,89 @@
-"""The web search route, ``POST /v1/search``.
+"""The web search route, ``POST /v1/search``, against a fake SearXNG.
 
-The config is the allowlist. Each refusal rule has a negative test here. A
-call proves the reading of each result shape, the timeout, and a call log
-entry that holds no query. The upstream is the ``search_server.py`` fixture
-over stdio, on an entry with ``allow:`` and no value, so no person reaches it.
+The fake is an ``httpx.MockTransport`` on ``app.state.search_transport``, so
+these run with no network. Each refusal and each failure has a test, and the
+logs and the answers never hold the query or the key.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import sys
-from pathlib import Path
+from typing import Any
 
+import httpx
 import httpx2
-import mcp_types as types
 import pytest
 from conftest import TOKENS, bearer
 from joshua_gateway import search
-from joshua_gateway.main import build_app, lifespan
+from joshua_gateway.main import build_app
 from joshua_gateway.observability import CALL_LOG
 from joshua_shared import config
 
-FIXTURE = Path(__file__).parent / "fixtures" / "search_server.py"
+KEY = "proxy-secret-value"
+
+RESULTS = [
+    {"title": "Braised short ribs", "url": "https://food.example/ribs", "content": "Braise."},
+    {"title": "Again", "url": "https://food.example/ribs", "content": "a copy"},
+    {"title": "Mail", "url": "mailto:someone@example.com"},
+    {"title": "Script", "url": "javascript:alert(1)"},
+    {"title": "File", "url": "file:///etc/passwd"},
+    {"title": "Spaced", "url": "https://a.example/ b"},
+    {"title": 5, "url": 5},
+    "not an object",
+    {"title": "  Long  title ", "url": "http://plain.example/x", "content": "x" * 5000},
+]
 
 
-def _yaml(tool: str = "search_list", extra: str = "", policy: str = "", enabled: str = "") -> str:
-    return (
+def _yaml(extra: str = "", enabled: str = "", with_search: bool = True) -> str:
+    text = (
         "name: Test\n"
         "timezone: America/New_York\n"
         "people:\n"
         "  - id: alex\n    name: Alex\n"
         "internet:\n"
         f"{enabled}"
-        "  search:\n"
-        "    server: websearch\n"
-        f"    tool: {tool}\n"
-        f"{extra}"
-        "mcp:\n"
-        "  websearch:\n"
-        f"    type: stdio\n    command: {sys.executable}\n    args:\n      - {FIXTURE}\n"
-        "    allow:\n"
-        f"{policy}"
+        "  model: claude-sonnet-5\n"
     )
+    if with_search:
+        text += "  search:\n    url: http://searxng:8080/\n" + extra
+    return text
+
+
+class FakeSearxng:
+    """A SearXNG that answers each request with ``status`` and ``body``."""
+
+    def __init__(self, status: int = 200, body: Any = None, error: Exception | None = None):
+        self.status = status
+        self.body = {"query": "q", "results": RESULTS} if body is None else body
+        self.error = error
+        self.requests: list[httpx.Request] = []
+
+    def transport(self) -> httpx.MockTransport:
+        def handle(request: httpx.Request) -> httpx.Response:
+            self.requests.append(request)
+            if self.error is not None:
+                raise self.error
+            if isinstance(self.body, bytes):
+                return httpx.Response(self.status, content=self.body)
+            return httpx.Response(self.status, json=self.body)
+
+        return httpx.MockTransport(handle)
 
 
 @pytest.fixture
 def make_app(monkeypatch, config_path):
     for identity, token in TOKENS.items():
         monkeypatch.setenv(f"JOSHUA_TOKEN_{identity.upper()}", token)
+    monkeypatch.setenv("SEARXNG_API_KEY", KEY)
     monkeypatch.delenv("ADMIN_CALLERS", raising=False)
 
-    def make(text: str):
+    def make(text: str, fake: FakeSearxng | None = None):
         config_path.write_text(text)
         monkeypatch.setattr(config, "_cache", None)
-        return build_app()
+        app = build_app()
+        app.state.search_transport = (fake or FakeSearxng()).transport()
+        return app
 
     return make
 
@@ -70,10 +99,9 @@ async def _post(app, body, identity: str | None = "core", headers=None) -> httpx
         return await client.post("/v1/search", headers=sent, json=body)
 
 
-async def _search(make_app, tool: str, query: str = "short ribs", **kwargs) -> httpx2.Response:
-    app = make_app(_yaml(tool, **kwargs))
-    async with lifespan(app):
-        return await _post(app, {"query": query})
+async def _search(make_app, fake: FakeSearxng, query: str = "short ribs", extra: str = ""):
+    app = make_app(_yaml(extra), fake)
+    return await _post(app, {"query": query})
 
 
 def _entries() -> list[dict]:
@@ -84,203 +112,146 @@ def _entries() -> list[dict]:
 
 
 async def test_no_bearer_is_401(make_app) -> None:
-    app = make_app(_yaml())
-    async with lifespan(app):
-        assert (await _post(app, {"query": "a"}, None)).status_code == 401
+    assert (await _post(make_app(_yaml()), {"query": "a"}, None)).status_code == 401
 
 
 async def test_a_wrong_bearer_is_401(make_app) -> None:
-    app = make_app(_yaml())
-    async with lifespan(app):
-        response = await _post(app, {"query": "a"}, None, {"Authorization": "Bearer wrong"})
+    response = await _post(make_app(_yaml()), {"query": "a"}, None, {"Authorization": "Bearer x"})
     assert response.status_code == 401
 
 
 @pytest.mark.parametrize("identity", ["laptop", "ci", "channels", "gateway"])
 async def test_a_caller_that_is_not_core_is_403(make_app, identity) -> None:
-    app = make_app(_yaml())
-    async with lifespan(app):
-        response = await _post(app, {"query": "a"}, identity)
+    fake = FakeSearxng()
+    response = await _post(make_app(_yaml(), fake), {"query": "a"}, identity)
     assert response.status_code == 403
+    assert fake.requests == []
 
 
 async def test_a_person_header_does_not_open_the_route(make_app) -> None:
-    """A person never reaches the route: only the core identity does."""
     app = make_app(_yaml())
-    async with lifespan(app):
-        response = await _post(app, {"query": "a"}, "laptop", {"X-Joshua-Person": "alex"})
+    response = await _post(app, {"query": "a"}, "laptop", {"X-Joshua-Person": "alex"})
     assert response.status_code == 403
-
-
-async def test_no_person_reaches_the_search_server_through_mcp(make_app) -> None:
-    """`allow:` with no value: the tool is the internet agent's, and no person's."""
-    app = make_app(_yaml())
-    transport = httpx2.ASGITransport(app=app)
-    async with lifespan(app):
-        async with httpx2.AsyncClient(transport=transport, base_url="http://testserver") as c:
-            for person in ("alex", "unknown", None):
-                headers = {**bearer("core")}
-                if person:
-                    headers["X-Joshua-Person"] = person
-                assert (await c.get("/websearch", headers=headers)).status_code == 403
 
 
 # -- a good call -----------------------------------------------------------
 
 
-async def test_a_json_list_is_read_and_cleaned(make_app) -> None:
-    response = await _search(make_app, "search_list")
+async def test_the_results_are_read_and_cleaned(make_app) -> None:
+    response = await _search(make_app, FakeSearxng())
     assert response.status_code == 200
     results = response.json()["results"]
-    urls = [r["url"] for r in results]
-    assert urls == ["https://args.example/", "https://two.example/page", "https://three.example/"]
-    assert results[1] == {
-        "title": "Second",
-        "url": "https://two.example/page",
-        "snippet": "short ribs",
+    assert [r["url"] for r in results] == ["https://food.example/ribs", "http://plain.example/x"]
+    assert results[0] == {
+        "title": "Braised short ribs",
+        "url": "https://food.example/ribs",
+        "snippet": "Braise.",
     }
-    assert len(results[2]["snippet"]) <= 1000
+    assert results[1]["title"] == "Long title"
+    assert len(results[1]["snippet"]) <= 1000
 
 
-async def test_the_query_and_the_fixed_arguments_reach_the_tool(make_app) -> None:
-    extra = "    query_arg: q\n    args:\n      count: '3'\n      safe: 'true'\n      lang: en\n"
-    response = await _search(make_app, "search_list", extra=extra)
-    sent = json.loads(response.json()["results"][0]["snippet"])
-    assert sent == {"q": "short ribs", "count": 3, "safe": True, "lang": "en"}
+async def test_the_request_is_the_json_api_with_the_query(make_app) -> None:
+    fake = FakeSearxng()
+    await _search(make_app, fake, extra="    categories: general\n    language: en\n")
+    request = fake.requests[0]
+    assert request.method == "GET"
+    assert str(request.url).startswith("http://searxng:8080/search?")
+    assert dict(request.url.params) == {
+        "q": "short ribs",
+        "format": "json",
+        "categories": "general",
+        "language": "en",
+    }
+    assert "authorization" not in request.headers
+
+
+async def test_the_key_is_sent_as_a_bearer_only_when_it_is_set(make_app) -> None:
+    fake = FakeSearxng()
+    await _search(make_app, fake, extra="    api_key: ${SEARXNG_API_KEY:-}\n")
+    assert fake.requests[0].headers["authorization"] == f"Bearer {KEY}"
 
 
 async def test_max_results_caps_the_list(make_app) -> None:
-    response = await _search(make_app, "search_list", extra="    max_results: 1\n")
-    assert [r["url"] for r in response.json()["results"]] == ["https://args.example/"]
+    response = await _search(make_app, FakeSearxng(), extra="    max_results: 1\n")
+    assert [r["url"] for r in response.json()["results"]] == ["https://food.example/ribs"]
 
 
-async def test_a_nested_object_is_read(make_app) -> None:
-    response = await _search(make_app, "search_nested")
-    assert response.json()["results"] == [
-        {"title": "Nested", "url": "https://nested.example/a", "snippet": ""}
-    ]
-
-
-async def test_one_json_object_for_each_part_is_read(make_app) -> None:
-    response = await _search(make_app, "search_parts")
-    assert [r["url"] for r in response.json()["results"]] == [
-        "https://one.example/",
-        "https://two.example/",
-    ]
-
-
-async def test_structured_content_is_read(make_app) -> None:
-    response = await _search(make_app, "search_structured")
-    assert [r["url"] for r in response.json()["results"]] == ["https://s.example/"]
-
-
-async def test_plain_text_gives_the_url_of_each_block(make_app) -> None:
-    response = await _search(make_app, "search_text")
-    results = response.json()["results"]
-    assert [r["url"] for r in results] == [
-        "https://food.example/short-ribs",
-        "https://cook.example/basics",
-    ]
-    assert results[0]["title"] == "Braised short ribs"
-    assert results[0]["snippet"] == "Braise at 160 C for three hours."
-    # A URL in the text of a block is words, and it is not a result.
-    assert "https://other.example/in-text" not in [r["url"] for r in results]
-
-
-async def test_garbage_gives_no_result(make_app) -> None:
-    response = await _search(make_app, "search_garbage")
+async def test_an_empty_list_gives_no_result(make_app) -> None:
+    response = await _search(make_app, FakeSearxng(body={"results": []}))
     assert response.status_code == 200
     assert response.json() == {"results": []}
 
 
-async def test_the_call_log_holds_no_query(make_app, caplog) -> None:
-    caplog.set_level(logging.INFO)
-    await _search(make_app, "search_list", query="a private question")
-    entry = _entries()[0]
-    assert entry["status"] == "success"
-    assert entry["identity"] == "core"
-    assert entry["query_chars"] == len("a private question")
-    assert entry["results"] == 3
-    assert "private" not in repr(_entries())
-    assert "private" not in caplog.text
+async def test_the_logs_hold_no_query_and_no_key(make_app, caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    fake = FakeSearxng(status=403, body={"error": KEY})
+    await _search(
+        make_app, fake, query="a private question", extra="    api_key: ${SEARXNG_API_KEY:-}\n"
+    )
+    await _search(make_app, FakeSearxng(), query="a private question")
+    entries = _entries()[:2]
+    assert entries[1]["status"] == "error"
+    assert entries[0]["status"] == "success"
+    assert entries[0]["query_chars"] == len("a private question")
+    assert entries[0]["results"] == 2
+    gateway_text = " ".join(r.getMessage() for r in caplog.records if r.name.startswith("gateway"))
+    assert "private" not in gateway_text
+    assert KEY not in gateway_text
+    assert KEY not in repr(_entries())
 
 
-# -- failures and refusals -------------------------------------------------
+# -- failures --------------------------------------------------------------
 
 
-async def test_a_tool_error_is_502_and_holds_no_upstream_text(make_app) -> None:
-    response = await _search(make_app, "search_fail")
+async def test_a_403_says_that_the_json_format_is_off(make_app) -> None:
+    response = await _search(make_app, FakeSearxng(status=403, body=b"Forbidden"))
     assert response.status_code == 502
-    assert response.json() == {"error": "search tool error"}
-    assert "PROVIDER-SECRET-VALUE" not in response.text
-
-
-async def test_a_slow_tool_times_out(make_app) -> None:
-    response = await _search(make_app, "search_slow", extra="    timeout_seconds: 0.5\n")
-    assert response.status_code == 504
-    assert _entries()[0]["error"] == "timeout"
-
-
-async def test_an_upstream_that_breaks_is_502(make_app, monkeypatch) -> None:
-    async def broken(up, cfg, query):
-        raise RuntimeError("connection to https://user:secret@search.example failed")
-
-    monkeypatch.setattr(search, "call_search", broken)
-    response = await _search(make_app, "search_list")
-    assert response.status_code == 502
-    assert "secret" not in response.text
-    assert _entries()[0]["error"] == "RuntimeError"
-
-
-async def test_an_upstream_that_is_not_serving_is_503(make_app) -> None:
-    app = make_app(_yaml())
-    async with lifespan(app):
-        app.state.upstreams.pop("websearch")
-        response = await _post(app, {"query": "a"})
-    assert response.status_code == 503
+    assert "search.formats" in response.json()["error"]
+    assert "settings.yml" in response.json()["error"]
 
 
 @pytest.mark.parametrize(
-    ("tool", "policy", "status", "reason"),
+    ("fake", "status", "error"),
     [
-        ("search_wipe", "", 403, "tool_destructive"),
-        ("no_such_tool", "", 403, "tool_not_exposed"),
-        ("search_list", "    tools:\n      deny:\n        - search_*\n", 403, "tool_not_exposed"),
+        (FakeSearxng(status=401, body=b"no"), 502, "searxng refused the key (401)"),
+        (FakeSearxng(status=500, body=b"boom"), 502, "searxng answered 500"),
+        (FakeSearxng(body=b"<html>not json</html>"), 502, "searxng answer is not json"),
+        (FakeSearxng(body=["a", "list"]), 502, "searxng answer has no results list"),
+        (FakeSearxng(body={"results": "x"}), 502, "searxng answer has no results list"),
+        (FakeSearxng(error=httpx.ReadTimeout("slow")), 504, "timeout"),
         (
-            "search_list",
-            "    tools:\n      class:\n        search_list: act\n",
-            403,
-            "tool_class_act",
-        ),
-        (
-            "search_list",
-            "    tools:\n      class:\n        search_*: write-local\n",
-            403,
-            "tool_class_write-local",
+            FakeSearxng(error=httpx.ConnectError("refused")),
+            502,
+            "searxng unreachable: ConnectError",
         ),
     ],
 )
-async def test_a_refused_tool_is_not_called(make_app, tool, policy, status, reason) -> None:
-    response = await _search(make_app, tool, policy=policy)
+async def test_a_failure_gives_a_short_error(make_app, fake, status, error) -> None:
+    response = await _search(make_app, fake, extra="    api_key: ${SEARXNG_API_KEY:-}\n")
     assert response.status_code == status
-    assert response.json()["error"] == reason
-    assert _entries()[0]["status"] == "denied"
+    assert response.json() == {"error": error}
+    assert KEY not in response.text
+    assert _entries()[0]["error"] == error
+
+
+async def test_an_error_text_of_searxng_never_reaches_the_answer(make_app) -> None:
+    body = {"error": f"https://user:{KEY}@search.example failed"}
+    response = await _search(make_app, FakeSearxng(status=500, body=body))
+    assert KEY not in response.text
+    assert "search.example" not in response.text
 
 
 async def test_no_search_block_is_404(make_app) -> None:
-    text = _yaml().replace("internet:\n  search:\n    server: websearch\n", "x-cut:\n")
-    text = text.replace("x-cut:\n    tool: search_list\n", "")
-    app = make_app(text)
-    async with lifespan(app):
-        response = await _post(app, {"query": "a"})
+    fake = FakeSearxng()
+    response = await _post(make_app(_yaml(with_search=False), fake), {"query": "a"})
     assert response.status_code == 404
     assert response.json()["error"] == "search not configured"
+    assert fake.requests == []
 
 
 async def test_the_internet_agent_turned_off_is_404(make_app) -> None:
-    app = make_app(_yaml(enabled="  enabled: false\n"))
-    async with lifespan(app):
-        response = await _post(app, {"query": "a"})
+    response = await _post(make_app(_yaml(enabled="  enabled: false\n")), {"query": "a"})
     assert response.status_code == 404
 
 
@@ -292,67 +263,27 @@ async def test_the_internet_agent_turned_off_is_404(make_app) -> None:
         {"query": "   "},
         {"query": "x" * 501},
         {"query": 5},
-        {"query": "a", "tool": "search_wipe"},
-        {"query": "a", "args": {"count": 99}},
+        {"query": "a", "url": "http://other.example"},
+        {"query": "a", "categories": "files"},
         b"not json",
     ],
 )
 async def test_a_bad_body_is_400(make_app, body) -> None:
-    app = make_app(_yaml())
-    async with lifespan(app):
-        response = await _post(app, body)
+    fake = FakeSearxng()
+    response = await _post(make_app(_yaml(), fake), body)
     assert response.status_code == 400
+    assert fake.requests == []
 
 
 # -- the parts ---------------------------------------------------------------
 
 
-def _result(text: str = "", structured=None) -> types.CallToolResult:
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=text)], structured_content=structured
-    )
+def test_the_params_hold_only_what_is_set() -> None:
+    cfg = config.parse(_yaml(), {}, source="t.yaml").internet.search
+    assert cfg is not None
+    assert search.search_params(cfg, "q") == {"q": "q", "format": "json"}
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"items": [{"title": "I", "link": "https://i.example/"}]},
-        {"organic": [{"title": "O", "url": "https://o.example/"}]},
-        {"data": {"results": [{"url": "https://d.example/"}]}},
-        [[{"url": "https://deep.example/"}]],
-        {"url": "https://single.example/"},
-    ],
-)
-def test_each_list_key_is_read(payload) -> None:
-    assert len(search.normalize(_result(json.dumps(payload)), 10)) == 1
-
-
-def test_one_result_on_each_line_is_read() -> None:
-    lines = "\n".join(json.dumps({"url": f"https://{n}.example/"}) for n in ("a", "b"))
-    assert len(search.normalize(_result(lines), 10)) == 2
-
-
-def test_text_with_one_url_on_each_line_is_read() -> None:
-    text = "First page https://a.example/x.\nSecond page https://b.example/y\nno url here"
-    results = search.normalize(_result(text), 10)
-    assert [r.url for r in results] == ["https://a.example/x", "https://b.example/y"]
-    assert results[0].snippet.startswith("First page")
-
-
-def test_a_url_with_space_or_another_scheme_is_dropped() -> None:
-    payload = [{"url": "https://a.example/ b"}, {"url": "file:///etc/passwd"}, {"url": 5}]
-    assert search.normalize(_result(json.dumps(payload)), 10) == []
-
-
-def test_an_empty_answer_gives_no_result() -> None:
-    assert search.normalize(types.CallToolResult(content=[]), 10) == []
-
-
-def test_a_value_that_does_not_convert_stays_text() -> None:
-    schema = {"properties": {"count": {"type": "integer"}, "f": {"type": "number"}}}
-    assert search.coerce_args({"count": "many", "f": "1.5", "x": "y"}, schema) == {
-        "count": "many",
-        "f": 1.5,
-        "x": "y",
-    }
-    assert search.coerce_args({"a": "1"}, None) == {"a": "1"}
+def test_read_results_skips_a_result_with_no_url() -> None:
+    body = json.loads(json.dumps({"results": [{"title": "t"}, {"url": "https://ok.example/"}]}))
+    assert [r.url for r in search.read_results(body, 10)] == ["https://ok.example/"]

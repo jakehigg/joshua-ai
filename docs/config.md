@@ -437,10 +437,10 @@ internet:
 | `model` | `claude-sonnet-5` | The model the worker uses. |
 | `timeout_seconds` | `120` | How long one question may take. A search, a read, and an answer are several calls. |
 | `max_turns` | `12` | The ceiling on what one question costs. |
-| `fetch.enabled` | `false` | `true` lets the worker read a page. `false` leaves it with search alone, which makes no connection from the container. `joshua.example.yaml` sets it to `true`. |
+| `fetch.enabled` | `false` | `true` lets the worker read a page. `false` leaves it with search alone, and `core` then makes no connection to a page. `joshua.example.yaml` sets it to `true`. |
 | `fetch.blocked` | empty | What a fetch may never reach. `joshua.example.yaml` ships a list to start from. |
 | `fetch.resolve_hosts` | `true` | Look the host up, and refuse a name that resolves into a CIDR on the list. |
-| `search` | not set | The search MCP server of the worker. See [Web search](#web-search). |
+| `search` | not set | The SearXNG instance of the worker, off the Anthropic server. See [Web search](#web-search). |
 
 **Reading a page is off unless you turn it on.** A `joshua.yaml` with no
 `internet:` section searches and never fetches. Turn fetch on only with a
@@ -470,60 +470,48 @@ person.
 
 ### Web search
 
-How the worker searches depends on two things: the `search` block, and the
-model server of the `internet` job (see [inference](#inference)).
+**On the Anthropic server, web search needs nothing.** With the subscription
+or an Anthropic API key, the internet agent uses `WebSearch`, Anthropic's own
+search. **When the `internet` job moves to another server** (Bedrock through
+LiteLLM, Ollama, or any other server of [inference](#inference)), **web
+search stops**, unless `internet.search` names a SearXNG instance.
 
-| `internet.search` | Server of the `internet` job | Search tool of the worker |
+| Server of the `internet` job | `internet.search` | Search tool of the worker |
 |---|---|---|
-| set | any | `web_search`, through the gateway and the MCP server of `search.server` |
-| not set | Anthropic | `WebSearch`, which runs on Anthropic's side |
-| not set | another server | none. The worker reads only the pages it was given, and says that it cannot search. |
+| Anthropic | set or not set | `WebSearch`, which runs on Anthropic's side. `internet.search` is not used. |
+| another server | set | `web_search`, which calls SearXNG through the gateway |
+| another server | not set | none. The worker reads only the pages it was given, and says that it cannot search. |
 
-When `search` is set, the worker always uses it, also on the Anthropic server.
-Core logs the search at start: `"search": "mcp:<server>"`, `"anthropic"`, or
+Core logs the search at start: `"search": "anthropic"`, `"searxng"`, or
 `"none"`. A `none` while the internet agent is on is also a warning.
 
 ```yaml
 internet:
   search:
-    server: websearch          # an entry of the mcp section
-    tool: searxng_web_search   # the search tool of that server
-    query_arg: query           # the argument that gets the query
-    args:                      # fixed arguments for each call
-      response_format: json
+    provider: searxng
+    url: http://searxng:8080
+    api_key: ${SEARXNG_API_KEY:-}
     max_results: 10
     timeout_seconds: 20
-mcp:
-  websearch:
-    type: stdio
-    package: npm:mcp-searxng@2.9.0
-    env:
-      SEARXNG_URL: http://searxng:8080
-    allow:                     # no value: no person gets the tool directly
+    categories: general
+    language: en
 ```
 
 | Key | Default | What it does |
 |---|---|---|
-| `search.server` | required | An entry of the `mcp` section. It must be an external server (`type`), not a builtin, and it must have no `identities`. |
-| `search.tool` | required | The search tool of that server. |
-| `search.query_arg` | `query` | The argument of the tool that gets the query. |
-| `search.args` | empty | Fixed arguments for each call, such as a result count or a language. They must not set `query_arg`. The gateway changes a value to the type that the tool declares, so `count: 5` reaches the tool as a number. |
+| `search.provider` | `searxng` | The search engine. `searxng` is the only value. |
+| `search.url` | required | The base URL of the SearXNG instance, `http://` or `https://`. |
+| `search.api_key` | not set | A key for a reverse proxy in front of SearXNG. The gateway sends it as `Authorization: Bearer <key>`, and only when it is set. Put it in `.env.gateway` (or `secrets.gateway` of the Helm chart), never in the environment of `core`. |
 | `search.max_results` | `10` | The most results the worker gets, from 1 to 50. |
-| `search.timeout_seconds` | `20` | How long one search call may take on the gateway, up to 120. |
+| `search.timeout_seconds` | `20` | How long one SearXNG call may take, up to 120. |
+| `search.categories` | not set | The SearXNG `categories` parameter, such as `general`. |
+| `search.language` | not set | The SearXNG `language` parameter, such as `en`. |
 
-Set `allow:` with no value on the `mcp` entry of the search server. The empty
-list admits no person, so the agent does not get the tool and the server
-stays the internet agent's. The search route of the gateway serves `core`
-alone and names no person, so the `allow` list does not stop it. The `tools`
-filter and the `class` map of the entry still apply: a tool that the filter
-hides, or that the map marks `write-local` or `act`, is refused.
-
-The gateway reads the answer of the tool as a JSON list of results, a JSON
-object that holds that list (under `results`, `items`, `web.results`,
-`organic`, and similar keys), one JSON object for each text part, or plain
-text with a `URL:` line in each block. It keeps only an `http` or `https`
-URL. [docs/operations.md](operations.md#web-search-for-the-internet-agent)
-has an entry for three search servers.
+The gateway calls `GET <url>/search?q=<query>&format=json`. SearXNG answers
+`403` to that call when the `json` format is off, so add `json` to
+`search.formats` in the `settings.yml` of SearXNG.
+[docs/operations.md](operations.md#web-search-off-anthropic-searxng) has the
+steps.
 
 ### The block list
 
@@ -604,8 +592,7 @@ which is the builtins and nothing else.
 `people`. `all` means every person, including a request with no person.
 A list scopes the server to those people: the gateway serves a request only when
 its person is on the list, and denies a request with no person or `unknown`.
-`allow:` with no value is the empty list, so no person reaches the server. Use
-it for the search server of the internet agent. The
+`allow:` with no value is the empty list, so no person reaches the server. The
 person comes from the `X-Joshua-Person` header, which the gateway trusts only from
 core.
 
@@ -1148,11 +1135,11 @@ the model setting of each job as it is, for example `claude-opus-5`. Give each
 name a model on the server, for example a LiteLLM model name, or set
 `<job>.model` to a name that the server has.
 
-**`WebSearch` needs Anthropic.** With no `internet.search`, the internet
-agent searches with `WebSearch`, which runs on Anthropic's side. It gets it
-only when the `internet` job is on the subscription or the Anthropic API. On
-another server it has no search. Set `internet.search` to search on every
-server: see [Web search](#web-search).
+**Web search needs Anthropic, or SearXNG.** On the subscription or the
+Anthropic API, the internet agent uses Anthropic's own `WebSearch`, and you
+set nothing. When the `internet` job is on another server, such as Bedrock
+through LiteLLM or Ollama, web search stops, unless `internet.search` names a
+SearXNG instance. See [Web search](#web-search).
 
 **Keys belong in `.env`.** A literal key in `joshua.yaml` fails the load, as
 for every other credential. Each job gets only its own key: a job never gets
@@ -1175,8 +1162,8 @@ environment. After that, the only credential that gets to the CLI is the one
 of the job that the CLI runs. Core then writes one log line that gives, for
 each job, the server (`anthropic` or the host), the model, and the fields of
 the job block that change the global setting. The line holds no key. A
-second line gives the search of the internet agent: `mcp:<server>`,
-`anthropic`, or `none`. When `internet.enabled` is on and the search is
+second line gives the search of the internet agent: `anthropic`, `searxng`,
+or `none`. When `internet.enabled` is on and the search is
 `none`, core also writes a warning, because the internet agent cannot search.
 
 **A server change starts a new conversation session.** Each conversation

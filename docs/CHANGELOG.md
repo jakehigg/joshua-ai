@@ -41,22 +41,26 @@ with the images and the packaged chart, are at
   an Anthropic API key. An empty job key on the global server sends no key,
   and does not fall back to the global key. See [config.md](config.md#inference).
 
-- **The internet agent can search through a search MCP server, on every model
-  server.** A new block, `internet.search`, names an entry of the `mcp`
-  section and its search tool, with `query_arg`, fixed `args`, `max_results`
-  (default 10), and `timeout_seconds` (default 20). The worker then holds one
-  in-process tool, `web_search`, which calls the new gateway route
-  `POST /v1/search` with the token of core. The gateway calls the configured
-  tool, reads the results from JSON or plain text, and keeps only `http` and
-  `https` URLs. The provider key stays in the gateway, and the agent never sees
-  a raw result. Each result URL may be fetched, and a URL in a snippet may
-  not. With `internet.search` set, the worker never uses `WebSearch`. With no
-  block, the worker gets `WebSearch` only when the `internet` job is on the
-  Anthropic server. On another server it has no search and says so. Core logs
-  the search at start (`mcp:<server>`, `anthropic`, or `none`) and warns only
-  for `none`. `allow:` with no value on an `mcp` entry now means no person.
-  [operations.md](operations.md#web-search-for-the-internet-agent) has entries
-  for SearXNG, Brave Search, and Tavily.
+- **Web search off the Anthropic server, through SearXNG.** On the Anthropic
+  server the internet agent uses Anthropic's own `WebSearch`, as before, and
+  needs nothing. When the `internet` job moves to another server (Bedrock
+  through LiteLLM, Ollama), web search stops, unless the new block
+  `internet.search` names a SearXNG instance: `url`, an optional `api_key`,
+  `max_results` (default 10), `timeout_seconds` (default 20), and the optional
+  `categories` and `language`. The worker then holds one in-process tool,
+  `web_search`, which calls the new gateway route `POST /v1/search` with the
+  token of core. The gateway calls the SearXNG JSON API and keeps only `http`
+  and `https` URLs. The optional key stays in the gateway (`.env.gateway`,
+  `secrets.gateway` of the Helm chart), and the agent never sees a raw
+  result. Each result URL may be fetched, and a URL in a snippet may not.
+  SearXNG must allow the `json` format, and its `403` gives a clear error.
+  With no block on another server, the worker has no search and says so.
+  Core logs the search at start (`anthropic`, `searxng`, or `none`) and warns
+  only for `none`. See
+  [operations.md](operations.md#web-search-off-anthropic-searxng).
+
+- **`allow:` with no value on an `mcp` entry is the empty list.** No person
+  reaches that server. Before, the value failed the config load.
 
 - **Snapshots put the state of a live system in the memory index.** A new
   list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the

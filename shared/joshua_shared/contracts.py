@@ -243,7 +243,7 @@ WEB_SEARCH_MAX_URL_CHARS = 2000
 class WebSearchRequest(_Model):
     """The body of the gateway ``POST /v1/search``: one query, and nothing else.
 
-    The gateway reads the server, the tool, and the arguments from
+    The gateway reads the SearXNG instance, its parameters, and its key from
     ``internet.search``, so the caller cannot choose them.
     """
 

@@ -164,13 +164,7 @@ def test_the_plan_names_each_server_model_and_override() -> None:
 SEARCH = """
 internet:
   search:
-    server: websearch
-    tool: search
-mcp:
-  websearch:
-    type: http
-    url: http://searxng:8080/mcp
-    allow:
+    url: http://searxng:8080
 """
 
 
@@ -203,11 +197,11 @@ def test_the_plan_log_holds_no_key_and_warns_when_there_is_no_search(
     ("section", "extra", "search"),
     [
         ("", "", "anthropic"),
+        ("", SEARCH, "anthropic"),
         (ELSEWHERE, "\ninternet:\n  enabled: false\n", "none"),
-        (ELSEWHERE, SEARCH, "mcp:websearch"),
-        ("", SEARCH, "mcp:websearch"),
+        (ELSEWHERE, SEARCH, "searxng"),
     ],
-    ids=["internet on anthropic", "internet off", "search mcp elsewhere", "search mcp"],
+    ids=["internet on anthropic", "anthropic wins over searxng", "internet off", "searxng"],
 )
 def test_no_search_warning_when_search_can_work(
     caplog: pytest.LogCaptureFixture, section: str, extra: str, search: str

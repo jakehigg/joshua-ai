@@ -262,8 +262,8 @@ async def test_the_searcher_reaches_the_worker_and_the_agent_gets_no_raw_result(
 
     monkeypatch.setattr(internet_agent, "ask", ask)
     settings = _settings(
-        "\ninternet:\n  search:\n    server: websearch\n    tool: search\n"
-        "mcp:\n  websearch:\n    type: http\n    url: http://searxng:8080/mcp\n    allow:\n"
+        "\ninternet:\n  search:\n    url: http://searxng:8080\n"
+        "inference:\n  internet:\n    base_url: http://litellm:4000\n    api_key: ''\n"
     )
 
     text = await do_lookup(_deps(), settings=settings, question="q", searcher=searcher)

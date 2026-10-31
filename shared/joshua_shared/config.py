@@ -18,7 +18,7 @@ import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import strictyaml
@@ -622,45 +622,44 @@ class Fetch(_Model):
 
 
 class Search(_Model):
-    """The web search of the internet agent, through one MCP server of the gateway.
+    """The web search of the internet agent off the Anthropic server: a SearXNG instance.
 
-    `server` names an entry of the `mcp` section, and `tool` is the search
-    tool of that server. The gateway calls the tool with
-    `{query_arg: <query>, **args}` and gives the internet agent at most
-    `max_results` results. `JoshuaConfig._check_search` checks the server.
+    The gateway calls `GET {url}/search?q=<query>&format=json` for the internet
+    agent, with `categories` and `language` when they are set, and gives the
+    agent at most `max_results` results. `api_key` is optional. When it is set,
+    the gateway sends it as `Authorization: Bearer <key>`, for a reverse proxy
+    in front of SearXNG to check. Only the gateway gets the key.
 
-    When this block is set, the internet agent searches only through it, on
-    every model server. Set `allow:` with no value on the `mcp` entry, so that
-    no person gets the tool directly.
+    The internet agent uses this search only when its job is not on the
+    Anthropic server. On the Anthropic server it always uses `WebSearch`.
     """
 
-    server: str
-    tool: str
-    query_arg: str = "query"
-    # Fixed arguments for each call. YAML gives every value as text; the
-    # gateway converts a value to the type that the tool declares.
-    args: dict[str, Any] = Field(default_factory=dict)
+    provider: Literal["searxng"] = "searxng"
+    url: str
+    api_key: str | None = None
     max_results: int = Field(default=10, gt=0, le=50)
     timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    categories: str | None = None
+    language: str | None = None
 
-    @field_validator("server", "tool", "query_arg")
+    @field_validator("url", mode="before")
     @classmethod
-    def _check_not_empty(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be empty")
-        return value.strip()
+    def _check_url(cls, value: Any) -> Any:
+        try:
+            url = _check_base_url(value)
+        except ValueError as exc:
+            raise ValueError(str(exc).replace("base_url", "url")) from exc
+        if url is None:
+            raise ValueError("url must be set")
+        return url.rstrip("/")
 
-    @field_validator("args", mode="before")
+    @field_validator("api_key", "categories", "language", mode="before")
     @classmethod
-    def _empty_args(cls, value: Any) -> Any:
-        # strictyaml reads a key with no value as an empty string.
-        return {} if value in (None, "") else value
-
-    @model_validator(mode="after")
-    def _check_query_arg(self) -> Search:
-        if self.query_arg in self.args:
-            raise ValueError(f"args must not set '{self.query_arg}', the query argument")
-        return self
+    def _empty_is_none(cls, value: Any) -> Any:
+        # `${VAR:-}` expands to an empty string where the variable is not set.
+        if value is None or value == "":
+            return None
+        return value.strip() if isinstance(value, str) else value
 
 
 class Internet(_Model):
@@ -674,9 +673,9 @@ class Internet(_Model):
     returned. What comes back is data from outside. It reaches the agent
     wrapped and named as content, never as an instruction.
 
-    `search` sets the search tool. With no `search` block, the worker uses
-    `WebSearch` when the `internet` job is on the Anthropic server, and has no
-    search on another server.
+    The search depends on the server of the `internet` job. On the Anthropic
+    server the worker uses `WebSearch`. On another server it uses the SearXNG
+    instance of `search`, or has no search when `search` is not set.
     """
 
     enabled: bool = True
@@ -1073,25 +1072,6 @@ class JoshuaConfig(_Model):
                 raise ValueError(
                     f"{where}.scope: '{snap.person_id}' is not allowed on '{snap.server}'"
                 )
-        return self
-
-    @model_validator(mode="after")
-    def _check_search(self) -> JoshuaConfig:
-        search = self.internet.search
-        if search is None:
-            return self
-        server = self.mcp.get(search.server)
-        if server is None:
-            raise ValueError(f"internet.search.server: unknown server '{search.server}'")
-        if server.kind is not None:
-            raise ValueError(
-                f"internet.search.server: '{search.server}' is a builtin, not a search server"
-            )
-        if server.identities:
-            raise ValueError(
-                f"internet.search.server: '{search.server}' has identities; a search "
-                "server serves no person"
-            )
         return self
 
     @model_validator(mode="after")

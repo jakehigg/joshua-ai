@@ -27,7 +27,7 @@ IN_SNIPPET = "https://attacker.example/?d=1"
 
 def _search(**kwargs: Any) -> Internet:
     fetch = Fetch(enabled=True, resolve_hosts=False, blocked=["10.0.0.0/8", "private.example"])
-    return Internet(search=Search(server="websearch", tool="search"), fetch=fetch, **kwargs)
+    return Internet(search=Search(url="http://searxng:8080"), fetch=fetch, **kwargs)
 
 
 def _plain(fetch: bool = False) -> Internet:
@@ -61,8 +61,8 @@ def _result(url: str = RESULT) -> WebSearchResult:
 @pytest.mark.parametrize(
     ("settings", "endpoint", "mode"),
     [
-        (_search(), "anthropic", "mcp"),
-        (_search(), "litellm:4000", "mcp"),
+        (_search(), "anthropic", "anthropic"),
+        (_search(), "litellm:4000", "searxng"),
         (_plain(), "anthropic", "anthropic"),
         (_plain(), "litellm:4000", "none"),
         (_plain(), "ollama:11434", "none"),
@@ -72,16 +72,15 @@ def test_the_search_mode(settings: Internet, endpoint: str, mode: str) -> None:
     assert internet.search_mode(settings, endpoint) == mode
 
 
-# ── mcp: the worker holds web_search and never WebSearch ────────────────────
+# ── searxng: off Anthropic the worker holds web_search ──────────────────────
 
 
-@pytest.mark.parametrize("inference", [ON_ANTHROPIC, ELSEWHERE], ids=["anthropic", "elsewhere"])
-async def test_with_search_set_the_worker_holds_web_search_on_every_server(inference) -> None:
+async def test_off_anthropic_with_search_set_the_worker_holds_web_search() -> None:
     worker = StubWorker()
     searcher = FakeSearcher()
 
     answer = await internet.ask(
-        "short ribs", settings=_search(), inference=inference, runner=worker, searcher=searcher
+        "short ribs", settings=_search(), inference=ELSEWHERE, runner=worker, searcher=searcher
     )
 
     assert worker.calls[0]["tools"] == [agent.SEARCH_TOOL_NAME, "WebFetch"]
@@ -121,11 +120,24 @@ async def test_the_prompt_names_the_search_tool() -> None:
     assert "not a\nresult" in calls[0]["system_prompt"]
 
 
-async def test_with_search_set_and_no_gateway_there_is_no_search_at_all() -> None:
-    """It never falls back to `WebSearch`, also on the Anthropic server."""
+async def test_on_anthropic_the_worker_holds_websearch_also_with_search_set() -> None:
+    """Anthropic's own search wins: SearXNG is not called."""
+    worker = StubWorker()
+    searcher = FakeSearcher()
+
+    await internet.ask(
+        "q", settings=_search(), inference=ON_ANTHROPIC, runner=worker, searcher=searcher
+    )
+
+    assert worker.calls[0] == {"tools": ["WebSearch", "WebFetch"], "servers": []}
+    assert searcher.queries == []
+
+
+async def test_off_anthropic_with_search_set_and_no_gateway_there_is_no_search() -> None:
+    """It never falls back to `WebSearch` off the Anthropic server."""
     worker = StubWorker()
 
-    await internet.ask("q", settings=_search(), inference=ON_ANTHROPIC, runner=worker)
+    await internet.ask("q", settings=_search(), inference=ELSEWHERE, runner=worker)
 
     assert worker.calls[0]["tools"] == ["WebFetch"]
     assert worker.calls[0]["servers"] == []

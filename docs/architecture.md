@@ -50,10 +50,10 @@ web). The rest sit behind `gateway`.
 
 The `internet` tool asks the internet agent, an ephemeral worker in `core`. The
 worker gets one question and none of the conversation, and it holds the web
-tools and nothing else. With `internet.search` set, a search goes through the
-gateway route `POST /v1/search` to a search MCP server of the `mcp` section.
-With no `internet.search`, a search runs on Anthropic's side as `WebSearch`,
-and only on the Anthropic server. Reading a page runs in `core`, only when
+tools and nothing else. On the Anthropic server, a search runs on Anthropic's
+side as `WebSearch`. On another server, a search goes through the gateway
+route `POST /v1/search` to the SearXNG instance of `internet.search`, and with
+no `internet.search` the worker has no search. Reading a page runs in `core`, only when
 `internet.fetch.enabled` is on, and only for a page the worker was given.
 [security.md](security.md) has the whole design.
 

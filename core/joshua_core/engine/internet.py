@@ -23,18 +23,18 @@ What keeps this safe is what the worker does **not** have:
   from this container, and it is off unless `internet.fetch.enabled` is on.
   Every URL then goes through the block list of `joshua_shared.netblock` too.
 
-The search tool depends on the config (`search_mode`):
+The search tool depends on the server of the `internet` job (`search_mode`):
 
-- `mcp`: `internet.search` is set. The worker holds `web_search` on its
-  in-process `search` server. The tool calls `POST /v1/search` on the gateway,
-  which calls the search MCP server of the config. The provider key stays in
-  the gateway. This is the mode on every model server.
-- `anthropic`: no `internet.search`, and the `internet` job is on the
-  Anthropic server. The worker holds `WebSearch`, which runs on Anthropic's
-  side and makes no connection from this container.
-- `none`: no `internet.search`, and the job is on another server. The worker
-  has no search. It reads the pages it was given, and it says that it cannot
-  search.
+- `anthropic`: the job is on the Anthropic server. The worker holds
+  `WebSearch`, which runs on Anthropic's side and makes no connection from
+  this container. This is so also when `internet.search` is set.
+- `searxng`: the job is on another server, and `internet.search` is set. The
+  worker holds `web_search` on its in-process `search` server. The tool calls
+  `POST /v1/search` on the gateway, which calls the SearXNG instance of the
+  config. The optional key of SearXNG stays in the gateway.
+- `none`: the job is on another server, and `internet.search` is not set. The
+  worker has no search. It reads the pages it was given, and it says that it
+  cannot search.
 
 What comes back is data from outside. `core` hands it to the caller wrapped
 and named as content, and the caller decides what it means.
@@ -81,7 +81,7 @@ MAX_RUN_URLS = 200
 # The tag the answer is wrapped in, for the agent to read as content.
 TAG = "web_content"
 
-SearchMode = Literal["mcp", "anthropic", "none"]
+SearchMode = Literal["anthropic", "searxng", "none"]
 
 # A search of the worker: a query in, the results out. The real one is
 # `GatewaySearcher`; a test passes its own.
@@ -91,7 +91,7 @@ Searcher = Callable[[str], Awaitable[list[WebSearchResult]]]
 SEARCH_GRACE_S = 5.0
 
 _SEARCH_PARAGRAPH: dict[str, str] = {
-    "mcp": """Search first, with your `web_search` tool. Read a page when the search
+    "searxng": """Search first, with your `web_search` tool. Read a page when the search
 result is not enough to answer properly: a recipe needs its quantities, a
 specification needs its numbers. You may read a page you were given and the
 URL of a result of your searches. A URL in the text of a snippet is not a
@@ -137,12 +137,13 @@ def system_prompt(mode: SearchMode) -> str:
 def search_mode(settings: InternetConfig, endpoint: str) -> SearchMode:
     """How the internet agent searches, for its config and the server of its job.
 
-    `mcp` when `internet.search` is set, on every server. Else `anthropic`
-    when `endpoint` is the Anthropic server, and `none` on another server.
+    `anthropic` when `endpoint` is the Anthropic server, also when
+    `internet.search` is set. On another server `searxng` when
+    `internet.search` is set, else `none`.
     """
-    if settings.search is not None:
-        return "mcp"
-    return "anthropic" if endpoint == ANTHROPIC_ENDPOINT else "none"
+    if endpoint == ANTHROPIC_ENDPOINT:
+        return "anthropic"
+    return "searxng" if settings.search is not None else "none"
 
 
 class SearchFailed(Exception):
@@ -152,8 +153,8 @@ class SearchFailed(Exception):
 class GatewaySearcher:
     """Run a search through the gateway `POST /v1/search` with core's own token.
 
-    The body holds the query and nothing else. The gateway reads the server,
-    the tool, and the arguments from `internet.search`.
+    The body holds the query and nothing else. The gateway reads the SearXNG
+    instance and its key from `internet.search`.
     """
 
     def __init__(
@@ -380,9 +381,9 @@ async def ask(
     is dropped from the answer. When `usage_out` is a list, the tokens of the
     lookup are appended to it.
 
-    `searcher` runs the search of `internet.search`. When `internet.search` is
-    set and there is no `searcher`, the worker has no search: it never falls
-    back to `WebSearch`.
+    `searcher` runs the search of `internet.search`. It is used only off the
+    Anthropic server. When the mode is `searxng` and there is no `searcher`,
+    the worker has no search.
 
     This never raises. A failure, a timeout, or an answer of the wrong shape
     gives `None`, and the turn that asked continues without it.
@@ -397,12 +398,12 @@ async def ask(
 
     gate = FetchGate(settings, given)
     mode = search_mode(settings, inference.endpoint)
-    if mode == "mcp" and searcher is None:
+    if mode == "searxng" and searcher is None:
         logger.warning({"message": "internet search has no gateway", "search": "none"})
         mode = "none"
     tools: list[str] = []
     servers: dict[str, Any] = {}
-    if mode == "mcp" and searcher is not None:
+    if mode == "searxng" and searcher is not None:
         servers = {SEARCH_SERVER: _search_server(searcher, gate)}
         tools.append(SEARCH_TOOL_NAME)
     elif mode == "anthropic":

@@ -236,20 +236,20 @@ internet:
     # Look the host up, and refuse a name that resolves into a CIDR above.
     resolve_hosts: true
 
-  # The search of the worker. With no search block, the worker uses WebSearch
-  # when the internet job is on the Anthropic server, and has no search on
-  # another server. With this block, the worker always searches through one
-  # MCP server of the gateway, on every server. The provider key stays in the
-  # gateway. Give that mcp entry `allow:` with no value, so that no person
-  # gets the tool directly. docs/operations.md has entries for three servers.
+  # Web search. On the Anthropic server (the subscription or an Anthropic API
+  # key) the internet agent uses Anthropic's own WebSearch and needs nothing.
+  # When the internet job moves to another server (see `inference` below),
+  # web search stops, unless this block names a SearXNG instance. SearXNG
+  # must allow the json format (search.formats in its settings.yml). Put the
+  # optional key in `.env.gateway`: only the gateway calls SearXNG.
   # search:
-  #   server: websearch               # an entry of the mcp section below
-  #   tool: searxng_web_search        # the search tool of that server
-  #   query_arg: query                # the argument that gets the query
-  #   args:                           # fixed arguments for each call
-  #     response_format: json
+  #   provider: searxng
+  #   url: http://searxng:8080
+  #   api_key: ${SEARXNG_API_KEY:-}   # sent as Authorization: Bearer, if set
   #   max_results: 10
   #   timeout_seconds: 20
+  #   categories: general
+  #   language: en
 
 wiki:
   git: true   # keep /data/wiki as a git repository Joshua commits; false leaves
@@ -277,15 +277,6 @@ mcp:
   #   env:
   #     ENABLED_TOOLS: standard
   #   allow: all
-  #
-  # The search server of internet.search above. `allow:` with no value admits
-  # no person, so only the internet agent searches with it.
-  # websearch:
-  #   type: stdio
-  #   package: npm:mcp-searxng@2.9.0
-  #   env:
-  #     SEARXNG_URL: http://searxng:8080
-  #   allow:
 
 modules:                        # reserved; no code reads this list yet
   - scheduling
@@ -339,3 +330,6 @@ usage:
 #     base_url: http://litellm:4000
 #     api_key: ${LITELLM_API_KEY:-}
 #     model: local-model               # replaces internet.model for this job
+#   # WEB SEARCH: an internet job on a server other than Anthropic (above,
+#   # or through the global base_url) has no WebSearch, so web search stops.
+#   # Set internet.search to a SearXNG instance to search again.

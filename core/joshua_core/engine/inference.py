@@ -98,22 +98,16 @@ def plan(settings: JoshuaConfig) -> dict[str, dict[str, Any]]:
 def log_plan(settings: JoshuaConfig) -> None:
     """Log the plan of each job in one INFO line, then the search of the internet job.
 
-    The search line says how the internet agent searches: ``mcp:<server>``
-    for ``internet.search``, ``anthropic`` for ``WebSearch`` on the Anthropic
-    server, or ``none``. A warning follows only for ``none`` while the
-    internet agent is on, because it then cannot search.
+    The search line says how the internet agent searches: ``anthropic`` for
+    ``WebSearch`` on the Anthropic server, ``searxng`` for ``internet.search``
+    on another server, or ``none``. A warning follows only for ``none`` while
+    the internet agent is on, because it then cannot search.
     """
     jobs = plan(settings)
     logger.info({"message": "inference", "jobs": jobs})
     mode = internet_agent.search_mode(settings.internet, jobs["internet"]["endpoint"])
-    search = settings.internet.search
-    label = f"mcp:{search.server}" if mode == "mcp" and search is not None else mode
     logger.info(
-        {
-            "message": "internet search",
-            "search": label,
-            "enabled": settings.internet.enabled,
-        }
+        {"message": "internet search", "search": mode, "enabled": settings.internet.enabled}
     )
     if settings.internet.enabled and mode == "none":
         logger.warning(
