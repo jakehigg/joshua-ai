@@ -72,6 +72,37 @@ upstream credential an MCP server reads as `${VAR}`. Every variable is optional
 unless the key says `{optional: false}`, so a container starts without a
 credential it does not use.
 
+**A model server other than the subscription.** The keys of the `inference`
+section go in `secrets.core`, and only core gets them. Add one key for each
+variable that your `joshua.yaml` refers to:
+
+```yaml
+secrets:
+  core:
+    keys:
+      INFERENCE_API_KEY: {}
+      LOCAL_INFERENCE_API_KEY: {name: local-model-server, key: api-key}
+
+config: |
+  ...
+  inference:
+    base_url: http://litellm:4000
+    api_key: ${INFERENCE_API_KEY:-}
+    internet:
+      base_url: http://ollama:11434
+      api_key: ${LOCAL_INFERENCE_API_KEY:-}
+      model: llama3.1
+```
+
+For one LiteLLM key for each job, add `INFERENCE_KEY_CHAT: {}` and a key for
+each other job to `secrets.core.keys`, and set only `api_key` in each job
+block. Each job then uses `inference.base_url` with its own key.
+
+Write each key as `${VAR:-}`, with the `:-` default. Channels and gateway read
+the same file and do not get the key, and a `${VAR}` with no value and no
+default stops them at start. `docs/operations.md` has the recipes and the check
+route.
+
 `make init-env` in the repository mints the `JOSHUA_TOKEN_*` values. To make
 the Secrets by hand:
 
@@ -171,6 +202,24 @@ writes into the pod filesystem and runs again on every restart.
 Each upstream credential is a key in `secrets.gateway`, as `${VAR:-}` in your
 `joshua.yaml`. An entry whose credential is empty is turned off, and `/readyz`
 counts it in `disabled`.
+
+**Web search off the Anthropic server.** On the Anthropic server the internet
+agent uses Anthropic's own `WebSearch` and needs nothing. When the `internet`
+job moves to another server (Bedrock through LiteLLM, Ollama), web search
+stops, unless `internet.search` names a SearXNG instance. The gateway calls
+SearXNG, so its optional key is in `secrets.gateway` (the chart passes
+`SEARXNG_API_KEY` by default), never in `secrets.core`:
+
+```yaml
+config: |
+  ...
+  internet:
+    search:
+      url: http://searxng:8080
+      api_key: ${SEARXNG_API_KEY:-}
+```
+
+SearXNG must allow the `json` format. `docs/operations.md` has the recipe.
 
 ## The viewer
 

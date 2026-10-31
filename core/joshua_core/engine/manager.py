@@ -24,9 +24,11 @@ from zoneinfo import ZoneInfo
 from joshua_shared import layout, wikigit
 from joshua_shared.attachments import AttachmentMeta, read_meta
 from joshua_shared.config import JoshuaConfig
+from joshua_shared.inference import ANTHROPIC_ENDPOINT, ResolvedInference
 from joshua_shared.log import get_logger
 
 from joshua_core.attachments import file_attachment
+from joshua_core.engine import inference as inference_plan
 from joshua_core.engine.describe import (
     attachment_note,
     describe_attachment,
@@ -35,7 +37,7 @@ from joshua_core.engine.describe import (
 )
 from joshua_core.engine.mcp import allowed_gateway_servers, gateway_servers
 from joshua_core.engine.tools import ToolDeps
-from joshua_core.engine.types import Attachment, OnDelta, TurnResult
+from joshua_core.engine.types import FAILED_REPLY, Attachment, OnDelta, TurnResult
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.engine.usage import Usage
 from joshua_core.memory import prompt as memory_prompt
@@ -94,6 +96,39 @@ class _Managed:
     # ``core.mcp_replace_seconds``.
     replace_pending: bool = False
     replaced_at: float | None = None
+    # Why the session is marked for replacement, for the log line.
+    replace_reason: str = "mcp server failed"
+    # The model, the server, and the environment the session was built with.
+    inference: ResolvedInference | None = None
+
+
+@dataclass
+class _Built:
+    """What ``_build_session`` gives: a session and what the manager keeps of it.
+
+    ``deps`` is the live ToolDeps for the SDK backend, so the manager rebinds
+    its channel and speaker for each turn, or None for the stub. ``profile`` is
+    the derived profile, with the session's name and its ceilings. The memory
+    fields let ``_get_or_create`` rebuild after a nightly profile rewrite.
+    ``inference`` is the job of the session, resolved.
+    """
+
+    session: Any
+    deps: Any
+    profile: Any
+    memory_paths: list[Path]
+    memory_mtime: float
+    inference: ResolvedInference
+
+    def apply(self, mc: _Managed) -> None:
+        """Put this session and its fields on ``mc``."""
+        mc.session = self.session
+        mc.deps = self.deps
+        mc.profile = getattr(self.profile, "name", "") or ""
+        mc.idle_ttl_s = getattr(self.profile, "idle_ttl_s", None)
+        mc.memory_paths = self.memory_paths
+        mc.memory_mtime = self.memory_mtime
+        mc.inference = self.inference
 
 
 JOURNAL_TOOL = "mcp__files__write_journal_entry"
@@ -252,20 +287,41 @@ class ConversationManager:
             data_dir=self._data_dir,
         )
 
+    def _resume_on(
+        self, conversation: Conversation, resume: str | None, resolved: ResolvedInference
+    ) -> str | None:
+        """``resume``, or None when the stored session ran on another server.
+
+        A session holds the history of one server. Another server cannot read
+        it, so a server change starts a new session, the same as a stale
+        resume id. A stored NULL is ``anthropic``.
+        """
+        if resume is None:
+            return None
+        stored = conversation.inference_endpoint or ANTHROPIC_ENDPOINT
+        if stored == resolved.endpoint:
+            return resume
+        logger.info(
+            {
+                "message": "inference server changed; new session",
+                "conversation_id": conversation.id,
+                "from": stored,
+                "to": resolved.endpoint,
+            }
+        )
+        return None
+
     async def _build_session(
         self, channel: Channel, conversation: Conversation, resume: str | None
-    ) -> tuple[Any, Any, Any, list[Path], float]:
-        """Build a session for a conversation. Returns
-        ``(session, deps, profile, memory_paths, memory_mtime)`` — deps is the live
-        ToolDeps for the SDK backend (so the manager rebinds its channel and speaker
-        per turn), or None for the stub; profile is the derived profile, which
-        carries the session's name and its ceilings; the
-        memory fields let ``_get_or_create`` rebuild after a nightly profile
-        rewrite."""
+    ) -> _Built:
+        """Build a session for a conversation, on the server and the model of
+        its job (``voice`` for a spoken profile, else ``chat``)."""
         person = (
             await self._repo.get_person(conversation.person_id) if conversation.person_id else None
         )
         profile = self._derive_profile(person, channel)
+        resolved = inference_plan.resolve(self._settings, inference_plan.turn_job(profile))
+        resume = self._resume_on(conversation, resume, resolved)
         memory = self._memory_block(person, channel)
         system_prompt = self._composer.compose(profile, person, channel, memory)
         mem_paths = memory_prompt.source_paths(person, channel, self._data_dir)
@@ -287,8 +343,9 @@ class ConversationManager:
                 resume=resume,
                 data_dir=self._data_dir,
                 wiki_git=wikigit.is_enabled(self._settings),
+                inference=resolved,
             )
-            return session, None, profile, mem_paths, mem_mtime
+            return _Built(session, None, profile, mem_paths, mem_mtime, resolved)
 
         from joshua_core.engine.agent import AgentSession, build_options
 
@@ -313,11 +370,12 @@ class ConversationManager:
             system_prompt=system_prompt,
             cwd=cwd,
             mcp_servers=mcp,
-            model=getattr(profile, "model", None) or self._settings.core.model,
+            model=resolved.model,
+            env=resolved.env,
             max_turns=getattr(profile, "max_turns", 0) or self._settings.core.max_turns,
             resume=resume,
         )
-        return AgentSession(options), deps, profile, mem_paths, mem_mtime
+        return _Built(AgentSession(options), deps, profile, mem_paths, mem_mtime, resolved)
 
     def _conversation_role(self, channel: Channel, conversation: Conversation) -> str:
         """The role this conversation carries, for the gateway file policy.
@@ -347,21 +405,15 @@ class ConversationManager:
             if mc is not None:
                 await self._refresh_if_stale_locked(mc, channel)
                 return mc
-            session, deps, profile, mem_paths, mem_mtime = await self._build_session(
-                channel, conversation, conversation.sdk_session_id
-            )
+            built = await self._build_session(channel, conversation, conversation.sdk_session_id)
             mc = _Managed(
                 conversation=conversation,
-                session=session,
+                session=built.session,
                 lock=asyncio.Lock(),
                 last_used=monotonic(),
-                deps=deps,
-                profile=getattr(profile, "name", "") or "",
-                idle_ttl_s=getattr(profile, "idle_ttl_s", None),
                 built_at=monotonic(),
-                memory_paths=mem_paths,
-                memory_mtime=mem_mtime,
             )
+            built.apply(mc)
             self._pool[conversation.id] = mc
             await self._enforce_pool_limit_locked()
             return mc
@@ -371,11 +423,13 @@ class ConversationManager:
         changed on disk (the nightly rewrite), or when the last turn found a
         gateway server failed. Called with ``_pool_lock`` held; a busy session
         keeps its client and rebuilds on a later turn. History carries over
-        through the resumed sdk session."""
+        through the resumed sdk session. A session marked for replacement,
+        after a failed gateway server or a turn that timed out, is rebuilt
+        too."""
         if mc.lock.locked():
             return
         if mc.replace_pending:
-            await self._rebuild_locked(mc, channel, "session rebuilt (mcp server failed)")
+            await self._rebuild_locked(mc, channel, f"session rebuilt ({mc.replace_reason})")
             return
         if memory_prompt.newest_mtime(mc.memory_paths) <= mc.memory_mtime:
             return
@@ -384,15 +438,8 @@ class ConversationManager:
     async def _rebuild_locked(self, mc: _Managed, channel: Channel, message: str) -> None:
         """Give ``mc`` a new session: a new client with new MCP connections."""
         old = mc.session
-        session, deps, profile, mem_paths, mem_mtime = await self._build_session(
-            channel, mc.conversation, mc.conversation.sdk_session_id
-        )
-        mc.session = session
-        mc.deps = deps
-        mc.profile = getattr(profile, "name", "") or ""
-        mc.idle_ttl_s = getattr(profile, "idle_ttl_s", None)
-        mc.memory_paths = mem_paths
-        mc.memory_mtime = mem_mtime
+        built = await self._build_session(channel, mc.conversation, mc.conversation.sdk_session_id)
+        built.apply(mc)
         mc.built_at = monotonic()
         mc.replace_pending = False
         await old.close()
@@ -429,6 +476,7 @@ class ConversationManager:
             )
             return
         mc.replace_pending = True
+        mc.replace_reason = "mcp server failed"
         mc.replaced_at = now
         logger.warning(
             {
@@ -526,11 +574,12 @@ class ConversationManager:
             abs_path = self._data_dir / rel
             if settings.describe.enabled and layout.attachment_area(rel) is not None:
                 used: list[Usage] = []
+                resolved = inference_plan.resolve(self._settings, "describe")
                 try:
                     meta = await describe_attachment(
                         abs_path,
                         mime=attachment.mime,
-                        model=settings.describe.model,
+                        inference=resolved,
                         timeout_s=settings.describe.timeout_seconds,
                         max_text_chars=settings.extract.max_chars,
                         usage_out=used,
@@ -541,7 +590,8 @@ class ConversationManager:
                     self._repo,
                     "describe",
                     used,
-                    model=settings.describe.model,
+                    model=resolved.model,
+                    endpoint=resolved.endpoint,
                     person_id=person_id,
                     conversation_id=conversation_id,
                 )
@@ -677,11 +727,32 @@ class ConversationManager:
 
             mc.had_success = True
             mc.last_used = monotonic()
+            resolved = mc.inference or inference_plan.resolve(self._settings, "chat")
+            if result.is_error:
+                # The error text can name a host. The log gets a short label,
+                # and the person gets the failure reply.
+                logger.warning(
+                    {
+                        "message": "turn call failed",
+                        "conversation_id": conversation.id,
+                        "job": resolved.job,
+                        "endpoint": resolved.endpoint,
+                        "error": result.error or "error",
+                    }
+                )
+                result = replace(result, text=FAILED_REPLY)
             if result.session_id and result.session_id != mc.conversation.sdk_session_id:
                 await self._repo.set_sdk_session(
-                    conversation.id, result.session_id, last_channel_id=channel.id
+                    conversation.id,
+                    result.session_id,
+                    last_channel_id=channel.id,
+                    inference_endpoint=resolved.endpoint,
                 )
-                mc.conversation = replace(mc.conversation, sdk_session_id=result.session_id)
+                mc.conversation = replace(
+                    mc.conversation,
+                    sdk_session_id=result.session_id,
+                    inference_endpoint=resolved.endpoint,
+                )
             else:
                 await self._repo.touch_conversation(conversation.id, last_channel_id=channel.id)
 
@@ -709,14 +780,23 @@ class ConversationManager:
                 "out",
                 result.text or "",
                 status="failed" if result.is_error else "ok",
-                meta={"usage": result.usage, "cost_usd": result.cost_usd, **metrics},
+                meta={
+                    "usage": result.usage,
+                    # The SDK prices a model it does not know at its own rates,
+                    # so a cost is kept only for a call to Anthropic.
+                    "cost_usd": (
+                        result.cost_usd if resolved.endpoint == ANTHROPIC_ENDPOINT else None
+                    ),
+                    **metrics,
+                },
             )
             if isinstance(result.usage, dict):
                 await record_usage(
                     self._repo,
                     "chat",
                     [Usage.from_sdk(result.usage)],
-                    model=getattr(mc.profile, "model", None) or self._settings.core.model,
+                    model=resolved.model,
+                    endpoint=resolved.endpoint,
                     person_id=turn_person_id,
                     conversation_id=conversation.id,
                     ref=f"transcript:{transcript_id}" if transcript_id is not None else None,
@@ -741,7 +821,7 @@ class ConversationManager:
         on_delta: OnDelta,
     ) -> TurnResult:
         try:
-            return await mc.session.run(prompt, on_delta)
+            return await self._run_session(mc, prompt, on_delta)
         except Exception as e:  # noqa: BLE001
             # A stale resume id (e.g. the session file is gone after a restart)
             # breaks the very first turn. Rebuild without resume and try once more.
@@ -755,16 +835,36 @@ class ConversationManager:
                 }
             )
             await mc.session.close()
-            (
-                mc.session,
-                mc.deps,
-                mc.profile,
-                mc.memory_paths,
-                mc.memory_mtime,
-            ) = await self._build_session(channel, conversation, resume=None)
+            built = await self._build_session(channel, conversation, resume=None)
+            built.apply(mc)
             if mc.deps is not None:
                 mc.deps.channel = channel
-            return await mc.session.run(prompt, on_delta)
+            return await self._run_session(mc, prompt, on_delta)
+
+    async def _run_session(self, mc: _Managed, prompt: str, on_delta: OnDelta) -> TurnResult:
+        """Run one turn on ``mc.session`` inside ``inference.timeout_seconds``.
+
+        A turn that passes the limit interrupts the client and closes it, and
+        the next turn gets a new session. The turn gives a failed result, which
+        ``run_turn`` handles as it handles ``is_error``.
+        """
+        limit = self._settings.inference.timeout_seconds
+        try:
+            return await asyncio.wait_for(mc.session.run(prompt, on_delta), timeout=limit)
+        except TimeoutError:
+            await mc.session.interrupt()
+            await mc.session.close()
+            mc.replace_pending = True
+            mc.replace_reason = "turn timed out"
+            logger.warning(
+                {
+                    "message": "turn timed out",
+                    "conversation_id": mc.conversation.id,
+                    "timeout_s": limit,
+                    "endpoint": mc.inference.endpoint if mc.inference else None,
+                }
+            )
+            return TurnResult(text="", is_error=True, error="timeout")
 
     # --- lifecycle ---------------------------------------------------------
 

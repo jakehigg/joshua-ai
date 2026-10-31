@@ -52,6 +52,8 @@ class UsageEvent:
     person_id: str | None = None
     conversation_id: str | None = None
     run_id: int | None = None
+    # The server label of the call (``anthropic`` or a host), or None.
+    endpoint: str | None = None
     ref: str | None = None
     at: datetime | None = None
 
@@ -94,6 +96,7 @@ async def record_usage(
     usages: Iterable[Usage],
     *,
     model: str | None = None,
+    endpoint: str | None = None,
     person_id: str | None = None,
     conversation_id: str | None = None,
     ref: str | None = None,
@@ -102,7 +105,8 @@ async def record_usage(
     rows were written.
 
     `kind` is one of `chat`, `reflection`, `internet`, or `describe`; the row
-    name is the kind. `ref` names the source; with more than one usage, each
+    name is the kind. `model` is the model that the call used, and
+    `endpoint` is its server label. `ref` names the source; with more than one usage, each
     row gets `<ref>:<n>`. With no `ref`, each row gets a new random ref.
     A row that cannot be written is a warning. Only a `kind` that is not a
     call kind raises, a `ValueError`, because that is a fault in the code.
@@ -121,6 +125,7 @@ async def record_usage(
             name=kind,
             usage=used,
             model=model,
+            endpoint=endpoint,
             person_id=person_id,
             conversation_id=_uuid_or_none(conversation_id),
             ref=row_ref,

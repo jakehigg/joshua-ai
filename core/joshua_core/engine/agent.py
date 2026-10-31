@@ -5,8 +5,18 @@ to the engine through ``AgentSession`` (one live SDK client per conversation) an
 ``TurnResult``. The import is guarded so stub mode and the offline test run load
 this module without the SDK installed; the SDK-backed paths stay unused there.
 
-The SDK spawns the bundled Claude Code CLI and authenticates with
-``CLAUDE_CODE_OAUTH_TOKEN`` from the environment.
+The SDK starts the bundled Claude Code CLI with ``{**os.environ, **options.env}``.
+Core removes every provider variable from ``os.environ`` at start (see
+``engine/inference.py``), so ``options.env`` is the only source of the server,
+the credential, and the model tiers. Each builder takes ``env`` from a
+``ResolvedInference`` for one job, and each run function takes the
+``ResolvedInference`` itself.
+
+A failed model call does not raise. The CLI ends the turn with a result that
+has ``is_error`` set and the error text in ``result``. That text can name a
+host, so no function here returns it or logs it: ``run_oneshot`` gives ``""``,
+``run_structured`` and ``run_worker_session`` give None, and
+``AgentSession.run`` sets ``TurnResult.is_error`` and a short ``error`` label.
 """
 
 from __future__ import annotations
@@ -17,9 +27,12 @@ import json
 import shutil
 import tempfile
 import time
+import weakref
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
@@ -58,17 +71,53 @@ _NO_TOOLS: list[str] = []
 # The only built-in tools a worker may hold, and the only place in this repo
 # where a tool list is not empty. ``WebSearch`` runs on Anthropic's side.
 # ``WebFetch`` runs here, so it is gated by a PreToolUse hook over a block
-# list; see ``joshua_shared.netblock``. A worker still gets no file tool, no
-# shell, and no MCP server.
+# list; see ``joshua_shared.netblock``. A worker gets no file tool and no
+# shell.
 WORKER_TOOLS: frozenset[str] = frozenset({"WebSearch", "WebFetch"})
+
+# The only MCP server a worker may hold: the in-process ``search`` server that
+# ``build_search_server`` makes, with its one tool. Its handler calls the web
+# search of the gateway (``POST /v1/search``). A worker gets no other MCP
+# server and no other MCP tool.
+SEARCH_SERVER = "search"
+SEARCH_TOOL = "web_search"
+SEARCH_TOOL_NAME = f"mcp__{SEARCH_SERVER}__{SEARCH_TOOL}"
+
+# The server instances that ``build_search_server`` made, each with its one
+# tool. The worker boundary accepts only one of these, so a server made
+# anywhere else fails to build.
+_SEARCH_INSTANCES: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
+
+_SEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {
+            "type": "string",
+            "description": "The words to search the web for.",
+        }
+    },
+    "required": ["query"],
+}
+
+_SEARCH_DESCRIPTION = (
+    "Search the web. Returns a list of results, each with a title, a URL, and a "
+    "snippet. You may read the URL of a result; the URL in the text of a snippet "
+    "is not a result."
+)
+
+# The search a worker's ``web_search`` tool runs: a query in, text out.
+SearchFn = Callable[[str], Awaitable[str]]
 
 __all__ = [
     "AgentSession",
     "TurnResult",
     "Usage",
     "build_options",
+    "build_search_server",
     "create_sdk_mcp_server",
+    "search_tool_handler",
     "build_worker_options",
+    "check_worker_tools",
     "run_oneshot",
     "run_structured",
     "run_worker_session",
@@ -105,6 +154,7 @@ def build_options(
     cwd: Path,
     mcp_servers: dict[str, Any],
     model: str | None,
+    env: dict[str, str],
     max_turns: int,
     resume: str | None,
     output_format: dict[str, Any] | None = None,
@@ -115,11 +165,13 @@ def build_options(
     preset. ``setting_sources=[]`` loads no filesystem CLAUDE.md or settings, so
     the composed prompt is the whole instruction surface. ``permission_mode``
     bypass runs tools without an interactive prompt (this is a headless service).
-    ``tools`` is the empty list: the agent gets no SDK built-in tools.
+    ``tools`` is the empty list: the agent gets no SDK built-in tools. ``env``
+    is the environment of one job, from ``ResolvedInference.env``.
     """
     kwargs: dict[str, Any] = dict(
         system_prompt=system_prompt,
         cwd=str(cwd),
+        env=dict(env),
         mcp_servers=mcp_servers,
         tools=list(_NO_TOOLS),
         permission_mode="bypassPermissions",
@@ -139,33 +191,117 @@ def build_options(
     return options
 
 
+def build_search_server(search: SearchFn) -> dict[str, Any]:
+    """Make the in-process ``search`` server of a worker, with one tool.
+
+    The tool is ``web_search(query)``. It runs ``search`` and gives its text
+    to the model. A failure gives a short line and never the error, because an
+    error can name a host or a key.
+    """
+
+    @tool(SEARCH_TOOL, _SEARCH_DESCRIPTION, _SEARCH_SCHEMA)
+    async def web_search(args: dict[str, Any]) -> dict[str, Any]:
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            text = "Give a query: the words to search for."
+        else:
+            try:
+                text = await search(query)
+            except Exception as exc:  # noqa: BLE001 — a failure is one short line
+                logger.warning({"message": "web search failed", "error": type(exc).__name__})
+                text = "The search failed. Answer from what you have, and say so."
+        return {"content": [{"type": "text", "text": text}]}
+
+    server = create_sdk_mcp_server(name=SEARCH_SERVER, version="1.0.0", tools=[web_search])
+    _SEARCH_INSTANCES[server["instance"]] = web_search
+    return server
+
+
+def search_tool_handler(server: Any) -> Callable[[dict[str, Any]], Awaitable[Any]] | None:
+    """The handler of the ``web_search`` tool of ``server``, or None when
+    ``build_search_server`` did not make ``server``. The stub worker calls it
+    the way the SDK does."""
+    instance = server.get("instance") if isinstance(server, dict) else None
+    try:
+        found = _SEARCH_INSTANCES.get(instance) if instance is not None else None
+    except TypeError:
+        return None
+    return found.handler if found is not None else None
+
+
+def _check_worker_servers(mcp_servers: dict[str, Any]) -> None:
+    """Assert that ``mcp_servers`` is empty or the one ``search`` server."""
+    unknown = sorted(set(mcp_servers) - {SEARCH_SERVER})
+    assert not unknown, f"a worker may not reach these MCP servers: {unknown}"
+    if SEARCH_SERVER in mcp_servers:
+        server = mcp_servers[SEARCH_SERVER]
+        assert (
+            isinstance(server, dict)
+            and server.get("type") == "sdk"
+            and search_tool_handler(server) is not None
+        ), "a worker's search server must come from build_search_server"
+
+
+def check_worker_tools(
+    tools: list[str], mcp_servers: dict[str, Any]
+) -> tuple[list[str], list[str]]:
+    """Assert the worker boundary, and split ``tools`` into built-in and MCP tools.
+
+    A built-in tool is one of ``WORKER_TOOLS``. An MCP tool is
+    ``SEARCH_TOOL_NAME``, and only when ``mcp_servers`` holds the ``search``
+    server. ``mcp_servers`` is empty or holds only the ``search`` server of
+    ``build_search_server``. The stub worker runs the same check.
+    """
+    _check_worker_servers(mcp_servers)
+    builtin = [t for t in tools if not t.startswith("mcp__")]
+    from_mcp = [t for t in tools if t.startswith("mcp__")]
+    unknown = sorted(set(builtin) - WORKER_TOOLS)
+    assert not unknown, f"a worker may not hold these tools: {unknown}"
+    allowed_mcp = {SEARCH_TOOL_NAME} if SEARCH_SERVER in mcp_servers else set()
+    unknown_mcp = sorted(set(from_mcp) - allowed_mcp)
+    assert not unknown_mcp, f"a worker may not hold these tools: {unknown_mcp}"
+    return builtin, from_mcp
+
+
 def build_worker_options(
     *,
     system_prompt: str,
     cwd: Path,
     model: str | None,
+    env: dict[str, str],
     max_turns: int,
     tools: list[str],
     output_format: dict[str, Any] | None = None,
     hooks: dict[str, Any] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
 ) -> Any:
     """Construct ``ClaudeAgentOptions`` for one ephemeral worker.
 
-    A worker is not the agent. It holds one objective, no conversation, and no
-    MCP server, so it may hold a built-in tool that the agent may not: the
-    internet agent searches the web. The assert below is the boundary. It
-    names what a worker may hold, so a file tool, a shell, or anything else
-    fails here rather than in production.
+    A worker is not the agent. It holds one objective and no conversation, so
+    it may hold a web tool that the agent may not: the internet agent searches
+    the web. The asserts below are the boundary:
+
+    - a built-in tool in ``tools`` is one of ``WORKER_TOOLS``;
+    - an MCP tool in ``tools`` is ``SEARCH_TOOL_NAME``, and only when
+      ``mcp_servers`` holds the ``search`` server;
+    - ``mcp_servers`` is empty, or holds only the ``search`` server that
+      ``build_search_server`` made.
+
+    So a file tool, a shell, another MCP server, or another MCP tool fails
+    here rather than in production. ``env`` is the environment of one job,
+    from ``ResolvedInference.env``.
     """
-    unknown = sorted(set(tools) - WORKER_TOOLS)
-    assert not unknown, f"a worker may not hold these tools: {unknown}"
+    servers = dict(mcp_servers or {})
+    builtin, from_mcp = check_worker_tools(tools, servers)
+    allowed_mcp = {SEARCH_TOOL_NAME} if SEARCH_SERVER in servers else set()
 
     kwargs: dict[str, Any] = dict(
         system_prompt=system_prompt,
         cwd=str(cwd),
-        mcp_servers={},
-        tools=list(tools),
-        allowed_tools=list(tools),
+        env=dict(env),
+        mcp_servers=servers,
+        tools=builtin,
+        allowed_tools=builtin + from_mcp,
         permission_mode="bypassPermissions",
         setting_sources=[],
         max_turns=max_turns,
@@ -179,7 +315,10 @@ def build_worker_options(
         kwargs["hooks"] = _hook_matchers(hooks)
     options = ClaudeAgentOptions(**kwargs)
     assert set(options.tools) <= WORKER_TOOLS, "a worker may hold only the web tools"
-    assert options.mcp_servers == {}, "a worker reaches no MCP server"
+    assert set(options.allowed_tools) <= WORKER_TOOLS | allowed_mcp, (
+        "a worker may hold only the web tools"
+    )
+    _check_worker_servers(options.mcp_servers)
     return options
 
 
@@ -208,38 +347,48 @@ async def run_worker_session(
     system_prompt: str,
     user_text: str,
     schema: dict[str, Any],
-    model: str | None,
+    inference: ResolvedInference,
     timeout_s: float,
     max_turns: int,
     tools: list[str],
     hooks: dict[str, Any] | None = None,
     usage_out: list[Usage] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Run one worker that may use a tool, and answer with JSON matching ``schema``.
 
     Unlike ``run_structured``, this worker takes several turns: it searches, it
-    reads, and then it answers. It still holds no conversation and no MCP
-    server. Returns the structured answer, or None on a failure or a timeout.
-    When ``usage_out`` is a list, the tokens of the call are appended to it.
+    reads, and then it answers. It still holds no conversation, and no MCP
+    server but the ``search`` server of ``build_search_server``.
+    ``inference`` gives the model and the environment of the job.
+    Returns the structured answer, or None on a failure, a failed call
+    (``is_error``), or a timeout. When ``usage_out`` is a list, the tokens of
+    the call are appended to it.
     """
     cwd = Path(tempfile.mkdtemp(prefix="joshua-worker-"))
     options = build_worker_options(
         system_prompt=system_prompt,
         cwd=cwd,
-        model=model,
+        model=inference.model,
+        env=inference.env,
         max_turns=max_turns,
         tools=tools,
         output_format={"type": "json_schema", "schema": schema},
         hooks=hooks,
+        mcp_servers=mcp_servers,
     )
     client = ClaudeSDKClient(options=options)
     try:
-        return await asyncio.wait_for(_worker_turn(client, user_text, usage_out), timeout=timeout_s)
+        return await asyncio.wait_for(
+            _worker_turn(client, user_text, inference, usage_out), timeout=timeout_s
+        )
     except TimeoutError:
-        logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
+        logger.warning(
+            {"message": "worker timed out", "timeout_s": timeout_s, **_labels(inference)}
+        )
         return None
     except Exception as exc:  # noqa: BLE001 — a worker failure never breaks the turn
-        logger.warning({"message": "worker failed", "error": str(exc)})
+        logger.warning({"message": "worker failed", "error": str(exc), **_labels(inference)})
         return None
     finally:
         try:
@@ -249,8 +398,51 @@ async def run_worker_session(
         shutil.rmtree(cwd, ignore_errors=True)
 
 
+def _labels(inference: ResolvedInference) -> dict[str, str]:
+    """The fields of a log line that name the job and its server. No key."""
+    return {"job": inference.job, "endpoint": inference.endpoint}
+
+
+def _error_label(msg: Any) -> str:
+    """A short label for a failed result, safe to log: never the error text."""
+    status = getattr(msg, "api_error_status", None)
+    if isinstance(status, int):
+        return f"http_{status}"
+    subtype = getattr(msg, "subtype", None)
+    return str(subtype) if isinstance(subtype, str) and subtype else "error"
+
+
+def _answer(msg: Any, inference: ResolvedInference) -> tuple[bool, dict[str, Any] | None]:
+    """Read the structured answer of one message.
+
+    Returns ``(done, answer)``. ``done`` is True when the message ends the
+    turn: a failed result (the answer is None), a structured answer, or a
+    result text that is a JSON object. A failed result is logged with its
+    label and its server, and never with its text.
+    """
+    if bool(getattr(msg, "is_error", False)):
+        logger.warning(
+            {"message": "worker call failed", "error": _error_label(msg), **_labels(inference)}
+        )
+        return True, None
+    structured = getattr(msg, "structured_output", None)
+    if isinstance(structured, dict):
+        return True, structured
+    result = getattr(msg, "result", None)
+    if isinstance(result, str) and result.strip().startswith("{"):
+        try:
+            parsed = json.loads(result)
+        except ValueError:
+            return True, None
+        return True, parsed if isinstance(parsed, dict) else None
+    return False, None
+
+
 async def _worker_turn(
-    client: Any, user_text: str, usage_out: list[Usage] | None = None
+    client: Any,
+    user_text: str,
+    inference: ResolvedInference,
+    usage_out: list[Usage] | None = None,
 ) -> dict[str, Any] | None:
     """Send the objective, let the worker use its tools, return the answer.
 
@@ -267,16 +459,9 @@ async def _worker_turn(
                 name = getattr(block, "name", None)
                 if name:
                     logger.info({"message": "worker tool", "tool": str(name)})
-            structured = getattr(msg, "structured_output", None)
-            if isinstance(structured, dict):
-                return structured
-            result = getattr(msg, "result", None)
-            if isinstance(result, str) and result.strip().startswith("{"):
-                try:
-                    parsed = json.loads(result)
-                except ValueError:
-                    return None
-                return parsed if isinstance(parsed, dict) else None
+            done, answer = _answer(msg, inference)
+            if done:
+                return answer
         return None
     finally:
         meter.flush(usage_out)
@@ -286,27 +471,55 @@ async def run_oneshot(
     *,
     system_prompt: str,
     user_prompt: str,
-    model: str | None,
+    inference: ResolvedInference,
+    timeout_s: float,
     usage_out: list[Usage] | None = None,
+    error_out: list[tuple[str, str]] | None = None,
 ) -> str:
-    """One transient, tool-less turn — for cheap side calls such as the nightly
-    reflection pass. Spawns a fresh CLI subprocess in an empty scratch dir, runs a
-    single query, and tears down. Returns the result text ("" on failure). When
-    ``usage_out`` is a list, the tokens of the turn are appended to it."""
+    """One transient, tool-less turn, for a side call such as the nightly
+    reflection.
+
+    It starts a new CLI in an empty scratch directory, runs one query with the
+    model and the environment of ``inference``, and stops the CLI. Returns the
+    result text, or ``""`` on a failure, a failed call (``is_error``), or a
+    timeout after ``timeout_s``. A failure is logged with the server label,
+    never with the error text. When ``usage_out`` is a list, the tokens of the
+    turn are appended to it. When ``error_out`` is a list, a failed call or a
+    timeout appends ``(label, text)`` to it: the short label and the error
+    text. The text can hold a host or a key, so the caller must clean it
+    before it shows it. An exception from the CLI is raised, not appended.
+    """
     cwd = Path(tempfile.mkdtemp(prefix="joshua-oneshot-"))
     options = build_options(
         system_prompt=system_prompt,
         cwd=cwd,
         mcp_servers={},
-        model=model,
+        model=inference.model,
+        env=inference.env,
         max_turns=1,
         resume=None,
     )
     session = AgentSession(options)
     try:
-        result = await session.run(user_prompt)
+        try:
+            result = await asyncio.wait_for(session.run(user_prompt), timeout=timeout_s)
+        except TimeoutError:
+            await session.interrupt()
+            logger.warning(
+                {"message": "oneshot timed out", "timeout_s": timeout_s, **_labels(inference)}
+            )
+            if error_out is not None:
+                error_out.append(("timeout", ""))
+            return ""
         if usage_out is not None:
             usage_out.append(Usage.from_sdk(result.usage))
+        if result.is_error:
+            logger.warning(
+                {"message": "oneshot call failed", "error": result.error, **_labels(inference)}
+            )
+            if error_out is not None:
+                error_out.append((result.error or "error", result.text or ""))
+            return ""
         return result.text or ""
     finally:
         await session.close()
@@ -318,7 +531,7 @@ async def run_structured(
     system_prompt: str,
     user_text: str,
     schema: dict[str, Any],
-    model: str | None,
+    inference: ResolvedInference,
     timeout_s: float,
     image: tuple[bytes, str] | None = None,
     document: bytes | None = None,
@@ -328,9 +541,10 @@ async def run_structured(
 
     The turn carries ``user_text`` and, when given, one image (bytes and media
     type) or one PDF. There is no conversation history: the CLI starts in an
-    empty directory, runs one query, and is torn down. Returns the structured
-    answer, or None when the call fails or passes ``timeout_s``. When
-    ``usage_out`` is a list, the tokens of the call are appended to it.
+    empty directory, runs one query, and is torn down. ``inference`` gives the
+    model and the environment of the job. Returns the structured answer, or
+    None when the call fails, ends with ``is_error``, or passes ``timeout_s``.
+    When ``usage_out`` is a list, the tokens of the call are appended to it.
 
     This is the only way a worker reaches the model. The options come from
     ``build_options``, so the tool list is empty here too.
@@ -340,7 +554,8 @@ async def run_structured(
         system_prompt=system_prompt,
         cwd=cwd,
         mcp_servers={},
-        model=model,
+        model=inference.model,
+        env=inference.env,
         max_turns=1,
         resume=None,
         output_format={"type": "json_schema", "schema": schema},
@@ -348,13 +563,16 @@ async def run_structured(
     client = ClaudeSDKClient(options=options)
     try:
         return await asyncio.wait_for(
-            _structured_turn(client, user_text, image, document, usage_out), timeout=timeout_s
+            _structured_turn(client, user_text, image, document, inference, usage_out),
+            timeout=timeout_s,
         )
     except TimeoutError:
-        logger.warning({"message": "worker timed out", "timeout_s": timeout_s})
+        logger.warning(
+            {"message": "worker timed out", "timeout_s": timeout_s, **_labels(inference)}
+        )
         return None
     except Exception as exc:  # noqa: BLE001 — a worker failure never breaks the turn
-        logger.warning({"message": "worker failed", "error": str(exc)})
+        logger.warning({"message": "worker failed", "error": str(exc), **_labels(inference)})
         return None
     finally:
         try:
@@ -369,6 +587,7 @@ async def _structured_turn(
     user_text: str,
     image: tuple[bytes, str] | None,
     document: bytes | None,
+    inference: ResolvedInference,
     usage_out: list[Usage] | None = None,
 ) -> dict[str, Any] | None:
     """Send one user message with its file and return the structured answer.
@@ -415,16 +634,9 @@ async def _structured_turn(
         await client.query(_one_message())
         async for msg in client.receive_response():
             meter.note(msg)
-            structured = getattr(msg, "structured_output", None)
-            if isinstance(structured, dict):
-                return structured
-            result = getattr(msg, "result", None)
-            if isinstance(result, str) and result.strip().startswith("{"):
-                try:
-                    parsed = json.loads(result)
-                except ValueError:
-                    return None
-                return parsed if isinstance(parsed, dict) else None
+            done, answer = _answer(msg, inference)
+            if done:
+                return answer
         return None
     finally:
         meter.flush(usage_out)
@@ -601,6 +813,7 @@ class AgentSession:
         usage: dict[str, Any] | None = None
         cost: float | None = None
         is_error = False
+        error: str | None = None
         tool_errors: dict[str, bool] = {}
         result_text: str | None = None
 
@@ -638,6 +851,12 @@ class AgentSession:
                 tool_errors.update(_tool_results(msg))
             elif cls == "AssistantMessage":
                 calls.extend(_tool_calls(msg))
+                kind = getattr(msg, "error", None)
+                if kind:
+                    # The CLI writes a failed call as a message whose text is
+                    # the error. It can name a host, so it is not streamed.
+                    error = str(kind)
+                    continue
                 # With partial streaming the assembled message duplicates the
                 # deltas; use it only as a fallback.
                 if not streamed:
@@ -652,6 +871,8 @@ class AgentSession:
                 cost = getattr(msg, "total_cost_usd", None)
                 is_error = bool(getattr(msg, "is_error", False))
                 result_text = getattr(msg, "result", None)
+                if is_error and error is None:
+                    error = _error_label(msg)
 
         # A message with no stop reason seen is sent, not lost.
         await flush()
@@ -683,6 +904,7 @@ class AgentSession:
             cost_usd=cost,
             tools_used=tools_used,
             tool_calls=calls,
+            error=error if is_error else None,
         )
 
     async def interrupt(self) -> None:

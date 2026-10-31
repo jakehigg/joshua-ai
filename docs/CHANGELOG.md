@@ -8,6 +8,60 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **An `inference` section names the server and the key for the model
+  calls.** Set `inference.base_url` and `inference.api_key` to send every job
+  to a server that speaks the Anthropic Messages API, such as LiteLLM, or set
+  `api_key` alone to use the Anthropic API. A block for each job (`chat`,
+  `voice`, `reflection`, `describe`, `internet`) can change the model, the
+  server, the key, or all three. A job that sets `base_url` must also set `api_key`, so the
+  global key never goes to another server. Core removes the provider
+  variables from its own environment at start, gives each call the
+  credential of its job only, and logs the server and the model of each job.
+  `inference.timeout_seconds` (default 600) limits one chat or voice turn and
+  one reflection call. A server change starts a new session for each
+  conversation. A failed call gives the person the failure reply, never the
+  error text. The usage rows name the model and the server of each call, and
+  core keeps the cost of a turn only for a call to Anthropic. See
+  [config.md](config.md#inference).
+
+- **`POST /admin/inference/check` tests the server of each job.** Core sends
+  one short prompt to each distinct server, model, and key of the
+  `inference` jobs, and returns for each job the server, the model, `ok`,
+  the seconds, and a short error. The error has no key and no token. Each
+  call writes one usage row. `/readyz` on core gives `inference_overrides`,
+  the number of job blocks that set `base_url` or `model`. The Helm chart
+  (0.0.9) shows the `inference` keys in `secrets.core.keys` and the
+  `inference` section with `${VAR:-}`. [operations.md](operations.md#the-model-server)
+  has recipes for the subscription, LiteLLM in front of Bedrock, one LiteLLM
+  key for each job, and a local model for one job.
+
+- **A job block can set `api_key` alone.** The job then uses the global
+  `base_url` with its own key, and never gets the global key, so LiteLLM can
+  count the use of each job apart. With no global `base_url`, the job key is
+  an Anthropic API key. An empty job key on the global server sends no key,
+  and does not fall back to the global key. See [config.md](config.md#inference).
+
+- **Web search off the Anthropic server, through SearXNG.** On the Anthropic
+  server the internet agent uses Anthropic's own `WebSearch`, as before, and
+  needs nothing. When the `internet` job moves to another server (Bedrock
+  through LiteLLM, Ollama), web search stops, unless the new block
+  `internet.search` names a SearXNG instance: `url`, an optional `api_key`,
+  `max_results` (default 10), `timeout_seconds` (default 20), and the optional
+  `categories` and `language`. The worker then holds one in-process tool,
+  `web_search`, which calls the new gateway route `POST /v1/search` with the
+  token of core. The gateway calls the SearXNG JSON API and keeps only `http`
+  and `https` URLs. The optional key stays in the gateway (`.env.gateway`,
+  `secrets.gateway` of the Helm chart), and the agent never sees a raw
+  result. Each result URL may be fetched, and a URL in a snippet may not.
+  SearXNG must allow the `json` format, and its `403` gives a clear error.
+  With no block on another server, the worker has no search and says so.
+  Core logs the search at start (`anthropic`, `searxng`, or `none`) and warns
+  only for `none`. See
+  [operations.md](operations.md#web-search-off-anthropic-searxng).
+
+- **`allow:` with no value on an `mcp` entry is the empty list.** No person
+  reaches that server. Before, the value failed the config load.
+
 - **Snapshots put the state of a live system in the memory index.** A new
   list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the
   arguments, a cadence, and a scope. Core runs each one with no model, keeps

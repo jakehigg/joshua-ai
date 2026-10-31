@@ -236,6 +236,21 @@ internet:
     # Look the host up, and refuse a name that resolves into a CIDR above.
     resolve_hosts: true
 
+  # Web search. On the Anthropic server (the subscription or an Anthropic API
+  # key) the internet agent uses Anthropic's own WebSearch and needs nothing.
+  # When the internet job moves to another server (see `inference` below),
+  # web search stops, unless this block names a SearXNG instance. SearXNG
+  # must allow the json format (search.formats in its settings.yml). Put the
+  # optional key in `.env.gateway`: only the gateway calls SearXNG.
+  # search:
+  #   provider: searxng
+  #   url: http://searxng:8080
+  #   api_key: ${SEARXNG_API_KEY:-}   # sent as Authorization: Bearer, if set
+  #   max_results: 10
+  #   timeout_seconds: 20
+  #   categories: general
+  #   language: en
+
 wiki:
   git: true   # keep /data/wiki as a git repository Joshua commits; false leaves
               # git to a frontend or a sync tool
@@ -295,3 +310,26 @@ usage:
   # caller.
   allowed_callers:
     - viewer                   # the web viewer
+
+# inference:
+#   # Where the model calls go. With no section, every job uses the Claude
+#   # subscription (CLAUDE_CODE_OAUTH_TOKEN in .env). Put each key in .env and
+#   # refer to it here.
+#   base_url: ${INFERENCE_BASE_URL:-}   # empty: Anthropic. Set: every job uses this server
+#   api_key: ${INFERENCE_API_KEY:-}     # with no base_url: the Anthropic API with this key
+#   timeout_seconds: 600                # the limit of one turn and one reflection call
+#   # One block for each job that needs a change: chat, voice, reflection,
+#   # describe, internet. A block with only `model` keeps the server above. A
+#   # block that sets base_url must set api_key too ("" for a server with no
+#   # key), so the key above never goes to another server. A block that sets
+#   # only api_key uses the server above with its own key, for example one
+#   # LiteLLM key for each job:
+#   # chat:
+#   #   api_key: ${INFERENCE_KEY_CHAT:-}
+#   internet:
+#     base_url: http://litellm:4000
+#     api_key: ${LITELLM_API_KEY:-}
+#     model: local-model               # replaces internet.model for this job
+#   # WEB SEARCH: an internet job on a server other than Anthropic (above,
+#   # or through the global base_url) has no WebSearch, so web search stops.
+#   # Set internet.search to a SearXNG instance to search again.

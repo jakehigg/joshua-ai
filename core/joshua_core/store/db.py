@@ -66,6 +66,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_channel_anon
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_channel_id TEXT;
 -- Date the current SDK session started; the phase 4 daily rollover reads it.
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS session_started_on DATE;
+-- The server label (`anthropic` or a host) the SDK session ran on. NULL is
+-- `anthropic`. A session from another server is not resumed.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inference_endpoint TEXT;
 
 CREATE TABLE IF NOT EXISTS tasks (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,6 +167,9 @@ CREATE TABLE IF NOT EXISTS usage_event (
     cache_write     INT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_usage_event_at ON usage_event (at DESC);
+-- The server label of the call: `anthropic` or a host. NULL for a row from
+-- before the column.
+ALTER TABLE usage_event ADD COLUMN IF NOT EXISTS endpoint TEXT;
 
 -- The latest output of each configured snapshot (memory.snapshots). A failed
 -- call keeps the last good text and adds one to failures.

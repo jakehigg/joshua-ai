@@ -25,6 +25,7 @@ from joshua_shared.fleet_auth import require_identity
 from joshua_shared.log import get_logger
 
 from joshua_core.delivery import Deliverer, is_ignore
+from joshua_core.engine.types import FAILED_REPLY
 from joshua_core.engine.types import Attachment as EngineAttachment
 from joshua_core.events import EventService
 from joshua_core.store.models import Channel, Conversation, Person
@@ -36,7 +37,7 @@ logger = get_logger("turns")
 SEEN_TTL_SECONDS = 900
 
 # The reply core delivers when a turn raises. No detail leaks to the channel.
-TURN_FAILED = "Sorry, something went wrong on my end. Please try again."
+TURN_FAILED = FAILED_REPLY
 
 
 class SeenCache:

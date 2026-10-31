@@ -485,3 +485,32 @@ async def test_a_task_or_an_event_is_never_the_person(tmp_path: Path) -> None:
     assert "Joshua: A reminder for the group." in together
     # The group reply to a task has no member speaker, so no member gets it.
     assert "A reminder for the group." not in mine
+
+
+async def test_reflection_runs_the_reflection_job_with_the_time_limit(tmp_path: Path) -> None:
+    """Each call takes the server and the model of `inference.reflection`, and
+    each usage row names them."""
+    _bootstrap(tmp_path)
+    repo = FakeReflectRepo(
+        people=PEOPLE,
+        rows=[row("c1", "in", LONG, T10), row("c1", "out", "Congratulations!", T11)],
+        conv_meta={
+            "c1": {"session_mode": "per_person", "person_id": "alex", "display_name": "Alex"}
+        },
+    )
+    oneshot = canned_oneshot()
+    extra = (
+        "\ninference:\n  timeout_seconds: 42\n  reflection:\n"
+        "    base_url: http://reflect:4000\n    api_key: ''\n    model: local-reflect\n"
+    )
+    reflector, _, _ = _reflector(tmp_path, repo, oneshot=oneshot, extra=extra)
+
+    await reflector.reflect(target_date=DAY)
+
+    assert oneshot.calls
+    for call in oneshot.calls:
+        assert call["inference"].job == "reflection"
+        assert call["inference"].model == "local-reflect"
+        assert call["inference"].endpoint == "reflect:4000"
+        assert call["timeout_s"] == 42
+    assert {(e.model, e.endpoint) for e in repo.usage_events} == {("local-reflect", "reflect:4000")}

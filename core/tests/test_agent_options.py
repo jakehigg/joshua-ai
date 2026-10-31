@@ -10,7 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from engine_fakes import resolved
 from joshua_core.engine import agent
+
+INF = resolved("describe")
 
 
 class FakeOptions:
@@ -31,6 +34,7 @@ def _build(**overrides):
         cwd=Path("/data/inbox/sessions/c1"),
         mcp_servers={},
         model=None,
+        env={},
         max_turns=20,
         resume=None,
     )
@@ -139,7 +143,7 @@ async def test_a_picture_is_sent_as_an_image_block():
     client = FakeClient(FakeResult(structured={"kind": "receipt"}))
 
     answer = await agent._structured_turn(
-        client, "Describe this file.", (b"bytes", "image/png"), None
+        client, "Describe this file.", (b"bytes", "image/png"), None, INF
     )
 
     assert answer == {"kind": "receipt"}
@@ -154,7 +158,7 @@ async def test_a_picture_is_sent_as_an_image_block():
 async def test_a_pdf_is_sent_as_a_document_block():
     client = FakeClient(FakeResult(structured={"kind": "bill"}))
 
-    await agent._structured_turn(client, "Describe this file.", None, b"%PDF-1.7")
+    await agent._structured_turn(client, "Describe this file.", None, b"%PDF-1.7", INF)
 
     content = client.sent[0]["message"]["content"]
     assert content[1]["type"] == "document"
@@ -164,7 +168,7 @@ async def test_a_pdf_is_sent_as_a_document_block():
 async def test_one_message_and_no_history_is_sent():
     client = FakeClient(FakeResult(structured={}))
 
-    await agent._structured_turn(client, "Describe this file.", None, None)
+    await agent._structured_turn(client, "Describe this file.", None, None, INF)
 
     assert len(client.sent) == 1
     assert client.sent[0]["parent_tool_use_id"] is None
@@ -174,13 +178,13 @@ async def test_a_json_answer_in_the_text_is_read():
     """A model that answers in text, not in the structured field, still counts."""
     client = FakeClient(FakeResult(result='{"kind": "photo"}'))
 
-    assert await agent._structured_turn(client, "u", None, None) == {"kind": "photo"}
+    assert await agent._structured_turn(client, "u", None, None, INF) == {"kind": "photo"}
 
 
 async def test_an_answer_that_is_not_json_gives_none():
     client = FakeClient(FakeResult(result="I am sorry, I cannot do that."))
 
-    assert await agent._structured_turn(client, "u", None, None) is None
+    assert await agent._structured_turn(client, "u", None, None, INF) is None
 
 
 # ── the worker boundary ──────────────────────────────────────────────────────
@@ -191,6 +195,7 @@ def _worker(**overrides):
         system_prompt="look up one question",
         cwd=Path("/tmp/worker"),
         model="claude-sonnet-5",
+        env={},
         max_turns=12,
         tools=["WebSearch"],
     )
@@ -261,3 +266,103 @@ def test_a_matcher_that_is_already_built_is_left_alone(fake_sdk):
     options = _worker(tools=["WebFetch"], hooks={"PreToolUse": [matcher]})
 
     assert options.hooks["PreToolUse"] == [matcher]
+
+
+# ── the search server of a worker ────────────────────────────────────────────
+
+
+async def _search(query: str) -> str:
+    return f"results for {query}"
+
+
+def test_a_worker_may_hold_the_search_server_and_its_one_tool(fake_sdk):
+    server = agent.build_search_server(_search)
+    options = _worker(
+        tools=[agent.SEARCH_TOOL_NAME, "WebFetch"], mcp_servers={agent.SEARCH_SERVER: server}
+    )
+    assert options.tools == ["WebFetch"]
+    assert options.allowed_tools == ["WebFetch", agent.SEARCH_TOOL_NAME]
+    assert list(options.mcp_servers) == ["search"]
+    assert agent.SEARCH_TOOL_NAME == "mcp__search__web_search"
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"type": "http", "url": "http://gateway:8000/websearch"},
+        {"type": "stdio", "command": "search-mcp"},
+        {"type": "sdk", "name": "search", "instance": object()},
+        "search",
+    ],
+    ids=["http", "stdio", "sdk not built here", "not a dict"],
+)
+def test_a_search_server_not_made_by_the_builder_fails_to_build(fake_sdk, server):
+    with pytest.raises(AssertionError, match="build_search_server"):
+        _worker(tools=[agent.SEARCH_TOOL_NAME], mcp_servers={agent.SEARCH_SERVER: server})
+
+
+def test_another_mcp_server_fails_to_build(fake_sdk):
+    """Also a server that `build_search_server` made, under another name."""
+    built = agent.build_search_server(_search)
+    for servers in (
+        {"files": {"type": "http", "url": "http://gateway:8000/files"}},
+        {"recall": built},
+        {agent.SEARCH_SERVER: built, "files": {"type": "http", "url": "http://gateway/files"}},
+    ):
+        with pytest.raises(AssertionError, match="may not reach"):
+            _worker(tools=["WebSearch"], mcp_servers=servers)
+
+
+@pytest.mark.parametrize(
+    "tool", ["mcp__search__other", "mcp__files__read_page", "mcp__recall__search_memory"]
+)
+def test_another_mcp_tool_fails_to_build(fake_sdk, tool):
+    servers = {agent.SEARCH_SERVER: agent.build_search_server(_search)}
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=[agent.SEARCH_TOOL_NAME, tool], mcp_servers=servers)
+
+
+def test_the_search_tool_with_no_search_server_fails_to_build(fake_sdk):
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=[agent.SEARCH_TOOL_NAME])
+
+
+@pytest.mark.parametrize("tool", ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task"])
+def test_a_file_or_shell_tool_beside_the_search_server_fails_to_build(fake_sdk, tool):
+    servers = {agent.SEARCH_SERVER: agent.build_search_server(_search)}
+    with pytest.raises(AssertionError, match="may not hold"):
+        _worker(tools=[agent.SEARCH_TOOL_NAME, tool], mcp_servers=servers)
+
+
+def test_options_that_were_widened_after_the_build_fail(fake_sdk, monkeypatch):
+    """The asserts read the built options too, not only the arguments."""
+
+    class Widened(FakeOptions):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.mcp_servers = {**kwargs["mcp_servers"], "files": {"type": "http"}}
+
+    monkeypatch.setattr(agent, "ClaudeAgentOptions", Widened)
+    with pytest.raises(AssertionError, match="may not reach"):
+        _worker(tools=["WebSearch"])
+
+
+async def test_the_search_tool_runs_the_search_and_hides_a_failure():
+    handler = agent.search_tool_handler(agent.build_search_server(_search))
+    assert handler is not None
+    assert (await handler({"query": "ribs"}))["content"][0]["text"] == "results for ribs"
+    assert "Give a query" in (await handler({"query": ""}))["content"][0]["text"]
+
+    async def broken(query: str) -> str:
+        raise RuntimeError("https://user:secret@search.example refused")
+
+    failing = agent.search_tool_handler(agent.build_search_server(broken))
+    assert failing is not None
+    text = (await failing({"query": "ribs"}))["content"][0]["text"]
+    assert text == "The search failed. Answer from what you have, and say so."
+
+
+def test_a_server_the_builder_did_not_make_has_no_handler():
+    assert agent.search_tool_handler(None) is None
+    assert agent.search_tool_handler({"instance": object()}) is None
+    assert agent.search_tool_handler({"instance": []}) is None

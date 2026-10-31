@@ -1,7 +1,8 @@
 """Derived session profiles.
 
 A profile decides which kernel prompt files compose a session's system prompt and
-carries the per-session engine ceilings (model, max turns, idle TTL). The
+carries the per-session engine ceilings (max turns, idle TTL) and the
+inference job (``chat`` or ``voice``) that picks the model and the server. The
 profile comes from the person's role and the chat kind. There is no
 ``profiles.yaml`` matrix. Tool exposure comes from the gateway config, not from
 the profile.
@@ -44,7 +45,9 @@ VOICE_FILES = ("voice.md",)
 class Profile:
     name: str  # "dm" | "group" | "guest" | "event" | "scheduled", "voice-" prefixed on a call
     prompt_files: tuple[str, ...]
-    model: str | None = None  # None -> core.model
+    # The inference job of the session: ``voice`` on a call, else ``chat``.
+    # ``engine/inference.py`` resolves the model and the server from it.
+    job: str = "chat"
     max_turns: int | None = None
     idle_ttl_s: int | None = None
 
@@ -83,12 +86,13 @@ def _spoken(profile: Profile, voice: VoiceChannel) -> Profile:
     The voice files are appended, never substituted: a guest on a call keeps
     ``guest.md``, and a group keeps ``group.md``. The ceilings come from
     ``channels.voice``, because a spoken turn must answer fast, and a person who
-    stops talking has left the room.
+    stops talking has left the room. The ``voice`` job takes its model from
+    ``channels.voice.model``, or from ``inference.voice.model`` when set.
     """
     return replace(
         profile.with_files(VOICE_FILES),
         name=f"voice-{profile.name}",
-        model=voice.model,
+        job="voice",
         max_turns=voice.max_turns,
         idle_ttl_s=voice.idle_ttl_s,
     )

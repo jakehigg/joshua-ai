@@ -55,6 +55,9 @@ class Conversation:
     last_channel_id: str | None = None
     # Date the current SDK session started; the phase 4 daily rollover reads it.
     session_started_on: date | None = None
+    # The server label the SDK session ran on. None is ``anthropic``. A session
+    # from another server is not resumed.
+    inference_endpoint: str | None = None
 
 
 @dataclass(frozen=True)

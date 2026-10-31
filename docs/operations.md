@@ -17,7 +17,7 @@ Each container answers two open routes on its port:
 | Container | `/readyz` checks |
 |---|---|
 | `channels` | one entry per channel: `{"ok": bool}`. Telegram reports `ok: false` while a poll error stands, and `ok: true` again after the next good poll. iMessage reports whether BlueBubbles answers a ping. The code stays `200`: channels serves `core` and the webhook while a poller is failing, and a `503` would stop the webhook that works because of an upstream that does not. |
-| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable). Either one false is a `503`. `embed` reports the model and does not hold `ok` down: a lost model costs the memory and not the turn. |
+| `core` | `db` (the database answers) and `layout` (the data volume is complete and writable). Either one false is a `503`. `embed` reports the model and does not hold `ok` down: a lost model costs the memory and not the turn. `inference_overrides` is the number of `inference` job blocks that set `base_url` or `model`. It names no server and no model. |
 | `gateway` | `connected`, `errored`, `total`: the MCP upstreams. The code stays `200`: the `files` builtin answers whatever an upstream is doing, and a `503` would take away every tool because one failed to connect. |
 
 From the host:
@@ -102,6 +102,7 @@ message text and no sender handle.
 | `POST /admin/reflect` | run the nightly reflection now. `{"date": "2026-08-27", "person": "sam"}` re-runs one day for one person. |
 | `GET /admin/journal/status` | today's journal: entries written, whether the nightly page landed, and the last nightly run |
 | `POST /admin/turn` | run one turn with no channel: `{"channel", "text", "person"}`. The reply comes back in the response and is not delivered. |
+| `POST /admin/inference/check` | send one short prompt to the server and the model of each `inference` job. See "Check the model server". |
 
 Example:
 
@@ -121,6 +122,250 @@ add a port to a compose override for a debugging session.
 | `GET /admin/inventory` | every MCP server, its status, its tools, and who may use it |
 | `GET /admin/calls?identity=&tool=&limit=200` | the last tool calls: who, which tool, how long, success or denied |
 | `POST /admin/reload` | reconnect the upstreams after a change to `mcp:` in `joshua.yaml`. `{"server": "name"}` reloads one. |
+
+## The model server
+
+The [`inference`](config.md#inference) section of `joshua.yaml` sets the
+server, the key, and the model of each model call. Each recipe here is a
+complete `inference` section. Put each key in `.env` (or in `secrets.core` of
+the Helm chart), never in `joshua.yaml`, and write it as `${VAR:-}`.
+
+### The Claude subscription
+
+Do not write an `inference` section. Set `CLAUDE_CODE_OAUTH_TOKEN` in `.env`.
+Every job uses the subscription. This is the default.
+
+### LiteLLM in front of Bedrock
+
+LiteLLM speaks the Anthropic Messages API and sends each call to the model
+that its config names, for example a model on Bedrock. Joshua sends every job
+to LiteLLM:
+
+```yaml
+inference:
+  base_url: http://litellm:4000
+  api_key: ${INFERENCE_API_KEY:-}
+```
+
+`INFERENCE_API_KEY` in `.env` is a LiteLLM key. `docker-compose.yml` gives it
+to `core`.
+
+Joshua sends the model setting of each job as it is, for example
+`claude-opus-5`. Each name must be a `model_name` in the LiteLLM config.
+Thus do one of these:
+
+- Give LiteLLM a `model_name` for each model that a job asks for.
+- Set `model` in each job block to a LiteLLM name:
+
+```yaml
+inference:
+  base_url: http://litellm:4000
+  api_key: ${INFERENCE_API_KEY:-}
+  chat:
+    model: bedrock-claude-sonnet
+  voice:
+    model: bedrock-claude-haiku
+  reflection:
+    model: bedrock-claude-sonnet
+  describe:
+    model: bedrock-claude-haiku
+  internet:
+    model: bedrock-claude-haiku
+```
+
+The LiteLLM config then names each alias:
+
+```yaml
+model_list:
+  - model_name: bedrock-claude-sonnet
+    litellm_params:
+      model: bedrock/<the Bedrock model id>
+  - model_name: bedrock-claude-haiku
+    litellm_params:
+      model: bedrock/<the Bedrock model id>
+```
+
+Know these limits:
+
+- **Web search stops.** On the Anthropic server the internet agent uses
+  Anthropic's own `WebSearch`, which needs nothing. Through LiteLLM, Bedrock,
+  or Ollama there is no `WebSearch`, so the internet agent has no search, and
+  core writes a warning at start. To search again, point `internet.search` at
+  a SearXNG instance: see "Web search off Anthropic: SearXNG". `WebFetch` runs
+  in `core`, so it works on every server when `internet.fetch.enabled` is on.
+- **A PDF can fail.** The `describe` job sends a PDF as a document block. A
+  model that is not Claude can refuse it through LiteLLM. Keep `describe` on
+  a Claude model.
+
+### One LiteLLM key for each job
+
+LiteLLM counts the use of each key. To see the use of each job in LiteLLM,
+give each job its own key and keep the one server. A job block that sets only
+`api_key` uses the global `base_url` with that key, and never gets the global
+key:
+
+```yaml
+inference:
+  base_url: http://litellm:4000
+  chat:
+    api_key: ${INFERENCE_KEY_CHAT:-}
+  voice:
+    api_key: ${INFERENCE_KEY_VOICE:-}
+  reflection:
+    api_key: ${INFERENCE_KEY_REFLECTION:-}
+  describe:
+    api_key: ${INFERENCE_KEY_DESCRIBE:-}
+  internet:
+    api_key: ${INFERENCE_KEY_INTERNET:-}
+```
+
+Do these steps:
+
+1. Make one key in LiteLLM for each job.
+2. Put each key in `.env`, for example `INFERENCE_KEY_CHAT=...`.
+3. Give each variable to `core`. `docker-compose.yml` gives `core` only
+   `INFERENCE_BASE_URL` and `INFERENCE_API_KEY`, so add the job keys to the
+   `environment` of `core` in `docker-compose.yml`:
+
+```yaml
+services:
+  core:
+    environment:
+      INFERENCE_KEY_CHAT: ${INFERENCE_KEY_CHAT:-}
+      INFERENCE_KEY_VOICE: ${INFERENCE_KEY_VOICE:-}
+      INFERENCE_KEY_REFLECTION: ${INFERENCE_KEY_REFLECTION:-}
+      INFERENCE_KEY_DESCRIBE: ${INFERENCE_KEY_DESCRIBE:-}
+      INFERENCE_KEY_INTERNET: ${INFERENCE_KEY_INTERNET:-}
+```
+
+   With the Helm chart, add each variable to `secrets.core.keys`.
+4. Restart `core`, then run the check (see "Check the model server").
+
+A job key that `core` does not get is empty. The job then sends no key, and
+the check shows `http_401` for that job. Jobs with different keys get
+different check calls.
+
+### A local model for one job
+
+Ollama and LiteLLM can serve a local model through the Anthropic Messages
+API. Send one job there, and keep the other jobs on the global setting. A
+job that sets `base_url` must also set `api_key`. Write `api_key: ""` for a
+server that needs no key:
+
+```yaml
+inference:
+  reflection:
+    base_url: http://ollama:11434
+    api_key: ""
+    model: llama3.1
+```
+
+The other jobs use the subscription. The nightly reflection uses the local
+model. A small model can write a weak journal page. Read the next page that
+it writes.
+
+### Check the model server
+
+`POST /admin/inference/check` on `core` sends the prompt "Reply with the word
+ok." to each job. Jobs with the same server, model, and key share one call.
+Each call has a limit of 30 seconds, or `inference.timeout_seconds` when that
+is less. The calls run at the same time. Each call that ends writes one usage
+row, in the usage group of its first job.
+
+Run it after a change to the `inference` section:
+
+```
+curl -s -H "$auth" -X POST 127.0.0.1:8081/admin/inference/check
+```
+
+The answer has one row for each job. This example shows two of the five:
+
+```json
+{
+  "ok": false,
+  "jobs": [
+    {"job": "chat", "endpoint": "litellm:4000", "model": "bedrock-claude-sonnet",
+     "ok": true, "seconds": 1.42},
+    {"job": "reflection", "endpoint": "ollama:11434", "model": "llama3.1",
+     "ok": false, "seconds": 0.08, "error": "http_404: model 'llama3.1' not found"}
+  ]
+}
+```
+
+- `ok` at the top is `true` only when every job is `ok`.
+- `endpoint` is the host and the port of the server, or `anthropic`.
+- `error` is a short label, such as `http_401`, `http_404`, `timeout`, or the
+  name of an exception, then the start of the error text. Core removes every
+  key and token from the text and cuts it to 200 characters. The log gets the
+  label and the server, never the text.
+
+To read a failure:
+
+| `error` starts with | Do this |
+|---|---|
+| `http_401`, `authentication_failed` | Make sure that the key in `.env` is correct and that `core` gets it. |
+| `http_404`, `http_400` | Make sure that the server has a model with the name in `model`. |
+| `timeout` | Make sure that `core` can reach the server, and that the model loads in time. |
+| `CLIConnectionError`, another exception name | Read the `core` log. |
+
+## Web search off Anthropic: SearXNG
+
+On the Anthropic server (the subscription or an Anthropic API key), the
+internet agent uses Anthropic's own `WebSearch`. You set nothing, and
+`internet.search` is not used.
+
+When the `internet` job moves to another server, such as Bedrock through
+LiteLLM or Ollama, web search stops. To search again, give the internet agent
+a SearXNG instance. The gateway calls the JSON API of SearXNG, and the agent
+reads the answer of the internet agent, never the raw results.
+
+Do these steps:
+
+1. Run a SearXNG instance that the gateway can reach, for example the
+   container `searxng` on port 8080 of the compose network.
+2. Turn on the `json` format of SearXNG. In its `settings.yml`, add `json` to
+   `search.formats`:
+
+   ```yaml
+   search:
+     formats:
+       - html
+       - json
+   ```
+
+   Restart SearXNG. Without `json`, SearXNG answers `403`, and the gateway
+   gives the error "searxng refused the json format (403)".
+3. Add the `search` block to the `internet` section of `joshua.yaml`:
+
+   ```yaml
+   internet:
+     search:
+       url: http://searxng:8080
+   ```
+
+4. If a reverse proxy in front of SearXNG checks a key, add
+   `api_key: ${SEARXNG_API_KEY:-}` to the block. Put
+   `SEARXNG_API_KEY=<the key>` in `.env.gateway` (or in `secrets.gateway` of
+   the Helm chart). The gateway sends it as `Authorization: Bearer <the key>`.
+   Do not give the key to `core`.
+5. Restart the gateway and core.
+6. Read the core log. The line `"message": "internet search"` must show
+   `"search": "searxng"`.
+
+[docs/config.md](config.md#web-search) explains each key, including
+`categories`, `language`, and `max_results`.
+
+To read a failure, find the gateway log line with `"search": true`:
+
+| `error` | Do this |
+|---|---|
+| `searxng refused the json format (403)...` | Add `json` to `search.formats` of SearXNG, or make sure that the proxy accepts the key. |
+| `searxng refused the key (401)` | Make sure that `SEARXNG_API_KEY` in `.env.gateway` is correct. |
+| `searxng unreachable: ConnectError` | Make sure that the gateway can reach `search.url`. |
+| `timeout` | Make sure that SearXNG answers in `search.timeout_seconds`. |
+| `searxng answer is not json` | Make sure that `search.url` is the SearXNG instance, not a login page. |
+
+The gateway log holds the length of each query, never the query or the key.
 
 ## Change the config
 

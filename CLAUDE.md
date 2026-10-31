@@ -127,6 +127,10 @@ Route allowlists, by default:
 - gateway `POST /v1/snapshots/{name}`: `core` only. The body is empty: the
   gateway reads the tool and the arguments from `memory.snapshots`, so the
   config is the allowlist.
+- gateway `POST /v1/search`: `core` only. The body is `{query}`: the gateway
+  calls the SearXNG JSON API of `internet.search` (`GET {url}/search`,
+  `format=json`), not an MCP upstream. The URL, the parameters, and the
+  optional key come from the config, and only the gateway holds the key.
 - `/admin/*` on every container: `ADMIN_CALLERS` (default `laptop,ci`), checked
   on every admin route with no exception.
 - `/healthz`: open, `{"ok": true}`. `/readyz`: open, booleans and counts, no
@@ -220,15 +224,29 @@ configured upstream behind `gateway`. If a task seems to need a built-in tool,
 the task is wrong. Open an issue.
 
 **One exception, and it is not the agent.** An ephemeral worker may hold a web
-tool, because it holds nothing else: one objective, no conversation, no MCP
-server, and no file tool. `build_worker_options` asserts that a worker's tools
-are a subset of `WORKER_TOOLS` (`WebSearch` and `WebFetch`), so a file tool or
-a shell fails to build. `WebSearch` runs on Anthropic's side; `WebFetch` runs
-in the container, is off unless `internet.fetch.enabled` is on, and is gated by
-a `PreToolUse` hook. The hook reads only a URL the caller passed or a search of
-that run returned, then checks the block list in `joshua_shared.netblock`, and
-a hook that fails denies. Never widen `WORKER_TOOLS`, and never give a worker
-the conversation.
+tool, because it holds nothing else: one objective, no conversation, and no
+file tool. `build_worker_options` (through `check_worker_tools`) asserts the
+boundary, so a file tool, a shell, another MCP server, or another MCP tool
+fails to build:
+
+- a built-in tool is in `WORKER_TOOLS` (`WebSearch` and `WebFetch`);
+- `mcp_servers` is empty, or holds only the in-process `search` server that
+  `build_search_server` made;
+- the only MCP tool is `mcp__search__web_search`, and only beside that server.
+
+The worker gets at most one search tool, chosen by the server of the
+`internet` job. On `anthropic` it is `WebSearch` (on Anthropic's side), also
+when `internet.search` is set. On another server with `internet.search` set,
+it is `web_search`: its handler calls the gateway `POST /v1/search` with
+core's token, adds each result URL to the fetch allowlist of the run, and
+gives the model title, URL, and snippet. On another server with no
+`internet.search`, it has no search, and the prompt tells it to say so.
+`WebFetch` runs in the container, is off unless `internet.fetch.enabled` is
+on, and is gated by a `PreToolUse` hook. The hook
+reads only a URL the caller passed or a result URL of a search of that run,
+then checks the block list in `joshua_shared.netblock`, and a hook that fails
+denies. Never widen `WORKER_TOOLS` or the worker's MCP servers, never give a
+worker the conversation, and never give the agent a raw search result.
 
 The worker that holds the web tools is the **internet agent**
 (`engine/internet.py`). It looks up what its caller asks and holds nothing

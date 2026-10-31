@@ -15,6 +15,7 @@ from engine_fakes import (
     make_channel,
     make_conversation,
     make_settings,
+    resolved,
 )
 from joshua_core.engine import describe as describe_module
 from joshua_core.engine import internet as internet_agent
@@ -296,7 +297,12 @@ async def test_describe_attachment_passes_usage_out_to_the_worker(tmp_path: Path
 
     used: list[Usage] = []
     await describe_module.describe_attachment(
-        path, mime="image/png", timeout_s=5, runner=run, usage_out=used
+        path,
+        mime="image/png",
+        timeout_s=5,
+        inference=resolved("describe"),
+        runner=run,
+        usage_out=used,
     )
     assert seen == [used] and used == [Usage(input=1)]
 

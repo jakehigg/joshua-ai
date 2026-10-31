@@ -66,7 +66,7 @@ services:
     # Not published on the host. Only `core` connects, over the compose network.
 
   gateway:
-    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.8}
+    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.9}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *runtime-vars]
@@ -76,7 +76,9 @@ services:
     # `NAME=value` line per variable in `.env.gateway`, which is yours and is
     # gitignored. It is optional, so a stack with no upstream credential starts
     # without it. This file, not `.env`, is where an MCP server's token goes:
-    # the gateway is the only container that may hold one.
+    # the gateway is the only container that may hold one. The optional key of
+    # the SearXNG instance of `internet.search` (`SEARXNG_API_KEY`) goes here
+    # too: the gateway calls SearXNG, and core never gets the key.
     env_file:
       - path: .env.gateway
         required: false
@@ -90,7 +92,7 @@ services:
     healthcheck: *app-healthcheck
 
   core:
-    image: ghcr.io/jakehigg/joshua-ai-core:${JOSHUA_VERSION:-0.0.8}
+    image: ghcr.io/jakehigg/joshua-ai-core:${JOSHUA_VERSION:-0.0.9}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *runtime-vars]
@@ -99,6 +101,11 @@ services:
       GATEWAY_URL: http://gateway:8000
       CHANNELS_URL: http://channels:8000
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # The server and the key of the `inference` section, when it names them.
+      # Add a job key with another name here too. Core removes the provider
+      # variables from its environment at start.
+      INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-}
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
       # The embedding model is downloaded once into the model-cache volume.
       MEMORY_EMBED_CACHE_DIR: ${MEMORY_EMBED_CACHE_DIR:-/home/app/.cache/fastembed}
       # `sdk` uses the Claude Agent SDK. `stub` needs no Anthropic token.
@@ -126,7 +133,7 @@ services:
     healthcheck: *app-healthcheck
 
   channels:
-    image: ghcr.io/jakehigg/joshua-ai-channels:${JOSHUA_VERSION:-0.0.8}
+    image: ghcr.io/jakehigg/joshua-ai-channels:${JOSHUA_VERSION:-0.0.9}
     restart: unless-stopped
     environment:
       <<: [*fleet-tokens, *config-vars, *runtime-vars]
@@ -156,7 +163,7 @@ services:
   # beside the rest of the stack and nothing off the host reaches it. Put the
   # reverse proxy in front of 127.0.0.1:8082.
   viewer:
-    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.8}
+    image: ghcr.io/jakehigg/joshua-ai-gateway:${JOSHUA_VERSION:-0.0.9}
     profiles: ["viewer"]
     restart: unless-stopped
     # The gateway image entrypoint runs the gateway app; the viewer is the

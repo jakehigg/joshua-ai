@@ -50,15 +50,23 @@ web). The rest sit behind `gateway`.
 
 The `internet` tool asks the internet agent, an ephemeral worker in `core`. The
 worker gets one question and none of the conversation, and it holds the web
-tools and nothing else. A search runs on Anthropic's side. Reading a page runs
-in `core`, only when `internet.fetch.enabled` is on, and only for a page the
-worker was given. [security.md](security.md) has the whole design.
+tools and nothing else. On the Anthropic server, a search runs on Anthropic's
+side as `WebSearch`. On another server, a search goes through the gateway
+route `POST /v1/search` to the SearXNG instance of `internet.search`, and with
+no `internet.search` the worker has no search. Reading a page runs in `core`, only when
+`internet.fetch.enabled` is on, and only for a page the worker was given.
+[security.md](security.md) has the whole design.
 
 `core` owns the database and the data volume. It indexes the volume for
 retrieval, writes the nightly reflection, and runs the scheduler.
 
-`core` holds the Claude token and the database password. It reaches the
-Claude API, and, when fetch is on, the pages the internet agent reads.
+`core` holds the model credentials and the database password. For each model
+call, it picks the server and the credential of that job from the
+[`inference`](config.md#inference) section: by default the Claude
+subscription. At start it removes the provider variables from its own
+environment, so the CLI of a job gets the credential of that job and no other.
+It reaches the model server, and, when fetch is on, the pages the internet
+agent reads.
 
 ## gateway
 

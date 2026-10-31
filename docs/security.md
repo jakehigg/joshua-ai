@@ -60,6 +60,12 @@ Every route has an allowlist of fleet identities. The list is in
   or that the upstream declares destructive and not read-only. A test proves
   each refusal. See [memory.md](memory.md#snapshots-of-live-systems).
 
+- The gateway route `POST /v1/search` admits only `core`, and its body holds
+  one query. The gateway reads the SearXNG URL, its parameters, and its
+  optional key from `internet.search`, so no caller can choose the host, the
+  path, or another parameter. A test proves the `403` for every other
+  caller.
+
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
 name, a path, or a token.
 
@@ -184,11 +190,27 @@ each one verifies the callers it trusts. The three containers are one trust
 domain.
 
 Compose gives each container only the variables it needs. `core` gets the
-Claude token and the database password. `channels` gets the platform
+model credentials and the database password. `channels` gets the platform
 credentials. `gateway` gets the upstream credentials, from its own
 `.env.gateway` file, which no other service reads. This works because
 `joshua.yaml` references a secret as `${VAR:-}`: a container without the
 variable expands it to the empty string and never holds the credential.
+
+`core` picks the server and the credential of each model call from the
+[`inference`](config.md#inference) section, one job at a time. Each key of
+that section is in `.env`, or in a Secret named by `secrets.core` with the
+Helm chart, and `joshua.yaml` refers to it as `${VAR:-}`. A literal key in
+`joshua.yaml` fails the load. At start, after
+the config loads, it keeps `CLAUDE_CODE_OAUTH_TOKEN` and removes every
+provider variable from its own environment. The SDK can replace a variable
+that the CLI inherits, but it cannot remove one, so the environment of each
+call sets every provider variable, with an empty value for each one the job
+does not use. Thus a job gets its own key and no other: a job never gets the
+key of a different job, and a job on another server never gets the
+subscription token. Core never logs a key. The text of a failed call can name
+a host, so it goes neither to a person nor to the log. Only
+`POST /admin/inference/check` returns it, to an admin caller, after core
+removes every key and token of the `inference` section from it.
 
 An entry whose credential expanded to nothing is turned off, not started with an
 empty credential and not retried. `/readyz` counts it in `disabled` and the log
@@ -275,12 +297,40 @@ the three apart.
 the wiki, the journal, a profile, or any message of the conversation, so a page
 that tells it to look up a private thing has nothing to look up.
 
-**The worker cannot act.** Its tool list holds `WebSearch`, and `WebFetch` when
-fetch is on, and nothing else. No file tool, no shell, no MCP server, so
-nothing it reads can reach the house, the wiki, or an upstream.
-`agent.build_worker_options` asserts that list, and a test proves that a file
-tool fails to build. The agent itself still has no built-in tool at all, and
-that test still passes.
+**The worker cannot act.** It holds one search tool, and `WebFetch` when fetch
+is on, and nothing else. No file tool and no shell. Nothing it reads can
+reach the house, the wiki, or an upstream other than the search. These are
+the asserts of `agent.build_worker_options`:
+
+- A built-in tool is `WebSearch` or `WebFetch`.
+- The only MCP server is `search`, in process, made by
+  `agent.build_search_server`. A server made anywhere else, an `http` or
+  `stdio` server, and a server with another name fail to build.
+- The only MCP tool is `mcp__search__web_search`, and only beside that
+  server.
+
+Tests prove that a file tool, a shell, another MCP server, and another MCP
+tool each fail to build. The agent itself still has no built-in tool at all,
+and that test still passes.
+
+**The worker has one search tool, and the config chooses it:**
+
+- With the `internet` job on the Anthropic server, the tool is `WebSearch`,
+  also when `internet.search` is set.
+- On another server with `internet.search` set, the tool is `web_search`. It
+  calls the gateway route `POST /v1/search` with the token of `core`, and the
+  gateway calls the SearXNG instance of the config. The worker holds no
+  credential: the optional key of SearXNG is in the environment of the
+  gateway alone. The tool gives the model a title, a URL, and a snippet for
+  each result, and never an error text, because an error can name a host or
+  a key.
+- On another server with no `internet.search`, the worker has no search. It
+  reads only the pages it was given, and it says that it cannot search.
+
+**The agent never sees a raw search result.** The results go to the worker,
+which holds nothing. The agent gets the answer of the worker, wrapped as
+content, with the sources that the worker was given. A result that tells the
+reader to do something reaches only the worker, which can do nothing with it.
 
 **What comes back is content.** The answer reaches the agent wrapped and
 named as what it is: text from the open web, not an instruction, possibly
@@ -299,9 +349,10 @@ So the worker reads a page only when it was **given** that URL, and the check
 is at the fetch itself, in the `PreToolUse` hook:
 
 - **Its caller named it** in `urls`.
-- **One of its own searches returned it** in the same run. Only the `url`
-  field of a search result counts; a URL in the text of a result is words
-  somebody wrote.
+- **One of its own searches returned it** in the same run. Only the URL of a
+  result counts: the `url` field of a `WebSearch` result, or the `url` of a
+  result of `web_search`, which the tool adds itself. A URL in the text of a
+  result or of a snippet is words somebody wrote.
 
 Every other URL is refused: a URL written into the question, a link on a page
 the worker read, and a URL the model made up. A source the worker reports is
@@ -326,7 +377,8 @@ The text of an attachment is content, so a URL in it is not granted, and a test
 proves that.
 
 **What the question can still carry.** The agent writes the question, and a
-search sends it to Anthropic's search. A compromised turn can put a private
+search sends a query to the search provider: Anthropic for `WebSearch`, or
+your SearXNG instance, which sends it on to the search engines it uses. A compromised turn can put a private
 detail in the question, and that detail then leaves in a search query. It
 cannot choose where it goes, because the worker fetches no URL it was not
 given. The tool tells the agent to keep private detail out of the question.
@@ -337,6 +389,10 @@ This distinction decides the whole design, and it was measured, not assumed:
 
 - **`WebSearch` runs on Anthropic's servers.** The container makes no
   connection. Nothing on your network is reachable that way.
+- **`web_search` runs in the gateway.** Core sends the query to the gateway,
+  and the gateway calls the SearXNG instance of the config. It reaches only
+  that one URL, with the path `/search`, never a URL of the worker's
+  choosing.
 - **`WebFetch` runs in the container.** A fetch of `http://127.0.0.1:8477/`
   reached a server on the machine that ran the CLI. So a page Joshua reads can
   name a host on your own network, and Joshua is the one that would fetch it.

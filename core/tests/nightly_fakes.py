@@ -43,20 +43,32 @@ def canned_oneshot(
     shared-profile call with a fixed shared profile."""
 
     async def _oneshot(
-        *, system_prompt: str, user_prompt: str, model: str | None, usage_out: Any = None
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        inference: Any,
+        timeout_s: float,
+        usage_out: Any = None,
     ) -> str:
+        _oneshot.calls.append({"inference": inference, "timeout_s": timeout_s})  # type: ignore[attr-defined]
         if usage_out is not None:
             usage_out.append(ONESHOT_USAGE)
         if "shared profile" in system_prompt:
             return json.dumps({"profile": "# House\n## About\nQuiet weeknights."})
         return json.dumps({"post": post, "profile": profile})
 
+    _oneshot.calls = []  # type: ignore[attr-defined]
     return _oneshot
 
 
 def junk_oneshot() -> Any:
     async def _oneshot(
-        *, system_prompt: str, user_prompt: str, model: str | None, usage_out: Any = None
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        inference: Any,
+        timeout_s: float,
+        usage_out: Any = None,
     ) -> str:
         return "not json at all"
 
