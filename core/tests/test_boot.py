@@ -45,6 +45,7 @@ def test_boot_applies_schema_and_seeds(monkeypatch, tmp_path) -> None:
         assert ready == {
             "ok": True,
             "checks": {"db": True, "layout": True, "embed": True},
+            "inference_overrides": 0,
         }
 
         # Seeding ran during startup; verify from an independent connection.
