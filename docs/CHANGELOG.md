@@ -59,6 +59,16 @@ with the images and the packaged chart, are at
   only for `none`. See
   [operations.md](operations.md#web-search-off-anthropic-searxng).
 
+- **A one-hour prompt cache off the subscription.** On the subscription the
+  CLI writes the prompt cache for one hour. On any other server it writes it
+  for five minutes, so a reply more than five minutes after the last one
+  wrote the full prompt to the cache again. In one measured day through
+  LiteLLM to Bedrock, these writes were about 80% of the cost of `chat`.
+  Each job that is not on the subscription now gets
+  `ENABLE_PROMPT_CACHING_1H=1`, and the CLI asks for `"ttl": "1h"` on each
+  cache marker. The other cache variables of the CLI are empty for each
+  job. You do not set anything. See [config.md](config.md#inference).
+
 - **Tool search for the conversation turns.** A new key,
   `inference.<job>.tool_search`, for `chat` (default `true`) and `voice`
   (default `false`). With it on, a model call sends only the names of the MCP

@@ -205,6 +205,11 @@ Know these limits:
   `voice`, because a spoken reply must be fast. Set
   `inference.voice.tool_search: true` to turn it on there too. See
   [Tool search](config.md#tool-search).
+- **The prompt cache lasts five minutes off the subscription.** The CLI
+  writes the prompt cache for one hour on the subscription, and for five
+  minutes on any other server. Core sets the one-hour cache for each job
+  that is not on the subscription, so you do not set anything. See
+  [config.md](config.md#inference).
 
 ### One LiteLLM key for each job
 

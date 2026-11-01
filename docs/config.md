@@ -1193,6 +1193,24 @@ used, and the server, in the `endpoint` column of `usage_event`. The SDK
 prices a model that it does not know at its own rates, so core keeps the
 cost of a chat turn only for a call to `anthropic`.
 
+**The prompt cache lasts one hour on every server.** The CLI keeps the start
+of each prompt in a cache, and a cache read costs much less than new input.
+On the subscription, the CLI writes the cache for one hour. On any other
+server, the CLI writes it for five minutes, so a reply that comes more than
+five minutes after the last one writes the full prompt again, at more than
+the input price. For a household that talks in short bursts across the day,
+that is most of the cost. So for each job that is not on the subscription
+(a `base_url`, or an `api_key` alone), core sets
+`ENABLE_PROMPT_CACHING_1H=1` for the CLI. The CLI then puts `"ttl": "1h"` on
+each cache marker. This is a field of the Anthropic Messages API, and
+LiteLLM sends it on to Bedrock. You do not set anything. Core also sets
+`ENABLE_PROMPT_CACHING_1H_BEDROCK`, `FORCE_PROMPT_CACHING_5M`, and
+`DISABLE_PROMPT_CACHING` to empty for each job, so a value in the
+environment of the container has no effect. A one-hour cache write costs
+two times the input price, and a five-minute write costs 1.25 times, but a
+read costs 0.1 times, so the one-hour cache costs less when replies come
+more than five minutes apart.
+
 ### Tool search
 
 Each MCP tool has a definition: its name, its description, and its

@@ -54,10 +54,13 @@ def load(section: str = "", *, voice: bool = True, env: dict[str, str] | None = 
 
 
 def expected_env(job: str, **values: str) -> dict[str, str]:
-    """The full environment of ``job``. Only ``chat`` has tool search on by default."""
+    """The full environment of ``job``. Only ``chat`` has tool search on by default.
+    Every job that is not on the subscription has the one-hour prompt cache."""
     env = dict.fromkeys(ENV_KEYS, "")
     if job == "chat":
         env["ENABLE_TOOL_SEARCH"] = "true"
+    if "CLAUDE_CODE_OAUTH_TOKEN" not in values:
+        env["ENABLE_PROMPT_CACHING_1H"] = "1"
     env.update(values)
     return env
 
@@ -204,7 +207,7 @@ def test_at_most_one_auth_variable_is_set() -> None:
 
 
 def test_env_has_exactly_the_full_key_set() -> None:
-    assert len(set(ENV_KEYS)) == len(ENV_KEYS) == 25
+    assert len(set(ENV_KEYS)) == len(ENV_KEYS) == 29
     cfg = load('\ninference:\n  internet:\n    base_url: http://litellm:4000\n    api_key: ""\n')
     for job in config.INFERENCE_JOBS:
         assert set(resolve_inference(cfg, job, oauth_token=OAUTH).env) == set(ENV_KEYS)
@@ -475,3 +478,28 @@ def test_a_worker_job_never_gets_tool_search(job: str) -> None:
 def test_tool_search_on_a_worker_job_is_refused(job: str) -> None:
     with pytest.raises(config.ConfigError, match="only for the conversation jobs"):
         load(f"\ninference:\n  {job}:\n    tool_search: true\n")
+
+
+def test_one_hour_cache_only_off_the_subscription() -> None:
+    sections = {
+        "": "",
+        "\ninference:\n  api_key: ${INFERENCE_API_KEY}\n": "1",
+        "\ninference:\n  base_url: http://litellm:4000\n  api_key: ${INFERENCE_API_KEY}\n": "1",
+        '\ninference:\n  base_url: http://ollama:11434\n  api_key: ""\n': "1",
+    }
+    for section, expected in sections.items():
+        cfg = load(section)
+        for job in config.INFERENCE_JOBS:
+            env = resolve_inference(cfg, job, oauth_token=OAUTH).env
+            assert env["ENABLE_PROMPT_CACHING_1H"] == expected
+            assert env["ENABLE_PROMPT_CACHING_1H_BEDROCK"] == ""
+            assert env["FORCE_PROMPT_CACHING_5M"] == ""
+            assert env["DISABLE_PROMPT_CACHING"] == ""
+
+
+def test_one_hour_cache_follows_each_job_server() -> None:
+    cfg = load('\ninference:\n  internet:\n    base_url: http://litellm:4000\n    api_key: ""\n')
+    internet = resolve_inference(cfg, "internet", oauth_token=OAUTH)
+    chat = resolve_inference(cfg, "chat", oauth_token=OAUTH)
+    assert internet.env["ENABLE_PROMPT_CACHING_1H"] == "1"
+    assert chat.env["ENABLE_PROMPT_CACHING_1H"] == ""

@@ -71,9 +71,23 @@ TOOL_SEARCH_ON = "true"
 # A voice turn must answer fast, and tool search adds one model call.
 TOOL_SEARCH_DEFAULTS = {"chat": True, "voice": False}
 
+# Prompt cache lifetime. On the subscription the CLI writes the prompt cache
+# for one hour. On any other server it writes it for five minutes, so a reply
+# that comes more than five minutes after the last one writes the full prompt
+# to the cache again. ``ENABLE_PROMPT_CACHING_1H`` makes the CLI ask for the
+# one-hour cache on every server (``"ttl": "1h"`` on each cache marker). The
+# other keys can change the lifetime too, so each job sets them to ``""``.
+CACHE_1H_KEY = "ENABLE_PROMPT_CACHING_1H"
+CACHE_KEYS = (
+    CACHE_1H_KEY,
+    "ENABLE_PROMPT_CACHING_1H_BEDROCK",
+    "FORCE_PROMPT_CACHING_5M",
+    "DISABLE_PROMPT_CACHING",
+)
+
 # The full set. Each environment from ``resolve_inference`` holds exactly these
 # keys, and a caller can remove them from ``os.environ`` with the same list.
-ENV_KEYS = (*PROVIDER_KEYS, *MODEL_KEYS, NONESSENTIAL_TRAFFIC_KEY, TOOL_SEARCH_KEY)
+ENV_KEYS = (*PROVIDER_KEYS, *MODEL_KEYS, NONESSENTIAL_TRAFFIC_KEY, TOOL_SEARCH_KEY, *CACHE_KEYS)
 
 ANTHROPIC_ENDPOINT = "anthropic"
 
@@ -181,8 +195,10 @@ def resolve_inference(config: JoshuaConfig, job: str, *, oauth_token: str) -> Re
         for key in MODEL_TIER_KEYS:
             env[key] = model
         env[NONESSENTIAL_TRAFFIC_KEY] = "1"
+        env[CACHE_1H_KEY] = "1"
     elif api_key:
         env["ANTHROPIC_API_KEY"] = api_key
+        env[CACHE_1H_KEY] = "1"
     else:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
 
