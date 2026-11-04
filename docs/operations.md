@@ -322,6 +322,33 @@ To read a failure:
 | `timeout` | Make sure that `core` can reach the server, and that the model loads in time. |
 | `CLIConnectionError`, another exception name | Read the `core` log. |
 
+### What was tested
+
+These setups were tested before this release. A setup that is not in this
+list can work, but nobody has tested it.
+
+| Setup | Result |
+|---|---|
+| The Claude subscription, no `inference` section | Works as in the release before. |
+| LiteLLM in front of Bedrock, Claude Opus, Sonnet, and Haiku 5.5 | Works. A conversation turn, a resumed session, a one-shot call, structured output, an image, a PDF, MCP tools, and `WebFetch` were tested with a test script. Then one instance ran on it for several days, with one LiteLLM key for each job: chat, voice, the nightly reflection, the description of attachments, and the internet agent. `POST /admin/inference/check` gave `ok` for each job. |
+| Web search through LiteLLM | Does not work. LiteLLM does not send Anthropic's `WebSearch` to Bedrock. Use SearXNG (see the next section). |
+| SearXNG for the internet agent, on Bedrock through LiteLLM | Works. The internet agent searched, read pages, and answered with sources. |
+| Tool search through LiteLLM to Bedrock | Works. A test with 81 MCP tools used about 8000 tokens for one turn in place of about 106000, and the model called the correct tool. |
+| The one-hour prompt cache through LiteLLM to Bedrock | Works. The usage of each call shows the cache write as a one-hour write. |
+| A local model through Ollama or LiteLLM | Not tested. |
+| A model that is not Claude | Not tested. Structured output, images, and PDFs can fail. |
+
+**Cost off the subscription.** On the subscription, a model call has no
+cost for each token. On another server, each call has a cost, and most of
+the cost of a turn is the prompt: the system prompt, the tool definitions,
+and the history of the session. Tool search and the one-hour prompt cache
+make the prompt much smaller and much less expensive. The model of the
+`chat` job is the largest part that is left: a smaller model, for example
+Sonnet in place of Opus, costs about half as much for each token. The usage
+page does not show a cost for a call to another server, because the SDK
+does not know the price there. Read the cost in LiteLLM, or in the bill of
+your provider.
+
 ## Web search off Anthropic: SearXNG
 
 On the Anthropic server (the subscription or an Anthropic API key), the

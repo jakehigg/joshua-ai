@@ -12,7 +12,10 @@ upstream credential). A shared package, `joshua_shared`, holds the code the
 three containers use.
 
 The same code runs on Kubernetes and on one Docker host with a Claude
-subscription. One instance serves one group of people. The design keeps
+subscription. The model calls can also go to another server that speaks the
+Anthropic Messages API, such as LiteLLM in front of Bedrock: see
+[docs/operations.md](docs/operations.md#the-model-server). One instance serves
+one group of people. The design keeps
 the agent's power low: it has no file tools, no shell, and no web tools. It
 reaches the world only through `channels`, through `gateway`, and through the
 internet agent, a worker in `core` that searches the open web for one question
