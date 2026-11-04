@@ -81,3 +81,65 @@ def test_gateway_servers_role_defaults_to_guest(cfg):
     servers = gateway_servers(["files"], "http://gw:8000", "tok", None, "conv-1")
     assert servers["files"]["headers"]["X-Joshua-Role"] == "guest"
     assert servers["files"]["headers"]["X-Joshua-Person"] == "unknown"
+
+
+GROUP_YAML = """
+name: Test House
+timezone: America/New_York
+people:
+  - id: alex
+    name: Alex
+    role: member
+    handles:
+      telegram: "101"
+  - id: mia
+    name: Mia
+    role: member
+    handles:
+      telegram: "102"
+groups:
+  - id: team
+    channel: telegram
+    chat_id: "-100200"
+    members:
+      - "101"
+      - "102"
+  - id: other
+    channel: telegram
+    chat_id: "-100300"
+    members:
+      - "101"
+mcp:
+  files:
+    kind: builtin
+    allow: all
+  tracker:
+    type: http
+    url: http://upstream/tracker
+    allow:
+      - alex
+      - team
+"""
+
+
+@pytest.fixture
+def group_cfg():
+    return config_module.parse(GROUP_YAML, env={}, source="<test>")
+
+
+def test_an_allowed_group_reaches_a_scoped_server(group_cfg):
+    assert allowed_gateway_servers(group_cfg, None, "team") == ["files", "tracker"]
+    assert allowed_gateway_servers(group_cfg, "unknown", "team") == ["files", "tracker"]
+
+
+def test_a_group_not_on_the_list_gets_only_open_servers(group_cfg):
+    assert allowed_gateway_servers(group_cfg, None, "other") == ["files"]
+    assert allowed_gateway_servers(group_cfg, "mia", None) == ["files"]
+
+
+def test_gateway_servers_send_the_group_only_for_a_group(group_cfg):
+    group = gateway_servers(["tracker"], "http://gw:8000", "tok", None, "c1", "member", "team")
+    assert group["tracker"]["headers"]["X-Joshua-Group"] == "team"
+    assert group["tracker"]["headers"]["X-Joshua-Person"] == "unknown"
+    direct = gateway_servers(["tracker"], "http://gw:8000", "tok", "alex", "c2", "member")
+    assert "X-Joshua-Group" not in direct["tracker"]["headers"]

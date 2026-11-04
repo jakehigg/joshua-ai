@@ -50,8 +50,9 @@ Every route has an allowlist of fleet identities. The list is in
 - `/admin/*` on every container checks `ADMIN_CALLERS` on every route, with
   no exception.
 - `gateway` admits only `core` on its MCP routes, and trusts the
-  `X-Joshua-Person` header only from `core`. No setting widens either one. Any
-  other caller gets what an unknown person gets: the shared files, read-only.
+  `X-Joshua-Person` and `X-Joshua-Group` headers only from `core`. No setting
+  widens either one. Any other caller gets what an unknown person gets: the
+  shared files, read-only.
 
 - core's `POST /v1/memory/search` names no person. It searches the shared
   scope and returns only pages under `wiki/`, of kind `wiki`, `journal`, or
@@ -159,6 +160,15 @@ A conversation carries one role. A direct message carries the role of its
 person. A group carries a derived role: `member` only when `members` is not
 empty and every handle in it names a member. An empty list, or a handle that
 names nobody, is a guest chat.
+
+### What opens a scoped server to a group chat
+
+A group chat has no single person, so it reaches a scoped server only when the
+server's `allow` names its group id. `X-Joshua-Group` carries the id, and the
+gateway trusts it only from `core`. Validation refuses a group with no
+`members` in an `allow` list, because anybody in that chat would then reach the
+server. Everyone in the chat acts through one credential, so name a group only
+when you trust every member of the chat with that server.
 
 So one guest in a family chat stops Joshua writing for the members too. That is
 the safe direction, and it is not visible from the chat, so `core` logs a

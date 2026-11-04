@@ -315,15 +315,18 @@ An error is a short fixed text, never the text of SearXNG:
 The call log holds the length of the query and the count of the results,
 never the query and never the key.
 
-`core` sends two headers with every MCP request:
+`core` sends these headers with every MCP request:
 
 | Header | Meaning |
 |---|---|
 | `X-Joshua-Person` | the person id, or `unknown` |
 | `X-Joshua-Conversation` | the conversation id |
+| `X-Joshua-Role` | `member` or `guest` |
+| `X-Joshua-Group` | the group id, only for a group chat in `groups` |
 
-The gateway trusts `X-Joshua-Person` only from `core`. From any other caller it
-ignores the header, and the request gets only what an unknown person gets.
+The gateway trusts these headers only from `core`. From any other caller it
+ignores them, and the request gets only what an unknown person gets. A group id
+that is not in `groups` is 400.
 
 ## Where `laptop` may go
 

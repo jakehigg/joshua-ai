@@ -1031,9 +1031,28 @@ class JoshuaConfig(_Model):
                     seen_handles.add(key)
         return self
 
+    def _check_allowed_group(self, where: str, group_id: str) -> None:
+        """Refuse a group id in an ``allow`` list that cannot be trusted.
+
+        The id travels in a header, so it must match the person id pattern. It
+        must name one group only. The group must list ``members``, because an
+        empty list admits anybody in that chat.
+        """
+        matches = [group for group in self.groups if group.id == group_id]
+        if not _PERSON_ID_RE.match(group_id):
+            raise ValueError(f"{where}: group id '{group_id}' must match {PERSON_ID_PATTERN}")
+        if len(matches) > 1:
+            raise ValueError(f"{where}: group id '{group_id}' names more than one group")
+        if not matches[0].members:
+            raise ValueError(
+                f"{where}: group '{group_id}' has no members, so anybody in that chat "
+                "would reach the server"
+            )
+
     @model_validator(mode="after")
     def _check_mcp(self) -> JoshuaConfig:
         person_ids = {person.id for person in self.people}
+        group_ids = {group.id for group in self.groups}
         for name, server in self.mcp.items():
             if not _MCP_NAME_RE.match(name):
                 raise ValueError(f"mcp.{name}: name must match {MCP_NAME_PATTERN}")
@@ -1043,9 +1062,17 @@ class JoshuaConfig(_Model):
                 )
             if isinstance(server.allow, list):
                 for pid in server.allow:
-                    if pid not in person_ids:
-                        raise ValueError(f"mcp.{name}.allow: unknown person id '{pid}'")
+                    if pid in person_ids and pid in group_ids:
+                        raise ValueError(
+                            f"mcp.{name}.allow: '{pid}' is both a person id and a group id"
+                        )
+                    if pid in group_ids:
+                        self._check_allowed_group(f"mcp.{name}.allow", pid)
+                    elif pid not in person_ids:
+                        raise ValueError(f"mcp.{name}.allow: unknown person or group id '{pid}'")
             for pid in server.identities:
+                if pid in group_ids and isinstance(server.allow, list) and pid in server.allow:
+                    continue
                 if pid not in person_ids:
                     raise ValueError(f"mcp.{name}.identities: unknown person id '{pid}'")
             if server.identities:

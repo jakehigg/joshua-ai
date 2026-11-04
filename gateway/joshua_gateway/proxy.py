@@ -32,7 +32,7 @@ from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 
 from joshua_gateway.catalog import ServerSpec, permits
-from joshua_gateway.observability import person_ctx
+from joshua_gateway.observability import group_ctx, person_ctx
 
 log = get_logger("gateway.proxy")
 
@@ -201,7 +201,7 @@ def build_upstream_server(
     handler reads the upstream session per call through ``link.forward``, so
     one server outlives an upstream reconnect. ``tools/list`` and call-time
     checks run the spec's tool filter and per-person rule against the request
-    person (read from ``person_ctx``); a tool the person may not use is hidden
+    person (read from ``person_ctx``) and group (``group_ctx``); a tool they may not use is hidden
     from the list and rejected at call time.
 
     A failed ``tools/call`` is a tool result with ``is_error`` set, never a
@@ -220,17 +220,17 @@ def build_upstream_server(
             raise _list_error(link.label, exc) from exc
 
     async def on_list_tools(ctx, params):
-        person = person_ctx.get()
+        person, group = person_ctx.get(), group_ctx.get()
         result = await forward(lambda session: session.list_tools())
-        tools = [t for t in result.tools if permits(link.spec, t.name, person)]
+        tools = [t for t in result.tools if permits(link.spec, t.name, person, group)]
         return types.ListToolsResult(tools=tools)
 
     async def on_call_tool(ctx, params):
         tool = params.name
-        person = person_ctx.get()
+        person, group = person_ctx.get(), group_ctx.get()
         # Enforce the filter at CALL time, not just in tools/list. A consumer that
         # knows a filtered-out name could otherwise call it directly.
-        if not permits(link.spec, tool, person):
+        if not permits(link.spec, tool, person, group):
             if on_call is not None:
                 on_call(tool, 0.0, "denied", "tool not permitted")
             return _tool_error(f"tool not permitted: {tool}")

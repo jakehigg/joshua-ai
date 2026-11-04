@@ -588,10 +588,19 @@ package and the gateway installs it. See
 plain `command` and no `package` runs an executable that is already in the image,
 which is the builtins and nothing else.
 
-`allow` is `all` or a list of person ids. Person ids must exist in
-`people`. `all` means every person, including a request with no person.
-A list scopes the server to those people: the gateway serves a request only when
-its person is on the list, and denies a request with no person or `unknown`.
+`allow` is `all` or a list of person ids and group ids. Each id must exist in
+`people` or in `groups`. `all` means every person, including a request with no
+person. A list scopes the server to those people and group chats: the gateway
+serves a request only when its person or its group chat is on the list, and
+denies a request with neither.
+
+A group chat reaches the gateway as person `unknown`, because one chat holds
+many people. So a list of person ids does not open a server to a group chat,
+even when every member of the chat is on the list. Add the group id to open the
+server to that chat. A group id in `allow` must match the person id pattern,
+must name one group only, must not also be a person id, and the group must have
+`members`. A group with no `members` admits anybody in that chat, so validation
+refuses it. Everyone in the chat uses the server through the same credential.
 `allow:` with no value is the empty list, so no person reaches the server. The
 person comes from the `X-Joshua-Person` header, which the gateway trusts only from
 core.
@@ -880,6 +889,9 @@ overrides that merge onto the base connect config.
   for an http or sse server. A cross-transport override fails validation.
 - Every person in `allow` needs an identity. A person in `allow` with no identity
   fails validation. An identity server needs an explicit `allow` list, not `all`.
+- A group id in `allow` also needs an identity, under the group id. A request
+  from a group chat uses the identity of the person when that person has one
+  here, else the identity of the group.
 - A request with no person gets 403 `person_required`. A person the server does
   not admit gets 403.
 - The connections are isolated: one person's expired credential does not affect

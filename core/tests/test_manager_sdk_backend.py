@@ -76,3 +76,74 @@ async def test_run_turn_sdk_backend_persists_session(tmp_path, monkeypatch):
     assert repo.sdk_sessions["c1"] == "sess-9"
     assert manager._pool["c1"].deps.channel is channel
     assert [row["direction"] for row in repo.transcripts] == ["in", "out"]
+
+
+GROUP_MCP = """
+groups:
+  - id: team
+    channel: telegram
+    chat_id: "-100200"
+    members:
+      - "101"
+mcp:
+  files:
+    kind: builtin
+    allow: all
+  tracker:
+    type: http
+    url: http://upstream/tracker
+    allow:
+      - team
+"""
+
+
+def make_group_manager(repo, tmp_path) -> ConversationManager:
+    return ConversationManager(
+        repo=repo,
+        settings=make_settings(mcp=GROUP_MCP),
+        composer=FakeComposer(),
+        derive_profile=fake_derive_profile,
+        gateway_url="http://gw:8000",
+        gateway_token="tok",
+        agent_backend="sdk",
+        data_dir=tmp_path,
+        builtin_factories={},
+    )
+
+
+async def test_a_group_chat_reaches_the_server_that_allows_its_group(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    manager = make_group_manager(FakeRepo(), tmp_path)
+    channel = make_channel("telegram:-100200", session_mode="shared")
+    conversation = make_conversation(person_id=None, channel_id="telegram:-100200")
+
+    built = await manager._build_session(channel, conversation, resume=None)
+
+    servers = built.session._options.mcp_servers
+    assert set(servers) == {"files", "tracker"}
+    assert servers["tracker"]["headers"]["X-Joshua-Group"] == "team"
+    assert servers["tracker"]["headers"]["X-Joshua-Person"] == "unknown"
+
+
+async def test_another_group_chat_does_not_reach_that_server(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    manager = make_group_manager(FakeRepo(), tmp_path)
+    channel = make_channel("telegram:-100999", session_mode="shared")
+    conversation = make_conversation(person_id=None, channel_id="telegram:-100999")
+
+    built = await manager._build_session(channel, conversation, resume=None)
+
+    servers = built.session._options.mcp_servers
+    assert set(servers) == {"files"}
+    assert "X-Joshua-Group" not in servers["files"]["headers"]
+
+
+async def test_a_direct_message_sends_no_group(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    manager = make_group_manager(FakeRepo(), tmp_path)
+
+    built = await manager._build_session(make_channel(), make_conversation(), resume=None)
+
+    servers = built.session._options.mcp_servers
+    assert set(servers) == {"files"}
+    assert "X-Joshua-Group" not in servers["files"]["headers"]
