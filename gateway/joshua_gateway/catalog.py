@@ -51,8 +51,8 @@ class ServerSpec:
     tool_filter: ToolFilter
     tool_classes: dict[str, str]  # reserved for the trust policy: pattern -> read|write-local|act
     url_args: str  # reserved for the trust policy: none | grant-required
-    allow_persons: frozenset[str]  # person ids, or the ALL sentinel
-    identities: dict[str, dict[str, Any]]  # person -> connect overrides (identities ticket)
+    allow_persons: frozenset[str]  # person ids and group ids, or the ALL sentinel
+    identities: dict[str, dict[str, Any]]  # person or group -> connect overrides
     options: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -79,27 +79,41 @@ class ServerSpec:
         """Why this instance must not start, or None. See ``blank_credential``."""
         return blank_credential(self.connect_cfg)
 
-    def permits_person(self, person: str | None) -> bool:
-        """True when ``person`` may reach this server.
+    def permits_person(self, person: str | None, group: str | None = None) -> bool:
+        """True when ``person``, or the group chat ``group``, may reach this server.
 
         ``allow: all`` admits everyone, including no person and ``unknown``. A
-        scoped server admits only the named person ids; no person and ``unknown``
-        are denied.
+        scoped server admits only the named person ids and group ids; no person
+        and ``unknown`` are denied unless the group is named.
         """
         if self.allow_persons is ALL:
+            return True
+        if group is not None and group in self.allow_persons:
             return True
         if person is None or person == "unknown":
             return False
         return person in self.allow_persons
 
+    def instance_key(self, person: str | None, group: str | None = None) -> str | None:
+        """The identity that serves a request on an identity server, or None.
 
-def permits(server: ServerSpec, tool: str, person: str | None) -> bool:
-    """True when ``person`` may use ``tool`` on ``server``.
+        The person's own identity comes first. A request whose person has no
+        identity here uses the identity of its group.
+        """
+        if person is not None and person in self.identities and person in self.allow_persons:
+            return person
+        if group is not None and group in self.identities and group in self.allow_persons:
+            return group
+        return None
+
+
+def permits(server: ServerSpec, tool: str, person: str | None, group: str | None = None) -> bool:
+    """True when ``person`` (or the group chat ``group``) may use ``tool`` on ``server``.
 
     Combines the per-server person gate with the tool filter. The signature holds
     room for a per-person tool override later.
     """
-    return server.permits_person(person) and server.tool_filter.permits(tool)
+    return server.permits_person(person, group) and server.tool_filter.permits(tool)
 
 
 def _tool_filter(server: McpServer) -> ToolFilter:

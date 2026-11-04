@@ -1,9 +1,10 @@
 """Point the agent's MCP servers at the gateway.
 
 The gateway holds every upstream credential and enforces the per-person policy.
-Core sends its own fleet bearer and the person header; it opens only the servers
-that person is allowed to reach, so the SDK does not start connections the
-gateway would 403. The gateway stays the enforcement point.
+Core sends its own fleet bearer, the person header, and for a group chat the
+group header. It opens only the servers that the person or the group may reach,
+so the SDK does not start connections the gateway would 403. The gateway stays
+the enforcement point.
 """
 
 from __future__ import annotations
@@ -14,19 +15,25 @@ from typing import Any
 from joshua_shared.config import JoshuaConfig, McpServer
 
 
-def _permits(server: McpServer, person_id: str | None) -> bool:
-    """Mirror the gateway's per-person gate: ``allow: all`` admits everyone; a
-    scoped server admits only the named person ids, never an unknown caller."""
+def _permits(server: McpServer, person_id: str | None, group_id: str | None) -> bool:
+    """Mirror the gateway's gate: ``allow: all`` admits everyone; a scoped
+    server admits only the named person ids and group ids, never an unknown
+    caller."""
     if server.allow == "all":
+        return True
+    if group_id is not None and group_id in server.allow:
         return True
     if person_id is None or person_id == "unknown":
         return False
     return person_id in server.allow
 
 
-def allowed_gateway_servers(cfg: JoshuaConfig, person_id: str | None) -> list[str]:
-    """The ``mcp`` section server names this person may reach, in config order."""
-    return [name for name, server in cfg.mcp.items() if _permits(server, person_id)]
+def allowed_gateway_servers(
+    cfg: JoshuaConfig, person_id: str | None, group_id: str | None = None
+) -> list[str]:
+    """The ``mcp`` section server names this person or group may reach, in
+    config order."""
+    return [name for name, server in cfg.mcp.items() if _permits(server, person_id, group_id)]
 
 
 def gateway_servers(
@@ -36,6 +43,7 @@ def gateway_servers(
     person_id: str | None,
     conversation_id: str,
     role: str = "guest",
+    group_id: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build the SDK ``mcp_servers`` map that routes each name through the gateway.
 
@@ -53,17 +61,14 @@ def gateway_servers(
     starts, so a header set here holds until the session is rebuilt.
     """
     base = gateway_url.rstrip("/")
-    person = person_id or "unknown"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Joshua-Person": person_id or "unknown",
+        "X-Joshua-Conversation": conversation_id,
+        "X-Joshua-Role": role,
+    }
+    if group_id is not None:
+        headers["X-Joshua-Group"] = group_id
     return {
-        name: {
-            "type": "http",
-            "url": f"{base}/{name}",
-            "headers": {
-                "Authorization": f"Bearer {token}",
-                "X-Joshua-Person": person,
-                "X-Joshua-Conversation": conversation_id,
-                "X-Joshua-Role": role,
-            },
-        }
-        for name in names
+        name: {"type": "http", "url": f"{base}/{name}", "headers": dict(headers)} for name in names
     }

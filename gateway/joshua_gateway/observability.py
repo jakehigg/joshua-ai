@@ -41,6 +41,10 @@ conversation_ctx: ContextVar[str | None] = ContextVar("gateway_conversation", de
 # caller asserted no role, and the files server then reads and writes nothing.
 role_ctx: ContextVar[str | None] = ContextVar("gateway_role", default=None)
 
+# The group core asserted for a group chat. A scoped server admits the request
+# when its ``allow`` names this group. None for a direct message.
+group_ctx: ContextVar[str | None] = ContextVar("gateway_group", default=None)
+
 DEFAULT_CALL_LOG_SIZE = 2000
 
 

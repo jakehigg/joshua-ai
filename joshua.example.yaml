@@ -277,6 +277,13 @@ mcp:
   #   env:
   #     ENABLED_TOOLS: standard
   #   allow: all
+  #
+  # `allow` may also name a group id from `groups`, which opens the server to
+  # that group chat. A list of person ids alone does not, because a group chat
+  # has no single person. The group must list `members`.
+  #   allow:
+  #     - alex
+  #     - <group id>
 
 modules:                        # reserved; no code reads this list yet
   - scheduling

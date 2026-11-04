@@ -9,11 +9,11 @@ gate, binds the person to the session, then forwards to the upstream session
 manager. A request that arrives while the upstream reconnects waits for it; an
 upstream that is down and not reconnecting is 503.
 
-The person comes from ``X-Joshua-Person`` and the role from ``X-Joshua-Role``,
-both trusted only from ``core``. The role is what the files server acts on. A server
-with
-``allow: all`` admits any person; a scoped server admits only its named people
-and denies a request with no person. A denied request is 403 before any upstream
+The person comes from ``X-Joshua-Person``, the role from ``X-Joshua-Role``, and
+the group of a group chat from ``X-Joshua-Group``, all trusted only from
+``core``. The role is what the files server acts on. A server with ``allow: all``
+admits any person; a scoped server admits only its named people and groups and
+denies a request with neither. A denied request is 403 before any upstream
 contact and is written to the call log. A later request that changes the person
 or conversation of a live session is 409.
 """
@@ -34,6 +34,7 @@ from joshua_gateway.observability import (
     CALLERS,
     SESSIONS,
     conversation_ctx,
+    group_ctx,
     identity_ctx,
     now_iso,
     person_ctx,
@@ -123,6 +124,8 @@ async def _authenticate(scope, allowed: frozenset[str], name: str, send: Send):
             headers.get("x-joshua-conversation"),
             _known_persons(),
             headers.get("x-joshua-role"),
+            headers.get("x-joshua-group"),
+            _known_groups(),
         )
     except person_policy.PersonError as exc:
         await _reject(send, 400, exc.message.encode())
@@ -151,6 +154,7 @@ async def _forward(up: Upstream, identity: str, attr, scope, receive, send) -> N
         person_ctx.set(attr.person),
         conversation_ctx.set(attr.conversation),
         role_ctx.set(attr.role),
+        group_ctx.set(attr.group),
     )
     try:
         # During a reconnect the request goes on: the handler waits for the
@@ -166,6 +170,7 @@ async def _forward(up: Upstream, identity: str, attr, scope, receive, send) -> N
         person_ctx.reset(tokens[1])
         conversation_ctx.reset(tokens[2])
         role_ctx.reset(tokens[3])
+        group_ctx.reset(tokens[4])
 
 
 def make_asgi(up: Upstream, allowed: frozenset[str]):
@@ -182,7 +187,7 @@ def make_asgi(up: Upstream, allowed: frozenset[str]):
         if result is None:
             return
         identity, attr = result
-        if not up.spec.permits_person(attr.person):
+        if not up.spec.permits_person(attr.person, attr.group):
             _record_denied(up.label, identity, attr.person, attr.conversation)
             await _reject(send, 403, f"{up.label} is not open to this request".encode())
             return
@@ -199,12 +204,13 @@ def make_multi_asgi(
 ):
     """ASGI app for an identity server: route each person to their own instance.
 
-    ``get_spec`` returns the current server spec (for the per-person allow gate)
-    and ``resolve_instance`` returns the live upstream instance for a person.
+    ``get_spec`` returns the current server spec (for the allow gate) and
+    ``resolve_instance`` returns the live upstream instance for an identity key.
     Both read live state so a reload that adds or removes a person takes effect
     without a route change. A request with no person is 403 ``person_required``;
-    a person the server does not admit is 403; otherwise the request forwards to
-    that person's instance.
+    a person or group the server does not admit is 403; otherwise the request
+    forwards to the instance of the person, or of the group when the person has
+    no identity here.
     """
 
     async def asgi(scope, receive, send) -> None:
@@ -216,11 +222,13 @@ def make_multi_asgi(
             _record_denied(name, identity, attr.person, attr.conversation, "person_required")
             await _reject(send, 403, b"person_required")
             return
-        if not get_spec().permits_person(attr.person):
+        spec = get_spec()
+        if not spec.permits_person(attr.person, attr.group):
             _record_denied(name, identity, attr.person, attr.conversation)
             await _reject(send, 403, f"{name} is not open to this request".encode())
             return
-        up = resolve_instance(attr.person)
+        key = spec.instance_key(attr.person, attr.group)
+        up = resolve_instance(key) if key is not None else None
         if up is None:
             _record_denied(name, identity, attr.person, attr.conversation)
             await _reject(send, 403, f"{name} is not open to this request".encode())
@@ -233,6 +241,11 @@ def make_multi_asgi(
 def _known_persons() -> frozenset[str]:
     """Person ids from the current config, for validating a person header."""
     return frozenset(p.id for p in config.load().people)
+
+
+def _known_groups() -> frozenset[str]:
+    """Group ids from the current config, for validating a group header."""
+    return frozenset(g.id for g in config.load().groups)
 
 
 class UpstreamRoute:

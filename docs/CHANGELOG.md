@@ -8,6 +8,14 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **An MCP server `allow` list can name a group chat.** A group chat reaches
+  the gateway as person `unknown`, so a server scoped to person ids was closed
+  to it. Add the group id from `groups` to `allow`, and the chat can use the
+  server. An identity server takes an identity for the group id. Validation
+  refuses a group with no `members`. Core sends the new `X-Joshua-Group`
+  header, which the gateway trusts only from `core`. See
+  [config.md](config.md).
+
 - **An `inference` section names the server and the key for the model
   calls.** Set `inference.base_url` and `inference.api_key` to send every job
   to a server that speaks the Anthropic Messages API, such as LiteLLM, or set
