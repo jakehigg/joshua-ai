@@ -51,9 +51,8 @@ async def test_build_session_wires_gateway_and_builtins(tmp_path, monkeypatch):
     manager = make_manager(repo, tmp_path, builtins={"scheduling": scheduling})
     channel, conversation = make_channel(), make_conversation()
 
-    session, deps, profile, _paths, _mtime = await manager._build_session(
-        channel, conversation, resume=None
-    )
+    built = await manager._build_session(channel, conversation, resume=None)
+    session, deps, profile = built.session, built.deps, built.profile
     assert profile.name == "default"
 
     options = session._options

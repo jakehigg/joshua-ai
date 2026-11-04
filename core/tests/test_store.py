@@ -131,6 +131,11 @@ async def test_set_session_and_touch(repo) -> None:
     reread = await repo.get_conversation(conv.id)
     assert reread.sdk_session_id == "sess-1"
     assert reread.last_channel_id == "voice:office"
+    assert reread.inference_endpoint is None
+
+    await repo.set_sdk_session(conv.id, "sess-2", inference_endpoint="litellm:4000")
+    reread = await repo.get_conversation(conv.id)
+    assert (reread.sdk_session_id, reread.inference_endpoint) == ("sess-2", "litellm:4000")
 
     await repo.touch_conversation(conv.id, last_channel_id="voice:kitchen")
     assert (await repo.get_conversation(conv.id)).last_channel_id == "voice:kitchen"

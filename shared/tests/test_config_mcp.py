@@ -426,3 +426,28 @@ def test_allow_scripts_needs_a_package() -> None:
             """
         )
     assert "applies only to a package server" in str(exc.value)
+
+
+def test_allow_with_no_value_admits_no_person() -> None:
+    """strictyaml has no `[]`, so `allow:` with no value is the empty list."""
+    cfg = parse_mcp(
+        """
+        tasks:
+          type: http
+          url: http://tasks:8080/mcp
+          allow:
+        """
+    )
+    assert cfg.mcp["tasks"].allow == []
+
+
+def test_allow_as_other_text_is_still_refused() -> None:
+    with pytest.raises(config.ConfigError, match="allow must be"):
+        parse_mcp(
+            """
+            tasks:
+              type: http
+              url: http://tasks:8080/mcp
+              allow: everyone
+            """
+        )

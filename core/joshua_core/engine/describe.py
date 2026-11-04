@@ -43,6 +43,7 @@ from joshua_shared.attachments import (
     read_meta,
     write_meta,
 )
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, Field
 
@@ -50,9 +51,6 @@ from joshua_core.engine.ephemeral import Runner, run_worker
 from joshua_core.engine.usage import Usage
 
 logger = get_logger("engine.describe")
-
-# The worker model. It sees images, and it is cheap enough to run on each file.
-DEFAULT_MODEL = "claude-haiku-4-5"
 
 # The name in the log and in the audit.
 WORKER = "describe-attachment"
@@ -93,7 +91,7 @@ async def describe_attachment(
     abs_path: Path,
     *,
     mime: str,
-    model: str = DEFAULT_MODEL,
+    inference: ResolvedInference,
     timeout_s: float,
     max_text_chars: int = MAX_TEXT_CHARS,
     runner: Runner | None = None,
@@ -101,7 +99,8 @@ async def describe_attachment(
 ) -> AttachmentMeta | None:
     """Describe the file at `abs_path` and write the answer to its metadata file.
 
-    Returns the metadata, or `None` when the file cannot be described. A file
+    `inference` is the model and the server of the `describe` job. Returns
+    the metadata, or `None` when the file cannot be described. A file
     that already carries a description is returned as it is, and no call is
     made. When `usage_out` is a list, the tokens of the call are appended to
     it.
@@ -120,7 +119,7 @@ async def describe_attachment(
         system_prompt=SYSTEM_PROMPT,
         user_text="Describe this file.",
         answer=DescribeAnswer,
-        model=model,
+        inference=inference,
         timeout_s=timeout_s,
         image=image,
         document=document,
@@ -135,7 +134,7 @@ async def describe_attachment(
         subject=answer.subject,
         slug=answer.slug,
         text_present=answer.text_present,
-        model=model,
+        model=inference.model,
         described_at=datetime.now(UTC).isoformat(),
     )
     transcript = clean_text(answer.transcript, limit=max_text_chars)

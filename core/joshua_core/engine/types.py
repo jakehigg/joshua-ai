@@ -13,6 +13,10 @@ from typing import Any
 
 OnDelta = Callable[[str], Awaitable[None]]
 
+# What a person gets when a turn fails. The error text of a failed call can
+# name a host, so it never reaches a person.
+FAILED_REPLY = "Sorry, something went wrong on my end. Please try again."
+
 
 @dataclass(frozen=True)
 class Attachment:
@@ -41,3 +45,7 @@ class TurnResult:
     # Per-call record ``[{"name": ..., "input": {...}}, ...]`` in call order, with
     # duplicates. ``tools_used`` is the de-duped name list derived from it.
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    # A short label for a failed turn, safe to log: an SDK error kind such as
+    # ``authentication_failed``, ``http_422``, or ``timeout``. It never holds
+    # the error text.
+    error: str | None = None

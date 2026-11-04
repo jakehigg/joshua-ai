@@ -98,3 +98,24 @@ async def test_backfill_reads_old_rows_once(repo) -> None:
         300,
         4,
     )
+
+
+async def test_the_endpoint_of_a_row_is_stored(repo) -> None:
+    await repo.add_usage_event(
+        UsageEvent(
+            kind="chat",
+            name="chat",
+            usage=Usage(input=1),
+            model="local-chat",
+            endpoint="litellm:4000",
+            at=NOON,
+            ref="ep",
+        )
+    )
+    async with repo._pool.connection() as conn:  # noqa: SLF001 — read the raw row
+        cur = await conn.execute("SELECT model, endpoint FROM usage_event WHERE ref = 'ep'")
+        row = await cur.fetchone()
+    assert (row["model"], row["endpoint"]) == ("local-chat", "litellm:4000")
+    # The answer of the usage route keeps its shape: no endpoint split.
+    body = summarize(await repo.usage_rows(SINCE, TZ), timezone=TZ, days=30).model_dump()
+    assert "endpoint" not in body["totals"]["chat"]

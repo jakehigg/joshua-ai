@@ -30,8 +30,10 @@ from typing import Any
 
 from joshua_shared import layout, wikigit
 from joshua_shared.config import JoshuaConfig
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 
+from joshua_core.engine import inference as inference_plan
 from joshua_core.engine.cron import compute_next_cron, now_in, zone
 from joshua_core.engine.usage import Usage
 from joshua_core.store.usage_events import record_usage
@@ -204,7 +206,6 @@ class NightlyReflector:
         self._tz = settings.timezone
         self._data_dir = Path(data_dir)
         self._min_chars = settings.memory.min_chars_for_post
-        self._model = settings.core.reflection_model
         self._daily_rollover = settings.memory.daily_rollover
         self._nightly_at = settings.memory.nightly_at
         self._oneshot = oneshot or _default_oneshot
@@ -484,15 +485,30 @@ class NightlyReflector:
     async def _oneshot_json(
         self, system: str, user: str, *, required: str
     ) -> dict[str, Any] | None:
-        """Run the reflection call and parse it. Retry once on a parse failure."""
+        """Run the reflection call and parse it. Retry once on a parse failure.
+
+        The call uses the `reflection` job of `inference`, and the time limit
+        `inference.timeout_seconds`.
+        """
         for attempt in (1, 2):
             used: list[Usage] = []
+            resolved = inference_plan.resolve(self._settings, "reflection")
             try:
                 raw = await self._oneshot(
-                    system_prompt=system, user_prompt=user, model=self._model, usage_out=used
+                    system_prompt=system,
+                    user_prompt=user,
+                    inference=resolved,
+                    timeout_s=float(self._settings.inference.timeout_seconds),
+                    usage_out=used,
                 )
             finally:
-                await record_usage(self._repo, "reflection", used, model=self._model)
+                await record_usage(
+                    self._repo,
+                    "reflection",
+                    used,
+                    model=resolved.model,
+                    endpoint=resolved.endpoint,
+                )
             data = _parse_object(raw)
             if data is not None and required in data:
                 return data
@@ -680,7 +696,8 @@ async def _default_oneshot(
     *,
     system_prompt: str,
     user_prompt: str,
-    model: str | None,
+    inference: ResolvedInference,
+    timeout_s: float,
     usage_out: list[Usage] | None = None,
 ) -> str:
     """The real reflection call. Imported lazily so the module loads without the
@@ -688,5 +705,9 @@ async def _default_oneshot(
     from joshua_core.engine.agent import run_oneshot
 
     return await run_oneshot(
-        system_prompt=system_prompt, user_prompt=user_prompt, model=model, usage_out=usage_out
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        inference=inference,
+        timeout_s=timeout_s,
+        usage_out=usage_out,
     )

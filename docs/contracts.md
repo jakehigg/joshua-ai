@@ -100,7 +100,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | Route | Callers | Request | Reply |
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
-| `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. |
+| `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}, "inference_overrides": int}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. `inference_overrides` counts the `inference` job blocks that set `base_url` or `model`. |
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
@@ -115,6 +115,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /admin/kb/events?limit=` | `ADMIN_CALLERS` | | `{"events": […]}` |
 | `POST /admin/reflect` | `ADMIN_CALLERS` | `{"person"?, "date"?}` | the reflection summary |
 | `POST /admin/turn` | `ADMIN_CALLERS` | `{"channel", "text", "person"?, "framing"?}` | `{"conversation_id", "text"}`. The reply is not delivered. |
+| `POST /admin/inference/check` | `ADMIN_CALLERS` | none | `{"ok": bool, "jobs": [{"job", "endpoint", "model", "ok", "seconds", "error"?}]}`, one row for each `inference` job. Jobs with the same server, model, and key share one call. `error` has no key and no token, and is 200 characters at most. |
 | `GET /admin/usage?days=` | `ADMIN_CALLERS` | | the same answer as `GET /v1/usage` |
 | `GET /admin/snapshots` | `ADMIN_CALLERS` | | `{"snapshots": [{"name", "server", "tool", "scope", "every", "fetched_at", "ok", "failures", "last_error", "items", "listed"}]}`, no text |
 
@@ -242,6 +243,7 @@ it.
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
 | `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
 | `POST /v1/snapshots/{name}` | `core` | empty | `{"ok", "text", "is_error", "fetched_at"}` (below). `404` for a name that is not a gateway snapshot, `403` for a refused tool, `503` when the upstream is down, `504` after 30 seconds. |
+| `POST /v1/search` | `core` | `{"query": str}`, 1 to 500 characters | `{"results": [{"title", "url", "snippet"}]}` (below). `400` for a bad body, `404` when `internet.search` is not set or the internet agent is off, `502` when SearXNG refuses, fails, or does not answer JSON, `504` after `internet.search.timeout_seconds`. |
 | `POST /admin/mcp/install` | `ADMIN_CALLERS` | `{"server": name, "reinstall": bool}` | `{"server", "package", "resolved", "installed_at", "reconnected": […]}`. `404` for a server with no `package`, `502` with a one-line `error` when the install failed. |
 
 When an upstream loses its session, core's session to the gateway continues.
@@ -283,6 +285,35 @@ of the person of the scope, as the MCP route does.
 flag of the tool. `ok` is true when the call ran and `is_error` is false.
 `fetched_at` is UTC, in ISO 8601. The call log holds the call with the
 snapshot name and no content.
+
+### The web search route
+
+`POST /v1/search` runs the SearXNG search of `internet.search` for the
+internet agent in core. The body holds the query and nothing else. The gateway
+calls `GET <url>/search` with `q=<query>`, `format=json`, and `categories` and
+`language` when they are set. It sends `Authorization: Bearer <api_key>` only
+when `api_key` is set. The URL, the parameters, and the key come from the
+config of the gateway, never from the caller.
+
+The gateway reads `results` of the SearXNG answer, and takes `url`, `title`,
+and `content` (as `snippet`) of each result. A result has a `title` of at
+most 300 characters, an `http` or `https` `url`, and a `snippet` of at most
+1000 characters. One URL is kept once, and the list has at most
+`internet.search.max_results` results.
+
+An error is a short fixed text, never the text of SearXNG:
+
+| `error` | Status | Cause |
+|---|---|---|
+| `searxng refused the json format (403): ...` | `502` | SearXNG answered `403`: `json` is not in `search.formats` of its `settings.yml`, or a proxy refused the key |
+| `searxng refused the key (401)` | `502` | a proxy refused the key |
+| `searxng answered <status>` | `502` | another status that is not `200` |
+| `searxng answer is not json`, `searxng answer has no results list` | `502` | the answer is not a SearXNG JSON answer |
+| `searxng unreachable: <exception>` | `502` | the connection failed |
+| `timeout` | `504` | no answer in `timeout_seconds` |
+
+The call log holds the length of the query and the count of the results,
+never the query and never the key.
 
 `core` sends two headers with every MCP request:
 

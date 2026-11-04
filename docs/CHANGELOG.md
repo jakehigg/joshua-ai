@@ -8,6 +8,97 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **An `inference` section names the server and the key for the model
+  calls.** Set `inference.base_url` and `inference.api_key` to send every job
+  to a server that speaks the Anthropic Messages API, such as LiteLLM, or set
+  `api_key` alone to use the Anthropic API. A block for each job (`chat`,
+  `voice`, `reflection`, `describe`, `internet`) can change the model, the
+  server, the key, or all three. A job that sets `base_url` must also set `api_key`, so the
+  global key never goes to another server. Core removes the provider
+  variables from its own environment at start, gives each call the
+  credential of its job only, and logs the server and the model of each job.
+  `inference.timeout_seconds` (default 600) limits one chat or voice turn and
+  one reflection call. A server change starts a new session for each
+  conversation. A failed call gives the person the failure reply, never the
+  error text. The usage rows name the model and the server of each call, and
+  core keeps the cost of a turn only for a call to Anthropic. See
+  [config.md](config.md#inference).
+
+- **`POST /admin/inference/check` tests the server of each job.** Core sends
+  one short prompt to each distinct server, model, and key of the
+  `inference` jobs, and returns for each job the server, the model, `ok`,
+  the seconds, and a short error. The error has no key and no token. Each
+  call writes one usage row. `/readyz` on core gives `inference_overrides`,
+  the number of job blocks that set `base_url` or `model`. The Helm chart
+  (0.0.9) shows the `inference` keys in `secrets.core.keys` and the
+  `inference` section with `${VAR:-}`. [operations.md](operations.md#the-model-server)
+  has recipes for the subscription, LiteLLM in front of Bedrock, one LiteLLM
+  key for each job, and a local model for one job.
+
+- **A job block can set `api_key` alone.** The job then uses the global
+  `base_url` with its own key, and never gets the global key, so LiteLLM can
+  count the use of each job apart. With no global `base_url`, the job key is
+  an Anthropic API key. An empty job key on the global server sends no key,
+  and does not fall back to the global key. See [config.md](config.md#inference).
+
+- **Web search off the Anthropic server, through SearXNG.** On the Anthropic
+  server the internet agent uses Anthropic's own `WebSearch`, as before, and
+  needs nothing. When the `internet` job moves to another server (Bedrock
+  through LiteLLM, Ollama), web search stops, unless the new block
+  `internet.search` names a SearXNG instance: `url`, an optional `api_key`,
+  `max_results` (default 10), `timeout_seconds` (default 20), and the optional
+  `categories` and `language`. The worker then holds one in-process tool,
+  `web_search`, which calls the new gateway route `POST /v1/search` with the
+  token of core. The gateway calls the SearXNG JSON API and keeps only `http`
+  and `https` URLs. The optional key stays in the gateway (`.env.gateway`,
+  `secrets.gateway` of the Helm chart), and the agent never sees a raw
+  result. Each result URL may be fetched, and a URL in a snippet may not.
+  SearXNG must allow the `json` format, and its `403` gives a clear error.
+  With no block on another server, the worker has no search and says so.
+  Core logs the search at start (`anthropic`, `searxng`, or `none`) and warns
+  only for `none`. See
+  [operations.md](operations.md#web-search-off-anthropic-searxng).
+
+- **A one-hour prompt cache off the subscription.** On the subscription the
+  CLI writes the prompt cache for one hour. On any other server it writes it
+  for five minutes, so a reply more than five minutes after the last one
+  wrote the full prompt to the cache again. In one measured day through
+  LiteLLM to Bedrock, these writes were about 80% of the cost of `chat`.
+  Each job that is not on the subscription now gets
+  `ENABLE_PROMPT_CACHING_1H=1`, and the CLI asks for `"ttl": "1h"` on each
+  cache marker. The other cache variables of the CLI are empty for each
+  job. You do not set anything. See [config.md](config.md#inference).
+
+- **Tool search for the conversation turns.** A new key,
+  `inference.<job>.tool_search`, for `chat` (default `true`) and `voice`
+  (default `false`). With it on, a model call sends only the names of the MCP
+  tools, and the model loads the definition of a tool when it needs it. With
+  many MCP servers, a call through LiteLLM sent all the definitions on each
+  call (about 90000 tokens in one measured setup), and a turn with tool
+  search used about 8000 tokens in place of about 106000. A turn that uses a
+  tool can need one more model call, which is why it is off for `voice`. Core
+  then gives the agent exactly one CLI tool, `ToolSearch`, and sets
+  `ENABLE_TOOL_SEARCH` for the CLI; with it off, the agent has no tool and
+  the variable is empty. `ToolSearch` gives no capability: it loads only the
+  definition of a tool the agent already holds. The same rule applies on the
+  subscription and on another server. The workers never get it, and a worker
+  block that sets it fails the load. The start log gives `tool_search` for
+  each job. See [config.md](config.md#tool-search).
+
+- **The agent can read back the current conversation.** A new in-process
+  server, `history`, has `search_history(query, limit)`, a word search with
+  a snippet, newest first, and `read_history(start, end, cursor)`, the full
+  messages of a time window in pages of at most 60 messages and 12000
+  characters. Both cover only the conversation of the session: a direct
+  message, a group, or a voice call. Neither tool takes a conversation, a
+  channel, or a person. Failed turns, scheduled task prompts, event texts,
+  and `[IGNORE]` replies are not shown. Core adds the index
+  `idx_transcript_fts` at start, so the first start after the update can take
+  longer on a large transcript. See [memory.md](memory.md#the-history-of-a-conversation).
+
+- **`allow:` with no value on an `mcp` entry is the empty list.** No person
+  reaches that server. Before, the value failed the config load.
+
 - **Snapshots put the state of a live system in the memory index.** A new
   list, `memory.snapshots`, names fixed MCP tool calls: a server, a tool, the
   arguments, a cadence, and a scope. Core runs each one with no model, keeps

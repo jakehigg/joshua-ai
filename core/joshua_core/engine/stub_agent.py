@@ -14,9 +14,11 @@ from datetime import datetime
 from pathlib import Path
 
 from joshua_shared import layout, wikigit
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.types import OnDelta, TurnResult
+from joshua_core.engine.usage import Usage
 
 logger = get_logger("engine.stub")
 
@@ -29,6 +31,10 @@ ECHO_TOOLS_MARKER = "[[echo-tools]]"
 # ``write_journal_entry`` call, so the on-demand journal flow runs end to end
 # without the SDK.
 JOURNAL_MARKER = "[[journal]]"
+
+# A prompt that contains this marker makes the stub wait until it is cancelled,
+# so a test can run the turn time limit.
+HANG_MARKER = "[[hang]]"
 
 # The files-MCP-relative attachment paths cited in a turn's attach note:
 # ``wiki/attachments/…``, ``people/<id>/attachments/…``, or ``shared/attachments/…``.
@@ -46,6 +52,7 @@ class StubAgentSession:
         resume: str | None = None,
         data_dir: Path | str | None = None,
         wiki_git: bool = True,
+        inference: ResolvedInference | None = None,
     ):
         self._system_prompt = system_prompt
         self._cwd = cwd
@@ -53,6 +60,15 @@ class StubAgentSession:
         self._server_names = sorted(server_names or [])
         self._data_dir = Path(data_dir) if data_dir is not None else None
         self._wiki_git = wiki_git
+        # The job the manager resolved for this session. A test reads it to see
+        # which server and model a turn would use.
+        self.inference = inference
+        # The resume id the session was built with, after the manager's checks.
+        self.resume = resume
+        # Set by a test: the next turn fails the way the CLI reports a failed
+        # call, with ``is_error`` and the error text in the result.
+        self.fail_with: str | None = None
+        self.interrupted = False
         # When built with a resume id, fail the first run once so the manager's
         # resume-retry path (rebuild without resume) is exercised offline.
         self._resume = resume
@@ -72,6 +88,16 @@ class StubAgentSession:
     @property
     def connected(self) -> bool:
         return self._connected
+
+    @property
+    def endpoint(self) -> str | None:
+        """The server label of the session, or None with no resolved job."""
+        return self.inference.endpoint if self.inference is not None else None
+
+    @property
+    def model(self) -> str | None:
+        """The model of the session, or None with no resolved job."""
+        return self.inference.model if self.inference is not None else None
 
     async def failed_mcp_servers(self) -> list[str]:
         """The servers this session reports as failed, as ``AgentSession`` does."""
@@ -93,6 +119,20 @@ class StubAgentSession:
         if self._resume and not self._resume_failed:
             self._resume_failed = True
             raise RuntimeError(f"stub resume failed for session {self._resume}")
+
+        if HANG_MARKER in prompt:
+            await asyncio.Event().wait()
+
+        if self.fail_with is not None:
+            text, self.fail_with = self.fail_with, None
+            return TurnResult(
+                text=text,
+                session_id=self._session_id,
+                is_error=True,
+                usage={"input_tokens": 0, "output_tokens": 0},
+                cost_usd=0.0,
+                error="http_422",
+            )
 
         if JOURNAL_MARKER in prompt:
             self._write_journal(prompt)
@@ -163,6 +203,7 @@ class StubAgentSession:
             wikigit.commit(wiki_root, [entry], f"journal: {rel}")
 
     async def interrupt(self) -> None:
+        self.interrupted = True
         logger.info({"message": "stub interrupt"})
 
     async def close(self) -> None:
@@ -178,3 +219,107 @@ def _unique(items: list[str]) -> list[str]:
             seen.add(item)
             out.append(item)
     return out
+
+
+class StubOneshot:
+    """A stand-in for ``agent.run_oneshot`` with no SDK and no network.
+
+    It takes the same arguments and answers ``"ok"``. It keeps each
+    ``ResolvedInference`` it was called with in ``calls``, so a test sees how
+    many calls a check made. ``fail`` maps a server label to the
+    ``(label, text)`` of a failed call, and ``raise_for`` maps a server label
+    to an exception to raise. A test sets them.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[ResolvedInference] = []
+        self.fail: dict[str, tuple[str, str]] = {}
+        self.raise_for: dict[str, Exception] = {}
+
+    async def __call__(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        inference: ResolvedInference,
+        timeout_s: float,
+        usage_out: list[Usage] | None = None,
+        error_out: list[tuple[str, str]] | None = None,
+    ) -> str:
+        self.calls.append(inference)
+        if usage_out is not None:
+            usage_out.append(Usage(input=3, output=1))
+        if inference.endpoint in self.raise_for:
+            raise self.raise_for[inference.endpoint]
+        if inference.endpoint in self.fail:
+            if error_out is not None:
+                error_out.append(self.fail[inference.endpoint])
+            return ""
+        return "ok"
+
+
+class StubWorker:
+    """A stand-in for ``agent.run_worker_session`` with no SDK and no network.
+
+    It takes the same arguments and runs the worker boundary of
+    ``agent.check_worker_tools`` first, so a worker that the real builder
+    refuses fails here too. When it holds the ``search`` server, it calls the
+    real ``web_search`` handler once with the first line of the objective, as
+    the SDK does. Then it asks the ``PreToolUse`` hook about each URL of
+    ``fetch``, as a ``WebFetch`` call would. It answers with the first result
+    URL as its one source, or with no source.
+
+    ``calls`` keeps the tools and the server names of each call,
+    ``search_text`` the text the search tool gave, and ``decisions`` the
+    ``(url, allowed)`` of each fetch. A test sets ``fetch``.
+    """
+
+    def __init__(self, fetch: list[str] | None = None) -> None:
+        self.fetch = list(fetch or [])
+        self.calls: list[dict[str, object]] = []
+        self.search_text: list[str] = []
+        self.decisions: list[tuple[str, bool]] = []
+
+    async def __call__(
+        self,
+        *,
+        system_prompt: str,
+        user_text: str,
+        schema: dict[str, object],
+        inference: ResolvedInference,
+        timeout_s: float,
+        max_turns: int,
+        tools: list[str],
+        hooks: dict[str, list[object]] | None = None,
+        usage_out: list[Usage] | None = None,
+        mcp_servers: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        from joshua_core.engine import agent
+
+        servers = dict(mcp_servers or {})
+        agent.check_worker_tools(tools, servers)
+        self.calls.append({"tools": list(tools), "servers": sorted(servers)})
+        source = ""
+        handler = agent.search_tool_handler(servers.get(agent.SEARCH_SERVER))
+        if handler is not None and agent.SEARCH_TOOL_NAME in tools:
+            result = await handler({"query": user_text.splitlines()[0]})
+            text = result["content"][0]["text"]
+            self.search_text.append(text)
+            match = re.search(r"^\s*URL: (\S+)$", text, re.MULTILINE)
+            source = match.group(1) if match else ""
+        for url in self.fetch:
+            allowed = True
+            for hook in (hooks or {}).get("PreToolUse", []):
+                payload = {"tool_name": "WebFetch", "tool_input": {"url": url}}
+                decision = await hook(payload, "stub", None)  # type: ignore[operator]
+                if decision:
+                    allowed = False
+            self.decisions.append((url, allowed))
+        if usage_out is not None:
+            usage_out.append(Usage(input=1, output=1))
+        return {
+            "answer": "The stub worker answered." if source else "The stub worker found nothing.",
+            "sources": [{"url": source, "title": "stub"}] if source else [],
+            "confidence": "low",
+            "disagreements": "",
+        }

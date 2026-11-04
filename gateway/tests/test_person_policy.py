@@ -230,3 +230,12 @@ async def test_inventory_reports_allow_and_live_persons(gateway):
     assert servers["b"]["allow"] == ["alex"]
     assert servers["a"]["persons"] == []
     assert servers["b"]["persons"] == ["alex"]
+
+
+async def test_allow_with_no_value_admits_no_person(gateway):
+    """`allow:` with no value is the empty list: every person gets 403."""
+    app = gateway(_echo_entry("c", "  allow:\n"))
+    async with lifespan(app):
+        for person in ("alex", "mia", "unknown", None):
+            resp = await _get(app, "/c", "core", person_header(person))
+            assert resp.status_code == 403

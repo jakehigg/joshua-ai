@@ -21,6 +21,32 @@ imagePullSecrets: []
 # docs/config.md. The chart writes it to a ConfigMap and mounts it read-only in
 # all three containers. Leave it empty to supply your own ConfigMap through
 # config.existingConfigMap.
+#
+# To send the model calls to a server other than the Claude subscription, add
+# an `inference` section. Refer to each key as ${VAR:-}, never as a literal.
+# The `:-` default is necessary: channels and gateway read the same file and do
+# not get the key. docs/operations.md has the recipes.
+#
+#   config: |
+#     ...
+#     inference:
+#       base_url: http://litellm:4000
+#       api_key: ${INFERENCE_API_KEY:-}
+#       internet:
+#         base_url: http://ollama:11434
+#         api_key: ${LOCAL_INFERENCE_API_KEY:-}
+#         model: llama3.1
+#
+# Web search: on the Anthropic server the internet agent uses Anthropic's own
+# WebSearch and needs nothing. When the internet job moves to another server
+# (Bedrock through LiteLLM, Ollama), web search stops, unless internet.search
+# names a SearXNG instance. The optional key goes in secrets.gateway, never in
+# secrets.core:
+#
+#     internet:
+#       search:
+#         url: http://searxng:8080
+#         api_key: ${SEARXNG_API_KEY:-}
 config: ""
 
 # Use a ConfigMap you made yourself. It must hold the key joshua.yaml.
@@ -58,6 +84,17 @@ secrets:
       # The callers of POST /v1/memory/search. Core verifies them.
       JOSHUA_TOKEN_VIEWER: {}
       JOSHUA_TOKEN_MCP: {}
+      # The key of the model server in `inference.base_url`, and the key of
+      # one job block. Only core gets them. Add the keys that your joshua.yaml
+      # refers to:
+      # INFERENCE_API_KEY: {}
+      # LOCAL_INFERENCE_API_KEY: {name: local-model-server, key: api-key}
+      # One LiteLLM key for each job, on the server in `inference.base_url`:
+      # INFERENCE_KEY_CHAT: {}
+      # INFERENCE_KEY_VOICE: {}
+      # INFERENCE_KEY_REFLECTION: {}
+      # INFERENCE_KEY_DESCRIBE: {}
+      # INFERENCE_KEY_INTERNET: {}
   channels:
     name: joshua-channels-secrets
     keys:
@@ -84,6 +121,9 @@ secrets:
       JOSHUA_TOKEN_GATEWAY: {}
       JOSHUA_TOKEN_LAPTOP: {}
       JOSHUA_TOKEN_CI: {}
+      # The optional key of the SearXNG instance of internet.search. The
+      # gateway calls SearXNG, so only the gateway gets it.
+      SEARXNG_API_KEY: {}
   # The viewer reads the volume, and calls core for one thing: a search by
   # meaning. It holds its own fleet token and no other, and no upstream
   # credential. VIEWER_PASSWORDS is every viewer password in one value, as

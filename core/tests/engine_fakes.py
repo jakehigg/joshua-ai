@@ -11,6 +11,7 @@ from typing import Any
 
 from joshua_core.store.models import Channel, Conversation, Person
 from joshua_shared import config as config_module
+from joshua_shared.inference import ENV_KEYS, ResolvedInference
 
 BASE_CONFIG = """
 name: Test House
@@ -34,12 +35,26 @@ def make_settings(*, pool_max: int = 20, idle_seconds: int = 1800, mcp: str = ""
     return config_module.parse(text, env={}, source="<test>")
 
 
+def resolved(
+    job: str = "chat",
+    *,
+    model: str = "test-model",
+    endpoint: str = "anthropic",
+    env: dict[str, str] | None = None,
+) -> ResolvedInference:
+    """A resolved job for a test that does not read the config."""
+    full = dict.fromkeys(ENV_KEYS, "")
+    full.update(env or {})
+    return ResolvedInference(job=job, model=model, env=full, endpoint=endpoint)
+
+
 class FakeRepo:
     """Records transcript writes and serves the two people the manager reads."""
 
     def __init__(self) -> None:
         self.transcripts: list[dict[str, Any]] = []
         self.sdk_sessions: dict[str, str] = {}
+        self.sdk_endpoints: dict[str, str | None] = {}
         self.touched: list[str] = []
         self.usage_events: list[Any] = []
         self._people = {
@@ -73,9 +88,14 @@ class FakeRepo:
         self.usage_events.append(event)
 
     async def set_sdk_session(
-        self, conversation_id: str, session_id: str, last_channel_id: str | None = None
+        self,
+        conversation_id: str,
+        session_id: str,
+        last_channel_id: str | None = None,
+        inference_endpoint: str | None = None,
     ) -> None:
         self.sdk_sessions[conversation_id] = session_id
+        self.sdk_endpoints[conversation_id] = inference_endpoint
 
     async def touch_conversation(
         self, conversation_id: str, last_channel_id: str | None = None
@@ -101,12 +121,14 @@ def make_conversation(
     person_id: str | None = "alex",
     sdk_session_id: str | None = None,
     channel_id: str = "telegram:1",
+    inference_endpoint: str | None = None,
 ) -> Conversation:
     return Conversation(
         id=conversation_id,
         channel_id=channel_id,
         person_id=person_id,
         sdk_session_id=sdk_session_id,
+        inference_endpoint=inference_endpoint,
     )
 
 

@@ -8,8 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from engine_fakes import resolved
 from joshua_core.engine import describe
 from joshua_shared.attachments import AttachmentMeta, Description, read_meta, write_meta
+
+INF = resolved("describe")
 
 PNG_1PX = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
@@ -47,7 +50,9 @@ async def test_a_photo_gets_a_description_and_its_text(tmp_path: Path) -> None:
     path = _image(tmp_path)
     run, calls = _runner(GOOD)
 
-    meta = await describe.describe_attachment(path, mime="image/png", timeout_s=5, runner=run)
+    meta = await describe.describe_attachment(
+        path, mime="image/png", timeout_s=5, inference=INF, runner=run
+    )
 
     assert meta is not None
     assert meta.description is not None
@@ -63,7 +68,9 @@ async def test_the_description_is_stored_beside_the_file(tmp_path: Path) -> None
     path = _image(tmp_path)
     run, _ = _runner(GOOD)
 
-    await describe.describe_attachment(path, mime="image/png", timeout_s=5, runner=run)
+    await describe.describe_attachment(
+        path, mime="image/png", timeout_s=5, inference=INF, runner=run
+    )
 
     stored = read_meta(path)
     assert stored is not None
@@ -77,8 +84,12 @@ async def test_the_same_file_is_described_one_time(tmp_path: Path) -> None:
     path = _image(tmp_path)
     run, calls = _runner(GOOD)
 
-    await describe.describe_attachment(path, mime="image/png", timeout_s=5, runner=run)
-    await describe.describe_attachment(path, mime="image/png", timeout_s=5, runner=run)
+    await describe.describe_attachment(
+        path, mime="image/png", timeout_s=5, inference=INF, runner=run
+    )
+    await describe.describe_attachment(
+        path, mime="image/png", timeout_s=5, inference=INF, runner=run
+    )
 
     assert len(calls) == 1
 
@@ -87,7 +98,9 @@ async def test_a_slug_that_could_escape_a_directory_is_refused(tmp_path: Path) -
     path = _image(tmp_path)
     run, _ = _runner({**GOOD, "slug": "../../etc/passwd"})
 
-    meta = await describe.describe_attachment(path, mime="image/png", timeout_s=5, runner=run)
+    meta = await describe.describe_attachment(
+        path, mime="image/png", timeout_s=5, inference=INF, runner=run
+    )
 
     assert meta is None
     stored = read_meta(path)
@@ -100,7 +113,10 @@ async def test_a_kind_outside_the_list_is_refused(tmp_path: Path) -> None:
     run, _ = _runner({**GOOD, "kind": "whatever the model felt like"})
 
     assert (
-        await describe.describe_attachment(path, mime="image/png", timeout_s=5, runner=run) is None
+        await describe.describe_attachment(
+            path, mime="image/png", timeout_s=5, inference=INF, runner=run
+        )
+        is None
     )
 
 
@@ -109,7 +125,10 @@ async def test_a_worker_failure_leaves_the_turn_alive(tmp_path: Path) -> None:
     run, _ = _runner(None)
 
     assert (
-        await describe.describe_attachment(path, mime="image/png", timeout_s=5, runner=run) is None
+        await describe.describe_attachment(
+            path, mime="image/png", timeout_s=5, inference=INF, runner=run
+        )
+        is None
     )
 
 
@@ -118,7 +137,9 @@ async def test_a_pdf_with_no_text_layer_goes_to_the_worker(tmp_path: Path) -> No
     path.write_bytes(b"%PDF-1.7\n" + b"0" * 100)
     run, calls = _runner({**GOOD, "kind": "bill", "slug": "water-bill"})
 
-    meta = await describe.describe_attachment(path, mime="application/pdf", timeout_s=5, runner=run)
+    meta = await describe.describe_attachment(
+        path, mime="application/pdf", timeout_s=5, inference=INF, runner=run
+    )
 
     assert meta is not None
     assert calls[0]["document"] == path.read_bytes()
@@ -135,7 +156,9 @@ async def test_a_pdf_that_already_holds_its_text_keeps_it(tmp_path: Path) -> Non
     )
     run, _ = _runner({**GOOD, "transcript": "something the model read"})
 
-    meta = await describe.describe_attachment(path, mime="application/pdf", timeout_s=5, runner=run)
+    meta = await describe.describe_attachment(
+        path, mime="application/pdf", timeout_s=5, inference=INF, runner=run
+    )
 
     assert meta is not None
     assert meta.extracted_text == "Account 12345"
@@ -148,7 +171,10 @@ async def test_a_file_of_a_type_the_worker_cannot_read_is_skipped(tmp_path: Path
     run, calls = _runner(GOOD)
 
     assert (
-        await describe.describe_attachment(path, mime="text/plain", timeout_s=5, runner=run) is None
+        await describe.describe_attachment(
+            path, mime="text/plain", timeout_s=5, inference=INF, runner=run
+        )
+        is None
     )
     assert calls == []
 
@@ -160,7 +186,9 @@ async def test_a_very_large_pdf_is_not_sent(tmp_path: Path, monkeypatch) -> None
     run, calls = _runner(GOOD)
 
     assert (
-        await describe.describe_attachment(path, mime="application/pdf", timeout_s=5, runner=run)
+        await describe.describe_attachment(
+            path, mime="application/pdf", timeout_s=5, inference=INF, runner=run
+        )
         is None
     )
     assert calls == []

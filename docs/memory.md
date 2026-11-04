@@ -255,6 +255,39 @@ A skill starts to work after the next index pass
 turn that taught it. To stop a skill, a member sets `triggers: []` or deletes
 the file. A deleted file stops firing on the next pass.
 
+## The history of a conversation
+
+The agent can read back the messages of the conversation that it is in, with
+the in-process `history` server. Every session has it: a direct message, a
+group, a voice call, a guest, an event, and a scheduled task.
+
+- `search_history(query, limit)` finds messages by words. It gives the time,
+  who wrote it, and a short snippet, newest first. `limit` is 10 by default,
+  and 50 at most. The words use web search syntax: `"a phrase"`, `or`, and
+  `-word`. The search uses the English word stems of PostgreSQL full text
+  search, so "paints" finds "paint".
+- `read_history(start, end, cursor)` gives the full messages from `start` to
+  `end` (default: now), oldest first. A time with no offset is in
+  `timezone`. One result holds at most 60 messages and 12000 characters. When
+  more remain, the result says so and gives a cursor for the next page. A
+  message that alone is longer than the limit is cut and marked.
+
+**The scope is the current conversation only.** Neither tool takes a
+conversation, a channel, or a person. A direct message reads that direct
+message, and a group reads that group. A message of another conversation
+never comes back, even when it matches better.
+
+**Only the messages are visible.** A reader sees the message of a person
+(`in`) and the reply (`out`). It does not see a failed turn (status
+`failed`), the prompt of a scheduled task (`task`), the text of an event
+(`inject`), or a reply of `[IGNORE]`, which sent nothing.
+
+The queries are in the store (`Repo.search_transcript` and
+`Repo.read_transcript`), and each takes a list of the conversations that the
+caller may read. The `history` server gives the current conversation only. A
+later external MCP server can use the same functions with the conversations
+of its caller. There is no HTTP route for them.
+
 ## The journal is Joshua's, not a person's
 
 `wiki/journal/YYYY/MM/DD/` is Joshua's own journal: what happened, in

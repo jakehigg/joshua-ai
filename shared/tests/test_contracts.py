@@ -128,3 +128,29 @@ def test_field_rename_breaks_snapshot() -> None:
 
     expected = json.loads((SNAPSHOT_DIR / "turn_ack.json").read_text(encoding="utf-8"))
     assert RenamedTurnAck.model_json_schema() != expected
+
+
+# ── the gateway web search ──────────────────────────────────────────────────
+
+
+def test_a_web_search_request_holds_one_query() -> None:
+    from joshua_shared.contracts import WebSearchRequest
+
+    assert WebSearchRequest(query="short ribs").query == "short ribs"
+
+
+@pytest.mark.parametrize(
+    "body", [{}, {"query": ""}, {"query": "x" * 501}, {"query": "a", "tool": "other"}]
+)
+def test_a_bad_web_search_request_is_refused(body: dict) -> None:
+    from joshua_shared.contracts import WebSearchRequest
+
+    with pytest.raises(ValidationError):
+        WebSearchRequest.model_validate(body)
+
+
+def test_a_web_search_response_round_trips() -> None:
+    from joshua_shared.contracts import WebSearchResponse
+
+    body = {"results": [{"title": "A", "url": "https://a.example/", "snippet": "s"}]}
+    assert WebSearchResponse.model_validate(body).model_dump() == body

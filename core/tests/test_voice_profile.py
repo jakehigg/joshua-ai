@@ -72,7 +72,7 @@ def test_a_group_on_a_call_keeps_the_group_prompt() -> None:
 
 def test_the_voice_files_carry_the_configured_ceilings() -> None:
     spoken = derive_profile(_MEMBER, _VOICE, voice=_voice_config())
-    assert spoken.model == "claude-sonnet-5"
+    assert spoken.job == "voice"
     assert spoken.max_turns == 8
     assert spoken.idle_ttl_s == 300
 
@@ -81,7 +81,7 @@ def test_a_text_channel_never_loads_a_voice_file() -> None:
     typed = derive_profile(_MEMBER, _TELEGRAM, voice=_voice_config())
     assert typed.name == "dm"
     assert not set(VOICE_FILES) & set(typed.prompt_files)
-    assert typed.model is None
+    assert typed.job == "chat"
     assert typed.idle_ttl_s is None
 
 
@@ -89,6 +89,7 @@ def test_without_the_voice_section_a_call_is_an_ordinary_dm() -> None:
     """The channel type alone must not change a session. Config turns it on."""
     profile = derive_profile(_MEMBER, _VOICE, voice=None)
     assert profile.name == "dm"
+    assert profile.job == "chat"
     assert not set(VOICE_FILES) & set(profile.prompt_files)
 
 

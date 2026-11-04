@@ -437,9 +437,10 @@ internet:
 | `model` | `claude-sonnet-5` | The model the worker uses. |
 | `timeout_seconds` | `120` | How long one question may take. A search, a read, and an answer are several calls. |
 | `max_turns` | `12` | The ceiling on what one question costs. |
-| `fetch.enabled` | `false` | `true` lets the worker read a page. `false` leaves it with search alone, which makes no connection from the container. `joshua.example.yaml` sets it to `true`. |
+| `fetch.enabled` | `false` | `true` lets the worker read a page. `false` leaves it with search alone, and `core` then makes no connection to a page. `joshua.example.yaml` sets it to `true`. |
 | `fetch.blocked` | empty | What a fetch may never reach. `joshua.example.yaml` ships a list to start from. |
 | `fetch.resolve_hosts` | `true` | Look the host up, and refuse a name that resolves into a CIDR on the list. |
+| `search` | not set | The SearXNG instance of the worker, off the Anthropic server. See [Web search](#web-search). |
 
 **Reading a page is off unless you turn it on.** A `joshua.yaml` with no
 `internet:` section searches and never fetches. Turn fetch on only with a
@@ -447,13 +448,14 @@ block list you have read.
 
 **The worker holds one question and nothing else.** No wiki, no journal, no
 profile, and no message of the conversation. A page that tells it to look up
-something private has nothing to look up. It has no file tool, no shell, and no
-MCP server, so nothing it reads can make it act.
+something private has nothing to look up. It has no file tool and no shell.
+Its one search tool and `WebFetch` are its only tools, so nothing it reads can
+make it act.
 
 **The worker reads only a page it was given.** That is a URL its caller
-passed, or a URL that one of its own searches returned. A URL in the text of
-the question, a link on a page it read, and a URL the model made up are
-refused at the fetch.
+passed, or the URL of a result that one of its own searches returned. A URL in
+the text of the question, in the text of a result, a link on a page it read,
+and a URL the model made up are refused at the fetch.
 
 **The agent still has no web tool.** It calls `use_internet(question, urls)`,
 and it writes that question itself, so it must put in what the worker needs and
@@ -463,8 +465,53 @@ refused. See [docs/security.md](security.md). What comes back reaches the agent
 wrapped and named as content from the open web, and the agent reads it for the
 person.
 
-**A search runs on Anthropic's side. A fetch runs here.** That is the whole
-reason the block list exists. See [docs/security.md](security.md).
+**A fetch runs here.** That is the whole reason the block list exists. See
+[docs/security.md](security.md).
+
+### Web search
+
+**On the Anthropic server, web search needs nothing.** With the subscription
+or an Anthropic API key, the internet agent uses `WebSearch`, Anthropic's own
+search. **When the `internet` job moves to another server** (Bedrock through
+LiteLLM, Ollama, or any other server of [inference](#inference)), **web
+search stops**, unless `internet.search` names a SearXNG instance.
+
+| Server of the `internet` job | `internet.search` | Search tool of the worker |
+|---|---|---|
+| Anthropic | set or not set | `WebSearch`, which runs on Anthropic's side. `internet.search` is not used. |
+| another server | set | `web_search`, which calls SearXNG through the gateway |
+| another server | not set | none. The worker reads only the pages it was given, and says that it cannot search. |
+
+Core logs the search at start: `"search": "anthropic"`, `"searxng"`, or
+`"none"`. A `none` while the internet agent is on is also a warning.
+
+```yaml
+internet:
+  search:
+    provider: searxng
+    url: http://searxng:8080
+    api_key: ${SEARXNG_API_KEY:-}
+    max_results: 10
+    timeout_seconds: 20
+    categories: general
+    language: en
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `search.provider` | `searxng` | The search engine. `searxng` is the only value. |
+| `search.url` | required | The base URL of the SearXNG instance, `http://` or `https://`. |
+| `search.api_key` | not set | A key for a reverse proxy in front of SearXNG. The gateway sends it as `Authorization: Bearer <key>`, and only when it is set. Put it in `.env.gateway` (or `secrets.gateway` of the Helm chart), never in the environment of `core`. |
+| `search.max_results` | `10` | The most results the worker gets, from 1 to 50. |
+| `search.timeout_seconds` | `20` | How long one SearXNG call may take, up to 120. |
+| `search.categories` | not set | The SearXNG `categories` parameter, such as `general`. |
+| `search.language` | not set | The SearXNG `language` parameter, such as `en`. |
+
+The gateway calls `GET <url>/search?q=<query>&format=json`. SearXNG answers
+`403` to that call when the `json` format is off, so add `json` to
+`search.formats` in the `settings.yml` of SearXNG.
+[docs/operations.md](operations.md#web-search-off-anthropic-searxng) has the
+steps.
 
 ### The block list
 
@@ -544,7 +591,8 @@ which is the builtins and nothing else.
 `allow` is `all` or a list of person ids. Person ids must exist in
 `people`. `all` means every person, including a request with no person.
 A list scopes the server to those people: the gateway serves a request only when
-its person is on the list, and denies a request with no person or `unknown`. The
+its person is on the list, and denies a request with no person or `unknown`.
+`allow:` with no value is the empty list, so no person reaches the server. The
 person comes from the `X-Joshua-Person` header, which the gateway trusts only from
 core.
 
@@ -1003,6 +1051,197 @@ usage:
 `GET /admin/usage` gives the same answer to an admin caller and does not read
 this list. See [contracts.md](contracts.md#the-usage-route).
 
+## inference
+
+`inference` sets the server and the key for the model calls. With no
+section, every job uses the Claude subscription, through
+`CLAUDE_CODE_OAUTH_TOKEN`.
+
+```yaml
+inference:
+  base_url: ${INFERENCE_BASE_URL:-}
+  api_key: ${INFERENCE_API_KEY:-}
+  timeout_seconds: 600
+  internet:
+    base_url: http://litellm:4000
+    api_key: ${LITELLM_API_KEY:-}
+    model: local-model
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `base_url` | not set | The server for every job. It must be an `http://` or `https://` URL. An empty value is the same as no value. |
+| `api_key` | not set | The key for `base_url`. With no `base_url`, the key for the Anthropic API. |
+| `timeout_seconds` | `600` | The time limit of one chat or voice turn and of one reflection call. It must be more than 0. A turn that passes it stops, and the person gets the failure reply. `attachments.describe.timeout_seconds` and `internet.timeout_seconds` set the limits of those workers. |
+| `<job>.model` | the model setting of the job | The model for this job. |
+| `<job>.base_url` | not set | The server for this job. |
+| `<job>.api_key` | not set | The key for `<job>.base_url`. It must be set when `<job>.base_url` is set. With no `<job>.base_url`, the key of this job on the global server, in place of the global `api_key`. |
+| `chat.tool_search`, `voice.tool_search` | `true` for `chat`, `false` for `voice` | Tool search for the turns of this job. See [Tool search](#tool-search). The other jobs do not have this key, and the load fails when one sets it. |
+
+The jobs are `chat`, `voice`, `reflection`, `describe`, and `internet`. Any
+other key in `inference` fails the load.
+
+**Three global cases.**
+
+- No `base_url` and no `api_key`: the Claude subscription.
+- `api_key` and no `base_url`: the Anthropic API with that key.
+- `base_url`: every job uses that server and `api_key`. The server must speak
+  the Anthropic Messages API, for example LiteLLM, which can also send a call
+  to Bedrock or Vertex. Joshua removes a trailing `/v1` from the URL, because
+  the CLI adds `/v1/messages`.
+
+**A job inherits.** A job with no block uses the global server and its own
+model setting:
+
+| Job | Model setting |
+|---|---|
+| `chat` | `core.model` |
+| `voice` | `channels.voice.model`, or `core.model` with no `channels.voice` section |
+| `reflection` | `core.reflection_model` |
+| `describe` | `attachments.describe.model` |
+| `internet` | `internet.model` |
+
+A job block that sets only `model` keeps the global server. A job block that
+sets `base_url` uses its own server and its own `api_key`.
+
+**A job `base_url` needs a job `api_key`.** Without it, the global key would
+go to a different server, so the load fails. For a server that needs no key,
+write `api_key: ""`.
+
+**A job `api_key` alone replaces the global key for that job.** The job uses
+the global `base_url` with its own key, and never gets the global key. Use it
+to give each job its own LiteLLM key, so LiteLLM counts the use of each job
+apart. With no global `base_url`, the job key is an Anthropic API key. An
+empty job key (for example `${VAR:-}` with `VAR` not set) sends no key on the
+global server: it does not fall back to the global key. With no global
+`base_url`, an empty job key uses the subscription.
+
+```yaml
+inference:
+  base_url: http://litellm:4000
+  chat:
+    api_key: ${INFERENCE_KEY_CHAT:-}
+  voice:
+    api_key: ${INFERENCE_KEY_VOICE:-}
+  reflection:
+    api_key: ${INFERENCE_KEY_REFLECTION:-}
+  describe:
+    api_key: ${INFERENCE_KEY_DESCRIBE:-}
+  internet:
+    api_key: ${INFERENCE_KEY_INTERNET:-}
+```
+
+**The model names must exist on the server.** With `base_url`, Joshua sends
+the model setting of each job as it is, for example `claude-opus-5`. Give each
+name a model on the server, for example a LiteLLM model name, or set
+`<job>.model` to a name that the server has.
+
+**Web search needs Anthropic, or SearXNG.** On the subscription or the
+Anthropic API, the internet agent uses Anthropic's own `WebSearch`, and you
+set nothing. When the `internet` job is on another server, such as Bedrock
+through LiteLLM or Ollama, web search stops, unless `internet.search` names a
+SearXNG instance. See [Web search](#web-search).
+
+**Keys belong in `.env`.** A literal key in `joshua.yaml` fails the load, as
+for every other credential. Each job gets only its own key: a job never gets
+the key of a different job, and a job on another server never gets the
+subscription token.
+
+**Give each variable to `core`.** `docker-compose.yml` gives `core` the
+variables `INFERENCE_BASE_URL` and `INFERENCE_API_KEY`. For a job key with
+another name, such as `LITELLM_API_KEY`, add it to the `environment` of
+`core`. With the Helm chart, add each variable to `secrets.core.keys`. Use
+`${VAR:-}` in `joshua.yaml`, because `channels` and `gateway` read the same
+file and do not get the variable. A job key that `core` does not get is empty,
+and the job then sends no key.
+
+**What core does at start.** Core reads the config, keeps
+`CLAUDE_CODE_OAUTH_TOKEN`, and then removes every provider variable
+(`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, and the
+others that select a server, a credential, or a model) from its own
+environment. After that, the only credential that gets to the CLI is the one
+of the job that the CLI runs. Core then writes one log line that gives, for
+each job, the server (`anthropic` or the host), the model, and the fields of
+the job block that change the global setting. The line holds no key. A
+second line gives the search of the internet agent: `anthropic`, `searxng`,
+or `none`. When `internet.enabled` is on and the search is
+`none`, core also writes a warning, because the internet agent cannot search.
+
+**A server change starts a new conversation session.** Each conversation
+keeps the server of its SDK session. When the server of the `chat` or
+`voice` job changes, the next turn of that conversation starts a new
+session, because the new server cannot read the history of the old one.
+The profile and the journal still carry what Joshua knows.
+
+**A failed call.** When the server refuses a call, for example with a wrong
+key or an unknown model, the person gets "Sorry, something went wrong on my
+end. Please try again." The error text can name a host, so it goes neither
+to the person nor to the log. The log gets a short label, such as
+`authentication_failed` or `http_422`, and the server.
+
+**Check the server.** After a change to this section, run
+`POST /admin/inference/check` on `core`. It sends one short prompt to each
+job and returns, for each job, the server, the model, `ok`, and a short
+error with no key. `/readyz` on `core` gives `inference_overrides`, the
+number of job blocks that set `base_url` or `model`.
+[operations.md](operations.md#the-model-server) has recipes for the
+subscription, LiteLLM in front of Bedrock, and a local model for one job,
+and tells how to read the check.
+
+**Usage and cost.** Each row of the usage page names the model that the call
+used, and the server, in the `endpoint` column of `usage_event`. The SDK
+prices a model that it does not know at its own rates, so core keeps the
+cost of a chat turn only for a call to `anthropic`.
+
+**The prompt cache lasts one hour on every server.** The CLI keeps the start
+of each prompt in a cache, and a cache read costs much less than new input.
+On the subscription, the CLI writes the cache for one hour. On any other
+server, the CLI writes it for five minutes, so a reply that comes more than
+five minutes after the last one writes the full prompt again, at more than
+the input price. For a household that talks in short bursts across the day,
+that is most of the cost. So for each job that is not on the subscription
+(a `base_url`, or an `api_key` alone), core sets
+`ENABLE_PROMPT_CACHING_1H=1` for the CLI. The CLI then puts `"ttl": "1h"` on
+each cache marker. This is a field of the Anthropic Messages API, and
+LiteLLM sends it on to Bedrock. You do not set anything. Core also sets
+`ENABLE_PROMPT_CACHING_1H_BEDROCK`, `FORCE_PROMPT_CACHING_5M`, and
+`DISABLE_PROMPT_CACHING` to empty for each job, so a value in the
+environment of the container has no effect. A one-hour cache write costs
+two times the input price, and a five-minute write costs 1.25 times, but a
+read costs 0.1 times, so the one-hour cache costs less when replies come
+more than five minutes apart.
+
+### Tool search
+
+Each MCP tool has a definition: its name, its description, and its
+arguments. Without tool search, each model call of a turn sends the
+definition of every tool that the agent holds. With many MCP servers, that
+is a large part of each call. With tool search, a call sends only the tool
+names. When the model needs a tool, it asks for the definition with the CLI
+tool `ToolSearch`, and then it calls the tool.
+
+```yaml
+inference:
+  chat:
+    tool_search: true    # the default
+  voice:
+    tool_search: false   # the default
+```
+
+- With tool search on, a turn sends fewer tokens, but a turn that uses a tool
+  can need one more model call. That is why it is on for `chat` and off for
+  `voice`, where a reply must be fast.
+- One rule applies on every server. With tool search on, core gives the agent
+  the tool `ToolSearch` and sets `ENABLE_TOOL_SEARCH=true` for the CLI. With
+  it off, the agent gets no tool and the variable is empty, so a value in the
+  environment of the container has no effect. On a server that is not
+  Anthropic, the CLI keeps tool search off unless the variable is set.
+- `ToolSearch` gives the agent no new capability. It loads only the
+  definition of an MCP tool that the agent already holds. It reads no file,
+  runs no command, and reaches no network.
+- The workers (`reflection`, `describe`, `internet`) never get tool search.
+- The start log line of each job gives `tool_search` (`true` or `false`).
+
 ## Agent backend
 
 `core` reads the `AGENT_BACKEND` environment variable to pick the session backend.
@@ -1011,7 +1250,7 @@ It is an env var, not a `joshua.yaml` key. `docker-compose.yml` defaults it to
 
 | Value | Runs | Needs |
 |---|---|---|
-| `sdk` (default) | Real Claude through the Claude Agent SDK | `CLAUDE_CODE_OAUTH_TOKEN` and the bundled `claude` CLI (in the core image) |
+| `sdk` (default) | The model through the Claude Agent SDK | The credential that [`inference`](#inference) names (by default `CLAUDE_CODE_OAUTH_TOKEN`) and the bundled `claude` CLI (in the core image) |
 | `stub` | A canned reply, for plumbing tests | Nothing: no SDK, token, or network |
 
 Get a token with `claude setup-token`. For `stub`, set `AGENT_BACKEND=stub` in

@@ -4,8 +4,10 @@ A worker is a small model call that runs beside a turn and returns an object,
 not prose. It is the safe way to look at untrusted content, because it can do
 nothing with what it reads:
 
-- **No tools.** The worker reaches no MCP server and no file. A worker that is
-  told what to do by the content it reads can act on none of it.
+- **Nothing to act with.** A worker reaches no file and no shell. Only the
+  internet agent holds tools, and they are web tools: see
+  `agent.build_worker_options`. A worker that is told what to do by the
+  content it reads can act on none of it.
 - **No conversation.** The worker sees one objective and one file. It never
   sees what a person said, in this turn or in any other.
 - **A fixed answer.** A JSON schema holds the shape. A value that does not
@@ -25,6 +27,7 @@ from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Any
 
+from joshua_shared.inference import ResolvedInference
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, ValidationError
 
@@ -55,7 +58,7 @@ async def run_worker[T: BaseModel](
     system_prompt: str,
     user_text: str,
     answer: type[T],
-    model: str | None,
+    inference: ResolvedInference,
     timeout_s: float,
     image: tuple[bytes, str] | None = None,
     document: bytes | None = None,
@@ -64,17 +67,20 @@ async def run_worker[T: BaseModel](
     max_turns: int = 1,
     hooks: dict[str, Any] | None = None,
     usage_out: list[Usage] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
 ) -> T | None:
     """Run one worker and return its answer, or `None`.
 
     `answer` is the Pydantic model the reply must match; its JSON schema is what
-    the model is asked for. `image` is `(bytes, media type)` and `document` is a
-    PDF. Give one or neither.
+    the model is asked for. `inference` is the model, the server, and the
+    environment of the job, and the runner gets it as it is. `image` is
+    `(bytes, media type)` and `document` is a PDF. Give one or neither.
 
     A worker with no `tools` answers in one turn from what it was given. A
     worker with `tools` may take up to `max_turns` to search and read first, and
-    `hooks` gates what a tool may do. `agent.build_worker_options` decides which
-    tools a worker may hold at all.
+    `hooks` gates what a tool may do. `mcp_servers` is empty, or the one
+    `search` server of `agent.build_search_server`. `agent.build_worker_options`
+    decides which tools and which server a worker may hold at all.
 
     When `usage_out` is a list, the runner gets it and appends the tokens of
     the call to it, so the caller learns what the call cost. A runner gets the
@@ -87,12 +93,14 @@ async def run_worker[T: BaseModel](
     extra: dict[str, Any] = {} if usage_out is None else {"usage_out": usage_out}
     try:
         if tools:
+            if mcp_servers:
+                extra["mcp_servers"] = mcp_servers
             call = runner or _default_tool_runner()
             raw = await call(
                 system_prompt=system_prompt,
                 user_text=user_text,
                 schema=answer.model_json_schema(),
-                model=model,
+                inference=inference,
                 timeout_s=timeout_s,
                 tools=tools,
                 max_turns=max_turns,
@@ -105,7 +113,7 @@ async def run_worker[T: BaseModel](
                 system_prompt=system_prompt,
                 user_text=user_text,
                 schema=answer.model_json_schema(),
-                model=model,
+                inference=inference,
                 timeout_s=timeout_s,
                 image=image,
                 document=document,

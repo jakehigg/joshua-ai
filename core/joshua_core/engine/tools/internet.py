@@ -2,9 +2,10 @@
 
 One tool, ``use_internet``. The agent holds no web tool and never will. It
 asks this tool a question, and the internet agent, a worker with nothing but
-the web tools, goes and finds out. See ``engine/internet.py`` for what the
-worker does and does not hold, and ``joshua_shared.netblock`` for the block
-list that keeps a fetch off the private network.
+its web tools, goes and finds out. The agent never sees a raw search result.
+See ``engine/internet.py`` for what the worker does and does not hold, and
+``joshua_shared.netblock`` for the block list that keeps a fetch off the
+private network.
 
 What comes back is content from the open web. It is wrapped and marked as
 such, and the agent reads it for the person.
@@ -17,6 +18,7 @@ from typing import Any
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
+from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import internet as internet_agent
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
@@ -84,6 +86,7 @@ async def do_lookup(
     question: str,
     urls: list[str] | None = None,
     grants: UrlGrants | None = None,
+    searcher: internet_agent.Searcher | None = None,
 ) -> str:
     """Look one question up and return the text the agent reads.
 
@@ -117,12 +120,21 @@ async def do_lookup(
         }
     )
     used: list[Usage] = []
-    answer = await internet_agent.ask(question, settings=config, urls=allowed, usage_out=used)
+    resolved = inference_plan.resolve(settings, "internet")
+    answer = await internet_agent.ask(
+        question,
+        settings=config,
+        inference=resolved,
+        urls=allowed,
+        usage_out=used,
+        searcher=searcher,
+    )
     await record_usage(
         deps.repo,
         "internet",
         used,
-        model=config.model,
+        model=resolved.model,
+        endpoint=resolved.endpoint,
         person_id=deps.person_id,
         conversation_id=conversation_id or None,
     )
@@ -163,9 +175,16 @@ def _refusal(refused: list[str]) -> str:
 
 
 def build_internet_server(
-    deps: ToolDeps, *, settings: JoshuaConfig, grants: UrlGrants | None = None
+    deps: ToolDeps,
+    *,
+    settings: JoshuaConfig,
+    grants: UrlGrants | None = None,
+    searcher: internet_agent.Searcher | None = None,
 ) -> Any:
-    """Build the in-process ``internet`` MCP server bound to one conversation."""
+    """Build the in-process ``internet`` MCP server bound to one conversation.
+
+    ``searcher`` runs the search of ``internet.search`` for the internet agent.
+    """
 
     @tool("use_internet", _DESCRIPTION, _INTERNET_SCHEMA)
     async def use_internet(args: dict[str, Any]) -> dict[str, Any]:
@@ -177,16 +196,22 @@ def build_internet_server(
             question=str(args.get("question", "")),
             urls=urls,
             grants=grants,
+            searcher=searcher,
         )
         return _reply(text)
 
     return create_sdk_mcp_server(name="internet", version="1.0.0", tools=[use_internet])
 
 
-def register(manager: Any, settings: JoshuaConfig, grants: UrlGrants | None = None) -> None:
+def register(
+    manager: Any,
+    settings: JoshuaConfig,
+    grants: UrlGrants | None = None,
+    searcher: internet_agent.Searcher | None = None,
+) -> None:
     """Wire the ``internet`` builtin into the conversation manager."""
 
     def factory(deps: ToolDeps) -> Any:
-        return build_internet_server(deps, settings=settings, grants=grants)
+        return build_internet_server(deps, settings=settings, grants=grants, searcher=searcher)
 
     manager.register_builtin("internet", factory)

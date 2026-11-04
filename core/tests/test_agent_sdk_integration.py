@@ -20,6 +20,7 @@ from engine_fakes import (
     make_conversation,
     make_settings,
 )
+from joshua_core.engine import inference as inference_plan
 from joshua_core.engine.manager import ConversationManager
 
 pytestmark = pytest.mark.integration
@@ -29,6 +30,8 @@ _HAS_TOKEN = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"))
 
 @pytest.mark.skipif(not _HAS_TOKEN, reason="needs CLAUDE_CODE_OAUTH_TOKEN and the claude CLI")
 async def test_sdk_backend_runs_a_real_turn(tmp_path) -> None:
+    # Keep the token as a start does. A copy, so this process keeps its environment.
+    inference_plan.take_credentials(dict(os.environ))
     manager = ConversationManager(
         repo=FakeRepo(),
         settings=make_settings(),

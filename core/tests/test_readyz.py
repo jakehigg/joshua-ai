@@ -11,11 +11,38 @@ import contextlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from joshua_core.main import readyz
 from joshua_core.memory import embed as embed_module
+from joshua_shared import config as config_module
 from joshua_shared import layout
+
+BASE = """
+name: Test
+timezone: UTC
+people:
+  - id: alex
+    name: Alex
+    role: member
+"""
+
+KEY = "fake-readyz-key-0001"
+
+# Two job blocks that change something, and one that changes nothing.
+OVERRIDES = """
+inference:
+  base_url: http://litellm:4000
+  api_key: ${INFERENCE_API_KEY}
+  chat:
+    model: bedrock-claude-sonnet
+  internet:
+    base_url: http://ollama:11434
+    api_key: ""
+    model: llama3
+  voice:
+"""
 
 
 @pytest.fixture
@@ -45,14 +72,14 @@ class _Pool:
         yield _Connection()
 
 
-def _request(*, db_up: bool):
+def _request(*, db_up: bool, settings: Any = None):
     repo = SimpleNamespace(_pool=_Pool(up=db_up))
-    ctx = SimpleNamespace(repo=repo)
+    ctx = SimpleNamespace(repo=repo, settings=settings)
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(ctx=ctx)))
 
 
-def _call(*, db_up: bool):
-    response = asyncio.run(readyz(_request(db_up=db_up)))
+def _call(*, db_up: bool, settings: Any = None):
+    response = asyncio.run(readyz(_request(db_up=db_up, settings=settings)))
     return response.status_code, json.loads(response.body)
 
 
@@ -95,5 +122,25 @@ def test_the_layout_check_leaves_no_probe_file(data_root: Path) -> None:
 
 def test_the_body_holds_no_names(data_root: Path) -> None:
     _, body = _call(db_up=True)
-    assert set(body) == {"ok", "checks"}
+    assert set(body) == {"ok", "checks", "inference_overrides"}
     assert set(body["checks"]) == {"db", "layout", "embed"}
+    assert body["inference_overrides"] == 0
+
+
+def test_readyz_counts_the_job_blocks_that_change_something(data_root: Path) -> None:
+    settings = config_module.parse(
+        BASE + OVERRIDES, env={"INFERENCE_API_KEY": KEY}, source="<test>"
+    )
+    status, body = _call(db_up=True, settings=settings)
+    assert status == 200
+    assert body["inference_overrides"] == 2
+
+
+def test_readyz_names_no_server_no_model_and_no_key(data_root: Path) -> None:
+    settings = config_module.parse(
+        BASE + OVERRIDES, env={"INFERENCE_API_KEY": KEY}, source="<test>"
+    )
+    _, body = _call(db_up=True, settings=settings)
+    text = json.dumps(body)
+    for value in (KEY, "litellm", "ollama", "11434", "bedrock", "llama3", "http"):
+        assert value not in text

@@ -25,6 +25,9 @@ Routes:
 - ``GET /admin/snapshots`` — each configured snapshot and its last outcome:
   the fetch time, ok, the failures, the last error, and the item count. No
   text.
+- ``POST /admin/inference/check`` — send one short prompt to each distinct
+  server, model, and credential of the ``inference`` jobs, and return the
+  outcome of each job. The error text holds no key.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ from joshua_shared.fleet_auth import (
 from joshua_shared.log import get_logger
 
 from joshua_core import people
+from joshua_core.engine import inference as inference_plan
 from joshua_core.memory import embed
 from joshua_core.memory.sources.snapshots import is_listed, split_items
 
@@ -132,6 +136,13 @@ def authorize_admin(request: Request) -> JSONResponse | None:
     if status == 403:
         return JSONResponse({"error": f"caller {identity} not in ADMIN_CALLERS"}, status_code=403)
     return None
+
+
+async def _default_oneshot(**kwargs: Any) -> str:
+    """The real check call. Imported lazily so the module loads without the SDK."""
+    from joshua_core.engine.agent import run_oneshot
+
+    return await run_oneshot(**kwargs)
 
 
 def build_admin_router() -> APIRouter:
@@ -339,5 +350,17 @@ def build_admin_router() -> APIRouter:
             direction="in",
         )
         return JSONResponse({"conversation_id": conversation.id, "text": result.text or ""})
+
+    @router.post("/admin/inference/check")
+    async def inference_check(request: Request):  # type: ignore[no-untyped-def]
+        denied = authorize_admin(request)
+        if denied is not None:
+            return denied
+        ctx = request.app.state.ctx
+        oneshot = getattr(ctx, "oneshot", None) or _default_oneshot
+        result = await inference_plan.check(
+            ctx.settings, oneshot=oneshot, repo=getattr(ctx, "repo", None)
+        )
+        return JSONResponse(result)
 
     return router
