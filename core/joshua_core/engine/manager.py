@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 from joshua_shared import layout, wikigit
 from joshua_shared.attachments import AttachmentMeta, read_meta
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import Group, JoshuaConfig
 from joshua_shared.inference import ANTHROPIC_ENDPOINT, ResolvedInference
 from joshua_shared.log import get_logger
 
@@ -329,7 +329,9 @@ class ConversationManager:
         cwd = self._session_cwd(conversation.id)
 
         role = self._conversation_role(channel, conversation)
-        gateway_names = allowed_gateway_servers(self._settings, conversation.person_id)
+        group = self._conversation_group(channel, conversation)
+        group_id = group.id if group is not None else None
+        gateway_names = allowed_gateway_servers(self._settings, conversation.person_id, group_id)
         server_names = [*gateway_names, *self._builtin_factories]
 
         if self._agent_backend == "stub":
@@ -356,6 +358,7 @@ class ConversationManager:
             conversation.person_id,
             conversation.id,
             role,
+            group_id,
         )
         deps = ToolDeps(
             repo=self._repo,
@@ -394,11 +397,20 @@ class ConversationManager:
         if channel.session_mode != "shared" and conversation.person_id:
             person = self._settings.person(conversation.person_id)
             return person.role if person is not None else "guest"
-        group = self._settings.groups_by_chat(channel.channel_type, _chat_id(channel.id))
+        group = self._conversation_group(channel, conversation)
         if group is None:
             return "guest"
         role, _ = self._settings.group_role(group)
         return role
+
+    def _conversation_group(self, channel: Channel, conversation: Conversation) -> Group | None:
+        """The configured group of a group chat, or None for a direct message.
+
+        The gateway admits this group to a server whose ``allow`` names it.
+        """
+        if channel.session_mode != "shared" and conversation.person_id:
+            return None
+        return self._settings.groups_by_chat(channel.channel_type, _chat_id(channel.id))
 
     async def _get_or_create(self, channel: Channel, conversation: Conversation) -> _Managed:
         async with self._pool_lock:

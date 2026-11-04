@@ -159,7 +159,7 @@ def test_allow_unknown_person_fails() -> None:
                 - nobody
             """
         )
-    assert "unknown person id 'nobody'" in str(exc.value)
+    assert "unknown person or group id 'nobody'" in str(exc.value)
 
 
 def test_identities_unknown_person_fails() -> None:
@@ -451,3 +451,160 @@ def test_allow_as_other_text_is_still_refused() -> None:
               allow: everyone
             """
         )
+
+
+GROUPS = """
+groups:
+  - id: team
+    channel: imessage
+    chat_id: "chat-team"
+    members:
+      - "+15550000001"
+  - id: open
+    channel: imessage
+    chat_id: "chat-open"
+"""
+
+
+def parse_mcp_groups(mcp_block: str, groups: str = GROUPS) -> config.JoshuaConfig:
+    text = ROSTER + groups + "\nmcp:\n" + textwrap.indent(textwrap.dedent(mcp_block), "  ")
+    return config.parse(text, {}, source="test.yaml")
+
+
+def test_allow_names_a_group() -> None:
+    cfg = parse_mcp_groups(
+        """
+        tracker:
+          type: http
+          url: https://x/mcp
+          allow:
+            - alex
+            - team
+        """
+    )
+    assert cfg.mcp["tracker"].allow == ["alex", "team"]
+
+
+def test_allow_refuses_a_group_with_no_members() -> None:
+    with pytest.raises(config.ConfigError) as exc:
+        parse_mcp_groups(
+            """
+            tracker:
+              type: http
+              url: https://x/mcp
+              allow:
+                - open
+            """
+        )
+    assert "group 'open' has no members" in str(exc.value)
+
+
+def test_allow_refuses_an_id_that_is_a_person_and_a_group() -> None:
+    groups = GROUPS.replace("id: team", "id: alex")
+    with pytest.raises(config.ConfigError) as exc:
+        parse_mcp_groups(
+            """
+            tracker:
+              type: http
+              url: https://x/mcp
+              allow:
+                - alex
+            """,
+            groups,
+        )
+    assert "'alex' is both a person id and a group id" in str(exc.value)
+
+
+def test_allow_refuses_a_group_id_used_twice() -> None:
+    groups = GROUPS.replace("id: open", "id: team").replace(
+        'chat_id: "chat-open"', 'chat_id: "chat-open"\n    members:\n      - "+15550000002"'
+    )
+    with pytest.raises(config.ConfigError) as exc:
+        parse_mcp_groups(
+            """
+            tracker:
+              type: http
+              url: https://x/mcp
+              allow:
+                - team
+            """,
+            groups,
+        )
+    assert "group id 'team' names more than one group" in str(exc.value)
+
+
+def test_allow_refuses_a_group_id_that_is_not_a_slug() -> None:
+    groups = GROUPS.replace("id: team", "id: Team Chat")
+    with pytest.raises(config.ConfigError) as exc:
+        parse_mcp_groups(
+            """
+            tracker:
+              type: http
+              url: https://x/mcp
+              allow:
+                - Team Chat
+            """,
+            groups,
+        )
+    assert "group id 'Team Chat' must match" in str(exc.value)
+
+
+def test_identities_accept_an_allowed_group() -> None:
+    cfg = parse_mcp_groups(
+        """
+        tracker:
+          type: http
+          url: https://x/mcp
+          allow:
+            - alex
+            - team
+          identities:
+            alex:
+              headers:
+                Authorization: "token-a"
+            team:
+              headers:
+                Authorization: "token-t"
+        """
+    )
+    assert set(cfg.mcp["tracker"].identities) == {"alex", "team"}
+
+
+def test_allowed_group_without_identity_fails() -> None:
+    with pytest.raises(config.ConfigError) as exc:
+        parse_mcp_groups(
+            """
+            tracker:
+              type: http
+              url: https://x/mcp
+              allow:
+                - alex
+                - team
+              identities:
+                alex:
+                  headers:
+                    Authorization: "token-a"
+            """
+        )
+    assert "team is allowed but has no identity" in str(exc.value)
+
+
+def test_identities_refuse_a_group_that_is_not_allowed() -> None:
+    with pytest.raises(config.ConfigError) as exc:
+        parse_mcp_groups(
+            """
+            tracker:
+              type: http
+              url: https://x/mcp
+              allow:
+                - alex
+              identities:
+                alex:
+                  headers:
+                    Authorization: "token-a"
+                team:
+                  headers:
+                    Authorization: "token-t"
+            """
+        )
+    assert "unknown person id 'team'" in str(exc.value)
