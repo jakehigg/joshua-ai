@@ -277,6 +277,7 @@ class Client:
     def __init__(self, options: Any) -> None:
         self.options = options
         self.interrupted = False
+        self.disconnected = False
         Client.built.append(self)
 
     async def connect(self) -> None:
@@ -300,7 +301,7 @@ class Client:
         self.interrupted = True
 
     async def disconnect(self) -> None:
-        return None
+        self.disconnected = True
 
 
 @pytest.fixture
@@ -634,6 +635,66 @@ async def test_a_oneshot_that_passes_the_limit_gives_empty_text(sdk: type[Client
     )
     assert text == ""
     assert sdk.built[0].interrupted
+
+
+# ── a cancelled turn ─────────────────────────────────────────────────────────
+
+
+async def test_a_cancelled_turn_never_hands_its_client_to_the_next_turn(
+    sdk: type[Client], tmp_path: Path
+) -> None:
+    manager = sdk_manager(FakeRepo(), tmp_path)
+    channel, conversation = make_channel(), make_conversation()
+    sdk.hang = True
+    task = asyncio.create_task(manager.run_turn(channel, conversation, "first"))
+    for _ in range(100):
+        if sdk.built and manager._pool["c1"].lock.locked():
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.gather(*manager._teardowns)
+
+    first = sdk.built[0]
+    assert first.interrupted
+    assert first.disconnected
+
+    sdk.hang = False
+    sdk.messages = [ResultMessage(result="second reply")]
+    result = await manager.run_turn(channel, conversation, "second")
+
+    assert result.text == "second reply"
+    assert len(sdk.built) == 2
+    assert manager._pool["c1"].session._client is sdk.built[1]
+
+
+def test_abandon_with_no_client_gives_nothing(tmp_path: Path) -> None:
+    session = agent.AgentSession.__new__(agent.AgentSession)
+    session._client = None
+    assert session.abandon() is None
+
+
+async def test_a_failed_teardown_is_logged_and_not_raised(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class Broken:
+        async def interrupt(self) -> None:
+            raise RuntimeError("no interrupt")
+
+        async def disconnect(self) -> None:
+            raise RuntimeError("no disconnect")
+
+    session = agent.AgentSession.__new__(agent.AgentSession)
+    session._client = Broken()
+    teardown = session.abandon()
+    assert session._client is None
+    assert teardown is not None
+    with caplog.at_level("WARNING"):
+        await teardown
+    messages = [r.msg["message"] for r in caplog.records if isinstance(r.msg, dict)]
+    assert "interrupt failed" in messages
+    assert "disconnect failed" in messages
 
 
 # ── resume across a server change ────────────────────────────────────────────

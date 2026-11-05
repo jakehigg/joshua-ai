@@ -177,6 +177,19 @@ with the images and the packaged chart, are at
 
 ### Fixed
 
+- **A turn that stops early no longer makes the next replies late.** When a
+  client closed the stream of a turn before the reply completed (a voice call
+  that hangs up, a closed page), the rest of that reply stayed on the session.
+  The next turn of the conversation then gave the reply to the turn before it,
+  and each later turn did the same. Now core gives up the client of a
+  cancelled turn, and the next turn starts a new one. The log line is
+  `turn cancelled`.
+
+- **An idle session closes after its deadline.** Core now starts the reaper,
+  so `core.session_idle_seconds` and `channels.voice.idle_ttl_s` take effect.
+  The first turn after a session closes starts a new one, with the history of
+  the conversation.
+
 - **The journal holds what people said, and what changed.** The nightly
   reflection no longer reads the instruction of a scheduled task or an event
   as words of a person. Joshua's reply to them stays, labelled Joshua. The

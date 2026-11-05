@@ -28,7 +28,7 @@ import shutil
 import tempfile
 import time
 import weakref
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
@@ -738,6 +738,18 @@ def _tool_results(msg: Any) -> dict[str, bool]:
     return results
 
 
+async def _teardown(client: Any) -> None:
+    """Interrupt and disconnect a client that a session gave up. Best effort."""
+    try:
+        await client.interrupt()
+    except Exception as e:  # noqa: BLE001 — best-effort
+        logger.warning({"message": "interrupt failed", "error": str(e)})
+    try:
+        await client.disconnect()
+    except Exception as e:  # noqa: BLE001 — best-effort
+        logger.warning({"message": "disconnect failed", "error": str(e)})
+
+
 class AgentSession:
     """One long-lived SDK client bound to one conversation.
 
@@ -950,3 +962,17 @@ class AgentSession:
                 logger.warning({"message": "disconnect failed", "error": str(e)})
             finally:
                 self._client = None
+
+    def abandon(self) -> Coroutine[Any, Any, None] | None:
+        """Take the client off this session now, with no ``await``.
+
+        The caller uses this when a turn is cancelled: the rest of that turn
+        stays in the queue of the client, so no later turn may read from it.
+        The next ``run`` connects a new client. The return value interrupts
+        and disconnects the old client, for the caller to run in a task of
+        its own. None when there is no client.
+        """
+        client, self._client = self._client, None
+        if client is None:
+            return None
+        return _teardown(client)

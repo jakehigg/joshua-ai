@@ -48,9 +48,16 @@ def test_boot_applies_schema_and_seeds(monkeypatch, tmp_path) -> None:
             "inference_overrides": 0,
         }
 
+        # The lifespan started the idle-session reaper.
+        manager = app.state.ctx.manager
+        assert manager._reaper is not None and not manager._reaper.done()
+
         # Seeding ran during startup; verify from an independent connection.
         people = asyncio.run(_list_people())
         assert {p.id for p in people} == {"alex"}
+
+    # Shutdown stopped it.
+    assert manager._reaper is None
 
 
 async def _list_people():

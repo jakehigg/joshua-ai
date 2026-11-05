@@ -255,6 +255,9 @@ class ConversationManager:
         self._context_providers: list[ContextProvider] = []
         self._pool: dict[str, _Managed] = {}
         self._pool_lock = asyncio.Lock()
+        # The teardowns of abandoned clients, kept until they finish.
+        self._teardowns: set[asyncio.Task[None]] = set()
+        self._reaper: asyncio.Task[None] | None = None
 
     @property
     def url_grants(self) -> UrlGrants | None:
@@ -860,10 +863,16 @@ class ConversationManager:
         A turn that passes the limit interrupts the client and closes it, and
         the next turn gets a new session. The turn gives a failed result, which
         ``run_turn`` handles as it handles ``is_error``.
+
+        A cancelled turn (the caller closed the stream) abandons its client, so
+        the rest of its reply never reaches a later turn. See ``_abandon_turn``.
         """
         limit = self._settings.inference.timeout_seconds
         try:
             return await asyncio.wait_for(mc.session.run(prompt, on_delta), timeout=limit)
+        except asyncio.CancelledError:
+            self._abandon_turn(mc)
+            raise
         except TimeoutError:
             await mc.session.interrupt()
             await mc.session.close()
@@ -878,6 +887,29 @@ class ConversationManager:
                 }
             )
             return TurnResult(text="", is_error=True, error="timeout")
+
+    def _abandon_turn(self, mc: _Managed) -> None:
+        """Take the client of a cancelled turn off ``mc.session``.
+
+        The rest of the cancelled reply stays in the queue of the client. A
+        later turn on the same client reads that reply as its own, and each
+        turn after it is one reply late. This takes the client off the session
+        and marks the session for replacement, so the next turn uses a new
+        client.
+
+        It never awaits. The task that runs the turn is cancelled, and under
+        anyio each ``await`` in it raises the cancellation again. The teardown
+        of the old client runs in a task of its own.
+        """
+        mc.replace_pending = True
+        mc.replace_reason = "turn cancelled"
+        abandon = getattr(mc.session, "abandon", None)
+        teardown = abandon() if abandon is not None else None
+        if teardown is not None:
+            task = asyncio.create_task(teardown, name=f"abandon-{mc.conversation.id}")
+            self._teardowns.add(task)
+            task.add_done_callback(self._teardowns.discard)
+        logger.warning({"message": "turn cancelled", "conversation_id": mc.conversation.id})
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -942,6 +974,22 @@ class ConversationManager:
             except Exception as e:  # noqa: BLE001
                 logger.error({"message": "reaper error", "error": str(e)})
 
+    def start_reaper(self, interval_s: float = 60) -> None:
+        """Run ``reaper_loop`` as a task. A second call does nothing."""
+        if self._reaper is None or self._reaper.done():
+            self._reaper = asyncio.create_task(self.reaper_loop(interval_s), name="session-reaper")
+
+    async def stop_reaper(self) -> None:
+        """Stop the reaper task and wait for it to end."""
+        if self._reaper is None:
+            return
+        self._reaper.cancel()
+        try:
+            await self._reaper
+        except asyncio.CancelledError:
+            pass
+        self._reaper = None
+
     async def pool_snapshot(self) -> dict[str, Any]:
         """Read-only view of the warm pool for the monitor."""
         now = monotonic()
@@ -988,4 +1036,6 @@ class ConversationManager:
             for mc in list(self._pool.values()):
                 await mc.session.close()
             self._pool.clear()
+        if self._teardowns:
+            await asyncio.gather(*self._teardowns, return_exceptions=True)
         logger.info({"message": "manager shut down"})
