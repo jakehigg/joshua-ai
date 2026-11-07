@@ -29,6 +29,9 @@ from joshua_channels.cli_routes import build_cli_router
 from joshua_channels.core_client import CoreClient, build_core_client
 from joshua_channels.deliver import DEFAULT_DATA_DIR, ChannelsContext
 from joshua_channels.guard import Guard
+from joshua_channels.peers.outbox import retry_loop
+from joshua_channels.peers.routes import build_peers_router
+from joshua_channels.peers.service import PeersService, build_peers_service
 from joshua_channels.registry import AdapterRegistry
 from joshua_channels.voice_routes import build_voice_router
 
@@ -97,7 +100,13 @@ def build_context() -> tuple[ChannelsContext, CoreClient | None]:
         timezone=settings.timezone,
         max_text_chars=settings.attachments.extract.max_chars,
     )
-    register_adapters(registry, settings, guard, core_client, data_dir, pipeline)
+    peers = build_peers_service(
+        settings,
+        data_dir=data_dir,
+        settings_provider=config_module.load,
+        core_client=core_client,
+    )
+    register_adapters(registry, settings, guard, core_client, data_dir, pipeline, peers)
     context = ChannelsContext(
         settings=settings,
         registry=registry,
@@ -105,6 +114,7 @@ def build_context() -> tuple[ChannelsContext, CoreClient | None]:
         guard=guard,
         core_client=core_client,
         pipeline=pipeline,
+        peers=peers,
     )
     return context, core_client
 
@@ -116,11 +126,14 @@ def register_adapters(
     core_client: CoreClient | None,
     data_dir: str,
     pipeline: AttachmentPipeline,
+    peers: PeersService | None = None,
 ) -> None:
     """Register one adapter per configured channel section.
 
     Every adapter shares the one attachment pipeline: it downloads files into an
     inbox directory and hands them to the pipeline for normalization and storage.
+    With ``peers``, the Telegram adapter hands each message from a bot to the
+    peer receiver, and the outbox sends through the Telegram adapter.
     """
     # The terminal channel is always on. It needs no credential, so a person on
     # the host can always reach Joshua.
@@ -128,16 +141,18 @@ def register_adapters(
     if settings.channels.telegram is not None and not telegram_enabled(settings):
         logger.warning({"message": "telegram configured with an empty bot token; channel is off"})
     if telegram_enabled(settings):
-        registry.register(
-            TelegramAdapter(
-                bot_token=settings.channels.telegram.bot_token,
-                guard=guard,
-                core_client=core_client,
-                settings_provider=config_module.load,
-                pipeline=pipeline,
-                data_dir=data_dir,
-            )
+        telegram = TelegramAdapter(
+            bot_token=settings.channels.telegram.bot_token,
+            guard=guard,
+            core_client=core_client,
+            settings_provider=config_module.load,
+            pipeline=pipeline,
+            data_dir=data_dir,
+            peers=peers.receiver if peers is not None else None,
         )
+        registry.register(telegram)
+        if peers is not None:
+            peers.transport = telegram.send_document_bytes
     if settings.channels.imessage is not None and not imessage_enabled(settings):
         logger.warning({"message": "imessage configured with an empty credential; channel is off"})
     if imessage_enabled(settings):
@@ -170,6 +185,7 @@ async def lifespan(app: FastAPI):
     core_client: CoreClient | None = getattr(app.state, "core_client", None)
     started = False
     retention_task: asyncio.Task | None = None
+    peers_task: asyncio.Task | None = None
     if context is None:
         context, core_client = build_context()
         app.state.ctx = context
@@ -182,6 +198,8 @@ async def lifespan(app: FastAPI):
                 retention_loop(context.pipeline), name="attachment-retention"
             )
         await context.registry.start_all()
+        if context.peers is not None:
+            peers_task = asyncio.create_task(retry_loop(context.peers.tick), name="peers-retry")
         started = True
         names = list(context.registry.types())
         if voice_enabled(context.settings):
@@ -192,10 +210,12 @@ async def lifespan(app: FastAPI):
     finally:
         if started:
             logger.info({"message": "joshua-channels shutting down"})
-            if retention_task is not None:
-                retention_task.cancel()
+            for task in (retention_task, peers_task):
+                if task is None:
+                    continue
+                task.cancel()
                 try:
-                    await retention_task
+                    await task
                 except asyncio.CancelledError:
                     pass
             await context.registry.stop_all()
@@ -272,6 +292,7 @@ def build_app(context: ChannelsContext | None = None) -> FastAPI:
     app.state.voice_identities = identities
     app.include_router(build_voice_router(identities))
     app.include_router(build_admin_router())
+    app.include_router(build_peers_router())
     if context is not None:
         app.state.ctx = context
     return app

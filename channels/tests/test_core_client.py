@@ -128,3 +128,23 @@ async def test_build_core_client_from_env() -> None:
     client = build_core_client({"CORE_URL": "http://core", "JOSHUA_TOKEN_CHANNELS": "t"})
     assert client is not None
     await client.aclose()
+
+
+@pytest.mark.parametrize("status", [202, 404])
+async def test_peer_received_posts_only_the_id_and_returns_the_status(status: int) -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("authorization")
+        seen["path"] = request.url.path
+        seen["body"] = request.content
+        return httpx.Response(status, json={})
+
+    client = _client(handler)
+    result = await client.peer_received("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    await client.aclose()
+
+    assert result == status
+    assert seen["path"] == "/v1/peers/received"
+    assert seen["auth"] == "Bearer chan-tok"
+    assert seen["body"] == b'{"id":"01ARZ3NDEKTSV4RRFFQ69G5FAV"}'

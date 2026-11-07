@@ -5,6 +5,10 @@ and turns core's ``send`` back into one or more Telegram messages. Long polling
 runs in the container event loop; ``start`` and ``stop`` drive the
 ``python-telegram-bot`` application. Every inbound message passes the inbound
 ``Guard`` before it reaches core; an unknown sender never reaches core.
+
+A message from a bot is checked first, before the guard and before anything
+that can reply. It never becomes a person turn: it goes to the peer receiver
+when peers are configured, and is dropped with no reply otherwise.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import uuid4
 
 from joshua_shared.attachments import NO_CAPTION_TEXT
@@ -26,7 +30,11 @@ from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from joshua_channels.core_client import CoreClient
 from joshua_channels.guard import REASON_TRUNCATED, REASON_UNKNOWN, Guard
+from joshua_channels.peers.protocol import bot_sender
 from joshua_channels.registry import AdapterHealth
+
+if TYPE_CHECKING:
+    from joshua_channels.peers.receive import PeerReceiver
 
 logger = get_logger("channels.telegram")
 
@@ -115,6 +123,7 @@ class TelegramAdapter:
         pipeline: AttachmentPipeline | None = None,
         data_dir: str = "/data",
         bot: object | None = None,
+        peers: PeerReceiver | None = None,
     ) -> None:
         self._bot_token = bot_token
         self._guard = guard
@@ -124,6 +133,7 @@ class TelegramAdapter:
         self._data_dir = Path(data_dir)
         self._application: Application | None = None
         self._bot = bot
+        self._peers = peers
         self._poll_errors = 0
         self._last_poll_error: str | None = None
         # When the last poll error arrived, on the monotonic clock. None means
@@ -227,6 +237,12 @@ class TelegramAdapter:
         if message is None or user is None or chat is None:
             return
 
+        # A bot is never a person. This check comes before the guard, so a bot
+        # never reaches core and never gets the ``unknown_sender`` reply.
+        if getattr(user, "is_bot", False):
+            await self._on_bot(message, user, chat, context.bot)
+            return
+
         text = message.text or message.caption or ""
         has_attachment = bool(message.photo or message.document)
         if not text and not has_attachment:
@@ -270,6 +286,13 @@ class TelegramAdapter:
 
         await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
         await self._submit(context.bot, chat_id, event)
+
+    async def _on_bot(self, message: Any, user: Any, chat: Any, bot: Any) -> None:
+        """Hand a message from a bot to the peer receiver, or drop it. Never reply with text."""
+        if self._peers is None:
+            logger.info({"message": "telegram: bot message dropped", "bot_id": str(user.id)})
+            return
+        await self._peers.handle(message, user, chat, bot, bot_sender(bot))
 
     async def _on_refused(
         self, bot: object, chat_id: str, reason: str | None, cfg: JoshuaConfig
@@ -344,6 +367,14 @@ class TelegramAdapter:
                 await self._bot.send_document(chat_id=chat_id, document=path)  # type: ignore[attr-defined]
             parts += 1
         return parts
+
+    async def send_document_bytes(self, chat_id: str, data: bytes, filename: str) -> None:
+        """Send one document from memory. The peer outbox sends envelopes with this."""
+        if self._bot is None:
+            raise RuntimeError("telegram adapter not started")
+        await self._bot.send_document(  # type: ignore[attr-defined]
+            chat_id=chat_id, document=data, filename=filename
+        )
 
     # --- resolve -----------------------------------------------------------
 

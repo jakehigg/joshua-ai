@@ -24,6 +24,7 @@ CORE_URL_ENV = "CORE_URL"
 CHANNELS_TOKEN_ENV = "JOSHUA_TOKEN_CHANNELS"
 TURNS_PATH = "/v1/turns"
 STREAM_PATH = "/v1/turns/stream"
+PEERS_RECEIVED_PATH = "/v1/peers/received"
 
 # One retry after core answers 429, then the turn is dropped.
 BUSY_RETRY_AFTER_S = 2.0
@@ -84,6 +85,15 @@ class CoreClient:
             )
         logger.warning({"message": "turn not accepted", "channel": event.channel, "status": status})
         return TurnAck(accepted=False, status=status, reason=data.get("reason"))
+
+    async def peer_received(self, item_id: str) -> int:
+        """Tell core that a peer item is stored. Returns core's status code.
+
+        The body is ``{"id": item_id}`` and nothing else: core reads the item
+        from the volume. No retry here; the caller logs the result.
+        """
+        response = await self._client.post_json(PEERS_RECEIVED_PATH, json={"id": item_id})
+        return response.status_code
 
     async def stream_turn(self, event: TurnEvent) -> AsyncIterator[tuple[str, dict]]:
         """Run a turn inline and yield ``(event_name, data)`` for each SSE frame."""

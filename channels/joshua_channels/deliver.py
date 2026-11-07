@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -24,6 +24,9 @@ from joshua_channels.core_client import CoreClient
 from joshua_channels.destinations import Resolved
 from joshua_channels.guard import Guard
 from joshua_channels.registry import AdapterRegistry
+
+if TYPE_CHECKING:
+    from joshua_channels.peers.service import PeersService
 
 logger = get_logger("channels.deliver")
 
@@ -58,6 +61,7 @@ class ChannelsContext:
     guard: Guard | None = None
     core_client: CoreClient | None = None
     pipeline: AttachmentPipeline | None = None
+    peers: PeersService | None = None
 
 
 class AttachmentError(Exception):
