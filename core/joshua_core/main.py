@@ -377,6 +377,7 @@ def _bootstrap_layout(settings: JoshuaConfig) -> None:
     """
     layout.bootstrap_wiki()
     layout.bootstrap_shared()
+    layout.bootstrap_peers()
     layout.migrate_to_one_wiki()
     layout.bootstrap_shared_profile(settings.name)
     migrate_page_links()

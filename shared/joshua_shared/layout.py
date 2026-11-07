@@ -2,9 +2,9 @@
 
 Every path under the data volume comes from this module, so the three containers
 agree on where a file lives. The functions build paths; `bootstrap_person`,
-`bootstrap_wiki`, `bootstrap_shared`, and `bootstrap_shared_profile` create the
-tree; `migrate_to_one_wiki` moves an older layout onto this one;
-`validate_layout` reports problems for `/readyz`.
+`bootstrap_wiki`, `bootstrap_shared`, `bootstrap_peers`, and
+`bootstrap_shared_profile` create the tree; `migrate_to_one_wiki` moves an
+older layout onto this one; `validate_layout` reports problems for `/readyz`.
 
 There is one wiki, at `<data>/wiki/`. It is Joshua's memory:
 
@@ -40,7 +40,7 @@ from importlib import resources
 from pathlib import Path, PurePosixPath
 
 from joshua_shared.fs import is_writable
-from joshua_shared.ids import PERSON_ID_RE
+from joshua_shared.ids import PERSON_ID_RE, ULID_RE
 from joshua_shared.log import get_logger
 
 # The default mount point. `JOSHUA_DATA_DIR` overrides it for tests.
@@ -249,6 +249,27 @@ def inbox_root(root: Path | str | None = None) -> Path:
     return _root(root) / "inbox"
 
 
+def peers_root(root: Path | str | None = None) -> Path:
+    """`<data>/peers`, what other Joshua instances sent."""
+    return _root(root) / "peers"
+
+
+def peers_inbox_root(root: Path | str | None = None) -> Path:
+    """`<data>/peers/inbox`, one folder for each item a peer sent."""
+    return peers_root(root) / "inbox"
+
+
+def peer_item_dir(item_id: str, root: Path | str | None = None) -> Path:
+    """`<data>/peers/inbox/<item_id>`, one item from a peer.
+
+    `item_id` is the envelope id, a ULID. Any other value raises `ValueError`,
+    so the id cannot escape the inbox (`..`, `/`, an absolute path).
+    """
+    if not ULID_RE.match(item_id):
+        raise ValueError(f"invalid peer item id: {item_id!r}")
+    return peers_inbox_root(root) / item_id
+
+
 def person_attachments_root(pid: str, root: Path | str | None = None) -> Path:
     """`<data>/people/<pid>/attachments`, what a person sent in a direct chat."""
     return person_dir(pid, ATTACHMENTS, root)
@@ -367,6 +388,11 @@ def bootstrap_shared(root: Path | str | None = None) -> None:
     `bootstrap_shared_profile`.
     """
     (shared_root(root) / "attachments").mkdir(parents=True, exist_ok=True)
+
+
+def bootstrap_peers(root: Path | str | None = None) -> None:
+    """Create `peers/inbox/`. Idempotent."""
+    peers_inbox_root(root).mkdir(parents=True, exist_ok=True)
 
 
 def bootstrap_shared_profile(name: str = "Joshua", root: Path | str | None = None) -> None:

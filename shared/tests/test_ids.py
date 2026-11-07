@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from joshua_shared.ids import PERSON_ID_PATTERN, PERSON_ID_RE
+from joshua_shared.ids import PERSON_ID_PATTERN, PERSON_ID_RE, is_ulid, new_ulid
 
 MINIMAL = """
 name: Test House
@@ -73,3 +73,28 @@ def test_the_config_command_runs_with_no_warning(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
+
+
+def test_new_ulid_is_canonical_and_ordered_by_time() -> None:
+    first = new_ulid(1_700_000_000_000, bytes(10))
+    second = new_ulid(1_700_000_000_001, bytes(10))
+    assert is_ulid(first) and is_ulid(second)
+    assert first < second
+    assert new_ulid(0, bytes(10)) == "0" * 26
+    assert new_ulid((1 << 48) - 1, b"\xff" * 10) == "7" + "Z" * 25
+
+
+@pytest.mark.parametrize(
+    ("ms", "entropy"), [(-1, bytes(10)), (1 << 48, bytes(10)), (0, bytes(9)), (0, bytes(11))]
+)
+def test_new_ulid_refuses_bad_input(ms: int, entropy: bytes) -> None:
+    with pytest.raises(ValueError):
+        new_ulid(ms, entropy)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "0" * 25, "0" * 27, "8" + "0" * 25, "0" * 25 + "U", "0" * 25 + "a", "0" * 26 + "\n"],
+)
+def test_a_bad_ulid_does_not_match(value: str) -> None:
+    assert not is_ulid(value)

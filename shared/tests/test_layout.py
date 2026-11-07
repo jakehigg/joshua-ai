@@ -718,3 +718,41 @@ def test_data_relative_refuses_a_path_outside_the_volume(tmp_path: Path) -> None
 )
 def test_attachment_area_reads_the_path(rel: str, area: str | None) -> None:
     assert layout.attachment_area(rel) == area
+
+
+PEER_ITEM = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+
+def test_peer_paths(data_dir: Path) -> None:
+    assert layout.peers_root() == data_dir / "peers"
+    assert layout.peers_inbox_root() == data_dir / "peers" / "inbox"
+    assert layout.peer_item_dir(PEER_ITEM) == data_dir / "peers" / "inbox" / PEER_ITEM
+
+
+def test_peer_item_dir_takes_an_explicit_root(tmp_path: Path) -> None:
+    assert layout.peer_item_dir(PEER_ITEM, tmp_path) == tmp_path / "peers" / "inbox" / PEER_ITEM
+
+
+@pytest.mark.parametrize(
+    "item_id",
+    [
+        "",
+        "..",
+        "../../etc",
+        "/etc/passwd",
+        PEER_ITEM + "/..",
+        "../" + PEER_ITEM[3:],
+        PEER_ITEM.lower(),
+        PEER_ITEM + "\n",
+        "8" + PEER_ITEM[1:],
+    ],
+)
+def test_peer_item_dir_refuses_a_bad_id(data_dir: Path, item_id: str) -> None:
+    with pytest.raises(ValueError, match="invalid peer item id"):
+        layout.peer_item_dir(item_id)
+
+
+def test_bootstrap_peers_creates_the_inbox_and_is_idempotent(data_dir: Path) -> None:
+    layout.bootstrap_peers()
+    layout.bootstrap_peers()
+    assert (data_dir / "peers" / "inbox").is_dir()

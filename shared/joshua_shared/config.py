@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from joshua_shared.ids import PERSON_ID_PATTERN, PERSON_ID_RE
 from joshua_shared.log import CREDENTIAL_PREFIXES
 from joshua_shared.mcp_package import PackageError, parse_package
+from joshua_shared.peers import ITEM_KINDS, ON_RECEIVE, contact_keys, normalize_name
 
 DEFAULT_CONFIG_PATH = "/etc/joshua/joshua.yaml"
 CONFIG_ENV_VAR = "JOSHUA_CONFIG"
@@ -63,6 +64,7 @@ URL_ARGS = ("none", "grant-required")
 _E164_RE = re.compile(r"^\+[1-9]\d{1,14}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # A BlueBubbles service name: letters only, no separator.
+_BOT_ID_RE = re.compile(r"^[0-9]{1,20}\Z")
 _DM_SERVICE_RE = re.compile(r"^[A-Za-z]+$")
 
 # ``${VAR}`` or ``${VAR:-default}``. The default runs to the next ``}``.
@@ -176,6 +178,80 @@ class Group(_Model):
     channel: str
     chat_id: str
     members: list[str] = []
+
+
+class PeerContact(_Model):
+    """One person who uses a peer instance, named by the local owner.
+
+    The name and the aliases are what a person here says ("send it to Alex").
+    A name from the remote side is never an identity.
+    """
+
+    name: str
+    aliases: list[str] = []
+
+    @model_validator(mode="after")
+    def _check_names(self) -> PeerContact:
+        for value in (self.name, *self.aliases):
+            if not normalize_name(value):
+                raise ValueError(f"contact name or alias {value!r} is empty after normalization")
+        return self
+
+
+class Peer(_Model):
+    """Another Joshua instance, paired by hand. ``telegram_bot_id`` is its only identity."""
+
+    id: str
+    name: str
+    telegram_bot_id: str
+    kinds: list[str] = list(ITEM_KINDS)
+    on_receive: str = "notify"
+    contacts: list[PeerContact] = []
+
+    @field_validator("id")
+    @classmethod
+    def _check_id(cls, value: str) -> str:
+        if not _PERSON_ID_RE.match(value):
+            raise ValueError(f"peer id must match {PERSON_ID_PATTERN}")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("peer name must not be empty")
+        return value
+
+    @field_validator("telegram_bot_id", mode="before")
+    @classmethod
+    def _bot_id_as_text(cls, value: Any) -> Any:
+        return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
+
+    @field_validator("telegram_bot_id")
+    @classmethod
+    def _check_bot_id(cls, value: str) -> str:
+        if not _BOT_ID_RE.match(value):
+            raise ValueError("telegram_bot_id must be digits only")
+        return value
+
+    @field_validator("kinds")
+    @classmethod
+    def _check_kinds(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError(f"kinds must list one or more of {ITEM_KINDS}")
+        for kind in value:
+            if kind not in ITEM_KINDS:
+                raise ValueError(f"kind '{kind}' is not one of {ITEM_KINDS}")
+        if len(set(value)) != len(value):
+            raise ValueError("kinds must not repeat a kind")
+        return value
+
+    @field_validator("on_receive")
+    @classmethod
+    def _check_on_receive(cls, value: str) -> str:
+        if value not in ON_RECEIVE:
+            raise ValueError(f"on_receive must be one of {ON_RECEIVE}")
+        return value
 
 
 class TelegramChannel(_Model):
@@ -1013,6 +1089,7 @@ class JoshuaConfig(_Model):
     viewer: Viewer = Viewer()
     usage: UsageConfig = UsageConfig()
     inference: Inference = Inference()
+    peers: list[Peer] = []
 
     @model_validator(mode="after")
     def _check_unique(self) -> JoshuaConfig:
@@ -1138,6 +1215,55 @@ class JoshuaConfig(_Model):
                 raise ValueError(
                     f"channels.voice.device_defaults.{device}: unknown person id '{pid}'"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _check_peers(self) -> JoshuaConfig:
+        """Refuse a peer or a contact that two names could confuse.
+
+        Peer ids and bot ids are unique. A bot id is not also a person's
+        Telegram handle. A contact name or alias, after ``normalize_name``, is
+        not a local person id, person name, or group id, and no two contacts
+        share one, on one peer or on two.
+        """
+        local: dict[str, str] = {}
+        for person in self.people:
+            local.setdefault(normalize_name(person.id), f"person id '{person.id}'")
+            local.setdefault(normalize_name(person.name), f"person name '{person.name}'")
+        for group in self.groups:
+            local.setdefault(normalize_name(group.id), f"group id '{group.id}'")
+        person_telegram = {h for p in self.people for h in p.handle_ids("telegram")}
+
+        peer_ids: set[str] = set()
+        bot_ids: set[str] = set()
+        owners: dict[str, str] = {}
+        for peer in self.peers:
+            where = f"peers.{peer.id}"
+            if peer.id in peer_ids:
+                raise ValueError(f"{where}: duplicate peer id")
+            peer_ids.add(peer.id)
+            if peer.telegram_bot_id in bot_ids:
+                raise ValueError(f"{where}: telegram_bot_id is already used by another peer")
+            bot_ids.add(peer.telegram_bot_id)
+            if peer.telegram_bot_id in person_telegram:
+                raise ValueError(f"{where}: telegram_bot_id is also a person's telegram handle")
+            for contact in peer.contacts:
+                label = f"contact '{contact.name}' of peer '{peer.id}'"
+                for key in sorted(contact_keys(contact)):
+                    if key in local:
+                        raise ValueError(
+                            f"{where}.contacts: the name or alias '{key}' of {label} "
+                            f"is the same as the local {local[key]}. Use the full name "
+                            "of the contact and do not give a first-name alias"
+                        )
+                    if key in owners:
+                        raise ValueError(
+                            f"{where}.contacts: the name or alias '{key}' of {label} "
+                            f"is also a name or alias of {owners[key]}. Each contact "
+                            "name and alias must be unique across all peers"
+                        )
+                for key in contact_keys(contact):
+                    owners[key] = label
         return self
 
     def person(self, person_id: str) -> Person | None:
