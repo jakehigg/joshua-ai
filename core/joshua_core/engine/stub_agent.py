@@ -69,6 +69,7 @@ class StubAgentSession:
         # call, with ``is_error`` and the error text in the result.
         self.fail_with: str | None = None
         self.interrupted = False
+        self.abandoned = False
         # When built with a resume id, fail the first run once so the manager's
         # resume-retry path (rebuild without resume) is exercised offline.
         self._resume = resume
@@ -208,6 +209,14 @@ class StubAgentSession:
 
     async def close(self) -> None:
         self._connected = False
+
+    def abandon(self) -> None:
+        """Give up the session at once, as ``AgentSession.abandon`` does. The stub
+        has no client to tear down, so it returns None."""
+        self.abandoned = True
+        self.interrupted = True
+        self._connected = False
+        logger.info({"message": "stub abandon"})
 
 
 def _unique(items: list[str]) -> list[str]:

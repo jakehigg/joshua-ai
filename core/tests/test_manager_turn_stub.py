@@ -3,8 +3,10 @@ echo-tools probe."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
+import pytest
 from engine_fakes import (
     FakeComposer,
     FakeRepo,
@@ -14,6 +16,7 @@ from engine_fakes import (
     make_settings,
 )
 from joshua_core.engine.manager import ConversationManager
+from joshua_core.engine.stub_agent import HANG_MARKER
 from joshua_core.engine.types import Attachment
 from joshua_shared import config as config_module
 from joshua_shared import layout
@@ -116,6 +119,85 @@ async def test_reaper_disabled_when_ttl_not_positive(tmp_path):
     manager._pool["c1"].last_used -= 100
     assert await manager._reap_idle() == 0
     assert len(manager._pool) == 1
+
+
+async def test_reaper_task_closes_idle_session_and_stops(tmp_path):
+    repo = FakeRepo()
+    manager = make_manager(repo, tmp_path, idle_seconds=1)
+    channel, conversation = make_channel(), make_conversation()
+    await manager.run_turn(channel, conversation, "hi")
+    manager._pool["c1"].last_used -= 100
+
+    manager.start_reaper(interval_s=0.01)
+    first = manager._reaper
+    manager.start_reaper(interval_s=0.01)
+    assert manager._reaper is first
+    for _ in range(100):
+        if not manager._pool:
+            break
+        await asyncio.sleep(0.01)
+
+    assert manager._pool == {}
+    await manager.stop_reaper()
+    assert manager._reaper is None
+    assert first is not None and first.done()
+
+
+async def test_stop_reaper_without_start_does_nothing(tmp_path):
+    manager = make_manager(FakeRepo(), tmp_path)
+    await manager.stop_reaper()
+    assert manager._reaper is None
+
+
+async def _cancel_mid_turn(manager, channel, conversation) -> None:
+    """Start a turn that never ends, wait until it holds the lock, cancel it."""
+    task = asyncio.create_task(manager.run_turn(channel, conversation, f"wait {HANG_MARKER}"))
+    for _ in range(100):
+        mc = manager._pool.get(conversation.id)
+        if mc is not None and mc.lock.locked():
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_a_cancelled_turn_abandons_its_session(tmp_path, caplog):
+    repo = FakeRepo()
+    manager = make_manager(repo, tmp_path)
+    channel, conversation = make_channel(), make_conversation()
+
+    with caplog.at_level("DEBUG"):
+        await _cancel_mid_turn(manager, channel, conversation)
+
+    mc = manager._pool["c1"]
+    old = mc.session
+    assert old.abandoned
+    assert not old.connected
+    assert mc.replace_pending
+    assert mc.replace_reason == "turn cancelled"
+    assert not mc.lock.locked()
+    assert any(
+        isinstance(r.msg, dict) and r.msg["message"] == "turn cancelled" for r in caplog.records
+    )
+
+    # The next turn runs on a new session and gets its own reply.
+    after = await manager.run_turn(channel, conversation, "hello again")
+    assert not after.is_error
+    assert "hello again" in after.text
+    assert manager._pool["c1"].session is not old
+    assert not manager._pool["c1"].replace_pending
+
+
+async def test_a_completed_turn_keeps_its_session(tmp_path):
+    repo = FakeRepo()
+    manager = make_manager(repo, tmp_path)
+    channel, conversation = make_channel(), make_conversation()
+
+    await manager.run_turn(channel, conversation, "first")
+    mc = manager._pool["c1"]
+    assert not mc.session.abandoned
+    assert not mc.replace_pending
 
 
 async def test_resume_retry_rebuilds_without_resume(tmp_path):

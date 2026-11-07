@@ -199,6 +199,7 @@ async def lifespan(app: FastAPI):
         oneshot=StubOneshot() if agent_backend == "stub" else None,
     )
     await scheduler.start()
+    manager.start_reaper()
     indexer_loop.start()
     _start_snapshots(app.state.ctx.snapshots)
     await reflector.start()
@@ -215,6 +216,7 @@ async def lifespan(app: FastAPI):
         await indexer_loop.stop()
         await scheduler.stop()
         await turns.drain()
+        await manager.stop_reaper()
         await manager.shutdown()
         await db.close()
 
