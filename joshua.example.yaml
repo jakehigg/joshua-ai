@@ -34,6 +34,20 @@ groups:
       - "+15551234567"
       - "+15557654321"
 
+# peers:                          # other Joshua instances, paired by hand on both sides
+#   - id: rivera                  # a slug, the same rule as a person id
+#     name: Rivera's Joshua       # the label Joshua uses for that instance
+#     telegram_bot_id: "1234567890"   # the numeric id of its bot; the only identity checked
+#     kinds:                      # what this instance accepts from it (default all three)
+#       - recipe
+#       - note
+#       - link
+#     on_receive: notify          # notify | silent
+#     contacts:                   # the people who use it, named by you
+#       - name: Sam Rivera        # use the full name: a name or alias may not match
+#         aliases:                # a person id, a person name, or a group id here
+#           - sam r
+
 channels:
   telegram:
     bot_token: ${TELEGRAM_BOT_TOKEN:-}

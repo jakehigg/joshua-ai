@@ -4,6 +4,16 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- **A `peers:` section names other Joshua instances and their contacts.**
+  Each peer has an id, a label, the numeric id of its Telegram bot, the kinds
+  it may send, and the contacts who use it. Start-up fails when a contact name
+  or alias is the same as a local person id, a person name, or a group id, or
+  when two contacts share a name. Nothing sends or receives yet.
+
 ## 0.1.1 - 2026-11-07
 
 A voice call that hangs up during a reply no longer makes the replies after it
