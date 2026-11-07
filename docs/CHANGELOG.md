@@ -4,7 +4,44 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
-## Unreleased
+## 0.1.0 - 2026-11-07
+
+Joshua can now send its model calls to a server other than the Claude
+subscription: the Anthropic API, LiteLLM in front of Bedrock, or a local
+model, with a server, a model, and a key for each job. Web search then works
+through SearXNG. Tool search makes a conversation turn with many MCP servers
+much smaller. The agent can read back the current conversation, snapshots put
+the state of a live system in the memory, and a usage page shows the tokens
+that Joshua used. The viewer and the joshua-mcp addon can search the memory by
+meaning.
+
+### Upgrading from 0.0.8
+
+**Nothing needs a change.** Your `joshua.yaml` from 0.0.8 loads as it is. With
+no `inference` section, every model call stays on the subscription token, as
+before. Then:
+
+1. Run `make init-env`. It keeps every value in your `.env` and mints only the
+   two new tokens, `JOSHUA_TOKEN_VIEWER` and `JOSHUA_TOKEN_MCP`. Without them,
+   the viewer searches by words, as before. On Kubernetes, add
+   `JOSHUA_TOKEN_VIEWER` and `JOSHUA_TOKEN_MCP` to the core Secret, and
+   `JOSHUA_TOKEN_VIEWER` to the viewer Secret. The chart marks both keys
+   optional, so a Secret without them still starts.
+2. Expect a longer first start on a large transcript. Core adds the index
+   `idx_transcript_fts`, and fills the new `usage_event` table from the chat
+   turns that it made before.
+3. To send a reminder made by voice to a phone, set
+   `channels.voice.deliver_via`. Without it, such a reply is dropped, and the
+   log says why.
+
+**Tool search is on for `chat`.** A chat turn now loads the definition of an
+MCP tool when it needs one. A turn that uses a tool can take one more model
+call. Set `inference.chat.tool_search: false` to turn it off.
+
+**To move off the subscription,** read
+[operations.md](operations.md#the-model-server) before you add an `inference`
+section. When the `internet` job moves off Anthropic, web search stops unless
+`internet.search` names a SearXNG instance.
 
 ### Added
 
@@ -38,7 +75,7 @@ with the images and the packaged chart, are at
   the seconds, and a short error. The error has no key and no token. Each
   call writes one usage row. `/readyz` on core gives `inference_overrides`,
   the number of job blocks that set `base_url` or `model`. The Helm chart
-  (0.0.9) shows the `inference` keys in `secrets.core.keys` and the
+  (0.1.0) shows the `inference` keys in `secrets.core.keys` and the
   `inference` section with `${VAR:-}`. [operations.md](operations.md#the-model-server)
   has recipes for the subscription, LiteLLM in front of Bedrock, one LiteLLM
   key for each job, and a local model for one job.
@@ -161,8 +198,7 @@ with the images and the packaged chart, are at
   `JOSHUA_TOKEN_MCP` to the core Secret, and `JOSHUA_TOKEN_VIEWER` to the
   viewer Secret. Without the tokens, the viewer searches by words, as before.
 
-- **The viewer can open with no sign-in, for a household on a trusted
-  network.** Set `viewer.anonymous: true`, and a browser with no password gets
+- **The viewer can open with no sign-in, on a trusted network.** Set `viewer.anonymous: true`, and a browser with no password gets
   full access: it reads and writes the wiki, the same as a signed-in member.
   A member can still sign in with a password on the same viewer. Set
   `viewer.users` to add restrictions back. The network is then the only
