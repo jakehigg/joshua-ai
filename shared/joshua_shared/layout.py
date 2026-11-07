@@ -130,6 +130,11 @@ def _root(root: Path | str | None) -> Path:
     return data_root() if root is None else Path(root)
 
 
+def people_root(root: Path | str | None = None) -> Path:
+    """`<data>/people`, the files that belong to each person."""
+    return _root(root) / "people"
+
+
 def person_root(pid: str, root: Path | str | None = None) -> Path:
     """`<data>/people/<pid>`."""
     return _root(root) / "people" / safe_segment(pid)
@@ -265,9 +270,41 @@ def peer_item_dir(item_id: str, root: Path | str | None = None) -> Path:
     `item_id` is the envelope id, a ULID. Any other value raises `ValueError`,
     so the id cannot escape the inbox (`..`, `/`, an absolute path).
     """
+    return peers_inbox_root(root) / _peer_id_segment(item_id)
+
+
+def _peer_id_segment(item_id: str) -> str:
     if not ULID_RE.match(item_id):
         raise ValueError(f"invalid peer item id: {item_id!r}")
-    return peers_inbox_root(root) / item_id
+    return item_id
+
+
+def peers_outbox_root(root: Path | str | None = None) -> Path:
+    """`<data>/peers/outbox`, one folder for each item this instance sends."""
+    return peers_root(root) / "outbox"
+
+
+def peer_outbox_dir(item_id: str, root: Path | str | None = None) -> Path:
+    """`<data>/peers/outbox/<item_id>`. `item_id` must be a ULID, else `ValueError`."""
+    return peers_outbox_root(root) / _peer_id_segment(item_id)
+
+
+def peers_seen_root(root: Path | str | None = None) -> Path:
+    """`<data>/peers/seen`, the replay table: one file for each envelope id received."""
+    return peers_root(root) / "seen"
+
+
+def peer_seen_path(item_id: str, root: Path | str | None = None) -> Path:
+    """`<data>/peers/seen/<item_id>.json`. `item_id` must be a ULID, else `ValueError`."""
+    return peers_seen_root(root) / f"{_peer_id_segment(item_id)}.json"
+
+
+def peer_staging_dir(peer_id: str, root: Path | str | None = None) -> Path:
+    """`<data>/inbox/peers/<peer_id>`, scratch for the attachments a peer sent first.
+
+    `peer_id` follows the person id rule, else `ValueError`.
+    """
+    return inbox_root(root) / "peers" / safe_segment(peer_id)
 
 
 def person_attachments_root(pid: str, root: Path | str | None = None) -> Path:
@@ -391,8 +428,9 @@ def bootstrap_shared(root: Path | str | None = None) -> None:
 
 
 def bootstrap_peers(root: Path | str | None = None) -> None:
-    """Create `peers/inbox/`. Idempotent."""
-    peers_inbox_root(root).mkdir(parents=True, exist_ok=True)
+    """Create `peers/inbox/`, `peers/outbox/`, and `peers/seen/`. Idempotent."""
+    for path in (peers_inbox_root(root), peers_outbox_root(root), peers_seen_root(root)):
+        path.mkdir(parents=True, exist_ok=True)
 
 
 def bootstrap_shared_profile(name: str = "Joshua", root: Path | str | None = None) -> None:

@@ -756,3 +756,26 @@ def test_bootstrap_peers_creates_the_inbox_and_is_idempotent(data_dir: Path) -> 
     layout.bootstrap_peers()
     layout.bootstrap_peers()
     assert (data_dir / "peers" / "inbox").is_dir()
+    assert (data_dir / "peers" / "outbox").is_dir()
+    assert (data_dir / "peers" / "seen").is_dir()
+
+
+def test_peer_outbox_seen_and_staging_paths(data_dir: Path) -> None:
+    assert layout.people_root() == data_dir / "people"
+    assert layout.peer_outbox_dir(PEER_ITEM) == data_dir / "peers" / "outbox" / PEER_ITEM
+    assert layout.peer_seen_path(PEER_ITEM) == data_dir / "peers" / "seen" / f"{PEER_ITEM}.json"
+    assert layout.peer_staging_dir("rivera") == data_dir / "inbox" / "peers" / "rivera"
+
+
+@pytest.mark.parametrize("item_id", ["..", "/etc/passwd", PEER_ITEM.lower()])
+def test_peer_outbox_and_seen_refuse_a_bad_id(data_dir: Path, item_id: str) -> None:
+    with pytest.raises(ValueError, match="invalid peer item id"):
+        layout.peer_outbox_dir(item_id)
+    with pytest.raises(ValueError, match="invalid peer item id"):
+        layout.peer_seen_path(item_id)
+
+
+@pytest.mark.parametrize("peer_id", ["..", "a/b", "Rivera", ""])
+def test_peer_staging_dir_refuses_a_bad_peer_id(data_dir: Path, peer_id: str) -> None:
+    with pytest.raises(ValueError):
+        layout.peer_staging_dir(peer_id)
