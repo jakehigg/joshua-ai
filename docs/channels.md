@@ -187,6 +187,14 @@ Telegram's servers fetch the URL. Joshua never triggers that fetch.
 A photo or a document from Telegram goes through the attachment pipeline. See
 "Attachments" below.
 
+### Messages from bots
+
+A message from a Telegram bot never becomes a turn, and Joshua never replies
+to it, also with `unknown_sender: reply`. The bot of a paired peer instance
+(`peers:` in `joshua.yaml`) sends items as documents, and channels stores
+them for the person they are for. Joshua drops a message from any other bot.
+See `security.md`.
+
 ## iMessage
 
 iMessage needs a Mac that runs [BlueBubbles](https://bluebubbles.app). Joshua

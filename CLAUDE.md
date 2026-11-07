@@ -119,6 +119,11 @@ Route allowlists, by default:
 - channels `POST /v1/voice/chat/completions`, `GET /v1/models`:
   `channels.voice.allowed_callers` (default `voice`). Both answer 404 with no
   `channels.voice` section.
+- channels `POST /v1/peers/send`, `POST /v1/peers/show`: `gateway`. channels
+  `POST /v1/peers/notice`: `core`. core `POST /v1/peers/received`:
+  `channels`. Each peer route answers 404 with no `peers` section. A Telegram
+  message from a bot goes to the peer path before the guard, and never
+  becomes a turn or gets a reply.
 - channels `POST /webhook/imessage/{secret}`: no bearer. The path secret is the
   credential. A wrong secret gets 404, never 401. The handler always answers
   200 fast, because BlueBubbles never retries.
@@ -154,6 +159,9 @@ One volume mounts at `/data` in all three containers:
 /data/people/<id>/cli/outbox.jsonl               channels writes it
 /data/shared/attachments/<group>/YYYY/MM/        channels writes it
 /data/inbox/                                     channels scratch, short-lived
+/data/peers/inbox/<id>/                          an item a peer sent; channels writes it
+/data/peers/outbox/<id>/                         an item to send to a peer; channels writes it
+/data/peers/seen/<id>.json                       the peer replay table; channels writes it
 ```
 
 Nobody else writes anything. `people/` and `shared/` are read-only through the

@@ -85,12 +85,75 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `GET /v1/cli/outbox?person=&ack=true` | `channels.webhooks.allowed_callers` | | `{"messages": [{"ts", "text", "attachments"}]}`, `403 unknown_person` |
 | `POST /v1/voice/chat/completions` | `channels.voice.allowed_callers` | OpenAI chat completions, plus `speaker` and `speaker_confidence` | SSE of `chat.completion.chunk`, or one `chat.completion` for `stream: false`. `400 bad_request`, `404 not_found` with no voice section, `503 core_unavailable` |
 | `GET /v1/models` | `channels.voice.allowed_callers` | | `{"object": "list", "data": [{"id": "joshua", …}]}`, `404 not_found` with no voice section |
+| `POST /v1/peers/send` | `gateway` | `{"peer_id", "envelope", "attachments_from"?}` | `202 {"id"}`, `400`, `404 unknown_peer`, `409 duplicate`, `503 telegram_unavailable`. See [The peer routes](#the-peer-routes). |
+| `POST /v1/peers/show` | `gateway` | `{"id", "person_id"}` | `200 {"ok": true}`, never the body. `403 not_allowed`, `404`, `502 send_failed` |
+| `POST /v1/peers/notice` | `core` | `{"id"}` | `200 {"ok": true, "sent": n}`, `404 unknown_item` |
 | `GET /admin/guard/stats` | `ADMIN_CALLERS` | | counters: `unknown_sender`, `rate_limited`, `truncated`, `refused_total` |
 | `GET /admin/guard/recent` | `ADMIN_CALLERS` | | `{"recent": [{"channel_type", "address", "chat_id", "reason", "at"}]}` |
 | `GET /admin/chats/unconfigured` | `ADMIN_CALLERS` | | `{"groups": [{"channel_type", "chat_id", "chat_title", "at"}]}` |
 
 An error reply from `channels` is `{"reason": "<code>"}`, with a `detail` field
 when there is more to say.
+
+### The peer routes
+
+The three peer routes answer `404 {"reason": "not_found"}` when `peers` is
+empty. The envelope is the v1 envelope of `joshua_shared.peers`.
+
+**`POST /v1/peers/send`** (`gateway`). Channels puts one item in its outbox
+and sends it to the peer bot. The body:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `peer_id` | string | a `peers[].id` |
+| `envelope` | object | a v1 item envelope: `kind` is `recipe`, `note`, or `link`. `sender_person` is a local person. `body.attachments` lists each attachment by `name`, `mime`, `sha256`, and `size`. |
+| `attachments_from` | list of string | optional. One absolute data-volume path for each attachment, in any order. |
+
+Each path in `attachments_from` must resolve to a file under `/data/wiki/` or
+`/data/people/`, with no dot folder on the way. A symbolic link that points
+out of these folders is refused. The sha256 and the size of the file must be
+those of one attachment entry, and each entry needs exactly one path.
+
+| Status | Reason |
+|---|---|
+| `202 {"id"}` | the item is in the outbox. The first attempt starts at once. |
+| `400` | `bad_request`, `invalid_envelope` (with `detail`), `kind_not_item` (an `ack`), `unknown_person` (`sender_person`), `expired`, `invalid_attachment` (with `detail`) |
+| `404` | `unknown_peer` |
+| `409` | `duplicate`: the outbox already holds this `id` |
+| `503` | `telegram_unavailable`: the Telegram channel is off |
+
+The outbox sends each attachment as one document, then the envelope as one
+document named `envelope.json`. It sends again with exponential backoff (60
+seconds, doubled each time, at most one hour) until an ack arrives or
+`expires_at` passes. An ack `accepted` or `unmatched` settles the item. An ack
+`rejected` marks it failed.
+
+**`POST /v1/peers/show`** (`gateway`). The body is `{"id", "person_id"}`.
+Channels reads the stored item and sends its title, an empty line, and its
+markdown, as received, to the person, with the attachments as files. No model
+reads it. The person is reached on the first of `telegram`, `imessage`, and
+`cli` where they have a direct chat. The reply is `{"ok": true}` and never
+holds the body.
+
+| Status | Reason |
+|---|---|
+| `403` | `not_allowed`: the item is for another person, or it is unmatched and the person is a guest |
+| `404` | `unknown_person`, `unknown_item`, `no_destination` |
+| `502` | `send_failed` |
+
+An unmatched item (no local person matched) may be shown to any member.
+
+**`POST /v1/peers/notice`** (`core`). The body is `{"id"}`. Channels sends
+this fixed text, and no model output, to the item's recipient, or to every
+member when the item is unmatched:
+
+```
+New {kind} from {peer name}: {title}
+```
+
+The title loses its line breaks and is cut to 80 characters. A peer with
+`on_receive: silent` gets no notice, and the reply is `{"ok": true, "sent": 0}`.
+`sent` counts the people who got the notice.
 
 ## core
 
@@ -105,6 +168,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
+| `POST /v1/peers/received` | `channels` | `{"id"}` | `202`. Not in core yet: a later change of #64 adds it. Until then core answers `404`, and channels logs it and keeps the item. |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
@@ -118,6 +182,11 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /admin/inference/check` | `ADMIN_CALLERS` | none | `{"ok": bool, "jobs": [{"job", "endpoint", "model", "ok", "seconds", "error"?}]}`, one row for each `inference` job. Jobs with the same server, model, and key share one call. `error` has no key and no token, and is 200 characters at most. |
 | `GET /admin/usage?days=` | `ADMIN_CALLERS` | | the same answer as `GET /v1/usage` |
 | `GET /admin/snapshots` | `ADMIN_CALLERS` | | `{"snapshots": [{"name", "server", "tool", "scope", "every", "fetched_at", "ok", "failures", "last_error", "items", "listed"}]}`, no text |
+
+Channels calls `POST /v1/peers/received` after it stores a peer item under
+`/data/peers/inbox/<id>/`. The body holds only the item id. Core reads the
+item from the volume. A failed call loses nothing, because the item is already
+stored.
 
 `POST /v1/turns` answers `202` at once and runs the turn in the background. The
 reply reaches the person through `POST /v1/deliver`. A second turn with the
@@ -333,6 +402,10 @@ that is not in `groups` is 400.
 The `laptop` identity is for the operator on the host. It may call
 `POST /v1/events`, the two `/v1/cli/*` routes, every `/admin/*` route (by
 default), and `POST /v1/turns/stream` with a `cli` handle.
+
+It may not call the peer routes. `POST /v1/peers/send` and
+`POST /v1/peers/show` admit only `gateway`, and `POST /v1/peers/notice` admits
+only `core`.
 
 It may not call the gateway MCP routes. Only `core` reaches a person's tools and
 files, and only `core` says which person a request belongs to. It may not call

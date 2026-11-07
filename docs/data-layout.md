@@ -32,6 +32,10 @@ already at the new path stays where it is. See [Migration](#migration).
 /data/people/<person_id>/cli/outbox.jsonl        (the terminal channel's outbox)
 /data/shared/attachments/<group>/YYYY/MM/<file>  (files from a group chat)
 /data/inbox/                                     (channels scratch, short-lived)
+/data/inbox/peers/<peer_id>/<sha256>             (an attachment from a peer, waiting for its envelope)
+/data/peers/inbox/<id>/                          an item a peer sent; see Peers
+/data/peers/outbox/<id>/                         an item this instance sends; see Peers
+/data/peers/seen/<id>.json                       the replay table, one file for each envelope id
 ```
 
 `person_id` is a slug that matches `^[a-z0-9][a-z0-9-]{0,31}$`.
@@ -51,7 +55,7 @@ everyone, and any member reads any journal entry or profile. What a person
 may write comes from their role, never from the path. See `security.md`.
 
 - channels writes `people/<id>/attachments/`, `shared/attachments/`,
-  `people/<id>/cli/`, and `inbox/`.
+  `people/<id>/cli/`, `inbox/`, and `peers/`.
 - core writes `wiki/journal/`, `wiki/people/`, `wiki/joshua-docs/`,
   `wiki/attachments/`, and `inbox/sessions/`. Core also writes the metadata
   file of an attachment, and renames an attachment after the description.
@@ -205,6 +209,33 @@ not JSON, or that holds a value outside the model reads as nothing.
 The text of a file is what somebody else wrote. It is data, never an
 instruction. See `security.md`.
 
+## Peers
+
+`peers/` holds what other Joshua instances sent, and what this instance sends
+to them. Every `<id>` is the envelope id, a ULID, and `layout` refuses any
+other value.
+
+- `peers/inbox/<id>/` is one received item. Channels writes it in one rename:
+  `envelope.json` (the document as received), `body.md` (the markdown, as
+  received), `attachments/<name>`, and `meta.json`. `meta.json` holds
+  `peer_id`, `received_at`, `recipient` (a person id, or `null` when no person
+  matched), `reason` (`exact`, `first_word`, `no_match`, or `ambiguous`),
+  `candidates`, and `status` (`new`).
+- `peers/outbox/<id>/` is one item to send: `envelope.json`, a copy of each
+  attachment at `attachments/<sha256>`, and `state.json` (`peer_id`,
+  `chat_id`, `attempts`, `next_attempt_at`, `expires_at`, `status`, and
+  `ack_status`). `status` is `pending`, `acked`, `failed`, or `expired`.
+  Channels removes the folder after `expires_at` when the item is no longer
+  pending.
+- `peers/seen/<id>.json` is the replay table: the status of a received
+  envelope, its `expires_at`, and the ack that went back. Channels removes it
+  after `expires_at`.
+- `inbox/peers/<peer_id>/` holds an attachment a peer sent before its
+  envelope, named by its sha256. Channels removes it after one hour.
+
+The text of a peer item is what somebody else wrote. No turn reads it. See
+`security.md`.
+
 ## Bootstrap
 
 `layout.bootstrap_person(pid, display_name)` creates `attachments/` under
@@ -214,7 +245,8 @@ template if it is absent. `layout.bootstrap_wiki()` creates `wiki/` with
 `wiki/README.md` left by an older layout. `layout.bootstrap_shared()` creates
 `shared/attachments/`. `layout.bootstrap_shared_profile(name)` writes the
 shared profile at `wiki/people/everyone.md` from a template if it is absent.
-All four are idempotent. A second call changes nothing.
+`layout.bootstrap_peers()` creates `peers/inbox/`, `peers/outbox/`, and
+`peers/seen/`. All five are idempotent. A second call changes nothing.
 
 Bootstrap runs at core startup for every configured person, and again when
 `add_user` or the people CLI adds a new person.

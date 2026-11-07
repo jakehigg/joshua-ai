@@ -73,6 +73,11 @@ Every route has an allowlist of fleet identities. The list is in
   path, or another parameter. A test proves the `403` for every other
   caller.
 
+- channels `POST /v1/peers/send` and `POST /v1/peers/show` admit only
+  `gateway`. channels `POST /v1/peers/notice` admits only `core`. Core's
+  `POST /v1/peers/received` admits only `channels`. No setting widens them,
+  and a test proves the `403` for each other caller. See [Peers](#peers).
+
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
 name, a path, or a token.
 
@@ -448,6 +453,53 @@ is the fence around a mistake, not a wall against somebody who already runs a
 server and aims it at you. A person who needs that wall runs the container with
 egress to the open web alone, which the network, not this code, decides.
 
+## Peers
+
+A peer is another Joshua instance, paired by hand in `peers:`. Two instances
+exchange items as Telegram documents between their bots. No instance opens a
+port for this: the Telegram channel uses long polling.
+
+**A bot is never a person.** The Telegram adapter checks `is_bot` first,
+before the guard and before anything that can reply. A message from a bot:
+
+- never reaches the guard, never becomes a turn, and never reaches a model.
+- never gets the `unknown_sender` reply, also with `unknown_sender: reply`.
+- goes to the peer path when `peers` is not empty. Else channels drops it.
+
+**The only identity is the bot id.** The peer path looks up the sender's
+numeric id in `peers[].telegram_bot_id`. A name or a display name from the
+other side is never an identity. Channels drops these with no reply, and the
+log line holds the bot id and the reason, never a body:
+
+- a bot that is not a paired peer.
+- a message that is not in a private chat.
+- a peer over 30 messages in one minute.
+- a message from a peer that is not a document.
+
+**Code checks each item.** Channels checks the size of the envelope before
+the download, and parses it with the v1 schema. Channels refuses an item, and sends
+the ack `rejected`, when its kind is not in the peer's `kinds`, when it is
+expired, or when an attachment it lists was not received first with the same
+sha256 and size. An id seen before gets the first ack again, and channels
+does not store the item again. The replay table is a file for each id, so it survives a
+restart.
+
+**The negative guarantees.** A test proves each one:
+
+- A peer body never enters a turn. Channels stores it under
+  `/data/peers/inbox/<id>/` and tells core the id alone.
+- An ack never reaches a model, never notifies core, and is never acked back.
+  An ack for an id that is not in the outbox, or from another peer than the
+  one the item went to, is dropped.
+- `POST /v1/peers/show` sends the body to a person with no model, and its
+  reply holds no body. A person sees only their own items. A member, and
+  never a guest, may see an item that matched nobody.
+- The notice is a fixed template. Its title loses its line breaks and is cut
+  to 80 characters.
+- `POST /v1/peers/send` attaches only a file under `/data/wiki/` or
+  `/data/people/` whose sha256 and size match the envelope. A path outside,
+  a dot folder, or a link that points out is refused.
+
 ## What a compromised session can reach
 
 A prompt injection is the realistic attack: a message, a file, or a tool result
@@ -502,3 +554,6 @@ other's shared files on one instance.
   credential. Keep `.env` private.
 - A `package` MCP server runs in the gateway's container with no sandbox. See
   [Package MCP servers](#package-mcp-servers).
+- A peer envelope has no signature and no encryption. The peer's Telegram bot
+  id is the only proof of who sent it, so whoever holds that bot's token can
+  send as the peer. Telegram can read every envelope.

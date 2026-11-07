@@ -13,6 +13,11 @@ with the images and the packaged chart, are at
   it may send, and the contacts who use it. Start-up fails when a contact name
   or alias is the same as a local person id, a person name, or a group id, or
   when two contacts share a name. Nothing sends or receives yet.
+- **Channels receives and sends peer items over Telegram.** A message from a
+  bot never becomes a turn and never gets a reply. A paired peer's item is
+  checked, stored under `/data/peers/inbox/`, and acked. New routes:
+  `POST /v1/peers/send` and `POST /v1/peers/show` for the gateway, and
+  `POST /v1/peers/notice` for core. Nothing calls them yet.
 
 ## 0.1.1 - 2026-11-07
 
