@@ -103,7 +103,7 @@ def test_no_credentials_reads_the_journal(anon_client):
 def test_no_credentials_home_page_has_no_profile_link(anon_client):
     """There is no such person on disk, so the anonymous identity gets no
     profile link and no personal files folder on the home page."""
-    home = anon_client.get("/")
+    home = anon_client.get("/me")
     assert home.status_code == 200
     assert "/wiki/people/" not in home.text
     assert "profile" not in home.text

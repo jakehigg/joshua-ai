@@ -136,7 +136,7 @@ def test_member_and_guest_both_read_the_wiki(client):
 
 
 def test_home_lists_profile_link_wiki_and_attachments(client):
-    text = client.get("/", auth=("alex", ALEX_PW)).text
+    text = client.get("/me", auth=("alex", ALEX_PW)).text
     assert "/wiki/people/alex.md" in text
     assert "/wiki/pizza.md" in text
     assert "/attachments/2026/08/pic.png" in text
@@ -175,7 +175,7 @@ def test_dot_entries_are_hidden_from_home_and_search(client, tmp_path):
     data = tmp_path / "data"
     _write(data / "wiki/.git/config", "not markdown\n")
     _write(data / "wiki/.obsidian/workspace.md", "# Workspace\n\nA note tool's own state.\n")
-    home = client.get("/", auth=("alex", ALEX_PW)).text
+    home = client.get("/me", auth=("alex", ALEX_PW)).text
     assert "/wiki/.git" not in home
     assert "/wiki/.obsidian" not in home
     hits = client.get("/search", params={"q": "Workspace"}, auth=("alex", ALEX_PW)).text
@@ -306,9 +306,10 @@ def test_the_current_section_is_marked(client):
         assert f'class="j-nav-item" {link} aria-current="page"' in html, path
         assert f'class="j-tab" {link} aria-current="page"' in html, path
         assert html.count('aria-current="page"') == 2, path
-    home = client.get("/", auth=("alex", ALEX_PW)).text
-    assert 'aria-current="page"' not in home
-    assert "<strong>Home</strong>" in home
+    home = client.get("/me", auth=("alex", ALEX_PW)).text
+    assert 'class="j-nav-item" href="/me" aria-current="page"' in home
+    assert home.count('aria-current="page"') == 1
+    assert "<strong>You</strong>" in home
 
 
 def test_the_search_field_keeps_the_query(client):
