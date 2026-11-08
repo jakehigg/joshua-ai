@@ -8,7 +8,22 @@ with the images and the packaged chart, are at
 
 ### Added
 
-- **The assignments container, with a stub runner.** A fourth container,
+- **Assignments run a real session.** Each assignment now runs one Claude
+  Agent SDK session in `/work/<id>/`, with the file tools, Bash, the MCP
+  servers of the person through the gateway, and the tools `checkpoint`,
+  `wait`, `ask`, and `finish`. It works in slices of
+  `assignments.slice_turns` turns. Before each slice it reads core's
+  `GET /v1/limits`, and at the ceiling of its spec it stops as
+  `paused_limits` and asks Joshua through the question path. It writes a
+  plan page in `wiki/assignments/` first and keeps it current. Each slice
+  sends one usage row to core, so the usage page shows the tokens of the
+  assignments. `assignment_status` gives the next step. With
+  `limits.when_unknown: refuse`, `start_assignment` refuses a spec with no
+  `budget.tokens` while core cannot say how much of the limits is used. The
+  container now needs `CORE_URL` and `GATEWAY_URL`; compose and the chart set
+  them. See [assignments.md](assignments.md#the-runner).
+
+- **The assignments container.** A fourth container,
   `assignments`, stores long jobs that run for a member in the background.
   It is off by default: set `assignments.enabled: true` and start it with
   `docker compose --profile assignments up -d`, or set
@@ -18,8 +33,7 @@ with the images and the packaged chart, are at
   container keeps its rows in the schema `assignments` of the same Postgres,
   holds no model credential, and sends the report to channels with its own
   fleet token, `JOSHUA_TOKEN_ASSIGNMENTS`.
-  This release has only the stub runner: an assignment ends at once with a
-  fixed summary, and no model call runs. See
+  See
   [assignments.md](assignments.md) and
   [config.md](config.md#assignments).
 

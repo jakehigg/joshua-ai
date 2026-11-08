@@ -99,3 +99,29 @@ async def test_the_schema_applies_twice(store) -> None:
     await store.close()
     await store.open()
     assert len(await store.recent(None, 10)) == 1
+
+
+async def test_slices_count_up_and_a_repeat_is_not_stored(store) -> None:
+    row = await create(store)
+    assert await store.next_slice_n(row["id"]) == 1
+    fields = {
+        "usage": {"input": 10, "output": 5, "cache_read": 0, "cache_write": 1},
+        "limits_before": {"five_hour": {"used_pct": 20.0, "resets_at": None}},
+        "started_at": NOW,
+        "ended_at": NOW,
+        "reason": "end",
+    }
+    await store.add_slice(row["id"], n=1, **fields)
+    await store.add_slice(row["id"], n=1, **{**fields, "reason": "again"})
+    await store.add_slice(row["id"], n=2, **{**fields, "limits_before": None})
+    assert await store.next_slice_n(row["id"]) == 3
+    async with store.pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT n, input, reason, limits_before FROM assignments.slice "
+            "WHERE assignment_id = %s ORDER BY n",
+            (row["id"],),
+        )
+        rows = await cur.fetchall()
+    assert [(r["n"], r["input"], r["reason"]) for r in rows] == [(1, 10, "end"), (2, 10, "end")]
+    assert rows[0]["limits_before"]["five_hour"]["used_pct"] == 20.0
+    assert rows[1]["limits_before"] is None

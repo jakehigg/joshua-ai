@@ -8,6 +8,8 @@ and calls ``RunnerHost.stopped``, and the manager sends the event.
 
 ``StubRunner`` makes no model call. It ends each assignment as ``done``
 with a fixed summary, so the manager and the store are testable with no SDK.
+``joshua_assignments.sdk_runner.SdkRunner`` is the runner with a real
+session.
 """
 
 from __future__ import annotations
@@ -17,8 +19,10 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Protocol
 
+from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
+from joshua_assignments.settings import Settings
 from joshua_assignments.store import Store
 
 logger = get_logger("joshua_assignments.runner")
@@ -33,7 +37,9 @@ class RunnerHost(Protocol):
     """What a runner needs from the manager."""
 
     store: Store
+    settings: Settings
     clock: Callable[[], datetime]
+    load_config: Callable[[], JoshuaConfig]
 
     async def stopped(self, assignment_id: int) -> None: ...
 

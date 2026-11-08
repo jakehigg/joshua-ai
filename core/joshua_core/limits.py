@@ -9,8 +9,10 @@ Two sources fill one snapshot:
   fails. The endpoint gives the percent used and the reset time, and no
   token count.
 - ``sdk_event``: each model call on the subscription sends a
-  ``RateLimitEvent``. ``note_event`` reads it and updates the 5-hour and the
-  weekly window, at no cost. A call on another server is not read.
+  ``RateLimitEvent``. ``note_event`` reads it with
+  ``joshua_shared.limits.parse_event_windows``, which this module also
+  exports, and updates the 5-hour and the weekly window, at no cost. A
+  call on another server is not read.
 
 A request reads the endpoint only when the last good read is older than
 ``limits.max_age``. One read runs at a time, and the other requests wait for
@@ -40,6 +42,13 @@ from joshua_shared.contracts import (
     LimitsScoped,
     LimitsWindow,
 )
+from joshua_shared.limits import (
+    Window,
+    number,
+    parse_event_windows,
+    pct,
+    text,
+)
 from joshua_shared.log import get_logger
 
 logger = get_logger("limits")
@@ -60,7 +69,6 @@ _OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 _KIND_FIVE_HOUR = "session"
 _KIND_SEVEN_DAY = "weekly_all"
 _KIND_SCOPED = "weekly_scoped"
-_WINDOWS = ("five_hour", "seven_day")
 
 Clock = Callable[[], datetime]
 TokenSource = Callable[[], str]
@@ -77,13 +85,6 @@ def uses_subscription(env: Mapping[str, str] | None) -> bool:
 
 
 # ── the snapshot ────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class Window:
-    used_pct: float
-    resets_at: datetime | None = None
-    status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -114,16 +115,9 @@ class Snapshot:
     api_observed_at: datetime | None = field(default=None)
 
 
-def _number(value: Any) -> float | None:
-    """A finite number, or None. A bool is not a number here."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
-
-
-def _text(value: Any) -> str | None:
-    return value.strip() if isinstance(value, str) and value.strip() else None
+_number = number
+_text = text
+_pct = pct
 
 
 def _iso_time(value: Any) -> datetime | None:
@@ -135,21 +129,6 @@ def _iso_time(value: Any) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-
-
-def _epoch_time(value: Any) -> datetime | None:
-    """Epoch seconds as a UTC time, or None."""
-    number = _number(value)
-    if number is None or number <= 0:
-        return None
-    try:
-        return datetime.fromtimestamp(number, UTC)
-    except (OverflowError, OSError, ValueError):
-        return None
-
-
-def _pct(value: float) -> float:
-    return round(value, 1)
 
 
 def _limit_entries(body: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -257,39 +236,6 @@ def parse_usage(body: Any, observed_at: datetime) -> Snapshot | None:
         extra_usage=_api_extra(body.get("extra_usage")),
         api_observed_at=observed_at,
     )
-
-
-def parse_event_windows(info: Any) -> dict[str, Window]:
-    """The windows of the ``rate_limit_info`` of a ``RateLimitEvent``.
-
-    It reads ``raw["unifiedWindows"]`` first: a fraction of 0 to 1 and epoch
-    seconds. With none, it reads ``rate_limit_type`` with ``utilization``.
-    """
-    raw = getattr(info, "raw", None)
-    windows: dict[str, Window] = {}
-    unified = raw.get("unifiedWindows") if isinstance(raw, Mapping) else None
-    if isinstance(unified, Mapping):
-        for key in _WINDOWS:
-            item = unified.get(key)
-            if not isinstance(item, Mapping):
-                continue
-            used = _number(item.get("utilization"))
-            if used is None:
-                continue
-            windows[key] = Window(
-                _pct(used * 100), _epoch_time(item.get("resetsAt")), _text(item.get("status"))
-            )
-        if windows:
-            return windows
-    kind = getattr(info, "rate_limit_type", None)
-    used = _number(getattr(info, "utilization", None))
-    if kind in _WINDOWS and used is not None:
-        windows[kind] = Window(
-            _pct(used * 100),
-            _epoch_time(getattr(info, "resets_at", None)),
-            _text(getattr(info, "status", None)),
-        )
-    return windows
 
 
 # ── keeping the snapshot ────────────────────────────────────────────────────

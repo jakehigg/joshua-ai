@@ -224,3 +224,31 @@ def test_the_views_of_a_bare_row() -> None:
     assert view["last_checkpoint"] is None
     assert view["usage"] == {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
     assert view["repos"] == []
+
+
+async def test_a_failed_sweep_never_stops_the_queue(channels) -> None:
+    from joshua_assignments.runner import StubRunner
+
+    class Sweeping(StubRunner):
+        async def sweep(self) -> None:
+            raise OSError("disk")
+
+    cfg = make_config()
+    manager = Manager(
+        make_settings(),
+        FakeStore(),
+        load_config=lambda: cfg,
+        clock=lambda: FIXED_NOW,
+        runner=lambda m: Sweeping(m),
+    )
+    await manager.open()
+    started = await manager.start("alex", spec())
+    await manager.runner.idle()
+    assert manager.store.rows[started["id"]]["status"] == "done"
+
+
+def test_the_status_gives_the_next_step_of_the_last_checkpoint() -> None:
+    row = {"id": 1, "person_id": "alex", "status": "running", "spec": {"goal": "g"}}
+    view = full_view(row, {"at": FIXED_NOW, "note": "plan written. Next: clone it"})
+    assert view["next_step"] == "clone it"
+    assert full_view(row, None)["next_step"] is None

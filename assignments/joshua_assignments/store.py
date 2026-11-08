@@ -13,6 +13,7 @@ store.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any, Protocol
 
 from joshua_shared.log import get_logger
@@ -161,6 +162,20 @@ class Store(Protocol):
     async def next_queued(self) -> dict[str, Any] | None: ...
 
     async def requeue_running(self) -> list[int]: ...
+
+    async def next_slice_n(self, assignment_id: int) -> int: ...
+
+    async def add_slice(
+        self,
+        assignment_id: int,
+        *,
+        n: int,
+        usage: dict[str, int],
+        limits_before: dict[str, Any] | None,
+        started_at: datetime,
+        ended_at: datetime,
+        reason: str,
+    ) -> None: ...
 
 
 def check_fields(fields: dict[str, Any]) -> None:
@@ -325,3 +340,43 @@ class PgStore:
             )
             rows = await cur.fetchall()
         return sorted(int(row["id"]) for row in rows)
+
+    async def next_slice_n(self, assignment_id: int) -> int:
+        """The number of the next slice of an assignment: 1 for the first."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "SELECT COALESCE(MAX(n), 0) + 1 AS n FROM assignments.slice "
+                "WHERE assignment_id = %s",
+                (assignment_id,),
+            )
+            row = await cur.fetchone()
+        return int(row["n"]) if row else 1
+
+    async def add_slice(
+        self,
+        assignment_id: int,
+        *,
+        n: int,
+        usage: dict[str, int],
+        limits_before: dict[str, Any] | None,
+        started_at: datetime,
+        ended_at: datetime,
+        reason: str,
+    ) -> None:
+        """Store one slice. A slice with the same number is not stored again."""
+        async with self._pool().connection() as conn:
+            await conn.execute(
+                "INSERT INTO assignments.slice (assignment_id, n, input, output, cache_read, "
+                "cache_write, limits_before, started_at, ended_at, reason) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (assignment_id, n) DO NOTHING",
+                (
+                    assignment_id,
+                    n,
+                    *(int(usage.get(name, 0)) for name in USAGE_FIELDS),
+                    Jsonb(limits_before) if limits_before is not None else None,
+                    started_at,
+                    ended_at,
+                    reason,
+                ),
+            )

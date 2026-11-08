@@ -17,6 +17,7 @@ class FakeStore:
         self.clock = clock
         self.rows: dict[int, dict[str, Any]] = {}
         self.checkpoints: list[dict[str, Any]] = []
+        self.slices: list[dict[str, Any]] = []
         self.opened = False
         self.closed = False
         self.healthy = True
@@ -115,3 +116,12 @@ class FakeStore:
                 row["status"] = "queued"
                 ids.append(row["id"])
         return sorted(ids)
+
+    async def next_slice_n(self, assignment_id: int) -> int:
+        mine = [s["n"] for s in self.slices if s["assignment_id"] == assignment_id]
+        return max(mine, default=0) + 1
+
+    async def add_slice(self, assignment_id: int, **fields: Any) -> None:
+        if any(s["assignment_id"] == assignment_id and s["n"] == fields["n"] for s in self.slices):
+            return
+        self.slices.append({"assignment_id": assignment_id, **copy.deepcopy(fields)})

@@ -8,9 +8,15 @@ secrets and the addresses:
   one person, who must be in ``people``.
 - ``ADDON_TOKEN``: one bearer that names no person. It may use only the read
   tools.
-- ``CHANNELS_URL`` and ``JOSHUA_TOKEN_ASSIGNMENTS``: where the report and the
-  question events go, and the fleet token that sends them. Set both, or
-  neither.
+- ``JOSHUA_TOKEN_ASSIGNMENTS``: the fleet token of this container. It goes
+  to channels, to core, and to the gateway.
+- ``CHANNELS_URL``: where the report and the question events go.
+- ``CORE_URL``: where the runner reads the limits, writes the usage, and
+  sends the model calls of a session (core's model forwarder).
+- ``GATEWAY_URL``: where a session reaches the MCP servers of its person.
+
+Each URL needs ``JOSHUA_TOKEN_ASSIGNMENTS``. The runner needs ``CORE_URL``
+and ``GATEWAY_URL``.
 
 Every error message names the variable that is wrong, and never a token.
 """
@@ -45,12 +51,19 @@ class Settings:
     # every route except the probes.
     tokens: Mapping[str, Caller] = field(default_factory=dict, repr=False)
     channels_url: str | None = None
-    channels_token: str = field(default="", repr=False)
+    fleet_token: str = field(default="", repr=False)
+    core_url: str | None = None
+    gateway_url: str | None = None
 
     @property
     def will_notify(self) -> bool:
         """True when a report or a question goes to channels."""
-        return bool(self.channels_url and self.channels_token)
+        return bool(self.channels_url and self.fleet_token)
+
+    @property
+    def can_run(self) -> bool:
+        """True when the runner can run a session: core, the gateway, and the token."""
+        return bool(self.core_url and self.gateway_url and self.fleet_token)
 
     @property
     def people(self) -> list[str]:
@@ -109,16 +122,21 @@ def settings_from_env(cfg: JoshuaConfig, env: Mapping[str, str] | None = None) -
     if not tokens:
         raise SettingsError("set ASSIGNMENTS_TOKENS or ADDON_TOKEN: every caller needs a bearer")
 
-    channels_url = env.get("CHANNELS_URL", "").strip() or None
-    channels_token = env.get("JOSHUA_TOKEN_ASSIGNMENTS", "").strip()
-    if channels_url and not channels_url.startswith(("http://", "https://")):
-        raise SettingsError("CHANNELS_URL must start with http:// or https://")
-    if bool(channels_url) != bool(channels_token):
-        raise SettingsError("CHANNELS_URL and JOSHUA_TOKEN_ASSIGNMENTS must be set together")
+    fleet_token = env.get("JOSHUA_TOKEN_ASSIGNMENTS", "").strip()
+    urls: dict[str, str | None] = {}
+    for name in ("CHANNELS_URL", "CORE_URL", "GATEWAY_URL"):
+        url = env.get(name, "").strip() or None
+        if url and not url.startswith(("http://", "https://")):
+            raise SettingsError(f"{name} must start with http:// or https://")
+        if url and not fleet_token:
+            raise SettingsError(f"{name} needs JOSHUA_TOKEN_ASSIGNMENTS")
+        urls[name] = url
 
     return Settings(
         database_url=database_url,
         tokens=tokens,
-        channels_url=channels_url,
-        channels_token=channels_token,
+        channels_url=urls["CHANNELS_URL"],
+        fleet_token=fleet_token,
+        core_url=urls["CORE_URL"],
+        gateway_url=urls["GATEWAY_URL"],
     )

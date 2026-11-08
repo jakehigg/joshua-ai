@@ -51,6 +51,10 @@ spec:
               value: /data
             - name: CHANNELS_URL
               value: http://joshua-channels:8000
+            - name: CORE_URL
+              value: http://joshua-core:8000
+            - name: GATEWAY_URL
+              value: http://joshua-gateway:8000
             {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.assignments) | nindent 12 }}
           resources:
             {{- toYaml .Values.assignments.resources | nindent 12 }}

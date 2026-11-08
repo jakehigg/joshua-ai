@@ -30,6 +30,7 @@ def test_a_full_environment() -> None:
     }
     assert settings.people == ["alex", "mia"]
     assert settings.will_notify is True
+    assert settings.can_run is False
     assert "a-token" not in repr(settings) and "fleet" not in repr(settings)
     assert "postgresql" not in repr(settings)
 
@@ -38,6 +39,21 @@ def test_channels_is_optional() -> None:
     settings = settings_from_env(make_config(), env())
     assert settings.will_notify is False
     assert settings.channels_url is None
+    assert settings.can_run is False
+
+
+def test_core_and_the_gateway_let_the_runner_run() -> None:
+    settings = settings_from_env(
+        make_config(),
+        env(
+            CORE_URL="http://core:8000",
+            GATEWAY_URL="http://gateway:8000",
+            JOSHUA_TOKEN_ASSIGNMENTS="fleet",
+        ),
+    )
+    assert settings.can_run is True
+    assert settings.core_url == "http://core:8000"
+    assert "fleet" not in repr(settings)
 
 
 def test_the_addon_token_alone_is_enough() -> None:
@@ -54,8 +70,9 @@ def test_the_addon_token_alone_is_enough() -> None:
         ({"ASSIGNMENTS_TOKENS": "alex=x,mia=x"}, "the same token as another person"),
         ({"ADDON_TOKEN": "a-token"}, "ADDON_TOKEN: it is the same"),
         ({"CHANNELS_URL": "channels:8000", "JOSHUA_TOKEN_ASSIGNMENTS": "t"}, "must start with"),
-        ({"CHANNELS_URL": "http://channels:8000"}, "must be set together"),
-        ({"JOSHUA_TOKEN_ASSIGNMENTS": "t"}, "must be set together"),
+        ({"CHANNELS_URL": "http://channels:8000"}, "CHANNELS_URL needs JOSHUA_TOKEN"),
+        ({"CORE_URL": "http://core:8000"}, "CORE_URL needs JOSHUA_TOKEN"),
+        ({"GATEWAY_URL": "gateway", "JOSHUA_TOKEN_ASSIGNMENTS": "t"}, "must start with"),
     ],
 )
 def test_a_bad_environment_is_refused(changes: dict[str, str], message: str) -> None:

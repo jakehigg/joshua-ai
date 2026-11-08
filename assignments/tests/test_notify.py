@@ -102,7 +102,7 @@ async def test_no_destination_sends_nothing(channels) -> None:
 
 
 async def test_no_channels_sends_nothing(channels) -> None:
-    settings = make_settings(channels_url=None, channels_token="")
+    settings = make_settings(channels_url=None, fleet_token="")
     assert await notify.send_report(settings, SECTION, row()) is False
     assert channels.requests == []
 
