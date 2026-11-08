@@ -2,7 +2,8 @@
 
 A session's system prompt is layered, not a monolith:
 
-    kernel prompt files  +  channel line  +  identity block  +  tools block
+    kernel prompt files  +  user snippets  +  tool skills  +  channel line
+    +  identity block  +  tools block
 
 The composed string replaces the SDK preset in full. The memory recency tier
 (the person's profile page, plus the shared profile for members) is passed in
@@ -12,7 +13,7 @@ journal, arrives per turn through KB injection.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 from joshua_shared.log import get_logger
@@ -89,7 +90,8 @@ _JOURNAL_OFF = (
 TOOLS_BLOCK = (
     "## Your tools\n\n"
     "The `files` tool reads and writes your Markdown notes: `list_files`, "
-    "`read_file`, `write_file`, and `search_files`. It reaches the wiki under "
+    "`read_file`, `write_file`, `rename_file` (it renames a page or moves it to "
+    "another folder), and `search_files`. It reaches the wiki under "
     "`wiki/` (one wiki for everyone; `wiki/joshua-docs/` is your own documentation; "
     "`wiki/people/` holds the profiles you maintain nightly, read-only to you; "
     "`wiki/journal/` is your own journal, also read-only through this tool — "
@@ -110,6 +112,12 @@ TOOLS_BLOCK = (
     "have only the tools in that list — if none fits, say so plainly rather than "
     "pretending you acted."
 )
+
+
+# The MCP servers that ship a skill page, ``builtin/skills/<server>.md``. The
+# page goes into the prompt of a session that holds the server, and of no
+# other session, so a deployment without it pays nothing.
+SERVER_SKILLS = ("assignments",)
 
 
 class PromptComposer:
@@ -170,6 +178,21 @@ class PromptComposer:
                 parts.append(text)
         return parts
 
+    def _server_skills(self, servers: Collection[str], person: Person | None) -> list[str]:
+        """The skill page of each server in ``SERVER_SKILLS`` that the session holds.
+
+        A guest gets none: the servers that ship a skill are for members.
+        """
+        if person is not None and person.role == "guest":
+            return []
+        parts: list[str] = []
+        for name in SERVER_SKILLS:
+            if name in servers:
+                text = self._read(f"skills/{name}.md")
+                if text:
+                    parts.append(text)
+        return parts
+
     def channel_lines(self, channel: Channel | None) -> str:
         """The channel-address line for a turn's channel. Returns "" when there is
         nothing to say."""
@@ -188,7 +211,9 @@ class PromptComposer:
         person: Person | None,
         channel: Channel | None = None,
         memory: MemoryBlock | None = None,
+        servers: Collection[str] = (),
     ) -> str:
+        """Compose the prompt. ``servers`` are the gateway servers of the session."""
         parts: list[str] = []
         for rel in profile.prompt_files:
             text = self._read(rel)
@@ -196,6 +221,7 @@ class PromptComposer:
                 parts.append(text)
 
         parts.extend(self._user_snippets())
+        parts.extend(self._server_skills(servers, person))
 
         lines = self.channel_lines(channel)
         if lines:

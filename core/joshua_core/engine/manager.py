@@ -132,12 +132,28 @@ class _Built:
 
 
 JOURNAL_TOOL = "mcp__files__write_journal_entry"
+RENAME_TOOL = "mcp__files__rename_file"
 
 WRITE_TOOLS = (
     "mcp__files__write_file",
-    "mcp__files__rename_file",
+    RENAME_TOOL,
     JOURNAL_TOOL,
 )
+
+
+def _rename_target(data: dict[str, Any]) -> str | None:
+    """Where ``rename_file`` put the file: ``new_name`` when it is a path, else in the same folder.
+
+    The gateway can clean the name further, so this is the name the call asked for.
+    """
+    path, new_name = data.get("path"), data.get("new_name")
+    if not isinstance(path, str) or not isinstance(new_name, str) or not new_name.strip():
+        return path if isinstance(path, str) else None
+    new_name = new_name.strip()
+    if "/" in new_name:
+        return new_name
+    folder = path.rsplit("/", 1)[0] if "/" in path else ""
+    return f"{folder}/{new_name}" if folder else new_name
 
 
 def _journal_path(data: dict[str, Any], today: date | None) -> str | None:
@@ -189,8 +205,10 @@ def written_paths(tool_calls: list[dict[str, Any]], *, today: date | None = None
         data = call.get("input") or {}
         if name == JOURNAL_TOOL:
             path = _journal_path(data, today)
+        elif name == RENAME_TOOL:
+            path = _rename_target(data)
         else:
-            path = data.get("to") or data.get("path")
+            path = data.get("path")
         if isinstance(path, str) and path and path not in paths:
             paths.append(path)
     return paths
@@ -346,15 +364,16 @@ class ConversationManager:
         resolved = inference_plan.resolve(self._settings, inference_plan.turn_job(profile))
         resume = self._resume_on(conversation, resume, resolved)
         memory = self._memory_block(person, channel)
-        system_prompt = self._composer.compose(profile, person, channel, memory)
-        mem_paths = memory_prompt.source_paths(person, channel, self._data_dir)
-        mem_mtime = memory_prompt.newest_mtime(mem_paths)
-        cwd = self._session_cwd(conversation.id)
-
         role = self._conversation_role(channel, conversation)
         group = self._conversation_group(channel, conversation)
         group_id = group.id if group is not None else None
         gateway_names = allowed_gateway_servers(self._settings, conversation.person_id, group_id)
+        system_prompt = self._composer.compose(
+            profile, person, channel, memory, servers=gateway_names
+        )
+        mem_paths = memory_prompt.source_paths(person, channel, self._data_dir)
+        mem_mtime = memory_prompt.newest_mtime(mem_paths)
+        cwd = self._session_cwd(conversation.id)
         builtins = self.builtins_for(resolved.job)
         server_names = [*gateway_names, *builtins]
 

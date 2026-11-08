@@ -147,3 +147,22 @@ def test_a_journal_entry_with_a_bad_date_is_left_out() -> None:
 def test_a_journal_call_with_no_slug_is_left_out() -> None:
     calls = [_journal_call(markdown="body only")]
     assert manager.written_paths(calls, today=date(2026, 9, 4)) == []
+
+
+def test_a_rename_reports_where_the_file_went() -> None:
+    def rename(path: str, new_name: str | None) -> dict:
+        data = {"path": path} if new_name is None else {"path": path, "new_name": new_name}
+        return {"id": f"r-{new_name}", "name": "mcp__files__rename_file", "input": data, "ok": True}
+
+    calls = [
+        rename("wiki/inbox/idea.md", "plan.md"),
+        rename("wiki/inbox/old.md", "wiki/projects/old.md"),
+        rename("top.md", "b.md"),
+        rename("wiki/x.md", None),
+    ]
+    assert manager.written_paths(calls) == [
+        "wiki/inbox/plan.md",
+        "wiki/projects/old.md",
+        "b.md",
+        "wiki/x.md",
+    ]
