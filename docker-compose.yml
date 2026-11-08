@@ -199,7 +199,7 @@ services:
   # an `mcp:` server: docs/assignments.md has the steps. It is not published on
   # the host: only the gateway calls it.
   #
-  # It holds no model credential and no upstream credential. It gets the
+  # It holds no model credential and no MCP credential. It gets the
   # database (the schema `assignments` in the same Postgres), its own fleet
   # token for the events it sends to channels, and the bearers of its callers.
   # `/data` is read-only: it reads the people file there and writes nothing.
@@ -223,6 +223,12 @@ services:
       ASSIGNMENTS_TOKENS: ${ASSIGNMENTS_TOKENS:-}
       # A bearer that names no person and may only read.
       ADDON_TOKEN: ${ASSIGNMENTS_ADDON_TOKEN:-}
+    # The read token of each git host, under the name that
+    # assignments.platforms.<host>.token_env gives. Only the manager reads it;
+    # a session clones through the manager and never sees it.
+    env_file:
+      - path: .env.assignments
+        required: false
     volumes:
       - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
       - data:/data:ro

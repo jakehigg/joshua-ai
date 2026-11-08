@@ -10,7 +10,7 @@ from pathlib import Path
 from conftest import make_config, make_settings
 from fakes import FIXED_NOW, FakeStore
 from joshua_assignments.manager import Manager
-from joshua_assignments.prompts import READ_PAGE_FIRST
+from joshua_assignments.prompts import READ_PAGE_FIRST, RESTARTED
 from joshua_assignments.sdk_runner import (
     ASK_REPLY,
     AssignmentTools,
@@ -367,7 +367,8 @@ async def test_the_token_cap_ends_budget_exceeded(tmp_path, channels) -> None:
     row = h.row(started["id"])
     assert (row["status"], row["error"]) == ("budget_exceeded", "tokens")
     assert len(sdk.clients) == 1
-    assert not (h.work / str(started["id"])).exists()
+    # extend_assignment can resume it, so the session stays.
+    assert (h.work / str(started["id"])).is_dir()
 
 
 async def test_max_turns_ends_budget_exceeded_and_bounds_the_slice(tmp_path, channels) -> None:
@@ -438,12 +439,13 @@ async def test_a_restart_resumes_the_stored_session_with_the_page_first(tmp_path
     )
     await store.update(row["id"], status="running", started_at=FIXED_NOW, session_id="sess-9")
     await store.add_checkpoint(row["id"], "step 1 done. Next: step 2")
+    (h.work / str(row["id"]) / ".home").mkdir(parents=True)
     h.sdk.scripts.append([call("finish", summary="ok"), result("success")])
     await h.manager.open()
     await h.runner.idle()
     [client] = h.sdk.clients
     assert client.options.resume == "sess-9"
-    assert client.prompt.startswith(READ_PAGE_FIRST)
+    assert client.prompt.startswith(RESTARTED)
     assert "Last checkpoint: step 1 done. Next: step 2" in client.prompt
     assert h.row(row["id"])["status"] == "done"
 

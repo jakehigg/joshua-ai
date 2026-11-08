@@ -14,11 +14,20 @@ slices of ``assignments.slice_turns`` model turns:
    error (``failed``). ``ask`` parks the assignment as ``waiting``.
 
 The session id is on the row, and each slice passes it as ``resume``, so a
-stop, an answer, or a restart continues the same session. The scratch
-directory ``/work/<id>/`` holds the session (``HOME`` and
-``CLAUDE_CONFIG_DIR`` are in it). It stays while the assignment is parked or
-failed, and goes when it ends in another way. ``sweep`` removes the scratch
-of a failed assignment after ``assignments.keep_failed_work``.
+stop, an answer, an extension, or a restart continues the same session. An
+answer goes to the model once: the runner clears it on the row when it sends
+the prompt, so a restart does not send it again. The scratch directory
+``/work/<id>/`` holds the session (``HOME`` and ``CLAUDE_CONFIG_DIR`` are in
+it). It stays while the assignment is parked, and after it ends as
+``failed``, ``budget_exceeded``, or ``time_exceeded`` (``KEEP_SCRATCH``). It
+goes when the assignment ends in another way. ``sweep`` removes a kept
+scratch after ``assignments.keep_failed_work``. When the scratch of an
+assignment with a session id is gone, the runner starts a new session that
+reads the plan page first.
+
+With a ``GitProxy``, each session gets a new secret for the proxy and a
+``.gitconfig`` in its ``HOME`` that sends every ``https://`` git URL there.
+The secret goes when the session stops. See ``git_proxy``.
 
 A failure gives the row a short label, never the error text.
 """
@@ -45,8 +54,9 @@ from joshua_shared.log import get_logger
 from joshua_assignments import budget, prompts, session
 from joshua_assignments.clock import Clock
 from joshua_assignments.core_client import CoreClient
+from joshua_assignments.git_proxy import GitProxy, git_config, write_git_config
 from joshua_assignments.runner import RunnerHost
-from joshua_assignments.store import FINISHED, USAGE_FIELDS
+from joshua_assignments.store import FINISHED, KEEP_SCRATCH, USAGE_FIELDS
 
 logger = get_logger("joshua_assignments.sdk_runner")
 
@@ -173,8 +183,10 @@ class SdkRunner:
         sleep: Callable[[float], Any] = asyncio.sleep,
         monotonic: Callable[[], float] = time.monotonic,
         watch_s: float = session.WATCH_S,
+        git: GitProxy | None = None,
     ) -> None:
         self.host = host
+        self.git = git
         self.core = core or CoreClient(host.settings)
         self.client_factory = client_factory
         self.work_root = work_root
@@ -187,10 +199,21 @@ class SdkRunner:
     # --- the Runner protocol ----------------------------------------------
 
     async def start(self, assignment: dict[str, Any]) -> None:
-        self._spawn(assignment["id"], after_stop=False, answer=None)
+        self._spawn(assignment["id"], reason=None, answer=None)
 
-    async def resume(self, assignment: dict[str, Any], text: str) -> None:
-        self._spawn(assignment["id"], after_stop=True, answer=text or None)
+    async def resume(
+        self, assignment: dict[str, Any], text: str, *, reason: str = "answer"
+    ) -> None:
+        self._spawn(assignment["id"], reason=reason, answer=text or None)
+
+    async def open(self) -> None:
+        """Start the git proxy, when the runner has one."""
+        if self.git is not None:
+            await self.git.start()
+
+    async def close(self) -> None:
+        if self.git is not None:
+            await self.git.close()
 
     async def cancel(self, assignment: dict[str, Any]) -> None:
         """Stop the session of the assignment and remove its scratch directory."""
@@ -216,7 +239,7 @@ class SdkRunner:
         shutil.rmtree(self.work_dir(assignment_id), ignore_errors=True)
 
     async def sweep(self) -> list[int]:
-        """Remove the scratch of each ended assignment, a failed one after ``keep_failed_work``.
+        """Remove the scratch of each ended assignment, a kept one after ``keep_failed_work``.
 
         Returns the ids whose scratch it removed.
         """
@@ -236,7 +259,7 @@ class SdkRunner:
             row = await self.host.store.get(assignment_id)
             if row is not None and row["status"] not in FINISHED:
                 continue
-            if row is not None and row["status"] == "failed":
+            if row is not None and row["status"] in KEEP_SCRATCH:
                 finished_at = row.get("finished_at")
                 if finished_at is not None and now - finished_at < keep:
                     continue
@@ -248,8 +271,8 @@ class SdkRunner:
 
     # --- one run ----------------------------------------------------------
 
-    def _spawn(self, assignment_id: int, *, after_stop: bool, answer: str | None) -> None:
-        task = asyncio.create_task(self._run(assignment_id, after_stop, answer))
+    def _spawn(self, assignment_id: int, *, reason: str | None, answer: str | None) -> None:
+        task = asyncio.create_task(self._run(assignment_id, reason, answer))
         self.tasks[assignment_id] = task
         task.add_done_callback(lambda done: self._forget(assignment_id, done))
 
@@ -257,9 +280,9 @@ class SdkRunner:
         if self.tasks.get(assignment_id) is task:
             del self.tasks[assignment_id]
 
-    async def _run(self, assignment_id: int, after_stop: bool, answer: str | None) -> None:
+    async def _run(self, assignment_id: int, reason: str | None, answer: str | None) -> None:
         try:
-            await self._work(assignment_id, after_stop, answer)
+            await self._work(assignment_id, reason, answer)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — every failure ends the assignment
@@ -277,7 +300,7 @@ class SdkRunner:
         if status in FINISHED:
             fields["finished_at"] = self.host.clock()
         await self.host.store.update(assignment_id, status=status, **fields)
-        if status in FINISHED and status != "failed":
+        if status in FINISHED and status not in KEEP_SCRATCH:
             self.remove_work(assignment_id)
         logger.info(
             {"message": "assignment stopped", "assignment_id": assignment_id, "status": status}
@@ -318,7 +341,24 @@ class SdkRunner:
             role="member",
         )
 
-    async def _work(self, assignment_id: int, after_stop: bool, answer: str | None) -> None:
+    def _git_setup(self, row: dict[str, Any], home: Path) -> None:
+        """Give the session a new proxy secret and its ``.gitconfig``. No proxy: no file."""
+        if self.git is None or self.git.port is None:
+            return
+        secret = self.git.grant(row["id"])
+        hosts = {repo.split("/", 1)[0] for repo in (row.get("spec") or {}).get("repos") or []}
+        write_git_config(home, git_config(self.git.port, secret, hosts))
+
+    async def _work(self, assignment_id: int, reason: str | None, answer: str | None) -> None:
+        try:
+            await self._work_inner(assignment_id, reason, answer)
+        finally:
+            if self.git is not None:
+                self.git.revoke(assignment_id)
+
+    async def _work_inner(
+        self, assignment_id: int, resume_reason: str | None, answer: str | None
+    ) -> None:
         store = self.host.store
         row = await store.get(assignment_id)
         if row is None or row["status"] != "running":
@@ -328,9 +368,16 @@ class SdkRunner:
             await self._end(assignment_id, "failed", error="not_configured")
             return
         work = self.work_dir(assignment_id)
+        scratch_lost = not work.exists() and bool(row.get("session_id"))
+        if scratch_lost:
+            # The session record was in the scratch, so the session cannot continue.
+            logger.info({"message": "scratch gone; new session", "assignment_id": assignment_id})
+            row = await store.update(assignment_id, session_id=None) or row
         home = work / ".home"
         config_dir = home / ".claude"
         config_dir.mkdir(parents=True, exist_ok=True)
+        (work / prompts.REPOS_DIR).mkdir(exist_ok=True)
+        self._git_setup(row, home)
         tools = AssignmentTools(assignment_id, self.host, self.sleep)
         server = session.assignment_server(tools.handlers())
         env = session.session_env(
@@ -384,12 +431,22 @@ class SdkRunner:
                         tokens_left=int(tokens_cap) - total_tokens(row) if tokens_cap else None,
                     ),
                     checkpoint=checkpoint["note"] if checkpoint else None,
-                    after_stop=after_stop,
+                    reason=resume_reason,
                     answer=answer,
                 )
             else:
-                prompt = prompts.first_prompt(row)
-            after_stop, answer = False, None
+                prompt = prompts.first_prompt(
+                    row,
+                    work,
+                    resumed=scratch_lost,
+                    has_tasks=prompts.TASKS_SERVER in self._gateway(row),
+                )
+                if answer:
+                    prompt += f"\nAnswer: {answer.strip()[: prompts.MAX_ANSWER]}"
+            if answer:
+                # The answer is in this prompt: a restart must not send it again.
+                await store.update(assignment_id, answer=None)
+            resume_reason, answer, scratch_lost = None, None, False
 
             persona = section.models.get(str(spec.get("model") or ""))
             options = session.build_options(

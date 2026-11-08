@@ -63,6 +63,17 @@ def test_the_report_shows_follow_ups_and_cuts_a_long_summary() -> None:
     assert "Follow-ups:\n```\n[" in text and "Fix it" in text
 
 
+def test_the_report_gives_the_cost() -> None:
+    text = notify.report_text(
+        row(input=400, output=80, cache_read=4000, cache_write=20, turns=22, working_s=3900)
+    )
+    assert (
+        "Cost: 4500 tokens (input 400, output 80, cache read 4000, cache write 20), "
+        "22 turns, and 1h 05m of working time."
+    ) in text
+    assert "Cost: 0 tokens" in notify.report_text({"id": 3})
+
+
 def test_the_report_of_an_empty_row() -> None:
     text = notify.report_text({"id": 3})
     assert text.startswith("Assignment 3 has ended: unknown.")

@@ -78,6 +78,11 @@ def call(name: str, **args: Any) -> tuple[str, str, dict[str, Any]]:
     return ("tool", name, args)
 
 
+def shell(run: Callable[[Any], Any]) -> tuple[str, Callable[[Any], Any]]:
+    """A script step: the session runs a command. ``run`` gets the options."""
+    return ("shell", run)
+
+
 HANG = "hang"
 
 
@@ -108,6 +113,9 @@ class FakeClient:
                 await asyncio.Event().wait()
             elif isinstance(step, tuple) and step[0] == "tool":
                 self.replies.append(await handlers[step[1]](step[2]))
+            elif isinstance(step, tuple) and step[0] == "shell":
+                # What a Bash call of the session does: run with the session options.
+                self.replies.append(await step[1](self.options))
             elif isinstance(step, BaseException):
                 raise step
             else:

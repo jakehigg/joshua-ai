@@ -1,8 +1,11 @@
 """The runner: the part that does the work of an assignment.
 
 The manager sets an assignment ``running`` and calls ``start`` (a first
-run) or ``resume`` (an assignment that ran before: after an answer, or
-after a restart). ``cancel`` stops the work. Each call returns at once; the
+run) or ``resume`` (an assignment that ran before). ``resume`` gets the
+answer, if any, and the reason: ``answer`` (after ``answer_assignment``),
+``restart`` (the container started again while it ran), or ``extend``
+(``extend_assignment`` raised a cap that it had reached). ``cancel`` stops
+the work. Each call returns at once; the
 work runs in the background. When the work stops, the runner writes the row
 and calls ``RunnerHost.stopped``, and the manager sends the event.
 
@@ -44,10 +47,15 @@ class RunnerHost(Protocol):
     async def stopped(self, assignment_id: int) -> None: ...
 
 
+RESUME_REASONS = ("answer", "restart", "extend")
+
+
 class Runner(Protocol):
     async def start(self, assignment: dict[str, Any]) -> None: ...
 
-    async def resume(self, assignment: dict[str, Any], text: str) -> None: ...
+    async def resume(
+        self, assignment: dict[str, Any], text: str, *, reason: str = "answer"
+    ) -> None: ...
 
     async def cancel(self, assignment: dict[str, Any]) -> None: ...
 
@@ -63,7 +71,9 @@ class StubRunner:
     async def start(self, assignment: dict[str, Any]) -> None:
         self._spawn(assignment["id"])
 
-    async def resume(self, assignment: dict[str, Any], text: str) -> None:
+    async def resume(
+        self, assignment: dict[str, Any], text: str, *, reason: str = "answer"
+    ) -> None:
         self._spawn(assignment["id"])
 
     async def cancel(self, assignment: dict[str, Any]) -> None:

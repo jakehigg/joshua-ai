@@ -36,8 +36,13 @@ STATUSES = (
 )
 # An assignment that waits for an answer. It holds no session and no slot.
 PARKED = frozenset({"waiting", "paused_limits"})
-# An assignment that ended. Nothing starts it again.
+# An assignment that ended. Only ``extend_assignment`` starts one of
+# ``RESUMABLE`` again; nothing starts the others.
 FINISHED = frozenset({"done", "failed", "cancelled", "budget_exceeded", "time_exceeded"})
+# An ended assignment that ``extend_assignment`` resumes when it raises a cap.
+RESUMABLE = frozenset({"budget_exceeded", "time_exceeded"})
+# An ended assignment whose scratch stays for ``assignments.keep_failed_work``.
+KEEP_SCRATCH = frozenset({"failed", *RESUMABLE})
 USAGE_FIELDS = ("input", "output", "cache_read", "cache_write")
 JSON_FIELDS = frozenset({"spec", "stopped_at_limits", "follow_ups"})
 # The columns ``update`` may set.
