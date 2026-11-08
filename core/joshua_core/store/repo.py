@@ -963,6 +963,29 @@ class Repo:
             )
             return await cur.fetchall()
 
+    # --- subscription limits ----------------------------------------------------
+
+    async def load_limits_snapshot(self) -> dict[str, Any] | None:
+        """The body of the last saved limits snapshot, or None."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT body FROM limits_snapshot WHERE id = 1")
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        body = row["body"]
+        return body if isinstance(body, dict) else None
+
+    async def save_limits_snapshot(self, data: dict[str, Any]) -> None:
+        """Replace the saved limits snapshot with ``data``."""
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO limits_snapshot (id, saved_at, body) VALUES (1, now(), %s)
+                ON CONFLICT (id) DO UPDATE SET saved_at = now(), body = EXCLUDED.body
+                """,
+                (Json(data),),
+            )
+
     async def backfill_usage(self) -> dict[str, int]:
         """Write the `usage_event` rows of the calls made before the table
         existed, and return how many rows each kind added.

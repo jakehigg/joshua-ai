@@ -21,6 +21,7 @@ from joshua_shared import layout, wikigit
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger, install_healthcheck_filter
 
+from joshua_core import limits as limits_module
 from joshua_core.admin import build_admin_router
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
 from joshua_core.engine import inference as inference_plan
@@ -31,8 +32,11 @@ from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
 from joshua_core.engine.stub_agent import StubOneshot
 from joshua_core.engine.tools import history, internet, recall, registration, scheduling
+from joshua_core.engine.tools import limits as limits_tool
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
+from joshua_core.limits import LimitsTracker
+from joshua_core.limits_api import build_limits_router
 from joshua_core.memory import embed
 from joshua_core.memory.indexer import Indexer, IndexerLoop
 from joshua_core.memory.nightly import NightlyReflector
@@ -87,6 +91,8 @@ class AppContext:
     # The call of `POST /admin/inference/check`, or None for `run_oneshot`.
     # The stub backend sets a call with no SDK and no network.
     oneshot: Any = None
+    # The subscription limits, or None when `limits.enabled` is false.
+    limits: LimitsTracker | None = None
 
 
 def _database_url() -> str:
@@ -154,7 +160,8 @@ async def lifespan(app: FastAPI):
     await seed_people(repo, settings)
     _bootstrap_layout(settings)
 
-    manager = _build_manager(settings, repo, agent_backend)
+    limits_tracker = await _build_limits(settings, repo)
+    manager = _build_manager(settings, repo, agent_backend, limits_tracker)
     memory_store = MemoryStore(db.pool)
     indexer, indexer_loop = _build_memory(settings, memory_store, manager, repo)
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
@@ -197,6 +204,7 @@ async def lifespan(app: FastAPI):
         reflector=reflector,
         snapshots=_build_snapshots(settings, repo, indexer),
         oneshot=StubOneshot() if agent_backend == "stub" else None,
+        limits=limits_tracker,
     )
     await scheduler.start()
     manager.start_reaper()
@@ -218,6 +226,9 @@ async def lifespan(app: FastAPI):
         await turns.drain()
         await manager.stop_reaper()
         await manager.shutdown()
+        limits_module.install(None)
+        if limits_tracker is not None:
+            await limits_tracker.drain()
         await db.close()
 
 
@@ -272,12 +283,36 @@ def _start_snapshots(runner: SnapshotRunner | None) -> None:
     logger.info({"message": "snapshot runner started"})
 
 
-def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> ConversationManager:
+async def _build_limits(settings: JoshuaConfig, repo: Repo) -> LimitsTracker | None:
+    """The tracker of the subscription limits, with its last saved snapshot,
+    or None when `limits.enabled` is false. It reads the token that
+    `_take_credentials` kept."""
+    if not settings.limits.enabled:
+        limits_module.install(None)
+        return None
+    tracker = LimitsTracker(
+        token=inference_plan.subscription_token,
+        timezone=settings.timezone,
+        max_age_s=settings.limits.max_age_seconds,
+        store=repo,
+    )
+    await tracker.load()
+    limits_module.install(tracker)
+    return tracker
+
+
+def _build_manager(
+    settings: JoshuaConfig,
+    repo: Repo,
+    agent_backend: str,
+    limits_tracker: LimitsTracker | None = None,
+) -> ConversationManager:
     """Wire the conversation manager from config and the fleet environment.
 
     The gateway url and the core fleet token route the agent's MCP servers
-    through the gateway. The ``registration``, ``scheduling``, and ``history`` builtins register
-    here.
+    through the gateway. The ``registration``, ``scheduling``, ``history``,
+    and ``limits`` builtins register here. ``limits`` goes only to the jobs
+    that ``limits.chat_tool`` and ``limits.voice_tool`` name.
     """
     person_prompts = {p.id: p.prompt for p in settings.people if p.prompt}
     person_journal = {p.id: p.journal for p in settings.people if p.journal != "auto"}
@@ -304,6 +339,7 @@ def _build_manager(settings: JoshuaConfig, repo: Repo, agent_backend: str) -> Co
     registration.register(manager, data_dir)
     scheduling.register(manager)
     history.register(manager)
+    limits_tool.register(manager, limits_tracker, settings)
     return manager
 
 
@@ -455,6 +491,7 @@ def build_app() -> FastAPI:
     app.include_router(build_admin_router())
     app.include_router(build_search_router())
     app.include_router(build_usage_router())
+    app.include_router(build_limits_router())
     return app
 
 

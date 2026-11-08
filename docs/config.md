@@ -1063,6 +1063,38 @@ usage:
 `GET /admin/usage` gives the same answer to an admin caller and does not read
 this list. See [contracts.md](contracts.md#the-usage-route).
 
+## limits
+
+`limits` controls how Joshua knows how much of the Claude subscription limits
+is used: the 5-hour window and the weekly window. Core reads the percent used
+and the reset times from Anthropic with the subscription token
+(`CLAUDE_CODE_OAUTH_TOKEN`). Anthropic does not document this endpoint, and it
+gives a percent, not a token count. Each model call on the subscription also
+updates the two windows at no cost. Core gives the result on
+`GET /v1/limits` and through the `check_limits` tool, so you can ask Joshua
+"how much of my limit is left?".
+
+| Knob | Default | Effect |
+|---|---|---|
+| `enabled` | `true` | `false` turns the feature off: `GET /v1/limits` answers 404, and no job gets the tool. |
+| `max_age` | `5m` | A request reads Anthropic again only when the last good read is older than this. A duration such as `30s`, `5m`, or `1h`. |
+| `chat_tool` | `true` | Gives `check_limits` to chat turns. |
+| `voice_tool` | `true` | Gives `check_limits` to voice turns. |
+
+```yaml
+limits:
+  enabled: true
+  max_age: 5m
+  chat_tool: true
+  voice_tool: true
+```
+
+With no subscription token, the answer is `available: false` with the reason
+`no subscription token`. When Anthropic answers `429`, core keeps the last
+numbers, marks them `stale`, and does not ask again until the `Retry-After`
+time has passed. After another error it waits 60 seconds. No caller can make
+core ask sooner. See [contracts.md](contracts.md#the-limits-route).
+
 ## inference
 
 `inference` sets the server and the key for the model calls. With no

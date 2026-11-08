@@ -12,7 +12,7 @@ module never imports them.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
@@ -251,6 +251,8 @@ class ConversationManager:
         self._url_grants = url_grants
         # scheduling / registration builders, injected by their tickets.
         self._builtin_factories: dict[str, BuiltinFactory] = dict(builtin_factories or {})
+        # The jobs that get a builtin. A builtin with no entry goes to every job.
+        self._builtin_jobs: dict[str, frozenset[str]] = {}
         # Iterated before assembling each turn's prompt; empty until phase 4.
         self._context_providers: list[ContextProvider] = []
         self._pool: dict[str, _Managed] = {}
@@ -264,9 +266,27 @@ class ConversationManager:
         """The URLs each conversation may ask the internet agent to read."""
         return self._url_grants
 
-    def register_builtin(self, name: str, factory: BuiltinFactory) -> None:
-        """Wire an in-process MCP server builder (scheduling, registration)."""
+    def register_builtin(
+        self, name: str, factory: BuiltinFactory, *, jobs: Iterable[str] | None = None
+    ) -> None:
+        """Wire an in-process MCP server builder (scheduling, registration).
+
+        ``jobs`` names the jobs of a turn (``chat``, ``voice``) whose sessions
+        get the server. None gives it to every job.
+        """
         self._builtin_factories[name] = factory
+        if jobs is None:
+            self._builtin_jobs.pop(name, None)
+        else:
+            self._builtin_jobs[name] = frozenset(jobs)
+
+    def builtins_for(self, job: str) -> dict[str, BuiltinFactory]:
+        """The builtin builders that a session of ``job`` gets."""
+        return {
+            name: factory
+            for name, factory in self._builtin_factories.items()
+            if name not in self._builtin_jobs or job in self._builtin_jobs[name]
+        }
 
     def add_context_provider(self, provider: ContextProvider) -> None:
         self._context_providers.append(provider)
@@ -335,7 +355,8 @@ class ConversationManager:
         group = self._conversation_group(channel, conversation)
         group_id = group.id if group is not None else None
         gateway_names = allowed_gateway_servers(self._settings, conversation.person_id, group_id)
-        server_names = [*gateway_names, *self._builtin_factories]
+        builtins = self.builtins_for(resolved.job)
+        server_names = [*gateway_names, *builtins]
 
         if self._agent_backend == "stub":
             from joshua_core.engine.stub_agent import StubAgentSession
@@ -370,7 +391,7 @@ class ConversationManager:
             tz=self._settings.timezone,
             person_id=conversation.person_id,
         )
-        for name, factory in self._builtin_factories.items():
+        for name, factory in builtins.items():
             mcp[name] = factory(deps)
         options = build_options(
             system_prompt=system_prompt,

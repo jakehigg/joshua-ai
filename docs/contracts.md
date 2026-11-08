@@ -105,6 +105,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
+| `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
@@ -172,6 +173,56 @@ group, and `[]` when no call named one. `workers` gives the same counts and
 the other groups. The answer holds no person, no message, and no question. An
 empty list in `usage.allowed_callers` turns the route off: every caller gets
 `403`. `GET /admin/usage` gives the same answer to an admin caller.
+
+### The limits route
+
+`GET /v1/limits` tells how much of the Claude subscription limits is used. It
+has no bearer, as `/healthz`. Core is not exposed outside the cluster
+(`http://<core service>:8000/v1/limits`), and on compose it is on the host at
+`127.0.0.1:8081` only (`http://127.0.0.1:8081/v1/limits`). The answer holds
+percentages, reset times, and the extra usage amounts only: no person, no
+message, and no token.
+
+```json
+{"available": true, "reason": null, "source": "usage_api",
+ "observed_at": "2026-11-07T20:00:00-05:00", "stale": false,
+ "five_hour": {"used_pct": 23.0, "left_pct": 77.0,
+               "resets_at": "2026-11-07T22:30:00.842595-05:00", "status": "normal"},
+ "seven_day": {"used_pct": 23.0, "left_pct": 77.0,
+               "resets_at": "2026-11-09T20:00:00.842614-05:00", "status": "normal"},
+ "scoped": [{"name": "Fable", "used_pct": 13.0, "left_pct": 87.0,
+             "resets_at": "2026-11-09T20:00:00.842614-05:00"}],
+ "extra_usage": {"enabled": true, "used": 0.0, "limit": 25.0, "currency": "USD"},
+ "retry_after": null}
+```
+
+Core reads the numbers from `GET /api/oauth/usage` on Anthropic with the
+subscription token. Anthropic does not document this endpoint, so a field can
+change or go away, and core then leaves it out. It gives the percent used, not
+a token count. Each model call on the subscription also sends the 5-hour and
+the weekly window to core. Core then sets `source` to `sdk_event`. A call on
+another server is not read.
+
+- `available` is `false` when core knows nothing yet. `reason` then says why:
+  `no subscription token`, or `the limits are not known yet`.
+- `used_pct` and `left_pct` are 0 to 100. `resets_at` and `observed_at` are
+  ISO 8601 with the offset of the instance `timezone`, or `null`.
+- `status` is the word that Anthropic gave: from the usage endpoint the
+  severity of the limit (such as `normal`), and from a model call `allowed`,
+  `allowed_warning`, or `rejected`.
+- `scoped` lists the weekly limits of one model, when Anthropic gives them.
+- `extra_usage` is the paid usage past the limits. `used` and `limit` are in
+  units of `currency`, not cents. They are `null` when Anthropic does not say
+  the unit.
+- `stale` is `true` when the last read of the endpoint failed and no model
+  call has updated the windows since. `retry_after` is the seconds until core
+  reads the endpoint again: the `Retry-After` of a `429`, or 60 after another
+  error. It is `null` when no block is in force.
+
+A request reads the endpoint only when the last good read is older than
+`limits.max_age` (default `5m`). One read runs at a time, and the other
+requests wait for it. No parameter can make core read sooner. Core keeps the
+last snapshot in the `limits_snapshot` table, so a restart keeps it.
 
 ### The stream
 

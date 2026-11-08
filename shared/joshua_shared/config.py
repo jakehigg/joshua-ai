@@ -870,6 +870,44 @@ class UsageConfig(_Model):
         return value
 
 
+class LimitsConfig(_Model):
+    """Core's view of the Claude subscription limits: ``GET /v1/limits`` and
+    the ``check_limits`` tool.
+
+    ``enabled: false`` turns both off: the route answers 404 and no session
+    gets the tool. ``max_age`` is the age after which a request reads the
+    usage endpoint again. ``chat_tool`` and ``voice_tool`` give the tool to
+    the ``chat`` job and the ``voice`` job.
+    """
+
+    enabled: bool = True
+    max_age: str = "5m"
+    chat_tool: bool = True
+    voice_tool: bool = True
+
+    @field_validator("max_age")
+    @classmethod
+    def _check_max_age(cls, value: str) -> str:
+        if parse_duration(value) <= 0:
+            raise ValueError("max_age must be more than zero")
+        return value
+
+    @property
+    def max_age_seconds(self) -> int:
+        return parse_duration(self.max_age)
+
+    def tool_jobs(self) -> frozenset[str]:
+        """The conversation jobs that get the ``check_limits`` tool."""
+        if not self.enabled:
+            return frozenset()
+        jobs = set()
+        if self.chat_tool:
+            jobs.add("chat")
+        if self.voice_tool:
+            jobs.add("voice")
+        return frozenset(jobs)
+
+
 class Viewer(_Model):
     # The read-only web viewer. ``users`` maps a person id to a password
     # reference: a ``$2`` bcrypt hash, or a literal password, normally injected
@@ -1012,7 +1050,14 @@ class JoshuaConfig(_Model):
     modules: list[str] = []
     viewer: Viewer = Viewer()
     usage: UsageConfig = UsageConfig()
+    limits: LimitsConfig = LimitsConfig()
     inference: Inference = Inference()
+
+    @field_validator("limits", mode="before")
+    @classmethod
+    def _empty_limits(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        return {} if value in (None, "") else value
 
     @model_validator(mode="after")
     def _check_unique(self) -> JoshuaConfig:

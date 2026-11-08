@@ -46,8 +46,8 @@ BlueBubbles password. It holds no upstream tool credential.
 system prompt, and calls the Claude Agent SDK. The SDK gets an empty tool list,
 or only `ToolSearch` with [tool search](config.md#tool-search) on.
 Every capability the agent has is an MCP server. Some run inside `core`
-(memory search, reminders, adding a person, looking something up on the open
-web). The rest sit behind `gateway`.
+(memory search, reminders, adding a person, the subscription limits, looking
+something up on the open web). The rest sit behind `gateway`.
 
 The `internet` tool asks the internet agent, an ephemeral worker in `core`. The
 worker gets one question and none of the conversation, and it holds the web
@@ -100,6 +100,7 @@ gets 403.
 | gateway `POST /v1/snapshots/{name}` | `core` only |
 | `/admin/*` on every container | `ADMIN_CALLERS` (default `laptop`, `ci`) |
 | `/healthz`, `/readyz` on every container | open, no secrets in the answer |
+| core `GET /v1/limits` | open; percentages and reset times only |
 
 `contracts.md` has the request and response shapes.
 

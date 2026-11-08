@@ -76,6 +76,7 @@ ALLOWED_HOSTS = {
     "registry.npmjs.org": "the npm registry a package server installs from",
     "www.npmjs.com": "an npm package page",
     "docs.anthropic.com": "the API and Agent SDK documentation",
+    "api.anthropic.com": "the usage endpoint core reads for the subscription limits",
     "code.claude.com": "the Claude Code documentation",
     "claude.ai": "the session link in a commit trailer",
     "en.wikipedia.org": "a reference in prose",

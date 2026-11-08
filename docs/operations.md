@@ -135,6 +135,15 @@ the Helm chart), never in `joshua.yaml`, and write it as `${VAR:-}`.
 Do not write an `inference` section. Set `CLAUDE_CODE_OAUTH_TOKEN` in `.env`.
 Every job uses the subscription. This is the default.
 
+To see how much of the 5-hour and the weekly limit is used, ask Joshua, or
+read core's [limits route](contracts.md#the-limits-route). It needs no token:
+
+```
+curl -s 127.0.0.1:8081/v1/limits
+```
+
+In a cluster, call `http://<core service>:8000/v1/limits` from a pod.
+
 ### LiteLLM in front of Bedrock
 
 LiteLLM speaks the Anthropic Messages API and sends each call to the model
