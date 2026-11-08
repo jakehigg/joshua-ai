@@ -110,6 +110,15 @@ jobs:
             kubeconform -strict -ignore-missing-schemas -summary /tmp/rendered.yaml
           done
 
+  # A session of the assignments container runs as another user than the
+  # manager, so a shell in it cannot read the manager's environment. The test
+  # needs the image and two users, so it runs in Docker, as in production.
+  session-user:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/test-session-user.sh
+
   build:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
