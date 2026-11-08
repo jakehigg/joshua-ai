@@ -1,5 +1,6 @@
 # The whole deployment on one host. `make init-env && make up` starts the four
-# services. The images come from the GitHub container registry, so nothing is
+# services. The viewer and assignments are in profiles, so they are off until
+# you name the profile. The images come from the GitHub container registry, so nothing is
 # built here: set JOSHUA_VERSION in `.env` to take another release.
 #
 # To run your own build instead, add the developer override:
@@ -192,9 +193,47 @@ services:
       - "127.0.0.1:8082:8000"
     healthcheck: *app-healthcheck
 
+  # Long jobs that run for a member in the background. Off by default; start
+  # it with `docker compose --profile assignments up -d`. Set
+  # `assignments.enabled: true` in joshua.yaml first, and add the container as
+  # an `mcp:` server: docs/assignments.md has the steps. It is not published on
+  # the host: only the gateway calls it.
+  #
+  # It holds no model credential and no upstream credential. It gets the
+  # database (the schema `assignments` in the same Postgres), its own fleet
+  # token for the events it sends to channels, and the bearers of its callers.
+  # `/data` is read-only: it reads the people file there and writes nothing.
+  assignments:
+    image: ghcr.io/jakehigg/joshua-ai-assignments:${JOSHUA_VERSION:-0.1.1}
+    profiles: ["assignments"]
+    restart: unless-stopped
+    environment:
+      <<: *runtime-vars
+      JOSHUA_CONFIG: /etc/joshua/joshua.yaml
+      DATABASE_URL: postgresql://joshua:${POSTGRES_PASSWORD:-}@postgres:5432/joshua
+      CHANNELS_URL: http://channels:8000
+      JOSHUA_TOKEN_ASSIGNMENTS: ${JOSHUA_TOKEN_ASSIGNMENTS:-}
+      # `<person-id>=<token>` pairs, comma separated. Each bearer names one
+      # person. The gateway sends it (see docs/assignments.md).
+      ASSIGNMENTS_TOKENS: ${ASSIGNMENTS_TOKENS:-}
+      # A bearer that names no person and may only read.
+      ADDON_TOKEN: ${ASSIGNMENTS_ADDON_TOKEN:-}
+    volumes:
+      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - data:/data:ro
+      # The scratch directory of each assignment.
+      - assignments-work:/work
+    depends_on:
+      postgres:
+        condition: service_healthy
+      channels:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
 volumes:
   pgdata:
   data:
   claude-config:
   model-cache:
   mcp-store:
+  assignments-work:

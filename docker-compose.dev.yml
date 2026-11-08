@@ -35,3 +35,9 @@ services:
     build:
       context: .
       dockerfile: gateway/Dockerfile
+
+  assignments:
+    image: joshua-ai-assignments:dev
+    build:
+      context: .
+      dockerfile: assignments/Dockerfile

@@ -141,6 +141,19 @@ secrets:
     keys:
       VIEWER_PASSWORDS: {}
       JOSHUA_TOKEN_VIEWER: {}
+  # The assignments container holds no model credential and no upstream
+  # credential. DATABASE_URL names the same database as core: the container
+  # keeps its rows in the schema `assignments`. JOSHUA_TOKEN_ASSIGNMENTS is its
+  # own fleet token, for the events it posts to channels. ASSIGNMENTS_TOKENS is
+  # every bearer of a person, as `<person-id>=<token>` pairs, comma separated.
+  # ADDON_TOKEN is a bearer that names no person and may only read.
+  assignments:
+    name: joshua-assignments-secrets
+    keys:
+      DATABASE_URL: {}
+      JOSHUA_TOKEN_ASSIGNMENTS: {}
+      ASSIGNMENTS_TOKENS: {}
+      ADDON_TOKEN: {}
 
 # The shared /data volume. All three containers mount it at once, so the access
 # mode is ReadWriteMany and the class must support it.
@@ -288,6 +301,58 @@ viewer:
     tls:
       enabled: false
       secretName: ""
+
+# The assignments container: long jobs that run for a member in the
+# background. Off by default. docs/assignments.md has the whole setup.
+#
+# Two switches turn it on, and both are needed:
+#   assignments.enabled here      puts the pod in the cluster
+#   assignments.enabled in config lets the process start
+# With only the first, the container exits at once and says why in its log.
+assignments:
+  enabled: false
+  replicaCount: 1
+  # A whole image reference, which ignores the `image` block above.
+  image: ""
+  # The container keeps the state of its runs, so two pods must never run at
+  # once.
+  strategy: Recreate
+  # The scratch directory of each assignment, /work/<id>/. Empty means an
+  # emptyDir of `sizeLimit`, which a new pod loses. Name a claim to keep the
+  # scratch of a parked assignment across a restart.
+  work:
+    existingClaim: ""
+    sizeLimit: 10Gi
+  # The pod may reach only gateway, channels, core, the database, DNS, and the
+  # git hosts below, and only the gateway may reach it.
+  networkPolicy:
+    enabled: true
+    # The DNS pods. The default fits a cluster that runs CoreDNS as kube-dns
+    # in kube-system.
+    dns:
+      namespaceSelector:
+        kubernetes.io/metadata.name: kube-system
+      podSelector:
+        k8s-app: kube-dns
+    # A network policy matches addresses, not names. Give the address range of
+    # each git host in `assignments.repos`, such as 192.0.2.10/32.
+    gitHosts:
+      cidrs: []
+      ports: [443, 22]
+    # The database when `postgres.enabled` is false: its address range.
+    database:
+      cidrs: []
+      port: 5432
+    # More `from` entries for the ingress rule, for a CNI that also needs
+    # the kubelet's probes to be allowed.
+    extraIngress: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
 
 # Only channels is reachable from outside the cluster, for a webhook. core and
 # gateway are never exposed.
