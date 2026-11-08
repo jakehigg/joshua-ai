@@ -23,7 +23,6 @@ def parse(extra: str = "") -> config.JoshuaConfig:
 def test_no_section_takes_the_defaults() -> None:
     limits = parse().limits
     assert limits.enabled is True
-    assert limits.max_age == "5m" and limits.max_age_seconds == 300
     assert limits.chat_tool is True and limits.voice_tool is True
     assert limits.tool_jobs() == frozenset({"chat", "voice"})
 
@@ -33,10 +32,7 @@ def test_an_empty_section_takes_the_defaults() -> None:
 
 
 def test_a_full_section_validates() -> None:
-    limits = parse(
-        "limits:\n  enabled: true\n  max_age: 2m\n  chat_tool: false\n  voice_tool: true\n"
-    ).limits
-    assert limits.max_age_seconds == 120
+    limits = parse("limits:\n  enabled: true\n  chat_tool: false\n  voice_tool: true\n").limits
     assert limits.tool_jobs() == frozenset({"voice"})
 
 
@@ -45,10 +41,9 @@ def test_disabled_gives_the_tool_to_no_job() -> None:
     assert limits.tool_jobs() == frozenset()
 
 
-@pytest.mark.parametrize("value", ["0m", "five", "5"])
-def test_a_bad_max_age_is_refused(value: str) -> None:
+def test_max_age_is_not_a_key() -> None:
     with pytest.raises(config.ConfigError):
-        parse(f"limits:\n  max_age: {value}\n")
+        parse("limits:\n  max_age: 5m\n")
 
 
 def test_an_unknown_key_is_refused() -> None:
@@ -60,24 +55,21 @@ def test_the_contract_round_trips() -> None:
     body = {
         "available": True,
         "reason": None,
-        "source": "usage_api",
         "observed_at": "2026-11-07T20:00:00-05:00",
-        "stale": False,
         "five_hour": {
             "used_pct": 23.0,
             "left_pct": 77.0,
             "resets_at": "2026-11-07T22:30:00-05:00",
-            "status": "normal",
+            "status": "allowed",
+            "reset": False,
         },
         "seven_day": None,
-        "scoped": [{"name": "Fable", "used_pct": 13.0, "left_pct": 87.0, "resets_at": None}],
-        "extra_usage": {"enabled": True, "used": 0.0, "limit": 25.0, "currency": "USD"},
-        "retry_after": None,
     }
     assert LimitsResponse.model_validate(body).model_dump() == body
     assert LIMITS_PATH == "/v1/limits"
 
 
-def test_the_contract_refuses_an_unknown_source() -> None:
+@pytest.mark.parametrize("key", ["source", "stale", "scoped", "extra_usage", "retry_after"])
+def test_the_contract_refuses_a_removed_key(key: str) -> None:
     with pytest.raises(ValueError):
-        LimitsResponse.model_validate({"available": True, "source": "guess"})
+        LimitsResponse.model_validate({"available": True, key: None})

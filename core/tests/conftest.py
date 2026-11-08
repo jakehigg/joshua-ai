@@ -1,4 +1,4 @@
-"""Fixtures for the DB-backed integration tests.
+"""Fixtures for the DB-backed integration tests, and ``no_http``.
 
 Each fixture connects to ``DATABASE_URL`` (a pgvector service in CI), applies the
 schema, and truncates every table so tests do not see each other's rows. These
@@ -9,7 +9,9 @@ Postgres.
 from __future__ import annotations
 
 import os
+from typing import Any
 
+import httpx
 import pytest
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
@@ -36,3 +38,21 @@ async def db():
 @pytest.fixture
 def repo(db) -> Repo:
     return Repo(db)
+
+
+@pytest.fixture
+def no_http(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Fail the test on any httpx request, and record each one."""
+    calls: list[str] = []
+
+    async def refuse_async(self: Any, request: httpx.Request, **_: Any) -> httpx.Response:
+        calls.append(str(request.url))
+        raise AssertionError(f"an HTTP request for the limits: {request.url}")
+
+    def refuse(self: Any, request: httpx.Request, **_: Any) -> httpx.Response:
+        calls.append(str(request.url))
+        raise AssertionError(f"an HTTP request for the limits: {request.url}")
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", refuse_async)
+    monkeypatch.setattr(httpx.Client, "send", refuse)
+    return calls

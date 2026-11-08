@@ -135,6 +135,9 @@ the Helm chart), never in `joshua.yaml`, and write it as `${VAR:-}`.
 Do not write an `inference` section. Set `CLAUDE_CODE_OAUTH_TOKEN` in `.env`.
 Every job uses the subscription. This is the default.
 
+Use the token that `claude setup-token` gives. Joshua supports only this
+token.
+
 To see how much of the 5-hour and the weekly limit is used, ask Joshua, or
 read core's [limits route](contracts.md#the-limits-route). It needs no token:
 
@@ -143,6 +146,11 @@ curl -s 127.0.0.1:8081/v1/limits
 ```
 
 In a cluster, call `http://<core service>:8000/v1/limits` from a pod.
+
+The numbers come from the rate-limit report of each model call on the
+subscription. They show after the first model call since the start, or from
+the last saved value. A job on another inference server (`inference.base_url`)
+does not report them.
 
 ### LiteLLM in front of Bedrock
 
@@ -792,10 +800,33 @@ totals table. The "Each day" sections show only the groups with usage on that
 day.
 
 `?days=N` sets the window, today included: default 30, at most 366. The links
-at the top give 7, 30, 90, and 366 days.
+above the chart give 7, 30, 90, and 366 days.
 
-The page needs the same `CORE_URL` and `JOSHUA_TOKEN_VIEWER` as the search by
-meaning, and `usage.allowed_callers` in `joshua.yaml` must name `viewer`,
+**Subscription limits.** Above the chart, the page shows one meter for each
+limit window of the Claude subscription: `5-hour` and `Weekly`. Each meter
+shows the percent used, a bar, the percent left, and the reset time in the
+instance `timezone`, for example `resets 10:30 pm today` or
+`resets Mon 9 Nov, 8:00 pm`. The bar is green below 75 percent, amber with
+the word `high` from 75 percent, and red with the word `critical` from 90
+percent. A window that is blocked is red with the word `blocked`.
+
+A line under the heading, such as `as of 10:14 pm today`, gives the time of
+the last model call that reported the numbers. When a window reset after that
+call, its meter keeps the last bar, dimmed, and says
+`reset at 10:30 pm today — updates on the next model call`.
+
+The meters read core's `GET /v1/limits` (see
+[contracts.md](contracts.md#the-limits-route)). That route has no bearer, so
+the meters need only `CORE_URL`, also when `JOSHUA_TOKEN_VIEWER` is not set.
+When core does not know the limits yet, the section gives the reason and no
+meter. When core does not answer, answers `404` because `limits.enabled` is
+`false`, or gives an unknown answer, the section says that the limits are not
+available. The rest of the page does not change. The viewer asks core for the
+limits and for the tokens at the same time, so the meters do not make the page
+slower.
+
+The tables and the chart need the same `CORE_URL` and `JOSHUA_TOKEN_VIEWER`
+as the search by meaning, and `usage.allowed_callers` in `joshua.yaml` must name `viewer`,
 which it does by default. Without them, or when core does not answer, the page
 says so.
 

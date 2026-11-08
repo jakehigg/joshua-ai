@@ -92,10 +92,10 @@ Every route has an allowlist of fleet identities. The list is in
   on only for the paths of the Claude CLI, and any other path gets `403`.
 
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
-name, a path, or a token. Core's `GET /v1/limits` is open too. It returns the
-percent used of the subscription limits, the reset times, and the extra usage
-amounts, never a person or a token. Core sends the subscription token only to
-Anthropic, in the `Authorization` header of the usage request.
+name, a path, or a token. The core route `GET /v1/limits` is open too. It
+returns the percent used of the subscription limits and the reset times,
+never a person or a token. The numbers come from the rate-limit report of each
+model call on the subscription, so the limits feature sends the token nowhere.
 
 ## Per-person policy
 

@@ -192,6 +192,40 @@ details.day[open] > summary { border-bottom: 1px solid var(--j-line-soft); }
 details.day .j-table-wrap { border: 0; border-radius: 0; }
 .j-content > details.day + details.day { margin-top: -10px; }
 
+/* the subscription limits: one card a window, in a grid */
+section.limits { display: flex; flex-direction: column; gap: 10px; }
+section.limits > h2 { margin: 0; font-size: var(--j-text-lg); font-weight: 600; }
+section.limits > .j-meta { margin-top: -6px; }
+.limits-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+}
+.limit { --meter: var(--j-accent); gap: 8px; }
+.limit.warn { --meter: var(--j-warn); }
+.limit.crit { --meter: var(--j-bad); }
+.limit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.limit-name { font-weight: 600; }
+.limit-value {
+  margin-left: auto;
+  color: var(--j-muted);
+  font-size: var(--j-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.limit-value strong { color: var(--meter); font-size: var(--j-text-xl); line-height: 1; }
+.limit-bar svg { display: block; width: 100%; height: 8px; }
+.limit-bar .track { fill: var(--j-line); }
+.limit-bar .fill { fill: var(--meter); }
+.limit.reset .limit-bar, .limit.reset .limit-value { opacity: .4; }
+.limit-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 8px;
+  color: var(--j-muted);
+  font-size: var(--j-text-sm);
+}
+
 /* the series colors of the chart: the status tokens first, then four more */
 .s0 { fill: var(--j-accent); background: var(--j-accent); }
 .s1 { fill: var(--j-warn); background: var(--j-warn); }

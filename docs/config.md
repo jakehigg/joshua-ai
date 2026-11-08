@@ -1021,6 +1021,8 @@ and delete a page, which moves it to `wiki/.trash/`. A guest reads and nothing
 more. The agent never reaches the viewer. The viewer calls core for two
 things, with the `viewer` fleet token: its search page asks core to search by
 meaning, and its usage page reads the tokens of each day (see [usage](#usage)).
+The usage page also reads the subscription limits from core's open
+`GET /v1/limits`, with no token (see [limits](#limits)).
 
 The viewer is off by default. Start it with `docker compose --profile viewer
 up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
@@ -1106,34 +1108,31 @@ do not read this list. The gateway reads the list on each request.
 ## limits
 
 `limits` controls how Joshua knows how much of the Claude subscription limits
-is used: the 5-hour window and the weekly window. Core reads the percent used
-and the reset times from Anthropic with the subscription token
-(`CLAUDE_CODE_OAUTH_TOKEN`). Anthropic does not document this endpoint, and it
-gives a percent, not a token count. Each model call on the subscription also
-updates the two windows at no cost. Core gives the result on
+is used: the 5-hour window and the weekly window. Each model call on the
+subscription sends a rate-limit report with the percent used and the reset
+time of each window. Core keeps the last report and gives it on
 `GET /v1/limits` and through the `check_limits` tool, so you can ask Joshua
-"how much of my limit is left?".
+"how much of my limit is left?". Core makes no other request for the limits.
 
 | Knob | Default | Effect |
 |---|---|---|
 | `enabled` | `true` | `false` turns the feature off: `GET /v1/limits` answers 404, and no job gets the tool. |
-| `max_age` | `5m` | A request reads Anthropic again only when the last good read is older than this. A duration such as `30s`, `5m`, or `1h`. |
 | `chat_tool` | `true` | Gives `check_limits` to chat turns. |
 | `voice_tool` | `true` | Gives `check_limits` to voice turns. |
 
 ```yaml
 limits:
   enabled: true
-  max_age: 5m
   chat_tool: true
   voice_tool: true
 ```
 
-With no subscription token, the answer is `available: false` with the reason
-`no subscription token`. When Anthropic answers `429`, core keeps the last
-numbers, marks them `stale`, and does not ask again until the `Retry-After`
-time has passed. After another error it waits 60 seconds. No caller can make
-core ask sooner. See [contracts.md](contracts.md#the-limits-route).
+The numbers show after the first model call on the subscription since the
+start. Before that call, core gives the last saved value, or
+`available: false` when it has none. A job on another inference server
+(`inference.base_url`) does not report the limits. The supported token is the
+token from `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`. See
+[contracts.md](contracts.md#the-limits-route).
 
 ## assignments
 

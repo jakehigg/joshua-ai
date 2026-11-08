@@ -7,7 +7,9 @@ feed, newest day first, because the wiki tree is the wrong shape for reading
 what happened. The agent never calls the viewer. The viewer calls core for two
 things, when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set: ``/search`` asks
 core to search by meaning (``viewer_search``), and ``/usage`` shows the tokens
-of each group by day (``viewer_usage``). It reads the data volume
+of each group by day (``viewer_usage``) under the subscription limits
+(``viewer_limits``). The limits need ``CORE_URL`` only, because core's
+``GET /v1/limits`` has no bearer. The viewer reads the data volume
 through the same resolver as the files MCP (``files_mcp.paths``), so the two
 never drift on who reads what.
 
@@ -29,6 +31,7 @@ serves plain HTTP and binds every route behind basic auth except the probes.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -37,7 +40,7 @@ import os
 import secrets
 import sys
 from collections.abc import Iterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, tzinfo
 from functools import cache
 from html import escape
 from importlib import resources
@@ -62,6 +65,7 @@ from starlette.routing import Route
 
 from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
+from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
@@ -709,16 +713,34 @@ async def search(request: Request, person: Person) -> Response:
 
 
 async def usage(request: Request, person: Person) -> Response:
-    """The tokens of each group by day, from core. The page answers 200 also
-    when core is not configured or does not answer, and says so."""
+    """The subscription limits and the tokens of each group by day, from core.
+    The two calls run at the same time. The page answers 200 also when core is
+    not configured or does not answer, and says so."""
     days = usage_mod.parse_days(request.query_params.get("days"))
     core = usage_mod.from_env(os.environ)
-    body = await core.fetch(days) if core is not None else None
+    limits_core = limits_mod.from_env(os.environ)
+    body, limits = await asyncio.gather(
+        core.fetch(days) if core is not None else _none(),
+        limits_core.fetch() if limits_core is not None else _none(),
+    )
+    tz = limits_mod.zone(config.load().timezone)
+    section = limits_mod.section_html(
+        limits, configured=limits_core is not None, tz=tz, now=_now(tz)
+    )
     return _page(
         "usage",
-        usage_mod.page_html(body, days=days, configured=core is not None),
+        usage_mod.page_html(body, days=days, configured=core is not None, limits=section),
         section="usage",
     )
+
+
+async def _none() -> None:
+    return None
+
+
+def _now(tz: tzinfo) -> datetime:
+    """The time now in ``tz``. A test replaces it to fix the clock."""
+    return datetime.now(tz)
 
 
 def _search(roots: dict[str, Root], query: str) -> list[tuple[str, str, str]]:

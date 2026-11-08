@@ -158,7 +158,7 @@ class FakeCore:
                 return httpx.Response(self.limit_status, json={"error": "x"})
             if not self.available:
                 return httpx.Response(200, json={"available": False, "reason": "no token"})
-            body: dict[str, Any] = {"available": True, "source": "usage_api"}
+            body: dict[str, Any] = {"available": True}
             if self.five_hour is not None:
                 body["five_hour"] = window(self.five_hour)
             if self.seven_day is not None:
