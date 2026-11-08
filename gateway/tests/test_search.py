@@ -120,7 +120,7 @@ async def test_a_wrong_bearer_is_401(make_app) -> None:
     assert response.status_code == 401
 
 
-@pytest.mark.parametrize("identity", ["laptop", "ci", "channels", "gateway"])
+@pytest.mark.parametrize("identity", ["laptop", "ci", "channels", "gateway", "assignments"])
 async def test_a_caller_that_is_not_core_is_403(make_app, identity) -> None:
     fake = FakeSearxng()
     response = await _post(make_app(_yaml(), fake), {"query": "a"}, identity)

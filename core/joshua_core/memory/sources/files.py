@@ -22,14 +22,16 @@ name. ``doc_date`` is the journal day a path belongs to
 (``layout.journal_day_from_path``), else a frontmatter ``date``, else None.
 Frontmatter ``date``/``tags``/``provenance`` are honored when present. A dot
 entry (``.trash/``, ``.git/``, and so on, at any depth) and a ``*.meta.json``
-metadata file are ignored.
+metadata file are ignored. A page in a top-level wiki folder of
+``memory.exclude_folders`` (``wiki/assignments/`` by default) is ignored too,
+so the indexer removes its rows.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -38,6 +40,7 @@ from joshua_shared.attachments import is_meta, meta_path, read_meta
 from joshua_shared.layout import is_hidden
 from joshua_shared.log import get_logger
 
+from joshua_core.memory.search import excluded_prefixes
 from joshua_core.memory.sources import Document
 
 logger = get_logger("memory.sources.files")
@@ -102,9 +105,19 @@ class FilesSource:
 
     name = "files"
 
-    def __init__(self, data_dir: Path | str, *, index_attachments: bool = True):
+    def __init__(
+        self,
+        data_dir: Path | str,
+        *,
+        index_attachments: bool = True,
+        exclude_folders: Sequence[str] = (),
+    ):
         self._data_dir = Path(data_dir)
         self._index_attachments = index_attachments
+        self._excluded = excluded_prefixes(exclude_folders)
+
+    def _excluded_path(self, path: str) -> bool:
+        return path.startswith(self._excluded) if self._excluded else False
 
     def _markdown(self, base: Path) -> Iterator[Path]:
         if not base.is_dir():
@@ -179,7 +192,9 @@ class FilesSource:
     async def list_documents(self) -> AsyncIterator[Document]:
         for tree in _TREES:
             for file in self._markdown(self._data_dir / tree):
-                path = str(file.relative_to(self._data_dir))
+                path = file.relative_to(self._data_dir).as_posix()
+                if self._excluded_path(path):
+                    continue
                 yield self._document(file, path=path)
         if not self._index_attachments:
             return
@@ -194,6 +209,8 @@ class FilesSource:
         if not uri.startswith(tuple(f"{tree}/" for tree in _TREES)) and (
             layout.attachment_area(uri) is None
         ):
+            return None
+        if self._excluded_path(uri):
             return None
         file = self._data_dir / uri
         if not file.is_file() or is_hidden(file, self._data_dir):

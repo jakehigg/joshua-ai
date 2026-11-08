@@ -1,0 +1,71 @@
+"""The stub runner: it ends each assignment as done, with no model call."""
+
+from __future__ import annotations
+
+import asyncio
+
+from fakes import FIXED_NOW, FakeStore
+from joshua_assignments.runner import STUB_SUMMARY, Runner, StubRunner
+
+
+class Host:
+    def __init__(self) -> None:
+        self.store = FakeStore()
+        self.clock = lambda: FIXED_NOW
+        self.stopped_ids: list[int] = []
+
+    async def stopped(self, assignment_id: int) -> None:
+        self.stopped_ids.append(assignment_id)
+
+
+async def make_row(host: Host) -> dict:
+    return await host.store.create(
+        person_id="alex",
+        conversation_id=None,
+        spec={"goal": "x"},
+        model="claude-sonnet-5",
+        page_path=lambda i: f"assignments/{i}-x.md",
+    )
+
+
+async def test_the_stub_runs_to_done_and_tells_the_host() -> None:
+    host = Host()
+    runner: Runner = StubRunner(host)
+    row = await make_row(host)
+    await runner.start(row)
+    await runner.idle()
+    stored = host.store.rows[row["id"]]
+    assert stored["status"] == "done"
+    assert stored["summary"] == STUB_SUMMARY
+    assert stored["finished_at"] == FIXED_NOW
+    assert host.stopped_ids == [row["id"]]
+    assert runner.tasks == {}
+
+
+async def test_resume_runs_the_same_way() -> None:
+    host = Host()
+    runner = StubRunner(host)
+    row = await make_row(host)
+    await runner.resume(row, "the answer")
+    await runner.idle()
+    assert host.store.rows[row["id"]]["status"] == "done"
+
+
+async def test_a_holding_stub_never_ends_and_cancel_stops_it() -> None:
+    host = Host()
+    runner = StubRunner(host, delay_s=None)
+    row = await make_row(host)
+    await runner.start(row)
+    await runner.idle()
+    await asyncio.sleep(0)
+    assert host.store.rows[row["id"]]["status"] == "queued"
+    task = runner.tasks[row["id"]]
+    await runner.cancel(row)
+    await asyncio.sleep(0)
+    assert task.cancelled()
+    assert host.stopped_ids == []
+
+
+async def test_cancel_of_an_unknown_run_does_nothing() -> None:
+    host = Host()
+    await StubRunner(host).cancel({"id": 99})

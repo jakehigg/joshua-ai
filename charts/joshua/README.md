@@ -53,6 +53,7 @@ Each block gives a default Secret in `name` and the variables in `keys`:
 | `secrets.channels` | `TELEGRAM_BOT_TOKEN`, `BLUEBUBBLES_PASSWORD`, `IMESSAGE_WEBHOOK_SECRET`, and every `JOSHUA_TOKEN_*` |
 | `secrets.gateway` | Every `JOSHUA_TOKEN_*`, and one key for each upstream credential an MCP server reads |
 | `secrets.postgres` | `POSTGRES_PASSWORD`, when the chart runs Postgres |
+| `secrets.assignments` | `DATABASE_URL`, `JOSHUA_TOKEN_ASSIGNMENTS`, `ASSIGNMENTS_TOKENS`, `ADDON_TOKEN`, when the assignments container runs |
 
 An empty value takes the variable from `name`, under a key of the same
 spelling. Give `name` or `key` to take one variable from somewhere else:
@@ -276,6 +277,57 @@ there cannot sign in, whatever the Secret holds.
 The viewer serves plain HTTP and puts every route behind HTTP basic, so the
 password crosses the wire on each request. Terminate TLS at the ingress, and
 keep the host off the public internet unless you mean to publish your notes.
+
+## Assignments
+
+The chart can also run the assignments container, which runs long jobs for a
+member in the background. It is off by default. It holds no model credential
+and no upstream credential. It keeps its rows in the schema `assignments` of
+the same database as core, so `DATABASE_URL` names that database. It reads
+`/data` and writes nothing there. The chart points it at core and the
+gateway (`CORE_URL`, `GATEWAY_URL`): core gives it the limits and forwards
+its model calls, and the gateway gives it the MCP servers of a person.
+[docs/assignments.md](../../docs/assignments.md) has the whole setup, with the
+`mcp:` entry that lets the gateway call it.
+
+Two switches turn it on, and both are needed:
+
+```yaml
+# 1. put the pod in the cluster
+assignments:
+  enabled: true
+  networkPolicy:
+    gitHosts:
+      cidrs: [<address range of each git host>]
+
+# 2. let the process start, inside the joshua.yaml you pass as `config`
+config: |
+  ...
+  assignments:
+    enabled: true
+```
+
+With only the first, the container exits at once and its log says why.
+
+Make the Secret named by `secrets.assignments`. `JOSHUA_TOKEN_ASSIGNMENTS` is
+the fleet token of the container. Put the same value in the channels, core, and
+gateway Secrets, so channels accepts the events the container sends.
+`ASSIGNMENTS_TOKENS` is `<person-id>=<token>` pairs, comma separated:
+
+```
+kubectl -n <namespace> create secret generic joshua-assignments-secrets \
+  --from-literal=DATABASE_URL="$DATABASE_URL" \
+  --from-literal=JOSHUA_TOKEN_ASSIGNMENTS="$JOSHUA_TOKEN_ASSIGNMENTS" \
+  --from-literal=ASSIGNMENTS_TOKENS="alex=$ASSIGNMENTS_TOKEN_ALEX"
+```
+
+The network policy lets only the gateway reach the pod, and lets the pod reach
+only gateway, channels, core, the database, DNS, and the git hosts. A network
+policy matches addresses, not names, so give the address range of each git
+host in `assignments.networkPolicy.gitHosts.cidrs`. Set
+`assignments.networkPolicy.enabled: false` on a cluster with no network policy
+support. `/work` is an emptyDir unless `assignments.work.existingClaim` names a
+claim.
 
 ## Enhancements
 

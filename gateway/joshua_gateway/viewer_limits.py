@@ -144,11 +144,11 @@ def _reset_text(window: LimitsWindow, *, tz: tzinfo, now: datetime) -> str:
 
 def _badge(css: str, status: str | None) -> str:
     if status == "rejected":
-        return "<span class=badge>blocked</span>"
+        return '<span class="j-badge bad">blocked</span>'
     if css == "crit":
-        return "<span class=badge>critical</span>"
+        return '<span class="j-badge bad">critical</span>'
     if css == "warn":
-        return "<span class=badge>high</span>"
+        return '<span class="j-badge warn">high</span>'
     return ""
 
 
@@ -176,7 +176,7 @@ def _meter(name: str, window: LimitsWindow, *, tz: tzinfo, now: datetime) -> str
     else:
         badge = _badge(css, window.status)
     return (
-        f'<div class="limit {css}">'
+        f'<div class="j-card limit {css}">'
         f"<div class=limit-head><span class=limit-name>{escape(name)}</span>"
         f"{badge}"
         f"<span class=limit-value><strong>{used}</strong> used</span></div>"
@@ -194,21 +194,21 @@ def section_html(
     head = "<section class=limits><h2>Subscription limits</h2>"
     if not configured:
         return (
-            f"{head}<p class=snippet>The limits are not configured. They need "
+            f"{head}<p class=j-empty>The limits are not configured. They need "
             f"<code>{CORE_URL_ENV}</code>.</p></section>"
         )
     if body is None:
-        return f"{head}<p class=snippet>The limits are not available now.</p></section>"
+        return f"{head}<p class=j-empty>The limits are not available now.</p></section>"
     if not body.available:
         reason = f": {escape(body.reason)}" if body.reason else ""
-        return f"{head}<p class=snippet>The limits are not available{reason}.</p></section>"
+        return f"{head}<p class=j-empty>The limits are not available{reason}.</p></section>"
     meters = [
         _meter(name, window, tz=tz, now=now)
         for name, window in (("5-hour", body.five_hour), ("Weekly", body.seven_day))
         if window is not None
     ]
     if not meters:
-        return f"{head}<p class=snippet>The limits are not available now.</p></section>"
+        return f"{head}<p class=j-empty>The limits are not available now.</p></section>"
     seen = when_text(body.observed_at, tz=tz, now=now)
-    note = f"<p class=meta>as of {escape(seen)}</p>" if seen else ""
+    note = f'<p class="j-meta">as of {escape(seen)}</p>' if seen else ""
     return f"{head}{note}<div class=limits-grid>{''.join(meters)}</div></section>"

@@ -154,11 +154,11 @@ def _windows(days: int) -> str:
     for window in WINDOWS:
         label = f"{window} days"
         if window == days:
-            links.append(f'<span class="chip on">{label}</span>')
+            links.append(f'<span class="j-chip on" aria-current="true">{label}</span>')
         else:
             href = "/usage?" + urlencode({"days": window})
-            links.append(f'<a class=chip href="{escape(href)}">{label}</a>')
-    return f"<p class=filters>{''.join(links)}</p>"
+            links.append(f'<a class="j-chip" href="{escape(href)}">{label}</a>')
+    return f'<div class="j-chips" role="group" aria-label="Window">{"".join(links)}</div>'
 
 
 def _parse_date(text: str) -> date | None:
@@ -237,7 +237,7 @@ def chart_svg(body: UsageResponse, *, today: date | None = None) -> str:
         f'<li><span class="sw {series[name]}"></span>{escape(name)}</li>' for name in body.groups
     )
     return (
-        "<figure class=usage-chart>"
+        '<figure class="j-card usage-chart">'
         f'<svg viewBox="0 0 {_CHART_W} {_CHART_H}" role="img" '
         'aria-label="Total tokens per day, stacked by group">'
         f"{''.join(parts)}</svg>"
@@ -247,7 +247,7 @@ def chart_svg(body: UsageResponse, *, today: date | None = None) -> str:
 
 def _days_table(body: UsageResponse) -> str:
     """Days down, groups across, the total tokens in each cell."""
-    head = "".join(f"<th>{escape(name)}</th>" for name in body.groups)
+    head = "".join(f"<th class=num>{escape(name)}</th>" for name in body.groups)
     rows = []
     for row in body.rows:
         cells = []
@@ -267,11 +267,11 @@ def _days_table(body: UsageResponse) -> str:
     )
     grand = sum(g.total for g in body.totals.values())
     return (
-        "<h2>Tokens by day</h2><table class=usage>"
-        f"<thead><tr><th>Date</th>{head}<th>Total</th></tr></thead>"
+        '<h2>Tokens by day</h2><div class="j-table-wrap"><table class="j-table usage">'
+        f"<thead><tr><th>Date</th>{head}<th class=num>Total</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         f"<tfoot><tr><th>Total</th>{totals}"
-        f"<td class=num><strong>{exact(grand)}</strong></td></tr></tfoot></table>"
+        f"<td class=num><strong>{exact(grand)}</strong></td></tr></tfoot></table></div>"
     )
 
 
@@ -289,7 +289,7 @@ def _counts_table(
 ) -> str:
     """One row for each group, the six counts across, and a total row. With
     ``models``, a last column holds the models of each row."""
-    head = "".join(f"<th>{name}</th>" for _, name in _COLUMNS)
+    head = "".join(f"<th class=num>{name}</th>" for _, name in _COLUMNS)
     if models:
         head += "<th>Models</th>"
     rows = []
@@ -306,9 +306,10 @@ def _counts_table(
         foot += "<td></td>"
     cap = f"<caption>{escape(caption)}</caption>" if caption else ""
     return (
-        f"<table class=usage>{cap}<thead><tr><th>{escape(label)}</th>{head}</tr></thead>"
+        f'<div class="j-table-wrap"><table class="j-table usage">{cap}'
+        f"<thead><tr><th>{escape(label)}</th>{head}</tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
-        f"<tfoot><tr><th>Total</th>{foot}</tr></tfoot></table>"
+        f"<tfoot><tr><th>Total</th>{foot}</tr></tfoot></table></div>"
     )
 
 
@@ -331,21 +332,24 @@ def _totals(body: UsageResponse) -> str:
 def page_html(body: UsageResponse | None, *, days: int, configured: bool, limits: str = "") -> str:
     """The body of the usage page. ``body`` None means core did not answer.
     ``limits`` is the HTML of the limits section, which goes above the usage."""
-    head = f"<h1>usage</h1>{limits}{_windows(days)}"
+    head = f'<h1 class="j-doc-title">usage</h1>{limits}{_windows(days)}'
     if not configured:
         return (
-            f"{head}<p class=snippet>The usage page is not configured. It needs "
+            f'{head}<p class="j-empty">The usage page is not configured. It needs '
             f"<code>{CORE_URL_ENV}</code> and <code>{VIEWER_TOKEN_ENV}</code>.</p>"
         )
     if body is None:
-        return f"{head}<p class=snippet>Core did not answer. The usage is not available now.</p>"
+        return f'{head}<p class="j-empty">Core did not answer. The usage is not available now.</p>'
     intro = (
-        f"<p class=meta>Tokens of the last {body.days} days, by calendar day in "
+        f'<p class="j-muted">Tokens of the last {body.days} days, by calendar day in '
         f"{escape(body.timezone)}. A day with no usage is not in the tables of "
         "days.</p>"
     )
     if not body.rows:
-        return f"{head}{intro}{chart_svg(body)}<p>No usage in this window.</p>{_totals(body)}"
+        return (
+            f"{head}{intro}{chart_svg(body)}"
+            f'<p class="j-empty">No usage in this window.</p>{_totals(body)}'
+        )
     per_day = "".join(
         f"<details class=day><summary>{escape(row.date)}</summary>"
         f"{_counts_table(row.groups)}</details>"

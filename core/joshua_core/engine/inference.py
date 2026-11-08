@@ -146,6 +146,7 @@ _USAGE_KIND = {
     "reflection": "reflection",
     "describe": "describe",
     "internet": "internet",
+    "assignment": "assignment",
 }
 
 Oneshot = Callable[..., Awaitable[str]]

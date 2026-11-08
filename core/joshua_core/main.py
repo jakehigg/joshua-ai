@@ -46,6 +46,7 @@ from joshua_core.memory.sources.snapshots import SOURCE_NAME as SNAPSHOTS_SOURCE
 from joshua_core.memory.sources.snapshots import SnapshotsSource
 from joshua_core.memory.store import MemoryStore
 from joshua_core.migrate_links import migrate_page_links
+from joshua_core.model_forwarder import ModelForwarder
 from joshua_core.scheduler import Scheduler
 from joshua_core.search_api import build_search_router
 from joshua_core.snapshots import SnapshotRunner, build_runner
@@ -229,6 +230,9 @@ async def lifespan(app: FastAPI):
         limits_module.install(None)
         if limits_tracker is not None:
             await limits_tracker.drain()
+        forwarder = getattr(app.state, "forwarder", None)
+        if forwarder is not None:
+            await forwarder.aclose()
         await db.close()
 
 
@@ -350,7 +354,11 @@ def _build_memory(
     memory = settings.memory
 
     sources: dict[str, Any] = {
-        "files": FilesSource(data_dir, index_attachments=settings.attachments.extract.embed)
+        "files": FilesSource(
+            data_dir,
+            index_attachments=settings.attachments.extract.embed,
+            exclude_folders=memory.exclude_folders,
+        )
     }
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
     for name, options in memory.sources.items():
@@ -486,6 +494,8 @@ def build_app() -> FastAPI:
     app.include_router(build_search_router())
     app.include_router(build_usage_router())
     app.include_router(build_limits_router())
+    app.state.forwarder = ModelForwarder()
+    app.include_router(app.state.forwarder.router)
     return app
 
 

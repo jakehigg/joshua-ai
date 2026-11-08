@@ -1,7 +1,8 @@
 # Architecture
 
 Joshua is three containers and one database. The three containers ship from one
-repository and one `docker-compose.yml`. The same code runs on one Docker host
+repository and one `docker-compose.yml`. A fourth container, `assignments`, is
+optional and off by default. The same code runs on one Docker host
 and on Kubernetes.
 
 ![The three containers and what passes between them](images/architecture.svg)
@@ -80,6 +81,31 @@ The `files` MCP runs inside `gateway`. It is the only path that writes the
 wiki and a person's journal, and it confines every path to its root. There is
 one wiki. Everyone reads it, a member writes it, a guest reads it only.
 
+## assignments
+
+`assignments` is a fourth container, optional and off by default. It runs long
+jobs for a member in the background: an assignment. Joshua starts one with the
+`start_assignment` tool, through the gateway, and continues the conversation.
+When the assignment ends or must stop, the container sends an event to
+channels `POST /v1/events`, and core runs it as a turn in the person's
+conversation.
+
+A long job needs a checkout, a shell, and file tools. Core must not hold
+them, because core holds every fleet token and the model credential. So the
+work runs in its own container, which holds no model credential and no
+upstream credential. It holds one fleet token of its own, the bearers of its
+callers, and the database URL. It keeps its rows in the schema `assignments`
+of the shared Postgres. It mounts `/data` read-only. On Kubernetes, a network
+policy lets only the gateway reach it, and lets it reach only gateway,
+channels, core, the database, DNS, and the git hosts you name.
+
+Each assignment runs one Claude Agent SDK session in a scratch directory, in
+slices. Before each slice, the container reads core's `GET /v1/limits`, and
+the assignment stops at the ceiling that its spec sets on the subscription
+windows. The session sends its model calls through core's forwarder, so the
+model credential stays in core, and core gets one usage row for each slice.
+[assignments.md](assignments.md) has the whole design.
+
 ## Who may call what
 
 Every container loads the fleet tokens (`JOSHUA_TOKEN_<NAME>`). A caller sends
@@ -92,15 +118,18 @@ gets 403.
 | core `POST /v1/turns`, `POST /v1/turns/stream` | `channels` (and `laptop` for a `cli` handle) |
 | core `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) |
 | core `GET /v1/usage` | `usage.allowed_callers` (default `viewer`) |
+| core `POST /v1/usage` | `usage.writers` (default `assignments`), rows of kind `assignment` only |
+| core `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`), and any other token gets 401 |
 | channels `POST /v1/deliver`, `GET /v1/channels/resolve` | `core` |
 | channels `POST /v1/events` | `channels.webhooks.allowed_callers` (default `laptop`, `ci`) |
 | channels `POST /v1/cli/turns/stream`, `GET /v1/cli/outbox` | `channels.webhooks.allowed_callers` |
 | channels `POST /webhook/imessage/{secret}` | no bearer; the path secret is the credential |
-| gateway MCP routes | `core` only |
+| gateway MCP routes | `gateway.person_header_callers` (default `core`, `assignments`) |
 | gateway `POST /v1/snapshots/{name}` | `core` only |
 | `/admin/*` on every container | `ADMIN_CALLERS` (default `laptop`, `ci`) |
 | `/healthz`, `/readyz` on every container | open, no secrets in the answer |
 | core `GET /v1/limits` | open; percentages and reset times only |
+| assignments `/mcp` | a bearer in `ASSIGNMENTS_TOKENS` (a person) or `ADDON_TOKEN` (read only); the gateway sends it |
 
 `contracts.md` has the request and response shapes.
 

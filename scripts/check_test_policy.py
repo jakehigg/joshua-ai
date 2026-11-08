@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-MEMBERS = ("shared", "channels", "core", "gateway")
+MEMBERS = ("shared", "channels", "core", "gateway", "assignments")
 EXCLUDED_MODULES = ("__init__.py", "__main__.py")
 SKIP_XFAIL = re.compile(r"pytest\.mark\.skip\(|xfail\(")
 REASON_WITH_ISSUE = re.compile(r"""reason\s*=\s*(['"])(?:(?!\1).)*#\d+""")

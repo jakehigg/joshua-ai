@@ -185,7 +185,7 @@ def test_the_real_answer_gives_two_meters_above_the_usage(data, monkeypatch) -> 
     html, core = _get(monkeypatch)
     section = _limits(html)
     assert html.index("Subscription limits") < html.index("<h2>Tokens by day</h2>")
-    assert section.count('<div class="limit ') == 2
+    assert section.count('<div class="j-card limit ') == 2
     assert "<span class=limit-name>5-hour</span>" in section
     assert "<span class=limit-name>Weekly</span>" in section
     assert "<strong>61%</strong> used" in section and "39% left" in section
@@ -196,7 +196,7 @@ def test_the_real_answer_gives_two_meters_above_the_usage(data, monkeypatch) -> 
     assert 'aria-valuenow="61"' in section and 'aria-valuetext="61% used"' in section
     assert '<rect class=fill width="61"' in section
     # The line under the heading says when the numbers came.
-    assert section.index("<h2>") < section.index("<p class=meta>as of 10:14 pm today</p>")
+    assert section.index("<h2>") < section.index('<p class="j-meta">as of 10:14 pm today</p>')
     assert section.index("as of") < section.index("limits-grid")
     assert " reset" not in section and "next model call" not in section
     assert "<script" not in html and "style=" not in section
@@ -215,7 +215,7 @@ def test_no_bearer_goes_to_the_limits_route(data, monkeypatch) -> None:
 def test_the_meters_need_core_url_only(data, monkeypatch) -> None:
     monkeypatch.delenv(usage_mod.VIEWER_TOKEN_ENV)
     html, core = _get(monkeypatch)
-    assert _limits(html).count('<div class="limit ') == 2
+    assert _limits(html).count('<div class="j-card limit ') == 2
     assert "The usage page is not configured" in html
     assert [r.url.path for r in core.requests] == [limits_mod.LIMITS_PATH]
 
@@ -232,7 +232,7 @@ def test_a_failure_leaves_the_usage_intact(data, monkeypatch, failure) -> None:
     html, _core = _get(monkeypatch, failure)
     section = _limits(html)
     assert "The limits are not available now." in section
-    assert '<div class="limit ' not in section
+    assert '<div class="j-card limit ' not in section
     _usage_intact(html)
 
 
@@ -247,7 +247,7 @@ def test_an_unknown_field_is_ignored(data, monkeypatch) -> None:
     answer = copy.deepcopy(REAL)
     answer["new_field"] = 1
     answer["five_hour"]["new_field"] = "x"
-    assert _limits(_get(monkeypatch, answer)[0]).count('<div class="limit ') == 2
+    assert _limits(_get(monkeypatch, answer)[0]).count('<div class="j-card limit ') == 2
 
 
 def test_a_reset_window_is_dimmed_and_says_the_next_call_updates_it(data, monkeypatch) -> None:
@@ -258,13 +258,13 @@ def test_a_reset_window_is_dimmed_and_says_the_next_call_updates_it(data, monkey
     section = _limits(_get(monkeypatch, answer)[0])
     five, weekly = section.split("<span class=limit-name>Weekly</span>")
     # The last bar stays, dimmed, with no badge.
-    assert '<div class="limit crit reset">' in five
-    assert "class=badge" not in five
+    assert '<div class="j-card limit crit reset">' in five
+    assert "j-badge" not in five
     assert '<rect class=fill width="95"' in five
     assert "reset at 9:30 pm today — updates on the next model call" in five
     assert "resets" not in five
     assert "resets Mon 9 Nov, 8:00 pm" in weekly
-    assert "<p class=meta>as of 10:14 pm today</p>" in section
+    assert '<p class="j-meta">as of 10:14 pm today</p>' in section
 
 
 def test_a_reset_window_with_no_time_says_reset_only() -> None:
@@ -277,7 +277,7 @@ def test_a_reset_window_with_no_time_says_reset_only() -> None:
     )
     html = limits_mod.section_html(body, configured=True, tz=NY, now=NOW)
     assert "<span>reset — updates on the next model call</span>" in html
-    assert '<div class="limit ok reset">' in html
+    assert '<div class="j-card limit ok reset">' in html
 
 
 def test_the_reset_flag_and_not_the_viewer_clock_decides() -> None:
@@ -326,12 +326,12 @@ def test_thresholds(data, monkeypatch, used, status, css, badge) -> None:
     answer = copy.deepcopy(REAL)
     answer["five_hour"].update(used_pct=used, left_pct=100 - used, status=status)
     section = _limits(_get(monkeypatch, answer)[0])
-    head = section[section.index('<div class="limit ') :]
-    assert head.startswith(f'<div class="limit {css}">')
+    head = section[section.index('<div class="j-card limit ') :]
+    assert head.startswith(f'<div class="j-card limit {css}">')
     if badge:
-        assert f"<span class=badge>{badge}</span>" in head.split("Weekly")[0]
+        assert f">{badge}</span>" in head.split("Weekly")[0]
     else:
-        assert "class=badge" not in head.split("Weekly")[0]
+        assert "j-badge" not in head.split("Weekly")[0]
 
 
 def test_level() -> None:

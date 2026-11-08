@@ -1,6 +1,6 @@
 .PHONY: sync lint fmt test test-dates up up-dev pull down nuke logs ps shell-core psql init-env e2e smoke chat validate backup restore
 
-MEMBERS := shared channels core gateway
+MEMBERS := shared channels core gateway assignments
 
 # The compose command line for a plain run: the base file, plus one `-f` for
 # each slot in enhancements.yaml whose `use` names a choice. scripts/
@@ -127,7 +127,7 @@ init-env:
 		echo "POSTGRES_PASSWORD=$$pw" >> .env; \
 		echo "minted POSTGRES_PASSWORD"; \
 	fi
-	@for name in CHANNELS CORE GATEWAY LAPTOP VIEWER MCP; do \
+	@for name in CHANNELS CORE GATEWAY LAPTOP VIEWER MCP ASSIGNMENTS; do \
 		if ! grep -q "^JOSHUA_TOKEN_$$name=." .env; then \
 			token=$$(openssl rand -base64 33 | tr '+/' '-_' | tr -d '='); \
 			sed -i.bak "/^JOSHUA_TOKEN_$$name=/d" .env && rm -f .env.bak; \

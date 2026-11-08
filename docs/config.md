@@ -284,6 +284,21 @@ behavior a member teaches in chat. See [memory.md](memory.md#taught-skills).
 | `recency_bonus` | `0.08` | score added to a recent document |
 | `recency_half_life_days` | `14.0` | how fast that bonus decays |
 | `embed_model` | `BAAI/bge-small-en-v1.5` | the embedding model, 384 dimensions |
+| `exclude_folders` | `assignments` | top-level wiki folders that the memory never holds |
+
+`exclude_folders` names top-level folders of the wiki, one path segment each.
+The `files` source does not index a page in them, so the next pass removes
+its rows. `search_memory`, the per-turn injection, and
+`POST /v1/memory/search` never return such a page, also when the index still
+holds it. The default excludes `wiki/assignments/`, where each assignment
+keeps its plan page. A plan page is work in progress, and it must not come
+back in a turn as a memory. An empty value excludes nothing.
+
+```yaml
+memory:
+  exclude_folders:
+    - assignments
+```
 
 Do not change `embed_model` on a running instance. The `kb_chunk` column holds
 384 numbers per chunk. A model with a different size needs a new index.
@@ -603,7 +618,7 @@ must name one group only, must not also be a person id, and the group must have
 refuses it. Everyone in the chat uses the server through the same credential.
 `allow:` with no value is the empty list, so no person reaches the server. The
 person comes from the `X-Joshua-Person` header, which the gateway trusts only from
-core.
+the identities in [`gateway.person_header_callers`](#gateway).
 
 `tools` filters the tool list. `allow` and `deny` are `fnmatch` globs matched
 against the tool name. `deny` beats `allow`. An absent `tools` block means every
@@ -1055,15 +1070,40 @@ calls for each day and each group. The viewer's usage page reads it.
 | Knob | Default | Effect |
 |---|---|---|
 | `allowed_callers` | `viewer` | The fleet identities that may call `GET /v1/usage`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the route off, and every caller gets 403. |
+| `writers` | `assignments` | The fleet identities that may write usage rows with `POST /v1/usage`. A row must be of kind `assignment`. An empty value turns the write off, and every caller gets 403. |
 
 ```yaml
 usage:
   allowed_callers:
     - viewer
+  writers:
+    - assignments
 ```
 
 `GET /admin/usage` gives the same answer to an admin caller and does not read
-this list. See [contracts.md](contracts.md#the-usage-route).
+these lists. The usage page always shows the `assignment` group, with zero
+counts when it has no row. See [contracts.md](contracts.md#the-usage-route)
+and [the usage write route](contracts.md#the-usage-write-route).
+
+## gateway
+
+`gateway` holds the settings of the gateway itself.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `person_header_callers` | `core`, `assignments` | The fleet identities that may call the MCP routes and say which person, role, group, and conversation a call is for, with the `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, and `X-Joshua-Conversation` headers. Every other identity gets 403 on an MCP route. The list must hold `core`, or the load fails. |
+
+```yaml
+gateway:
+  person_header_callers:
+    - core
+    - assignments
+```
+
+The assignments container acts for the person who started an assignment, so
+it sends the same headers as core. The person tool policy applies to it in
+the same way. The snapshot route and the search route admit `core` only, and
+do not read this list. The gateway reads the list on each request.
 
 ## limits
 
@@ -1094,6 +1134,72 @@ start. Before that call, core gives the last saved value, or
 token from `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`. See
 [contracts.md](contracts.md#the-limits-route).
 
+## assignments
+
+`assignments` controls the assignments container, which runs long jobs for a
+member in the background. [assignments.md](assignments.md) explains the
+container, the spec, the tools, and the setup. Only the `assignments`
+container reads this section.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `enabled` | `false` | `true` lets the container start. With `false` it exits at start. |
+| `default_model` | `sonnet` | The model of a spec that names none. It must be a key of `models`. |
+| `models` | `sonnet`, `opus` | Name to `model` (the model id) and `effort` (`low`, `medium`, `high`, `xhigh`, `max`; default `medium`). A spec names a key. A file that sets `models` replaces both built-in models. |
+| `default_max_turns` | `200` | The cap on model turns of a spec that names none. At the cap, the assignment ends as `budget_exceeded`. |
+| `default_working_time` | `4h` | The working time of a spec that names none. A duration such as `30m` or `4h`. |
+| `limits.five_hour_pct` | `70` | The ceiling on the 5-hour window, in percent used, of a spec that names none. |
+| `limits.seven_day_pct` | `85` | The ceiling on the weekly window of a spec that names none. |
+| `limits.max_five_hour_pct` | `90` | The highest 5-hour ceiling a spec can ask for. A higher value is clamped to it. |
+| `limits.max_seven_day_pct` | `95` | The highest weekly ceiling a spec can ask for. |
+| `limits.when_unknown` | `refuse` | `refuse` or `run`: what an assignment does when core cannot say how much of a window is used. With `refuse`, `start_assignment` refuses a spec with no `budget.tokens`, and a running assignment with no token cap stops as `paused_limits`. |
+| `max_concurrent` | `1` | The number of assignments that can run at one time. A parked assignment holds no slot. |
+| `slice_turns` | `10` | The model turns of one slice. The runner reads the limits before each slice. |
+| `keep_failed_work` | `7d` | How long the scratch directory of a failed assignment stays. The container removes it at start, or when an assignment stops, after this time. |
+| `repos` | `[]` | The repositories an assignment may clone: `host/group/name`, or `host/group/*` for a whole group. Lower case. `*` also matches a subgroup. |
+| `platforms` | `{}` | Git host to `kind` (`github`, `gitlab`, `git`) and `token_env`, the name of the variable that holds its token. |
+| `people` | `{}` | Person id to `notify`, the destination of the report and the questions of an assignment with `report_to: conversation`. Each key must be in `people`. |
+
+```yaml
+assignments:
+  enabled: true
+  default_model: sonnet
+  models:
+    sonnet:
+      model: claude-sonnet-5
+      effort: medium
+    opus:
+      model: claude-opus-5
+      effort: high
+  limits:
+    five_hour_pct: 70
+    max_five_hour_pct: 90
+  repos:
+    - gitlab.example.net/infra/*
+  platforms:
+    gitlab.example.net:
+      kind: gitlab
+      token_env: ASSIGNMENTS_GITLAB_TOKEN
+  people:
+    alex:
+      notify: imessage:dm:alex
+```
+
+The loader refuses:
+
+- a token as a value anywhere in the section, such as `token_env: ghp_...`.
+  Put the token in an environment variable and give its name in `token_env`.
+- a `default_model` that is not a key of `models`.
+- a ceiling above its maximum, such as `five_hour_pct: 95` with
+  `max_five_hour_pct: 90`.
+- a repository pattern that is not `host/group/name`, and a key of `people`
+  that is not a person id.
+
+The bearers and the database are not in this section. They are variables of
+the container: `DATABASE_URL`, `ASSIGNMENTS_TOKENS`, `ADDON_TOKEN`,
+`CHANNELS_URL`, and `JOSHUA_TOKEN_ASSIGNMENTS`. `.env.example` documents
+them.
+
 ## inference
 
 `inference` sets the server and the key for the model calls. With no
@@ -1120,9 +1226,28 @@ inference:
 | `<job>.base_url` | not set | The server for this job. |
 | `<job>.api_key` | not set | The key for `<job>.base_url`. It must be set when `<job>.base_url` is set. With no `<job>.base_url`, the key of this job on the global server, in place of the global `api_key`. |
 | `chat.tool_search`, `voice.tool_search` | `true` for `chat`, `false` for `voice` | Tool search for the turns of this job. See [Tool search](#tool-search). The other jobs do not have this key, and the load fails when one sets it. |
+| `forwarder.allowed_callers` | `assignments` | The fleet identities that may send a model call through core's forwarder, `/v1/model/{path}`. An empty value turns the route off (404). |
 
-The jobs are `chat`, `voice`, `reflection`, `describe`, and `internet`. Any
-other key in `inference` fails the load.
+The jobs are `chat`, `voice`, `reflection`, `describe`, `internet`, and
+`assignment`. Any other key in `inference` fails the load.
+
+**The `assignment` job.** The assignments container holds no model
+credential. Its CLI sends each model call to core's forwarder, and core puts
+the credential of the `assignment` job on the call. So `inference.assignment`
+can send the assignments to another server or give them their own key, as for
+any other job. The forwarder does not change the model of a call: the
+container chooses it. The `model` of this job is used only by
+`POST /admin/inference/check`, and it is `core.model` when the block sets
+none. See [the model forwarder](contracts.md#the-model-forwarder).
+
+```yaml
+inference:
+  assignment:
+    api_key: ${INFERENCE_KEY_ASSIGNMENT:-}
+  forwarder:
+    allowed_callers:
+      - assignments
+```
 
 **Three global cases.**
 

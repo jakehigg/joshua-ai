@@ -6,7 +6,47 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Security
+
+- **A session cannot read the assignments container.** A shell in an
+  assignment session could read the environment of the container process
+  in `/proc`, with the database URL and the bearers of its callers. The
+  process now makes itself non-dumpable at start, so Linux refuses its
+  environment and its memory to the session. The code in `/app` now belongs
+  to root, so a session cannot change it. No setting is needed in compose or
+  on Kubernetes. See
+  [assignments.md](assignments.md#what-a-session-can-see).
+
 ### Added
+
+- **Assignments run a real session.** Each assignment now runs one Claude
+  Agent SDK session in `/work/<id>/`, with the file tools, Bash, the MCP
+  servers of the person through the gateway, and the tools `checkpoint`,
+  `wait`, `ask`, and `finish`. It works in slices of
+  `assignments.slice_turns` turns. Before each slice it reads core's
+  `GET /v1/limits`, and at the ceiling of its spec it stops as
+  `paused_limits` and asks Joshua through the question path. It writes a
+  plan page in `wiki/assignments/` first and keeps it current. Each slice
+  sends one usage row to core, so the usage page shows the tokens of the
+  assignments. `assignment_status` gives the next step. With
+  `limits.when_unknown: refuse`, `start_assignment` refuses a spec with no
+  `budget.tokens` while core cannot say how much of the limits is used. The
+  container now needs `CORE_URL` and `GATEWAY_URL`; compose and the chart set
+  them. See [assignments.md](assignments.md#the-runner).
+
+- **The assignments container.** A fourth container,
+  `assignments`, stores long jobs that run for a member in the background.
+  It is off by default: set `assignments.enabled: true` and start it with
+  `docker compose --profile assignments up -d`, or set
+  `assignments.enabled: true` in the chart. Joshua gets six tools through the
+  gateway: `start_assignment`, `assignment_status`, `list_assignments`,
+  `answer_assignment`, `cancel_assignment`, and `extend_assignment`. The
+  container keeps its rows in the schema `assignments` of the same Postgres,
+  holds no model credential, and sends the report to channels with its own
+  fleet token, `JOSHUA_TOKEN_ASSIGNMENTS`.
+  See
+  [assignments.md](assignments.md) and
+  [config.md](config.md#assignments).
 
 - **Joshua knows how much of the subscription limits is left.** Ask "how
   much of my limit is left?", and the `check_limits` tool gives the percent
@@ -30,6 +70,46 @@ with the images and the packaged chart, are at
   from 90 percent. The meters need only `CORE_URL`. When core does not
   answer, the section says so, and the rest of the page does not change. See
   [operations.md](operations.md#the-usage-page).
+- **Core can send the model calls of the assignments container.** The new
+  route `/v1/model/{path}` takes a Claude API request with the token of an
+  identity in `inference.forwarder.allowed_callers` (default `assignments`),
+  puts the credential of the new inference job `assignment` on it, and
+  streams it to the model server and back. The container holds no model
+  credential, and the credential never leaves core. Only the paths of the
+  Claude CLI go on. Every other token gets `401` and every other path gets
+  `403`. `inference.assignment` can send these calls to another server, as
+  for any job. See
+  [contracts.md](contracts.md#the-model-forwarder).
+- **Another container can report its model calls on the usage page.** The new
+  route `POST /v1/usage` takes usage rows of kind `assignment` from an
+  identity in `usage.writers` (default `assignments`). The usage page now
+  always shows an `assignment` group. A row of any other kind gets `400`. See
+  [contracts.md](contracts.md#the-usage-write-route).
+- **A wiki folder can stay out of the memory.** `memory.exclude_folders`
+  (default `assignments`) names top-level wiki folders that the index does not
+  hold and that no search returns. The plan pages of the assignments, in
+  `wiki/assignments/`, thus never come back in a turn. See
+  [config.md](config.md#index).
+- **The gateway trusts the person headers from the assignments container.**
+  The new `gateway.person_header_callers` (default `core` and `assignments`)
+  names the identities that may call the MCP routes and say which person a
+  call is for. Every other identity gets `403` on an MCP route, as before.
+  The snapshot and search routes still admit `core` only. See
+  [config.md](config.md#gateway).
+- **`make init-env` mints `JOSHUA_TOKEN_ASSIGNMENTS`.** Compose and the chart
+  give it to core, channels, and the gateway, so each one can verify the
+  assignments container. Run `make init-env` again to add it to an existing
+  `.env`. To let the container post events, add `assignments` to
+  `channels.webhooks.allowed_callers`.
+
+### Changed
+
+- **The viewer has the Joshua look.** The viewer now uses the shared Joshua
+  stylesheet. It is dark only. On a wide screen, a sidebar holds the Wiki,
+  Journal, Search, and Usage links. On a phone, an app bar and tabs hold them.
+  The search field is in the app bar on each screen. The viewer serves the
+  stylesheet, the logo, and the icons at `/ui/`, behind the same sign-in as a
+  page. The routes, the forms, and what each page shows do not change.
 
 ## 0.1.1 - 2026-11-07
 

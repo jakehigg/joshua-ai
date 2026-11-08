@@ -23,17 +23,20 @@ for member in shared channels gateway; do
     --cov="joshua_$member" --cov-report=term --cov-report=xml --cov-fail-under=80
 done
 
-# core's store layer only runs against Postgres, so the integration suite counts
-# toward coverage. Run the unit suite, append the integration suite, then gate on
-# the combined total. Needs DATABASE_URL set to a live Postgres.
-echo "==> test: core (unit + integration, combined coverage)"
-uv run --package joshua-core pytest core/tests --cov=joshua_core --cov-report= --cov-fail-under=0
-rc=0
-uv run --package joshua-core pytest core/tests -m integration \
-  --cov=joshua_core --cov-append --cov-report= --cov-fail-under=0 || rc=$?
-if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then exit "$rc"; fi
-uv run --package joshua-core coverage report --show-missing --fail-under=80
-uv run --package joshua-core coverage xml -o coverage.xml
+# The store layer of core and of assignments only runs against Postgres, so the
+# integration suite counts toward coverage. Run the unit suite, append the
+# integration suite, then gate on the combined total. Needs DATABASE_URL set to
+# a live Postgres.
+for member in core assignments; do
+  echo "==> test: $member (unit + integration, combined coverage)"
+  uv run --package "joshua-$member" pytest "$member/tests" --cov="joshua_$member" --cov-report= --cov-fail-under=0
+  rc=0
+  uv run --package "joshua-$member" pytest "$member/tests" -m integration \
+    --cov="joshua_$member" --cov-append --cov-report= --cov-fail-under=0 || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then exit "$rc"; fi
+  uv run --package "joshua-$member" coverage report --show-missing --fail-under=80
+  if [ "$member" = core ]; then uv run --package joshua-core coverage xml -o coverage.xml; fi
+done
 
 echo "==> test: every member on other dates"
 make test-dates

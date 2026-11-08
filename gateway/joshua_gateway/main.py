@@ -31,6 +31,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from joshua_gateway import person as person_policy
 from joshua_gateway.admin import (
     admin_calls,
     admin_inventory,
@@ -45,10 +46,11 @@ from joshua_gateway.upstream import Upstream
 
 logger = get_logger("gateway")
 
-# Only core is admitted on the MCP routes. A person's tools and files are reached
-# through core, never directly. Per-person access is the person gate on the
-# server spec.
-MCP_ROUTE_CALLERS = frozenset({"core"})
+# The MCP routes admit the identities of ``gateway.person_header_callers``
+# only: core, and the assignments container, which acts for one person. A
+# person's tools and files are never reached directly. Per-person access is
+# the person gate on the server spec.
+MCP_ROUTE_CALLERS = person_policy.trusted_identities
 
 # How long a boot, and a reload that starts a new instance, waits for the first
 # connection before it moves on. The supervisor keeps retrying in the background

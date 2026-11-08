@@ -41,7 +41,9 @@ import secrets
 import sys
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, tzinfo
+from functools import cache
 from html import escape
+from importlib import resources
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -110,143 +112,18 @@ _MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table
 # Which viewer route serves each root, for a search hit link.
 _ROUTE_PREFIX = {"wiki": "/wiki/", "shared": "/shared/"}
 
-_CSS = """\
-:root { color-scheme: light dark; --fg: #1a1a1a; --bg: #fbfbfb;
-  --muted: #666; --line: #ddd; --link: #0b5; --code: #f0f0f0;
-  --warn: #b7791f; --crit: #c33; }
-@media (prefers-color-scheme: dark) {
-  :root { --fg: #e6e6e6; --bg: #16181c; --muted: #9aa0a6;
-    --line: #333; --link: #6c9; --code: #22252b;
-    --warn: #e0b04a; --crit: #f07070; } }
-* { box-sizing: border-box; }
-body { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem;
-  font: 16px/1.6 system-ui, sans-serif; color: var(--fg);
-  background: var(--bg); }
-nav { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
-  padding-bottom: .75rem; margin-bottom: 1rem;
-  border-bottom: 1px solid var(--line); }
-nav form { margin-left: auto; }
-nav input { padding: .3rem .5rem; }
-a { color: var(--link); text-decoration: none; }
-a:hover { text-decoration: underline; }
-h1, h2, h3 { line-height: 1.25; }
-ul.tree { list-style: none; padding-left: 0; }
-ul.tree li { padding: .1rem 0; }
-article.md img { max-width: 100%; height: auto; }
-article.md pre, article.md code { background: var(--code);
-  border-radius: 4px; }
-article.md pre { padding: .75rem; overflow-x: auto; }
-article.md code { padding: .1rem .3rem; }
-header.frontmatter { border: 1px solid var(--line); border-radius: 6px;
-  padding: .5rem .75rem; margin-bottom: 1rem; font-size: .9rem;
-  color: var(--muted); }
-header.frontmatter .k { font-weight: 600; }
-form.delete { margin-top: 2rem; padding-top: 1rem;
-  border-top: 1px solid var(--line); }
-form.delete button { padding: .4rem .75rem; cursor: pointer; }
-.snippet { color: var(--muted); }
-p.crumbs { color: var(--muted); font-size: .9rem; margin: 0 0 .5rem; }
-p.meta { color: var(--muted); font-size: .85rem; margin: 0 0 1rem; }
-p.meta .k { font-weight: 600; }
-.count { color: var(--muted); font-size: .85rem; }
-ul.tree ul { list-style: none; padding-left: 1.25rem; }
-ul.tree details > summary { cursor: pointer; padding: .15rem 0; }
-ul.tree details > summary::marker { color: var(--muted); }
-section.siblings { margin-top: 2rem; padding-top: 1rem;
-  border-top: 1px solid var(--line); }
-section.siblings h2 { font-size: 1rem; color: var(--muted); }
-section.siblings ul { columns: 2; column-gap: 2rem; }
-table { border-collapse: collapse; margin: .75rem 0; max-width: 100%;
-  display: block; overflow-x: auto; }
-th, td { border: 1px solid var(--line); padding: .3rem .6rem;
-  text-align: left; vertical-align: top; }
-th { background: var(--code); }
-p.months { color: var(--muted); }
-p.filters { display: flex; flex-wrap: wrap; gap: .4rem; }
-.chip { display: inline-block; padding: .05rem .6rem; border-radius: 999px;
-  border: 1px solid var(--line); font-size: .85rem; color: var(--fg); }
-.chip.on { background: var(--link); border-color: var(--link); color: #fff; }
-.chip:hover { text-decoration: none; border-color: var(--link); }
-.badge { display: inline-block; padding: .05rem .5rem; border-radius: 4px;
-  font-size: .75rem; text-transform: uppercase; letter-spacing: .04em;
-  background: var(--code); color: var(--muted); }
-.badge.nightly { background: var(--link); color: #fff; }
-section.day { margin: 2rem 0; }
-section.day h2 { font-size: 1.1rem; color: var(--muted); font-weight: 600;
-  border-bottom: 1px solid var(--line); padding-bottom: .25rem; }
-section.day h2 a { color: inherit; }
-article.entry { padding: .75rem 0 .75rem 1rem; margin: .5rem 0 1rem;
-  border-left: 3px solid var(--line); }
-article.entry header { display: flex; flex-wrap: wrap; gap: .5rem;
-  align-items: baseline; }
-article.entry h3 { margin: 0; font-size: 1.05rem; }
-article.entry h3 a { color: var(--fg); }
-article.entry .md > :first-child { margin-top: .5rem; }
-article.entry .md img { max-width: 100%; height: auto; }
-article.entry .md pre, article.entry .md code { background: var(--code);
-  border-radius: 4px; }
-article.entry .md pre { padding: .75rem; overflow-x: auto; }
-article.entry footer { font-size: .85rem; color: var(--muted); }
-form.edit label { display: block; margin: 1rem 0; }
-form.edit input[name=people], form.edit textarea { width: 100%;
-  padding: .4rem .5rem; font: inherit; color: var(--fg);
-  background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
-form.edit textarea { font-family: ui-monospace, monospace; font-size: .95rem;
-  line-height: 1.5; }
-form.edit button { padding: .4rem .75rem; cursor: pointer; }
-form.edit input[name=name] { width: 100%; padding: .4rem .5rem; font: inherit;
-  color: var(--fg); background: var(--bg); border: 1px solid var(--line);
-  border-radius: 4px; }
-details.kept { margin: 1rem 0; font-size: .85rem; color: var(--muted); }
-details.kept pre { background: var(--code); padding: .5rem .75rem;
-  border-radius: 4px; overflow-x: auto; }
-p.error { color: #c33; }
-p.actions { margin-top: 2rem; font-size: .9rem; }
-table.usage td.num { text-align: right; font-variant-numeric: tabular-nums;
-  white-space: nowrap; }
-table.usage caption { text-align: left; color: var(--muted); }
-figure.usage-chart { margin: 1rem 0; }
-figure.usage-chart svg { width: 100%; height: auto; display: block; }
-figure.usage-chart .grid { stroke: var(--line); stroke-width: 1; }
-figure.usage-chart .axis { fill: var(--muted); font-size: 11px; }
-ul.legend { list-style: none; padding: 0; margin: .5rem 0 0; display: flex;
-  flex-wrap: wrap; gap: .25rem 1rem; font-size: .85rem; }
-ul.legend .sw { display: inline-block; width: .8rem; height: .8rem;
-  border-radius: 2px; margin-right: .35rem; vertical-align: -.1rem; }
-section.limits { margin: 0 0 1.5rem; padding-bottom: 1rem;
-  border-bottom: 1px solid var(--line); }
-section.limits h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
-section.limits p.meta { margin: -.25rem 0 .5rem; }
-div.limits-grid { display: grid; gap: .75rem 1.5rem;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
-div.limit { --meter: var(--link); }
-div.limit.warn { --meter: var(--warn); }
-div.limit.crit { --meter: var(--crit); }
-div.limit-head { display: flex; align-items: baseline; gap: .5rem; }
-div.limit-head .limit-name { font-weight: 600; }
-div.limit-head .limit-value { margin-left: auto; color: var(--muted);
-  font-size: .85rem; font-variant-numeric: tabular-nums; }
-div.limit-head .limit-value strong { color: var(--meter); font-size: 1.5rem;
-  line-height: 1; }
-div.limit-bar svg { display: block; width: 100%; height: .6rem;
-  margin: .3rem 0; }
-div.limit-bar .track { fill: var(--line); }
-div.limit-bar .fill { fill: var(--meter); }
-div.limit .badge { background: var(--meter); color: var(--bg); }
-div.limit.reset .limit-bar, div.limit.reset .limit-value { opacity: .4; }
-div.limit-foot { display: flex; justify-content: space-between; gap: .5rem;
-  flex-wrap: wrap; color: var(--muted); font-size: .85rem; }
-details.day { margin: .25rem 0; }
-details.day > summary { cursor: pointer; }
-.s0 { fill: #2a78c2; background: #2a78c2; }
-.s1 { fill: #e07b39; background: #e07b39; }
-.s2 { fill: #3a9e6f; background: #3a9e6f; }
-.s3 { fill: #b5487a; background: #b5487a; }
-.s4 { fill: #8a6ccf; background: #8a6ccf; }
-.s5 { fill: #c9a227; background: #c9a227; }
-.s6 { fill: #3aa6b9; background: #3aa6b9; }
-.s7 { fill: #8c8c8c; background: #8c8c8c; }
-"""
+# The stylesheets and images the pages load. The shared Joshua stylesheet and
+# its images are in ``ui/``, and ``viewer.css`` holds what only the viewer
+# needs. Each is served from the package, behind the same sign-in as a page.
+_UI_DIR = "ui"
+_UI_FILES = {
+    "joshua-ui.css": "text/css",
+    "logo-512.png": "image/png",
+    "logo-64.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+    "favicon-32.png": "image/png",
+}
+_VIEWER_CSS = "viewer.css"
 
 
 # -- auth -------------------------------------------------------------------
@@ -426,32 +303,115 @@ def _frontmatter_html(front: dict[str, Any] | None) -> str:
     return f'<header class="frontmatter">{rows}</header>'
 
 
-def _page(title: str, body: str, *, status: int = 200, nav: bool = True) -> HTMLResponse:
-    chrome = _NAV if nav else ""
+# The sections of the navigation: (key, label, URL, icon path data).
+_SECTIONS = (
+    (
+        "wiki",
+        "Wiki",
+        "/wiki/",
+        '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/>'
+        '<path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
+    ),
+    (
+        "journal",
+        "Journal",
+        "/journal",
+        '<path d="M5 4h14a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>'
+        '<path d="M8 2v4M16 2v4M3 10h18"/>',
+    ),
+    (
+        "search",
+        "Search",
+        "/search",
+        '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    ),
+    ("usage", "Usage", "/usage", '<path d="M4 20V11M10 20V4M16 20v-8M21 20H3"/>'),
+)
+_SECTION_LABEL = {key: label for key, label, _, _ in _SECTIONS}
+_SEARCH_ICON = _SECTIONS[2][3]
+
+
+def _icon(paths: str) -> str:
+    return f'<svg class="j-icon" viewBox="0 0 24 24" aria-hidden="true">{paths}</svg>'
+
+
+def _current(key: str, section: str) -> str:
+    return ' aria-current="page"' if key == section else ""
+
+
+def _shell(body: str, *, section: str, query: str) -> str:
+    """The page shell: the sidebar on a wide screen; the app bar and the tabs
+    on a phone. ``section`` marks the current item. The search field is in the
+    app bar, so it shows on every screen."""
+    items = "".join(
+        f'<a class="j-nav-item" href="{url}"{_current(key, section)}>{_icon(icon)}{label}</a>'
+        for key, label, url, icon in _SECTIONS
+    )
+    tabs = "".join(
+        f'<a class="j-tab" href="{url}"{_current(key, section)}>{label}</a>'
+        for key, label, url, _ in _SECTIONS
+    )
+    here = _SECTION_LABEL.get(section, "Home")
+    content = "j-content wide" if section == "usage" else "j-content"
+    return (
+        '<div class="j-shell has-sidebar">'
+        '<aside class="j-sidebar">'
+        '<a class="j-brand" href="/"><img class="j-logo" src="/ui/logo-64.png" alt="">Joshua</a>'
+        f'<nav class="v-sections" aria-label="Sections">{items}</nav>'
+        "</aside>"
+        '<div class="j-main">'
+        '<header class="j-appbar">'
+        '<img class="j-logo" src="/ui/logo-64.png" alt="">'
+        f'<a class="j-appbar-title" href="/"><small>Joshua</small><strong>{here}</strong></a>'
+        '<span class="j-spacer"></span>'
+        '<form class="v-search" action="/search" method="get" role="search">'
+        f'<label class="j-field">{_icon(_SEARCH_ICON)}'
+        f'<input type="search" name="q" value="{escape(query, quote=True)}" '
+        'placeholder="Search" aria-label="Search"></label></form>'
+        "</header>"
+        f'<nav class="j-tabs mobile-only" aria-label="Sections">{tabs}</nav>'
+        f'<main class="{content}">{body}</main>'
+        "</div></div>"
+    )
+
+
+def _page(
+    title: str,
+    body: str,
+    *,
+    status: int = 200,
+    nav: bool = True,
+    section: str = "",
+    query: str = "",
+) -> HTMLResponse:
+    """A full page. ``section`` is the key of the current section in the
+    navigation (``wiki``, ``journal``, ``search``, ``usage``), or "" for the
+    home page. ``nav`` False gives the bare content with no navigation."""
+    main = (
+        _shell(body, section=section, query=query)
+        if nav
+        else f'<main class="j-content">{body}</main>'
+    )
     html = (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width, initial-scale=1">'
+        '<meta name="theme-color" content="#080d17">'
         f"<title>{escape(title)}</title>"
+        '<link rel=icon type="image/png" href="/ui/favicon-32.png">'
+        '<link rel=apple-touch-icon href="/ui/apple-touch-icon.png">'
+        '<link rel=stylesheet href="/ui/joshua-ui.css">'
         '<link rel=stylesheet href="/style.css"></head><body>'
-        f"{chrome}<main>{body}</main></body></html>"
+        f"{main}</body></html>"
     )
     return HTMLResponse(html, status_code=status)
 
 
-_NAV = (
-    '<nav><a href="/">home</a><a href="/wiki/">wiki</a><a href="/journal">journal</a>'
-    '<a href="/usage">usage</a>'
-    '<form action="/search" method="get">'
-    '<input name="q" placeholder="search" aria-label="search"></form></nav>'
-)
-
-
 def _not_found() -> HTMLResponse:
-    return _page("not found", "<h1>not found</h1>", status=404, nav=False)
+    return _page("not found", '<h1 class="j-doc-title">not found</h1>', status=404, nav=False)
 
 
 def _forbidden() -> HTMLResponse:
-    return _page("forbidden", "<h1>forbidden</h1>", status=403, nav=False)
+    return _page("forbidden", '<h1 class="j-doc-title">forbidden</h1>', status=403, nav=False)
 
 
 def _read_text(abs_path: Path) -> str | None:
@@ -500,13 +460,15 @@ def _serve(roots: dict[str, Root], rel: str, person: Person, *, allow_delete: bo
         rendered = _MD.render(body_md)
         if root.name == "wiki":
             rendered = _wiki_attachment_links(rendered)
-        body += wiki.meta_html(front or {}) + f'<article class="md">{rendered}</article>'
+        body += wiki.meta_html(front or {}) + f'<article class="j-prose">{rendered}</article>'
         if root.name == "wiki":
             body += wiki.siblings_html(root.base, under_wiki)
         if allow_delete and root.name == "wiki" and person.role == "member":
-            body += f'<p class="actions">{edit.edit_link(under_wiki)}</p>'
-            body += _delete_form(person, rel)
-        return _page(title, body)
+            body += (
+                f'<div class="v-actions">{edit.edit_link(under_wiki)}'
+                f"{_delete_form(person, rel)}</div>"
+            )
+        return _page(title, body, section="wiki" if root.name == "wiki" else "")
 
     return _download(abs_path)
 
@@ -568,9 +530,9 @@ def _list_attachments(root: Root) -> list[str]:
 
 def _section(title: str, links: list[tuple[str, str]]) -> str:
     if not links:
-        return f"<h2>{escape(title)}</h2><p class=snippet>nothing yet.</p>"
+        return f'<h2 class="j-label">{escape(title)}</h2><p class="j-empty">nothing yet.</p>'
     items = "".join(f'<li><a href="{escape(url)}">{escape(text)}</a></li>' for url, text in links)
-    return f"<h2>{escape(title)}</h2><ul class=tree>{items}</ul>"
+    return f'<h2 class="j-label">{escape(title)}</h2><ul class="tree">{items}</ul>'
 
 
 # -- delete -----------------------------------------------------------------
@@ -599,7 +561,7 @@ def _delete_form(person: Person, rel: str) -> str:
         '<form class="delete" action="/delete" method="post">'
         f'<input type="hidden" name="path" value="{escape(rel, quote=True)}">'
         f'<input type="hidden" name="csrf" value="{escape(token, quote=True)}">'
-        "<button type=submit>move this page to trash</button></form>"
+        '<button class="j-btn sm danger" type=submit>move this page to trash</button></form>'
     )
 
 
@@ -637,13 +599,13 @@ def _commit_trash(root: Root, abs_path: Path) -> None:
 async def index(request: Request, person: Person) -> Response:
     roots = _roots_for(person)
     anonymous = person.id == ANONYMOUS_PERSON_ID
-    body = [f"<h1>{escape(person.name)}</h1>"]
+    body = [f'<h1 class="j-doc-title">{escape(person.name)}</h1>']
     if anonymous:
-        body.append('<p><a href="/journal">journal</a></p>')
+        body.append('<p class="j-meta"><a href="/journal">journal</a></p>')
     else:
         profile_url = f"/wiki/people/{person.id}.md"
         body.append(
-            f'<p><a href="{escape(profile_url, quote=True)}">profile</a> · '
+            f'<p class="j-meta"><a href="{escape(profile_url, quote=True)}">profile</a> · '
             '<a href="/journal">journal</a></p>'
         )
         # The anonymous identity has no attachments folder on disk: there is
@@ -658,8 +620,8 @@ async def index(request: Request, person: Person) -> Response:
             )
         )
     tree = wiki.build_tree(roots["wiki"].base)
-    body.append("<h2>wiki</h2>")
-    body.append(wiki.tree_html(tree) if tree else "<p class=snippet>nothing yet.</p>")
+    body.append('<h2 class="j-label">wiki</h2>')
+    body.append(wiki.tree_html(tree) if tree else '<p class="j-empty">nothing yet.</p>')
     return _page(person.name, "".join(body))
 
 
@@ -705,8 +667,8 @@ def _folder_page(roots: dict[str, Root], rel: str, person: Person) -> Response:
     body = wiki.crumbs_html(root.base, rel, leaf=None) if rel else ""
     body += wiki.folder_html(folder, index_html)
     if person.role == "member":
-        body += f'<p class="actions">{edit.new_link(rel)}</p>'
-    return _page(folder.title, body)
+        body += f'<div class="v-actions">{edit.new_link(rel)}</div>'
+    return _page(folder.title, body, section="wiki")
 
 
 async def shared_page(request: Request, person: Person) -> Response:
@@ -726,24 +688,28 @@ async def search(request: Request, person: Person) -> Response:
     down or not configured."""
     query = (request.query_params.get("q") or "").strip()
     if not query:
-        return _page("search", "<h1>search</h1><p class=snippet>Enter a query.</p>")
+        return _page(
+            "search",
+            '<h1 class="j-doc-title">search</h1><p class="j-empty">Enter a query.</p>',
+            section="search",
+        )
     meaning = ""
     core = search_mod.from_env(os.environ)
     if core is not None:
         meaning = search_mod.meaning_html(await core.search(query))
     hits = _search(_roots_for(person), query)
     if not hits:
-        words = f"<p>No match for {escape(query)}.</p>"
+        words = f'<p class="j-empty">No match for {escape(query)}.</p>'
     else:
-        items = "".join(
-            f'<li><a href="{escape(url)}">{escape(label)}</a> '
-            f"<span class=snippet>{escape(snippet)}</span></li>"
-            for url, label, snippet in hits
-        )
-        words = f"<ul class=tree>{items}</ul>"
+        words = search_mod.results_html([(url, label, "", snippet) for url, label, snippet in hits])
     if meaning:
-        words = f"<section class=words><h2>By words</h2>{words}</section>"
-    return _page("search", f"<h1>search</h1>{meaning}{words}")
+        words = f'<section class="words"><h2>By words</h2>{words}</section>'
+    return _page(
+        "search",
+        f'<h1 class="j-doc-title">search</h1>{meaning}{words}',
+        section="search",
+        query=query,
+    )
 
 
 async def usage(request: Request, person: Person) -> Response:
@@ -764,6 +730,7 @@ async def usage(request: Request, person: Person) -> Response:
     return _page(
         "usage",
         usage_mod.page_html(body, days=days, configured=core is not None, limits=section),
+        section="usage",
     )
 
 
@@ -860,7 +827,7 @@ async def journal_feed(request: Request, person: Person) -> Response:
         person_id=person_id,
         can_edit=person.role == "member",
     )
-    return _page("journal", body)
+    return _page("journal", body, section="journal")
 
 
 async def journal_day(request: Request, person: Person) -> Response:
@@ -886,7 +853,7 @@ async def journal_day(request: Request, person: Person) -> Response:
         people=_people_list(),
         can_edit=person.role == "member",
     )
-    return _page(day.isoformat(), body)
+    return _page(day.isoformat(), body, section="journal")
 
 
 # -- edit -------------------------------------------------------------------
@@ -924,8 +891,10 @@ def _edit_target(
         if abs_path.exists():
             return _page(
                 "exists",
-                "<h1>exists</h1><p>A page with that name is already there.</p>",
+                '<h1 class="j-doc-title">exists</h1>'
+                '<p class="j-error">A page with that name is already there.</p>',
                 status=409,
+                section="wiki",
             )
     else:
         if not abs_path.is_file():
@@ -961,7 +930,7 @@ async def edit_page(request: Request, person: Person) -> Response:
             people=entry.people,
             cancel_url=entry.day_url,
         )
-        return _page(f"edit {entry.title}", form)
+        return _page(f"edit {entry.title}", form, section="journal")
     front, body = edit.split_raw_frontmatter(text)
     title = wiki.page_title(text, wiki.stem_title(abs_path.stem))
     form = edit.form_html(
@@ -973,7 +942,7 @@ async def edit_page(request: Request, person: Person) -> Response:
         kept_front=front,
         cancel_url=f"/wiki/{rel}",
     )
-    return _page(f"edit {title}", form)
+    return _page(f"edit {title}", form, section="wiki")
 
 
 async def new_page(request: Request, person: Person) -> Response:
@@ -988,7 +957,7 @@ async def new_page(request: Request, person: Person) -> Response:
         return _not_found()
     if not abs_dir.is_dir():
         return _not_found()
-    return _page("new page", _new_form(person, folder, name="", body="", error=""))
+    return _page("new page", _new_form(person, folder, name="", body="", error=""), section="wiki")
 
 
 def _new_form(person: Person, folder: str, *, name: str, body: str, error: str) -> str:
@@ -1027,6 +996,7 @@ async def save(request: Request, person: Person) -> Response:
                     person, folder, name=str(form.get("name", "")), body=body, error=str(exc)
                 ),
                 status=400,
+                section="wiki",
             )
     else:
         rel = str(form.get("path", ""))
@@ -1056,10 +1026,20 @@ async def save(request: Request, person: Person) -> Response:
             after = f"/wiki/{rel}"
             what = "edit"
     except edit.EditError as exc:
-        return _page("edit", f"<h1>edit</h1><p>{escape(str(exc))}</p>", status=400)
+        return _page(
+            "edit",
+            f'<h1 class="j-doc-title">edit</h1><p class="j-error">{escape(str(exc))}</p>',
+            status=400,
+            section="journal" if day is not None else "wiki",
+        )
     raw = data.encode("utf-8")
     if len(raw) > MAX_BYTES:
-        return _page("edit", "<h1>edit</h1><p>The page exceeds 256 KB.</p>", status=400)
+        return _page(
+            "edit",
+            '<h1 class="j-doc-title">edit</h1><p class="j-error">The page exceeds 256 KB.</p>',
+            status=400,
+            section="journal" if day is not None else "wiki",
+        )
     _atomic_write(abs_path, raw)
     _commit_write(root, abs_path, what)
     logger.info({"message": "viewer write", "root": "wiki", "what": what})
@@ -1079,8 +1059,25 @@ def _commit_write(root: Root, abs_path: Path, what: str) -> None:
         logger.warning({"message": "wiki commit failed", "error": str(exc)})
 
 
+@cache
+def _package_file(*parts: str) -> bytes:
+    """A file of this package, read once."""
+    return resources.files("joshua_gateway").joinpath(*parts).read_bytes()
+
+
 async def style(request: Request, person: Person) -> Response:
-    return Response(_CSS, media_type="text/css")
+    """The viewer's own stylesheet, which loads after the shared one."""
+    return Response(_package_file(_VIEWER_CSS), media_type="text/css")
+
+
+async def ui_file(request: Request, person: Person) -> Response:
+    """One file of the shared Joshua look: the stylesheet or an image. A name
+    that is not in ``_UI_FILES`` is 404."""
+    name = request.path_params["name"]
+    media_type = _UI_FILES.get(name)
+    if media_type is None:
+        return _not_found()
+    return Response(_package_file(_UI_DIR, name), media_type=media_type)
 
 
 async def healthz(request: Request) -> JSONResponse:
@@ -1105,9 +1102,9 @@ async def readyz(request: Request) -> JSONResponse:
 class SecurityHeaders(BaseHTTPMiddleware):
     """Add the fixed security headers to every response.
 
-    ``default-src 'none'`` blocks every sub-resource; the page loads its one
-    stylesheet from ``'self'`` and its images from ``'self'`` (attachments).
-    There is no script.
+    ``default-src 'none'`` blocks every sub-resource; the page loads its
+    stylesheets from ``'self'`` and its images from ``'self'`` (attachments,
+    the logo and the icons). There is no script.
     """
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
@@ -1128,6 +1125,7 @@ def build_app() -> Starlette:
             Route("/healthz", healthz),
             Route("/readyz", readyz),
             Route("/style.css", _require_auth(style)),
+            Route("/ui/{name}", _require_auth(ui_file)),
             Route("/", _require_auth(index)),
             Route("/wiki", _require_auth(wiki_root)),
             Route("/journal", _require_auth(journal_feed)),

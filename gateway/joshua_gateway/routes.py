@@ -10,17 +10,19 @@ manager. A request that arrives while the upstream reconnects waits for it; an
 upstream that is down and not reconnecting is 503.
 
 The person comes from ``X-Joshua-Person``, the role from ``X-Joshua-Role``, and
-the group of a group chat from ``X-Joshua-Group``, all trusted only from
-``core``. The role is what the files server acts on. A server with ``allow: all``
-admits any person; a scoped server admits only its named people and groups and
-denies a request with neither. A denied request is 403 before any upstream
+the group of a group chat from ``X-Joshua-Group``, all trusted only from the
+identities in ``gateway.person_header_callers``. The MCP routes admit only
+those identities, read from the current config on each request. The role is
+what the files server acts on. A server with ``allow: all`` admits any
+person; a scoped server admits only its named people and groups and denies a
+request with neither. A denied request is 403 before any upstream
 contact and is written to the call log. A later request that changes the person
 or conversation of a live session is 409.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from typing import Any
 
 from joshua_shared import config
@@ -43,6 +45,8 @@ from joshua_gateway.observability import (
 from joshua_gateway.upstream import Upstream
 
 Send = Callable[[dict[str, Any]], Awaitable[None]]
+# The fleet identities admitted on an MCP route, read on each request.
+Callers = Callable[[], Collection[str]]
 
 _SESSION_HEADER = b"mcp-session-id"
 
@@ -102,7 +106,7 @@ def _record_denied(
     )
 
 
-async def _authenticate(scope, allowed: frozenset[str], name: str, send: Send):
+async def _authenticate(scope, allowed: Callers, name: str, send: Send):
     """Authenticate the caller and attribute the request to a person.
 
     Returns ``(identity, attribution)`` on success, or None after sending a 401
@@ -113,7 +117,8 @@ async def _authenticate(scope, allowed: frozenset[str], name: str, send: Send):
     if identity is None:
         await _reject(send, 401, b"unauthorized")
         return None
-    if identity not in allowed:
+    trusted = frozenset(allowed())
+    if identity not in trusted:
         await _reject(send, 403, f"caller {identity} not allowed on {name}".encode())
         return None
     headers = _headers(scope)
@@ -126,6 +131,7 @@ async def _authenticate(scope, allowed: frozenset[str], name: str, send: Send):
             headers.get("x-joshua-role"),
             headers.get("x-joshua-group"),
             _known_groups(),
+            trusted,
         )
     except person_policy.PersonError as exc:
         await _reject(send, 400, exc.message.encode())
@@ -173,10 +179,11 @@ async def _forward(up: Upstream, identity: str, attr, scope, receive, send) -> N
         group_ctx.reset(tokens[4])
 
 
-def make_asgi(up: Upstream, allowed: frozenset[str]):
+def make_asgi(up: Upstream, allowed: Callers):
     """ASGI app for one shared upstream endpoint (a server without identities).
 
-    ``allowed`` is the set of fleet callers permitted on MCP routes (``core``).
+    ``allowed`` gives the fleet callers permitted on MCP routes
+    (``gateway.person_header_callers``).
     A missing or invalid bearer is 401; a caller outside
     ``allowed`` is 403; a person the server does not admit is 403; a bad person
     header is 400; a session that changes person or conversation is 409.
@@ -200,7 +207,7 @@ def make_multi_asgi(
     name: str,
     get_spec: Callable[[], ServerSpec],
     resolve_instance: Callable[[str], Upstream | None],
-    allowed: frozenset[str],
+    allowed: Callers,
 ):
     """ASGI app for an identity server: route each person to their own instance.
 

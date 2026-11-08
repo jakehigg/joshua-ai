@@ -68,6 +68,7 @@ channels:
     allowed_callers:
       - laptop
       - ci
+      - assignments            # the assignments container sends its reports and questions
   destinations:
     everyone: imessage:group:everyone
   limits:
@@ -142,6 +143,12 @@ memory:
   per_doc_cap: 3
   recency_bonus: 0.08
   recency_half_life_days: 14.0
+  # Top-level wiki folders that the memory never holds: the files source does
+  # not index them, and no search returns a page in them. The assignments
+  # write their plan pages in wiki/assignments/. An empty value excludes
+  # nothing.
+  exclude_folders:
+    - assignments
   # Snapshots: fixed MCP tool calls that core runs on a cadence, with no
   # model. The output goes into the index and replaces the last output, so a
   # turn can see that an open item matches what a person says. The list is
@@ -311,12 +318,26 @@ viewer:                         # a read-only web viewer for the wiki and a
 
 usage:
   # Core's GET /v1/usage: the tokens of each day, for the chat, the nightly
-  # reflection, the lookups, and the describer. The usage page of the viewer
-  # reads it. Each caller needs a JOSHUA_TOKEN_<NAME> in .env. An empty value
-  # turns the route off. GET /admin/usage gives the same answer to an admin
+  # reflection, the lookups, the describer, and the assignments. The usage
+  # page of the viewer reads it. Each caller needs a JOSHUA_TOKEN_<NAME> in
+  # .env. An empty value turns the route off. GET /admin/usage gives the same answer to an admin
   # caller.
   allowed_callers:
     - viewer                   # the web viewer
+  # Core's POST /v1/usage: the fleet identities that may write usage rows of
+  # the kind assignment. The usage page then shows the assignment group. An
+  # empty value turns the write off.
+  writers:
+    - assignments              # the assignments container
+
+# gateway:
+#   # The fleet identities that may call the gateway MCP routes and say which
+#   # person, role, group, and conversation a call is for (the X-Joshua-*
+#   # headers). Every other identity gets 403 on an MCP route. The list must
+#   # hold core. The snapshot and search routes admit core only.
+#   person_header_callers:
+#     - core
+#     - assignments            # acts for the person who started the assignment
 
 # limits:
 #   # How much of the Claude subscription limits is used: core's
@@ -327,6 +348,42 @@ usage:
 #   chat_tool: true            # give check_limits to chat turns
 #   voice_tool: true           # give check_limits to voice turns
 
+# assignments:
+#   # Long jobs that run for a member in the background, in their own
+#   # container. Off by default. Start the container with
+#   # `docker compose --profile assignments up -d`, and add it as an `mcp:`
+#   # server. docs/assignments.md has the whole setup. A token is never a value
+#   # here: a platform names the variable that holds its token.
+#   enabled: false
+#   default_model: sonnet              # a key of models
+#   models:                            # name -> model id and effort; a spec names a key
+#     sonnet:
+#       model: claude-sonnet-5
+#       effort: medium               # low | medium | high | xhigh | max
+#     opus:
+#       model: claude-opus-5
+#       effort: high
+#   default_max_turns: 200             # soft cap on model turns, when the spec names none
+#   default_working_time: 4h           # the clock runs only while the assignment works
+#   limits:                            # ceilings on the subscription windows, in percent used
+#     five_hour_pct: 70                # the ceiling when the spec names none
+#     seven_day_pct: 85
+#     max_five_hour_pct: 90            # a spec may go this high and no higher
+#     max_seven_day_pct: 95
+#     when_unknown: refuse             # refuse | run, when core cannot read the windows
+#   max_concurrent: 1                  # running assignments; a parked one holds no slot
+#   slice_turns: 10                    # model turns between two reads of the limits
+#   keep_failed_work: 7d               # how long the scratch of a failed assignment stays
+#   repos:                             # what an assignment may clone: host/group/name or host/group/*
+#     - gitlab.example.net/infra/*
+#   platforms:                         # git hosts: kind and the variable that holds the token
+#     gitlab.example.net:
+#       kind: gitlab                   # github | gitlab | git
+#       token_env: ASSIGNMENTS_GITLAB_TOKEN
+#   people:
+#     alex:
+#       notify: imessage:dm:alex       # the destination of the report and the questions
+
 # inference:
 #   # Where the model calls go. With no section, every job uses the Claude
 #   # subscription (CLAUDE_CODE_OAUTH_TOKEN in .env). Put each key in .env and
@@ -335,7 +392,7 @@ usage:
 #   api_key: ${INFERENCE_API_KEY:-}     # with no base_url: the Anthropic API with this key
 #   timeout_seconds: 600                # the limit of one turn and one reflection call
 #   # One block for each job that needs a change: chat, voice, reflection,
-#   # describe, internet. A block with only `model` keeps the server above. A
+#   # describe, internet, assignment. A block with only `model` keeps the server above. A
 #   # block that sets base_url must set api_key too ("" for a server with no
 #   # key), so the key above never goes to another server. A block that sets
 #   # only api_key uses the server above with its own key, for example one
@@ -351,6 +408,14 @@ usage:
 #     base_url: http://litellm:4000
 #     api_key: ${LITELLM_API_KEY:-}
 #     model: local-model               # replaces internet.model for this job
+#   # ASSIGNMENT: the model calls of the assignments container go through
+#   # core's forwarder, /v1/model/..., and core adds the credential of
+#   # this job. The container holds no model credential.
+#   # assignment:
+#   #   api_key: ${INFERENCE_KEY_ASSIGNMENT:-}
+#   # forwarder:
+#   #   allowed_callers:          # who may send a model call through core;
+#   #     - assignments           # an empty value turns the route off (404)
 #   # WEB SEARCH: an internet job on a server other than Anthropic (above,
 #   # or through the global base_url) has no WebSearch, so web search stops.
 #   # Set internet.search to a SearXNG instance to search again.

@@ -39,7 +39,10 @@ policy on every call, both when it lists the tools and when a tool runs. A
 tool that a person may not use is not in their list, and a call to it fails.
 
 `core` sits between them. It holds the Claude token and the database password.
-It reaches the Claude API. When `internet.fetch.enabled` is on, it also reads
+It reaches the Claude API. The assignments container holds no model
+credential: it sends its model calls through core's forwarder, and the
+credential never leaves core. See
+[the model credential stays in core](#the-model-credential-stays-in-core). When `internet.fetch.enabled` is on, it also reads
 the web pages the internet agent was given, through the block list. See
 [the internet agent](#the-internet-agent-and-the-one-tool-that-reaches-out).
 
@@ -50,10 +53,13 @@ Every route has an allowlist of fleet identities. The list is in
 
 - `/admin/*` on every container checks `ADMIN_CALLERS` on every route, with
   no exception.
-- `gateway` admits only `core` on its MCP routes, and trusts the
-  `X-Joshua-Person` and `X-Joshua-Group` headers only from `core`. No setting
-  widens either one. Any other caller gets what an unknown person gets: the
-  shared files, read-only.
+- `gateway` admits only the identities in `gateway.person_header_callers` on
+  its MCP routes (default `core` and `assignments`), and trusts the
+  `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, and
+  `X-Joshua-Conversation` headers only from them. The list must hold `core`.
+  Every other caller gets `403` on an MCP route, and a test proves it for
+  `viewer`. The assignments container acts for the person who started an
+  assignment, so the person tool policy applies to it in the same way.
 
 - core's `POST /v1/memory/search` names no person. It searches the shared
   scope and returns only pages under `wiki/`, of kind `wiki`, `journal`, or
@@ -61,8 +67,8 @@ Every route has an allowlist of fleet identities. The list is in
   holds their text in the shared scope. The route checks each row again after
   the database filter, and a test proves it.
 
-- The gateway route `POST /v1/snapshots/{name}` admits only `core`, and its body is
-  empty. The gateway reads the tool and the arguments of the snapshot from its
+- The gateway route `POST /v1/snapshots/{name}` admits only `core`, also
+  when `assignments` is in `person_header_callers`, and its body is empty. The gateway reads the tool and the arguments of the snapshot from its
   own config, so no caller can ask for another tool. It refuses a tool that
   the tool filter hides, that the `class` map marks `write-local` or `act`,
   or that the upstream declares destructive and not read-only. A test proves
@@ -72,7 +78,18 @@ Every route has an allowlist of fleet identities. The list is in
   one query. The gateway reads the SearXNG URL, its parameters, and its
   optional key from `internet.search`, so no caller can choose the host, the
   path, or another parameter. A test proves the `403` for every other
-  caller.
+  caller, `assignments` too.
+
+- core's `POST /v1/usage` admits `usage.writers` (default `assignments`) and
+  accepts rows of kind `assignment` only. A row of `chat`, `reflection`,
+  `internet`, or `describe` gets `400`, so a writer cannot change the numbers
+  of the calls that core makes. Core stores each `ref` with the name of the
+  writer, so a writer cannot reach the rows of another writer.
+
+- core's `ANY /v1/model/{path}` admits `inference.forwarder.allowed_callers`
+  (default `assignments`). It compares the bearer with the tokens of that list
+  only, so every other token, also core's own, gets `401`. It sends a request
+  on only for the paths of the Claude CLI, and any other path gets `403`.
 
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
 name, a path, or a token. The core route `GET /v1/limits` is open too. It
@@ -156,7 +173,8 @@ An `owner` role arrives later, and it will be the only role that adds a person.
 
 ### What decides a write
 
-The gateway acts on the `X-Joshua-Role` header, which only `core` may assert.
+The gateway acts on the `X-Joshua-Role` header, which only the identities in
+`gateway.person_header_callers` may assert.
 `X-Joshua-Person` rides along for the audit trail and decides nothing about a
 file.
 
@@ -169,7 +187,7 @@ names nobody, is a guest chat.
 
 A group chat has no single person, so it reaches a scoped server only when the
 server's `allow` names its group id. `X-Joshua-Group` carries the id, and the
-gateway trusts it only from `core`. Validation refuses a group with no
+gateway trusts it only from the identities in `gateway.person_header_callers`. Validation refuses a group with no
 `members` in an `allow` list, because anybody in that chat would then reach the
 server. Everyone in the chat acts through one credential, so name a group only
 when you trust every member of the chat with that server.
@@ -204,9 +222,10 @@ starts with `sk-ant-`, `glpat-`, `xoxb-`, `ak2_`, or `GOCSPX-` fails validation.
 The log formatter replaces a bearer token and any value with those prefixes
 with `[REDACTED]`.
 
-`make init-env` mints the database password and the four fleet tokens. Each
-token is 33 random bytes. Every container gets all four fleet tokens, because
-each one verifies the callers it trusts. The three containers are one trust
+`make init-env` mints the database password and the fleet tokens
+(`channels`, `core`, `gateway`, `laptop`, `viewer`, `mcp`, and `assignments`).
+Each token is 33 random bytes. Every container gets all the fleet tokens,
+because each one verifies the callers it trusts. The three containers are one trust
 domain.
 
 Compose gives each container only the variables it needs. `core` gets the
@@ -232,9 +251,45 @@ a host, so it goes neither to a person nor to the log. Only
 `POST /admin/inference/check` returns it, to an admin caller, after core
 removes every key and token of the `inference` section from it.
 
+### The model credential stays in core
+
+The assignments container runs a session with Bash and file tools on a
+checkout of a repository, so it must hold no secret that it does not need. It
+holds no model credential. Its CLI sets `ANTHROPIC_BASE_URL` to core's
+forwarder and sends its own fleet token as a stand-in Claude token. Core:
+
+- compares that token with the tokens of `inference.forwarder.allowed_callers`
+  only.
+- sends a request on only for `v1/messages`, `v1/messages/count_tokens`,
+  `v1/models`, and `v1/models/<id>`.
+- removes the caller's `Authorization` and `x-api-key`, and adds the
+  credential of the `assignment` job.
+- never returns the credential, never logs a token, a header value, or a
+  body, and never returns or logs the error text of a failed connection.
+
+Thus the container can make model calls, but it cannot read the credential,
+send it to another host, or reach another path of the API with it. A stolen
+assignments token reaches the model through core and nothing more, and an
+empty `allowed_callers` stops it at once.
+
 An entry whose credential expanded to nothing is turned off, not started with an
 empty credential and not retried. `/readyz` counts it in `disabled` and the log
 names the empty key.
+
+### A session cannot read the assignments manager
+
+A session has Bash and runs as the same user as the assignments manager,
+which holds the database URL and the bearers of its callers. The manager
+makes itself non-dumpable at start, before it reads a secret or opens its
+port. Then Linux refuses its `/proc/<pid>/environ`, `mem`, `maps`, and `fd`
+to the session, which has no `CAP_SYS_PTRACE`. The session also gets every
+variable of the manager with an empty value, except a few plain ones.
+
+Two things remain. A command in the session can send a signal to the
+manager and stop it, which is a denial of service and not a leak. The
+session holds the fleet token of the container until per-assignment tokens
+exist. [assignments.md](assignments.md#what-a-session-can-see) has the
+details.
 
 ## Package MCP servers
 
