@@ -36,6 +36,11 @@ for name in environ maps; do
 done
 if err=$(ls "/proc/$pid/fd" 2>&1 >/dev/null); then echo "fd=read"; else echo "fd=$err"; fi
 echo probe > "$HOME/probe.txt"
+for dir in /app /app/.venv /app/assignments/joshua_assignments; do
+  if err=$( (echo x > "$dir/probe") 2>&1); then echo "write:$dir=written"
+  else echo "write:$dir=$err"; fi
+done
+echo "owner:/app=$(stat -c %u /app 2>/dev/null)"
 echo "--env--"
 env
 """
@@ -111,6 +116,17 @@ def check_control() -> None:
     assert lines["environ"] == "read", lines["environ"]
 
 
+IN_IMAGE = Path("/app/.venv").is_dir() and sys.prefix.startswith("/app/")
+
+
+def check_code_read_only() -> None:
+    """In the image: the session cannot change the code that the manager runs."""
+    lines, _, _ = run_session(harden=True)
+    assert lines["owner:/app"] == "0", "/app must belong to root"
+    for path in ("/app", "/app/.venv", "/app/assignments/joshua_assignments"):
+        assert "Permission denied" in lines[f"write:{path}"], lines[f"write:{path}"]
+
+
 # --- pytest ------------------------------------------------------------------
 
 try:
@@ -130,6 +146,10 @@ if pytest is not None:
     def test_without_the_call_the_session_can_read_it() -> None:
         check_control()
 
+    @pytest.mark.skipif(not IN_IMAGE, reason="needs the /app of the image (#75)")
+    def test_the_session_cannot_change_the_code_in_the_image() -> None:
+        check_code_read_only()
+
 
 if __name__ == "__main__":
     if sys.platform != "linux":
@@ -141,3 +161,8 @@ if __name__ == "__main__":
         "hardened: environ, maps, and fd are denied (EACCES); "
         "no secret in the session environment or under HOME"
     )
+    if IN_IMAGE:
+        check_code_read_only()
+        print("code: /app belongs to root; the session cannot write /app or /app/.venv")
+    else:
+        sys.exit("not in the image: the check of /app did not run")

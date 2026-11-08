@@ -273,12 +273,13 @@ What remains:
   cannot read a secret that way.
 - The session holds the fleet token of the container, as above. A
   per-assignment token, in a later release, will remove it.
-- The session can write the files that the user of the container owns: the
-  scratch directories of other assignments, and the code in `/app`, which
-  the manager runs at its next start.
+- The session can write the scratch directories of other assignments,
+  because the user of the container owns them. The code and the venv in
+  `/app` belong to root and are read-only, so the session cannot change
+  what the manager runs.
 
-`scripts/test-nondumpable.sh` proves the refusal in the runtime image with
-Docker. On Linux, the unit suite runs the same test.
+`scripts/test-nondumpable.sh` proves the refusal and the read-only `/app`
+in the runtime image with Docker. On Linux, the unit suite runs the same test.
 
 ## The statuses
 
