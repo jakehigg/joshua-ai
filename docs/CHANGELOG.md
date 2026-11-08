@@ -6,6 +6,33 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+## 0.2.0 - 2026-11-08
+
+Joshua can now run long jobs for a member in the background: the new
+`assignments` container runs one Claude session for each assignment, stops
+at the subscription limits that you set, asks when it is stuck, and reports
+when it is done. Joshua also knows how much of the subscription limits is
+left, and the usage page shows it. The viewer has the shared Joshua look, a
+menu of links, and opens on the wiki.
+
+### Upgrading from 0.1.1
+
+**Nothing needs a change.** Your `joshua.yaml` from 0.1.1 loads as it is, and
+the assignments container is off by default. Then:
+
+1. Run `make init-env`. It keeps every value in your `.env` and mints only the
+   new `JOSHUA_TOKEN_ASSIGNMENTS`. On Kubernetes, add it to the Secrets of
+   core, channels, and the gateway before you turn assignments on.
+2. The viewer address `/` now opens the wiki. The page that `/` showed
+   before is at `/me`.
+3. `memory.exclude_folders` defaults to `assignments`. If you keep your own
+   pages in a top-level wiki folder `assignments/`, rename the folder or set
+   `memory.exclude_folders`, or the index no longer holds those pages.
+4. To use assignments, read [assignments.md](assignments.md): set
+   `assignments.enabled: true`, add `assignments` to
+   `channels.webhooks.allowed_callers`, and start the container with
+   `docker compose --profile assignments up -d` or the chart value.
+
 ### Security
 
 - **A session cannot read the assignments container.** A shell in an
