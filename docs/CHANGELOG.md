@@ -6,6 +6,17 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Security
+
+- **A session cannot read the assignments container.** A shell in an
+  assignment session could read the environment of the container process
+  in `/proc`, with the database URL and the bearers of its callers. The
+  process now makes itself non-dumpable at start, so Linux refuses its
+  environment and its memory to the session. The code in `/app` now belongs
+  to root, so a session cannot change it. No setting is needed in compose or
+  on Kubernetes. See
+  [assignments.md](assignments.md#what-a-session-can-see).
+
 ### Added
 
 - **Assignments run a real session.** Each assignment now runs one Claude

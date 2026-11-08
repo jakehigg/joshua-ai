@@ -7,7 +7,9 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 WORKDIR /app
 COPY . /app
-RUN uv sync --frozen --no-dev --package joshua-assignments
+RUN uv sync --frozen --no-dev --package joshua-assignments \
+    && /app/.venv/bin/python -m compileall -q /app/shared /app/assignments \
+    && chmod -R a+rX,go-w /app/.venv /app/shared /app/assignments
 
 # Runtime stage: the runtime of the core image, plus git for the checkouts.
 FROM python:3.13-slim AS runtime
@@ -37,11 +39,16 @@ RUN mkdir -p /data && chown 1000:1000 /data
 # The scratch directory of each assignment, /work/<id>/. Compose and the chart
 # mount a volume here, so the image must own the path.
 RUN mkdir -p /work && chown 1000:1000 /work
+# The code and the venv belong to root and are read-only for uid 1000. A
+# session runs as uid 1000 and has a shell, so it must not change the code
+# that the manager runs at its next start. The builder compiled the bytecode,
+# so nothing writes to /app at run time.
 WORKDIR /app
-COPY --from=builder --chown=1000:1000 /app/.venv /app/.venv
-COPY --from=builder --chown=1000:1000 /app/shared /app/shared
-COPY --from=builder --chown=1000:1000 /app/assignments /app/assignments
-ENV PATH="/app/.venv/bin:$PATH"
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/shared /app/shared
+COPY --from=builder /app/assignments /app/assignments
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1
 USER 1000
 EXPOSE 8000
 ENTRYPOINT ["python", "-m", "joshua_assignments"]
