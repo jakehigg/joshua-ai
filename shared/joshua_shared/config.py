@@ -954,6 +954,198 @@ class LimitsConfig(_Model):
         return frozenset(jobs)
 
 
+# --- assignments -------------------------------------------------------------
+
+# The efforts a model of ``assignments.models`` can name.
+ASSIGNMENT_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# Text that starts like one of these is a token, not the name of a variable.
+_TOKEN_PREFIXES = (*CREDENTIAL_PREFIXES, "ghp_", "gho_", "ghs_", "github_pat_")
+_AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
+_ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}\Z")
+_ASSIGNMENT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}\Z")
+# ``host/group/name`` or ``host/group/*``. A GitLab subgroup adds a part.
+_REPO_PATTERN_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?(/[a-z0-9*][a-z0-9._*-]*){2,}\Z")
+
+
+def _looks_like_token(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith(_TOKEN_PREFIXES) or _AWS_KEY_RE.match(stripped) is not None
+
+
+def _find_literal_token(value: Any, path: str) -> str | None:
+    """The key path of the first string in ``value`` that looks like a token, or None."""
+    if isinstance(value, str):
+        return path if _looks_like_token(value) else None
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            here = f"{path}.{key}"
+            if isinstance(key, str) and _looks_like_token(key):
+                return path
+            found = _find_literal_token(item, here)
+            if found:
+                return found
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            found = _find_literal_token(item, f"{path}[{index}]")
+            if found:
+                return found
+    return None
+
+
+class AssignmentModel(_Model):
+    """One model an assignment can use: the model id and the effort."""
+
+    model: str = Field(min_length=1)
+    effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+
+
+def _builtin_assignment_models() -> dict[str, AssignmentModel]:
+    return {
+        "sonnet": AssignmentModel(model="claude-sonnet-5", effort="medium"),
+        "opus": AssignmentModel(model="claude-opus-5", effort="high"),
+    }
+
+
+class AssignmentLimits(_Model):
+    """The ceilings on the subscription windows for an assignment, in percent used.
+
+    ``five_hour_pct`` and ``seven_day_pct`` apply when a spec names no
+    ceiling. A spec can ask for a ceiling up to ``max_five_hour_pct`` and
+    ``max_seven_day_pct``, and no higher. ``when_unknown`` is what an
+    assignment does when core cannot say how much of a window is used.
+    """
+
+    five_hour_pct: int = Field(default=70, ge=1, le=100)
+    seven_day_pct: int = Field(default=85, ge=1, le=100)
+    max_five_hour_pct: int = Field(default=90, ge=1, le=100)
+    max_seven_day_pct: int = Field(default=95, ge=1, le=100)
+    when_unknown: Literal["refuse", "run"] = "refuse"
+
+    @model_validator(mode="after")
+    def _ceiling_within_maximum(self) -> AssignmentLimits:
+        if self.five_hour_pct > self.max_five_hour_pct:
+            raise ValueError("five_hour_pct is above max_five_hour_pct")
+        if self.seven_day_pct > self.max_seven_day_pct:
+            raise ValueError("seven_day_pct is above max_seven_day_pct")
+        return self
+
+
+class AssignmentPlatform(_Model):
+    """One git host: its kind, and the environment variable that holds its token."""
+
+    kind: Literal["github", "gitlab", "git"]
+    token_env: str
+
+    @field_validator("token_env")
+    @classmethod
+    def _token_env(cls, value: str) -> str:
+        if not _ENV_NAME_RE.match(value):
+            raise ValueError("must be the name of an environment variable, such as GITLAB_TOKEN")
+        return value
+
+
+class AssignmentPerson(_Model):
+    """The settings of one person for assignments.
+
+    ``notify`` is the destination that gets the report and the question of an
+    assignment whose spec says ``report_to: conversation``.
+    """
+
+    notify: str | None = None
+
+    @field_validator("notify", mode="before")
+    @classmethod
+    def _empty_is_none(cls, value: Any) -> Any:
+        return None if value == "" else value
+
+
+class Assignments(_Model):
+    """The assignments container: long jobs that run for a member in the background.
+
+    ``enabled: false`` (the default) keeps the container from starting. A
+    token is never a value here: a platform names the variable that holds its
+    token with ``token_env``. ``JoshuaConfig._check_assignments`` checks that
+    each key of ``people`` names a person.
+    """
+
+    enabled: bool = False
+    default_model: str = "sonnet"
+    # A file that names models replaces this whole map.
+    models: dict[str, AssignmentModel] = Field(default_factory=_builtin_assignment_models)
+    default_max_turns: int = Field(default=200, gt=0)
+    default_working_time: str = "4h"
+    limits: AssignmentLimits = AssignmentLimits()
+    max_concurrent: int = Field(default=1, gt=0)
+    slice_turns: int = Field(default=10, gt=0)
+    keep_failed_work: str = "7d"
+    repos: list[str] = []
+    platforms: dict[str, AssignmentPlatform] = {}
+    people: dict[str, AssignmentPerson] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_literal_tokens(cls, data: Any) -> Any:
+        leaked = _find_literal_token(data, "assignments") if isinstance(data, Mapping) else None
+        if leaked:
+            raise ValueError(
+                f"{leaked} holds a literal token; put the token in an environment "
+                "variable and name it with token_env"
+            )
+        return data
+
+    @field_validator("limits", "platforms", "people", "models", mode="before")
+    @classmethod
+    def _empty_mapping(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        return {} if value in (None, "") else value
+
+    @field_validator("repos", mode="before")
+    @classmethod
+    def _empty_list(cls, value: Any) -> Any:
+        return [] if value in (None, "") else value
+
+    @field_validator("default_working_time", "keep_failed_work")
+    @classmethod
+    def _check_duration(cls, value: str) -> str:
+        if parse_duration(value) <= 0:
+            raise ValueError("must be more than zero")
+        return value
+
+    @field_validator("repos")
+    @classmethod
+    def _check_repos(cls, value: list[str]) -> list[str]:
+        for pattern in value:
+            if not _REPO_PATTERN_RE.match(pattern) or "." not in pattern.split("/", 1)[0]:
+                raise ValueError(
+                    f"repos: {pattern!r} is not host/group/name or host/group/* in lower case"
+                )
+        return value
+
+    @model_validator(mode="after")
+    def _check_names(self) -> Assignments:
+        if not self.models:
+            raise ValueError("models must name at least one model")
+        for name in self.models:
+            if not _ASSIGNMENT_NAME_RE.match(name):
+                raise ValueError(f"models.{name} is not a valid model name")
+        if self.default_model not in self.models:
+            raise ValueError(f"default_model names {self.default_model!r}, which is not in models")
+        for host in self.platforms:
+            if host != host.lower() or "/" in host or not host.strip():
+                raise ValueError(
+                    f"platforms.{host}: a host is a lowercase name, such as github.com"
+                )
+        return self
+
+    @property
+    def default_working_seconds(self) -> int:
+        return parse_duration(self.default_working_time)
+
+    @property
+    def keep_failed_work_seconds(self) -> int:
+        return parse_duration(self.keep_failed_work)
+
+
 class Viewer(_Model):
     # The read-only web viewer. ``users`` maps a person id to a password
     # reference: a ``$2`` bcrypt hash, or a literal password, normally injected
@@ -1148,8 +1340,9 @@ class JoshuaConfig(_Model):
     limits: LimitsConfig = LimitsConfig()
     inference: Inference = Inference()
     gateway: GatewayConfig = GatewayConfig()
+    assignments: Assignments = Assignments()
 
-    @field_validator("limits", "gateway", mode="before")
+    @field_validator("limits", "gateway", "assignments", mode="before")
     @classmethod
     def _empty_limits(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.
@@ -1279,6 +1472,14 @@ class JoshuaConfig(_Model):
                 raise ValueError(
                     f"channels.voice.device_defaults.{device}: unknown person id '{pid}'"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _check_assignments(self) -> JoshuaConfig:
+        person_ids = {person.id for person in self.people}
+        for pid in self.assignments.people:
+            if pid not in person_ids:
+                raise ValueError(f"assignments.people: unknown person id '{pid}'")
         return self
 
     def person(self, person_id: str) -> Person | None:

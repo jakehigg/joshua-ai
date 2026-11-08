@@ -1,7 +1,8 @@
 # Architecture
 
 Joshua is three containers and one database. The three containers ship from one
-repository and one `docker-compose.yml`. The same code runs on one Docker host
+repository and one `docker-compose.yml`. A fourth container, `assignments`, is
+optional and off by default. The same code runs on one Docker host
 and on Kubernetes.
 
 ![The three containers and what passes between them](images/architecture.svg)
@@ -80,6 +81,27 @@ The `files` MCP runs inside `gateway`. It is the only path that writes the
 wiki and a person's journal, and it confines every path to its root. There is
 one wiki. Everyone reads it, a member writes it, a guest reads it only.
 
+## assignments
+
+`assignments` is a fourth container, optional and off by default. It runs long
+jobs for a member in the background: an assignment. Joshua starts one with the
+`start_assignment` tool, through the gateway, and continues the conversation.
+When the assignment ends or must stop, the container sends an event to
+channels `POST /v1/events`, and core runs it as a turn in the person's
+conversation.
+
+A long job needs a checkout, a shell, and file tools. Core must not hold
+them, because core holds every fleet token and the model credential. So the
+work runs in its own container, which holds no model credential and no
+upstream credential. It holds one fleet token of its own, the bearers of its
+callers, and the database URL. It keeps its rows in the schema `assignments`
+of the shared Postgres. It mounts `/data` read-only. On Kubernetes, a network
+policy lets only the gateway reach it, and lets it reach only gateway,
+channels, core, the database, DNS, and the git hosts you name.
+
+This release has only the stub runner, which calls no model.
+[assignments.md](assignments.md) has the whole design.
+
 ## Who may call what
 
 Every container loads the fleet tokens (`JOSHUA_TOKEN_<NAME>`). A caller sends
@@ -103,6 +125,7 @@ gets 403.
 | `/admin/*` on every container | `ADMIN_CALLERS` (default `laptop`, `ci`) |
 | `/healthz`, `/readyz` on every container | open, no secrets in the answer |
 | core `GET /v1/limits` | open; percentages and reset times only |
+| assignments `/mcp` | a bearer in `ASSIGNMENTS_TOKENS` (a person) or `ADDON_TOKEN` (read only); the gateway sends it |
 
 `contracts.md` has the request and response shapes.
 

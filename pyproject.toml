@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 package = false
 
 [tool.uv.workspace]
-members = ["shared", "channels", "core", "gateway"]
+members = ["shared", "channels", "core", "gateway", "assignments"]
 
 [tool.uv.sources]
 joshua-shared = { workspace = true }

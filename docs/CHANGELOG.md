@@ -8,6 +8,21 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **The assignments container, with a stub runner.** A fourth container,
+  `assignments`, stores long jobs that run for a member in the background.
+  It is off by default: set `assignments.enabled: true` and start it with
+  `docker compose --profile assignments up -d`, or set
+  `assignments.enabled: true` in the chart. Joshua gets six tools through the
+  gateway: `start_assignment`, `assignment_status`, `list_assignments`,
+  `answer_assignment`, `cancel_assignment`, and `extend_assignment`. The
+  container keeps its rows in the schema `assignments` of the same Postgres,
+  holds no model credential, and sends the report to channels with its own
+  fleet token, `JOSHUA_TOKEN_ASSIGNMENTS`.
+  This release has only the stub runner: an assignment ends at once with a
+  fixed summary, and no model call runs. See
+  [assignments.md](assignments.md) and
+  [config.md](config.md#assignments).
+
 - **Joshua knows how much of the subscription limits is left.** Ask "how
   much of my limit is left?", and the `check_limits` tool gives the percent
   used and left of the 5-hour window and the weekly window, and when each

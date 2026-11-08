@@ -1,6 +1,6 @@
 .PHONY: sync lint fmt test test-dates up up-dev pull down nuke logs ps shell-core psql init-env e2e smoke chat validate backup restore
 
-MEMBERS := shared channels core gateway
+MEMBERS := shared channels core gateway assignments
 
 # The compose command line for a plain run: the base file, plus one `-f` for
 # each slot in enhancements.yaml whose `use` names a choice. scripts/

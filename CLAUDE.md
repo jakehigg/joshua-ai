@@ -64,7 +64,7 @@ a team") are fine in a sentence.
 ## Repo layout
 
 ```
-pyproject.toml           uv workspace root: members shared, channels, core, gateway
+pyproject.toml           uv workspace root: members shared, channels, core, gateway, assignments
 uv.lock                  committed; a pin change is a reviewed change
 joshua.example.yaml      the one config file, documented inline
 docker-compose.yml       postgres (pgvector), gateway, core, channels
@@ -74,6 +74,7 @@ shared/                  package joshua_shared: config, layout, contracts, fleet
 channels/                package joshua_channels
 core/                    package joshua_core
 gateway/                 package joshua_gateway
+assignments/             package joshua_assignments: the optional fourth container
 docs/                    the product documentation; core ships it into the wiki
 scripts/                 backup, restore, chat, check_test_policy, ci-local
 tests/e2e/               compose-level tests
@@ -150,6 +151,11 @@ Route allowlists, by default:
 - core `GET /v1/limits`: open, the percent used of the subscription limits
   and the reset times, no person and no token. 404 when `limits.enabled` is
   false.
+- assignments `/mcp`: a bearer from `ASSIGNMENTS_TOKENS` names a member, as
+  in the developer addon. `ADDON_TOKEN` names no person and may use only the
+  read tools. These are not fleet tokens. The container's own fleet token,
+  `JOSHUA_TOKEN_ASSIGNMENTS`, sends its events to channels `POST /v1/events`.
+  `docs/assignments.md` has the design.
 
 `docs/contracts.md` has every route and body.
 

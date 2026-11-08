@@ -349,6 +349,42 @@ usage:
 #   chat_tool: true            # give check_limits to chat turns
 #   voice_tool: true           # give check_limits to voice turns
 
+# assignments:
+#   # Long jobs that run for a member in the background, in their own
+#   # container. Off by default. Start the container with
+#   # `docker compose --profile assignments up -d`, and add it as an `mcp:`
+#   # server. docs/assignments.md has the whole setup. A token is never a value
+#   # here: a platform names the variable that holds its token.
+#   enabled: false
+#   default_model: sonnet              # a key of models
+#   models:                            # name -> model id and effort; a spec names a key
+#     sonnet:
+#       model: claude-sonnet-5
+#       effort: medium               # low | medium | high | xhigh | max
+#     opus:
+#       model: claude-opus-5
+#       effort: high
+#   default_max_turns: 200             # soft cap on model turns, when the spec names none
+#   default_working_time: 4h           # the clock runs only while the assignment works
+#   limits:                            # ceilings on the subscription windows, in percent used
+#     five_hour_pct: 70                # the ceiling when the spec names none
+#     seven_day_pct: 85
+#     max_five_hour_pct: 90            # a spec may go this high and no higher
+#     max_seven_day_pct: 95
+#     when_unknown: refuse             # refuse | run, when core cannot read the windows
+#   max_concurrent: 1                  # running assignments; a parked one holds no slot
+#   slice_turns: 10                    # model turns between two reads of the limits
+#   keep_failed_work: 7d               # how long the scratch of a failed assignment stays
+#   repos:                             # what an assignment may clone: host/group/name or host/group/*
+#     - gitlab.example.net/infra/*
+#   platforms:                         # git hosts: kind and the variable that holds the token
+#     gitlab.example.net:
+#       kind: gitlab                   # github | gitlab | git
+#       token_env: ASSIGNMENTS_GITLAB_TOKEN
+#   people:
+#     alex:
+#       notify: imessage:dm:alex       # the destination of the report and the questions
+
 # inference:
 #   # Where the model calls go. With no section, every job uses the Claude
 #   # subscription (CLAUDE_CODE_OAUTH_TOKEN in .env). Put each key in .env and

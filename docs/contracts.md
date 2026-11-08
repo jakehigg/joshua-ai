@@ -481,6 +481,33 @@ The gateway trusts these headers only from the identities in
 identity gets `403` on an MCP route. A group id that is not in `groups` is
 400.
 
+## assignments
+
+Port 8000 in the container. Compose does not publish it. Only the gateway
+calls it, for a person. The container is off unless `assignments.enabled` is
+true and its profile runs. [assignments.md](assignments.md) has the tools.
+
+| Route | Callers | Request | Reply |
+|---|---|---|---|
+| `GET /healthz` | open | | `{"ok": true}` |
+| `GET /readyz` | open | | `{"ok", "database", "channels", "people", "queued", "running", "waiting", "paused_limits"}`: booleans and counts only. `503` when the database does not answer. |
+| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the six tools. `401` for a missing or wrong bearer. |
+
+These bearers are not fleet tokens. `ASSIGNMENTS_TOKENS` holds
+`<person-id>=<token>` pairs, and a bearer names one person. The gateway sends
+it from the `identities` of the `assignments` entry under `mcp:`. The
+container compares each bearer with `hmac.compare_digest`. A tool call with an
+`ADDON_TOKEN` bearer gets `403 forbidden: this tool needs a person` from every
+tool except `assignment_status` and `list_assignments`. A person who is not a
+member gets `403 forbidden: assignments are for members only`. Another
+person's assignment is `404 not found: no assignment <id>`.
+
+The container calls one route of another container. It sends the report and
+the question of an assignment to channels `POST /v1/events` with
+`Authorization: Bearer <JOSHUA_TOKEN_ASSIGNMENTS>` and the body
+`{"destination": str, "text": str}`. Channels accepts it only when
+`assignments` is in `channels.webhooks.allowed_callers`.
+
 ## Where `laptop` may go
 
 The `laptop` identity is for the operator on the host. It may call

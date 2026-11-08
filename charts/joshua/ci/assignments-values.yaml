@@ -1,0 +1,26 @@
+# Values that render the assignments container, its Service, and its network
+# policy. They name no real deployment.
+config: |
+  name: Test House
+  timezone: UTC
+  people:
+    - id: alex
+      name: Alex
+      role: member
+  assignments:
+    enabled: true
+    repos:
+      - gitlab.example.net/infra/*
+    platforms:
+      gitlab.example.net:
+        kind: gitlab
+        token_env: ASSIGNMENTS_GITLAB_TOKEN
+assignments:
+  enabled: true
+  networkPolicy:
+    gitHosts:
+      cidrs:
+        - 192.0.2.10/32
+    database:
+      cidrs:
+        - 198.51.100.0/24
