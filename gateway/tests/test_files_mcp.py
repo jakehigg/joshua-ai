@@ -741,7 +741,7 @@ async def test_rename_file_refuses_a_journal_entry(gateway, data_root, fixed_clo
                 "rename_file",
                 {"path": "wiki/journal/2026/08/27/garden.md", "new_name": "beans.md"},
             )
-    assert res.is_error is True and "cannot be renamed" in res.content[0].text
+    assert res.is_error is True and "write_journal_entry" in res.content[0].text
     day = data_root / "wiki" / "journal" / "2026" / "08" / "27"
     assert (day / "garden.md").exists() and not (day / "beans.md").exists()
 
@@ -1261,3 +1261,83 @@ async def test_the_same_file_copied_twice_makes_one_copy(gateway, data_root):
             )
     assert one["path"] == two["path"]
     assert len(list((data_root / "wiki" / "attachments").rglob("*.png"))) == 1
+
+
+# -- rename_file moves a page to another folder -------------------------------
+
+
+def _tracked(wiki: Path) -> list[str]:
+    return subprocess.run(
+        ["git", "ls-files"], cwd=wiki, capture_output=True, text=True
+    ).stdout.split()
+
+
+def _wiki_repo(data_root: Path) -> None:
+    """A wiki repository with every page committed, as core leaves it at start."""
+    wikigit.ensure_repo(data_root / "wiki")
+    wikigit.commit(data_root / "wiki", None, "start")
+
+
+async def _call(gateway, args: dict, headers: dict | None = None):
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        sent = headers or {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", sent) as session:
+            return await session.call_tool("rename_file", args)
+
+
+@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
+async def test_rename_file_moves_a_page_to_another_folder_and_commits(gateway, data_root):
+    _wiki_repo(data_root)
+    res = await _call(gateway, {"path": "wiki/note.md", "new_name": "wiki/a/b/note.md"})
+    assert result_json(res) == {"path": "wiki/a/b/note.md", "renamed_from": "wiki/note.md"}
+    assert not (data_root / "wiki" / "note.md").exists()
+    assert (data_root / "wiki" / "a" / "b" / "note.md").read_text() == "hello wiki\ntodo item\n"
+    assert "rename_file: note.md -> a/b/note.md" in _git_log(data_root / "wiki")
+    tracked = _tracked(data_root / "wiki")
+    assert "a/b/note.md" in tracked and "note.md" not in tracked
+
+
+@pytest.mark.parametrize(
+    ("new_name", "words"),
+    [
+        ("wiki/people/alex2.md", "profiles"),
+        ("wiki/journal/2026/01/01/x.md", "write_journal_entry"),
+        ("wiki/joshua-docs/x.md", "documentation"),
+        ("wiki/.trash/note.md", "hidden"),
+        ("wiki/other.md", "exists"),
+        ("wiki/note.md", "current name"),
+        ("wiki/sub/note.txt", "extension"),
+        ("shared/note.md", "inside wiki/"),
+        ("wiki/../../etc/x.md", ".."),
+    ],
+)
+async def test_a_move_into_an_owned_folder_or_onto_a_page_is_refused(
+    gateway, data_root, new_name, words
+):
+    (data_root / "wiki" / "other.md").write_text("other\n")
+    res = await _call(gateway, {"path": "wiki/note.md", "new_name": new_name})
+    assert res.is_error is True
+    assert words in res.content[0].text
+    assert str(data_root) not in res.content[0].text
+    assert (data_root / "wiki" / "note.md").exists()
+    assert not (data_root / "wiki" / "people" / "alex2.md").exists()
+
+
+@pytest.mark.parametrize("folder", ["people", "joshua-docs"])
+async def test_a_page_in_an_owned_folder_is_not_renamed_or_moved(gateway, data_root, folder):
+    page = data_root / "wiki" / folder / "alex.md"
+    page.parent.mkdir()
+    page.write_text("x\n")
+    for new_name in ("b.md", "wiki/b.md"):
+        res = await _call(gateway, {"path": f"wiki/{folder}/alex.md", "new_name": new_name})
+        assert res.is_error is True
+    assert page.exists() and not (data_root / "wiki" / "b.md").exists()
+
+
+async def test_a_guest_cannot_move_a_page(gateway, data_root):
+    guest = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "guest"}
+    res = await _call(gateway, {"path": "wiki/note.md", "new_name": "wiki/x/note.md"}, guest)
+    assert res.is_error is True and "read-only" in res.content[0].text
+    assert (data_root / "wiki" / "note.md").exists()
+    assert not (data_root / "wiki" / "x").exists()
