@@ -409,6 +409,18 @@ An external system can send Joshua an event. `channels` accepts it at
 `POST /v1/events` from the identities in `channels.webhooks.allowed_callers`
 (default `laptop` and `ci`). Each caller needs its own `JOSHUA_TOKEN_<NAME>`.
 
+The assignments container sends its reports and its questions as events. To
+let it, add `assignments` to the list:
+
+```yaml
+channels:
+  webhooks:
+    allowed_callers:
+      - laptop
+      - ci
+      - assignments
+```
+
 Two shapes exist:
 
 - A **named event** carries `event_type` and an optional `payload`. Core runs

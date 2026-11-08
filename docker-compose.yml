@@ -24,6 +24,9 @@ x-fleet-tokens: &fleet-tokens
   # the viewer, and the joshua-mcp addon.
   JOSHUA_TOKEN_VIEWER: ${JOSHUA_TOKEN_VIEWER:-}
   JOSHUA_TOKEN_MCP: ${JOSHUA_TOKEN_MCP:-}
+  # The assignments container: core's model forwarder and usage write, the
+  # gateway MCP routes, and channels events.
+  JOSHUA_TOKEN_ASSIGNMENTS: ${JOSHUA_TOKEN_ASSIGNMENTS:-}
 
 # The channel credentials go to `channels` alone. joshua.yaml references them
 # as ${VAR:-}, so a container without the variable expands it to the empty

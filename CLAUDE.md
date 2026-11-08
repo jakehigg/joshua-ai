@@ -96,7 +96,9 @@ that is not on the route's allowlist gets 403. There is no other bearer path.
 
 Identities: `channels`, `core`, `gateway`, plus `laptop` and `ci` for
 operators, and `viewer` and `mcp`, which call core's search by meaning. The
-`viewer` also reads core's usage by day.
+`viewer` also reads core's usage by day. `assignments` is the assignments
+container: core's model forwarder and usage write, the gateway MCP routes for
+a person, and channels events.
 `make init-env` mints the tokens into `.env`. Each of the three containers gets
 all of them, because each one verifies the callers it trusts. The viewer gets
 only its own. The three containers
@@ -113,6 +115,15 @@ Route allowlists, by default:
 - core `GET /v1/usage`: `usage.allowed_callers` (default `viewer`). An empty
   list turns it off. It returns token counts by day and group, and no person.
   `GET /admin/usage` gives the same answer to an admin caller.
+- core `POST /v1/usage`: `usage.writers` (default `assignments`). An empty
+  list turns it off. It accepts rows of kind `assignment` only (400
+  otherwise), and stores each `ref` as `<writer>:<ref>`.
+- core `ANY /v1/model/{path}`: `inference.forwarder.allowed_callers` (default
+  `assignments`). The model forwarder: core puts the credential of the
+  inference job `assignment` on a Claude API call, so the model credential
+  never leaves core. The bearer is compared with the tokens of that list only,
+  so any other token, core's too, gets 401. Only the CLI paths go on (403
+  otherwise). `api/hello` (GET, HEAD) is open. An empty list is 404.
 - channels `POST /v1/deliver`, `GET /v1/channels/resolve`: `core`.
 - channels `POST /v1/events`, `POST /v1/cli/*`, `GET /v1/cli/*`:
   `channels.webhooks.allowed_callers` (default `laptop`, `ci`).
@@ -122,8 +133,9 @@ Route allowlists, by default:
 - channels `POST /webhook/imessage/{secret}`: no bearer. The path secret is the
   credential. A wrong secret gets 404, never 401. The handler always answers
   200 fast, because BlueBubbles never retries.
-- gateway MCP routes: `core` only. `X-Joshua-Person` is trusted only from
-  `core`.
+- gateway MCP routes: `gateway.person_header_callers` (default `core`,
+  `assignments`; it must hold `core`). `X-Joshua-Person`, `X-Joshua-Role`,
+  `X-Joshua-Group`, and `X-Joshua-Conversation` are trusted only from them.
 - gateway `POST /v1/snapshots/{name}`: `core` only. The body is empty: the
   gateway reads the tool and the arguments from `memory.snapshots`, so the
   config is the allowlist.

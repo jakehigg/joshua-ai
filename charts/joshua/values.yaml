@@ -84,6 +84,8 @@ secrets:
       # The callers of POST /v1/memory/search. Core verifies them.
       JOSHUA_TOKEN_VIEWER: {}
       JOSHUA_TOKEN_MCP: {}
+      # The assignments container: the model forwarder and POST /v1/usage.
+      JOSHUA_TOKEN_ASSIGNMENTS: {}
       # The key of the model server in `inference.base_url`, and the key of
       # one job block. Only core gets them. Add the keys that your joshua.yaml
       # refers to:
@@ -95,6 +97,7 @@ secrets:
       # INFERENCE_KEY_REFLECTION: {}
       # INFERENCE_KEY_DESCRIBE: {}
       # INFERENCE_KEY_INTERNET: {}
+      # INFERENCE_KEY_ASSIGNMENT: {}
   channels:
     name: joshua-channels-secrets
     keys:
@@ -106,6 +109,8 @@ secrets:
       JOSHUA_TOKEN_GATEWAY: {}
       JOSHUA_TOKEN_LAPTOP: {}
       JOSHUA_TOKEN_CI: {}
+      # The assignments container, when channels.webhooks.allowed_callers names it.
+      JOSHUA_TOKEN_ASSIGNMENTS: {}
   # The database password. It is separate, so an instance can hold the database
   # credential apart from the model credential.
   postgres:
@@ -121,6 +126,8 @@ secrets:
       JOSHUA_TOKEN_GATEWAY: {}
       JOSHUA_TOKEN_LAPTOP: {}
       JOSHUA_TOKEN_CI: {}
+      # The assignments container, on the MCP routes (gateway.person_header_callers).
+      JOSHUA_TOKEN_ASSIGNMENTS: {}
       # The optional key of the SearXNG instance of internet.search. The
       # gateway calls SearXNG, so only the gateway gets it.
       SEARXNG_API_KEY: {}

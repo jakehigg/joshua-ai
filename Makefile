@@ -127,7 +127,7 @@ init-env:
 		echo "POSTGRES_PASSWORD=$$pw" >> .env; \
 		echo "minted POSTGRES_PASSWORD"; \
 	fi
-	@for name in CHANNELS CORE GATEWAY LAPTOP VIEWER MCP; do \
+	@for name in CHANNELS CORE GATEWAY LAPTOP VIEWER MCP ASSIGNMENTS; do \
 		if ! grep -q "^JOSHUA_TOKEN_$$name=." .env; then \
 			token=$$(openssl rand -base64 33 | tr '+/' '-_' | tr -d '='); \
 			sed -i.bak "/^JOSHUA_TOKEN_$$name=/d" .env && rm -f .env.bak; \
