@@ -45,6 +45,8 @@ JOB_MODELS = {
     "reflection": "reflection-model",
     "describe": "describe-model",
     "internet": "internet-model",
+    # The forwarder job has no model setting of its own: it is core.model.
+    "assignment": "chat-model",
 }
 
 
@@ -66,7 +68,14 @@ def expected_env(job: str, **values: str) -> dict[str, str]:
 
 
 def test_job_list_matches_the_inference_blocks() -> None:
-    assert config.INFERENCE_JOBS == ("chat", "voice", "reflection", "describe", "internet")
+    assert config.INFERENCE_JOBS == (
+        "chat",
+        "voice",
+        "reflection",
+        "describe",
+        "internet",
+        "assignment",
+    )
     for job in config.INFERENCE_JOBS:
         assert job in config.Inference.model_fields
 

@@ -7,7 +7,10 @@ Core never trusts ``framing`` from user input; only the scheduler and ops set it
 ``SearchRequest`` and ``SearchResponse`` are the shapes of core's
 ``POST /v1/memory/search``, which the viewer and an addon call.
 ``UsageResponse`` is the shape of core's ``GET /v1/usage``, which the viewer
-calls for its usage page. ``LimitsResponse`` is the shape of core's
+calls for its usage page. ``UsageWriteRequest`` is the body of core's
+``POST /v1/usage``, which the assignments container calls to report the
+tokens of its own model calls. ``MODEL_FORWARDER_PATH`` is the prefix of
+core's model forwarder. ``LimitsResponse`` is the shape of core's
 ``GET /v1/limits``: how much of the Claude subscription limits is used.
 ``WebSearchRequest`` and ``WebSearchResponse`` are
 the shapes of the gateway ``POST /v1/search``, which core calls for the
@@ -19,6 +22,8 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from joshua_shared.ids import PERSON_ID_PATTERN
 
 HandleType = Literal["telegram", "imessage", "webhook", "voice", "cli"]
 ChatKind = Literal["dm", "group"]
@@ -213,6 +218,75 @@ class UsageResponse(_Model):
     groups: list[str]
     rows: list[UsageDay]
     totals: dict[str, UsageGroup]
+
+
+# The path of core's usage write route, and the limits of its body.
+USAGE_WRITE_PATH = "/v1/usage"
+USAGE_WRITE_MAX_BYTES = 1024 * 1024
+USAGE_WRITE_MAX_ROWS = 500
+# The only kind that ``POST /v1/usage`` accepts. The other kinds are the calls
+# that core makes itself, and only core writes them.
+USAGE_WRITE_KINDS = ("assignment",)
+UsageWriteKind = Literal["assignment"]
+# The largest count of one row. The columns are INT.
+USAGE_MAX_COUNT = 2**31 - 1
+# Pydantic checks a pattern with the Rust regex engine, where ``$`` matches
+# only at the end of the text, never before a last newline.
+# A label: a worker, a model, a server label such as ``[::1]:8080``, or a ref.
+_USAGE_LABEL_PATTERN = r"^[A-Za-z0-9\[][A-Za-z0-9._:/@\[\]-]*$"
+_PERSON_PATTERN = PERSON_ID_PATTERN.removesuffix(r"\Z") + "$"
+
+
+class UsageWriteCounts(_Model):
+    """The four token counts of one usage row."""
+
+    input: int = Field(default=0, ge=0, le=USAGE_MAX_COUNT)
+    output: int = Field(default=0, ge=0, le=USAGE_MAX_COUNT)
+    cache_read: int = Field(default=0, ge=0, le=USAGE_MAX_COUNT)
+    cache_write: int = Field(default=0, ge=0, le=USAGE_MAX_COUNT)
+
+
+class UsageWriteRow(_Model):
+    """One usage row that a container reports for its own model calls.
+
+    ``kind`` and ``name`` are ``assignment``: the row goes into the
+    ``assignment`` group of the usage page. ``worker`` names a part of the
+    group, for example one assignment, and the page shows it as a worker.
+    ``ref`` is the id of the row for its writer. Core keeps one row for each
+    writer and ``ref``, so a writer can send a row again after a failure.
+    """
+
+    kind: UsageWriteKind
+    name: UsageWriteKind = "assignment"
+    worker: str | None = Field(default=None, max_length=64, pattern=_USAGE_LABEL_PATTERN)
+    run_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
+    person_id: str | None = Field(default=None, pattern=_PERSON_PATTERN)
+    model: str | None = Field(default=None, max_length=200, pattern=_USAGE_LABEL_PATTERN)
+    endpoint: str | None = Field(default=None, max_length=200, pattern=_USAGE_LABEL_PATTERN)
+    calls: int = Field(default=1, ge=0, le=USAGE_MAX_COUNT)
+    usage: UsageWriteCounts = UsageWriteCounts()
+    ref: str = Field(min_length=1, max_length=200, pattern=_USAGE_LABEL_PATTERN)
+
+
+class UsageWriteRequest(_Model):
+    """The body of core's ``POST /v1/usage``: at most ``USAGE_WRITE_MAX_ROWS``
+    rows."""
+
+    rows: list[UsageWriteRow] = Field(max_length=USAGE_WRITE_MAX_ROWS)
+
+
+class UsageWriteResponse(_Model):
+    """The answer of ``POST /v1/usage``: the number of rows core accepted. A
+    row with a ``ref`` that core already holds is accepted and not written
+    again."""
+
+    accepted: int
+
+
+# The prefix of core's model forwarder: ``{MODEL_FORWARDER_PATH}/{path}``,
+# any method. A caller sets ``ANTHROPIC_BASE_URL`` to core's URL and this
+# prefix.
+MODEL_FORWARDER_PATH = "/v1/model"
 
 
 # The path of core's subscription limits route. It has no bearer, as ``/healthz``.

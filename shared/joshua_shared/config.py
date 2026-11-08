@@ -54,7 +54,9 @@ MEMORY_SOURCE_ADAPTERS = ("files", "memos")
 # own, so a reply core delivers there must go to one of these instead.
 VOICE_DELIVER_VIA_TYPES = ("telegram", "imessage")
 # The jobs that call a model. Each one can have its own block in ``inference``.
-INFERENCE_JOBS = ("chat", "voice", "reflection", "describe", "internet")
+# ``assignment`` is the job of the model calls that core's forwarder sends on
+# for the assignments container.
+INFERENCE_JOBS = ("chat", "voice", "reflection", "describe", "internet", "assignment")
 # The jobs of a conversation turn. Only these can use tool search.
 CONVERSATION_JOBS = ("chat", "voice")
 # Reserved policy vocabulary (recorded now, enforced later).
@@ -349,6 +351,23 @@ class Skills(_Model):
     top_k: int = Field(default=3, ge=1)
 
 
+# A top-level folder of the wiki in ``memory.exclude_folders``: one path
+# segment, no dot at the start.
+_WIKI_FOLDER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}\Z")
+
+
+def _empty_list(value: Any) -> Any:
+    """``[]`` for a key with no value. strictyaml reads one as an empty string."""
+    if value is None or value == "":
+        return []
+    return value
+
+
+def _callers(value: list[str]) -> list[str]:
+    """The fleet identities of an allowlist, stripped and in lower case."""
+    return [name.strip().lower() for name in value if name and name.strip()]
+
+
 class MemorySearch(_Model):
     # The fleet identities that may call core's ``POST /v1/memory/search``: a
     # search of the wiki, the journal, and the profiles by meaning. Each one
@@ -513,6 +532,26 @@ class Memory(_Model):
     # Fixed MCP tool calls whose output goes into the index. Empty turns the
     # feature off. See ``Snapshot``.
     snapshots: list[Snapshot] = []
+    # Top-level folders of the wiki that the memory never holds: the ``files``
+    # source does not index them, and no search returns a page in them. The
+    # plan pages of the assignments are in ``wiki/assignments/``.
+    exclude_folders: list[str] = ["assignments"]
+
+    @field_validator("exclude_folders", mode="before")
+    @classmethod
+    def _empty_exclude(cls, value: Any) -> Any:
+        return _empty_list(value)
+
+    @field_validator("exclude_folders")
+    @classmethod
+    def _check_exclude(cls, value: list[str]) -> list[str]:
+        for name in value:
+            if not _WIKI_FOLDER_RE.match(name):
+                raise ValueError(
+                    f"exclude_folders: '{name}' must be one top-level wiki folder, "
+                    "such as assignments"
+                )
+        return list(dict.fromkeys(value))
 
     @field_validator("snapshots", mode="before")
     @classmethod
@@ -851,23 +890,30 @@ class McpServer(_Model):
 
 
 class UsageConfig(_Model):
-    """Core's ``GET /v1/usage``: the tokens of each group by day.
+    """Core's ``GET /v1/usage`` and ``POST /v1/usage``.
 
-    ``allowed_callers`` names the fleet identities that may call it. Each one
-    needs a ``JOSHUA_TOKEN_<NAME>`` in core's environment. An empty value
-    turns the route off, so every caller gets 403. ``GET /admin/usage`` gives
-    the same answer to an admin caller and does not read this list.
+    ``allowed_callers`` names the fleet identities that may read the tokens
+    of each group by day. ``writers`` names the fleet identities that may
+    write usage rows of kind ``assignment``. Each one needs a
+    ``JOSHUA_TOKEN_<NAME>`` in core's environment. An empty value turns that
+    route off, so every caller gets 403. ``GET /admin/usage`` gives the same
+    answer to an admin caller and does not read these lists.
     """
 
     allowed_callers: list[str] = ["viewer"]
+    # The fleet identities that may write usage rows with ``POST /v1/usage``.
+    # An empty list turns the write off.
+    writers: list[str] = ["assignments"]
 
-    @field_validator("allowed_callers", mode="before")
+    @field_validator("allowed_callers", "writers", mode="before")
     @classmethod
     def _empty_is_none(cls, value: Any) -> Any:
-        # strictyaml reads a key with no value as an empty string.
-        if value is None or value == "":
-            return []
-        return value
+        return _empty_list(value)
+
+    @field_validator("writers")
+    @classmethod
+    def _lower_writers(cls, value: list[str]) -> list[str]:
+        return _callers(value)
 
 
 class LimitsConfig(_Model):
@@ -983,6 +1029,27 @@ class InferenceJob(_Model):
         return self
 
 
+class InferenceForwarder(_Model):
+    """Core's model forwarder, ``/v1/model/{path}``.
+
+    ``allowed_callers`` names the fleet identities that may send a model call
+    through core with their own token. Core puts the credential of the
+    ``assignment`` job on the call. An empty list turns the route off (404).
+    """
+
+    allowed_callers: list[str] = ["assignments"]
+
+    @field_validator("allowed_callers", mode="before")
+    @classmethod
+    def _empty(cls, value: Any) -> Any:
+        return _empty_list(value)
+
+    @field_validator("allowed_callers")
+    @classmethod
+    def _lower(cls, value: list[str]) -> list[str]:
+        return _callers(value)
+
+
 class Inference(_Model):
     """Where the model calls go: a server, a key, and a block for each job.
 
@@ -1003,6 +1070,13 @@ class Inference(_Model):
     reflection: InferenceJob = InferenceJob()
     describe: InferenceJob = InferenceJob()
     internet: InferenceJob = InferenceJob()
+    assignment: InferenceJob = InferenceJob()
+    forwarder: InferenceForwarder = InferenceForwarder()
+
+    @field_validator("forwarder", mode="before")
+    @classmethod
+    def _empty_forwarder(cls, value: Any) -> Any:
+        return {} if value == "" else value
 
     @field_validator("base_url", mode="before")
     @classmethod
@@ -1035,6 +1109,27 @@ class Inference(_Model):
         return job
 
 
+class GatewayConfig(_Model):
+    """The gateway's own settings.
+
+    ``person_header_callers`` names the fleet identities that may call the MCP
+    routes and assert ``X-Joshua-Person``, ``X-Joshua-Role``,
+    ``X-Joshua-Group``, and ``X-Joshua-Conversation``. Every other identity
+    gets 403 on an MCP route. The list must hold ``core``. The snapshot route
+    and the search route admit ``core`` only and do not read this list.
+    """
+
+    person_header_callers: list[str] = ["core", "assignments"]
+
+    @field_validator("person_header_callers")
+    @classmethod
+    def _check_callers(cls, value: list[str]) -> list[str]:
+        callers = list(dict.fromkeys(_callers(value)))
+        if "core" not in callers:
+            raise ValueError("person_header_callers must hold core")
+        return callers
+
+
 class JoshuaConfig(_Model):
     name: str
     timezone: str
@@ -1052,8 +1147,9 @@ class JoshuaConfig(_Model):
     usage: UsageConfig = UsageConfig()
     limits: LimitsConfig = LimitsConfig()
     inference: Inference = Inference()
+    gateway: GatewayConfig = GatewayConfig()
 
-    @field_validator("limits", mode="before")
+    @field_validator("limits", "gateway", mode="before")
     @classmethod
     def _empty_limits(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.

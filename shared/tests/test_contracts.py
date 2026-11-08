@@ -154,3 +154,64 @@ def test_a_web_search_response_round_trips() -> None:
 
     body = {"results": [{"title": "A", "url": "https://a.example/", "snippet": "s"}]}
     assert WebSearchResponse.model_validate(body).model_dump() == body
+
+
+# ── POST /v1/usage ───────────────────────────────────────────────────────────
+
+
+def _usage_row(**fields: object) -> dict[str, object]:
+    row: dict[str, object] = {"kind": "assignment", "ref": "12:1"}
+    row.update(fields)
+    return row
+
+
+def test_a_usage_row_takes_the_assignment_kind_only() -> None:
+    from joshua_shared.contracts import USAGE_WRITE_KINDS, UsageWriteRequest
+
+    body = UsageWriteRequest.model_validate({"rows": [_usage_row()]})
+    row = body.rows[0]
+    assert (row.kind, row.name, row.calls) == ("assignment", "assignment", 1)
+    assert row.usage.input == row.usage.output == 0
+    assert USAGE_WRITE_KINDS == ("assignment",)
+    for kind in ("chat", "reflection", "internet", "describe"):
+        with pytest.raises(ValidationError):
+            UsageWriteRequest.model_validate({"rows": [_usage_row(kind=kind)]})
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"person_id": "alex\n"},
+        {"person_id": "Alex"},
+        {"ref": "a b"},
+        {"run_id": 0},
+        {"usage": {"output": 2**31}},
+        {"endpoint": "host\nname"},
+    ],
+)
+def test_a_usage_row_refuses_a_bad_value(fields: dict[str, object]) -> None:
+    from joshua_shared.contracts import UsageWriteRequest
+
+    with pytest.raises(ValidationError):
+        UsageWriteRequest.model_validate({"rows": [_usage_row(**fields)]})
+
+
+def test_a_usage_row_takes_a_bracketed_server_label() -> None:
+    from joshua_shared.contracts import UsageWriteRow
+
+    assert UsageWriteRow.model_validate(_usage_row(endpoint="[::1]:8080")).endpoint == "[::1]:8080"
+
+
+def test_a_usage_body_holds_at_most_the_row_limit() -> None:
+    from joshua_shared.contracts import USAGE_WRITE_MAX_ROWS, UsageWriteRequest
+
+    rows = [_usage_row(ref=f"r{n}") for n in range(USAGE_WRITE_MAX_ROWS + 1)]
+    with pytest.raises(ValidationError):
+        UsageWriteRequest.model_validate({"rows": rows})
+
+
+def test_the_forwarder_and_usage_paths() -> None:
+    from joshua_shared.contracts import MODEL_FORWARDER_PATH, USAGE_WRITE_PATH
+
+    assert MODEL_FORWARDER_PATH == "/v1/model"
+    assert USAGE_WRITE_PATH == "/v1/usage"
