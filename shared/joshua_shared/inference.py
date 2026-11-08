@@ -122,6 +122,10 @@ def job_model_setting(config: JoshuaConfig, job: str) -> str:
         return config.attachments.describe.model
     if job == "internet":
         return config.internet.model
+    if job == "assignment":
+        # The forwarder does not change the model of a call. This model is the
+        # one that the check of ``POST /admin/inference/check`` uses.
+        return config.core.model
     raise KeyError(f"unknown inference job '{job}'; valid: {INFERENCE_JOBS}")
 
 

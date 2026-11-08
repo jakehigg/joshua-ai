@@ -104,7 +104,7 @@ def test_the_answer_has_the_documented_shape(monkeypatch) -> None:
     assert set(body) == {"timezone", "days", "groups", "rows", "totals"}
     assert body["timezone"] == "America/New_York"
     assert body["days"] == 30
-    assert body["groups"] == ["chat", "reflection", "internet", "describe", "extra"]
+    assert body["groups"] == ["chat", "reflection", "internet", "describe", "assignment", "extra"]
     assert [r["date"] for r in body["rows"]] == ["2026-10-20", "2026-10-19"]
     chat = body["rows"][0]["groups"]["chat"]
     assert chat == {

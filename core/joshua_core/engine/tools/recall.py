@@ -88,6 +88,7 @@ async def do_search_memory(
     per_doc_cap: int = 3,
     full: bool = False,
     snapshots: Sequence[Snapshot] = (),
+    exclude_folders: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     """Return ``[{path, title, heading, text, score}]`` for the caller's scope.
 
@@ -116,6 +117,7 @@ async def do_search_memory(
         recency_bonus=recency_bonus,
         recency_half_life_days=recency_half_life_days,
         per_doc_cap=per_doc_cap,
+        exclude_folders=exclude_folders,
     )
     labels = await snapshot_labels(store, chunks, deps.tz)
     by_name = {snap.name: snap for snap in snapshots}
@@ -157,6 +159,7 @@ def build_recall_server(
     recency_half_life_days: float,
     per_doc_cap: int,
     snapshots: Sequence[Snapshot] = (),
+    exclude_folders: Sequence[str] = (),
 ) -> Any:
     """Build the in-process ``recall`` MCP server bound to one conversation."""
 
@@ -183,6 +186,7 @@ def build_recall_server(
             per_doc_cap=per_doc_cap,
             full=args.get("full") is True,
             snapshots=snapshots,
+            exclude_folders=exclude_folders,
         )
         return _reply(json.dumps(results))
 
@@ -203,6 +207,7 @@ def register(manager: Any, store: MemoryStore, settings: JoshuaConfig) -> None:
             recency_half_life_days=memory.recency_half_life_days,
             per_doc_cap=memory.per_doc_cap,
             snapshots=memory.snapshots,
+            exclude_folders=memory.exclude_folders,
         )
 
     manager.register_builtin("recall", factory)

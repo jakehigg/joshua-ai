@@ -44,6 +44,8 @@ inference:
     model: bedrock-claude-sonnet
   internet:
     model: bedrock-claude-sonnet
+  assignment:
+    model: bedrock-claude-sonnet
 """
 
 # The same, but the internet job is on a second server: two targets.
@@ -62,6 +64,8 @@ inference:
   internet:
     base_url: http://ollama:11434
     api_key: ${LOCAL_API_KEY}
+    model: bedrock-claude-sonnet
+  assignment:
     model: bedrock-claude-sonnet
 """
 

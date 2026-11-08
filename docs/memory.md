@@ -33,6 +33,13 @@ too: reading is not what separates a guest from a member. Writing is.
 `.trash/` directories are not indexed, and a `*.meta.json` file is never a
 document of its own.
 
+A top-level wiki folder in `memory.exclude_folders` is not indexed either. The
+default is `assignments`: each assignment keeps its plan page in
+`wiki/assignments/`, and that page is work in progress, not a memory. No
+search returns a page in an excluded folder: not `search_memory`, not the
+note that a turn gets, and not `POST /v1/memory/search`. A person can still
+open the page with the `files` tools.
+
 The index also holds the text of an attachment. A PDF with a text layer and a
 text file are read when they arrive; the words on a picture and on a scan come
 from the describer. That text lives in the metadata file beside the

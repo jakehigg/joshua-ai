@@ -16,6 +16,7 @@ from joshua_gateway import person
 from joshua_gateway.main import lifespan
 from joshua_gateway.observability import CALL_LOG, SESSIONS
 from joshua_gateway.person import Attribution, PersonError, resolve
+from joshua_shared import config
 from starlette.testclient import TestClient
 
 
@@ -113,7 +114,7 @@ async def test_no_person_sees_only_a(gateway):
     assert resp.status_code == 403
 
 
-# -- only core is trusted (acceptance) ------------------------------------
+# -- only gateway.person_header_callers are trusted (acceptance) ----------
 
 
 def test_laptop_person_header_is_ignored(gateway):
@@ -123,17 +124,74 @@ def test_laptop_person_header_is_ignored(gateway):
     assert resp.status_code == 403
 
 
-def test_no_identity_but_core_is_trusted():
-    """Only core may say which person a request belongs to.
+def test_no_identity_but_the_trusted_ones_is_trusted():
+    """Only core and the assignments container may say which person a request
+    belongs to, by default.
 
     resolve() ignores the person header from every other fleet identity, so the
     request has no person and gets what an unknown person gets. The header
-    decides who reads and writes a person's files, and nothing widens the rule.
+    decides who reads and writes a person's files.
     """
-    for identity in sorted(set(TOKENS) - {"core"}):
+    assert person.DEFAULT_TRUSTED == frozenset({"core", "assignments"})
+    for identity in sorted(set(TOKENS) - person.DEFAULT_TRUSTED):
         assert resolve(identity, "alex", "c1", {"alex"}) == Attribution(
             person=None, conversation=None
         )
+    for identity in sorted(person.DEFAULT_TRUSTED):
+        assert resolve(identity, "alex", "c1", {"alex"}).person == "alex"
+
+
+def test_resolve_ignores_the_viewer_and_reads_the_trusted_list():
+    assert resolve("viewer", "alex", "c1", {"alex"}) == Attribution(person=None, conversation=None)
+    narrow = frozenset({"core"})
+    assert resolve("assignments", "alex", "c1", {"alex"}, trusted=narrow) == Attribution(
+        person=None, conversation=None
+    )
+
+
+def test_trusted_identities_come_from_the_config(gateway):
+    gateway(two_servers())
+    assert person.trusted_identities() == frozenset({"core", "assignments"})
+
+
+async def test_assignments_asserts_the_person_on_an_mcp_route(gateway):
+    """The assignments container acts for the person who started the
+    assignment: its person header reaches a server scoped to that person."""
+    app = gateway(two_servers())
+    async with lifespan(app):
+        async with gateway_session(app, "/b", "assignments", person_header("alex")) as session:
+            assert [t.name for t in (await session.list_tools()).tools] == ["echo"]
+        resp = await _get(app, "/b", "assignments", person_header("mia"))
+    assert resp.status_code == 403
+
+
+def test_viewer_person_header_is_refused(gateway):
+    """The viewer is not in gateway.person_header_callers: the MCP route
+    refuses it, with or without the person header."""
+    with TestClient(gateway(two_servers())) as client:
+        with_header = client.get("/a", headers={**bearer("viewer"), **person_header("alex")})
+        scoped = client.get("/b", headers={**bearer("viewer"), **person_header("alex")})
+    assert with_header.status_code == 403
+    assert scoped.status_code == 403
+    assert b"caller viewer not allowed" in with_header.content
+
+
+def test_a_narrow_list_refuses_assignments(gateway, config_path, monkeypatch):
+    """With person_header_callers set to core only, assignments gets 403. The
+    route reads the list on each request."""
+    app = gateway(two_servers())
+    config_path.write_text(
+        config_path.read_text() + "gateway:\n  person_header_callers:\n    - core\n"
+    )
+    monkeypatch.setattr(config, "_cache", None)
+    with TestClient(app) as client:
+        resp = client.get("/a", headers={**bearer("assignments"), **person_header("alex")})
+        core = client.get("/b", headers={**bearer("core"), **person_header("mia")})
+    assert resp.status_code == 403
+    assert b"caller assignments not allowed" in resp.content
+    # core still passes the route check; then the person gate of b denies mia.
+    assert core.status_code == 403
+    assert b"not open to this request" in core.content
     assert person.trusted_identities() == frozenset({"core"})
 
 

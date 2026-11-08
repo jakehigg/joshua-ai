@@ -172,6 +172,7 @@ async def kb_context(
     recency_half_life_days: float,
     per_doc_cap: int,
     timezone: str = "UTC",
+    exclude_folders: Sequence[str] = (),
 ) -> str | None:
     """Build the per-turn injection note for one ``TurnCtx``, or None.
 
@@ -210,6 +211,7 @@ async def kb_context(
             recency_bonus=recency_bonus,
             recency_half_life_days=recency_half_life_days,
             per_doc_cap=per_doc_cap,
+            exclude_folders=exclude_folders,
         )
     except Exception as exc:  # noqa: BLE001 — retrieval must never break a turn
         logger.warning({"message": "kb inject skipped: retrieval failed", "error": str(exc)})
@@ -285,6 +287,7 @@ def register(manager: Any, store: MemoryStore, settings: JoshuaConfig, repo: Rep
             recency_half_life_days=memory.recency_half_life_days,
             per_doc_cap=memory.per_doc_cap,
             timezone=getattr(settings, "timezone", "UTC"),
+            exclude_folders=memory.exclude_folders,
         )
 
     manager.add_context_provider(provider)

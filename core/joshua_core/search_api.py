@@ -9,7 +9,8 @@ The search is always in the shared scope (``person_id`` None), and the caller
 names no person. It returns only the ``files`` source and only the kinds in
 ``SEARCH_KINDS``: every row it can return is a wiki page that any reader of the
 wiki can already open. A person's own attachments (kind ``people``) and the
-skill rows are never returned. The route checks the kind and the path of each
+skill rows are never returned, and neither is a page in a folder of
+``memory.exclude_folders``. The route checks the kind and the path of each
 row again after the database filter, so a new kind in the indexer does not
 widen what the route returns.
 
@@ -31,7 +32,7 @@ from pydantic import ValidationError
 
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
-from joshua_core.memory.search import search
+from joshua_core.memory.search import excluded_prefixes, is_excluded, search
 
 logger = get_logger("search_api")
 
@@ -59,14 +60,16 @@ def _authorize(request: Request) -> tuple[JSONResponse | None, str | None]:
     return None, identity
 
 
-def _visible(chunk: KbChunk, kinds: tuple[str, ...]) -> bool:
-    """True for a row this route may return: a wiki page of a requested kind.
-    ``kinds`` is always a subset of ``SEARCH_KINDS``."""
+def _visible(chunk: KbChunk, kinds: tuple[str, ...], excluded: tuple[str, ...] = ()) -> bool:
+    """True for a row this route may return: a wiki page of a requested kind,
+    not in an excluded folder. ``kinds`` is always a subset of
+    ``SEARCH_KINDS``."""
     return (
         chunk.source == _SOURCE
         and chunk.kind in kinds
         and chunk.person_id is None
         and chunk.path.startswith(_WIKI_PREFIX)
+        and not is_excluded(chunk.path, excluded)
     )
 
 
@@ -116,8 +119,10 @@ def build_search_router() -> APIRouter:
             recency_bonus=memory.recency_bonus,
             recency_half_life_days=memory.recency_half_life_days,
             per_doc_cap=memory.per_doc_cap,
+            exclude_folders=memory.exclude_folders,
         )
-        hits = [_hit(c) for c in chunks if _visible(c, kinds)]
+        excluded = excluded_prefixes(memory.exclude_folders)
+        hits = [_hit(c) for c in chunks if _visible(c, kinds, excluded)]
         logger.info({"message": "memory search", "caller": identity, "results": len(hits)})
         return JSONResponse(SearchResponse(results=hits).model_dump())
 

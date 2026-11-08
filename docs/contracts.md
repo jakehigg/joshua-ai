@@ -20,8 +20,10 @@ gets 403.
 
 The identities are `channels`, `core`, `gateway`, `laptop`, and `ci`. `laptop`
 and `ci` are for operators. `viewer` and `mcp` call core's search by meaning:
-the web viewer and the joshua-mcp addon. `make init-env` writes all of them
-except `ci` into `.env`.
+the web viewer and the joshua-mcp addon. `assignments` is the assignments
+container: it calls core's model forwarder and usage write, the gateway MCP
+routes, and channels events. `make init-env` writes all of them except `ci`
+into `.env`.
 
 ## Models
 
@@ -105,6 +107,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
+| `POST /v1/usage` | `usage.writers` (default `assignments`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment`, `413` over 1 MiB, `503` when the database fails. |
+| `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
@@ -145,13 +149,14 @@ logs the query.
 `GET /v1/usage` gives the tokens of the model calls, for each calendar day in
 the instance `timezone` and for each group. The groups are `chat` (the turns
 of the agent), `reflection` (the nightly reflection), `internet` (a lookup
-that the agent makes with `use_internet`), and `describe` (the attachment
-describer). `days` is the window, today included: default 30, held to 1 to
+that the agent makes with `use_internet`), `describe` (the attachment
+describer), and `assignment` (the model calls of the assignments container).
+`days` is the window, today included: default 30, held to 1 to
 366.
 
 ```json
 {"timezone": "America/New_York", "days": 30,
- "groups": ["chat", "reflection", "internet", "describe"],
+ "groups": ["chat", "reflection", "internet", "describe", "assignment"],
  "rows": [{"date": "2026-10-20",
            "groups": {"chat": {"calls": 12, "input": 900, "output": 400,
                                "cache_read": 52000, "cache_write": 3100,
@@ -162,7 +167,7 @@ describer). `days` is the window, today included: default 30, held to 1 to
 ```
 
 `groups` always holds every feature, also one with no usage: `chat`,
-`reflection`, `internet`, and `describe`, in that order. After them come the
+`reflection`, `internet`, `describe`, and `assignment`, in that order. After them come the
 other names of the rows in the window, sorted. `totals` holds one entry for
 each name of `groups`, with zero counts for a group with no usage. `rows` is
 newest first and holds only a day with usage, and a day holds only the groups
@@ -173,6 +178,101 @@ group, and `[]` when no call named one. `workers` gives the same counts and
 the other groups. The answer holds no person, no message, and no question. An
 empty list in `usage.allowed_callers` turns the route off: every caller gets
 `403`. `GET /admin/usage` gives the same answer to an admin caller.
+
+The group `assignment` holds the model calls of the assignments container.
+Core does not make these calls itself, so the container reports them with
+`POST /v1/usage`.
+
+### The usage write route
+
+`POST /v1/usage` writes usage rows that another container reports for its
+own model calls. The callers are `usage.writers` (default `assignments`). An
+empty list turns the route off: every caller gets `403`. Core checks the
+bearer before it reads the body.
+
+```json
+{"rows": [{"kind": "assignment", "name": "assignment",
+           "worker": "assignment-12", "run_id": 12, "person_id": "alex",
+           "model": "claude-sonnet-5", "endpoint": "anthropic", "calls": 3,
+           "usage": {"input": 100, "output": 20, "cache_read": 1000,
+                     "cache_write": 50},
+           "ref": "12:slice:1"}]}
+```
+
+| Field | Rule |
+|---|---|
+| `kind` | `assignment` only. A row of `chat`, `reflection`, `internet`, `describe`, or any other kind gets `400`. Only core writes those. |
+| `name` | `assignment`, the default. It is the group on the usage page. |
+| `worker` | optional, at most 64 characters. The usage page shows it as a worker of the group, for example one assignment. |
+| `run_id` | optional, a positive integer, for example the id of the assignment. |
+| `person_id` | optional, a person id. |
+| `model`, `endpoint` | optional labels: the model and the server label of the calls. |
+| `calls` | default 1, 0 or more. |
+| `usage` | the four counts, each 0 to 2147483647, default 0. |
+| `ref` | required, 1 to 200 characters. The id of the row for its writer. |
+
+The body holds at most 500 rows and 1 MiB. A larger body gets `413`. When one
+row is not valid, core writes no row and answers `400`. Core stores the `ref`
+as `<writer>:<ref>`, for example `assignments:12:slice:1`. Thus a writer
+cannot change the rows of core or of another writer, and a row that the
+writer sends again is not written again. The answer `{"accepted": n}` counts
+the rows of the body, also a row that core already had. When the database
+fails, the answer is `503` and the writer can send the same rows again. Core
+logs the writer and the number of rows, never a row.
+
+### The model forwarder
+
+`ANY /v1/model/{path}` sends a Claude API request on to the model server, with
+the credential of the inference job `assignment`. The assignments container
+holds no model credential. Its Claude CLI sets:
+
+```
+ANTHROPIC_BASE_URL=http://core:8000/v1/model
+CLAUDE_CODE_OAUTH_TOKEN=<JOSHUA_TOKEN_ASSIGNMENTS>
+```
+
+The CLI sends its fleet token as a Claude token. Core compares it with the
+tokens of `inference.forwarder.allowed_callers` only. A missing token, a
+wrong token, and the token of any other identity, also `core`, get `401`. An
+empty list turns the route off: every request gets `404`.
+
+Core sends a request on only for these paths:
+
+- `v1/messages`
+- `v1/messages/count_tokens`
+- `v1/models`
+- `v1/models/<id>`, one more segment with no dot segment
+
+Any other path gets `403`, and core sends nothing. Core answers
+`GET` or `HEAD` `/v1/model/api/hello` itself with `{}` and no bearer: it is the
+connectivity probe of the CLI.
+
+The server is the server of the `assignment` job: `inference.assignment`,
+else the global `inference` settings, else the Anthropic API with the
+subscription token. Core removes `Authorization`, `x-api-key`, `Host`, and
+the hop-by-hop headers. Then it adds the credential of the job:
+
+| The job uses | Core sends |
+|---|---|
+| the subscription | `Authorization: Bearer <subscription token>` |
+| an API key with no `base_url` | `x-api-key: <key>` |
+| a `base_url` and a key | `Authorization: Bearer <key>` |
+| a `base_url` with `api_key: ""` | no credential |
+
+With a credential that is not the subscription token, core also removes the
+`oauth-*` flags from `anthropic-beta`, because the CLI sets them for its
+stand-in token. Core passes the other headers and the query on, and does not
+change the body. Thus the model of a call is the model that the caller asks
+for. The body streams in both directions, so a server-sent event stream
+arrives at the caller as the server sends it. The status and the headers of
+the server come back as they are.
+
+The forwarder writes no usage row: the container reports its own usage with
+`POST /v1/usage`. Core never logs a token, a header value, or a body. When the
+server does not answer, the reply is `502 {"error": "model server
+unreachable"}`, and the log names the error type and the server label, never
+the error text, because the error text can name a host. With no subscription
+token for a job on the subscription, the reply is `503`.
 
 ### The limits route
 
@@ -282,14 +382,14 @@ the name the front end sent, so an operator can add that person.
 
 ## gateway
 
-Port 8000 in the container. Compose does not publish it. Only `core` reaches
-it.
+Port 8000 in the container. Compose does not publish it. Only the containers
+reach it.
 
 | Route | Callers | Request | Reply |
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok": bool, "connected", "errored", "installing", "disabled", "total"}`, counts only. Always `200`; `ok` reports the upstreams, not readiness. `installing` is a package install still running; `disabled` is an entry whose credential is empty. Neither is an error. |
-| `ANY /<server>` and `/<server>/…` | `core` | MCP over streamable HTTP | the upstream's answer. `403` when the person may not use this server. `409` when a live session changes person. `503` when the upstream is down and not reconnecting. See below for a lost upstream session. |
+| `ANY /<server>` and `/<server>/…` | `gateway.person_header_callers` (default `core`, `assignments`) | MCP over streamable HTTP | the upstream's answer. `403` when the person may not use this server. `409` when a live session changes person. `503` when the upstream is down and not reconnecting. See below for a lost upstream session. |
 | `POST /admin/reload` | `ADMIN_CALLERS` | `{"server": name}` or empty | `{"reloaded": {…}, "failed": {…}}`, `502` when one failed |
 | `GET /admin/calls?identity=&tool=&limit=` | `ADMIN_CALLERS` | | `{"calls": […]}`, newest first |
 | `GET /admin/inventory` | `ADMIN_CALLERS` | | `{"servers": {…}, "identities": {…}}`. Each connection has `reconnects`, `last_reconnect_at`, and `last_reconnect_reason`. A `package` entry adds `package`, `resolved`, `installed_at`; a disabled entry adds `disabled_reason`. |
@@ -366,7 +466,8 @@ An error is a short fixed text, never the text of SearXNG:
 The call log holds the length of the query and the count of the results,
 never the query and never the key.
 
-`core` sends these headers with every MCP request:
+`core` sends these headers with every MCP request. The assignments container
+sends them for the person who started the assignment:
 
 | Header | Meaning |
 |---|---|
@@ -375,9 +476,10 @@ never the query and never the key.
 | `X-Joshua-Role` | `member` or `guest` |
 | `X-Joshua-Group` | the group id, only for a group chat in `groups` |
 
-The gateway trusts these headers only from `core`. From any other caller it
-ignores them, and the request gets only what an unknown person gets. A group id
-that is not in `groups` is 400.
+The gateway trusts these headers only from the identities in
+`gateway.person_header_callers` (default `core` and `assignments`). Every other
+identity gets `403` on an MCP route. A group id that is not in `groups` is
+400.
 
 ## Where `laptop` may go
 
@@ -385,7 +487,9 @@ The `laptop` identity is for the operator on the host. It may call
 `POST /v1/events`, the two `/v1/cli/*` routes, every `/admin/*` route (by
 default), and `POST /v1/turns/stream` with a `cli` handle.
 
-It may not call the gateway MCP routes. Only `core` reaches a person's tools and
-files, and only `core` says which person a request belongs to. It may not call
+It may not call the gateway MCP routes. Only the identities in
+`gateway.person_header_callers` (default `core` and `assignments`) reach a
+person's tools and files, and only they say which person a request belongs
+to. It may not call
 `/v1/turns`, `/v1/deliver`, or `/v1/channels/resolve` either. Those belong to
 the containers.

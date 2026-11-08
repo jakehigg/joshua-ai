@@ -2,7 +2,9 @@
 
 ``search`` over-fetches candidates by cosine from the person's scope, then
 applies :func:`rank_chunks` (per-document cap and a recency bonus for
-``journal`` kinds) to return the top ``k`` chunks.
+``journal`` kinds) to return the top ``k`` chunks. A chunk of a page in a
+folder of ``exclude_folders`` (``memory.exclude_folders``) is never returned,
+also when the index still holds it.
 """
 
 from __future__ import annotations
@@ -13,6 +15,20 @@ from datetime import UTC, datetime
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.ranking import PER_DOC_CAP, rank_chunks
 from joshua_core.memory.store import MemoryStore
+
+_WIKI_PREFIX = "wiki/"
+
+
+def excluded_prefixes(folders: Sequence[str]) -> tuple[str, ...]:
+    """The path prefixes of the top-level wiki folders in ``folders``, such as
+    ``wiki/assignments/``."""
+    return tuple(f"{_WIKI_PREFIX}{name.strip('/')}/" for name in folders if name.strip("/"))
+
+
+def is_excluded(path: str, prefixes: tuple[str, ...]) -> bool:
+    """True when ``path`` is in one of the folders of ``prefixes``."""
+    return bool(prefixes) and path.startswith(prefixes)
+
 
 # Journal pages are time-anchored; wiki and profile pages are not.
 TEMPORAL_KINDS: tuple[str, ...] = ("journal",)
@@ -36,8 +52,11 @@ async def search(
     recency_half_life_days: float = 14.0,
     per_doc_cap: int = PER_DOC_CAP,
     now: datetime | None = None,
+    exclude_folders: Sequence[str] = (),
 ) -> list[KbChunk]:
-    """Return the top ``k`` chunks visible to ``person_id`` (own + shared)."""
+    """Return the top ``k`` chunks visible to ``person_id`` (own + shared),
+    with no chunk in a folder of ``exclude_folders``."""
+    prefixes = excluded_prefixes(exclude_folders)
     candidates = await store.kb_search(
         person_id,
         query_vec,
@@ -47,6 +66,8 @@ async def search(
         kinds=kinds,
         exclude_kinds=exclude_kinds,
     )
+    if prefixes:
+        candidates = [c for c in candidates if not is_excluded(c.path, prefixes)]
     ranked = rank_chunks(
         candidates,
         limit=k,

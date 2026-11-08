@@ -19,6 +19,37 @@ with the images and the packaged chart, are at
   token count. The new `limits` section turns the route and the tool off, or
   the tool off for chat or for voice. See
   [config.md](config.md#limits).
+- **Core can send the model calls of the assignments container.** The new
+  route `/v1/model/{path}` takes a Claude API request with the token of an
+  identity in `inference.forwarder.allowed_callers` (default `assignments`),
+  puts the credential of the new inference job `assignment` on it, and
+  streams it to the model server and back. The container holds no model
+  credential, and the credential never leaves core. Only the paths of the
+  Claude CLI go on. Every other token gets `401` and every other path gets
+  `403`. `inference.assignment` can send these calls to another server, as
+  for any job. See
+  [contracts.md](contracts.md#the-model-forwarder).
+- **Another container can report its model calls on the usage page.** The new
+  route `POST /v1/usage` takes usage rows of kind `assignment` from an
+  identity in `usage.writers` (default `assignments`). The usage page now
+  always shows an `assignment` group. A row of any other kind gets `400`. See
+  [contracts.md](contracts.md#the-usage-write-route).
+- **A wiki folder can stay out of the memory.** `memory.exclude_folders`
+  (default `assignments`) names top-level wiki folders that the index does not
+  hold and that no search returns. The plan pages of the assignments, in
+  `wiki/assignments/`, thus never come back in a turn. See
+  [config.md](config.md#index).
+- **The gateway trusts the person headers from the assignments container.**
+  The new `gateway.person_header_callers` (default `core` and `assignments`)
+  names the identities that may call the MCP routes and say which person a
+  call is for. Every other identity gets `403` on an MCP route, as before.
+  The snapshot and search routes still admit `core` only. See
+  [config.md](config.md#gateway).
+- **`make init-env` mints `JOSHUA_TOKEN_ASSIGNMENTS`.** Compose and the chart
+  give it to core, channels, and the gateway, so each one can verify the
+  assignments container. Run `make init-env` again to add it to an existing
+  `.env`. To let the container post events, add `assignments` to
+  `channels.webhooks.allowed_callers`.
 
 ## 0.1.1 - 2026-11-07
 

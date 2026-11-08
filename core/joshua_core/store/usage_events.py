@@ -9,9 +9,12 @@ A row holds counts and ids only. It never holds a message, a question, or a
 token.
 
 The groups of the usage page are the `name` of a row: `chat`, `reflection`,
-`internet`, and `describe`. `summarize` folds the rows of `Repo.usage_rows` into the `UsageResponse`
-shape, one day in the instance timezone for each row. `usage_features` names
-the groups that the answer always holds, also with no row.
+`internet`, `describe`, and `assignment`. Core writes the rows of the first
+four itself. The assignments container reports the rows of `assignment` with
+`POST /v1/usage` (see `usage_api.py`). `summarize` folds the rows of
+`Repo.usage_rows` into the `UsageResponse` shape, one day in the instance
+timezone for each row. `usage_features` names the groups that the answer
+always holds, also with no row.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ from joshua_core.engine.usage import Usage
 
 logger = get_logger("store.usage")
 
-USAGE_KINDS = ("chat", "reflection", "internet", "describe")
+USAGE_KINDS = ("chat", "reflection", "internet", "describe", "assignment")
 
 # The groups of the features that are always on, in the order of the answer.
 CALL_GROUPS = USAGE_KINDS
@@ -104,11 +107,11 @@ async def record_usage(
     """Write one `kind` row for each usage in `usages`, and return how many
     rows were written.
 
-    `kind` is one of `chat`, `reflection`, `internet`, or `describe`; the row
-    name is the kind. `model` is the model that the call used, and
-    `endpoint` is its server label. `ref` names the source; with more than one usage, each
-    row gets `<ref>:<n>`. With no `ref`, each row gets a new random ref.
-    A row that cannot be written is a warning. Only a `kind` that is not a
+    `kind` is one of `USAGE_KINDS`; the row name is the kind. `model` is the
+    model that the call used, and `endpoint` is its server label. `ref` names
+    the source; with more than one usage, each row gets `<ref>:<n>`. With no
+    `ref`, each row gets a new random ref. A row that cannot be written is a
+    warning. Only a `kind` that is not a
     call kind raises, a `ValueError`, because that is a fault in the code.
     """
     if kind not in USAGE_KINDS:

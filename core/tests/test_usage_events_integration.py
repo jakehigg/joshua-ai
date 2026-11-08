@@ -119,3 +119,62 @@ async def test_the_endpoint_of_a_row_is_stored(repo) -> None:
     # The answer of the usage route keeps its shape: no endpoint split.
     body = summarize(await repo.usage_rows(SINCE, TZ), timezone=TZ, days=30).model_dump()
     assert "endpoint" not in body["totals"]["chat"]
+
+
+async def test_a_reported_assignment_row_lands_in_usage_event(repo, monkeypatch) -> None:
+    """`POST /v1/usage` against a real Postgres: one `usage_event` row with the
+    run id, the worker, and the writer in the ref, and the `assignment` group
+    in the sum. The same row sent again is not written again."""
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from joshua_core.usage_api import build_usage_router
+    from joshua_shared.config import UsageConfig
+
+    monkeypatch.setenv("JOSHUA_TOKEN_ASSIGNMENTS", "assignments-token")
+    app = FastAPI()
+    app.state.ctx = SimpleNamespace(
+        settings=SimpleNamespace(timezone=TZ, usage=UsageConfig()), repo=repo
+    )
+    app.include_router(build_usage_router())
+    row = {
+        "kind": "assignment",
+        "worker": "assignment-12",
+        "run_id": 12,
+        "person_id": "alex",
+        "model": "claude-sonnet-5",
+        "calls": 2,
+        "usage": {"input": 40, "output": 4},
+        "ref": "12:slice:1",
+    }
+    headers = {"Authorization": "Bearer assignments-token"}
+    async with repo._pool.connection() as conn:  # noqa: SLF001 — the test reads the table
+        for _ in range(2):
+            response = await _post(app, headers, {"rows": [row]})
+            assert response.status_code == 200
+        cur = await conn.execute(
+            "SELECT kind, name, worker, run_id, person_id, ref, calls, input FROM usage_event"
+        )
+        rows = await cur.fetchall()
+    assert len(rows) == 1
+    assert tuple(rows[0].values()) == (
+        "assignment",
+        "assignment",
+        "assignment-12",
+        12,
+        "alex",
+        "assignments:12:slice:1",
+        2,
+        40,
+    )
+    since = datetime(2000, 1, 1, tzinfo=UTC)
+    body = summarize(await repo.usage_rows(since, TZ), timezone=TZ, days=366).model_dump()
+    assert body["totals"]["assignment"]["workers"]["assignment-12"]["calls"] == 2
+
+
+async def _post(app, headers, body):  # type: ignore[no-untyped-def]
+    import httpx
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://core") as client:
+        return await client.post("/v1/usage", headers=headers, json=body)
