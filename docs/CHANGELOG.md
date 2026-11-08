@@ -19,6 +19,38 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Assignments ask, resume, and clone.** `answer_assignment` now reads the
+  limits first: when a window is still at or over its ceiling, the
+  assignment stays parked and the reply says when the window resets. A
+  `waiting` assignment waits with no time limit. The answer goes to the
+  model one time, so a restart does not send it again. At start, each
+  `running` assignment continues its session with "Read your plan page
+  before anything else; the pod restarted." `extend_assignment` also takes
+  `max_turns`, and it continues a `budget_exceeded` or `time_exceeded`
+  assignment. Their scratch now stays for `assignments.keep_failed_work`. A
+  session clones the repositories of its spec over HTTPS through a
+  listener on `127.0.0.1` in the manager, which puts the token of
+  `assignments.platforms.<host>.token_env` on each clone, checks
+  `assignments.repos` again, and refuses a push. The session never holds a
+  git token. In compose, put the token in `.env.assignments`; on Kubernetes,
+  add it to `secrets.assignments`. Follow-ups go to the tasks project of the
+  spec only when the session holds the `tasks` server, and to the plan page
+  in all other cases. The report gives the cost. See
+  [assignments.md](assignments.md#questions-and-answers).
+
+- **A skill page for assignments.** Core adds
+  `prompts/builtin/skills/assignments.md` to the system prompt of a session
+  that holds the `assignments` server: how to build a spec, how budget words
+  become the `budget` block, when to answer a question alone, what to do at
+  a limits stop, and to give the cost with each result. See
+  [assignments.md](assignments.md#the-skill-page).
+
+- **`rename_file` moves a page.** `new_name` can now be a path such as
+  `wiki/projects/idea.md`, and the page moves to that folder, with one wiki
+  commit. `rename_file` now refuses a file in, or a target in,
+  `wiki/people/` and `wiki/joshua-docs/` too, not only `wiki/journal/`. See
+  [config.md](config.md#the-files-mcp).
+
 - **Assignments run a real session.** Each assignment now runs one Claude
   Agent SDK session in `/work/<id>/`, with the file tools, Bash, the MCP
   servers of the person through the gateway, and the tools `checkpoint`,
