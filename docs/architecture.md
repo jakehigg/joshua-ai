@@ -99,7 +99,11 @@ of the shared Postgres. It mounts `/data` read-only. On Kubernetes, a network
 policy lets only the gateway reach it, and lets it reach only gateway,
 channels, core, the database, DNS, and the git hosts you name.
 
-This release has only the stub runner, which calls no model.
+Each assignment runs one Claude Agent SDK session in a scratch directory, in
+slices. Before each slice, the container reads core's `GET /v1/limits`, and
+the assignment stops at the ceiling that its spec sets on the subscription
+windows. The session sends its model calls through core's forwarder, so the
+model credential stays in core, and core gets one usage row for each slice.
 [assignments.md](assignments.md) has the whole design.
 
 ## Who may call what

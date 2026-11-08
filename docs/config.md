@@ -1147,16 +1147,16 @@ container reads this section.
 | `enabled` | `false` | `true` lets the container start. With `false` it exits at start. |
 | `default_model` | `sonnet` | The model of a spec that names none. It must be a key of `models`. |
 | `models` | `sonnet`, `opus` | Name to `model` (the model id) and `effort` (`low`, `medium`, `high`, `xhigh`, `max`; default `medium`). A spec names a key. A file that sets `models` replaces both built-in models. |
-| `default_max_turns` | `200` | The soft cap on model turns of a spec that names none. |
+| `default_max_turns` | `200` | The cap on model turns of a spec that names none. At the cap, the assignment ends as `budget_exceeded`. |
 | `default_working_time` | `4h` | The working time of a spec that names none. A duration such as `30m` or `4h`. |
 | `limits.five_hour_pct` | `70` | The ceiling on the 5-hour window, in percent used, of a spec that names none. |
 | `limits.seven_day_pct` | `85` | The ceiling on the weekly window of a spec that names none. |
 | `limits.max_five_hour_pct` | `90` | The highest 5-hour ceiling a spec can ask for. A higher value is clamped to it. |
 | `limits.max_seven_day_pct` | `95` | The highest weekly ceiling a spec can ask for. |
-| `limits.when_unknown` | `refuse` | `refuse` or `run`: what an assignment does when core cannot say how much of a window is used. |
+| `limits.when_unknown` | `refuse` | `refuse` or `run`: what an assignment does when core cannot say how much of a window is used. With `refuse`, `start_assignment` refuses a spec with no `budget.tokens`, and a running assignment with no token cap stops as `paused_limits`. |
 | `max_concurrent` | `1` | The number of assignments that can run at one time. A parked assignment holds no slot. |
-| `slice_turns` | `10` | The model turns between two reads of the limits. |
-| `keep_failed_work` | `7d` | How long the scratch directory of a failed assignment stays. |
+| `slice_turns` | `10` | The model turns of one slice. The runner reads the limits before each slice. |
+| `keep_failed_work` | `7d` | How long the scratch directory of a failed assignment stays. The container removes it at start, or when an assignment stops, after this time. |
 | `repos` | `[]` | The repositories an assignment may clone: `host/group/name`, or `host/group/*` for a whole group. Lower case. `*` also matches a subgroup. |
 | `platforms` | `{}` | Git host to `kind` (`github`, `gitlab`, `git`) and `token_env`, the name of the variable that holds its token. |
 | `people` | `{}` | Person id to `notify`, the destination of the report and the questions of an assignment with `report_to: conversation`. Each key must be in `people`. |

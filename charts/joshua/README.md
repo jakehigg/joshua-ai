@@ -284,8 +284,11 @@ The chart can also run the assignments container, which runs long jobs for a
 member in the background. It is off by default. It holds no model credential
 and no upstream credential. It keeps its rows in the schema `assignments` of
 the same database as core, so `DATABASE_URL` names that database. It reads
-`/data` and writes nothing there. [docs/assignments.md](../../docs/assignments.md)
-has the whole setup, with the `mcp:` entry that lets the gateway call it.
+`/data` and writes nothing there. The chart points it at core and the
+gateway (`CORE_URL`, `GATEWAY_URL`): core gives it the limits and forwards
+its model calls, and the gateway gives it the MCP servers of a person.
+[docs/assignments.md](../../docs/assignments.md) has the whole setup, with the
+`mcp:` entry that lets the gateway call it.
 
 Two switches turn it on, and both are needed:
 

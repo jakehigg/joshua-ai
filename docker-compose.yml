@@ -212,6 +212,11 @@ services:
       JOSHUA_CONFIG: /etc/joshua/joshua.yaml
       DATABASE_URL: postgresql://joshua:${POSTGRES_PASSWORD:-}@postgres:5432/joshua
       CHANNELS_URL: http://channels:8000
+      # The runner reads the limits, writes the usage, and sends the model
+      # calls of each session to core. A session reaches the MCP servers of
+      # its person through the gateway.
+      CORE_URL: http://core:8000
+      GATEWAY_URL: http://gateway:8000
       JOSHUA_TOKEN_ASSIGNMENTS: ${JOSHUA_TOKEN_ASSIGNMENTS:-}
       # `<person-id>=<token>` pairs, comma separated. Each bearer names one
       # person. The gateway sends it (see docs/assignments.md).

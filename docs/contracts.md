@@ -502,11 +502,21 @@ tool except `assignment_status` and `list_assignments`. A person who is not a
 member gets `403 forbidden: assignments are for members only`. Another
 person's assignment is `404 not found: no assignment <id>`.
 
-The container calls one route of another container. It sends the report and
-the question of an assignment to channels `POST /v1/events` with
-`Authorization: Bearer <JOSHUA_TOKEN_ASSIGNMENTS>` and the body
-`{"destination": str, "text": str}`. Channels accepts it only when
-`assignments` is in `channels.webhooks.allowed_callers`.
+The container calls these routes of the other containers, each with
+`Authorization: Bearer <JOSHUA_TOKEN_ASSIGNMENTS>` (the limits route has no
+bearer):
+
+| Route | When | Body |
+|---|---|---|
+| channels `POST /v1/events` | the report or the question of an assignment | `{"destination": str, "text": str}`. Channels accepts it only when `assignments` is in `channels.webhooks.allowed_callers`. |
+| core `GET /v1/limits` | before each slice, and at `start_assignment` when `when_unknown` is `refuse` and the spec has no `budget.tokens` | none |
+| core `POST /v1/usage` | after each slice that used tokens | one row: kind and name `assignment`, `worker` the model name of the spec, `run_id` the id, `person_id`, `model`, `calls`, `usage`, and `ref` `<id>:slice:<n>` |
+| core `ANY /v1/model/{path}` | each model call of a session, from the Claude CLI | a Claude API request |
+| gateway MCP routes | each MCP call of a session | MCP, with `X-Joshua-Person` the person, `X-Joshua-Role` `member`, and `X-Joshua-Conversation` `assignment:<id>` |
+
+A usage row that fails with a connection error, a timeout, or a `5xx` is sent
+again, 3 attempts in all. Core keeps one row for each `ref`, so a row that
+arrives two times counts one time.
 
 ## Where `laptop` may go
 
