@@ -3,9 +3,12 @@
 Core asserts the person, the conversation, and the role of every MCP request
 with the ``X-Joshua-Person``, ``X-Joshua-Conversation``, and ``X-Joshua-Role``
 headers. A group chat also sends ``X-Joshua-Group``. The gateway trusts those
-headers only from ``core``. From any other caller they are ignored and the
-request has no person, no role, and no group. No setting
-changes this, so nothing may widen it.
+headers only from the fleet identities in ``gateway.person_header_callers``
+(default ``core`` and ``assignments``). The assignments container acts for
+the person who started an assignment, so it sends the same headers. From any
+other caller the headers are ignored and the request has no person, no role,
+and no group. The config refuses a list without ``core``, and the MCP routes
+admit the identities of this list only.
 
 **The role is the access control; the person is not.** The corpus of Joshua is
 shared, and the role alone decides whether a request writes. The person is kept
@@ -21,15 +24,17 @@ from __future__ import annotations
 from collections.abc import Container
 from dataclasses import dataclass
 
-from joshua_shared.config import PERSON_ID_RE
+from joshua_shared import config
+from joshua_shared.config import PERSON_ID_RE, GatewayConfig
 
 _PERSON_RE = PERSON_ID_RE
 
 # The literal person id for a request core could not attribute to a known person.
 UNKNOWN = "unknown"
 
-# The one identity trusted to say which person a request belongs to.
-_TRUSTED = frozenset({"core"})
+# The identities trusted to say which person a request belongs to when no
+# config is given: the default of ``gateway.person_header_callers``.
+DEFAULT_TRUSTED = frozenset(GatewayConfig().person_header_callers)
 
 # The roles core may assert. A guest reads; a member also writes.
 _ROLES = frozenset({"member", "guest"})
@@ -56,8 +61,9 @@ class Attribution:
 
 
 def trusted_identities() -> frozenset[str]:
-    """The fleet identities allowed to assert the person header."""
-    return _TRUSTED
+    """The fleet identities allowed to assert the person header: the
+    ``gateway.person_header_callers`` of the current config."""
+    return frozenset(config.load().gateway.person_header_callers)
 
 
 def resolve(
@@ -68,14 +74,16 @@ def resolve(
     role_header: str | None = None,
     group_header: str | None = None,
     known_groups: Container[str] = (),
+    trusted: Container[str] = DEFAULT_TRUSTED,
 ) -> Attribution:
     """Attribute a request to a person, a conversation, a role, and a group.
 
-    ``identity`` is the authenticated fleet caller. Returns an empty attribution
-    when the caller may not assert the headers. Raises ``PersonError`` for a
+    ``identity`` is the authenticated fleet caller and ``trusted`` the
+    identities that may assert the headers. Returns an empty attribution
+    when the caller is not in ``trusted``. Raises ``PersonError`` for a
     trusted but invalid person, role, or group header.
     """
-    if identity not in trusted_identities():
+    if identity not in trusted:
         return Attribution(person=None, conversation=None, role=None)
 
     person = (person_header or "").strip() or None

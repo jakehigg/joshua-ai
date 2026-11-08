@@ -106,7 +106,7 @@ async def test_no_bearer_is_401(app) -> None:
         assert (await _post(app, "open-items", None)).status_code == 401
 
 
-@pytest.mark.parametrize("identity", ["laptop", "channels", "gateway"])
+@pytest.mark.parametrize("identity", ["laptop", "channels", "gateway", "assignments", "viewer"])
 async def test_a_caller_that_is_not_core_is_403(app, identity) -> None:
     async with lifespan(app):
         response = await _post(app, "open-items", identity)
