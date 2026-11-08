@@ -104,7 +104,9 @@ class FakeRepo:
 
 
 class FakeComposer:
-    def compose(self, profile: Any, person: Any, channel: Channel, memory: Any = None) -> str:
+    def compose(
+        self, profile: Any, person: Any, channel: Channel, memory: Any = None, servers: Any = ()
+    ) -> str:
         return "you are joshua"
 
 

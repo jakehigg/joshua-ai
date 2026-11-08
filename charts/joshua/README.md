@@ -53,7 +53,7 @@ Each block gives a default Secret in `name` and the variables in `keys`:
 | `secrets.channels` | `TELEGRAM_BOT_TOKEN`, `BLUEBUBBLES_PASSWORD`, `IMESSAGE_WEBHOOK_SECRET`, and every `JOSHUA_TOKEN_*` |
 | `secrets.gateway` | Every `JOSHUA_TOKEN_*`, and one key for each upstream credential an MCP server reads |
 | `secrets.postgres` | `POSTGRES_PASSWORD`, when the chart runs Postgres |
-| `secrets.assignments` | `DATABASE_URL`, `JOSHUA_TOKEN_ASSIGNMENTS`, `ASSIGNMENTS_TOKENS`, `ADDON_TOKEN`, when the assignments container runs |
+| `secrets.assignments` | `DATABASE_URL`, `JOSHUA_TOKEN_ASSIGNMENTS`, `ASSIGNMENTS_TOKENS`, `ADDON_TOKEN`, and the `token_env` of each git host, when the assignments container runs |
 
 An empty value takes the variable from `name`, under a key of the same
 spelling. Give `name` or `key` to take one variable from somewhere else:
@@ -318,8 +318,14 @@ gateway Secrets, so channels accepts the events the container sends.
 kubectl -n <namespace> create secret generic joshua-assignments-secrets \
   --from-literal=DATABASE_URL="$DATABASE_URL" \
   --from-literal=JOSHUA_TOKEN_ASSIGNMENTS="$JOSHUA_TOKEN_ASSIGNMENTS" \
-  --from-literal=ASSIGNMENTS_TOKENS="alex=$ASSIGNMENTS_TOKEN_ALEX"
+  --from-literal=ASSIGNMENTS_TOKENS="alex=$ASSIGNMENTS_TOKEN_ALEX" \
+  --from-literal=ASSIGNMENTS_GITLAB_TOKEN="$GITLAB_READ_TOKEN"
 ```
+
+The last key is the read token of a git host in `assignments.platforms`,
+under the name that its `token_env` gives. Add the same name to
+`secrets.assignments.keys`. The manager puts the token on each clone of a
+session, and the session never sees it.
 
 The network policy lets only the gateway reach the pod, and lets the pod reach
 only gateway, channels, core, the database, DNS, and the git hosts. A network

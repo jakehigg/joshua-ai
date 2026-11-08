@@ -883,8 +883,12 @@ path and a markdown link for the page. Member only. The file that arrived is
 never moved and never changed. A file over 50 MB is refused.
 
 `write_file` writes `.md` only, at most 256 KB, and `mode: create` fails when
-the file exists. `rename_file` renames one file in place under `wiki/`.
-`new_name` is a bare filename and the extension must not change.
+the file exists. `rename_file` renames or moves one file under `wiki/`, and
+commits the change. `new_name` is a bare filename, which renames the file in
+its folder, or a path such as `wiki/projects/idea.md`, which moves the file
+to that folder. The extension must not change. It refuses a file in, or a
+target in, `wiki/journal/`, `wiki/people/`, or `wiki/joshua-docs/`, a hidden
+entry such as `.trash/`, and a target that exists. A guest gets a refusal.
 `search_files` is a substring or regex search over markdown text, not semantic
 search. `list_files` adds `original_name` for an attachment when a
 `<file>.meta.json` metadata file records the sender's filename.
@@ -1155,9 +1159,9 @@ container reads this section.
 | `limits.when_unknown` | `refuse` | `refuse` or `run`: what an assignment does when core cannot say how much of a window is used. With `refuse`, `start_assignment` refuses a spec with no `budget.tokens`, and a running assignment with no token cap stops as `paused_limits`. |
 | `max_concurrent` | `1` | The number of assignments that can run at one time. A parked assignment holds no slot. |
 | `slice_turns` | `10` | The model turns of one slice. The runner reads the limits before each slice. |
-| `keep_failed_work` | `7d` | How long the scratch directory of a failed assignment stays. The container removes it at start, or when an assignment stops, after this time. |
-| `repos` | `[]` | The repositories an assignment may clone: `host/group/name`, or `host/group/*` for a whole group. Lower case. `*` also matches a subgroup. |
-| `platforms` | `{}` | Git host to `kind` (`github`, `gitlab`, `git`) and `token_env`, the name of the variable that holds its token. |
+| `keep_failed_work` | `7d` | How long the scratch directory of an assignment that ended as `failed`, `budget_exceeded`, or `time_exceeded` stays. The container removes it at start, or when an assignment stops, after this time. |
+| `repos` | `[]` | The repositories an assignment may clone: `host/group/name`, or `host/group/*` for a whole group. Lower case. `*` also matches a subgroup. `start_assignment` checks each repository of a spec, and the git proxy checks it again at each clone and fetch. |
+| `platforms` | `{}` | Git host to `kind` (`github`, `gitlab`, `git`) and `token_env`, the name of the variable that holds its read token. The manager puts the token on each clone of a session; the session never sees it. A host with no entry gets its requests with no credential. |
 | `people` | `{}` | Person id to `notify`, the destination of the report and the questions of an assignment with `report_to: conversation`. Each key must be in `people`. |
 
 ```yaml
@@ -1198,7 +1202,9 @@ The loader refuses:
 The bearers and the database are not in this section. They are variables of
 the container: `DATABASE_URL`, `ASSIGNMENTS_TOKENS`, `ADDON_TOKEN`,
 `CHANNELS_URL`, and `JOSHUA_TOKEN_ASSIGNMENTS`. `.env.example` documents
-them.
+them. The token of each git host is a variable of the container too, under
+the name that its `token_env` gives. In compose, put it in
+`.env.assignments`. On Kubernetes, add it to `secrets.assignments`.
 
 ## inference
 

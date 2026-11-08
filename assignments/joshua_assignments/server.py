@@ -144,7 +144,11 @@ async def list_assignments(ctx: Context, limit: int = 10, status: str | None = N
 async def answer_assignment(id: int, text: str, ctx: Context) -> dict:
     """Give a waiting or paused_limits assignment its answer, and resume it.
 
-    text is the answer, from what you know or from what the person said.
+    text is the answer, from what you know or from what the person said. For
+    a limits stop, "continue" is enough. The manager reads the limits first:
+    when a window is still at or over its ceiling, the assignment stays
+    parked, the answer is stored, and the reply says when the window resets.
+    A parked assignment waits with no time limit.
     """
     person = _person(ctx)
     return await get_manager().answer(await _own(Caller(person=person), id), text)
@@ -165,11 +169,14 @@ async def extend_assignment(
     working_time: str | None = None,
     five_hour_pct: int | None = None,
     seven_day_pct: int | None = None,
+    max_turns: int | None = None,
 ) -> dict:
-    """Raise one or more caps of an assignment that has not ended.
+    """Raise one or more caps of an assignment.
 
     Each value must be more than the current one. A ceiling above the
-    maximum in assignments.limits is clamped, and the reply says so.
+    maximum in assignments.limits is clamped, and the reply says so. A
+    budget_exceeded or time_exceeded assignment continues its session; an
+    assignment that ended in another way is refused.
     """
     person = _person(ctx)
     row = await _own(Caller(person=person), id)
@@ -179,6 +186,7 @@ async def extend_assignment(
         working_time=working_time,
         five_hour_pct=five_hour_pct,
         seven_day_pct=seven_day_pct,
+        max_turns=max_turns,
     )
 
 

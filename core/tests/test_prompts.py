@@ -191,3 +191,42 @@ def test_default_prompts_dir_resolves_to_the_packaged_files() -> None:
     for name, files in _PROMPT_FILES.items():
         for rel in files:
             assert composer._read(rel), f"{name}: {rel} is empty"
+
+
+def test_the_assignments_skill_goes_only_to_a_session_that_holds_the_server() -> None:
+    composer = PromptComposer()
+    profile = derive_profile(_MEMBER, _DM)
+    without = composer.compose(profile, _MEMBER, _DM, servers=["files", "tasks"])
+    held = composer.compose(profile, _MEMBER, _DM, servers=["files", "assignments"])
+    assert "## Assignments" not in without
+    assert "## Assignments" in held
+    guest = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM, servers=["assignments"])
+    assert "## Assignments" not in guest
+
+
+def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local() -> None:
+    page = (
+        Path(__file__).parents[1]
+        / "joshua_core"
+        / "prompts"
+        / "builtin"
+        / "skills"
+        / "assignments.md"
+    ).read_text()
+    for words in (
+        "start_assignment",
+        "`five_hour_pct: 80`",
+        "`seven_day_pct: 50`",
+        "the defaults apply",
+        "A value above the maximum becomes the maximum",
+        "a preference, a permission, or something only they",
+        "`internet` tool",
+        "schedule_task",
+        'answer_assignment(N, "continue")',
+        "read its plan page",
+        "Always give the cost",
+    ):
+        assert words in page, words
+    lowered = page.lower()
+    for banned in ("gitlab", "github", "audit", "journal", "kubernetes", "http://", "https://"):
+        assert banned not in lowered, banned

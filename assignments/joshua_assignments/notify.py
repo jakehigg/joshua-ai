@@ -40,8 +40,10 @@ import httpx
 from joshua_shared.config import Assignments
 from joshua_shared.log import get_logger
 
+from joshua_assignments.budget import duration_text
 from joshua_assignments.settings import Settings
 from joshua_assignments.spec import REPORT_TO_CONVERSATION
+from joshua_assignments.store import USAGE_FIELDS
 
 logger = get_logger("joshua_assignments.notify")
 
@@ -172,8 +174,22 @@ def report_text(row: dict[str, Any]) -> str:
     error = (row.get("error") or "").strip()
     if error:
         lines.append(fenced("Error:", error[:MAX_ERROR]))
-    lines.append("Tell the person the result in short, with the path of the plan page.")
+    lines.append(cost_text(row))
+    lines.append(
+        "Tell the person the result in short, with the cost and the path of the plan page."
+    )
     return "\n".join(lines)
+
+
+def cost_text(row: dict[str, Any]) -> str:
+    """The cost of an assignment, from the counts of its row."""
+    counts = {name: int(row.get(name) or 0) for name in USAGE_FIELDS}
+    return (
+        f"Cost: {sum(counts.values())} tokens (input {counts['input']}, output "
+        f"{counts['output']}, cache read {counts['cache_read']}, cache write "
+        f"{counts['cache_write']}), {int(row.get('turns') or 0)} turns, and "
+        f"{duration_text(int(row.get('working_s') or 0))} of working time."
+    )
 
 
 def question_text(row: dict[str, Any], question: str) -> str:

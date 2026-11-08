@@ -9,6 +9,8 @@
 #   env              a copy of .env. It holds secrets. Keep the directory private.
 #   env.gateway      a copy of .env.gateway, the upstream MCP credentials, when
 #                    that file exists. It holds secrets too.
+#   env.assignments  a copy of .env.assignments, the git host tokens of the
+#                    assignments container, when that file exists. Secrets too.
 #   manifest.json    when, from which commit, with which images
 #
 # The mcp-store volume is not here on purpose. It holds the MCP servers the
@@ -70,6 +72,12 @@ if [ -f .env.gateway ]; then
   cp .env.gateway "$dest/env.gateway"
   chmod 600 "$dest/env.gateway"
   echo "backup: copied .env.gateway to $dest/env.gateway. It holds secrets."
+fi
+# The git host tokens of the assignments container. Optional.
+if [ -f .env.assignments ]; then
+  cp .env.assignments "$dest/env.assignments"
+  chmod 600 "$dest/env.assignments"
+  echo "backup: copied .env.assignments to $dest/env.assignments. It holds secrets."
 fi
 
 commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"

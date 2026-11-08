@@ -93,8 +93,10 @@ conversation.
 A long job needs a checkout, a shell, and file tools. Core must not hold
 them, because core holds every fleet token and the model credential. So the
 work runs in its own container, which holds no model credential and no
-upstream credential. It holds one fleet token of its own, the bearers of its
-callers, and the database URL. It keeps its rows in the schema `assignments`
+MCP credential. It holds one fleet token of its own, the bearers of its
+callers, the database URL, and the read token of each git host you name. The
+manager of the container puts a git token on each clone through a listener on
+`127.0.0.1`, and refuses a push, so a session never holds a git token. It keeps its rows in the schema `assignments`
 of the shared Postgres. It mounts `/data` read-only. On Kubernetes, a network
 policy lets only the gateway reach it, and lets it reach only gateway,
 channels, core, the database, DNS, and the git hosts you name.

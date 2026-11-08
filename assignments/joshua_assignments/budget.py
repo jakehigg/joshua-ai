@@ -153,7 +153,7 @@ def stop_record(
     return record
 
 
-def _when(resets_at: str | None, timezone: str) -> str | None:
+def when_text(resets_at: str | None, timezone: str) -> str | None:
     if not resets_at:
         return None
     try:
@@ -164,7 +164,7 @@ def _when(resets_at: str | None, timezone: str) -> str | None:
     return f"{local:%H:%M} on {local:%Y-%m-%d}"
 
 
-def _number(value: Any) -> str:
+def number_text(value: Any) -> str:
     number = float(value)
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
 
@@ -175,10 +175,10 @@ def limits_stop_text(record: dict[str, Any], page: str | None, timezone: str) ->
     window = record.get("window")
     if window in LABELS:
         lines.append(
-            f"I stopped because the {LABELS[window]} is at {_number(record['used_pct'])} "
-            f"percent, and my ceiling is {_number(record['ceiling'])} percent."
+            f"I stopped because the {LABELS[window]} is at {number_text(record['used_pct'])} "
+            f"percent, and my ceiling is {number_text(record['ceiling'])} percent."
         )
-        when = _when(record.get("resets_at"), timezone)
+        when = when_text(record.get("resets_at"), timezone)
         lines.append(f"It resets at {when}." if when else "Core does not say when it resets.")
     else:
         lines.append(
@@ -227,10 +227,10 @@ def budget_line(
     five = check.used("five_hour")
     seven = check.used("seven_day")
     pieces = [
-        f"5-hour window at {_number(five)}% of your {ceilings.five_hour_pct}% ceiling"
+        f"5-hour window at {number_text(five)}% of your {ceilings.five_hour_pct}% ceiling"
         if five is not None
         else f"5-hour window unknown, your ceiling {ceilings.five_hour_pct}%",
-        f"weekly at {_number(seven)}% of {ceilings.seven_day_pct}%"
+        f"weekly at {number_text(seven)}% of {ceilings.seven_day_pct}%"
         if seven is not None
         else f"weekly unknown, ceiling {ceilings.seven_day_pct}%",
         f"{max(0, turns_left)} turns left",

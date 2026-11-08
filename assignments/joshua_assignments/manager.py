@@ -6,6 +6,13 @@ only, so a parked assignment holds no slot. When the runner stops an
 assignment, ``stopped`` sends the report or the question to channels and
 starts the next queued assignment.
 
+A parked assignment (``waiting`` or ``paused_limits``) waits with no time
+limit. Only ``answer_assignment`` starts it again, and only when the limits
+are under the ceilings. ``extend_assignment`` starts a ``budget_exceeded`` or
+``time_exceeded`` assignment again. At start, each ``running`` assignment
+goes back to the queue and resumes its session with a note that the
+container restarted.
+
 A rejected call returns ``{"status": "rejected", "reason", "message"}``. The
 reason is a fixed word.
 """
@@ -28,6 +35,7 @@ from joshua_assignments.runner import Runner, StubRunner
 from joshua_assignments.settings import Settings
 from joshua_assignments.spec import (
     MAX_GOAL_CHARS,
+    MAX_TURNS,
     AssignmentSpec,
     SpecRefused,
     check_duration,
@@ -36,7 +44,14 @@ from joshua_assignments.spec import (
     page_path,
     resolve,
 )
-from joshua_assignments.store import FINISHED, PARKED, STATUSES, USAGE_FIELDS, Store
+from joshua_assignments.store import (
+    FINISHED,
+    PARKED,
+    RESUMABLE,
+    STATUSES,
+    USAGE_FIELDS,
+    Store,
+)
 
 logger = get_logger("joshua_assignments.manager")
 
@@ -132,6 +147,8 @@ class Manager:
             runner(self) if runner is not None else StubRunner(self, delay_s=stub_delay_s)
         )
         self._dispatch_lock = asyncio.Lock()
+        # Why a queued assignment that ran before resumes, when not for an answer.
+        self._resume_reason: dict[int, str] = {}
 
     @property
     def section(self) -> Assignments:
@@ -150,6 +167,11 @@ class Manager:
         requeued = await self.store.requeue_running()
         if requeued:
             logger.info({"message": "requeued after a restart", "assignment_ids": requeued})
+        for assignment_id in requeued:
+            self._resume_reason[assignment_id] = "restart"
+        opener = getattr(self.runner, "open", None)
+        if opener is not None:
+            await opener()
         await self._sweep()
         await self.dispatch()
 
@@ -163,6 +185,9 @@ class Manager:
             logger.warning({"message": "scratch sweep failed", "error": type(exc).__name__})
 
     async def close(self) -> None:
+        closer = getattr(self.runner, "close", None)
+        if closer is not None:
+            await closer()
         await self.store.close()
 
     async def dispatch(self) -> None:
@@ -184,8 +209,12 @@ class Manager:
                 logger.info(
                     {"message": "assignment running", "assignment_id": row["id"], "resume": resume}
                 )
+                reason = self._resume_reason.pop(row["id"], None)
                 if resume:
-                    await self.runner.resume(row, row.get("answer") or "")
+                    answer = row.get("answer") or ""
+                    await self.runner.resume(
+                        row, answer, reason="answer" if answer else (reason or "answer")
+                    )
                 else:
                     await self.runner.start(row)
 
@@ -300,13 +329,57 @@ class Manager:
                 f"assignment {row['id']} is {row['status']}; only a waiting or "
                 "paused_limits assignment takes an answer",
             )
+        # An answer that is stored and not sent yet stays: the new text follows it.
+        earlier = (row.get("answer") or "").strip()
+        if earlier and earlier != text:
+            text = f"{earlier}\n{text}"[-MAX_GOAL_CHARS:]
+        over = await self._still_over(row)
+        if over is not None:
+            await self.store.update(row["id"], answer=text)
+            logger.info({"message": "answer stored; over a ceiling", "assignment_id": row["id"]})
+            return {
+                "id": row["id"],
+                "status": row["status"],
+                "message": f"Assignment {row['id']} stays {row['status']}. {over} "
+                "The answer is stored. Answer again when the window resets, or raise the "
+                "ceiling with extend_assignment.",
+            }
         await self.store.update(
             row["id"], answer=text, open_question=None, stopped_at_limits=None, status="queued"
         )
         logger.info({"message": "assignment answered", "assignment_id": row["id"]})
         await self.dispatch()
         current = await self.store.get(row["id"]) or row
-        return {"id": row["id"], "status": current["status"], "message": "The answer is stored."}
+        return {
+            "id": row["id"],
+            "status": current["status"],
+            "message": f"The answer is stored. Assignment {row['id']} is {current['status']}.",
+        }
+
+    async def _still_over(self, row: dict[str, Any]) -> str | None:
+        """Why the limits keep the assignment parked, or None when it may run.
+
+        It reads core's limits now. A window at or over its ceiling keeps it
+        parked. Unknown limits keep it parked when ``when_unknown`` is
+        ``refuse`` and the spec has no token cap.
+        """
+        if self.core is None:
+            return None
+        spec = row.get("spec") or {}
+        ceilings = budget.Ceilings.from_spec(spec)
+        check = budget.check_limits(await self.core.limits(), ceilings)
+        if check.over is not None:
+            window = check.windows[check.over]
+            text = (
+                f"The {budget.LABELS[check.over]} is at {budget.number_text(window['used_pct'])} "
+                f"percent, and its ceiling is {ceilings.of(check.over)} percent."
+            )
+            when = budget.when_text(window.get("resets_at"), self.load_config().timezone)
+            return f"{text} It resets at {when}." if when else text
+        tokens = (spec.get("budget") or {}).get("tokens")
+        if budget.blocked_when_unknown(check, self.section.limits.when_unknown, tokens):
+            return "Core cannot say how much of the subscription limits is used."
+        return None
 
     async def cancel(self, row: dict[str, Any]) -> dict[str, Any]:
         if row["status"] in FINISHED:
@@ -330,15 +403,13 @@ class Manager:
         working_time: str | None = None,
         five_hour_pct: int | None = None,
         seven_day_pct: int | None = None,
+        max_turns: int | None = None,
     ) -> dict[str, Any]:
-        if row["status"] in FINISHED:
+        """Raise caps. A ``budget_exceeded`` or ``time_exceeded`` assignment resumes."""
+        if row["status"] in FINISHED and row["status"] not in RESUMABLE:
             return rejected("finished", f"assignment {row['id']} has ended: {row['status']}")
-        if (
-            tokens is None
-            and working_time is None
-            and five_hour_pct is None
-            and (seven_day_pct is None)
-        ):
+        caps = (tokens, working_time, five_hour_pct, seven_day_pct, max_turns)
+        if all(value is None for value in caps):
             return rejected("invalid_arguments", "give at least one cap to raise")
         section = self.section
         spec = dict(row.get("spec") or {})
@@ -349,6 +420,14 @@ class Manager:
             if tokens <= 0 or (current is not None and tokens <= current):
                 return rejected("not_raised", "tokens must be more than the current cap")
             budget["tokens"] = tokens
+        if max_turns is not None:
+            current_turns = int(spec.get("max_turns") or section.default_max_turns)
+            if max_turns <= current_turns or max_turns > MAX_TURNS:
+                return rejected(
+                    "not_raised",
+                    f"max_turns must be more than {current_turns} and at most {MAX_TURNS}",
+                )
+            spec["max_turns"] = max_turns
         if working_time is not None:
             try:
                 new_s = check_duration(working_time)
@@ -370,14 +449,29 @@ class Manager:
                 )
             budget[name] = value
         spec["budget"] = budget
-        await self.store.update(row["id"], spec=spec)
-        logger.info({"message": "assignment extended", "assignment_id": row["id"]})
+        resume = row["status"] in RESUMABLE
+        if resume:
+            await self.store.update(
+                row["id"], spec=spec, status="queued", finished_at=None, error=None
+            )
+            self._resume_reason[row["id"]] = "extend"
+        else:
+            await self.store.update(row["id"], spec=spec)
+        logger.info(
+            {"message": "assignment extended", "assignment_id": row["id"], "resume": resume}
+        )
+        if resume:
+            await self.dispatch()
+        current = await self.store.get(row["id"]) or row
         message = f"Assignment {row['id']} has new caps."
+        if resume:
+            message += f" It continues its session: {current['status']}."
         if notes:
             message += " " + "; ".join(notes) + "."
         return {
             "id": row["id"],
-            "status": row["status"],
+            "status": current["status"],
+            "max_turns": spec.get("max_turns"),
             "budget": budget,
             "working_time": spec.get("working_time"),
             "notes": notes,

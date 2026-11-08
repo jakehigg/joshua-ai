@@ -480,6 +480,21 @@ true and its profile runs. [assignments.md](assignments.md) has the tools.
 | `GET /readyz` | open | | `{"ok", "database", "channels", "people", "queued", "running", "waiting", "paused_limits"}`: booleans and counts only. `503` when the database does not answer. |
 | `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the six tools. `401` for a missing or wrong bearer. |
 
+The git proxy is internal. It listens on `127.0.0.1` on a free port, in the
+manager process, and no other container can reach it. Only the git of a
+session calls it, through the `.gitconfig` that the runner writes in the
+`HOME` of the session.
+
+| Route | Callers | Request | Reply |
+|---|---|---|---|
+| `GET /<host>/<repo>/info/refs?service=git-upload-pack` | `Authorization: Bearer <secret of the session>` | none | the reply of `https://<host>/<repo>.git/info/refs`, with the token of the host on the request |
+| `POST /<host>/<repo>/git-upload-pack` | the same | the git request | the reply of the host |
+
+Every other request gets `403`: a missing or wrong secret, a repository that
+is not in the spec or not in `assignments.repos`, a push
+(`git-receive-pack`), a missing token, and any other path. A `401` or a
+redirect from the host is `403` or `502`, so git never asks for a password.
+
 These bearers are not fleet tokens. `ASSIGNMENTS_TOKENS` holds
 `<person-id>=<token>` pairs, and a bearer names one person. The gateway sends
 it from the `identities` of the `assignments` entry under `mcp:`. The
@@ -500,6 +515,7 @@ bearer):
 | core `POST /v1/usage` | after each slice that used tokens | one row: kind and name `assignment`, `worker` the model name of the spec, `run_id` the id, `person_id`, `model`, `calls`, `usage`, and `ref` `<id>:slice:<n>` |
 | core `ANY /v1/model/{path}` | each model call of a session, from the Claude CLI | a Claude API request |
 | gateway MCP routes | each MCP call of a session | MCP, with `X-Joshua-Person` the person, `X-Joshua-Role` `member`, and `X-Joshua-Conversation` `assignment:<id>` |
+| a git host, `https://<host>/<repo>.git/...` | a clone or a fetch of a session, through the git proxy | the git request, with HTTP Basic: the token of `assignments.platforms.<host>.token_env`. Never a push. |
 
 A usage row that fails with a connection error, a timeout, or a `5xx` is sent
 again, 3 attempts in all. Core keeps one row for each `ref`, so a row that

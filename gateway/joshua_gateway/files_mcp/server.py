@@ -1,6 +1,6 @@
 """The files MCP server, hosted in-process by the gateway as the ``files`` builtin.
 
-It lets the agent list, read, search, write, and rename a page in the one wiki
+It lets the agent list, read, search, write, rename, and move a page in the one wiki
 (``wiki/``, a member writes, a guest reads), add an entry to Joshua's own
 journal there (``write_journal_entry``), and read a person's attachments and
 terminal outbox (``people/<person>/``) and the shared attachments (``shared/``).
@@ -19,7 +19,9 @@ The role comes from the request (``role_ctx``), never from a tool argument.
 returns a tool error with a plain message; it never echoes the absolute path.
 
 There is no ``delete_file``. Deletion is a human action through the viewer or a
-shell.
+shell. ``rename_file`` renames or moves a file inside ``wiki/``, and never
+touches ``wiki/journal/``, ``wiki/people/``, or ``wiki/joshua-docs/``: other
+writers own those folders, and they find a page by its path.
 """
 
 from __future__ import annotations
@@ -220,8 +222,12 @@ TOOLS = [
     types.Tool(
         name="rename_file",
         description=(
-            "Rename one file in place under wiki/. new_name is a bare filename; "
-            "the extension must not change."
+            "Rename or move one file under wiki/. new_name is a bare filename, "
+            "which renames the file in its folder, or a path such as "
+            "wiki/projects/idea.md, which moves it to that folder. The extension "
+            "must not change. Refused: a path under wiki/journal/, wiki/people/, "
+            "or wiki/joshua-docs/, a hidden entry, and a target that exists. "
+            "Member only."
         ),
         input_schema={
             "type": "object",
@@ -548,38 +554,65 @@ def _write_file(
     return _json({"path": path, "bytes": len(data)})
 
 
+# The folders of the wiki that another writer owns. A rename never
+# takes a page in or out of one: core finds each page there by its path.
+_OWNED_FOLDERS = {
+    "journal": "the journal is written with write_journal_entry",
+    "people": "wiki/people/ holds the profiles that core writes",
+    "joshua-docs": "wiki/joshua-docs/ is the shipped documentation",
+}
+
+
+def _check_movable(root: Root, abs_path: Path, root_dir: Path) -> None:
+    """Refuse a path in a folder that another writer owns."""
+    if _in_journal(abs_path, root_dir):
+        raise FilesError(_OWNED_FOLDERS["journal"])
+    parts = abs_path.relative_to(root.base).parts
+    if parts and parts[0] in _OWNED_FOLDERS:
+        raise FilesError(_OWNED_FOLDERS[parts[0]])
+
+
 def _rename_file(
     roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo, root_dir: Path
 ) -> types.CallToolResult:
+    """Rename or move one file inside ``wiki/``, and commit it."""
     rel = args.get("path", "")
     root, src = resolve(rel, roots, write=False)
     if root.name != "wiki":
         raise FilesError(f"cannot rename in {root.name}")
     if not root.can_write:
         raise FilesError(f"{root.name} is read-only for a guest")
-    if _in_journal(src, root_dir):
-        raise FilesError("a journal entry cannot be renamed")
+    _check_movable(root, src, root_dir)
     if not src.is_file():
         raise FilesError("file not found")
 
-    new_name = str(args.get("new_name", ""))
-    if not new_name.strip() or "/" in new_name or "\\" in new_name or ".." in new_name:
-        raise FilesError("new_name must be a bare filename")
+    new_name = str(args.get("new_name", "")).strip()
+    if not new_name or "\\" in new_name:
+        raise FilesError("new_name must be a filename or a path under wiki/")
+    if "/" in new_name:
+        # A path names the folder too: the file moves there.
+        to_root, target = resolve(new_name, roots, write=False)
+        if to_root.name != "wiki":
+            raise FilesError("a file moves inside wiki/ only")
+        folder, name = target.parent, target.name
+    else:
+        if ".." in new_name:
+            raise FilesError("new_name must be a bare filename")
+        folder, name = src.parent, new_name
 
-    new_ext = Path(new_name).suffix
-    if new_ext.lower() != src.suffix.lower():
+    if Path(name).suffix.lower() != src.suffix.lower():
         raise FilesError("the extension must not change")
-    stem = _sanitize_stem(Path(new_name).stem)
+    stem = _sanitize_stem(Path(name).stem)
     if not stem:
         raise FilesError("new_name is empty after sanitizing")
-
-    final = f"{stem}{src.suffix}"
-    dest = src.parent / final
+    dest = folder / f"{stem}{src.suffix}"
+    _check_movable(root, dest, root_dir)
     if dest == src:
         raise FilesError("new_name matches the current name")
     if dest.exists():
         raise FilesError("target exists")
 
+    dest.parent.mkdir(parents=True, exist_ok=True)
     os.rename(src, dest)
     _commit_wiki(
         root,

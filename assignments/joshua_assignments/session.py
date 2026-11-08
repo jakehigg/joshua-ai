@@ -64,6 +64,8 @@ QUIET_ENV = {
     "DISABLE_AUTOUPDATER": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 }
+# git in a session never asks for a password and reads no system config.
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1"}
 # The variables of this process that a session keeps. Every other variable
 # gets an empty value.
 KEEP_ENV = frozenset({"PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "TMPDIR", "USER"})
@@ -134,6 +136,7 @@ def session_env(
             "HOME": str(home),
             "CLAUDE_CONFIG_DIR": str(config_dir),
             **QUIET_ENV,
+            **GIT_ENV,
         }
     )
     return env

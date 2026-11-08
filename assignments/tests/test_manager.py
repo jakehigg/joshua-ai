@@ -54,18 +54,18 @@ async def test_a_restart_puts_running_assignments_back_and_resumes_them(channels
     started = await first.start("alex", spec())
     assert store.rows[started["id"]]["status"] == "running"
     second = make_manager(store=store)
-    resumed: list[tuple[int, str]] = []
+    resumed: list[tuple[int, str, str]] = []
     real_resume = second.runner.resume
 
-    async def spy(row, text):
-        resumed.append((row["id"], text))
-        await real_resume(row, text)
+    async def spy(row, text, *, reason="answer"):
+        resumed.append((row["id"], text, reason))
+        await real_resume(row, text, reason=reason)
 
     second.runner.resume = spy  # type: ignore[method-assign]
     await second.open()
     await second.runner.idle()
     assert store.opened is True
-    assert resumed == [(started["id"], "")]
+    assert resumed == [(started["id"], "", "restart")]
     assert store.rows[started["id"]]["status"] == "done"
     await second.close()
     assert store.closed is True
@@ -150,7 +150,7 @@ async def test_answer_resumes_a_paused_assignment_with_the_answer(channels) -> N
     )
     resumed: list[str] = []
 
-    async def spy(row, text):
+    async def spy(row, text, *, reason="answer"):
         resumed.append(text)
 
     manager.runner.resume = spy  # type: ignore[method-assign]

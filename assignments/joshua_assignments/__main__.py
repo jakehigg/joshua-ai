@@ -4,6 +4,7 @@ import uvicorn
 from joshua_shared import config, log
 
 from joshua_assignments.core_client import CoreClient
+from joshua_assignments.git_proxy import GitProxy
 from joshua_assignments.harden import make_non_dumpable
 from joshua_assignments.sdk_runner import SdkRunner
 from joshua_assignments.server import build_app
@@ -46,7 +47,9 @@ def main() -> None:
         settings,
         PgStore(settings.database_url),
         core=core,
-        runner=lambda manager: SdkRunner(manager, core=core),
+        runner=lambda manager: SdkRunner(
+            manager, core=core, git=GitProxy(manager.store, manager.load_config)
+        ),
     )
     uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
 
