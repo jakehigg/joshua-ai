@@ -19,6 +19,17 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **A stalled assignment stops and asks.** The system prompt of an
+  assignment now tells the session to stop retrying when one action fails
+  three times in a row with the same error, to write the error on the plan
+  page, and to call `ask` with the error and what it tried. The message
+  after a slice with no new checkpoint says "You made no progress last
+  slice; if you are stuck, ask." After `assignments.stall_slices` slices in
+  a row with no new checkpoint (default 3), the runner stops the assignment
+  as `waiting`. Joshua then gets a question that names the last checkpoint
+  and the last tool errors. `answer_assignment` resumes it. See
+  [assignments.md](assignments.md#a-stalled-assignment).
+
 - **Assignments ask, resume, and clone.** `answer_assignment` now reads the
   limits first: when a window is still at or over its ceiling, the
   assignment stays parked and the reply says when the window resets. A

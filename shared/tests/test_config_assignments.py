@@ -37,6 +37,7 @@ assignments:
     when_unknown: run
   max_concurrent: 2
   slice_turns: 5
+  stall_slices: 4
   keep_failed_work: 3d
   repos:
     - gitlab.example.net/infra/*
@@ -73,6 +74,7 @@ def test_no_section_is_off_with_the_defaults() -> None:
     assert section.limits.max_five_hour_pct == 90
     assert section.limits.when_unknown == "refuse"
     assert section.max_concurrent == 1 and section.slice_turns == 10
+    assert section.stall_slices == 3
     assert section.repos == [] and section.platforms == {} and section.people == {}
 
 
@@ -86,6 +88,7 @@ def test_a_full_section_validates() -> None:
     assert section.default_model == "opus"
     assert section.models["opus"].effort == "high"
     assert section.default_max_turns == 150
+    assert section.stall_slices == 4
     assert section.default_working_seconds == 7200
     assert section.limits.when_unknown == "run"
     assert section.platforms["gitlab.example.net"].token_env == "ASSIGNMENTS_GITLAB_TOKEN"
@@ -214,3 +217,12 @@ def test_the_commented_block_in_the_example_file_validates() -> None:
     assert section.enabled is False
     assert section.repos == ["gitlab.example.net/infra/*"]
     assert section.people["alex"].notify == "imessage:dm:alex"
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_stall_slices_is_at_least_one(value: str) -> None:
+    assert "stall_slices" in refused(f"assignments:\n  stall_slices: {value}\n")
+
+
+def test_stall_slices_one_is_valid() -> None:
+    assert parse("assignments:\n  stall_slices: 1\n").assignments.stall_slices == 1

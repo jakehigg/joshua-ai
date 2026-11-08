@@ -7,10 +7,11 @@ import dataclasses
 from pathlib import Path
 
 import pytest
+from claude_agent_sdk.types import TextBlock, ToolResultBlock, UserMessage
 from joshua_assignments import session
 from joshua_assignments.clock import Clock
 from joshua_shared.gateway_mcp import gateway_servers
-from sdk_fakes import FakeSdk, assistant, rate_limit, result
+from sdk_fakes import FakeSdk, assistant, rate_limit, result, tool_error
 
 GATEWAY = "http://gateway:8000"
 
@@ -186,6 +187,45 @@ async def test_run_slice_reads_a_slice_and_keeps_the_session_id() -> None:
         None,
     )
     assert sdk.clients[0].interrupted is False and sdk.clients[0].disconnected is True
+
+
+def test_tool_errors_read_only_the_failed_results() -> None:
+    msg = UserMessage(
+        content=[
+            ToolResultBlock(tool_use_id="a", content="fine", is_error=False),
+            ToolResultBlock(tool_use_id="b", content="  exit 128  ", is_error=True),
+            ToolResultBlock(
+                tool_use_id="c",
+                content=[{"type": "text", "text": "502"}, {"type": "image"}, "x"],
+                is_error=True,
+            ),
+            ToolResultBlock(tool_use_id="d", content=None, is_error=True),
+            TextBlock(text="not a result"),
+        ]
+    )
+    assert session.tool_errors(msg) == ["exit 128", "502"]
+    assert session.tool_errors(UserMessage(content="plain text")) == []
+    long = session.tool_errors(tool_error("e" * 5000))
+    assert len(long[0]) == session.MAX_TOOL_ERROR
+
+
+async def test_run_slice_keeps_the_last_tool_errors() -> None:
+    async def keep(session_id: str) -> None:
+        return None
+
+    steps = [tool_error(f"error {i}") for i in range(15)]
+    sdk = FakeSdk([*steps, result("success")])
+    outcome = await session.run_slice(
+        options(),
+        "go",
+        clock=Clock(100),
+        over_ceiling=lambda info: False,
+        stop_requested=lambda: False,
+        on_session_id=keep,
+        client_factory=sdk,
+        watch_s=0.01,
+    )
+    assert outcome.tool_errors == [f"error {i}" for i in range(5, 15)]
 
 
 async def test_run_slice_with_no_time_left_interrupts_at_once() -> None:

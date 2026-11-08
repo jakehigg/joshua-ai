@@ -108,3 +108,24 @@ def test_follow_ups_go_to_the_tasks_project_only_when_the_session_holds_tasks() 
     assert "tasks project" not in without and "create_task" not in without
     no_project = prompts.first_prompt({**row, "spec": {"goal": "g"}}, has_tasks=True)
     assert prompts.FOLLOW_UPS_ON_PAGE in no_project
+
+
+def test_the_system_prompt_says_to_ask_after_three_same_failures() -> None:
+    text = prompts.system_prompt()
+    assert "## When a step fails" in text
+    assert (
+        "When the same action fails three times in a row with the same error, stop\nretrying"
+        in (text)
+    )
+    assert "Write the error on the plan page under Open questions." in text
+    assert "Call `ask` with the error text and what you tried." in text
+    assert "Do not try a different route to the same resource more than one time." in text
+
+
+def test_a_later_prompt_after_a_slice_with_no_progress() -> None:
+    text = prompts.later_prompt(budget="Budget: x.", checkpoint="c", no_progress=True)
+    lines = text.splitlines()
+    assert lines[0] == "Continue. Budget: x."
+    assert lines[1] == prompts.NO_PROGRESS
+    assert prompts.NO_PROGRESS == "You made no progress last slice; if you are stuck, ask."
+    assert prompts.NO_PROGRESS not in prompts.later_prompt(budget="B", checkpoint="c")

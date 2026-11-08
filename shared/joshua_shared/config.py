@@ -1064,6 +1064,7 @@ class Assignments(_Model):
     limits: AssignmentLimits = AssignmentLimits()
     max_concurrent: int = Field(default=1, gt=0)
     slice_turns: int = Field(default=10, gt=0)
+    stall_slices: int = Field(default=3, ge=1)
     keep_failed_work: str = "7d"
     repos: list[str] = []
     platforms: dict[str, AssignmentPlatform] = {}

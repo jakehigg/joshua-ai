@@ -6,7 +6,8 @@ convention, and the repository rules. It holds no detail of an installation.
 
 ``first_prompt`` starts a new session: the goal, the path of the plan page,
 and the clone command of each repository. ``later_prompt`` starts each later
-slice: the budget line and the last checkpoint. After a stop it begins with
+slice: the budget line and the last checkpoint, and ``NO_PROGRESS`` after a
+slice that stored no new checkpoint. After a stop it begins with
 a line that ``lead`` gives for the reason: ``READ_PAGE_FIRST`` after an
 answer or an extension, and ``RESTARTED`` after a restart of the container.
 """
@@ -26,6 +27,7 @@ SCRATCH_LOST = (
     "This assignment ran before, and its scratch directory is gone. "
     "Read your plan page before anything else, then continue from the next step it marks."
 )
+NO_PROGRESS = "You made no progress last slice; if you are stuck, ask."
 REPOS_DIR = "repos"
 # The MCP server that holds a tasks list. A session can hold it or not.
 TASKS_SERVER = "tasks"
@@ -137,8 +139,13 @@ def later_prompt(
     checkpoint: str | None,
     reason: str | None = None,
     answer: str | None = None,
+    no_progress: bool = False,
 ) -> str:
-    """The first message of a later slice. ``reason`` is set on the first slice after a stop."""
+    """The first message of a later slice.
+
+    ``reason`` is set on the first slice after a stop. ``no_progress`` is True
+    when the slice before stored no new checkpoint.
+    """
     lines: list[str] = []
     first = lead(reason)
     if first:
@@ -146,6 +153,8 @@ def later_prompt(
     if answer:
         lines.append(f"Answer: {answer.strip()[:MAX_ANSWER]}")
     lines.append(f"Continue. {budget}")
+    if no_progress:
+        lines.append(NO_PROGRESS)
     lines.append(f"Last checkpoint: {checkpoint}" if checkpoint else "Last checkpoint: none.")
     lines.append("When the goal is done, finish on the plan page and call finish.")
     return "\n".join(lines)

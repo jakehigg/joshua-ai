@@ -14,6 +14,8 @@ from claude_agent_sdk.types import (
     RateLimitInfo,
     ResultMessage,
     SystemMessage,
+    ToolResultBlock,
+    UserMessage,
 )
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.session import ASSIGNMENT_SERVER, server_handlers
@@ -57,6 +59,13 @@ def result(
         usage=usage or USAGE,
         result="secret error text from a host.example" if subtype != "success" else "ok",
         api_error_status=api_error_status,
+    )
+
+
+def tool_error(text: str | list[dict[str, Any]], tool_use_id: str = "t1") -> UserMessage:
+    """The message that carries one tool result that failed."""
+    return UserMessage(
+        content=[ToolResultBlock(tool_use_id=tool_use_id, content=text, is_error=True)]
     )
 
 
