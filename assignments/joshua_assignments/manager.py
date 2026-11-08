@@ -22,7 +22,8 @@ from joshua_shared.config import Assignments, JoshuaConfig
 from joshua_shared.log import get_logger
 from pydantic import ValidationError
 
-from joshua_assignments import notify
+from joshua_assignments import budget, notify
+from joshua_assignments.core_client import CoreClient
 from joshua_assignments.runner import Runner, StubRunner
 from joshua_assignments.settings import Settings
 from joshua_assignments.spec import (
@@ -68,7 +69,11 @@ def summary_view(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def full_view(row: dict[str, Any], checkpoint: dict[str, Any] | None) -> dict[str, Any]:
-    """The whole state of an assignment, for ``assignment_status``."""
+    """The whole state of an assignment, for ``assignment_status``.
+
+    ``next_step`` comes from the latest checkpoint note: the text after
+    ``Next:``, else the whole note. The plan page is the full record.
+    """
     spec = row.get("spec") or {}
     return {
         **summary_view(row),
@@ -82,6 +87,7 @@ def full_view(row: dict[str, Any], checkpoint: dict[str, Any] | None) -> dict[st
         "tasks_project": spec.get("tasks_project"),
         "report_to": spec.get("report_to"),
         "dry_run": bool(spec.get("dry_run")),
+        "next_step": budget.next_step(checkpoint.get("note") if checkpoint else None),
         "last_checkpoint": (
             {"at": _iso(checkpoint.get("at")), "note": checkpoint.get("note")}
             if checkpoint
@@ -113,12 +119,18 @@ class Manager:
         load_config: Callable[[], JoshuaConfig] = config.load,
         clock: Callable[[], datetime] = _now,
         stub_delay_s: float | None = 0.0,
+        runner: Callable[[Manager], Runner] | None = None,
+        core: CoreClient | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
         self.load_config = load_config
         self.clock = clock
-        self.runner: Runner = StubRunner(self, delay_s=stub_delay_s)
+        # ``core`` reads the limits for the check of ``when_unknown`` at start.
+        self.core = core
+        self.runner: Runner = (
+            runner(self) if runner is not None else StubRunner(self, delay_s=stub_delay_s)
+        )
         self._dispatch_lock = asyncio.Lock()
 
     @property
@@ -138,7 +150,17 @@ class Manager:
         requeued = await self.store.requeue_running()
         if requeued:
             logger.info({"message": "requeued after a restart", "assignment_ids": requeued})
+        await self._sweep()
         await self.dispatch()
+
+    async def _sweep(self) -> None:
+        sweep = getattr(self.runner, "sweep", None)
+        if sweep is None:
+            return
+        try:
+            await sweep()
+        except Exception as exc:  # noqa: BLE001 — a failed sweep never stops the queue
+            logger.warning({"message": "scratch sweep failed", "error": type(exc).__name__})
 
     async def close(self) -> None:
         await self.store.close()
@@ -171,11 +193,17 @@ class Manager:
         """The runner stopped an assignment: send its event, then start the next one."""
         row = await self.store.get(assignment_id)
         if row is not None:
-            if row["status"] in PARKED:
+            if row["status"] == "paused_limits" and row.get("stopped_at_limits"):
+                text = budget.limits_stop_text(
+                    row["stopped_at_limits"], row.get("page_path"), self.load_config().timezone
+                )
+                await notify.send_question(self.settings, self.section, row, text)
+            elif row["status"] in PARKED:
                 question = row.get("open_question") or "The assignment stopped."
                 await notify.send_question(self.settings, self.section, row, question)
             elif row["status"] in FINISHED:
                 await notify.send_report(self.settings, self.section, row)
+        await self._sweep()
         await self.dispatch()
 
     # --- the tools --------------------------------------------------------
@@ -196,6 +224,9 @@ class Manager:
             resolved = resolve(spec, section)
         except SpecRefused as exc:
             return rejected(exc.reason, exc.message)
+        refused = await self._refuse_unknown_limits(resolved.spec)
+        if refused is not None:
+            return refused
         if conversation_id:
             conversation_id = conversation_id[:MAX_CONVERSATION_ID]
         row = await self.store.create(
@@ -230,6 +261,21 @@ class Manager:
             "notes": resolved.notes,
             "message": message,
         }
+
+    async def _refuse_unknown_limits(self, spec: dict[str, Any]) -> dict[str, Any] | None:
+        """The refusal of ``when_unknown: refuse`` for a spec with no token cap, or None."""
+        if self.core is None or self.section.limits.when_unknown != "refuse":
+            return None
+        if (spec.get("budget") or {}).get("tokens"):
+            return None
+        check = budget.check_limits(await self.core.limits(), budget.Ceilings.from_spec(spec))
+        if not check.is_unknown:
+            return None
+        return rejected(
+            "limits_unknown",
+            "core cannot say how much of the subscription limits is used, and "
+            "assignments.limits.when_unknown is refuse; give budget.tokens, or try later",
+        )
 
     async def status(self, row: dict[str, Any]) -> dict[str, Any]:
         checkpoint = await self.store.last_checkpoint(row["id"])

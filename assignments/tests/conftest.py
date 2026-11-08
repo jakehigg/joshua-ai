@@ -66,7 +66,9 @@ def make_settings(**overrides: Any) -> Settings:
             ADDON: Caller(person=None),
         },
         "channels_url": "http://channels:8000",
-        "channels_token": CHANNELS_TOKEN,
+        "fleet_token": CHANNELS_TOKEN,
+        "core_url": "http://core:8000",
+        "gateway_url": "http://gateway:8000",
     }
     fields.update(overrides)
     return Settings(**fields)

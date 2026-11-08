@@ -706,6 +706,7 @@ name = "joshua-assignments"
 version = "0.0.0"
 source = { editable = "assignments" }
 dependencies = [
+    { name = "claude-agent-sdk" },
     { name = "httpx" },
     { name = "joshua-shared" },
     { name = "mcp" },
@@ -718,6 +719,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "claude-agent-sdk", specifier = ">=0.2.165" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "joshua-shared", editable = "shared" },
     { name = "mcp", specifier = ">=1.2" },

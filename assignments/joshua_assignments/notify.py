@@ -97,7 +97,7 @@ async def send_event(
         logger.info({"message": "event not sent: channels is not configured", **where})
         return False
     url = settings.channels_url.rstrip("/") + EVENTS_PATH
-    headers = {"Authorization": f"Bearer {settings.channels_token}"}
+    headers = {"Authorization": f"Bearer {settings.fleet_token}"}
     body = {"destination": destination, "text": text}
     logger.debug({"message": "event destination", "destination": destination, **where})
     async with _make_client() as client:
