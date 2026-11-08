@@ -4,6 +4,7 @@ import uvicorn
 from joshua_shared import config, log
 
 from joshua_assignments.core_client import CoreClient
+from joshua_assignments.harden import make_non_dumpable
 from joshua_assignments.sdk_runner import SdkRunner
 from joshua_assignments.server import build_app
 from joshua_assignments.settings import SettingsError, settings_from_env
@@ -12,6 +13,9 @@ from joshua_assignments.store import PgStore
 
 def main() -> None:
     logger = log.configure_from_env("joshua-assignments")
+    # Before the config, the settings, and the port: a session, as the same
+    # user, then cannot read the environment or the memory of this process.
+    make_non_dumpable()
     try:
         cfg = config.load()
     except config.ConfigError as exc:

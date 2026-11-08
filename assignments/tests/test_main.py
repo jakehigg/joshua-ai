@@ -42,6 +42,30 @@ def keep_root_logging():
     root.setLevel(level)
 
 
+@pytest.fixture(autouse=True)
+def hardened(monkeypatch):
+    """Record the call, so the test process itself stays dumpable."""
+    calls: list[str] = []
+    monkeypatch.setattr(entry, "make_non_dumpable", lambda: calls.append("harden") or True)
+    return calls
+
+
+def test_the_process_is_hardened_before_the_config_is_read(
+    config_file, monkeypatch, hardened
+) -> None:
+    order: list[str] = []
+
+    def load():
+        order.append("config")
+        raise config.ConfigError("stop")
+
+    monkeypatch.setattr(entry, "make_non_dumpable", lambda: order.append("harden"))
+    monkeypatch.setattr(entry.config, "load", load)
+    with pytest.raises(SystemExit):
+        entry.main()
+    assert order == ["harden", "config"]
+
+
 def test_disabled_exits_without_serving(config_file, monkeypatch, caplog) -> None:
     config_file(ON.replace("enabled: true", "enabled: false"))
     served = []
