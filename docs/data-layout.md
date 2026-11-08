@@ -25,6 +25,7 @@ already at the new path stays where it is. See [Migration](#migration).
 /data/wiki/people/everyone.md                    the shared profile
 /data/wiki/**.md                                 the rest of the wiki, incl. wiki/skills/*.md
 /data/wiki/.trash/<UTC timestamp>/**             pages the viewer deleted; the index skips it
+/data/wiki/.viewer/links.yaml                    the links of the viewer menu; gateway writes it for a member
 /data/wiki/.git/                                 the wiki's git repository; core makes it
 /data/wiki/.gitignore                            excludes .trash/ and attachments/; core writes it
 /data/wiki/attachments/YYYY/MM/<file>            the files the wiki keeps; core and gateway write them

@@ -720,6 +720,8 @@ off by default. To turn it on:
 
 The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
 `http://127.0.0.1:8082/` and sign in with the person id and the password.
+The address opens the wiki. "Your page" in the menu, at `/me`, has the profile
+link and the recent attachments of the person who signed in.
 Nothing off the host reaches it: put a reverse proxy in front, for TLS, before
 you expose it.
 
@@ -727,6 +729,35 @@ A member sees a "move this page to trash" button on a wiki page. It moves the
 page to `wiki/.trash/` and drops it from the search index at the next index run.
 A guest reads the wiki but cannot delete. To restore a page, move it back from
 `wiki/.trash/<timestamp>/` with a shell.
+
+### Links in the menu
+
+The menu has a "Links" group: links to the addons and other tools that the
+people of an instance use beside Joshua, for example the pantry or the tasks
+page. Each link opens in a new tab. On a phone, the "Links" tab opens the
+list.
+
+A member keeps the list at `/links`. Each link has a title, a URL, and an icon
+from a small built-in set. A URL must start with `http://` or `https://`. Clear
+a row, or tick "remove", to delete a link. A guest sees the links but cannot
+change them. The list holds at most 30 links.
+
+The viewer keeps the list in `wiki/.viewer/links.yaml`. The wiki tree, the
+search, and the index skip the file, because its directory name starts with a
+dot. When `wiki.git` is on, each save is a commit, so the history of the list
+is in the wiki's repository. You can also edit the file with a shell:
+
+```yaml
+links:
+  - title: Pantry
+    url: https://pantry.example.com/
+    icon: box
+```
+
+The icons are `link`, `box`, `list`, `cart`, `chart`, `home`, `music`,
+`calendar`, `book`, `tool`, `bolt`, `cloud`, `server`, `camera`, `chat`,
+`heart`, `code`, `star`, `globe`, and `play`. An unknown name shows `link`. An
+entry with a bad URL or no title does not show, and the others still do.
 
 The viewer holds one fleet token, its own, and no upstream credential. It
 reads the volume through the same resolver as the agent's `files` tool, so the

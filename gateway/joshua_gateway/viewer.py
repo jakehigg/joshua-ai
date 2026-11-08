@@ -54,6 +54,7 @@ import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
 from joshua_shared.layout import is_hidden, journal_day_from_path, journal_root
+from joshua_shared.layout import wiki_root as wiki_dir
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from markdown_it import MarkdownIt
 from starlette.applications import Starlette
@@ -66,6 +67,7 @@ from starlette.routing import Route
 from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
 from joshua_gateway import viewer_limits as limits_mod
+from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
@@ -327,8 +329,9 @@ _SECTIONS = (
     ),
     ("usage", "Usage", "/usage", '<path d="M4 20V11M10 20V4M16 20v-8M21 20H3"/>'),
 )
-_SECTION_LABEL = {key: label for key, label, _, _ in _SECTIONS}
+_SECTION_LABEL = {key: label for key, label, _, _ in _SECTIONS} | {"links": "Links", "me": "You"}
 _SEARCH_ICON = _SECTIONS[2][3]
+_ME_ICON = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'
 
 
 def _icon(paths: str) -> str:
@@ -347,9 +350,15 @@ def _shell(body: str, *, section: str, query: str) -> str:
         f'<a class="j-nav-item" href="{url}"{_current(key, section)}>{_icon(icon)}{label}</a>'
         for key, label, url, icon in _SECTIONS
     )
-    tabs = "".join(
-        f'<a class="j-tab" href="{url}"{_current(key, section)}>{label}</a>'
-        for key, label, url, _ in _SECTIONS
+    tabs = (
+        "".join(
+            f'<a class="j-tab" href="{url}"{_current(key, section)}>{label}</a>'
+            for key, label, url, _ in _SECTIONS
+        )
+        + f'<a class="j-tab" href="/links"{_current("links", section)}>Links</a>'
+    )
+    links_nav = links_mod.nav_html(
+        links_mod.load(wiki_dir(data_root())), current=section == "links"
     )
     here = _SECTION_LABEL.get(section, "Home")
     content = "j-content wide" if section == "usage" else "j-content"
@@ -358,6 +367,10 @@ def _shell(body: str, *, section: str, query: str) -> str:
         '<aside class="j-sidebar">'
         '<a class="j-brand" href="/"><img class="j-logo" src="/ui/logo-64.png" alt="">Joshua</a>'
         f'<nav class="v-sections" aria-label="Sections">{items}</nav>'
+        f"{links_nav}"
+        '<nav class="v-sections v-you" aria-label="You">'
+        f'<a class="j-nav-item" href="/me"{_current("me", section)}>{_icon(_ME_ICON)}Your page</a>'
+        "</nav>"
         "</aside>"
         '<div class="j-main">'
         '<header class="j-appbar">'
@@ -596,7 +609,14 @@ def _commit_trash(root: Root, abs_path: Path) -> None:
 # -- routes -----------------------------------------------------------------
 
 
+async def root(request: Request, person: Person) -> Response:
+    """``/`` opens the wiki."""
+    return RedirectResponse("/wiki/", status_code=302)
+
+
 async def index(request: Request, person: Person) -> Response:
+    """``/me``: the person's own page, with their profile link, their recent
+    attachments and the wiki tree."""
     roots = _roots_for(person)
     anonymous = person.id == ANONYMOUS_PERSON_ID
     body = [f'<h1 class="j-doc-title">{escape(person.name)}</h1>']
@@ -622,7 +642,7 @@ async def index(request: Request, person: Person) -> Response:
     tree = wiki.build_tree(roots["wiki"].base)
     body.append('<h2 class="j-label">wiki</h2>')
     body.append(wiki.tree_html(tree) if tree else '<p class="j-empty">nothing yet.</p>')
-    return _page(person.name, "".join(body))
+    return _page(person.name, "".join(body), section="me")
 
 
 async def wiki_page(request: Request, person: Person) -> Response:
@@ -1080,6 +1100,58 @@ async def ui_file(request: Request, person: Person) -> Response:
     return Response(_package_file(_UI_DIR, name), media_type=media_type)
 
 
+# -- links ----------------------------------------------------------------
+
+_LINKS_CSRF = "links"
+
+
+def _links_body(person: Person, links: list[links_mod.Link], *, error: str = "") -> str:
+    body = [
+        '<h1 class="j-doc-title">Links</h1>',
+        '<p class="j-muted">Links to the tools you use beside Joshua, such as its addons. '
+        "Each one opens in a new tab.</p>",
+        links_mod.list_html(links),
+    ]
+    if person.role == "member":
+        body.append('<h2 class="j-label">Edit links</h2>')
+        body.append(
+            links_mod.form_html(links, csrf=_csrf_token(person.id, _LINKS_CSRF), error=error)
+        )
+    return "".join(body)
+
+
+async def links_page(request: Request, person: Person) -> Response:
+    """The links. A member also gets the form that edits them."""
+    links = links_mod.load(wiki_dir(data_root()))
+    return _page("links", _links_body(person, links), section="links")
+
+
+async def links_save(request: Request, person: Person) -> Response:
+    """Replace the links with the rows of the form."""
+    if person.role != "member":
+        return _forbidden()
+    form = await request.form()
+    if not _csrf_valid(person.id, _LINKS_CSRF, str(form.get("csrf", ""))) or not _origin_ok(
+        request
+    ):
+        return _forbidden()
+    base = wiki_dir(data_root())
+    try:
+        links = links_mod.from_form(form)
+    except links_mod.LinkError as exc:
+        return _page(
+            "links",
+            _links_body(person, links_mod.load(base), error=str(exc)),
+            status=400,
+            section="links",
+        )
+    abs_path = links_mod.links_path(base)
+    _atomic_write(abs_path, links_mod.dump(links).encode())
+    _commit_write(_roots_for(person)["wiki"], abs_path, "links")
+    logger.info({"message": "viewer write", "root": "wiki", "what": "links", "links": len(links)})
+    return RedirectResponse("/links", status_code=303)
+
+
 async def healthz(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
@@ -1126,7 +1198,10 @@ def build_app() -> Starlette:
             Route("/readyz", readyz),
             Route("/style.css", _require_auth(style)),
             Route("/ui/{name}", _require_auth(ui_file)),
-            Route("/", _require_auth(index)),
+            Route("/", _require_auth(root)),
+            Route("/me", _require_auth(index)),
+            Route("/links", _require_auth(links_page)),
+            Route("/links", _require_auth(links_save), methods=["POST"]),
             Route("/wiki", _require_auth(wiki_root)),
             Route("/journal", _require_auth(journal_feed)),
             Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),

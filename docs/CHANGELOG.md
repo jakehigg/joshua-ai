@@ -19,6 +19,15 @@ with the images and the packaged chart, are at
 
 ### Added
 
+- **Links in the viewer menu.** The viewer menu has a "Links" group with
+  links to the tools that people use beside Joshua. Each link opens in a new
+  tab. A member adds, changes, and removes the links at `/links`: a title, an
+  http or https URL, and a built-in icon. The viewer keeps them in
+  `wiki/.viewer/links.yaml`. See
+  [operations.md](operations.md#links-in-the-menu).
+- **`/` opens the wiki.** The viewer address now opens the wiki. The page
+  that `/` showed before, with the profile link and the recent attachments,
+  is now "Your page" at `/me`.
 - **A stalled assignment stops and asks.** The system prompt of an
   assignment now tells the session to stop retrying when one action fails
   three times in a row with the same error, to write the error on the plan

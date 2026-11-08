@@ -235,3 +235,41 @@ section.limits > .j-meta { margin-top: -6px; }
 .s5 { fill: #f472b6; background: #f472b6; }
 .s6 { fill: #2dd4bf; background: #2dd4bf; }
 .s7 { fill: var(--j-muted); background: var(--j-muted); }
+
+/* ---------------------------------------------------------------- links */
+/* the sidebar group: the links, then the way to edit them */
+.v-links .j-nav-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-links-edit { color: var(--j-faint); font-size: var(--j-text-sm); padding-left: 38px; }
+/* the person's own page sits at the foot of the sidebar */
+.v-you { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--j-line-soft); }
+
+/* the list on /links */
+.v-link-list .j-list-row { color: var(--j-text); }
+.v-link-list .j-list-row > .j-icon { color: var(--j-accent); }
+.v-link-list .j-list-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the edit form: one row per link */
+.v-links-form { display: flex; flex-direction: column; gap: 12px; margin: 0; }
+.v-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) 150px auto;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  background: var(--j-surface);
+  border: 1px solid var(--j-line-soft);
+  border-radius: var(--j-radius);
+  min-width: 0;
+}
+.v-link-row legend { padding: 0 4px; }
+.v-icon-field .j-icon { color: var(--j-accent); }
+.v-icon-field select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+.v-remove { display: flex; align-items: center; gap: 6px; color: var(--j-muted); font-size: var(--j-text-sm); white-space: nowrap; }
+.v-remove input { accent-color: var(--j-bad); }
+.v-hint { margin: 0; font-size: var(--j-text-sm); }
+@media (max-width: 640px) {
+  .v-link-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .v-link-row > .j-field:nth-of-type(1),
+  .v-link-row > .j-field:nth-of-type(2) { grid-column: 1 / -1; }
+}
