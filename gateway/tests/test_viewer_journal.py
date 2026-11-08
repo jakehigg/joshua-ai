@@ -166,7 +166,7 @@ def test_feed_shows_the_newest_month_with_days_and_entries(client):
     assert "Friday 4 September 2026" in html
     assert "Oatmeal for breakfast" in html
     assert "flights to Lisbon" in html
-    assert 'class="badge nightly"' in html
+    assert 'class="j-badge accent nightly"' in html
     assert "pottery" not in html  # August is another month
     assert "← August 2026" in html
 
@@ -182,7 +182,7 @@ def test_feed_person_filter_keeps_entries_naming_that_person(client):
     html = client.get("/journal?person=mia", auth=ALEX).text
     assert "flights to Lisbon" in html  # the day page names mia
     assert "Oatmeal" not in html  # names alex only
-    assert 'class="chip on"' in html
+    assert 'class="j-chip on" aria-current="true"' in html
 
 
 def test_feed_unknown_person_filter_is_ignored(client):

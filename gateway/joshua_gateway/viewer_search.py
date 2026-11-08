@@ -98,14 +98,29 @@ def _snippet(text: str) -> str:
     return flat[:SNIPPET_CHARS].rstrip() + "…"
 
 
+def results_html(hits: list[tuple[str, str, str, str]]) -> str:
+    """A list of search hits. Each hit is ``(url, label, meta, snippet)``, all
+    plain text; ``meta`` and ``snippet`` may be empty."""
+    rows = []
+    for url, label, meta, snippet in hits:
+        sub = f'<span class="j-list-sub">{escape(meta)}</span>' if meta else ""
+        text = f'<span class="j-list-sub hit-text">{escape(snippet)}</span>' if snippet else ""
+        rows.append(
+            '<li class="j-list-row"><div class="j-list-main">'
+            f'<a class="j-list-title wrap" href="{escape(url)}">{escape(label)}</a>'
+            f"{sub}{text}</div></li>"
+        )
+    return f'<ul class="j-list">{"".join(rows)}</ul>'
+
+
 def meaning_html(response: SearchResponse | None) -> str:
     """The "by meaning" section. None means core did not answer."""
     if response is None:
         return (
-            "<section class=meaning><h2>By meaning</h2>"
-            "<p class=snippet>Search by meaning is not available now.</p></section>"
+            '<section class="meaning"><h2>By meaning</h2>'
+            '<p class="j-empty">Search by meaning is not available now.</p></section>'
         )
-    items: list[str] = []
+    hits: list[tuple[str, str, str, str]] = []
     for hit in response.results:
         url = viewer_url(hit.path)
         if url is None:
@@ -114,12 +129,10 @@ def meaning_html(response: SearchResponse | None) -> str:
         if hit.heading and hit.heading != hit.title:
             label = f"{label} › {hit.heading}"
         meta = hit.kind if hit.date is None else f"{hit.kind} · {hit.date}"
-        items.append(
-            f'<li><a href="{escape(url)}">{escape(label)}</a> '
-            f"<span class=count>{escape(meta)}</span>"
-            f"<br><span class=snippet>{escape(_snippet(hit.text))}</span></li>"
+        hits.append((url, label, meta, _snippet(hit.text)))
+    if not hits:
+        return (
+            '<section class="meaning"><h2>By meaning</h2>'
+            '<p class="j-empty">No close match.</p></section>'
         )
-    if not items:
-        return "<section class=meaning><h2>By meaning</h2><p>No close match.</p></section>"
-    rows = "".join(items)
-    return f"<section class=meaning><h2>By meaning</h2><ul class=tree>{rows}</ul></section>"
+    return f'<section class="meaning"><h2>By meaning</h2>{results_html(hits)}</section>'

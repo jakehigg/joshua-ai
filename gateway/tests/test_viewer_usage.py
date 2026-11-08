@@ -120,7 +120,8 @@ def _fixed_today(monkeypatch) -> None:
 
 def test_the_nav_links_the_usage_page(data) -> None:
     html = TestClient(viewer.build_app()).get("/", auth=ALEX).text
-    nav = html[html.index("<nav>") : html.index("</nav>")]
+    nav = html[html.index('<nav class="v-sections"') :]
+    nav = nav[: nav.index("</nav>")]
     assert nav.index('href="/journal"') < nav.index('href="/usage"')
 
 
@@ -153,7 +154,7 @@ def test_the_page_renders_the_tables_and_the_chart(data, monkeypatch) -> None:
     assert request.url.params["days"] == "7"
     assert request.headers["authorization"] == f"Bearer {VIEWER_TOKEN}"
     assert "<svg" in html and "<script" not in html
-    assert "<th>chat</th>" in html and "<th>extra</th>" in html
+    assert "<th class=num>chat</th>" in html and "<th class=num>extra</th>" in html
     # The table holds exact integers: the chat total of the 20th.
     assert usage_mod.exact(31600) in html
     # The totals column of the 20th: chat and extra added.
@@ -170,7 +171,7 @@ def test_the_page_renders_the_tables_and_the_chart(data, monkeypatch) -> None:
     assert ">2026-09-21</text>" in html and ">2026-10-20</text>" in html
     assert "no usage in this window" not in html
     assert "Cache read" in html
-    assert '<span class="chip on">7 days</span>' in html
+    assert '<span class="j-chip on" aria-current="true">7 days</span>' in html
 
 
 def test_a_hostile_group_name_is_escaped(data, monkeypatch) -> None:
@@ -295,7 +296,7 @@ def test_a_group_with_no_usage_is_in_both_tables(data, monkeypatch) -> None:
     days = _section(html, "<h2>Tokens by day</h2>", "</table>")
     totals = _section(html, "<h2>Totals by group</h2>", "</table>")
     for name in ("chat", "reflection", "internet", "describe", "extra"):
-        assert f"<th>{name}</th>" in days
+        assert f"<th class=num>{name}</th>" in days
         assert f"<tr><th>{name}</th>" in totals
     zero = _section(totals, "<tr><th>reflection</th>", "</tr>")
     assert zero.count("<td class=num>0</td>") == 6
@@ -334,7 +335,7 @@ def test_a_hostile_worker_name_and_model_are_escaped(data, monkeypatch) -> None:
     answer["totals"]["chat"]["models"] = [evil]
     _with_core(monkeypatch, FakeCore(answer))
     html = _get().text
-    assert "<img" not in html
+    assert "<img src=x" not in html
     assert "&lt;img src=x onerror=alert(1)&gt;" in html
 
 

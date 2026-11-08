@@ -144,6 +144,17 @@ def test_edit_form_for_a_journal_entry_has_the_people_field(client):
     assert 'name="people"' in html and 'value="alex"' in html
 
 
+def test_the_forms_use_the_shared_fields_and_buttons(client):
+    html = client.get("/edit/journal/2026/09/04/oatmeal.md", auth=ALEX).text
+    assert '<span class="j-field"><input name="people"' in html
+    assert '<span class="j-field mono"><textarea name="body"' in html
+    assert '<button class="j-btn primary" type=submit>save</button>' in html
+    assert 'class="j-nav-item" href="/journal" aria-current="page"' in html
+    html = client.get("/new?folder=recipes", auth=ALEX).text
+    assert '<span class="j-field"><input name="name"' in html
+    assert 'class="j-nav-item" href="/wiki/" aria-current="page"' in html
+
+
 def test_guest_gets_403_on_the_forms_and_the_save(client):
     assert client.get("/edit/recipes.md", auth=MIA).status_code == 403
     assert client.get("/new?folder=recipes", auth=MIA).status_code == 403
