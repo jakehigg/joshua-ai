@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        member: [shared, channels, gateway, core]
+        member: [shared, channels, gateway, core, assignments]
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -59,22 +59,23 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: uv sync --frozen --all-packages
       - name: unit tests
-        if: matrix.member != 'core'
+        if: matrix.member != 'core' && matrix.member != 'assignments'
         run: >
           uv run --package joshua-${{ matrix.member }} pytest ${{ matrix.member }}/tests
           --cov=joshua_${{ matrix.member }} --cov-report=term --cov-fail-under=80
-      # core: the store layer runs only against Postgres, so the integration
-      # suite counts toward coverage. pytest exit 5 ("no tests ran") from an
-      # empty integration suite is not a failure.
+      # core and assignments: the store layer runs only against Postgres, so
+      # the integration suite counts toward coverage. pytest exit 5 ("no
+      # tests ran") from an empty integration suite is not a failure.
       - name: unit and integration tests
-        if: matrix.member == 'core'
+        if: matrix.member == 'core' || matrix.member == 'assignments'
         run: |
-          uv run --package joshua-core pytest core/tests --cov=joshua_core --cov-report= --cov-fail-under=0
+          m=${{ matrix.member }}
+          uv run --package joshua-$m pytest $m/tests --cov=joshua_$m --cov-report= --cov-fail-under=0
           rc=0
-          uv run --package joshua-core pytest core/tests -m integration \
-            --cov=joshua_core --cov-append --cov-report= --cov-fail-under=0 || rc=$?
+          uv run --package joshua-$m pytest $m/tests -m integration \
+            --cov=joshua_$m --cov-append --cov-report= --cov-fail-under=0 || rc=$?
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then exit "$rc"; fi
-          uv run --package joshua-core coverage report --show-missing --fail-under=80
+          uv run --package joshua-$m coverage report --show-missing --fail-under=80
       # The same suite on two other dates, so a test that passes only on some
       # days fails on the day it is written. Postgres keeps its own clock, so
       # the integration suite does not run here.
@@ -116,9 +117,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp joshua.example.yaml joshua.yaml
-      # The three Dockerfiles must still build from the tree. The base compose
+      # The Dockerfiles must still build from the tree. The base compose
       # file names released images, so the build needs the developer override.
-      - run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+      # The assignments service is in a profile, so the build names it.
+      - run: docker compose --profile assignments -f docker-compose.yml -f docker-compose.dev.yml build
       # The gateway image carries Node, npm, uv and git, because it installs a
       # `package:` MCP server itself. That is worth the size, and a jump beyond
       # it is not: raise the limit here on purpose, never by accident.

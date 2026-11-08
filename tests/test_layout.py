@@ -8,8 +8,9 @@ MEMBERS = {
     "channels": "joshua_channels",
     "core": "joshua_core",
     "gateway": "joshua_gateway",
+    "assignments": "joshua_assignments",
 }
-CONTAINERS = ["channels", "core", "gateway"]
+CONTAINERS = ["channels", "core", "gateway", "assignments"]
 
 
 def test_members_exist() -> None:
