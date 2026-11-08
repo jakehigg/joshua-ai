@@ -6,6 +6,19 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Security
+
+- **An assignment session runs as another user.** A shell in a session could
+  read the environment of the assignments container in `/proc`, with the
+  database URL and the bearers of its callers. Now a second container,
+  `assignments-session`, runs each session as uid 1001, and the container
+  process stays uid 1000. Neither runs as root or holds a capability. The
+  container needs `ASSIGNMENTS_SESSION_SOCKET`; compose and the chart set it.
+  With compose, `docker compose --profile assignments up -d` starts both
+  containers. The chart adds the `session` container to the pod, sets the pod
+  `fsGroup` to 1001, and adds `assignments.session.resources`. See
+  [assignments.md](assignments.md#what-a-session-can-see).
+
 ### Added
 
 - **Assignments run a real session.** Each assignment now runs one Claude

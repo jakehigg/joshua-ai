@@ -329,6 +329,16 @@ host in `assignments.networkPolicy.gitHosts.cidrs`. Set
 support. `/work` is an emptyDir unless `assignments.work.existingClaim` names a
 claim.
 
+The pod has two containers from the same image. `assignments` is the manager,
+as uid 1000. `session` runs the session launcher as uid 1001, so a shell in a
+session cannot read the environment of the manager. The `session` container
+gets no secret and mounts only `/work` and the launcher socket. Both
+containers have `runAsNonRoot: true`, `allowPrivilegeEscalation: false`, and
+no capability. The pod `fsGroup` is 1001, the group `work`, so both
+containers can write `/work`. `assignments.session.resources` sets the
+resources of the `session` container, which runs the Claude CLI and the
+commands of each session.
+
 ## Enhancements
 
 An enhancement is an optional component from another project, not from

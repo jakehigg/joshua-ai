@@ -276,6 +276,29 @@ An entry whose credential expanded to nothing is turned off, not started with an
 empty credential and not retried. `/readyz` counts it in `disabled` and the log
 names the empty key.
 
+### A session runs as another user
+
+A session has Bash, so it can read what its user can read. The assignments
+manager holds the database URL and the bearers of its callers in its
+environment. So the session never runs as the user of the manager:
+
+- The manager runs as uid 1000 in the container `assignments`. A session runs
+  as uid 1001 (`session`), started by the launcher in the container
+  `assignments-session`. That container gets no secret, and has its own
+  process namespace.
+- Neither container runs as root or holds a capability. The kernel does not
+  let a process with no capability change its user, so the second container
+  starts as uid 1001.
+- The SDK starts the wrapper `joshua-session-cli`, never the CLI itself. A
+  check refuses a session that does not go through the wrapper.
+- The launcher runs only a session whose working directory, `HOME`, and CLI
+  configuration are in one `/work/<id>/`, and removes the secret names from
+  its environment.
+
+The session still holds the fleet token of the container, as its stand-in
+Claude token and in its MCP configuration.
+[assignments.md](assignments.md#what-a-session-can-see) has the details.
+
 ## Package MCP servers
 
 A `stdio` entry with a `package` field is another author's code, installed by

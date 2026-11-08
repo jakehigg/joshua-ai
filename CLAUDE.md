@@ -76,7 +76,7 @@ core/                    package joshua_core
 gateway/                 package joshua_gateway
 assignments/             package joshua_assignments: the optional fourth container
 docs/                    the product documentation; core ships it into the wiki
-scripts/                 backup, restore, chat, check_test_policy, ci-local
+scripts/                 backup, restore, chat, check_test_policy, ci-local, test-session-user
 tests/e2e/               compose-level tests
 .claude/skills/          the ste-writing skill (the documentation standard)
 .github/workflows/       CI
@@ -370,6 +370,8 @@ it. `make e2e` runs the compose-level tests.
   `ruff check .`, `ruff format --check .`, and `scripts/check_test_policy.py`.
 - `test`: one job per member with `--cov-fail-under=80`. The `core` job also
   runs the `-m integration` suite against a `pgvector/pgvector:pg16` service.
+- `session-user`: `scripts/test-session-user.sh` builds the assignments image
+  and proves in Docker that a session runs as another user than the manager.
 - `build`: on `main` only, `docker compose build` for the three images.
 
 `scripts/ci-local.sh` runs the lint and test jobs with the same commands.

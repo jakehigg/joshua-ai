@@ -5,8 +5,9 @@ audit of a repository, a clean-up of a wiki folder, a study that takes hours.
 Joshua starts it with a tool call and continues the conversation. The
 assignment reports back when it ends, or asks a question when it must stop.
 
-Assignments run in a fourth container, `assignments`. It is optional and off
-by default.
+Assignments run in a fourth container, `assignments`, with a small second
+container, `assignments-session`, that runs the sessions. Both are optional
+and off by default.
 
 ## Why a separate container
 
@@ -158,6 +159,12 @@ after a stop, an answer, or a restart of the container.
 
 ### The scratch directory
 
+The runner makes each scratch directory with the group `work` and the mode
+2770, and the session writes it as another user (see
+[What a session can see](#what-a-session-can-see)). When a session ends, the
+launcher gives the group write access to each file of the session, so the
+container can remove the directory later.
+
 The scratch directory stays while the assignment is `waiting` or
 `paused_limits`, so the session can continue. It also stays after `failed`,
 for `assignments.keep_failed_work`, so that you can look at it. The container
@@ -255,10 +262,42 @@ callers are not in the environment of the session. Two values are: the
 fleet token of the container, which the session sends to core as its Claude
 token, and the same token in the MCP configuration of the session.
 
-The session runs as the same user as the container process. So a command in
-the session can read the start environment of that process in `/proc`, which
-holds the database URL and the bearers of the callers. Give the assignments
-container its own database user when this is a risk for you.
+Per-assignment tokens, in a later release, will remove the fleet token from
+the session.
+
+The session runs as a different user from the container process, so a
+command in the session cannot read the environment of that process in
+`/proc`:
+
+- The image has two users. `assignments` (uid 1000) runs the container
+  process, the manager. `session` (uid 1001) runs the sessions. It has no
+  login shell and no home outside `/work`. Both are in the group `work`
+  (gid 1001).
+- A process with no capability cannot change its user. On Kubernetes,
+  `allowPrivilegeEscalation: false` also stops a setuid program and a file
+  capability. So the manager does not start the session itself. The second
+  container, `assignments-session`, runs the session launcher as uid 1001
+  from the start. Neither container runs as root, and neither holds a
+  capability.
+- The SDK starts the command `joshua-session-cli` as the Claude CLI. This
+  wrapper sends its arguments, its working directory, and its environment
+  to the launcher on the socket `ASSIGNMENTS_SESSION_SOCKET`, with its
+  standard input and output. The launcher starts the real CLI as uid 1001
+  on them. The working directory, `HOME`, and the CLI configuration must be
+  in one assignment directory `/work/<id>/`. The launcher removes the
+  database URL, the bearers, and every fleet token name from the
+  environment again. `ASSIGNMENTS_SESSION_CLI` on the launcher container
+  names the CLI (default `claude`).
+- The launcher container gets no secret, mounts only `/work` and the socket,
+  and has its own process namespace. If it could see the manager process,
+  the kernel would refuse to show the environment of that process to
+  another user.
+
+A check refuses to start a session that does not go through the wrapper. The
+container does not start a session without `ASSIGNMENTS_SESSION_SOCKET`.
+`scripts/test-session-user.sh` proves it in Docker: a shell in a session
+runs as uid 1001, cannot read `/proc/<manager pid>/environ`, and finds
+none of the three secrets in its environment or under its `HOME`.
 
 ## The statuses
 
@@ -336,11 +375,13 @@ only. `make backup` dumps the whole database, so a backup holds it.
              Authorization: Bearer ${ASSIGNMENTS_TOKEN_ALEX:-}
    ```
 
-7. Start the container: `docker compose --profile assignments up -d`.
+7. Start the containers: `docker compose --profile assignments up -d`. This
+   starts `assignments` and `assignments-session`.
 8. Restart the gateway, so it reads the new server.
 
-Compose sets `CORE_URL` and `GATEWAY_URL` for the container. The container
-does not start without them and `JOSHUA_TOKEN_ASSIGNMENTS`.
+Compose sets `CORE_URL`, `GATEWAY_URL`, and `ASSIGNMENTS_SESSION_SOCKET` for
+the container. The container does not start without them and
+`JOSHUA_TOKEN_ASSIGNMENTS`.
 
 The container is not published on the host. With `assignments.enabled: false`
 it exits at start and its log says why. On Kubernetes, see the chart
