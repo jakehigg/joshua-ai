@@ -143,6 +143,16 @@ with the images and the packaged chart, are at
   stylesheet, the logo, and the icons at `/ui/`, behind the same sign-in as a
   page. The routes, the forms, and what each page shows do not change.
 
+### Fixed
+
+- **A stopped tool call no longer breaks a store connection.** When a caller
+  of the assignments store stopped during a write (a slice that ends while a
+  `checkpoint` call runs, or a gateway call that closes), the manager logged
+  `another command is already in progress`, and the pool closed that
+  connection. Now each store operation completes and gives back a clean
+  connection, also when its caller stops. See
+  [assignments.md](assignments.md#the-store).
+
 ## 0.1.1 - 2026-11-07
 
 A voice call that hangs up during a reply no longer makes the replies after it
