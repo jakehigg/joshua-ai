@@ -85,6 +85,7 @@ def test_enabled_serves_on_port_8000_with_the_sdk_runner(config_file, monkeypatc
     monkeypatch.delenv("CHANNELS_URL", raising=False)
     monkeypatch.setenv("CORE_URL", "http://core:8000")
     monkeypatch.setenv("GATEWAY_URL", "http://gateway:8000")
+    monkeypatch.setenv("ASSIGNMENTS_SESSION_SOCKET", "/run/joshua-session/launcher.sock")
     monkeypatch.setenv("JOSHUA_TOKEN_ASSIGNMENTS", "fleet")
     served = []
     monkeypatch.setattr(entry.uvicorn, "run", lambda app, **k: served.append(k))

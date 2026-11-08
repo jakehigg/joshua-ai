@@ -20,6 +20,12 @@ directory ``/work/<id>/`` holds the session (``HOME`` and
 failed, and goes when it ends in another way. ``sweep`` removes the scratch
 of a failed assignment after ``assignments.keep_failed_work``.
 
+The session runs as the ``session`` user, and this process as
+``assignments``. Both are in the group ``work``. The runner makes each
+scratch directory with the group ``work`` and the mode 2770, so the session
+can write it and the runner can remove it. The launcher starts the session
+with umask 007, so what the session makes is writable by the group too.
+
 A failure gives the row a short label, never the error text.
 """
 
@@ -27,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import grp
 import os
 import re
 import shutil
@@ -42,7 +49,7 @@ from joshua_shared.gateway_mcp import allowed_gateway_servers, gateway_servers
 from joshua_shared.limits import parse_event_windows
 from joshua_shared.log import get_logger
 
-from joshua_assignments import budget, prompts, session
+from joshua_assignments import budget, launcher, prompts, session
 from joshua_assignments.clock import Clock
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.runner import RunnerHost
@@ -51,6 +58,8 @@ from joshua_assignments.store import FINISHED, USAGE_FIELDS
 logger = get_logger("joshua_assignments.sdk_runner")
 
 WORK_ROOT = Path("/work")
+WORK_GROUP = "work"
+WORK_MODE = 0o2770
 MAX_WAIT_S = 600
 MAX_NOTE = 2000
 MAX_QUESTION = 2000
@@ -78,6 +87,30 @@ def _reply(text: str, is_error: bool = False) -> dict[str, Any]:
     if is_error:
         out["is_error"] = True
     return out
+
+
+def work_gid(name: str = WORK_GROUP) -> int | None:
+    """The id of the group ``work``, or None when the system has no such group."""
+    try:
+        return grp.getgrnam(name).gr_gid
+    except KeyError:
+        return None
+
+
+def share_dir(path: Path, gid: int | None) -> None:
+    """Make ``path`` a directory of the group ``gid`` with the mode 2770, if this user owns it.
+
+    A directory of another user (an emptyDir root, or one the session made)
+    stays as it is.
+    """
+    path.mkdir(exist_ok=True)
+    st = path.stat()
+    if st.st_uid != os.geteuid():
+        return
+    if gid is not None and st.st_gid != gid:
+        os.chown(path, -1, gid)
+    if st.st_mode & 0o7777 != WORK_MODE:
+        os.chmod(path, WORK_MODE)
 
 
 def usage_ref(assignment_id: int, n: int) -> str:
@@ -173,6 +206,8 @@ class SdkRunner:
         sleep: Callable[[float], Any] = asyncio.sleep,
         monotonic: Callable[[], float] = time.monotonic,
         watch_s: float = session.WATCH_S,
+        cli_path: str | None = None,
+        gid: int | None = None,
     ) -> None:
         self.host = host
         self.core = core or CoreClient(host.settings)
@@ -182,6 +217,8 @@ class SdkRunner:
         self.sleep = sleep
         self.monotonic = monotonic
         self.watch_s = watch_s
+        self.cli_path = cli_path or shutil.which(launcher.WRAPPER) or launcher.WRAPPER
+        self.gid = work_gid() if gid is None else gid
         self.tasks: dict[int, asyncio.Task[None]] = {}
 
     # --- the Runner protocol ----------------------------------------------
@@ -211,6 +248,16 @@ class SdkRunner:
 
     def work_dir(self, assignment_id: int) -> Path:
         return self.work_root / str(int(assignment_id))
+
+    def make_work(self, assignment_id: int) -> tuple[Path, Path, Path]:
+        """Make the scratch, ``HOME``, and config directories of a session, shared with it."""
+        work = self.work_dir(assignment_id)
+        home = work / ".home"
+        config_dir = home / ".claude"
+        self.work_root.mkdir(parents=True, exist_ok=True)
+        for path in (self.work_root, work, home, config_dir):
+            share_dir(path, self.gid)
+        return work, home, config_dir
 
     def remove_work(self, assignment_id: int) -> None:
         shutil.rmtree(self.work_dir(assignment_id), ignore_errors=True)
@@ -327,10 +374,7 @@ class SdkRunner:
         if not settings.can_run:
             await self._end(assignment_id, "failed", error="not_configured")
             return
-        work = self.work_dir(assignment_id)
-        home = work / ".home"
-        config_dir = home / ".claude"
-        config_dir.mkdir(parents=True, exist_ok=True)
+        work, home, config_dir = self.make_work(assignment_id)
         tools = AssignmentTools(assignment_id, self.host, self.sleep)
         server = session.assignment_server(tools.handlers())
         env = session.session_env(
@@ -339,6 +383,7 @@ class SdkRunner:
             token=settings.fleet_token,
             home=home,
             config_dir=config_dir,
+            launcher_socket=settings.session_socket or "",
         )
 
         while True:
@@ -403,6 +448,7 @@ class SdkRunner:
                 gateway_url=settings.gateway_url or "",
                 assignment=server,
                 resume=row.get("session_id"),
+                cli_path=self.cli_path,
             )
             n = await store.next_slice_n(assignment_id)
             clock = Clock(working_s - used_s, now=self.monotonic)

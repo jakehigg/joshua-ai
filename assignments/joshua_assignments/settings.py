@@ -14,9 +14,11 @@ secrets and the addresses:
 - ``CORE_URL``: where the runner reads the limits, writes the usage, and
   sends the model calls of a session (core's model forwarder).
 - ``GATEWAY_URL``: where a session reaches the MCP servers of its person.
+- ``ASSIGNMENTS_SESSION_SOCKET``: the Unix socket of the session launcher,
+  which runs each session as the ``session`` user. An absolute path.
 
-Each URL needs ``JOSHUA_TOKEN_ASSIGNMENTS``. The runner needs ``CORE_URL``
-and ``GATEWAY_URL``.
+Each URL needs ``JOSHUA_TOKEN_ASSIGNMENTS``. The runner needs ``CORE_URL``,
+``GATEWAY_URL``, and ``ASSIGNMENTS_SESSION_SOCKET``.
 
 Every error message names the variable that is wrong, and never a token.
 """
@@ -54,6 +56,7 @@ class Settings:
     fleet_token: str = field(default="", repr=False)
     core_url: str | None = None
     gateway_url: str | None = None
+    session_socket: str | None = None
 
     @property
     def will_notify(self) -> bool:
@@ -62,8 +65,8 @@ class Settings:
 
     @property
     def can_run(self) -> bool:
-        """True when the runner can run a session: core, the gateway, and the token."""
-        return bool(self.core_url and self.gateway_url and self.fleet_token)
+        """True when the runner can run a session: core, the gateway, the token, the launcher."""
+        return bool(self.core_url and self.gateway_url and self.fleet_token and self.session_socket)
 
     @property
     def people(self) -> list[str]:
@@ -132,6 +135,10 @@ def settings_from_env(cfg: JoshuaConfig, env: Mapping[str, str] | None = None) -
             raise SettingsError(f"{name} needs JOSHUA_TOKEN_ASSIGNMENTS")
         urls[name] = url
 
+    session_socket = env.get("ASSIGNMENTS_SESSION_SOCKET", "").strip() or None
+    if session_socket and not session_socket.startswith("/"):
+        raise SettingsError("ASSIGNMENTS_SESSION_SOCKET must be an absolute path")
+
     return Settings(
         database_url=database_url,
         tokens=tokens,
@@ -139,4 +146,5 @@ def settings_from_env(cfg: JoshuaConfig, env: Mapping[str, str] | None = None) -
         fleet_token=fleet_token,
         core_url=urls["CORE_URL"],
         gateway_url=urls["GATEWAY_URL"],
+        session_socket=session_socket,
     )

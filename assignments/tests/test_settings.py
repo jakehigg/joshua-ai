@@ -42,16 +42,20 @@ def test_channels_is_optional() -> None:
     assert settings.can_run is False
 
 
-def test_core_and_the_gateway_let_the_runner_run() -> None:
+def test_core_the_gateway_and_the_launcher_let_the_runner_run() -> None:
+    values = {
+        "CORE_URL": "http://core:8000",
+        "GATEWAY_URL": "http://gateway:8000",
+        "JOSHUA_TOKEN_ASSIGNMENTS": "fleet",
+    }
+    without = settings_from_env(make_config(), env(**values))
+    assert without.can_run is False, "no session runs without the session launcher"
     settings = settings_from_env(
         make_config(),
-        env(
-            CORE_URL="http://core:8000",
-            GATEWAY_URL="http://gateway:8000",
-            JOSHUA_TOKEN_ASSIGNMENTS="fleet",
-        ),
+        env(**values, ASSIGNMENTS_SESSION_SOCKET="/run/joshua-session/launcher.sock"),
     )
     assert settings.can_run is True
+    assert settings.session_socket == "/run/joshua-session/launcher.sock"
     assert settings.core_url == "http://core:8000"
     assert "fleet" not in repr(settings)
 
@@ -65,6 +69,7 @@ def test_the_addon_token_alone_is_enough() -> None:
     ("changes", "message"),
     [
         ({"DATABASE_URL": ""}, "DATABASE_URL is required"),
+        ({"ASSIGNMENTS_SESSION_SOCKET": "run/x.sock"}, "must be an absolute path"),
         ({"ASSIGNMENTS_TOKENS": ""}, "set ASSIGNMENTS_TOKENS or ADDON_TOKEN"),
         ({"ASSIGNMENTS_TOKENS": "bob=b-token"}, "not in people: bob"),
         ({"ASSIGNMENTS_TOKENS": "alex=x,mia=x"}, "the same token as another person"),

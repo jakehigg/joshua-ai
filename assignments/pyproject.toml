@@ -15,6 +15,11 @@ dependencies = [
     "uvicorn>=0.30",
 ]
 
+[project.scripts]
+# The SDK starts this command as the Claude CLI. It runs the CLI through the
+# session launcher, as the `session` user (joshua_assignments/launcher.py).
+joshua-session-cli = "joshua_assignments.launcher:wrapper_main"
+
 [tool.uv.sources]
 joshua-shared = { workspace = true }
 

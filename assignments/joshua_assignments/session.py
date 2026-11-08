@@ -7,7 +7,12 @@ WebFetch, never holds the ``assignments`` server, and loads no settings from
 the disk (``setting_sources=[]``). ``check_session_tools`` asserts this on
 every set of options before a session starts.
 
-The SDK starts the Claude CLI with the environment of this process plus
+The SDK starts ``options.cli_path``, which is always the wrapper
+``joshua-session-cli``. The wrapper hands the start to the session launcher
+(``launcher``), which runs the real CLI as the ``session`` user, so a command
+in the session cannot read the environment of this process in ``/proc``.
+
+The SDK starts the CLI with the environment of this process plus
 ``options.env``. ``session_env`` gives every variable of this process that
 is not in ``KEEP_ENV`` an empty value, so the database URL and the bearers of
 the manager never reach the session. The CLI sends its model calls to core's
@@ -40,6 +45,7 @@ from claude_agent_sdk import (
 from joshua_shared.contracts import MODEL_FORWARDER_PATH
 from joshua_shared.log import get_logger
 
+from joshua_assignments import launcher
 from joshua_assignments.clock import Clock
 
 logger = get_logger("joshua_assignments.session")
@@ -118,13 +124,19 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
 
 
 def session_env(
-    environ: Mapping[str, str], *, core_url: str, token: str, home: Path, config_dir: Path
+    environ: Mapping[str, str],
+    *,
+    core_url: str,
+    token: str,
+    home: Path,
+    config_dir: Path,
+    launcher_socket: str,
 ) -> dict[str, str]:
     """The ``options.env`` of a session.
 
     The CLI sends its model calls to core's forwarder, with the fleet token
     of the container as its Claude token. Core puts the real credential on
-    them.
+    them. The wrapper reads the launcher socket and does not send it on.
     """
     env = {name: "" for name in environ if name not in KEEP_ENV}
     env.update(
@@ -133,6 +145,7 @@ def session_env(
             "CLAUDE_CODE_OAUTH_TOKEN": token,
             "HOME": str(home),
             "CLAUDE_CONFIG_DIR": str(config_dir),
+            launcher.SOCKET_ENV: launcher_socket,
             **QUIET_ENV,
         }
     )
@@ -171,7 +184,8 @@ def check_session_tools(options: Any, gateway_names: set[str], gateway_url: str)
     - ``mcp_servers`` holds only the gateway servers in ``gateway_names``, each
       an HTTP server on the gateway, and the ``assignment`` server that
       ``assignment_server`` made; never ``assignments``;
-    - the session loads no settings and no other MCP config.
+    - the session loads no settings and no other MCP config;
+    - the SDK starts the wrapper ``joshua-session-cli``, never the CLI itself.
     """
     tools = options.tools
     if not isinstance(tools, list) or set(tools) - set(BASE_TOOLS):
@@ -210,6 +224,8 @@ def check_session_tools(options: Any, gateway_names: set[str], gateway_url: str)
         raise AssertionError("a session loads no other MCP config: strict_mcp_config")
     if options.permission_mode != "bypassPermissions":
         raise AssertionError("a session runs headless: permission_mode is bypassPermissions")
+    if options.user is not None or Path(str(options.cli_path or "")).name != launcher.WRAPPER:
+        raise AssertionError(f"a session starts through the wrapper {launcher.WRAPPER}")
 
 
 def build_options(
@@ -224,6 +240,7 @@ def build_options(
     gateway_url: str,
     assignment: McpSdkServerConfig,
     resume: str | None,
+    cli_path: str,
 ) -> ClaudeAgentOptions:
     """The SDK options of one slice. ``check_session_tools`` checks them."""
     kwargs: dict[str, Any] = {
@@ -240,6 +257,7 @@ def build_options(
         "model": model,
         "env": env,
         "max_buffer_size": MAX_BUFFER_SIZE,
+        "cli_path": cli_path,
     }
     if effort:
         kwargs["effort"] = effort

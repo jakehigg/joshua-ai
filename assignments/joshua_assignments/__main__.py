@@ -32,7 +32,8 @@ def main() -> None:
         raise SystemExit(1) from exc
     if not settings.can_run:
         print(
-            "settings error: the runner needs CORE_URL, GATEWAY_URL, and JOSHUA_TOKEN_ASSIGNMENTS",
+            "settings error: the runner needs CORE_URL, GATEWAY_URL, JOSHUA_TOKEN_ASSIGNMENTS, "
+            "and ASSIGNMENTS_SESSION_SOCKET",
             file=sys.stderr,
         )
         raise SystemExit(1)

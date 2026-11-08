@@ -36,6 +36,7 @@ def options(**changes):
         gateway_url=GATEWAY,
         assignment=session.assignment_server(handlers()),
         resume=None,
+        cli_path="/app/.venv/bin/joshua-session-cli",
     )
     return dataclasses.replace(built, **changes) if changes else built
 
@@ -61,6 +62,9 @@ def test_the_built_options_pass_the_check() -> None:
         ({"strict_mcp_config": False}, "no other MCP config"),
         ({"permission_mode": "default"}, "headless"),
         ({"allowed_tools": ["mcp__other__x"]}, "not a tool of the session"),
+        ({"cli_path": None}, "through the wrapper"),
+        ({"cli_path": "/usr/bin/claude"}, "through the wrapper"),
+        ({"user": "session"}, "through the wrapper"),
     ],
 )
 def test_a_session_outside_the_boundary_fails(changes, message) -> None:
@@ -115,6 +119,7 @@ def test_build_options_refuses_a_bad_gateway_map() -> None:
             gateway_url=GATEWAY,
             assignment=session.assignment_server(handlers()),
             resume="s",
+            cli_path="joshua-session-cli",
         )
 
 
@@ -133,8 +138,10 @@ def test_the_session_env_hides_the_container_secrets() -> None:
         token="fleet",
         home=Path("/work/1/.home"),
         config_dir=Path("/work/1/.home/.claude"),
+        launcher_socket="/run/joshua-session/launcher.sock",
     )
     assert env["DATABASE_URL"] == "" and env["ADDON_TOKEN"] == ""
+    assert env["ASSIGNMENTS_SESSION_SOCKET"] == "/run/joshua-session/launcher.sock"
     assert "PATH" not in env
     assert env["ANTHROPIC_BASE_URL"] == "http://core:8000/v1/model"
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "fleet"

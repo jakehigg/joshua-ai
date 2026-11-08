@@ -13,10 +13,13 @@ from joshua_assignments.manager import Manager
 from joshua_assignments.prompts import READ_PAGE_FIRST
 from joshua_assignments.sdk_runner import (
     ASK_REPLY,
+    WORK_MODE,
     AssignmentTools,
     SdkRunner,
+    share_dir,
     total_tokens,
     usage_ref,
+    work_gid,
 )
 from sdk_fakes import (
     HANG,
@@ -467,6 +470,47 @@ async def test_the_session_holds_the_persons_gateway_servers_only(tmp_path, chan
     assert env["HOME"] == str(h.work / str(started["id"]) / ".home")
     assert env["CLAUDE_CONFIG_DIR"].startswith(env["HOME"])
     assert options.cwd == str(h.work / str(started["id"]))
+
+
+async def test_the_session_starts_through_the_wrapper_in_a_shared_scratch(
+    tmp_path, channels
+) -> None:
+    sdk = FakeSdk([call("ask", question="Which branch?"), result("success")])
+    h = Harness(tmp_path, sdk, FakeCore(), cli_path="/app/.venv/bin/joshua-session-cli")
+    started = await h.start()
+    assert h.row(started["id"])["status"] == "waiting"
+    options = sdk.clients[0].options
+    assert options.cli_path == "/app/.venv/bin/joshua-session-cli"
+    assert options.user is None
+    assert options.env["ASSIGNMENTS_SESSION_SOCKET"] == "/run/joshua-session/launcher.sock"
+    work = h.work / str(started["id"])
+    for path in (h.work, work, work / ".home", work / ".home" / ".claude"):
+        assert path.stat().st_mode & 0o770 == 0o770, path
+
+
+def test_share_dir_sets_the_group_and_the_mode_of_its_own_directory(tmp_path, monkeypatch) -> None:
+    chowns: list[tuple] = []
+    monkeypatch.setattr("os.chown", lambda path, uid, gid: chowns.append((path, uid, gid)))
+    target = tmp_path / "w"
+    share_dir(target, 4242)
+    assert chowns == [(target, -1, 4242)]
+    assert target.stat().st_mode & 0o770 == 0o770
+    chowns.clear()
+    share_dir(target, target.stat().st_gid)
+    assert chowns == []
+
+
+def test_share_dir_leaves_a_directory_of_another_user(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "theirs"
+    target.mkdir(mode=0o700)
+    monkeypatch.setattr("os.geteuid", lambda: target.stat().st_uid + 1)
+    share_dir(target, 4242)
+    assert target.stat().st_mode & 0o7777 == 0o700
+    assert WORK_MODE == 0o2770
+
+
+def test_work_gid_is_none_without_the_group() -> None:
+    assert work_gid("no-such-group-for-joshua") is None
 
 
 async def test_spec_tools_narrow_the_servers_and_keep_files(tmp_path, channels) -> None:

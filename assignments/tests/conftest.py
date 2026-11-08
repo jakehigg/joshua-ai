@@ -69,6 +69,7 @@ def make_settings(**overrides: Any) -> Settings:
         "fleet_token": CHANNELS_TOKEN,
         "core_url": "http://core:8000",
         "gateway_url": "http://gateway:8000",
+        "session_socket": "/run/joshua-session/launcher.sock",
     }
     fields.update(overrides)
     return Settings(**fields)
