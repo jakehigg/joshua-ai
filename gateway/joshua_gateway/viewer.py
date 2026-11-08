@@ -7,7 +7,9 @@ feed, newest day first, because the wiki tree is the wrong shape for reading
 what happened. The agent never calls the viewer. The viewer calls core for two
 things, when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set: ``/search`` asks
 core to search by meaning (``viewer_search``), and ``/usage`` shows the tokens
-of each group by day (``viewer_usage``). It reads the data volume
+of each group by day (``viewer_usage``) under the subscription limits
+(``viewer_limits``). The limits need ``CORE_URL`` only, because core's
+``GET /v1/limits`` has no bearer. The viewer reads the data volume
 through the same resolver as the files MCP (``files_mcp.paths``), so the two
 never drift on who reads what.
 
@@ -29,6 +31,7 @@ serves plain HTTP and binds every route behind basic auth except the probes.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -37,7 +40,7 @@ import os
 import secrets
 import sys
 from collections.abc import Iterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, tzinfo
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -60,6 +63,7 @@ from starlette.routing import Route
 
 from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
+from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
@@ -108,10 +112,12 @@ _ROUTE_PREFIX = {"wiki": "/wiki/", "shared": "/shared/"}
 
 _CSS = """\
 :root { color-scheme: light dark; --fg: #1a1a1a; --bg: #fbfbfb;
-  --muted: #666; --line: #ddd; --link: #0b5; --code: #f0f0f0; }
+  --muted: #666; --line: #ddd; --link: #0b5; --code: #f0f0f0;
+  --warn: #b7791f; --crit: #c33; }
 @media (prefers-color-scheme: dark) {
   :root { --fg: #e6e6e6; --bg: #16181c; --muted: #9aa0a6;
-    --line: #333; --link: #6c9; --code: #22252b; } }
+    --line: #333; --link: #6c9; --code: #22252b;
+    --warn: #e0b04a; --crit: #f07070; } }
 * { box-sizing: border-box; }
 body { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem;
   font: 16px/1.6 system-ui, sans-serif; color: var(--fg);
@@ -207,6 +213,27 @@ ul.legend { list-style: none; padding: 0; margin: .5rem 0 0; display: flex;
   flex-wrap: wrap; gap: .25rem 1rem; font-size: .85rem; }
 ul.legend .sw { display: inline-block; width: .8rem; height: .8rem;
   border-radius: 2px; margin-right: .35rem; vertical-align: -.1rem; }
+section.limits { margin: 0 0 1.5rem; padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line); }
+section.limits h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
+div.limits-grid { display: grid; gap: .75rem 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+div.limit { --meter: var(--link); }
+div.limit.warn { --meter: var(--warn); }
+div.limit.crit { --meter: var(--crit); }
+div.limit-head { display: flex; align-items: baseline; gap: .5rem; }
+div.limit-head .limit-name { font-weight: 600; }
+div.limit-head .limit-value { margin-left: auto; color: var(--muted);
+  font-size: .85rem; font-variant-numeric: tabular-nums; }
+div.limit-head .limit-value strong { color: var(--meter); font-size: 1.5rem;
+  line-height: 1; }
+div.limit-bar svg { display: block; width: 100%; height: .6rem;
+  margin: .3rem 0; }
+div.limit-bar .track { fill: var(--line); }
+div.limit-bar .fill { fill: var(--meter); }
+div.limit .badge { background: var(--meter); color: var(--bg); }
+div.limit-foot { display: flex; justify-content: space-between; gap: .5rem;
+  flex-wrap: wrap; color: var(--muted); font-size: .85rem; }
 details.day { margin: .25rem 0; }
 details.day > summary { cursor: pointer; }
 .s0 { fill: #2a78c2; background: #2a78c2; }
@@ -718,12 +745,33 @@ async def search(request: Request, person: Person) -> Response:
 
 
 async def usage(request: Request, person: Person) -> Response:
-    """The tokens of each group by day, from core. The page answers 200 also
-    when core is not configured or does not answer, and says so."""
+    """The subscription limits and the tokens of each group by day, from core.
+    The two calls run at the same time. The page answers 200 also when core is
+    not configured or does not answer, and says so."""
     days = usage_mod.parse_days(request.query_params.get("days"))
     core = usage_mod.from_env(os.environ)
-    body = await core.fetch(days) if core is not None else None
-    return _page("usage", usage_mod.page_html(body, days=days, configured=core is not None))
+    limits_core = limits_mod.from_env(os.environ)
+    body, limits = await asyncio.gather(
+        core.fetch(days) if core is not None else _none(),
+        limits_core.fetch() if limits_core is not None else _none(),
+    )
+    tz = limits_mod.zone(config.load().timezone)
+    section = limits_mod.section_html(
+        limits, configured=limits_core is not None, tz=tz, now=_now(tz)
+    )
+    return _page(
+        "usage",
+        usage_mod.page_html(body, days=days, configured=core is not None, limits=section),
+    )
+
+
+async def _none() -> None:
+    return None
+
+
+def _now(tz: tzinfo) -> datetime:
+    """The time now in ``tz``. A test replaces it to fix the clock."""
+    return datetime.now(tz)
 
 
 def _search(roots: dict[str, Root], query: str) -> list[tuple[str, str, str]]:

@@ -19,6 +19,15 @@ with the images and the packaged chart, are at
   token count. The new `limits` section turns the route and the tool off, or
   the tool off for chat or for voice. See
   [config.md](config.md#limits).
+- **The usage page shows the subscription limits.** Above the chart, the
+  viewer's `/usage` page has a meter for the 5-hour window and the weekly
+  window: the percent used, a bar, the percent left, and the reset time in
+  the instance timezone. It also has a meter for each weekly limit of one
+  model and for the extra usage, when Anthropic gives them. The bar is amber
+  from 75 percent used and red from 90 percent. The meters need only
+  `CORE_URL`. When core does not answer, the section says so, and the rest
+  of the page does not change. See
+  [operations.md](operations.md#the-usage-page).
 
 ## 0.1.1 - 2026-11-07
 

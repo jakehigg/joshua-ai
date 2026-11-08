@@ -792,10 +792,31 @@ totals table. The "Each day" sections show only the groups with usage on that
 day.
 
 `?days=N` sets the window, today included: default 30, at most 366. The links
-at the top give 7, 30, 90, and 366 days.
+above the chart give 7, 30, 90, and 366 days.
 
-The page needs the same `CORE_URL` and `JOSHUA_TOKEN_VIEWER` as the search by
-meaning, and `usage.allowed_callers` in `joshua.yaml` must name `viewer`,
+**Subscription limits.** Above the chart, the page shows one meter for each
+limit window of the Claude subscription: `5-hour` and `Weekly`. It also shows
+a meter for each weekly limit of one model, such as `Fable weekly`, and an
+`Extra usage` meter with the amount used of the limit, when Anthropic gives
+them. Each meter shows the percent used, a bar, the percent left, and the
+reset time in the instance `timezone`, for example `resets 10:30 pm today`
+or `resets Mon 9 Nov, 8:00 pm`. The bar is green below 75 percent, amber
+with the word `high` from 75 percent, and red with the word `critical` from
+90 percent. A window that Anthropic blocks is red with the word `blocked`.
+
+The meters read core's `GET /v1/limits` (see
+[contracts.md](contracts.md#the-limits-route)). That route has no bearer, so
+the meters need only `CORE_URL`, also when `JOSHUA_TOKEN_VIEWER` is not set.
+When core could not read new values, the section says `as of` and the time
+of the last values. When core does not know the limits yet, the section
+gives the reason and no meter. When core does not answer, answers `404`
+because `limits.enabled` is `false`, or gives an unknown answer, the section
+says that the limits are not available. The rest of the page does not
+change. The viewer asks core for the limits and for the tokens at the same
+time, so the meters do not make the page slower.
+
+The tables and the chart need the same `CORE_URL` and `JOSHUA_TOKEN_VIEWER`
+as the search by meaning, and `usage.allowed_callers` in `joshua.yaml` must name `viewer`,
 which it does by default. Without them, or when core does not answer, the page
 says so.
 

@@ -10,6 +10,8 @@ that has workers, and
 the counts of each day. Every group of ``groups`` is in the tables, also with
 no usage.
 
+Above the usage, the page shows the subscription limits (``viewer_limits``).
+
 The viewer needs ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER``. With either one
 missing, :func:`from_env` returns None and the page says so. A call that
 fails returns None too, and the page says so. The page answers 200 in both
@@ -326,9 +328,10 @@ def _totals(body: UsageResponse) -> str:
     return "".join(parts)
 
 
-def page_html(body: UsageResponse | None, *, days: int, configured: bool) -> str:
-    """The body of the usage page. ``body`` None means core did not answer."""
-    head = f"<h1>usage</h1>{_windows(days)}"
+def page_html(body: UsageResponse | None, *, days: int, configured: bool, limits: str = "") -> str:
+    """The body of the usage page. ``body`` None means core did not answer.
+    ``limits`` is the HTML of the limits section, which goes above the usage."""
+    head = f"<h1>usage</h1>{limits}{_windows(days)}"
     if not configured:
         return (
             f"{head}<p class=snippet>The usage page is not configured. It needs "

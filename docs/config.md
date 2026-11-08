@@ -1006,6 +1006,8 @@ and delete a page, which moves it to `wiki/.trash/`. A guest reads and nothing
 more. The agent never reaches the viewer. The viewer calls core for two
 things, with the `viewer` fleet token: its search page asks core to search by
 meaning, and its usage page reads the tokens of each day (see [usage](#usage)).
+The usage page also reads the subscription limits from core's open
+`GET /v1/limits`, with no token (see [limits](#limits)).
 
 The viewer is off by default. Start it with `docker compose --profile viewer
 up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
