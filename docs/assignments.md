@@ -504,6 +504,11 @@ The container keeps its rows in the shared Postgres, in the schema
 the tables `assignment`, `checkpoint`, and `slice`. The schema is additive
 only. `make backup` dumps the whole database, so a backup holds it.
 
+Each store operation takes its own connection from a pool, so the manager can
+serve the gateway and the runner at the same time. An operation that starts
+also completes, when its caller stops: a `checkpoint` note that the model
+sent before the slice ended is stored.
+
 ## Set it up with compose
 
 1. Run `make init-env`. It mints `JOSHUA_TOKEN_ASSIGNMENTS` into `.env`.

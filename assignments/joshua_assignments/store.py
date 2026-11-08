@@ -7,14 +7,19 @@ the tables of this container apart from the tables of core in the same
 database.
 
 ``Store`` is the protocol the manager uses. ``PgStore`` is the Postgres
-store.
+store. It takes a connection from a pool for each operation, as core does,
+so two operations never share a connection. A cancelled caller does not stop
+an operation: the operation runs to its end in a task of its own and gives
+its connection back clean. Every method is safe to call concurrently.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import functools
+from collections.abc import Awaitable, Callable, Coroutine
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Concatenate, Protocol
 
 from joshua_shared.log import get_logger
 from psycopg.rows import dict_row
@@ -22,6 +27,9 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 logger = get_logger("joshua_assignments.store")
+
+# How long ``close`` waits for the operations that are still running.
+CLOSE_WAIT_S = 10.0
 
 STATUSES = (
     "queued",
@@ -192,6 +200,42 @@ def check_fields(fields: dict[str, Any]) -> None:
         raise ValueError(f"unknown status {fields['status']!r}")
 
 
+def _settle(task: asyncio.Task[Any]) -> None:
+    """Log the error of an operation whose caller was cancelled, so it is not lost."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning({"message": "a store operation failed", "error": type(exc).__name__})
+
+
+def shielded[**P, R](
+    method: Callable[Concatenate[PgStore, P], Coroutine[Any, Any, R]],
+) -> Callable[Concatenate[PgStore, P], Awaitable[R]]:
+    """Run a store method in its own task, so a cancelled caller does not stop it.
+
+    psycopg cancels a query when its task is cancelled. When the task is
+    cancelled again during that cleanup (an anyio cancel scope cancels at
+    each await, and the SDK can cancel a tool call two times), the connection
+    stays busy. The rollback then fails with "another command is already in
+    progress", and the pool discards the connection. The caller still gets
+    the cancellation at once.
+    """
+
+    @functools.wraps(method)
+    async def run(self: PgStore, *args: P.args, **kwargs: P.kwargs) -> R:
+        task = asyncio.ensure_future(method(self, *args, **kwargs))
+        self._running.add(task)
+        task.add_done_callback(self._running.discard)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            task.add_done_callback(_settle)
+            raise
+
+    return run
+
+
 class PgStore:
     """The store in the shared Postgres, through an async connection pool."""
 
@@ -200,6 +244,7 @@ class PgStore:
         self._min_size = min_size
         self._max_size = max_size
         self.pool: AsyncConnectionPool | None = None
+        self._running: set[asyncio.Task[Any]] = set()
 
     async def open(self) -> None:
         """Open the pool and apply the schema."""
@@ -216,6 +261,9 @@ class PgStore:
         logger.info({"message": "assignments schema verified"})
 
     async def close(self) -> None:
+        """Wait for the running operations, then close the pool."""
+        if self._running:
+            await asyncio.wait(set(self._running), timeout=CLOSE_WAIT_S)
         if self.pool is not None:
             await self.pool.close()
             self.pool = None
@@ -225,6 +273,7 @@ class PgStore:
             raise RuntimeError("the store is not open")
         return self.pool
 
+    @shielded
     async def ping(self) -> bool:
         try:
             async with self._pool().connection() as conn:
@@ -233,6 +282,7 @@ class PgStore:
             return False
         return True
 
+    @shielded
     async def create(
         self,
         *,
@@ -258,6 +308,7 @@ class PgStore:
         assert created is not None
         return dict(created)
 
+    @shielded
     async def get(self, assignment_id: int) -> dict[str, Any] | None:
         async with self._pool().connection() as conn:
             cur = await conn.execute(
@@ -266,6 +317,7 @@ class PgStore:
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    @shielded
     async def recent(
         self, person_id: str | None, limit: int, status: str | None = None
     ) -> list[dict[str, Any]]:
@@ -285,6 +337,7 @@ class PgStore:
             rows = await cur.fetchall()
         return [dict(row) for row in rows]
 
+    @shielded
     async def update(self, assignment_id: int, **fields: Any) -> dict[str, Any] | None:
         check_fields(fields)
         if not fields:
@@ -303,6 +356,7 @@ class PgStore:
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    @shielded
     async def add_checkpoint(self, assignment_id: int, note: str) -> None:
         async with self._pool().connection() as conn:
             await conn.execute(
@@ -310,6 +364,7 @@ class PgStore:
                 (assignment_id, note),
             )
 
+    @shielded
     async def last_checkpoint(self, assignment_id: int) -> dict[str, Any] | None:
         async with self._pool().connection() as conn:
             cur = await conn.execute(
@@ -320,6 +375,7 @@ class PgStore:
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    @shielded
     async def counts(self) -> dict[str, int]:
         async with self._pool().connection() as conn:
             cur = await conn.execute(
@@ -328,6 +384,7 @@ class PgStore:
             rows = await cur.fetchall()
         return {row["status"]: int(row["n"]) for row in rows}
 
+    @shielded
     async def next_queued(self) -> dict[str, Any] | None:
         async with self._pool().connection() as conn:
             cur = await conn.execute(
@@ -336,6 +393,7 @@ class PgStore:
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    @shielded
     async def requeue_running(self) -> list[int]:
         """Put each ``running`` assignment back in the queue. Returns their ids."""
         async with self._pool().connection() as conn:
@@ -346,6 +404,7 @@ class PgStore:
             rows = await cur.fetchall()
         return sorted(int(row["id"]) for row in rows)
 
+    @shielded
     async def next_slice_n(self, assignment_id: int) -> int:
         """The number of the next slice of an assignment: 1 for the first."""
         async with self._pool().connection() as conn:
@@ -357,6 +416,7 @@ class PgStore:
             row = await cur.fetchone()
         return int(row["n"]) if row else 1
 
+    @shielded
     async def add_slice(
         self,
         assignment_id: int,
