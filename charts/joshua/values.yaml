@@ -353,6 +353,16 @@ assignments:
     limits:
       cpu: "2"
       memory: 2Gi
+  # The `session` container: the session launcher. It runs the Claude CLI of
+  # each session and the commands of the session, as uid 1001.
+  session:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi
 
 # Only channels is reachable from outside the cluster, for a webhook. core and
 # gateway are never exposed.

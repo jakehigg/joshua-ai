@@ -4,6 +4,13 @@
      reads /data (the people file) and writes nothing there. The gateway is its
      only caller.
 
+     The pod has two containers from the same image. `assignments` is the
+     manager, uid 1000. `session` is the session launcher, uid 1001: it runs
+     each session, so a shell in a session cannot read the environment of
+     the manager, and it gets no secret. Both are in the group `work` (gid
+     1001, the fsGroup), so both can write /work. Neither runs as root, and
+     neither holds a capability.
+
      Two switches turn it on, and both are needed. This one puts the pod in the
      cluster. `assignments.enabled: true` inside `config` lets the process
      start; without it the container exits and says so in its log. */}}
@@ -35,7 +42,7 @@ spec:
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        fsGroup: 1000
+        fsGroup: 1001
       containers:
         - name: assignments
           image: {{ include "joshua.image" (dict "root" $ "name" "assignments") }}
@@ -55,6 +62,8 @@ spec:
               value: http://joshua-core:8000
             - name: GATEWAY_URL
               value: http://joshua-gateway:8000
+            - name: ASSIGNMENTS_SESSION_SOCKET
+              value: /run/joshua-session/launcher.sock
             {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.assignments) | nindent 12 }}
           resources:
             {{- toYaml .Values.assignments.resources | nindent 12 }}
@@ -72,11 +81,45 @@ spec:
               readOnly: true
             - name: work
               mountPath: /work
+            - name: session-socket
+              mountPath: /run/joshua-session
             {{- if .Values.persistence.enabled }}
             - name: data
               mountPath: /data
               readOnly: true
             {{- end }}
+        - name: session
+          image: {{ include "joshua.image" (dict "root" $ "name" "assignments") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "joshua_assignments.launcher"]
+          securityContext:
+            runAsUser: 1001
+            runAsGroup: 1001
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: ASSIGNMENTS_SESSION_SOCKET
+              value: /run/joshua-session/launcher.sock
+          resources:
+            {{- toYaml .Values.assignments.session.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/run/joshua-session/launcher.sock"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["test", "-S", "/run/joshua-session/launcher.sock"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: session-socket
+              mountPath: /run/joshua-session
       volumes:
         - name: config
           configMap:
@@ -89,6 +132,9 @@ spec:
           emptyDir:
             sizeLimit: {{ .Values.assignments.work.sizeLimit }}
           {{- end }}
+        - name: session-socket
+          emptyDir:
+            sizeLimit: 1Mi
         {{- if .Values.persistence.enabled }}
         - name: data
           persistentVolumeClaim:

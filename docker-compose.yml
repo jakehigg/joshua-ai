@@ -223,17 +223,54 @@ services:
       ASSIGNMENTS_TOKENS: ${ASSIGNMENTS_TOKENS:-}
       # A bearer that names no person and may only read.
       ADDON_TOKEN: ${ASSIGNMENTS_ADDON_TOKEN:-}
+      # The session launcher in `assignments-session`.
+      ASSIGNMENTS_SESSION_SOCKET: /run/joshua-session/launcher.sock
     volumes:
       - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
       - data:/data:ro
       # The scratch directory of each assignment.
       - assignments-work:/work
+      - assignments-session:/run/joshua-session
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       postgres:
         condition: service_healthy
       channels:
         condition: service_healthy
+      assignments-session:
+        condition: service_started
     healthcheck: *app-healthcheck
+
+  # The session launcher of `assignments`. The same image, as the `session`
+  # user (uid 1001), so a shell in a session cannot read the environment of
+  # the manager. It gets no secret: each session gets only the environment
+  # that the runner gives it. It shares /work and the launcher socket with
+  # `assignments`.
+  assignments-session:
+    image: ghcr.io/jakehigg/joshua-ai-assignments:${JOSHUA_VERSION:-0.1.1}
+    profiles: ["assignments"]
+    restart: unless-stopped
+    user: "1001:1001"
+    entrypoint: ["python", "-m", "joshua_assignments.launcher"]
+    environment:
+      <<: *runtime-vars
+      ASSIGNMENTS_SESSION_SOCKET: /run/joshua-session/launcher.sock
+    volumes:
+      - assignments-work:/work
+      - assignments-session:/run/joshua-session
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/joshua-session/launcher.sock"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 volumes:
   pgdata:
@@ -242,3 +279,4 @@ volumes:
   model-cache:
   mcp-store:
   assignments-work:
+  assignments-session:

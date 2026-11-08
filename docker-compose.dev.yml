@@ -41,3 +41,8 @@ services:
     build:
       context: .
       dockerfile: assignments/Dockerfile
+
+  # The same image as `assignments`; the build above makes it.
+  assignments-session:
+    image: joshua-ai-assignments:dev
+    pull_policy: never

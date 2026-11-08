@@ -69,9 +69,10 @@ def test_every_app_service_can_expand_the_example_config() -> None:
 def test_named_volume_mount_points_are_owned_in_the_image() -> None:
     """A named volume takes its ownership from the image path it mounts over.
 
-    The apps run as uid 1000. A mount point the image does not create comes up
-    root-owned, and every write to it fails. Each service that mounts a named
-    volume must create and chown that path in its Dockerfile.
+    The apps run as uid 1000, and the assignments sessions as uid 1001 in the
+    group 1001. A mount point the image does not create comes up root-owned,
+    and every write to it fails. Each service that mounts a named volume must
+    create and chown that path in its Dockerfile.
     """
     import re
 
@@ -92,7 +93,7 @@ def test_named_volume_mount_points_are_owned_in_the_image() -> None:
             if source not in volumes:
                 continue  # a bind mount takes its ownership from the host
             owned = re.search(
-                rf"mkdir -p {re.escape(target)}\b.*chown 1000:1000 {re.escape(target)}\b",
+                rf"mkdir -p {re.escape(target)}\b.*chown 100[01]:100[01] {re.escape(target)}\b",
                 dockerfile,
             )
             assert owned, f"{service}: {build['dockerfile']} does not own {target}"
