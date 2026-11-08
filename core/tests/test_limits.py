@@ -1,92 +1,30 @@
-"""The subscription limits tracker: the parse of the usage endpoint, the rules
-of a read (max_age, the lock, 429, a timeout, no token), the SDK fill-in, and
-the saved snapshot. A mock transport stands in for Anthropic."""
+"""The subscription limits tracker: the parse of the ``RateLimitEvent`` of a
+model call, the answer with its ``reset`` flags, the saved snapshot, and the
+proof that core makes no HTTP request for the limits."""
 
 from __future__ import annotations
 
-import asyncio
-import copy
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
 import pytest
 from joshua_core import limits
 from joshua_core.engine.usage import UsageMeter
 from joshua_core.limits import (
-    ERROR_BACKOFF_S,
-    NO_TOKEN,
     NOT_YET,
-    USAGE_BETA,
-    USAGE_URL,
     LimitsTracker,
+    Snapshot,
+    Window,
     dump_snapshot,
     load_snapshot,
     parse_event_windows,
-    parse_usage,
     uses_subscription,
 )
 
 TOKEN = "sk-ant-oat01-secret-test-token"
 TZ = "America/New_York"
 T0 = datetime(2026, 11, 8, 1, 0, tzinfo=UTC)
-
-BODY: dict[str, Any] = {
-    "five_hour": {
-        "utilization": 23.0,
-        "resets_at": "2026-11-08T03:30:00.842595+00:00",
-        "limit_dollars": None,
-        "used_dollars": None,
-        "remaining_dollars": None,
-        "locked_reason": None,
-    },
-    "seven_day": {
-        "utilization": 41.5,
-        "resets_at": "2026-11-10T01:00:00.842614+00:00",
-        "limit_dollars": None,
-    },
-    "seven_day_opus": None,
-    "seven_day_sonnet": None,
-    "extra_usage": {
-        "is_enabled": True,
-        "monthly_limit": 2500,
-        "used_credits": 125.0,
-        "utilization": None,
-        "currency": "USD",
-        "decimal_places": 2,
-    },
-    "limits": [
-        {
-            "kind": "session",
-            "group": "session",
-            "percent": 23,
-            "severity": "normal",
-            "resets_at": "2026-11-08T03:30:00.842595+00:00",
-            "scope": None,
-            "is_active": True,
-        },
-        {
-            "kind": "weekly_all",
-            "group": "weekly",
-            "percent": 41,
-            "severity": "normal",
-            "resets_at": "2026-11-10T01:00:00.842614+00:00",
-            "scope": None,
-            "is_active": True,
-        },
-        {
-            "kind": "weekly_scoped",
-            "group": "weekly",
-            "percent": 13,
-            "resets_at": "2026-11-10T01:00:00.842614+00:00",
-            "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None},
-            "is_active": False,
-        },
-    ],
-    "some_new_key": {"nested": [1, 2, 3]},
-    "another_null": None,
-}
 
 RAW_EVENT = {
     "status": "allowed",
@@ -100,6 +38,9 @@ RAW_EVENT = {
         "seven_day": {"utilization": 0.47, "resetsAt": 1794272400, "status": "allowed_warning"},
     },
 }
+# The reset times of RAW_EVENT.
+FIVE_HOUR_RESET = datetime(2026, 11, 8, 3, 30, tzinfo=UTC)
+SEVEN_DAY_RESET = datetime(2026, 11, 10, 1, 0, tzinfo=UTC)
 
 
 class Clock:
@@ -111,28 +52,6 @@ class Clock:
 
     def advance(self, seconds: float) -> None:
         self.now = self.now + timedelta(seconds=seconds)
-
-
-class Upstream:
-    """A mock usage endpoint. ``responses`` is used in order; the last repeats."""
-
-    def __init__(self, *responses: Any, delay: float = 0.0) -> None:
-        self.responses = list(responses)
-        self.requests: list[httpx.Request] = []
-        self.delay = delay
-
-    async def handle(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        item = self.responses[min(len(self.requests) - 1, len(self.responses) - 1)]
-        if isinstance(item, Exception):
-            raise item
-        return item
-
-    @property
-    def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self.handle)
 
 
 class FakeStore:
@@ -148,26 +67,8 @@ class FakeStore:
         self.data = data
 
 
-def ok(body: Any = None) -> httpx.Response:
-    return httpx.Response(200, json=BODY if body is None else body)
-
-
-def tracker(
-    upstream: Upstream,
-    *,
-    clock: Clock | None = None,
-    token: str = TOKEN,
-    store: Any = None,
-    max_age_s: int = 300,
-) -> LimitsTracker:
-    return LimitsTracker(
-        token=lambda: token,
-        timezone=TZ,
-        max_age_s=max_age_s,
-        store=store,
-        clock=clock or Clock(),
-        transport=upstream.transport,
-    )
+def tracker(*, clock: Clock | None = None, store: Any = None) -> LimitsTracker:
+    return LimitsTracker(timezone=TZ, store=store, clock=clock or Clock())
 
 
 def event(raw: dict[str, Any] | None = None, **fields: Any) -> Any:
@@ -188,229 +89,118 @@ def _no_installed_tracker():
     limits.install(None)
 
 
-# --- the parse ---------------------------------------------------------------
+# --- the answer ------------------------------------------------------------------
 
 
-def test_a_200_body_gives_both_windows_the_scoped_week_and_the_extra_usage() -> None:
-    snap = parse_usage(BODY, T0)
-    assert snap is not None
-    assert snap.source == "usage_api"
-    assert snap.five_hour is not None and snap.five_hour.used_pct == 23.0
-    assert snap.five_hour.status == "normal"
-    assert snap.five_hour.resets_at == datetime(2026, 11, 8, 3, 30, 0, 842595, tzinfo=UTC)
-    assert snap.seven_day is not None and snap.seven_day.used_pct == 41.5
-    assert [(s.name, s.used_pct) for s in snap.scoped] == [("Fable", 13.0)]
-    assert snap.extra_usage is not None
-    # monthly_limit and used_credits are cents: decimal_places is 2.
-    assert snap.extra_usage.limit == 25.0
-    assert snap.extra_usage.used == 1.25
-    assert snap.extra_usage.currency == "USD"
-    assert snap.extra_usage.enabled is True
+def test_with_no_event_the_answer_says_why() -> None:
+    answer = tracker().answer()
+    assert answer.available is False
+    assert answer.reason == NOT_YET
+    assert answer.five_hour is None and answer.seven_day is None
 
 
-def test_extra_usage_with_no_decimal_places_gives_no_amount() -> None:
-    body = copy.deepcopy(BODY)
-    del body["extra_usage"]["decimal_places"]
-    snap = parse_usage(body, T0)
-    assert snap is not None and snap.extra_usage is not None
-    assert snap.extra_usage.used is None and snap.extra_usage.limit is None
+async def test_an_event_gives_both_windows_in_the_instance_timezone() -> None:
+    store = FakeStore()
+    t = tracker(store=store)
+    assert t.note_sdk_event(event(RAW_EVENT).rate_limit_info) is True
+    await t.drain()
+    answer = t.answer()
+    assert answer.available is True
+    assert answer.observed_at == "2026-11-07T20:00:00-05:00"
+    assert answer.five_hour is not None
+    assert (answer.five_hour.used_pct, answer.five_hour.left_pct) == (31.0, 69.0)
+    # 03:30 UTC is 22:30 the day before in New York.
+    assert answer.five_hour.resets_at == "2026-11-07T22:30:00-05:00"
+    assert answer.five_hour.reset is False
+    assert answer.seven_day is not None and answer.seven_day.status == "allowed_warning"
+    assert answer.seven_day.reset is False
+    assert set(store.saves[-1]) == {"observed_at", "five_hour", "seven_day"}
+    assert TOKEN not in str(answer.model_dump())
 
 
-def test_a_seven_day_model_object_is_a_scoped_limit() -> None:
-    body = copy.deepcopy(BODY)
-    body["seven_day_opus"] = {"utilization": 60.0, "resets_at": None}
-    snap = parse_usage(body, T0)
-    assert snap is not None
-    assert [(s.name, s.used_pct) for s in snap.scoped] == [("Fable", 13.0), ("Opus", 60.0)]
+def test_a_window_whose_reset_time_passed_is_marked_reset() -> None:
+    clock = Clock()
+    t = tracker(clock=clock)
+    t.note_sdk_event(event(RAW_EVENT).rate_limit_info)
+    clock.now = FIVE_HOUR_RESET - timedelta(seconds=1)
+    answer = t.answer()
+    assert answer.five_hour is not None and answer.five_hour.reset is False
+    clock.now = FIVE_HOUR_RESET
+    answer = t.answer()
+    assert answer.five_hour is not None and answer.five_hour.reset is True
+    # The numbers stay the last ones until the next call.
+    assert answer.five_hour.used_pct == 31.0
+    assert answer.seven_day is not None and answer.seven_day.reset is False
+    clock.now = SEVEN_DAY_RESET + timedelta(days=1)
+    answer = t.answer()
+    assert answer.seven_day is not None and answer.seven_day.reset is True
+    # The observed time does not move: no call came.
+    assert answer.observed_at == "2026-11-07T20:00:00-05:00"
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        {},
-        {"five_hour": None, "seven_day": "text", "limits": "no"},
-        {"five_hour": {"utilization": "23"}, "limits": [None, 3, {"kind": "weekly_scoped"}]},
-        {"five_hour": {"utilization": True}, "extra_usage": {"is_enabled": "yes"}},
-        {"five_hour": {"utilization": 5, "resets_at": "not a time"}},
-        {"limits": [{"kind": "weekly_scoped", "percent": 9, "scope": {"surface": "web"}}]},
-    ],
-)
-def test_missing_and_unknown_keys_never_fail(body: dict[str, Any]) -> None:
-    snap = parse_usage(body, T0)
-    assert snap is not None
+def test_a_new_event_after_the_reset_clears_the_flag() -> None:
+    clock = Clock(FIVE_HOUR_RESET + timedelta(minutes=5))
+    t = tracker(clock=clock)
+    t._snapshot = Snapshot(T0, five_hour=Window(80.0, FIVE_HOUR_RESET))
+    answer = t.answer()
+    assert answer.five_hour is not None and answer.five_hour.reset is True
+    raw = {"unifiedWindows": {"five_hour": {"utilization": 0.02, "resetsAt": 1794126600}}}
+    assert t.note_sdk_event(event(raw).rate_limit_info) is True
+    answer = t.answer()
+    assert answer.five_hour is not None
+    assert answer.five_hour.reset is False and answer.five_hour.used_pct == 2.0
 
 
-def test_the_limits_list_fills_a_missing_window() -> None:
-    body = {"limits": BODY["limits"]}
-    snap = parse_usage(body, T0)
-    assert snap is not None
-    assert snap.five_hour is not None and snap.five_hour.used_pct == 23.0
-    assert snap.seven_day is not None and snap.seven_day.used_pct == 41.0
+def test_a_window_with_no_reset_time_is_never_reset() -> None:
+    clock = Clock()
+    t = tracker(clock=clock)
+    t.note_sdk_event(event({}, rate_limit_type="seven_day", utilization=0.5).rate_limit_info)
+    clock.advance(10 * 365 * 86400)
+    answer = t.answer()
+    assert answer.seven_day is not None and answer.seven_day.reset is False
 
 
-def test_a_body_that_is_not_an_object_is_refused() -> None:
-    assert parse_usage(["x"], T0) is None
+# --- the saved snapshot ---------------------------------------------------------
 
 
 def test_a_saved_snapshot_loads_back() -> None:
-    snap = parse_usage(BODY, T0)
-    assert snap is not None
+    snap = Snapshot(T0, five_hour=Window(31.0, FIVE_HOUR_RESET, "allowed"))
     assert load_snapshot(dump_snapshot(snap)) == snap
-    assert load_snapshot({"source": "other"}) is None
+    assert load_snapshot({"five_hour": {"used_pct": 1}}) is None
     assert load_snapshot("text") is None
 
 
-# --- a read of the endpoint -----------------------------------------------------
-
-
-async def test_a_read_sends_the_token_and_the_beta_header_and_answers() -> None:
-    upstream = Upstream(ok())
-    store = FakeStore()
-    t = tracker(upstream, store=store)
-    answer = await t.current()
-    request = upstream.requests[0]
-    assert str(request.url) == USAGE_URL
-    assert request.headers["authorization"] == f"Bearer {TOKEN}"
-    assert request.headers["anthropic-beta"] == USAGE_BETA
-    assert answer.available is True
-    assert answer.source == "usage_api"
-    assert answer.stale is False
-    assert answer.retry_after is None
-    assert answer.five_hour is not None
-    assert answer.five_hour.left_pct == 77.0
-    # 03:30 UTC is 22:30 the day before in New York.
-    assert answer.five_hour.resets_at == "2026-11-07T22:30:00.842595-05:00"
-    assert answer.observed_at == "2026-11-07T20:00:00-05:00"
-    assert answer.scoped[0].left_pct == 87.0
-    assert answer.extra_usage is not None and answer.extra_usage.limit == 25.0
-    assert len(store.saves) == 1
-    assert TOKEN not in str(answer.model_dump())
-    assert TOKEN not in str(store.saves)
-
-
-async def test_a_second_request_inside_max_age_makes_no_call() -> None:
-    clock = Clock()
-    upstream = Upstream(ok())
-    t = tracker(upstream, clock=clock, max_age_s=300)
-    await t.current()
-    clock.advance(299)
-    await t.current()
-    assert len(upstream.requests) == 1
-    clock.advance(1)
-    await t.current()
-    assert len(upstream.requests) == 2
-
-
-async def test_two_concurrent_requests_make_one_call() -> None:
-    upstream = Upstream(ok(), delay=0.05)
-    t = tracker(upstream)
-    first, second = await asyncio.gather(t.current(), t.current())
-    assert len(upstream.requests) == 1
-    assert first.available and second.available
-
-
-async def test_a_429_keeps_the_snapshot_and_honours_retry_after(caplog) -> None:
-    clock = Clock()
-    limited = httpx.Response(
-        429,
-        json={"error": {"type": "rate_limit_error", "message": "Rate limited."}},
-        headers={"retry-after": "3589"},
+def test_an_old_saved_snapshot_with_more_keys_still_loads() -> None:
+    old = {
+        "source": "usage_api",
+        "observed_at": "2026-11-08T01:00:00+00:00",
+        "api_observed_at": "2026-11-08T01:00:00+00:00",
+        "five_hour": {"used_pct": 23.0, "resets_at": "2026-11-08T03:30:00+00:00", "status": None},
+        "seven_day": {"used_pct": 41.5, "resets_at": None, "status": "normal"},
+        "scoped": [{"name": "Fable", "used_pct": 13.0, "resets_at": None}],
+        "extra_usage": {"enabled": True, "used": 1.25, "limit": 25.0, "currency": "USD"},
+    }
+    snap = load_snapshot(old)
+    assert snap == Snapshot(
+        T0, five_hour=Window(23.0, FIVE_HOUR_RESET), seven_day=Window(41.5, None, "normal")
     )
-    upstream = Upstream(ok(), limited, ok())
-    t = tracker(upstream, clock=clock, max_age_s=300)
-    await t.current()
-    clock.advance(300)
-    answer = await t.current()
-    assert len(upstream.requests) == 2
-    assert answer.available is True
-    assert answer.stale is True
-    assert answer.retry_after == 3589
-    assert answer.five_hour is not None and answer.five_hour.used_pct == 23.0
-    clock.advance(3000)
-    answer = await t.current()
-    assert len(upstream.requests) == 2
-    assert answer.retry_after == 589
-    clock.advance(589)
-    answer = await t.current()
-    assert len(upstream.requests) == 3
-    assert answer.stale is False and answer.retry_after is None
-    assert TOKEN not in caplog.text
 
 
-async def test_a_429_with_no_retry_after_waits_the_back_off() -> None:
-    clock = Clock()
-    upstream = Upstream(httpx.Response(429), ok())
-    t = tracker(upstream, clock=clock)
-    answer = await t.current()
-    assert answer.available is False and answer.reason == NOT_YET
-    assert answer.retry_after == ERROR_BACKOFF_S
-    clock.advance(ERROR_BACKOFF_S - 1)
-    await t.current()
-    assert len(upstream.requests) == 1
-
-
-async def test_a_timeout_backs_off_for_a_minute() -> None:
-    clock = Clock()
-    upstream = Upstream(ok(), httpx.ReadTimeout("slow"), ok())
-    t = tracker(upstream, clock=clock, max_age_s=60)
-    await t.current()
-    clock.advance(60)
-    answer = await t.current()
-    assert answer.stale is True and answer.retry_after == ERROR_BACKOFF_S
-    assert answer.five_hour is not None
-    clock.advance(30)
-    await t.current()
-    assert len(upstream.requests) == 2
-    clock.advance(30)
-    answer = await t.current()
-    assert len(upstream.requests) == 3
-    assert answer.stale is False
-
-
-@pytest.mark.parametrize(
-    "response",
-    [
-        httpx.Response(500, text="boom"),
-        httpx.Response(200, text="not json"),
-        httpx.Response(200, json=[1, 2]),
-        httpx.ConnectError("refused"),
-    ],
-)
-async def test_another_failure_backs_off_too(response: Any) -> None:
-    upstream = Upstream(response)
-    t = tracker(upstream)
-    answer = await t.current()
-    assert answer.available is False
-    assert answer.stale is True
-    assert answer.retry_after == ERROR_BACKOFF_S
-    await t.current()
-    assert len(upstream.requests) == 1
-
-
-async def test_no_token_makes_no_call_and_says_so() -> None:
-    upstream = Upstream(ok())
-    t = tracker(upstream, token="")
-    answer = await t.current()
-    assert answer.available is False
-    assert answer.reason == NO_TOKEN
-    assert upstream.requests == []
-
-
-async def test_a_restart_keeps_the_saved_snapshot_and_its_age() -> None:
+async def test_a_restart_keeps_the_saved_snapshot() -> None:
     clock = Clock()
     store = FakeStore()
-    first = tracker(Upstream(ok()), clock=clock, store=store)
-    await first.current()
+    first = tracker(clock=clock, store=store)
+    first.note_sdk_event(event(RAW_EVENT).rate_limit_info)
+    await first.drain()
     clock.advance(60)
-    upstream = Upstream(ok())
-    second = tracker(upstream, clock=clock, store=store)
+    second = tracker(clock=clock, store=store)
     await second.load()
-    answer = await second.current()
+    answer = second.answer()
     assert answer.available is True and answer.five_hour is not None
-    assert upstream.requests == []
+    assert answer.five_hour.used_pct == 31.0
 
 
-async def test_a_store_that_fails_never_breaks_a_read() -> None:
+async def test_a_store_that_fails_never_breaks_an_event() -> None:
     class Broken:
         async def load_limits_snapshot(self) -> None:
             raise RuntimeError("db down")
@@ -418,13 +208,37 @@ async def test_a_store_that_fails_never_breaks_a_read() -> None:
         async def save_limits_snapshot(self, data: dict[str, Any]) -> None:
             raise RuntimeError("db down")
 
-    t = tracker(Upstream(ok()), store=Broken())
+    t = tracker(store=Broken())
     await t.load()
-    answer = await t.current()
-    assert answer.available is True
+    assert t.note_sdk_event(event(RAW_EVENT).rate_limit_info) is True
+    await t.drain()
+    assert t.answer().available is True
 
 
-# --- the SDK fill-in ------------------------------------------------------------
+async def test_an_older_event_does_not_replace_a_newer_snapshot() -> None:
+    clock = Clock()
+    t = tracker(clock=clock)
+    t._snapshot = Snapshot(T0 + timedelta(seconds=5), five_hour=Window(50.0))
+    assert t.note_sdk_event(event(RAW_EVENT).rate_limit_info) is False
+    assert t.snapshot is not None and t.snapshot.five_hour == Window(50.0)
+
+
+# --- no HTTP ------------------------------------------------------------------------
+
+
+async def test_core_makes_no_http_request_for_the_limits(no_http: list[str]) -> None:
+    store = FakeStore()
+    t = LimitsTracker(timezone=TZ, store=store)
+    await t.load()
+    t.answer()
+    t.note_sdk_event(event(RAW_EVENT).rate_limit_info)
+    await t.drain()
+    t.answer()
+    assert no_http == []
+    assert not hasattr(limits, "httpx")
+
+
+# --- the events ------------------------------------------------------------------
 
 
 def test_unified_windows_give_both_windows_as_percent() -> None:
@@ -449,34 +263,6 @@ def test_with_no_unified_windows_the_type_and_utilization_are_read() -> None:
     assert parse_event_windows(event({}, rate_limit_type="five_hour").rate_limit_info) == {}
 
 
-async def test_an_event_updates_the_windows_and_keeps_the_rest() -> None:
-    clock = Clock()
-    store = FakeStore()
-    t = tracker(Upstream(ok()), clock=clock, store=store)
-    await t.current()
-    clock.advance(10)
-    assert t.note_sdk_event(event(RAW_EVENT).rate_limit_info) is True
-    await t.drain()
-    answer = t.answer()
-    assert answer.source == "sdk_event"
-    assert answer.five_hour is not None and answer.five_hour.used_pct == 31.0
-    assert answer.seven_day is not None and answer.seven_day.used_pct == 47.0
-    assert [s.name for s in answer.scoped] == ["Fable"]
-    assert answer.extra_usage is not None
-    assert store.saves[-1]["source"] == "sdk_event"
-
-
-async def test_an_event_fills_the_snapshot_while_the_endpoint_blocks() -> None:
-    upstream = Upstream(httpx.Response(429, headers={"retry-after": "600"}))
-    t = tracker(upstream)
-    await t.current()
-    t.note_sdk_event(event(RAW_EVENT).rate_limit_info)
-    answer = await t.current()
-    assert len(upstream.requests) == 1
-    assert answer.available is True and answer.source == "sdk_event"
-    assert answer.retry_after == 600
-
-
 # The rate_limit_info of each bundled CLI, as captured on 2026-11-08 with a
 # subscription token. CLI 2.1.239 (claude-agent-sdk 0.2.144) sends no
 # percentages, so core needs claude-agent-sdk >= 0.2.165 (CLI 2.1.294), which
@@ -499,10 +285,10 @@ RAW_EVENT_CLI_2_1_294 = {
 
 
 def test_an_event_from_cli_2_1_294_fills_both_windows() -> None:
-    t = tracker(Upstream(ok()))
+    t = tracker()
     assert t.note_sdk_event(event(RAW_EVENT_CLI_2_1_294).rate_limit_info) is True
     answer = t.answer()
-    assert answer.available is True and answer.source == "sdk_event"
+    assert answer.available is True
     assert answer.five_hour is not None
     assert (answer.five_hour.used_pct, answer.five_hour.left_pct) == (61.0, 39.0)
     assert answer.five_hour.status is None
@@ -510,35 +296,26 @@ def test_an_event_from_cli_2_1_294_fills_both_windows() -> None:
 
 
 def test_an_event_from_cli_2_1_239_holds_no_percent_and_changes_nothing() -> None:
-    t = tracker(Upstream(ok()))
+    t = tracker()
     info = event(RAW_EVENT_CLI_2_1_239, rate_limit_type="five_hour").rate_limit_info
     assert t.note_sdk_event(info) is False
     assert t.snapshot is None
 
 
-async def test_an_older_event_does_not_replace_a_newer_snapshot() -> None:
-    clock = Clock()
-    t = tracker(Upstream(ok()), clock=clock)
-    await t.current()
-    clock.advance(-5)
-    assert t.note_sdk_event(event(RAW_EVENT).rate_limit_info) is False
-    assert t.answer().source == "usage_api"
-
-
 def test_note_event_reads_only_a_call_on_the_subscription() -> None:
-    t = tracker(Upstream(ok()))
+    t = tracker()
     limits.install(t)
     limits.note_event(event(RAW_EVENT), subscription=False)
     assert t.snapshot is None
     limits.note_event(SimpleNamespace(), subscription=True)
     assert t.snapshot is None
     limits.note_event(event(RAW_EVENT), subscription=True)
-    assert t.snapshot is not None and t.snapshot.source == "sdk_event"
+    assert t.snapshot is not None
 
 
 def test_note_event_with_no_tracker_or_a_bad_event_does_nothing() -> None:
     limits.note_event(event(RAW_EVENT), subscription=True)
-    t = tracker(Upstream(ok()))
+    t = tracker()
     limits.install(t)
     bad = type("RateLimitEvent", (), {"rate_limit_info": None})()
     limits.note_event(bad, subscription=True)
@@ -546,7 +323,7 @@ def test_note_event_with_no_tracker_or_a_bad_event_does_nothing() -> None:
 
 
 def test_the_usage_meter_gives_the_event_on_the_subscription_only() -> None:
-    t = tracker(Upstream(ok()))
+    t = tracker()
     limits.install(t)
     other = UsageMeter(subscription=False)
     other.note(event(RAW_EVENT))

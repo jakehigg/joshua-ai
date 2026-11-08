@@ -39,28 +39,25 @@ CONFIG = textwrap.dedent("""\
         alex: ${VIEWER_PW_ALEX:-}
     """)
 
-# The answer of a real core, while Anthropic blocked the usage endpoint.
+# The answer of a real core after a model call on the subscription.
 REAL: dict[str, Any] = {
     "available": True,
     "reason": None,
-    "source": "sdk_event",
     "observed_at": "2026-11-07T22:14:03-05:00",
-    "stale": True,
     "five_hour": {
         "used_pct": 61.0,
         "left_pct": 39.0,
         "resets_at": "2026-11-07T22:30:00-05:00",
         "status": None,
+        "reset": False,
     },
     "seven_day": {
         "used_pct": 28.0,
         "left_pct": 72.0,
         "resets_at": "2026-11-09T20:00:00-05:00",
         "status": None,
+        "reset": False,
     },
-    "scoped": [],
-    "extra_usage": None,
-    "retry_after": 2592,
 }
 
 USAGE: dict[str, Any] = {
@@ -198,9 +195,10 @@ def test_the_real_answer_gives_two_meters_above_the_usage(data, monkeypatch) -> 
     assert 'role=meter aria-label="5-hour used"' in section
     assert 'aria-valuenow="61"' in section and 'aria-valuetext="61% used"' in section
     assert '<rect class=fill width="61"' in section
-    # The stale note says when, and no retry count reaches the reader.
-    assert "<p class=meta>as of 10:14 pm today</p>" in section
-    assert "2592" not in html and "retry" not in section.lower()
+    # The line under the heading says when the numbers came.
+    assert section.index("<h2>") < section.index("<p class=meta>as of 10:14 pm today</p>")
+    assert section.index("as of") < section.index("limits-grid")
+    assert " reset" not in section and "next model call" not in section
     assert "<script" not in html and "style=" not in section
     _usage_intact(html)
     assert len(core.limits_requests()) == 1
@@ -252,45 +250,60 @@ def test_an_unknown_field_is_ignored(data, monkeypatch) -> None:
     assert _limits(_get(monkeypatch, answer)[0]).count('<div class="limit ') == 2
 
 
-def test_scoped_and_extra_usage_render_when_present(data, monkeypatch) -> None:
+def test_a_reset_window_is_dimmed_and_says_the_next_call_updates_it(data, monkeypatch) -> None:
     answer = copy.deepcopy(REAL)
-    answer["stale"] = False
-    answer["scoped"] = [
-        {"name": "Fable", "used_pct": 13.0, "left_pct": 87.0, "resets_at": None},
-    ]
-    answer["extra_usage"] = {"enabled": True, "used": 12.5, "limit": 25.0, "currency": "USD"}
+    answer["five_hour"].update(
+        used_pct=95.0, left_pct=5.0, resets_at="2026-11-07T21:30:00-05:00", reset=True
+    )
     section = _limits(_get(monkeypatch, answer)[0])
-    assert section.count('<div class="limit ') == 4
-    assert "<span class=limit-name>Fable weekly</span>" in section
-    assert "<span class=limit-name>Extra usage</span>" in section
-    assert "<strong>$12.50</strong> of $25.00" in section
-    assert "$12.50 left" in section and "50% used" in section
-    assert "as of" not in section
+    five, weekly = section.split("<span class=limit-name>Weekly</span>")
+    # The last bar stays, dimmed, with no badge.
+    assert '<div class="limit crit reset">' in five
+    assert "class=badge" not in five
+    assert '<rect class=fill width="95"' in five
+    assert "reset at 9:30 pm today — updates on the next model call" in five
+    assert "resets" not in five
+    assert "resets Mon 9 Nov, 8:00 pm" in weekly
+    assert "<p class=meta>as of 10:14 pm today</p>" in section
 
 
-@pytest.mark.parametrize(
-    "extra",
-    [
-        None,
-        {"enabled": False, "used": 1.0, "limit": 25.0, "currency": "USD"},
-        {"enabled": True, "used": None, "limit": None, "currency": None},
-    ],
-)
-def test_no_extra_meter_when_off_or_unknown(data, monkeypatch, extra) -> None:
-    answer = copy.deepcopy(REAL)
-    answer["extra_usage"] = extra
-    section = _limits(_get(monkeypatch, answer)[0])
-    assert "Extra usage" not in section
-    assert section.count('<div class="limit ') == 2
+def test_a_reset_window_with_no_time_says_reset_only() -> None:
+    body = LimitsResponse.model_validate(
+        {
+            "available": True,
+            "observed_at": "2026-11-07T20:00:00-05:00",
+            "seven_day": {"used_pct": 40, "left_pct": 60, "reset": True},
+        }
+    )
+    html = limits_mod.section_html(body, configured=True, tz=NY, now=NOW)
+    assert "<span>reset — updates on the next model call</span>" in html
+    assert '<div class="limit ok reset">' in html
 
 
-def test_a_hostile_scoped_name_and_reason_are_escaped(data, monkeypatch) -> None:
+def test_the_reset_flag_and_not_the_viewer_clock_decides() -> None:
+    body = LimitsResponse.model_validate(
+        {
+            "available": True,
+            "five_hour": {
+                "used_pct": 5,
+                "left_pct": 95,
+                "resets_at": (NOW - timedelta(minutes=10)).isoformat(),
+                "reset": False,
+            },
+        }
+    )
+    html = limits_mod.section_html(body, configured=True, tz=NY, now=NOW)
+    assert "resets 10:10 pm today" in html and "next model call" not in html
+    # No observed time gives no "as of" line.
+    assert "as of" not in html
+
+
+def test_a_hostile_reason_and_status_are_escaped(data, monkeypatch) -> None:
     evil = "<script>alert(1)</script>"
     answer = copy.deepcopy(REAL)
-    answer["scoped"] = [{"name": evil, "used_pct": 1.0, "left_pct": 99.0}]
+    answer["five_hour"]["status"] = evil
     html = _get(monkeypatch, answer)[0]
     assert "<script>" not in html
-    assert "&lt;script&gt;alert(1)&lt;/script&gt; weekly" in html
     html = _get(monkeypatch, {"available": False, "reason": evil})[0]
     assert "<script>" not in html and "&lt;script&gt;" in html
 
@@ -356,39 +369,15 @@ def test_when_text_uses_the_instance_zone() -> None:
     assert limits_mod.when_text("2026-11-07T22:30:00-05:00", tz=akl, now=NOW) == "4:30 pm today"
 
 
-def test_a_past_reset_reads_reset() -> None:
-    body = LimitsResponse.model_validate(
-        {
-            "available": True,
-            "five_hour": {
-                "used_pct": 5,
-                "left_pct": 95,
-                "resets_at": (NOW - timedelta(minutes=10)).isoformat(),
-            },
-        }
-    )
-    html = limits_mod.section_html(body, configured=True, tz=NY, now=NOW)
-    assert "reset 10:10 pm today" in html and "resets" not in html
-
-
 def test_an_answer_with_no_window_is_not_available() -> None:
     body = LimitsResponse(available=True)
     html = limits_mod.section_html(body, configured=True, tz=NY, now=NOW)
     assert "not available now" in html
 
 
-def test_a_stale_answer_with_no_time_says_old_values() -> None:
-    body = LimitsResponse.model_validate({**REAL, "observed_at": None})
-    html = limits_mod.section_html(body, configured=True, tz=NY, now=NOW)
-    assert "<p class=meta>old values</p>" in html
-
-
-def test_numbers_and_money() -> None:
+def test_numbers() -> None:
     assert limits_mod.pct(61.0) == "61%"
     assert limits_mod.pct(61.25) == "61.2%"
-    assert limits_mod.money(1234.5, "usd") == "$1,234.50"
-    assert limits_mod.money(3, None) == "$3.00"
-    assert limits_mod.money(3, "CHF") == "3.00 CHF"
     assert limits_mod.clock_time(datetime(2026, 1, 1, 0, 0, tzinfo=UTC)) == "12:00 am"
     assert limits_mod.clock_time(datetime(2026, 1, 1, 13, 7, tzinfo=UTC)) == "1:07 pm"
 

@@ -320,11 +320,10 @@ usage:
 
 # limits:
 #   # How much of the Claude subscription limits is used: core's
-#   # GET /v1/limits (no bearer) and the check_limits tool. Core reads the
-#   # percent used from Anthropic at most once in max_age. Every key is
-#   # optional.
+#   # GET /v1/limits (no bearer) and the check_limits tool. The numbers come
+#   # from the rate-limit report of each model call on the subscription.
+#   # Every key is optional.
 #   enabled: true              # false: the route answers 404 and no job gets the tool
-#   max_age: 5m                # read Anthropic again after this age
 #   chat_tool: true            # give check_limits to chat turns
 #   voice_tool: true           # give check_limits to voice turns
 

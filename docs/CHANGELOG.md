@@ -12,21 +12,23 @@ with the images and the packaged chart, are at
   much of my limit is left?", and the `check_limits` tool gives the percent
   used and left of the 5-hour window and the weekly window, and when each
   resets. Core's new `GET /v1/limits` gives the same numbers as JSON with no
-  bearer, in the cluster and on the host at `127.0.0.1:8081`. Core reads them
-  from an Anthropic endpoint that is not documented, at most once in
-  `limits.max_age` (default 5 minutes), and each model call on the
-  subscription updates them at no cost. Anthropic gives a percent, not a
-  token count. The new `limits` section turns the route and the tool off, or
-  the tool off for chat or for voice. See
-  [config.md](config.md#limits).
+  bearer, in the cluster and on the host at `127.0.0.1:8081`. The numbers
+  come from the rate-limit report of each model call on the subscription, at
+  no cost. They show after the first model call since the start, or from the
+  last saved value. When the reset time of a window is in the past, the
+  answer marks the window `reset`: the next model call updates its numbers.
+  A job on another inference server does not report the limits. The token
+  from `claude setup-token` is the supported token. The new `limits` section
+  turns the route and the tool off, or the tool off for chat or for voice.
+  See [config.md](config.md#limits).
 - **The usage page shows the subscription limits.** Above the chart, the
   viewer's `/usage` page has a meter for the 5-hour window and the weekly
   window: the percent used, a bar, the percent left, and the reset time in
-  the instance timezone. It also has a meter for each weekly limit of one
-  model and for the extra usage, when Anthropic gives them. The bar is amber
-  from 75 percent used and red from 90 percent. The meters need only
-  `CORE_URL`. When core does not answer, the section says so, and the rest
-  of the page does not change. See
+  the instance timezone. A line under the heading gives the time of the
+  numbers. A window that reset shows its last bar dimmed and says that the
+  next model call updates it. The bar is amber from 75 percent used and red
+  from 90 percent. The meters need only `CORE_URL`. When core does not
+  answer, the section says so, and the rest of the page does not change. See
   [operations.md](operations.md#the-usage-page).
 
 ## 0.1.1 - 2026-11-07

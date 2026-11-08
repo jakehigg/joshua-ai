@@ -218,59 +218,34 @@ class UsageResponse(_Model):
 # The path of core's subscription limits route. It has no bearer, as ``/healthz``.
 LIMITS_PATH = "/v1/limits"
 
-LimitsSource = Literal["usage_api", "sdk_event"]
-
 
 class LimitsWindow(_Model):
     """One limit window: the percent used and left, 0 to 100, and when it
     resets. ``resets_at`` is ISO 8601 with the offset of the instance
-    timezone, or None. ``status`` is the word Anthropic gave, or None."""
+    timezone, or None. ``status`` is the word Anthropic gave, or None.
+    ``reset`` is True when ``resets_at`` is in the past: the window reset
+    after the last model call, so the numbers are old until the next call."""
 
     used_pct: float
     left_pct: float
     resets_at: str | None = None
     status: str | None = None
-
-
-class LimitsScoped(_Model):
-    """One weekly limit of one model or surface, such as ``Opus``."""
-
-    name: str
-    used_pct: float
-    left_pct: float
-    resets_at: str | None = None
-
-
-class LimitsExtraUsage(_Model):
-    """The paid usage past the limits. ``used`` and ``limit`` are in units of
-    ``currency`` (dollars, not cents), or None when Anthropic did not say."""
-
-    enabled: bool
-    used: float | None = None
-    limit: float | None = None
-    currency: str | None = None
+    reset: bool = False
 
 
 class LimitsResponse(_Model):
     """The answer of ``GET /v1/limits``.
 
     ``available`` is False when core knows nothing yet, and ``reason`` then
-    says why. ``source`` is where the last value came from. ``observed_at`` is
-    when. ``stale`` is True when the last read of the usage endpoint failed,
-    and ``retry_after`` is the seconds until core reads it again, while
-    Anthropic blocks it or after an error.
+    says why. ``observed_at`` is the time of the model call that gave the
+    numbers.
     """
 
     available: bool
     reason: str | None = None
-    source: LimitsSource | None = None
     observed_at: str | None = None
-    stale: bool = False
     five_hour: LimitsWindow | None = None
     seven_day: LimitsWindow | None = None
-    scoped: list[LimitsScoped] = []
-    extra_usage: LimitsExtraUsage | None = None
-    retry_after: int | None = None
 
 
 # The path of the gateway snapshot route. ``{name}`` is a configured snapshot.

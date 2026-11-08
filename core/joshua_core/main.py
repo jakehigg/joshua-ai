@@ -285,17 +285,11 @@ def _start_snapshots(runner: SnapshotRunner | None) -> None:
 
 async def _build_limits(settings: JoshuaConfig, repo: Repo) -> LimitsTracker | None:
     """The tracker of the subscription limits, with its last saved snapshot,
-    or None when `limits.enabled` is false. It reads the token that
-    `_take_credentials` kept."""
+    or None when `limits.enabled` is false."""
     if not settings.limits.enabled:
         limits_module.install(None)
         return None
-    tracker = LimitsTracker(
-        token=inference_plan.subscription_token,
-        timezone=settings.timezone,
-        max_age_s=settings.limits.max_age_seconds,
-        store=repo,
-    )
+    tracker = LimitsTracker(timezone=settings.timezone, store=repo)
     await tracker.load()
     limits_module.install(tracker)
     return tracker

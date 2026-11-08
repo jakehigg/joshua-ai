@@ -216,6 +216,7 @@ ul.legend .sw { display: inline-block; width: .8rem; height: .8rem;
 section.limits { margin: 0 0 1.5rem; padding-bottom: 1rem;
   border-bottom: 1px solid var(--line); }
 section.limits h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
+section.limits p.meta { margin: -.25rem 0 .5rem; }
 div.limits-grid { display: grid; gap: .75rem 1.5rem;
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
 div.limit { --meter: var(--link); }
@@ -232,6 +233,7 @@ div.limit-bar svg { display: block; width: 100%; height: .6rem;
 div.limit-bar .track { fill: var(--line); }
 div.limit-bar .fill { fill: var(--meter); }
 div.limit .badge { background: var(--meter); color: var(--bg); }
+div.limit.reset .limit-bar, div.limit.reset .limit-value { opacity: .4; }
 div.limit-foot { display: flex; justify-content: space-between; gap: .5rem;
   flex-wrap: wrap; color: var(--muted); font-size: .85rem; }
 details.day { margin: .25rem 0; }

@@ -1,9 +1,11 @@
 """The subscription limits on the usage page: one call to core, and its HTML.
 
-The viewer asks core's ``GET /v1/limits`` and shows one meter for each limit
-window: the 5-hour window, the weekly window, each weekly limit of one model
-(``scoped``), and the extra usage when it is on. A meter shows the percent
-used, a bar, the percent left, and the reset time in the instance timezone.
+The viewer asks core's ``GET /v1/limits`` and shows one meter for the 5-hour
+window and one for the weekly window. A meter shows the percent used, a bar,
+the percent left, and the reset time in the instance timezone. A line under
+the heading says when the numbers came: the last model call on the
+subscription. A window that core marks ``reset`` keeps its last bar, dimmed,
+and says that the next model call updates it.
 
 The route is open, so the viewer sends no bearer and needs only ``CORE_URL``.
 With no ``CORE_URL``, :func:`from_env` returns None. A call that fails, a
@@ -25,11 +27,7 @@ from html import escape
 from zoneinfo import ZoneInfo
 
 import httpx
-from joshua_shared.contracts import (
-    LIMITS_PATH,
-    LimitsExtraUsage,
-    LimitsResponse,
-)
+from joshua_shared.contracts import LIMITS_PATH, LimitsResponse, LimitsWindow
 from joshua_shared.log import get_logger
 from pydantic import ValidationError
 
@@ -44,8 +42,6 @@ TIMEOUT_S = 5.0
 # critical.
 WARN_PCT = 75.0
 CRIT_PCT = 90.0
-
-_CURRENCY_SIGNS = {"USD": "$", "EUR": "€", "GBP": "£"}
 
 
 class CoreLimits:
@@ -138,15 +134,12 @@ def when_text(text: str | None, *, tz: tzinfo, now: datetime) -> str | None:
     return f"{day}, {clock_time(local)}"
 
 
-def _reset_text(text: str | None, *, tz: tzinfo, now: datetime) -> str:
-    human = when_text(text, tz=tz, now=now)
-    if human is None:
-        return ""
-    try:
-        past = datetime.fromisoformat(text or "") <= now
-    except TypeError:
-        past = False
-    return f"reset {human}" if past else f"resets {human}"
+def _reset_text(window: LimitsWindow, *, tz: tzinfo, now: datetime) -> str:
+    human = when_text(window.resets_at, tz=tz, now=now)
+    if window.reset:
+        at = f" at {human}" if human else ""
+        return f"reset{at} — updates on the next model call"
+    return f"resets {human}" if human else ""
 
 
 def _badge(css: str, status: str | None) -> str:
@@ -174,56 +167,22 @@ def _bar(label: str, used_pct: float, value_text: str) -> str:
     )
 
 
-def _meter(
-    name: str,
-    used_pct: float,
-    left_pct: float,
-    resets_at: str | None,
-    *,
-    status: str | None,
-    tz: tzinfo,
-    now: datetime,
-) -> str:
-    css = level(used_pct, status)
-    reset = _reset_text(resets_at, tz=tz, now=now)
-    used = pct(used_pct)
+def _meter(name: str, window: LimitsWindow, *, tz: tzinfo, now: datetime) -> str:
+    css = level(window.used_pct, window.status)
+    used = pct(window.used_pct)
+    badge = ""
+    if window.reset:
+        css += " reset"
+    else:
+        badge = _badge(css, window.status)
     return (
         f'<div class="limit {css}">'
         f"<div class=limit-head><span class=limit-name>{escape(name)}</span>"
-        f"{_badge(css, status)}"
+        f"{badge}"
         f"<span class=limit-value><strong>{used}</strong> used</span></div>"
-        f"{_bar(f'{name} used', used_pct, f'{used} used')}"
-        f"<div class=limit-foot><span>{pct(left_pct)} left</span>"
-        f"<span>{escape(reset)}</span></div></div>"
-    )
-
-
-def money(amount: float, currency: str | None) -> str:
-    """An amount with its currency: ``$12.50``, or ``12.50 CHF``."""
-    code = (currency or "USD").upper()
-    sign = _CURRENCY_SIGNS.get(code)
-    return f"{sign}{amount:,.2f}" if sign else f"{amount:,.2f} {code}"
-
-
-def _extra(extra: LimitsExtraUsage | None) -> str:
-    """The extra usage meter: the amount used of the monthly limit. Nothing
-    when the extra usage is off or core does not give both amounts."""
-    if extra is None or not extra.enabled or extra.used is None or not extra.limit:
-        return ""
-    used_pct = 100.0 * extra.used / extra.limit
-    css = level(used_pct)
-    used = money(extra.used, extra.currency)
-    limit = money(extra.limit, extra.currency)
-    left = money(max(extra.limit - extra.used, 0.0), extra.currency)
-    return (
-        f'<div class="limit {css}">'
-        f"<div class=limit-head><span class=limit-name>Extra usage</span>"
-        f"{_badge(css, None)}"
-        f"<span class=limit-value><strong>{escape(used)}</strong> "
-        f"of {escape(limit)}</span></div>"
-        f"{_bar('Extra usage used', used_pct, f'{used} of {limit} used')}"
-        f"<div class=limit-foot><span>{escape(left)} left</span>"
-        f"<span>{pct(used_pct)} used</span></div></div>"
+        f"{_bar(f'{name} used', window.used_pct, f'{used} used')}"
+        f"<div class=limit-foot><span>{pct(window.left_pct)} left</span>"
+        f"<span>{escape(_reset_text(window, tz=tz, now=now))}</span></div></div>"
     )
 
 
@@ -243,30 +202,13 @@ def section_html(
     if not body.available:
         reason = f": {escape(body.reason)}" if body.reason else ""
         return f"{head}<p class=snippet>The limits are not available{reason}.</p></section>"
-    meters = []
-    if body.five_hour is not None:
-        w = body.five_hour
-        meters.append(
-            _meter("5-hour", w.used_pct, w.left_pct, w.resets_at, status=w.status, tz=tz, now=now)
-        )
-    if body.seven_day is not None:
-        w = body.seven_day
-        meters.append(
-            _meter("Weekly", w.used_pct, w.left_pct, w.resets_at, status=w.status, tz=tz, now=now)
-        )
-    for s in body.scoped:
-        meters.append(
-            _meter(
-                f"{s.name} weekly", s.used_pct, s.left_pct, s.resets_at, status=None, tz=tz, now=now
-            )
-        )
-    extra = _extra(body.extra_usage)
-    if extra:
-        meters.append(extra)
+    meters = [
+        _meter(name, window, tz=tz, now=now)
+        for name, window in (("5-hour", body.five_hour), ("Weekly", body.seven_day))
+        if window is not None
+    ]
     if not meters:
         return f"{head}<p class=snippet>The limits are not available now.</p></section>"
-    note = ""
-    if body.stale:
-        seen = when_text(body.observed_at, tz=tz, now=now)
-        note = f"<p class=meta>as of {escape(seen)}</p>" if seen else "<p class=meta>old values</p>"
+    seen = when_text(body.observed_at, tz=tz, now=now)
+    note = f"<p class=meta>as of {escape(seen)}</p>" if seen else ""
     return f"{head}{note}<div class=limits-grid>{''.join(meters)}</div></section>"

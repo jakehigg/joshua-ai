@@ -5,6 +5,7 @@ the subscription."""
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,8 +26,8 @@ from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.tools import limits as limits_tool
 from joshua_core.limits import LimitsTracker
-from joshua_shared.contracts import LimitsResponse
-from test_limits import RAW_EVENT, TOKEN, Clock, Upstream, event, ok
+from joshua_shared.contracts import LimitsResponse, LimitsWindow
+from test_limits import FIVE_HOUR_RESET, RAW_EVENT, TOKEN, Clock, event
 
 TZ = "America/New_York"
 
@@ -38,11 +39,14 @@ def _no_installed_tracker():
     limits.install(None)
 
 
-def _tracker(*responses: Any, token: str = TOKEN) -> LimitsTracker:
-    upstream = Upstream(*(responses or (ok(),)))
-    return LimitsTracker(
-        token=lambda: token, timezone=TZ, max_age_s=300, clock=Clock(), transport=upstream.transport
-    )
+def _tracker(clock: Clock | None = None) -> LimitsTracker:
+    return LimitsTracker(timezone=TZ, clock=clock or Clock())
+
+
+def _fed(clock: Clock | None = None) -> LimitsTracker:
+    tracker = _tracker(clock)
+    tracker.note_sdk_event(event(RAW_EVENT).rate_limit_info)
+    return tracker
 
 
 def _deps() -> ToolDeps:
@@ -81,41 +85,49 @@ async def test_the_tool_gives_a_summary_and_the_numbers(monkeypatch) -> None:
         return {"type": "sdk", "name": name}
 
     monkeypatch.setattr(limits_tool, "create_sdk_mcp_server", fake_server)
-    limits_tool.build_limits_server(_deps(), _tracker())
+    limits_tool.build_limits_server(_deps(), _fed())
     reply = await captured["check_limits"].handler({})
     text = reply["content"][0]["text"]
     summary, _, numbers = text.partition("\n\nNumbers: ")
-    assert "77% of the 5-hour limit is left (23% used). It resets Sat 7 Nov, 10:30 pm." in summary
-    assert "58.5% of the weekly limit is left" in summary
-    assert "87% of the weekly Fable limit is left." in summary
-    assert "Extra usage: 1.25 of 25 USD used this month." in summary
-    assert f"Times are in {TZ}." in summary
+    assert summary == (
+        "69% of the 5-hour limit is left (31% used). It resets Sat 7 Nov, 10:30 pm. "
+        "53% of the weekly limit is left (47% used). It resets Mon 9 Nov, 8:00 pm. "
+        f"Times are in {TZ}."
+    )
     data = json.loads(numbers)
-    assert data["five_hour"]["left_pct"] == 77.0
+    assert data["five_hour"]["left_pct"] == 69.0
+    assert data["five_hour"]["reset"] is False
     assert TOKEN not in text
 
 
+def test_a_reset_window_says_when_and_that_the_next_call_updates_it() -> None:
+    clock = Clock()
+    tracker = _fed(clock)
+    clock.now = FIVE_HOUR_RESET + timedelta(minutes=1)
+    text = limits_tool.do_check_limits(tracker, TZ)
+    summary = text.partition("\n\nNumbers: ")[0]
+    assert summary.startswith(
+        "The 5-hour limit reset at Sat 7 Nov, 10:30 pm. "
+        "Its numbers update on the next model call. "
+        "53% of the weekly limit is left (47% used)."
+    )
+    assert "69%" not in summary
+
+
+def test_a_reset_window_with_no_time_still_says_it_reset() -> None:
+    window = LimitsWindow(used_pct=90.0, left_pct=10.0, reset=True)
+    text = limits_tool.summarize(LimitsResponse(available=True, five_hour=window), TZ)
+    assert text.startswith("The 5-hour limit reset. Its numbers update on the next model call.")
+
+
 def test_the_summary_says_why_it_knows_nothing() -> None:
-    text = limits_tool.summarize(
-        LimitsResponse(available=False, reason="no subscription token"), TZ
-    )
-    assert text == "The subscription limits are not known: no subscription token."
-    text = limits_tool.summarize(
-        LimitsResponse(available=False, reason="x", stale=True, retry_after=60), TZ
-    )
-    assert "tries again in 60 seconds" in text
+    text = limits_tool.do_check_limits(_tracker(), TZ)
+    assert text.startswith(f"The subscription limits are not known: {limits.NOT_YET}.")
 
 
-def test_the_summary_marks_stale_numbers() -> None:
-    answer = LimitsResponse(available=True, source="usage_api", stale=True)
-    text = limits_tool.summarize(answer, TZ)
-    assert "Anthropic gave no limit numbers." in text
-    assert "out of date" in text
-
-
-async def test_the_tool_without_a_token_says_so() -> None:
-    text = await limits_tool.do_check_limits(_tracker(token=""), TZ)
-    assert text.startswith("The subscription limits are not known: no subscription token.")
+def test_an_answer_with_no_window_says_so() -> None:
+    text = limits_tool.summarize(LimitsResponse(available=True), TZ)
+    assert text == f"Anthropic gave no limit numbers. Times are in {TZ}."
 
 
 # --- which jobs get the tool -------------------------------------------------------

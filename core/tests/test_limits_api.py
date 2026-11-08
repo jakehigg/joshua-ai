@@ -11,7 +11,7 @@ from joshua_core.limits_api import build_limits_router
 from joshua_shared.config import LimitsConfig
 from joshua_shared.contracts import LIMITS_PATH, LimitsResponse
 from starlette.testclient import TestClient
-from test_limits import TOKEN, Clock, Upstream, ok
+from test_limits import RAW_EVENT, TOKEN, Clock, event
 
 
 def _client(*, enabled: bool = True, tracker: LimitsTracker | None = None) -> TestClient:
@@ -22,43 +22,36 @@ def _client(*, enabled: bool = True, tracker: LimitsTracker | None = None) -> Te
     return TestClient(app)
 
 
-def _tracker(upstream: Upstream) -> LimitsTracker:
-    return LimitsTracker(
-        token=lambda: TOKEN,
-        timezone="America/New_York",
-        max_age_s=300,
-        clock=Clock(),
-        transport=upstream.transport,
-    )
+def _tracker() -> LimitsTracker:
+    tracker = LimitsTracker(timezone="America/New_York", clock=Clock())
+    tracker.note_sdk_event(event(RAW_EVENT).rate_limit_info)
+    return tracker
 
 
 def test_the_route_answers_with_no_bearer(monkeypatch) -> None:
     monkeypatch.delenv("ADMIN_CALLERS", raising=False)
-    upstream = Upstream(ok())
-    response = _client(tracker=_tracker(upstream)).get(LIMITS_PATH)
+    response = _client(tracker=_tracker()).get(LIMITS_PATH)
     assert response.status_code == 200
     body = response.json()
     LimitsResponse.model_validate(body)
+    assert set(body) == {"available", "reason", "observed_at", "five_hour", "seven_day"}
     assert body["available"] is True
-    assert body["source"] == "usage_api"
-    assert body["five_hour"]["left_pct"] == 77.0
+    assert body["five_hour"]["left_pct"] == 69.0
     assert body["five_hour"]["resets_at"].endswith("-05:00")
+    assert body["five_hour"]["reset"] is False
     assert TOKEN not in response.text
 
 
-def test_a_query_parameter_cannot_force_a_read() -> None:
-    upstream = Upstream(ok())
-    client = _client(tracker=_tracker(upstream))
+def test_the_route_makes_no_http_request(no_http: list[str]) -> None:
+    client = _client(tracker=_tracker())
     client.get(LIMITS_PATH)
     client.get(LIMITS_PATH, params={"fresh": "1", "refresh": "true"})
-    assert len(upstream.requests) == 1
+    assert no_http == []
 
 
 def test_the_route_is_404_when_limits_is_off() -> None:
-    upstream = Upstream(ok())
-    response = _client(enabled=False, tracker=_tracker(upstream)).get(LIMITS_PATH)
+    response = _client(enabled=False, tracker=_tracker()).get(LIMITS_PATH)
     assert response.status_code == 404
-    assert upstream.requests == []
 
 
 def test_the_route_is_404_with_no_tracker() -> None:
@@ -83,9 +76,7 @@ async def test_build_limits_follows_enabled_and_loads_the_saved_snapshot() -> No
         assert limits.installed() is None
 
         saved = {
-            "source": "usage_api",
             "observed_at": "2026-11-08T01:00:00+00:00",
-            "api_observed_at": "2026-11-08T01:00:00+00:00",
             "five_hour": {"used_pct": 12.0, "resets_at": None, "status": None},
         }
         tracker = await _build_limits(make_settings(), FakeStore(saved))  # type: ignore[arg-type]

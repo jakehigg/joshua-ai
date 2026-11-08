@@ -2,9 +2,8 @@
 
 One read-only tool, ``check_limits()``, with no argument. It gives a short
 summary in plain words, then the numbers of ``GET /v1/limits`` as JSON. It
-reads the same tracker as the route, so it follows the same rules: a read of
-the usage endpoint at most once in ``limits.max_age``, and never during a
-block.
+reads the same tracker as the route: the last rate-limit report of a model
+call on the subscription. It makes no upstream request.
 
 The server goes to the ``chat`` job when ``limits.chat_tool`` is on and to
 the ``voice`` job when ``limits.voice_tool`` is on. ``limits.enabled: false``
@@ -54,8 +53,12 @@ def _pct(value: float) -> str:
 def _window_line(label: str, window: LimitsWindow | None) -> str | None:
     if window is None:
         return None
-    line = f"{_pct(window.left_pct)} of the {label} is left ({_pct(window.used_pct)} used)."
     when = _when(window.resets_at)
+    if window.reset:
+        line = f"The {label} reset"
+        line += f" at {when}." if when else "."
+        return line + " Its numbers update on the next model call."
+    line = f"{_pct(window.left_pct)} of the {label} is left ({_pct(window.used_pct)} used)."
     if when:
         line += f" It resets {when}."
     return line
@@ -64,10 +67,7 @@ def _window_line(label: str, window: LimitsWindow | None) -> str | None:
 def summarize(answer: LimitsResponse, tz: str) -> str:
     """A few short sentences about ``answer``, for the agent to say."""
     if not answer.available:
-        text = f"The subscription limits are not known: {answer.reason or 'no data'}."
-        if answer.retry_after:
-            text += f" Core tries again in {answer.retry_after} seconds."
-        return text
+        return f"The subscription limits are not known: {answer.reason or 'no data'}."
     lines = [
         line
         for line in (
@@ -76,27 +76,15 @@ def summarize(answer: LimitsResponse, tz: str) -> str:
         )
         if line
     ]
-    for scoped in answer.scoped:
-        line = f"{_pct(scoped.left_pct)} of the weekly {scoped.name} limit is left."
-        when = _when(scoped.resets_at)
-        if when:
-            line += f" It resets {when}."
-        lines.append(line)
-    extra = answer.extra_usage
-    if extra is not None and extra.enabled and extra.used is not None and extra.limit is not None:
-        currency = f" {extra.currency}" if extra.currency else ""
-        lines.append(f"Extra usage: {extra.used:g} of {extra.limit:g}{currency} used this month.")
     if not lines:
         lines.append("Anthropic gave no limit numbers.")
-    if answer.stale:
-        lines.append("These numbers can be out of date: the last read failed.")
     lines.append(f"Times are in {tz}.")
     return " ".join(lines)
 
 
-async def do_check_limits(tracker: LimitsTracker, tz: str) -> str:
+def do_check_limits(tracker: LimitsTracker, tz: str) -> str:
     """The summary, then the numbers as JSON."""
-    answer = await tracker.current()
+    answer = tracker.answer()
     numbers = json.dumps(answer.model_dump(), separators=(",", ":"))
     return f"{summarize(answer, tz)}\n\nNumbers: {numbers}"
 
@@ -111,7 +99,7 @@ def build_limits_server(deps: ToolDeps, tracker: LimitsTracker) -> Any:
         _SCHEMA,
     )
     async def check_limits(args: dict[str, Any]) -> dict[str, Any]:
-        return _reply(await do_check_limits(tracker, deps.tz))
+        return _reply(do_check_limits(tracker, deps.tz))
 
     return create_sdk_mcp_server(name=SERVER_NAME, version="1.0.0", tools=[check_limits])
 

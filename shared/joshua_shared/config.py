@@ -875,26 +875,13 @@ class LimitsConfig(_Model):
     the ``check_limits`` tool.
 
     ``enabled: false`` turns both off: the route answers 404 and no session
-    gets the tool. ``max_age`` is the age after which a request reads the
-    usage endpoint again. ``chat_tool`` and ``voice_tool`` give the tool to
-    the ``chat`` job and the ``voice`` job.
+    gets the tool. ``chat_tool`` and ``voice_tool`` give the tool to the
+    ``chat`` job and the ``voice`` job.
     """
 
     enabled: bool = True
-    max_age: str = "5m"
     chat_tool: bool = True
     voice_tool: bool = True
-
-    @field_validator("max_age")
-    @classmethod
-    def _check_max_age(cls, value: str) -> str:
-        if parse_duration(value) <= 0:
-            raise ValueError("max_age must be more than zero")
-        return value
-
-    @property
-    def max_age_seconds(self) -> int:
-        return parse_duration(self.max_age)
 
     def tool_jobs(self) -> frozenset[str]:
         """The conversation jobs that get the ``check_limits`` tool."""
