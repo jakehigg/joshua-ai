@@ -276,6 +276,21 @@ An entry whose credential expanded to nothing is turned off, not started with an
 empty credential and not retried. `/readyz` counts it in `disabled` and the log
 names the empty key.
 
+### A session cannot read the assignments manager
+
+A session has Bash and runs as the same user as the assignments manager,
+which holds the database URL and the bearers of its callers. The manager
+makes itself non-dumpable at start, before it reads a secret or opens its
+port. Then Linux refuses its `/proc/<pid>/environ`, `mem`, `maps`, and `fd`
+to the session, which has no `CAP_SYS_PTRACE`. The session also gets every
+variable of the manager with an empty value, except a few plain ones.
+
+Two things remain. A command in the session can send a signal to the
+manager and stop it, which is a denial of service and not a leak. The
+session holds the fleet token of the container until per-assignment tokens
+exist. [assignments.md](assignments.md#what-a-session-can-see) has the
+details.
+
 ## Package MCP servers
 
 A `stdio` entry with a `package` field is another author's code, installed by

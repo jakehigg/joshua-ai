@@ -255,10 +255,30 @@ callers are not in the environment of the session. Two values are: the
 fleet token of the container, which the session sends to core as its Claude
 token, and the same token in the MCP configuration of the session.
 
-The session runs as the same user as the container process. So a command in
-the session can read the start environment of that process in `/proc`, which
-holds the database URL and the bearers of the callers. Give the assignments
-container its own database user when this is a risk for you.
+The session runs as the same user as the container process, the manager.
+The manager holds the database URL and the bearers of the callers in its
+environment. So at start, before it reads the configuration or a secret and
+before it opens its port, the manager makes itself non-dumpable
+(`prctl(PR_SET_DUMPABLE, 0)`). Linux then refuses `/proc/<pid>/environ`,
+`mem`, `maps`, and `fd` of the manager to every process that does not have
+`CAP_SYS_PTRACE`, also a process of the same user. No process in the
+container has that capability. The Claude CLI of a session is a new
+program, so it is dumpable, and it holds only the session environment. This
+works the same in compose and on Kubernetes, with no setting.
+
+What remains:
+
+- A command in the session can send a signal to the manager, because it is
+  the same user. It can stop the manager (a denial of service), but it
+  cannot read a secret that way.
+- The session holds the fleet token of the container, as above. A
+  per-assignment token, in a later release, will remove it.
+- The session can write the files that the user of the container owns: the
+  scratch directories of other assignments, and the code in `/app`, which
+  the manager runs at its next start.
+
+`scripts/test-nondumpable.sh` proves the refusal in the runtime image with
+Docker. On Linux, the unit suite runs the same test.
 
 ## The statuses
 
