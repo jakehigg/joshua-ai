@@ -4,6 +4,22 @@ Each entry names what changed for the person who runs Joshua. The releases,
 with the images and the packaged chart, are at
 <https://github.com/jakehigg/joshua-ai/releases>.
 
+## Unreleased
+
+### Added
+
+- **Joshua knows how much of the subscription limits is left.** Ask "how
+  much of my limit is left?", and the `check_limits` tool gives the percent
+  used and left of the 5-hour window and the weekly window, and when each
+  resets. Core's new `GET /v1/limits` gives the same numbers as JSON with no
+  bearer, in the cluster and on the host at `127.0.0.1:8081`. Core reads them
+  from an Anthropic endpoint that is not documented, at most once in
+  `limits.max_age` (default 5 minutes), and each model call on the
+  subscription updates them at no cost. Anthropic gives a percent, not a
+  token count. The new `limits` section turns the route and the tool off, or
+  the tool off for chat or for voice. See
+  [config.md](config.md#limits).
+
 ## 0.1.1 - 2026-11-07
 
 A voice call that hangs up during a reply no longer makes the replies after it

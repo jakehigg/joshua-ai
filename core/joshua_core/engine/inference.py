@@ -8,7 +8,8 @@ only the credential of that job. ``joshua_shared.inference`` does the
 resolution. This module holds the token, logs the plan at start, and runs
 the check of ``POST /admin/inference/check``.
 
-The token stays in this module and nowhere else. Nothing here logs it.
+The token stays in this module. ``subscription_token`` gives it to the
+limits module, which sends it to the usage endpoint. Nothing logs it.
 """
 
 from __future__ import annotations
@@ -58,6 +59,12 @@ def take_credentials(environ: MutableMapping[str, str] | None = None) -> list[st
     for key in removed:
         env.pop(key, None)
     return removed
+
+
+def subscription_token() -> str:
+    """The subscription token kept at start, or ``""``. The limits module
+    sends it to the usage endpoint. The caller never logs it."""
+    return _oauth_token
 
 
 def resolve(settings: JoshuaConfig, job: str) -> ResolvedInference:

@@ -18,8 +18,9 @@ file, runs no command, and reaches no network, so it gives no capability.
 Every ability the agent has is an MCP server:
 
 - Inside `core`: `search_memory`, `search_history` and `read_history`, the
-  scheduling tools, `add_user` and `list_users`, and `use_internet`, which
-  asks the internet agent one question.
+  scheduling tools, `add_user` and `list_users`, `check_limits`, which reads
+  the subscription limits, and `use_internet`, which asks the internet agent
+  one question.
 - Behind `gateway`: the `files` server and every server you add in `mcp:`.
 
 If a task seems to need a built-in tool, the task is wrong. Add an MCP server
@@ -74,7 +75,10 @@ Every route has an allowlist of fleet identities. The list is in
   caller.
 
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
-name, a path, or a token.
+name, a path, or a token. Core's `GET /v1/limits` is open too. It returns the
+percent used of the subscription limits, the reset times, and the extra usage
+amounts, never a person or a token. Core sends the subscription token only to
+Anthropic, in the `Authorization` header of the usage request.
 
 ## Per-person policy
 

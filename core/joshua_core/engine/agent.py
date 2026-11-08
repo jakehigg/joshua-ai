@@ -35,6 +35,7 @@ from typing import Any
 from joshua_shared.inference import TOOL_SEARCH_KEY, TOOL_SEARCH_ON, ResolvedInference
 from joshua_shared.log import get_logger
 
+from joshua_core import limits
 from joshua_core.engine.types import OnDelta, TurnResult
 from joshua_core.engine.usage import Usage, UsageMeter
 
@@ -477,7 +478,7 @@ async def _worker_turn(
     The usage that arrived goes to `usage_out` when the turn ends, also when a
     timeout cancels it.
     """
-    meter = UsageMeter()
+    meter = UsageMeter(subscription=limits.uses_subscription(inference.env))
     try:
         await client.connect()
         await client.query(user_text)
@@ -656,7 +657,7 @@ async def _structured_turn(
             "session_id": "default",
         }
 
-    meter = UsageMeter()
+    meter = UsageMeter(subscription=limits.uses_subscription(inference.env))
     try:
         await client.connect()
         await client.query(_one_message())
@@ -763,6 +764,9 @@ class AgentSession:
         # Gateway-backed servers to wait on before the first turn (see connect()).
         self._remote_servers = _remote_server_names(getattr(options, "mcp_servers", None))
         self._ready_timeout_s = ready_timeout_s
+        # A ``RateLimitEvent`` reaches the limits module only from a call on
+        # the subscription.
+        self._subscription = limits.uses_subscription(getattr(options, "env", None))
 
     @property
     def connected(self) -> bool:
@@ -885,7 +889,9 @@ class AgentSession:
                 continue
 
             cls = type(msg).__name__
-            if cls == "UserMessage":
+            if cls == "RateLimitEvent":
+                limits.note_event(msg, subscription=self._subscription)
+            elif cls == "UserMessage":
                 # A tool result rides on a user message. Record the outcome, so
                 # a refused write is not reported as a write.
                 tool_errors.update(_tool_results(msg))

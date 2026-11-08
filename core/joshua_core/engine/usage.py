@@ -10,7 +10,8 @@ A caller learns the usage of a call through the `usage_out` argument of
 `Usage` to when it ends. A structured call and a worker session read their
 usage with `UsageMeter`, so a call that times out still appends the tokens
 of the model messages that arrived before the timeout. A call that fails
-before any model message appends nothing.
+before any model message appends nothing. `UsageMeter` also gives each
+`RateLimitEvent` of a call on the subscription to `joshua_core.limits`.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
+
+from joshua_core import limits
 
 # The SDK names of the four counts, as the model API gives them.
 _SDK_FIELDS = {
@@ -106,14 +109,22 @@ class UsageMeter:
     it used, and a call that ends counts each token once.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, subscription: bool = False) -> None:
+        # True when the call runs on the subscription. Only then does a
+        # ``RateLimitEvent`` reach the limits module.
+        self._subscription = subscription
         self._messages: dict[str, Usage] = {}
         self._result: Usage | None = None
         self._seen = False
 
     def note(self, msg: Any) -> None:
-        """Read the usage of one SDK message, if it has one."""
+        """Read the usage of one SDK message, if it has one. A
+        ``RateLimitEvent`` of a call on the subscription goes to the limits
+        module."""
         kind = type(msg).__name__
+        if kind == "RateLimitEvent":
+            limits.note_event(msg, subscription=self._subscription)
+            return
         raw = getattr(msg, "usage", None)
         if kind == "ResultMessage":
             self._seen = True

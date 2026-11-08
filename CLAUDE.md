@@ -135,6 +135,9 @@ Route allowlists, by default:
   on every admin route with no exception.
 - `/healthz`: open, `{"ok": true}`. `/readyz`: open, booleans and counts, no
   names and no secrets.
+- core `GET /v1/limits`: open, the percent used of the subscription limits
+  and the reset times, no person and no token. 404 when `limits.enabled` is
+  false.
 
 `docs/contracts.md` has every route and body.
 
@@ -219,7 +222,7 @@ links the platform binary, so the install passes
 Never add `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebSearch`, or
 `WebFetch` to the agent's tool list. `engine/agent.py` passes `tools=[]` and
 asserts it. Every capability is an MCP server: `recall`, `history`,
-`internet`, `scheduling`, and `registration` inside `core`, and `files` plus
+`internet`, `scheduling`, `registration`, and `limits` inside `core`, and `files` plus
 every configured upstream behind `gateway`. If a task seems to need a
 built-in tool, the task is wrong. Open an issue.
 

@@ -187,6 +187,15 @@ CREATE TABLE IF NOT EXISTS snapshot_result (
     failures    INT NOT NULL DEFAULT 0,
     last_error  TEXT
 );
+
+-- The last snapshot of the Claude subscription limits (see joshua_core.limits),
+-- so a restart keeps it. One row, id 1. `body` holds percentages, reset times,
+-- and the extra usage amounts only: never a token.
+CREATE TABLE IF NOT EXISTS limits_snapshot (
+    id        SMALLINT PRIMARY KEY CHECK (id = 1),
+    saved_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    body      JSONB NOT NULL
+);
 """
 
 
