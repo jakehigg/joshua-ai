@@ -244,10 +244,11 @@ def _day_label(day: date) -> str:
 
 def _chips(entry: Entry, names: dict[str, str]) -> str:
     chips = "".join(
-        f'<a class=chip href="/journal?person={quote(pid)}">{escape(names.get(pid, pid))}</a>'
+        f'<a class="j-chip" href="/journal?person={quote(pid)}">{escape(names.get(pid, pid))}</a>'
         for pid in entry.people
     )
-    badge = f'<span class="badge {escape(entry.source)}">{escape(entry.source)}</span>'
+    tone = "j-badge accent" if entry.source == SOURCE_NIGHTLY else "j-badge"
+    badge = f'<span class="{tone} {escape(entry.source)}">{escape(entry.source)}</span>'
     return badge + chips
 
 
@@ -256,13 +257,14 @@ def entry_html(entry: Entry, names: dict[str, str], *, can_edit: bool) -> str:
     actions = [f'<a href="{entry.wiki_url}">page</a>']
     if can_edit:
         actions.append(f'<a href="{entry.edit_url}">edit</a>')
-    rendered = _MD.render(entry.body) if entry.body.strip() else "<p class=snippet>(empty)</p>"
+    rendered = _MD.render(entry.body) if entry.body.strip() else '<p class="j-faint">(empty)</p>'
     return (
-        f'<article class="entry" id="{escape(entry.slug, quote=True)}">'
-        f'<header><h3><a href="{entry.day_url}#{quote(entry.slug)}">{escape(entry.title)}</a></h3>'
+        f'<article class="j-entry" id="{escape(entry.slug, quote=True)}">'
+        '<header class="entry-head"><h3 class="j-entry-title">'
+        f'<a href="{entry.day_url}#{quote(entry.slug)}">{escape(entry.title)}</a></h3>'
         f"{_chips(entry, names)}</header>"
-        f'<div class="md">{rendered}</div>'
-        f"<footer>{' · '.join(actions)}</footer>"
+        f'<div class="j-prose">{rendered}</div>'
+        f'<footer class="j-meta">{" · ".join(actions)}</footer>'
         "</article>"
     )
 
@@ -270,7 +272,8 @@ def entry_html(entry: Entry, names: dict[str, str], *, can_edit: bool) -> str:
 def _day_section(day: date, entries: list[Entry], names: dict[str, str], *, can_edit: bool) -> str:
     articles = "".join(entry_html(e, names, can_edit=can_edit) for e in entries)
     return (
-        f'<section class="day"><h2><a href="{day_url(day)}">{escape(_day_label(day))}</a></h2>'
+        f'<section class="day"><h2 class="j-label">'
+        f'<a href="{day_url(day)}">{escape(_day_label(day))}</a></h2>'
         f"{articles}</section>"
     )
 
@@ -291,7 +294,7 @@ def _month_nav(
     parts.append(f"<strong>{escape(_month_label(month))}</strong>")
     if newer:
         parts.append(f'<a href="{month_url(newer, person_id)}">{escape(_month_label(newer))} →</a>')
-    return '<p class="months">' + " · ".join(parts) + "</p>"
+    return '<p class="pager">' + " · ".join(parts) + "</p>"
 
 
 def _people_filter(
@@ -299,15 +302,17 @@ def _people_filter(
 ) -> str:
     if not people:
         return ""
-    items = [
-        '<a class="chip{}" href="{}">everyone</a>'.format(
-            "" if person_id else " on", month_url(month)
-        )
-    ]
+    items = [_filter_chip("everyone", month_url(month), on=not person_id)]
     for pid, name in people:
-        on = " on" if pid == person_id else ""
-        items.append(f'<a class="chip{on}" href="{month_url(month, pid)}">{escape(name)}</a>')
-    return '<p class="filters">' + "".join(items) + "</p>"
+        items.append(_filter_chip(escape(name), month_url(month, pid), on=pid == person_id))
+    return '<div class="j-chips" role="group" aria-label="People">' + "".join(items) + "</div>"
+
+
+def _filter_chip(label: str, href: str, *, on: bool) -> str:
+    """A filter chip. ``label`` is HTML already escaped."""
+    if on:
+        return f'<a class="j-chip on" aria-current="true" href="{href}">{label}</a>'
+    return f'<a class="j-chip" href="{href}">{label}</a>'
 
 
 EMPTY_TEXT = (
@@ -328,11 +333,11 @@ def feed_html(
     """The feed for one month: the month links, the people filter, then one
     section per day. ``entries`` is the month's slice, already filtered."""
     names = dict(people)
-    parts = ["<h1>journal</h1>"]
+    parts = ['<h1 class="j-doc-title">journal</h1>']
     parts.append(_month_nav(month, available, person_id))
     parts.append(_people_filter(people, person_id, month))
     if not entries:
-        parts.append(f"<p class=snippet>{escape(EMPTY_TEXT)}</p>")
+        parts.append(f'<p class="j-empty">{escape(EMPTY_TEXT)}</p>')
     for day in days(entries):
         parts.append(_day_section(day, for_day(entries, day), names, can_edit=can_edit))
     return "".join(parts)
@@ -356,9 +361,12 @@ def day_html(
     nav.append(f'<a href="{month_url(month)}">{escape(_month_label(month))}</a>')
     if newer:
         nav.append(f'<a href="{day_url(newer)}">{escape(_day_label(newer))} →</a>')
-    parts = [f"<h1>{escape(_day_label(day))}</h1>", '<p class="months">' + " · ".join(nav) + "</p>"]
+    parts = [
+        f'<h1 class="j-doc-title">{escape(_day_label(day))}</h1>',
+        '<p class="pager">' + " · ".join(nav) + "</p>",
+    ]
     if not entries:
-        parts.append("<p class=snippet>Nothing on this day.</p>")
+        parts.append('<p class="j-empty">Nothing on this day.</p>')
     parts.append("".join(entry_html(e, names, can_edit=can_edit) for e in entries))
     return "".join(parts)
 

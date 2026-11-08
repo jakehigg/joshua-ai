@@ -80,6 +80,15 @@ with the images and the packaged chart, are at
   `.env`. To let the container post events, add `assignments` to
   `channels.webhooks.allowed_callers`.
 
+### Changed
+
+- **The viewer has the Joshua look.** The viewer now uses the shared Joshua
+  stylesheet. It is dark only. On a wide screen, a sidebar holds the Wiki,
+  Journal, Search, and Usage links. On a phone, an app bar and tabs hold them.
+  The search field is in the app bar on each screen. The viewer serves the
+  stylesheet, the logo, and the icons at `/ui/`, behind the same sign-in as a
+  page. The routes, the forms, and what each page shows do not change.
+
 ## 0.1.1 - 2026-11-07
 
 A voice call that hangs up during a reply no longer makes the replies after it

@@ -305,7 +305,7 @@ def crumbs_html(wiki: Path, rel: str, *, leaf: str | None) -> str:
             parts.append(f'<a href="/wiki/{quote(folder_rel)}/">{escape(title)}</a>')
     if leaf is not None:
         parts.append(f"<span>{escape(leaf)}</span>")
-    return '<p class="crumbs">' + " › ".join(parts) + "</p>"
+    return '<p class="j-crumbs">' + " › ".join(parts) + "</p>"
 
 
 def siblings_html(wiki: Path, rel: str) -> str:
@@ -329,8 +329,8 @@ def siblings_html(wiki: Path, rel: str) -> str:
         return ""
     items = items[:SIBLINGS_MAX]
     return (
-        f'<section class="siblings"><h2>more in {escape(folder.title)}</h2>'
-        f'<ul class="tree">{"".join(items)}</ul></section>'
+        f'<section class="siblings"><h2 class="j-label">more in {escape(folder.title)}</h2>'
+        f'<ul class="links">{"".join(items)}</ul></section>'
     )
 
 
@@ -340,9 +340,9 @@ def siblings_html(wiki: Path, rel: str) -> str:
 def folder_html(folder: Folder, index_body_html: str) -> str:
     """A folder page: the title, the index page's text if it has one, then the
     subfolders and the pages."""
-    parts = [f"<h1>{escape(folder.title)}</h1>"]
+    parts = [f'<h1 class="j-doc-title">{escape(folder.title)}</h1>']
     if index_body_html:
-        parts.append(f'<article class="md">{index_body_html}</article>')
+        parts.append(f'<article class="j-prose">{index_body_html}</article>')
     subfolders = "".join(
         f'<li><a href="{f.url}">{escape(f.title)}/</a> <span class=count>{f.count()}</span></li>'
         for f in folder.folders
@@ -353,13 +353,13 @@ def folder_html(folder: Folder, index_body_html: str) -> str:
     pages = "".join(_page_item(p) for p in folder.pages)
     files = "".join(_file_item(f) for f in folder.files)
     if subfolders:
-        parts.append(f'<h2>folders</h2><ul class="tree">{subfolders}</ul>')
+        parts.append(f'<h2 class="j-label">folders</h2><ul class="tree">{subfolders}</ul>')
     if pages:
-        parts.append(f'<h2>pages</h2><ul class="tree">{pages}</ul>')
+        parts.append(f'<h2 class="j-label">pages</h2><ul class="tree">{pages}</ul>')
     if files:
-        parts.append(f'<h2>files</h2><ul class="tree">{files}</ul>')
+        parts.append(f'<h2 class="j-label">files</h2><ul class="tree">{files}</ul>')
     if not subfolders and not pages and not files:
-        parts.append("<p class=snippet>nothing here yet.</p>")
+        parts.append('<p class="j-empty">nothing here yet.</p>')
     return "".join(parts)
 
 
@@ -388,7 +388,9 @@ def meta_html(front: dict[str, Any]) -> str:
     for key, value in front.items():
         if value in (None, "", [], {}):
             continue
-        pairs.append(f"<span class=k>{escape(str(key))}:</span> {escape(_short(value))}")
+        pairs.append(
+            f"<span><span class=k>{escape(str(key))}:</span> {escape(_short(value))}</span>"
+        )
     if not pairs:
         return ""
-    return '<p class="frontmatter meta">' + " · ".join(pairs) + "</p>"
+    return '<p class="j-meta frontmatter">' + " · ".join(pairs) + "</p>"

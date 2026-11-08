@@ -136,7 +136,7 @@ def test_shipped_docs_start_closed_and_a_small_folder_open(client):
 
 def test_wiki_root_is_the_front_page_and_the_folders(client):
     html = client.get("/wiki/", auth=ALEX).text
-    assert "<h1>Home</h1>" in html
+    assert '<h1 class="j-doc-title">Home</h1>' in html
     assert "The front door." in html
     assert '<a href="/wiki/recipes/">Recipes/</a>' in html
     assert '<a href="/journal">journal</a>' in html
@@ -149,8 +149,8 @@ def test_wiki_without_slash_redirects(client):
 
 def test_folder_page_renders_its_index_and_lists_its_pages(client):
     html = client.get("/wiki/recipes/", auth=ALEX).text
-    assert "<h1>Recipes</h1>" in html
-    assert html.count("<h1>") == 1  # the index heading is not repeated
+    assert '<h1 class="j-doc-title">Recipes</h1>' in html
+    assert html.count("<h1") == 1  # the index heading is not repeated
     assert "What we cook." in html
     assert '<a href="/wiki/recipes/sauces/">sauces/</a>' in html
     assert '<a href="/wiki/recipes/ponzu-sauce.md">Ponzu Sauce</a>' in html
@@ -227,7 +227,7 @@ def test_a_directory_path_without_slash_redirects_to_the_folder_page(client):
 
 def test_folder_without_an_index_page_still_lists(client):
     html = client.get("/wiki/garden/", auth=ALEX).text
-    assert "<h1>garden</h1>" in html and "Beds" in html
+    assert '<h1 class="j-doc-title">garden</h1>' in html and "Beds" in html
 
 
 def test_missing_and_hidden_folders_are_404(client):
@@ -259,7 +259,7 @@ def test_a_page_has_crumbs_a_title_and_its_siblings(client):
 
 def test_frontmatter_is_one_line_not_a_box(client):
     html = client.get("/wiki/recipes.md", auth=ALEX).text
-    assert 'class="frontmatter meta"' in html
+    assert 'class="j-meta frontmatter"' in html
     assert "wikijs" in html and "2026-09-03" in html
     assert "tags:" not in html
 

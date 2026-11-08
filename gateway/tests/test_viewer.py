@@ -235,6 +235,92 @@ def test_security_headers_on_every_response(client):
     assert response.headers["x-content-type-options"] == "nosniff"
 
 
+# -- the shared look ---------------------------------------------------------
+
+UI_FILES = {
+    "/ui/joshua-ui.css": "text/css",
+    "/ui/logo-512.png": "image/png",
+    "/ui/logo-64.png": "image/png",
+    "/ui/apple-touch-icon.png": "image/png",
+    "/ui/favicon-32.png": "image/png",
+    "/style.css": "text/css",
+}
+
+
+def test_the_shared_files_are_served(client):
+    for path, media_type in UI_FILES.items():
+        response = client.get(path, auth=("alex", ALEX_PW))
+        assert response.status_code == 200, path
+        assert response.headers["content-type"].split(";")[0] == media_type, path
+        assert response.content, path
+    css = client.get("/ui/joshua-ui.css", auth=MIA).text
+    assert "--j-bg" in css and ".j-shell" in css
+    assert client.get("/ui/logo-64.png", auth=MIA).content.startswith(b"\x89PNG")
+
+
+def test_the_shared_files_need_auth(client):
+    for path in UI_FILES:
+        response = client.get(path)
+        assert response.status_code == 401, path
+        assert response.headers["WWW-Authenticate"].startswith("Basic"), path
+        assert client.get(path, auth=("alex", "wrong")).status_code == 401, path
+
+
+def test_only_the_named_shared_files_are_served(client):
+    for path in ("/ui/README.md", "/ui/nope.css", "/ui/..%2fviewer.py", "/ui/%2e%2e"):
+        assert client.get(path, auth=("alex", ALEX_PW)).status_code == 404, path
+
+
+def test_the_viewer_stylesheet_uses_the_shared_tokens(client):
+    css = client.get("/style.css", auth=("alex", ALEX_PW)).text
+    assert "var(--j-" in css
+    assert "prefers-color-scheme" not in css  # dark only, like the shared file
+
+
+def test_a_page_has_the_shared_shell(client):
+    html = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).text
+    assert '<link rel=stylesheet href="/ui/joshua-ui.css">' in html
+    assert html.index("/ui/joshua-ui.css") < html.index("/style.css")
+    assert 'href="/ui/favicon-32.png"' in html
+    assert 'href="/ui/apple-touch-icon.png"' in html
+    assert '<meta name="theme-color" content="#080d17">' in html
+    assert '<div class="j-shell has-sidebar">' in html
+    assert '<aside class="j-sidebar">' in html and '<header class="j-appbar">' in html
+    assert '<nav class="j-tabs mobile-only"' in html
+    assert '<main class="j-content">' in html
+    assert '<article class="j-prose">' in html
+    # The search field is in the app bar, so a phone has it too.
+    appbar = html[html.index('<header class="j-appbar">') : html.index("</header>")]
+    assert 'action="/search"' in appbar and 'name="q"' in appbar
+
+
+def test_the_current_section_is_marked(client):
+    pages = {
+        "/wiki/pizza.md": 'href="/wiki/"',
+        "/journal": 'href="/journal"',
+        "/search?q=Dough": 'href="/search"',
+        "/usage": 'href="/usage"',
+    }
+    for path, link in pages.items():
+        html = client.get(path, auth=("alex", ALEX_PW)).text
+        assert f'class="j-nav-item" {link} aria-current="page"' in html, path
+        assert f'class="j-tab" {link} aria-current="page"' in html, path
+        assert html.count('aria-current="page"') == 2, path
+    home = client.get("/", auth=("alex", ALEX_PW)).text
+    assert 'aria-current="page"' not in home
+    assert "<strong>Home</strong>" in home
+
+
+def test_the_search_field_keeps_the_query(client):
+    html = client.get("/search", params={"q": 'a "b"'}, auth=("alex", ALEX_PW)).text
+    assert 'name="q" value="a &quot;b&quot;"' in html
+
+
+def test_the_delete_button_is_a_danger_button(client):
+    html = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).text
+    assert '<button class="j-btn sm danger" type=submit>move this page to trash</button>' in html
+
+
 # -- search -----------------------------------------------------------------
 
 

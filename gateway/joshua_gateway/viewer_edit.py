@@ -149,24 +149,28 @@ def form_html(
     """The edit form. ``people`` adds the people field (a journal entry).
     ``folder`` makes it a new-page form with a name field. ``kept_front`` is
     the frontmatter the save keeps, shown above the text."""
-    parts = [f"<h1>{escape(title)}</h1>", f"<p class=snippet>{escape(subtitle)}</p>"]
+    parts = [
+        f'<h1 class="j-doc-title">{escape(title)}</h1>',
+        f'<p class="j-meta">{escape(subtitle)}</p>',
+    ]
     if error:
-        parts.append(f'<p class="error">{escape(error)}</p>')
+        parts.append(f'<p class="j-error">{escape(error)}</p>')
     parts.append('<form class="edit" action="/save" method="post">')
     parts.append(f'<input type="hidden" name="csrf" value="{escape(csrf, quote=True)}">')
     if folder is not None:
         parts.append(f'<input type="hidden" name="folder" value="{escape(folder, quote=True)}">')
         parts.append(
-            "<label>name (a file name; folders with a slash)<br>"
-            f'<input name="name" value="{escape(name, quote=True)}" '
-            'placeholder="my-page.md" required></label>'
+            '<label class="j-field-label">name (a file name; folders with a slash)'
+            f'<span class="j-field"><input name="name" value="{escape(name, quote=True)}" '
+            'placeholder="my-page.md" required></span></label>'
         )
     else:
         parts.append(f'<input type="hidden" name="path" value="{escape(path, quote=True)}">')
     if people is not None:
         parts.append(
-            '<label>people (ids, comma separated)<br><input name="people" '
-            f'value="{escape(", ".join(people), quote=True)}"></label>'
+            '<label class="j-field-label">people (ids, comma separated)'
+            '<span class="j-field"><input name="people" '
+            f'value="{escape(", ".join(people), quote=True)}"></span></label>'
         )
     if kept_front:
         parts.append(
@@ -174,18 +178,22 @@ def form_html(
             f"<pre>{escape(kept_front.strip())}</pre></details>"
         )
     parts.append(
-        f'<label>text<br><textarea name="body" rows="22">{escape(body)}</textarea></label>'
+        '<label class="j-field-label">text<span class="j-field mono">'
+        f'<textarea name="body" rows="22">{escape(body)}</textarea></span></label>'
     )
     cancel = escape(cancel_url, quote=True)
-    parts.append(f'<p><button type=submit>save</button> <a href="{cancel}">cancel</a></p>')
+    parts.append(
+        '<div class="j-row-flex"><button class="j-btn primary" type=submit>save</button>'
+        f'<a class="j-btn ghost" href="{cancel}">cancel</a></div>'
+    )
     parts.append("</form>")
     return "".join(parts)
 
 
 def edit_link(rel: str) -> str:
-    return f'<a href="{edit_url(rel)}">edit this page</a>'
+    return f'<a class="j-btn sm" href="{edit_url(rel)}">edit this page</a>'
 
 
 def new_link(folder: str) -> str:
     where = wiki.stem_title(folder.rsplit("/", 1)[-1]) if folder else "the wiki"
-    return f'<a href="{new_url(folder)}">new page in {escape(where)}</a>'
+    return f'<a class="j-btn sm" href="{new_url(folder)}">new page in {escape(where)}</a>'

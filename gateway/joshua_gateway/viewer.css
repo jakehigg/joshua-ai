@@ -1,0 +1,203 @@
+/*
+ * viewer.css — what only the viewer needs, on top of ui/joshua-ui.css.
+ *
+ * The page loads the shared stylesheet first and this one second. Every
+ * color, size and radius comes from a --j-* token of the shared file. Class
+ * names here have no j- prefix, so they never collide with a shared one.
+ */
+
+/* ------------------------------------------------------------ the shell */
+.v-sections { display: flex; flex-direction: column; gap: 2px; }
+
+/* the search field in the app bar: on every screen, so a phone has it too */
+.v-search { flex: 1 1 160px; max-width: 320px; min-width: 0; margin: 0; }
+.v-search .j-field { min-height: 36px; padding: 0 10px; }
+.v-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.j-appbar-title { flex: none; max-width: 45%; }
+
+/* the content column: the gap of .j-content spaces the blocks */
+.j-content > p, .j-content > ul, .j-content > section, .j-content > figure { margin: 0; }
+.j-content > h1 { margin: 0; }
+.j-content > h2, .j-content > h3 {
+  margin: var(--j-gap) 0 0;
+  font-size: var(--j-text-lg);
+  font-weight: 600;
+}
+.j-content > h3 { font-size: var(--j-text-md); }
+.j-content > .j-label { margin-top: var(--j-gap); }
+.j-content > .j-crumbs + .j-meta, .j-content > .j-crumbs + .j-prose { margin-top: -6px; }
+.j-content code { font: 13px var(--j-mono); }
+
+/* a cell keeps its words whole; a wide table scrolls in its own box */
+.j-prose table { overflow-wrap: normal; }
+.j-prose td { min-width: 4ch; }
+
+/* the first heading of a page is its title */
+.j-prose > h1:first-child { font-size: var(--j-text-xl); font-weight: 700; margin-bottom: 14px; }
+
+/* --------------------------------------------------------- the wiki tree */
+ul.tree {
+  list-style: none;
+  margin: 0;
+  padding: 6px 14px;
+  background: var(--j-surface);
+  border: 1px solid var(--j-line-soft);
+  border-radius: var(--j-radius);
+  overflow-wrap: anywhere;
+}
+ul.tree li { padding: 5px 0; }
+ul.tree ul {
+  list-style: none;
+  margin: 4px 0 0 7px;
+  padding: 0 0 0 14px;
+  border-left: 1px solid var(--j-line);
+}
+ul.tree ul li { padding: 3px 0; }
+ul.tree details > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+ul.tree details > summary::-webkit-details-marker { display: none; }
+ul.tree details > summary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 4px 2px 0;
+  border: solid var(--j-faint);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
+  transition: transform .15s;
+}
+ul.tree details[open] > summary::before { transform: rotate(45deg); }
+ul.tree details > summary:hover::before { border-color: var(--j-text); }
+.count { color: var(--j-faint); font-size: var(--j-text-sm); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------- a page's parts */
+.j-meta.frontmatter .k { font-weight: 600; color: var(--j-text); }
+
+/* the actions under a page: edit, new page, move to trash */
+.v-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: var(--j-gap);
+  border-top: 1px solid var(--j-line-soft);
+}
+.v-actions form { margin: 0; }
+
+/* the other pages of the folder, in columns on a wide screen */
+section.siblings { display: flex; flex-direction: column; gap: 8px; padding-top: var(--j-gap); border-top: 1px solid var(--j-line-soft); }
+ul.links { list-style: none; margin: 0; padding: 0; overflow-wrap: anywhere; }
+ul.links li { padding: 3px 0; break-inside: avoid; }
+@media (min-width: 560px) {
+  ul.links { columns: 2; column-gap: 2rem; }
+}
+
+/* ------------------------------------------------------------- journal */
+.pager { color: var(--j-muted); font-size: var(--j-text-sm); }
+.pager strong { color: var(--j-text); font-weight: 600; }
+section.day { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
+section.day > h2 {
+  margin: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--j-line-soft);
+}
+section.day > h2 a { color: inherit; }
+section.day > h2 a:hover { color: var(--j-text); text-decoration: none; }
+.j-entry { gap: 8px; scroll-margin-top: 72px; }
+.entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.entry-head h3 { margin: 0 4px 0 0; font-size: var(--j-text-md); line-height: 1.35; }
+.entry-head h3 a { color: inherit; }
+.entry-head .j-chip { padding: 1px 9px; font-size: 12px; }
+.j-entry .j-prose { font-size: var(--j-text-md); }
+.j-entry .j-prose > :last-child { margin-bottom: 0; }
+
+/* -------------------------------------------------------------- search */
+section.meaning, section.words { display: flex; flex-direction: column; gap: 10px; }
+section.meaning > h2, section.words > h2 { margin: 0; font-size: var(--j-text-lg); font-weight: 600; }
+.j-list-main { gap: 2px; }
+.j-list-title.wrap { overflow-wrap: anywhere; }
+.hit-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- edit */
+form.edit { display: flex; flex-direction: column; gap: var(--j-gap); margin: 0; }
+form.edit .j-field textarea { min-height: 50vh; }
+details.kept { font-size: var(--j-text-sm); color: var(--j-muted); }
+details.kept > summary { cursor: pointer; }
+details.kept pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  font: 12.5px/1.55 var(--j-mono);
+  background: var(--j-surface-2);
+  border: 1px solid var(--j-line-soft);
+  border-radius: var(--j-radius-sm);
+  overflow-x: auto;
+}
+
+/* --------------------------------------------------------------- usage */
+/* a row heading in the body or the foot of a table reads as a cell */
+.j-table tbody th, .j-table tfoot th {
+  border-top: 1px solid var(--j-line-soft);
+  background: none;
+  color: var(--j-text);
+  font-size: inherit;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+.j-table tfoot td, .j-table tfoot th { border-top-color: var(--j-line); }
+.j-table.usage th, .j-table.usage td { white-space: nowrap; }
+.j-table caption { padding: 8px 10px; text-align: left; color: var(--j-muted); }
+.j-table-wrap { background: var(--j-bg); }
+
+figure.usage-chart { margin: 0; }
+figure.usage-chart svg { display: block; width: 100%; height: auto; }
+figure.usage-chart .grid { stroke: var(--j-line); stroke-width: 1; }
+figure.usage-chart .axis { fill: var(--j-muted); font-size: 11px; font-family: var(--j-font); }
+ul.legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: var(--j-text-sm);
+  color: var(--j-muted);
+}
+ul.legend li { display: inline-flex; align-items: center; gap: 6px; }
+ul.legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+
+details.day { border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); }
+details.day > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: var(--j-text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--j-muted);
+}
+details.day > summary:hover { color: var(--j-text); }
+details.day[open] > summary { border-bottom: 1px solid var(--j-line-soft); }
+details.day .j-table-wrap { border: 0; border-radius: 0; }
+.j-content > details.day + details.day { margin-top: -10px; }
+
+/* the series colors of the chart: the status tokens first, then four more */
+.s0 { fill: var(--j-accent); background: var(--j-accent); }
+.s1 { fill: var(--j-warn); background: var(--j-warn); }
+.s2 { fill: var(--j-ok); background: var(--j-ok); }
+.s3 { fill: var(--j-bad); background: var(--j-bad); }
+.s4 { fill: #a78bfa; background: #a78bfa; }
+.s5 { fill: #f472b6; background: #f472b6; }
+.s6 { fill: #2dd4bf; background: #2dd4bf; }
+.s7 { fill: var(--j-muted); background: var(--j-muted); }
