@@ -477,6 +477,45 @@ async def test_an_event_fills_the_snapshot_while_the_endpoint_blocks() -> None:
     assert answer.retry_after == 600
 
 
+# The rate_limit_info of each bundled CLI, as captured on 2026-11-08 with a
+# subscription token. CLI 2.1.239 (claude-agent-sdk 0.2.144) sends no
+# percentages, so core needs claude-agent-sdk >= 0.2.165 (CLI 2.1.294), which
+# sends unifiedWindows without a status for each window.
+RAW_EVENT_CLI_2_1_239 = {
+    "status": "allowed",
+    "resetsAt": 1794108600,
+    "rateLimitType": "five_hour",
+    "overageStatus": "allowed",
+    "overageResetsAt": 1796083200,
+    "isUsingOverage": False,
+}
+RAW_EVENT_CLI_2_1_294 = {
+    **RAW_EVENT_CLI_2_1_239,
+    "unifiedWindows": {
+        "five_hour": {"utilization": 0.61, "resetsAt": 1794108600},
+        "seven_day": {"utilization": 0.28, "resetsAt": 1794272400},
+    },
+}
+
+
+def test_an_event_from_cli_2_1_294_fills_both_windows() -> None:
+    t = tracker(Upstream(ok()))
+    assert t.note_sdk_event(event(RAW_EVENT_CLI_2_1_294).rate_limit_info) is True
+    answer = t.answer()
+    assert answer.available is True and answer.source == "sdk_event"
+    assert answer.five_hour is not None
+    assert (answer.five_hour.used_pct, answer.five_hour.left_pct) == (61.0, 39.0)
+    assert answer.five_hour.status is None
+    assert answer.seven_day is not None and answer.seven_day.used_pct == 28.0
+
+
+def test_an_event_from_cli_2_1_239_holds_no_percent_and_changes_nothing() -> None:
+    t = tracker(Upstream(ok()))
+    info = event(RAW_EVENT_CLI_2_1_239, rate_limit_type="five_hour").rate_limit_info
+    assert t.note_sdk_event(info) is False
+    assert t.snapshot is None
+
+
 async def test_an_older_event_does_not_replace_a_newer_snapshot() -> None:
     clock = Clock()
     t = tracker(Upstream(ok()), clock=clock)
