@@ -10,7 +10,7 @@ from pathlib import Path
 from conftest import make_config, make_settings
 from fakes import FIXED_NOW, FakeStore
 from joshua_assignments.manager import Manager
-from joshua_assignments.prompts import READ_PAGE_FIRST, RESTARTED
+from joshua_assignments.prompts import NO_PROGRESS, READ_PAGE_FIRST, RESTARTED
 from joshua_assignments.sdk_runner import (
     ASK_REPLY,
     AssignmentTools,
@@ -28,6 +28,7 @@ from sdk_fakes import (
     init,
     rate_limit,
     result,
+    tool_error,
 )
 
 CONFIG = """
@@ -573,3 +574,86 @@ async def test_assignment_tools_stop_only_after_ask_or_finish() -> None:
     assert tools.stop_requested is False
     await tools.finish({"summary": "done"})
     assert tools.stop_requested is True
+
+
+CLONE_ERROR = (
+    "fatal: unable to access 'https://gitlab.example.net/infra/gitops.git/': "
+    "The requested URL returned error: 502"
+)
+
+
+def failing_slice(message: str) -> list:
+    """A slice of max turns that gets the same clone error and stores no checkpoint."""
+    return [init(), assistant(message), tool_error(CLONE_ERROR), result("error_max_turns")]
+
+
+async def test_three_slices_with_no_checkpoint_park_with_one_question(tmp_path, channels) -> None:
+    sdk = FakeSdk(*(failing_slice(f"m{i}") for i in range(1, 6)))
+    h = Harness(tmp_path, sdk, FakeCore())
+    started = await h.start()
+    row = h.row(started["id"])
+
+    assert row["status"] == "waiting"
+    assert len(sdk.clients) == 3
+    assert [s["reason"] for s in h.store.slices] == ["turns", "turns", "turns"]
+    assert row["asked_at"] == FIXED_NOW
+    assert "3 slices in a row ended with no new checkpoint" in row["open_question"]
+    assert CLONE_ERROR in row["open_question"]
+    assert row["open_question"].count("returned error: 502") == 1
+    assert (h.work / str(started["id"])).is_dir()
+    [first, second, third] = sdk.clients
+    assert NO_PROGRESS not in first.prompt
+    assert NO_PROGRESS in second.prompt and NO_PROGRESS in third.prompt
+    [body] = channels.bodies
+    assert "has stopped and has a question" in body["text"]
+    assert "returned error: 502" in body["text"]
+    assert "answer_assignment" in body["text"]
+
+    answered = await h.manager.answer(await h.store.get(started["id"]), "The policy is fixed.")
+    assert answered["status"] == "running"
+    await h.runner.idle()
+    resumed = sdk.clients[3]
+    assert resumed.options.resume == SESSION
+    assert resumed.prompt.startswith(READ_PAGE_FIRST)
+    assert "Answer: The policy is fixed." in resumed.prompt
+    # A new run counts from zero, so the answer gives three more slices.
+    assert NO_PROGRESS not in resumed.prompt
+
+
+async def test_a_checkpoint_sets_the_count_to_zero(tmp_path, channels) -> None:
+    sdk = FakeSdk(
+        failing_slice("m1"),
+        failing_slice("m2"),
+        [init(), call("checkpoint", note="cloned. Next: read"), result("error_max_turns")],
+        failing_slice("m4"),
+        failing_slice("m5"),
+        [init(), call("finish", summary="Done."), result("success")],
+    )
+    h = Harness(tmp_path, sdk, FakeCore())
+    started = await h.start()
+    assert h.row(started["id"])["status"] == "done"
+    assert len(sdk.clients) == 6
+    assert NO_PROGRESS not in sdk.clients[3].prompt
+    assert NO_PROGRESS in sdk.clients[4].prompt
+    assert channels.bodies[0]["text"].count("has ended: done") == 1
+
+
+async def test_stall_slices_one_parks_after_one_slice_with_no_tool_error(
+    tmp_path, channels
+) -> None:
+    sdk = FakeSdk(
+        [init(), call("checkpoint", note="plan written. Next: clone"), result("error_max_turns")],
+        max_turns_slice("m2"),
+    )
+    h = Harness(tmp_path, sdk, FakeCore())
+    h.cfg = make_config(
+        text=CONFIG.replace("slice_turns: 10", "slice_turns: 10\n  stall_slices: 1")
+    )
+    started = await h.start()
+    row = h.row(started["id"])
+    assert row["status"] == "waiting" and len(sdk.clients) == 2
+    question = row["open_question"]
+    assert "1 slice in a row ended" in question
+    assert "My last checkpoint: plan written. Next: clone" in question
+    assert "I saw no tool error." in question
+    assert row["page_path"] in question

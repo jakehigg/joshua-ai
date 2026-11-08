@@ -373,6 +373,7 @@ usage:
 #     when_unknown: refuse             # refuse | run, when core cannot read the windows
 #   max_concurrent: 1                  # running assignments; a parked one holds no slot
 #   slice_turns: 10                    # model turns between two reads of the limits
+#   stall_slices: 3                    # slices with no new checkpoint before it stops and asks
 #   keep_failed_work: 7d               # how long the scratch of a failed assignment stays
 #   repos:                             # what an assignment may clone: host/group/name or host/group/*
 #     - gitlab.example.net/infra/*

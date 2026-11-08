@@ -12,6 +12,10 @@ slices of ``assignments.slice_turns`` model turns:
 4. End on ``finish`` (``done``), the token cap or the turns
    (``budget_exceeded``), the working time (``time_exceeded``), or a session
    error (``failed``). ``ask`` parks the assignment as ``waiting``.
+5. Count a slice that stored no new checkpoint. After
+   ``assignments.stall_slices`` of them in a row, park the assignment as
+   ``waiting`` with an automatic question (see ``stall``). The prompt after
+   such a slice says that it made no progress.
 
 The session id is on the row, and each slice passes it as ``resume``, so a
 stop, an answer, an extension, or a restart continues the same session. An
@@ -51,7 +55,7 @@ from joshua_shared.gateway_mcp import allowed_gateway_servers, gateway_servers
 from joshua_shared.limits import parse_event_windows
 from joshua_shared.log import get_logger
 
-from joshua_assignments import budget, prompts, session
+from joshua_assignments import budget, prompts, session, stall
 from joshua_assignments.clock import Clock
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.git_proxy import GitProxy, git_config, write_git_config
@@ -114,6 +118,7 @@ class AssignmentTools:
         self.sleep = sleep
         self.finished: dict[str, Any] | None = None
         self.question: str | None = None
+        self.checkpoints = 0
 
     @property
     def stop_requested(self) -> bool:
@@ -132,6 +137,7 @@ class AssignmentTools:
         if not note:
             return _reply("Give a note.", is_error=True)
         await self.host.store.add_checkpoint(self.assignment_id, note[:MAX_NOTE])
+        self.checkpoints += 1
         return _reply("Checkpoint stored.")
 
     async def ask(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -320,6 +326,16 @@ class SdkRunner:
         )
         await self._end(row["id"], "paused_limits", stopped_at_limits=record)
 
+    async def _park_stalled(self, row: dict[str, Any], counter: stall.StallCounter) -> None:
+        """Park the assignment as ``waiting`` with the automatic question of a stall."""
+        checkpoint = await self.host.store.last_checkpoint(row["id"])
+        question = counter.question(checkpoint["note"] if checkpoint else None, row["page_path"])
+        await self.host.store.update(row["id"], open_question=question, asked_at=self.host.clock())
+        logger.info(
+            {"message": "stalled; asking", "assignment_id": row["id"], "slices": counter.slices}
+        )
+        await self._end(row["id"], "waiting")
+
     def _gateway(self, row: dict[str, Any]) -> dict[str, dict[str, Any]]:
         """The gateway MCP servers of the person, built as core builds them."""
         cfg = self.host.load_config()
@@ -387,6 +403,7 @@ class SdkRunner:
             home=home,
             config_dir=config_dir,
         )
+        counter = stall.StallCounter(self.host.load_config().assignments.stall_slices, work)
 
         while True:
             row = await store.get(assignment_id)
@@ -433,6 +450,7 @@ class SdkRunner:
                     checkpoint=checkpoint["note"] if checkpoint else None,
                     reason=resume_reason,
                     answer=answer,
+                    no_progress=counter.slices > 0,
                 )
             else:
                 prompt = prompts.first_prompt(
@@ -462,6 +480,7 @@ class SdkRunner:
                 resume=row.get("session_id"),
             )
             n = await store.next_slice_n(assignment_id)
+            checkpoints_before = tools.checkpoints
             clock = Clock(working_s - used_s, now=self.monotonic)
             started_at = self.host.clock()
             outcome = session.SliceOutcome()
@@ -520,6 +539,11 @@ class SdkRunner:
                 return
             if outcome.stop == "time":
                 await self._end(assignment_id, "time_exceeded", error="working_time")
+                return
+            if counter.slice_ended(
+                progress=tools.checkpoints > checkpoints_before, errors=outcome.tool_errors
+            ):
+                await self._park_stalled(row, counter)
                 return
 
     @staticmethod

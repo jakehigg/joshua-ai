@@ -26,7 +26,7 @@ import asyncio
 import contextlib
 import weakref
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +55,9 @@ WATCH_S = 1.0
 STOP_TIMEOUT_S = 15.0
 # The result of a slice that used all of its turns. It is not a failure.
 MAX_TURNS_SUBTYPE = "error_max_turns"
+# The tool errors that one slice keeps, the last ones, each cut to MAX_TOOL_ERROR.
+MAX_TOOL_ERRORS = 10
+MAX_TOOL_ERROR = 2000
 
 # Switches that turn off what the Claude CLI sends to other hosts than
 # ANTHROPIC_BASE_URL.
@@ -323,7 +326,9 @@ class SliceOutcome:
     ``stop`` is why the runner stopped the slice early: ``limits`` (a
     ``RateLimitEvent`` crossed a ceiling), ``tool`` (``ask`` or ``finish``),
     or ``time`` (the working clock). None means the slice ended by itself.
-    ``error`` is a short label, never the error text.
+    ``error`` is a short label, never the error text. ``tool_errors`` holds
+    the text of the last tool results that failed, for the stall question
+    only. It is never logged and never stored as it is.
     """
 
     session_id: str | None = None
@@ -334,6 +339,35 @@ class SliceOutcome:
     stop: str | None = None
     error: str | None = None
     rate_limit_info: Any = None
+    tool_errors: list[str] = field(default_factory=list)
+
+
+def tool_errors(msg: Any) -> list[str]:
+    """The text of each tool result of ``msg`` that failed (``is_error``)."""
+    content = getattr(msg, "content", None)
+    if not isinstance(content, list):
+        return []
+    out: list[str] = []
+    for block in content:
+        if (
+            type(block).__name__ != "ToolResultBlock"
+            or getattr(block, "is_error", None) is not True
+        ):
+            continue
+        raw = getattr(block, "content", None)
+        if isinstance(raw, str):
+            text = raw
+        elif isinstance(raw, list):
+            text = " ".join(
+                str(item.get("text"))
+                for item in raw
+                if isinstance(item, dict) and isinstance(item.get("text"), str)
+            )
+        else:
+            text = ""
+        if text.strip():
+            out.append(text.strip()[:MAX_TOOL_ERROR])
+    return out
 
 
 def error_label(msg: Any) -> str:
@@ -395,6 +429,9 @@ async def run_slice(
                     outcome.stop = "limits"
                     outcome.rate_limit_info = info
                     return
+            elif kind == "UserMessage":
+                outcome.tool_errors.extend(tool_errors(msg))
+                del outcome.tool_errors[:-MAX_TOOL_ERRORS]
             elif kind == "ResultMessage":
                 outcome.turns = _count(getattr(msg, "num_turns", 0))
                 outcome.subtype = getattr(msg, "subtype", None)
