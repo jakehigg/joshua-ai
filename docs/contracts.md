@@ -477,12 +477,12 @@ true and its profile runs. [assignments.md](assignments.md) has the tools.
 | Route | Callers | Request | Reply |
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
-| `GET /readyz` | open | | `{"ok", "database", "channels", "people", "queued", "running", "waiting", "paused_limits"}`: booleans and counts only. `503` when the database does not answer. |
-| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the eleven tools. `401` for a missing or wrong bearer, and for a fleet token. |
-| `GET /v1/assignments?person=&state=&limit=` | `assignments.read_callers` (default `viewer`) | none | `{"items": [item, ...]}`, the newest first. Each item has the counts, the state, `lede`, and `next_step`. `limit` 1 to 200, default 50. |
+| `GET /readyz` | open | | `{"ok", "database", "channels", "people", "draft", "running", "waiting", "paused_limits"}`: booleans and counts only. `503` when the database does not answer. |
+| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the fourteen tools. `start_assignment` takes a slot at once or is refused with the reason `busy`; there is no queue. `401` for a missing or wrong bearer, and for a fleet token. |
+| `GET /v1/assignments?person=&state=&limit=` | `assignments.read_callers` (default `viewer`) | none | `{"items": [item, ...]}`, the newest first. Each item has the counts, the state, `lede`, and `next_step`. `state` is `draft`, `in_progress`, or `completed`. `limit` 1 to 200, default 50. |
 | `GET /v1/assignments/{id}?person=` | the same | none | one assignment: item plus spec, definition, comments, open_comments, plan, report, outputs, checkpoints (newest first, at most 200), summary, follow-ups, answer, error |
 | `GET /v1/saved?person=` | the same | none | `{"items": [saved_item, ...]}`, the newest first, each with `open_comments` |
-| `GET /v1/saved/{id}?person=` | the same | none | one saved assignment plus `definition`, `comments`, and `runs_list` (newest first, at most 50) |
+| `GET /v1/saved/{id}?person=` | the same | none | one saved assignment plus `definition`, `comments`, and `runs_list` (newest first, at most 50; a draft is not a run) |
 | `GET /v1/assignments/{id}/comments?person=`, `GET /v1/saved/{id}/comments?person=` | the same | none | `{"items": [comment, ...]}`, the oldest first |
 | `POST /v1/assignments/{id}/comments?person=`, `POST /v1/saved/{id}/comments?person=` | the same | `{"line_no", "line_text", "body"}` | `201` and the comment, written as `person`. `400` for a bad value, `409` past 200 open comments. |
 | `DELETE /v1/assignments/{id}/comments/{comment_id}?person=`, `DELETE /v1/saved/{id}/comments/{comment_id}?person=` | the same | none | `204`. Only an open comment of `person`: `404` for another person's, `409` for a resolved one. |

@@ -1172,7 +1172,7 @@ characters.
 | `limits.max_five_hour_pct` | `90` | The highest 5-hour ceiling a spec can ask for. A higher value is clamped to it. |
 | `limits.max_seven_day_pct` | `95` | The highest weekly ceiling a spec can ask for. |
 | `limits.when_unknown` | `refuse` | `refuse` or `run`: what an assignment does when core cannot say how much of a window is used. With `refuse`, `start_assignment` refuses a spec with no `budget.tokens`, and a running assignment with no token cap stops as `paused_limits`. |
-| `max_concurrent` | `1` | The number of assignments that can run at one time. A parked assignment holds no slot. |
+| `max_concurrent` | `1` | The most assignments that can run at one time. There is no queue: a start past this ceiling is refused with the reason `busy`, and Joshua starts it again later. A parked assignment and a draft hold no slot. |
 | `slice_turns` | `10` | The model turns of one slice. The runner reads the limits before each slice. |
 | `stall_slices` | `3` | The slices in a row with no new checkpoint after which the runner stops the assignment as `waiting` with an automatic question. The question names the last checkpoint and the last tool errors. At least `1`. See [assignments.md](assignments.md#a-stalled-assignment). |
 | `keep_failed_work` | `7d` | How long the scratch directory of an assignment that ended as `failed`, `budget_exceeded`, or `time_exceeded` stays. The container removes it at start, or when an assignment stops, after this time. |
