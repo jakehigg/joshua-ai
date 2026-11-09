@@ -533,8 +533,7 @@ class Memory(_Model):
     # feature off. See ``Snapshot``.
     snapshots: list[Snapshot] = []
     # Top-level folders of the wiki that the memory never holds: the ``files``
-    # source does not index them, and no search returns a page in them. The
-    # plan pages of the assignments are in ``wiki/assignments/``.
+    # source does not index them, and no search returns a page in them.
     exclude_folders: list[str] = ["assignments"]
 
     @field_validator("exclude_folders", mode="before")
