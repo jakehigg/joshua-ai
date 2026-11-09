@@ -194,11 +194,6 @@ def docs_root(root: Path | str | None = None) -> Path:
     return wiki_root(root) / "joshua-docs"
 
 
-def documents_root(root: Path | str | None = None) -> Path:
-    """`<data>/documents`, the documents of the members. Its own git repository."""
-    return _root(root) / DOCUMENTS
-
-
 def documents_owner_dir(owner: str, root: Path | str | None = None) -> Path:
     """`<data>/documents/<owner>`, for a person id or `shared`.
 
