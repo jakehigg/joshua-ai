@@ -273,3 +273,92 @@ section.limits > .j-meta { margin-top: -6px; }
   .v-link-row > .j-field:nth-of-type(1),
   .v-link-row > .j-field:nth-of-type(2) { grid-column: 1 / -1; }
 }
+
+/* ---------------------------------------------------------- assignments */
+/* the pills, and the way to the saved assignments beside them */
+.a-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.a-saved-link { margin-left: auto; font-size: var(--j-text-sm); }
+
+/* a row: the title and its line, then the chips at the end */
+.a-row { align-items: flex-start; }
+.a-row .j-list-main { gap: 3px; }
+.a-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.a-row .a-chips { flex: none; justify-content: flex-end; max-width: 45%; }
+.a-saved { padding: 1px 9px; font-size: 12px; }
+time[title] { cursor: help; text-decoration: underline dotted var(--j-faint); text-underline-offset: 3px; }
+
+/* the detail page reads as a wiki page: one column of sections */
+.j-content > .j-crumbs + .j-doc-title { margin-top: -6px; }
+.a-cost { margin-top: -6px; font-variant-numeric: tabular-nums; }
+.a-lead { color: var(--j-muted); }
+.a-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* an open question or a stop at the limits */
+.a-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--j-line);
+  border-left: 3px solid var(--j-accent);
+  border-radius: var(--j-radius-sm);
+  background: var(--j-accent-soft);
+}
+.a-notice.warn { border-left-color: var(--j-warn); background: var(--j-warn-soft); }
+.a-notice p { margin: 0; }
+
+section.a-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: var(--j-gap);
+  border-top: 1px solid var(--j-line-soft);
+}
+.a-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.a-head h2 { margin: 0; font-size: var(--j-text-lg); font-weight: 600; }
+.a-sub { margin: 6px 0 0; font-size: var(--j-text-md); font-weight: 600; }
+.a-section .j-prose > :last-child { margin-bottom: 0; }
+
+/* the recorded outputs */
+ul.a-outputs { margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+ul.a-outputs li { padding: 2px 0; }
+.a-kind { color: var(--j-muted); font-weight: 600; }
+
+/* the progress: a thin line with one dot a checkpoint, newest first */
+ol.a-timeline { list-style: none; margin: 0; padding: 0 0 0 18px; border-left: 1px solid var(--j-line); }
+ol.a-timeline li { position: relative; padding: 0 0 14px; }
+ol.a-timeline li:last-child { padding-bottom: 0; }
+ol.a-timeline li::before {
+  content: "";
+  position: absolute;
+  left: -23px;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--j-bg);
+  border: 2px solid var(--j-faint);
+}
+ol.a-timeline li:first-child::before { border-color: var(--j-accent); }
+.a-at { font: 500 12px var(--j-mono); color: var(--j-faint); }
+
+/* the definition, as YAML */
+details.a-def { border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); }
+details.a-def > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; }
+details.a-def[open] > summary { border-bottom: 1px solid var(--j-line-soft); }
+details.a-def pre, pre.a-error {
+  margin: 0;
+  padding: 10px 12px;
+  font: 12.5px/1.55 var(--j-mono);
+  background: var(--j-surface-2);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+details.a-def pre { border-radius: 0 0 var(--j-radius-sm) var(--j-radius-sm); }
+pre.a-error { color: var(--j-bad); border: 1px solid var(--j-bad-soft); border-radius: var(--j-radius-sm); }
+
+@media (max-width: 560px) {
+  .a-row { flex-direction: column; gap: 6px; }
+  .a-row .a-chips { max-width: none; justify-content: flex-start; }
+}
