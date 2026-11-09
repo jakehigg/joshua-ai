@@ -266,10 +266,10 @@ def test_the_status_and_kind_filters(docs) -> None:
 
 def test_a_row_counts_the_open_comments(docs) -> None:
     lines = [
-        {"id": 1, "line_no": 8, "line_text": "# Party plan", "body": "a", "author": "alex"},
+        {"id": 1, "line_no": 1, "line_text": "# Party plan", "body": "a", "author": "alex"},
         {
             "id": 2,
-            "line_no": 8,
+            "line_no": 1,
             "line_text": "# Party plan",
             "body": "b",
             "author": "alex",
@@ -302,13 +302,19 @@ def test_a_markdown_document_renders_as_blocks_with_a_plus_each(docs) -> None:
     html = _main(_get("/documents/alex/party").text)
     # The body has its own title, so the head gives none.
     assert html.count("<h1") == 1 and "<h1>Party plan</h1>" in html
-    # Each block is a unit anchored to its line of the file (frontmatter included).
-    assert 'id="L8"' in html and 'id="L10"' in html and 'id="L12"' in html
-    assert '<input type="hidden" name="line_no" value="12">' in html
+    # Each block is a unit anchored to its line of the body, from 1.
+    assert 'id="L1"' in html and 'id="L3"' in html and 'id="L5"' in html
+    assert '<input type="hidden" name="line_no" value="5">' in html
     assert '<input type="hidden" name="line_text" value="- Order the food">' in html
-    assert "Comment on the list item at line 13" in html
-    assert '<details class="a-source"><summary>Source</summary>' in html
-    assert 'id="S1"' in html and "title: Party plan" in html
+    assert "Comment on the list item at line 6" in html
+    source = html[html.index('<details class="a-source">') :]
+    # The Source fold shows the frontmatter with no number and no "+", then
+    # numbers the body from 1.
+    assert "title: Party plan" in source
+    pre = source[: source.index('id="S1"')]
+    assert pre.count('class="a-line a-pre"') == 7 and "a-add" not in pre
+    assert '<li class="a-line" id="S1"><a class="a-ln" href="#S1">1</a>' in source
+    assert '<code class="a-code"># Party plan</code>' in source
     assert '<span class="j-badge accent">active</span>' in html
 
 
@@ -320,7 +326,7 @@ def test_a_report_shaped_document_shows_the_showcase(docs) -> None:
     assert "Tell Joshua your answer." in html
     # The cards have their own "+", at their line of the file.
     assert "Comment on the highlight" in html and "Comment on decision 1" in html
-    assert 'id="L11"' in html  # the first highlight
+    assert 'id="L5"' in html  # the first highlight
     # The copy script is the one the policy allows.
     assert f"<script>{sc.COPY_SCRIPT}</script>" in html
     assert "Document documents/alex/cleanup.md, decision 1: Delete the old page?" in html
@@ -339,19 +345,38 @@ def test_both_sections_use_one_renderer() -> None:
     assert am.Gutter is vc.Gutter and dm.Gutter is vc.Gutter
 
 
-def test_a_comment_on_the_frontmatter_shows_under_the_head(docs) -> None:
-    line = {"id": 1, "line_no": 2, "line_text": "title: Party plan", "body": "rename"}
+def test_a_comment_on_the_document_as_a_whole_shows_under_the_head(docs) -> None:
+    line = {"id": 1, "line_no": 0, "line_text": "title: Party plan", "body": "rename"}
     _write(docs / "alex/party.comments.jsonl", json.dumps(line | {"author": "alex"}) + "\n")
     html = _main(_get("/documents/alex/party").text)
     head = html[html.index("<header") : html.index("</header>")]
-    assert "rename" in head
-    # The "+" of the head names the title line.
-    assert '<input type="hidden" name="line_no" value="2">' in head
+    assert "rename" in head and 'id="L0"' in head
+    assert "line changed" not in head
+    # The "+" of the head is line 0, anchored to the title line.
+    assert '<input type="hidden" name="line_no" value="0">' in head
     assert '<input type="hidden" name="line_text" value="title: Party plan">' in head
+    assert "Comment on the document" in head
+
+
+def test_a_comment_on_the_document_is_stale_when_the_title_changes(docs) -> None:
+    line = {"id": 1, "line_no": 0, "line_text": "title: Old plan", "body": "x", "author": "a"}
+    _write(docs / "alex/party.comments.jsonl", json.dumps(line) + "\n")
+    doc = ds.find(docs, "alex", "party", ["alex"])
+    assert doc is not None and [c.stale for c in ds.read_comments(doc)] == [True]
+    head = _main(_get("/documents/alex/party").text)
+    assert "line changed" in head[head.index("<header") : head.index("</header>")]
+
+
+def test_a_frontmatter_change_never_moves_a_comment(docs) -> None:
+    line = {"id": 1, "line_no": 5, "line_text": "- Order the food", "body": "x", "author": "a"}
+    _write(docs / "alex/party.comments.jsonl", json.dumps(line) + "\n")
+    _write(docs / "alex/party.md", PLAN.replace("kind: plan\n", "kind: plan\ntags:\n- a\n- b\n"))
+    doc = ds.find(docs, "alex", "party", ["alex"])
+    assert doc is not None and [c.stale for c in ds.read_comments(doc)] == [False]
 
 
 def test_a_stale_comment_is_marked(docs) -> None:
-    line = {"id": 1, "line_no": 12, "line_text": "- Order the cake", "body": "x", "author": "a"}
+    line = {"id": 1, "line_no": 5, "line_text": "- Order the cake", "body": "x", "author": "a"}
     _write(docs / "alex/party.comments.jsonl", json.dumps(line) + "\n")
     html = _main(_get("/documents/alex/party").text)
     assert "line changed" in html and "- Order the cake" in html
@@ -374,12 +399,12 @@ def test_the_comment_round_trip(docs) -> None:
     token = _csrf(page)
     response = c.post(
         "/documents/alex/party/comments",
-        data={"csrf": token, "line_no": "12", "line_text": "- Order the food", "body": "Pizza"},
+        data={"csrf": token, "line_no": "5", "line_text": "- Order the food", "body": "Pizza"},
         auth=ALEX,
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert response.headers["location"] == "/documents/alex/party#L12"
+    assert response.headers["location"] == "/documents/alex/party#L5"
     stored = (docs / "alex/party.comments.jsonl").read_text().splitlines()
     record = json.loads(stored[0])
     assert set(record) == {
@@ -392,7 +417,7 @@ def test_the_comment_round_trip(docs) -> None:
         "resolved_at",
         "resolution",
     }
-    assert record["author"] == "alex" and record["line_no"] == 12 and record["body"] == "Pizza"
+    assert record["author"] == "alex" and record["line_no"] == 5 and record["body"] == "Pizza"
     assert record["created_at"] == NOW.isoformat() and record["resolved_at"] is None
     assert _git_log(docs)[0] == "Joshua|viewer: comment documents/alex/party.md"
     html = c.get("/documents/alex/party", auth=ALEX).text
@@ -412,8 +437,8 @@ def test_the_comment_round_trip(docs) -> None:
 
 @NEEDS_GIT
 def test_only_the_author_deletes_an_open_comment(docs) -> None:
-    mine = {"id": 1, "line_no": 6, "line_text": "", "body": "of mia", "author": "mia"}
-    done = {"id": 2, "line_no": 6, "body": "old", "author": "alex", "resolved_at": "x"}
+    mine = {"id": 1, "line_no": 1, "line_text": "", "body": "of mia", "author": "mia"}
+    done = {"id": 2, "line_no": 1, "body": "old", "author": "alex", "resolved_at": "x"}
     text = json.dumps(mine) + "\n" + json.dumps(done) + "\n"
     _write(docs / "shared/meals.comments.jsonl", text)
     c = client()
@@ -429,7 +454,7 @@ def test_only_the_author_deletes_an_open_comment(docs) -> None:
 def test_a_comment_needs_the_token_and_the_same_origin(docs) -> None:
     c = client()
     token = _csrf(c.get("/documents/alex/party", auth=ALEX).text)
-    form = {"line_no": "12", "body": "x"}
+    form = {"line_no": "5", "body": "x"}
     assert c.post("/documents/alex/party/comments", data=form, auth=ALEX).status_code == 403
     # The token of another document does not pass.
     other = _csrf(c.get("/documents/shared/meals", auth=ALEX).text)
@@ -460,7 +485,7 @@ def test_a_comment_on_another_members_document_is_404(docs) -> None:
 @pytest.mark.parametrize(
     ("form", "error"),
     [
-        ({"line_no": "0", "body": "x"}, "The line is not in the document."),
+        ({"line_no": "-1", "body": "x"}, "The line is not in the document."),
         ({"line_no": "999", "body": "x"}, "The line is not in the document."),
         ({"line_no": "nope", "body": "x"}, "The line is not in the document."),
         ({"line_no": "1", "body": "  "}, "The comment is empty."),
@@ -476,13 +501,33 @@ def test_a_bad_comment_is_refused(docs, form, error) -> None:
     assert not (docs / "alex/party.comments.jsonl").exists()
 
 
+def test_a_comment_on_line_0_takes_the_title_line(docs) -> None:
+    c = client()
+    token = _csrf(c.get("/documents/alex/party", auth=ALEX).text)
+    response = c.post(
+        "/documents/alex/party/comments",
+        data={"csrf": token, "line_no": "0", "body": "Shorter title"},
+        auth=ALEX,
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/documents/alex/party#L0"
+    record = json.loads((docs / "alex/party.comments.jsonl").read_text())
+    assert record["line_no"] == 0 and record["line_text"] == "title: Party plan"
+
+
+def test_a_resolved_comment_on_the_document_says_so() -> None:
+    done = ds.DocComment(id=1, line_no=0, line_text="title: A", resolved_at="x", resolution="ok")
+    assert "The document: <code>title: A</code>" in vc.resolved_html([done], tz=UTC, now=NOW)
+
+
 def test_a_comment_with_no_repository_is_stored_with_no_commit(data) -> None:
     _write(data / "documents/alex/note.md", "---\ntitle: Note\n---\nHello\n")
     c = client()
     token = _csrf(c.get("/documents/alex/note", auth=ALEX).text)
     response = c.post(
         "/documents/alex/note/comments",
-        data={"csrf": token, "line_no": "4", "body": "x"},
+        data={"csrf": token, "line_no": "1", "body": "x"},
         auth=ALEX,
         follow_redirects=False,
     )

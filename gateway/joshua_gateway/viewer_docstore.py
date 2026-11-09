@@ -11,9 +11,11 @@ commit.
 The comments of a document are in the comments file beside it,
 ``<slug>.comments.jsonl``: one JSON object a line, with ``id``,
 ``line_no``, ``line_text``, ``body``, ``author``, ``created_at``,
-``resolved_at``, and ``resolution``. ``line_no`` is a line of the stored
-file, from 1, frontmatter included. ``stale`` is not stored: it is true when
-that line of the file is no longer ``line_text``.
+``resolved_at``, and ``resolution``. ``line_no`` is a line of the body, from
+1 at the first line after the closing ``---`` of the frontmatter, so a change
+of the frontmatter never moves a comment. ``line_no`` 0 is the document as a
+whole, and its ``line_text`` is the ``title:`` line. ``stale`` is not stored:
+it is true when that line is no longer ``line_text``.
 
 A member reads their own folder and ``shared/``, and no other member's
 folder. :func:`find` refuses an owner or a slug that is not of the allowed
@@ -192,7 +194,27 @@ class Document:
 
     @property
     def lines(self) -> list[str]:
+        """The lines of the stored file, frontmatter included."""
         return self.text.split("\n")
+
+    @property
+    def body_lines(self) -> list[str]:
+        """The lines of the body. A comment counts its ``line_no`` here."""
+        return self.body.split("\n")
+
+    @property
+    def title_line(self) -> str:
+        """The ``title:`` line of the frontmatter, the anchor of line 0, or ""."""
+        head = self.lines[1 : max(self.offset - 1, 1)]
+        return next((line for line in head if line.startswith("title:")), "")
+
+    def line(self, line_no: int) -> str | None:
+        """The text that a comment on ``line_no`` anchors to: the ``title:``
+        line for 0, a line of the body from 1, else None."""
+        if line_no == 0:
+            return self.title_line
+        body = self.body_lines
+        return body[line_no - 1] if 1 <= line_no <= len(body) else None
 
     @property
     def title(self) -> str:
@@ -343,19 +365,22 @@ def comments_path(doc: Document) -> Path:
     return doc.path.with_name(f"{doc.slug}{COMMENTS_SUFFIX}")
 
 
-def _parse_comment(line: str, lines: list[str]) -> DocComment | None:
+def _parse_comment(line: str, doc: Document) -> DocComment | None:
     try:
         data = json.loads(line)
     except ValueError:
         return None
     if not isinstance(data, dict) or data.get("id") is None:
         return None
+    raw_no = data.get("line_no")
+    if isinstance(raw_no, bool) or raw_no is None:
+        return None
     try:
-        line_no = int(data.get("line_no", 0))
+        line_no = int(raw_no)
     except (TypeError, ValueError):
         return None
     line_text = _text(data.get("line_text"))
-    current = lines[line_no - 1] if 1 <= line_no <= len(lines) else None
+    current = doc.line(line_no)
     return DocComment(
         id=data["id"],
         line_no=line_no,
@@ -377,11 +402,10 @@ def read_comments(doc: Document) -> list[DocComment]:
         raw = comments_path(doc).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []
-    lines = doc.lines
     out = []
     for line in raw.split("\n"):
         if line.strip():
-            comment = _parse_comment(line, lines)
+            comment = _parse_comment(line, doc)
             if comment is not None:
                 out.append(comment)
     return out
@@ -443,11 +467,10 @@ def delete_comment(base: Path, doc: Document, *, author: str, comment_id: str) -
         raw = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return False
-    lines = doc.lines
     kept: list[str] = []
     removed = False
     for line in raw.split("\n"):
-        comment = _parse_comment(line, lines) if line.strip() else None
+        comment = _parse_comment(line, doc) if line.strip() else None
         if (
             not removed
             and comment is not None

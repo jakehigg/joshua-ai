@@ -10,8 +10,10 @@ member's document shows, and the layout has no table.
 as blocks, with the renderer of the assignments pages (``viewer_showcase``),
 and a document with the headings of a report shows as the same showcase as
 the report of an assignment. Each block, card, and heading has a "+" for a
-comment (``viewer_comments``), the ``Source`` fold gives each line of the file
-with its own "+", and the ``Versions`` fold lists the commits of the file.
+comment (``viewer_comments``). A comment names a line of the body, from 1;
+the "+" of the head is line 0, the document as a whole. The ``Source`` fold
+gives the frontmatter with no "+" and each line of the body with its own
+"+", and the ``Versions`` fold lists the commits of the file.
 ``?rev=<sha>`` shows an older version, read-only.
 
 An HTML document shows in an ``<iframe>`` with ``sandbox`` and ``srcdoc``:
@@ -33,7 +35,13 @@ from urllib.parse import urlencode
 from joshua_gateway import viewer_docstore as ds
 from joshua_gateway import viewer_report as rp
 from joshua_gateway import viewer_showcase as sc
-from joshua_gateway.viewer_comments import CommentForms, Gutter, comments_badge, time_html
+from joshua_gateway.viewer_comments import (
+    CommentForms,
+    Gutter,
+    add_form,
+    comments_badge,
+    time_html,
+)
 
 # The pills of the list, in order: (status, label, the text when empty).
 PILLS = (
@@ -202,8 +210,9 @@ def _header(
     now: datetime,
 ) -> str:
     """The head of the page: the chips, the title, the time, and the lede.
-    With a gutter, the head is the unit of the frontmatter lines and of the
-    body lines up to ``head_last`` (the title and the lede of a report)."""
+    With a gutter, the head is the unit of line 0 (the document as a whole)
+    and of the body lines up to ``head_last`` (the title and the lede of a
+    report). Its "+" is on line 0, anchored to the ``title:`` line."""
     updated = time_html(doc.updated, tz=tz, now=now)
     meta = f'<span class="j-meta">updated {updated}</span>' if updated else ""
     chips = (
@@ -215,13 +224,11 @@ def _header(
     anchors = plus = cards = anchor = ""
     css = "a-hero d-hero"
     if gutter is not None and (doc.offset or head_last):
-        first = 1 - doc.offset
+        first = 0
         last = max(first, head_last)
-        # The "+" names the title line, not the "---" that opens the frontmatter.
-        lines = doc.lines[: doc.offset]
-        at = next((n for n, line in enumerate(lines) if line.startswith("title:")), 0)
         anchors, cards = gutter.anchors(first, last), gutter.take(first, last)
-        plus = gutter.plus(first + at, "the title")
+        if gutter.forms is not None:
+            plus = add_form(0, doc.title_line, gutter.forms, what="the document")
         css += " d-unit" + (" has-comments" if cards else "")
         anchor = f' id="{gutter.unit_id(first)}"'
     return (
@@ -306,7 +313,15 @@ def document_html(
     is that older version: read-only, with no comment."""
     if version is not None:
         comments, forms = [], None
-    gutter = Gutter(doc.lines, comments, forms, tz, now, offset=doc.offset, author=person_id)
+    gutter = Gutter(
+        doc.body_lines,
+        comments,
+        forms,
+        tz,
+        now,
+        author=person_id,
+        preamble=doc.lines[: doc.offset],
+    )
     open_comments = len(gutter.open)
     lede = ""
     head_last = 0

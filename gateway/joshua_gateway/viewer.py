@@ -1088,15 +1088,15 @@ async def document_comment(request: Request, person: Person) -> Response:
     try:
         line_no = int(str(form.get("line_no", "")))
     except ValueError:
-        line_no = 0
-    lines = doc.lines
-    if not 1 <= line_no <= len(lines):
+        line_no = -1
+    anchor = doc.line(line_no)
+    if anchor is None:
         return _comment_refused(doc, "The line is not in the document.")
     if not body:
         return _comment_refused(doc, "The comment is empty.")
     if len(body) > comments_mod.MAX_COMMENT:
         return _comment_refused(doc, f"The comment exceeds {comments_mod.MAX_COMMENT} characters.")
-    line_text = str(form.get("line_text", "")) or lines[line_no - 1]
+    line_text = str(form.get("line_text", "")) or anchor
     docstore.add_comment(
         base,
         doc,
