@@ -24,6 +24,9 @@ plain Markdown. A heading inside a fenced code block is not a heading.
 The plan is Markdown with task boxes (``- [x] done``, ``- [ ] to do``).
 :func:`plan_progress` counts them and finds the next step.
 
+Each section, list item, and the preamble also knows its line in the text
+(from 1), so the viewer can anchor a comment to the line of a card.
+
 The functions here return text and numbers, never HTML.
 """
 
@@ -75,20 +78,29 @@ class Item:
     """One list item of a section: the bold lead, when any, and the rest.
 
     ``text`` is the whole item as Markdown; ``lead`` is the bold text at its
-    start, with no ``**``; ``body`` is the Markdown after the lead.
+    start, with no ``**``; ``body`` is the Markdown after the lead. ``line``
+    is the line of the item in the text it came from, from 0.
     """
 
     text: str
     lead: str = ""
     body: str = ""
+    line: int = field(default=0, compare=False)
 
 
 @dataclass(frozen=True)
 class Section:
-    """A ``##`` section: its heading as written and its Markdown body."""
+    """A ``##`` section: its heading as written and its Markdown body.
+
+    ``line`` is the line of the heading in the report, ``start`` the line of
+    the first line of ``body``, and ``end`` the last line of the section, each
+    from 1. A section that :func:`parse` did not make has 0 for each."""
 
     title: str
     body: str
+    line: int = field(default=0, compare=False)
+    start: int = field(default=0, compare=False)
+    end: int = field(default=0, compare=False)
 
     @property
     def items(self) -> list[Item]:
@@ -117,6 +129,9 @@ class Report:
     sections: dict[str, Section] = field(default_factory=dict)
     extra: list[Section] = field(default_factory=list)
     generated: bool = False
+    # The lines (from 1) of the preamble and of the first ``##`` heading.
+    preamble_line: int = 0
+    first_section: int = 0
 
     def get(self, key: str) -> Section | None:
         """A known section, or None when the report has no such heading."""
@@ -131,6 +146,7 @@ class OutputLine:
     ref: str
     title: str
     note: str
+    line: int = field(default=0, compare=False)
 
 
 @dataclass(frozen=True)
@@ -181,39 +197,51 @@ def parse(text: str | None) -> Report:
     outside = _lines_outside_fences(lines)
     title = ""
     head: list[str] = []
-    chunks: list[tuple[str, list[str]]] = []
-    for line, free in zip(lines, outside, strict=True):
+    chunks: list[tuple[str, int, list[str]]] = []
+    for number, (line, free) in enumerate(zip(lines, outside, strict=True), start=1):
         h2 = _H2.match(line) if free else None
         if h2:
-            chunks.append((h2.group(1), []))
+            chunks.append((h2.group(1), number, []))
             continue
         h1 = _H1.match(line) if free and not chunks and not title else None
         if h1 and not "".join(head).strip():
             title = h1.group(1)
             continue
-        (chunks[-1][1] if chunks else head).append(line)
+        (chunks[-1][2] if chunks else head).append(line)
 
-    known = [name for name, _ in chunks if normal(name) in _KNOWN - {COST}]
+    known = [name for name, _, _ in chunks if normal(name) in _KNOWN - {COST}]
     if not known:
         return Report(structured=False, title=title)
 
     preamble = "\n".join(head).strip()
     lede, _, after = preamble.partition("\n\n")
+    whole = "\n".join(lines)
+    first_section = chunks[0][1]
     report = Report(
         structured=True,
         title=title,
         lede=" ".join(lede.split()),
         preamble=after.strip(),
         generated=lede.strip().startswith(GENERATED),
+        preamble_line=_line_of(whole, after.strip()) if after.strip() else 0,
+        first_section=first_section,
     )
-    for name, body in chunks:
-        section = Section(name, "\n".join(body).strip())
+    for n, (name, number, body) in enumerate(chunks):
+        end = chunks[n + 1][1] - 1 if n + 1 < len(chunks) else len(lines)
+        blank = next((i for i, row in enumerate(body) if row.strip()), len(body))
+        section = Section(name, "\n".join(body).strip(), number, number + 1 + blank, end)
         key = normal(name)
         if key in _KNOWN and key not in report.sections:
             report.sections[key] = section
         else:
             report.extra.append(section)
     return report
+
+
+def _line_of(text: str, part: str) -> int:
+    """The line (from 1) of the first character of ``part`` in ``text``."""
+    at = text.find(part)
+    return text.count("\n", 0, at) + 1 if at >= 0 else 0
 
 
 def list_items(body: str) -> tuple[list[Item], str]:
@@ -225,6 +253,7 @@ def list_items(body: str) -> tuple[list[Item], str]:
     lines = body.split("\n")
     outside = _lines_outside_fences(lines)
     items: list[list[str]] = []
+    starts: list[int] = []
     rest: list[str] = []
     current: list[str] | None = None
     for index, (line, free) in enumerate(zip(lines, outside, strict=True)):
@@ -232,6 +261,7 @@ def list_items(body: str) -> tuple[list[Item], str]:
         if match:
             current = [match.group(2)]
             items.append(current)
+            starts.append(index)
             continue
         if current is not None:
             indented = line.startswith(("  ", "\t"))
@@ -247,7 +277,8 @@ def list_items(body: str) -> tuple[list[Item], str]:
             else:
                 current = None
         rest.append(line)
-    return [_item(lines) for lines in items], "\n".join(rest).strip()
+    found = [_item(lines, start) for lines, start in zip(items, starts, strict=True)]
+    return found, "\n".join(rest).strip()
 
 
 def _dedent(line: str) -> str:
@@ -256,13 +287,13 @@ def _dedent(line: str) -> str:
     return line[min(len(line) - len(line.lstrip(" ")), 4) :]
 
 
-def _item(lines: list[str]) -> Item:
+def _item(lines: list[str], start: int) -> Item:
     text = "\n".join(lines).strip()
     match = _LEAD.match(text)
     if match is None:
-        return Item(text=text)
+        return Item(text=text, line=start)
     lead = (match.group(1) or match.group(2) or "").strip()
-    return Item(text=text, lead=lead, body=match.group(3).strip())
+    return Item(text=text, lead=lead, body=match.group(3).strip(), line=start)
 
 
 def decision_question(item: Item) -> tuple[str, str]:
@@ -303,15 +334,15 @@ def output_lines(body: str) -> list[OutputLine]:
             before = _TRAIL_DASH.sub("", text[: found.start()]).strip()
             title = link.group("title").strip() if link else before
             note = _LEAD_DASH.sub("", text[found.end() :]).strip()
-            lines.append(OutputLine(kind, ref, title, note))
+            lines.append(OutputLine(kind, ref, title, note, item.line))
             continue
         head, _, tail = (part.strip() for part in _split_dash(text))
         if not kind:
-            lines.append(OutputLine("", "", "", text.strip()))
+            lines.append(OutputLine("", "", "", text.strip(), item.line))
         elif " " not in head:
-            lines.append(OutputLine(kind, head, tail, ""))
+            lines.append(OutputLine(kind, head, tail, "", item.line))
         else:
-            lines.append(OutputLine(kind, "", head, tail))
+            lines.append(OutputLine(kind, "", head, tail, item.line))
     return lines
 
 

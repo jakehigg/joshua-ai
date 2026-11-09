@@ -718,3 +718,8 @@ def test_data_relative_refuses_a_path_outside_the_volume(tmp_path: Path) -> None
 )
 def test_attachment_area_reads_the_path(rel: str, area: str | None) -> None:
     assert layout.attachment_area(rel) == area
+
+
+def test_the_documents_root_is_beside_the_wiki(tmp_path: Path) -> None:
+    assert layout.documents_root(tmp_path) == tmp_path / "documents"
+    assert not (tmp_path / "documents").exists()

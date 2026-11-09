@@ -19,6 +19,18 @@ with the images and the packaged chart, are at
   `/documents/<owner>/<slug>`. `memory.documents.enabled` (default `true`)
   turns it off. With no `documents/` folder the source does nothing. See
   [memory.md](memory.md#documents-in-the-index).
+
+- **The viewer has a Documents section.** `/documents` lists your documents
+  and the shared ones by status (`Active`, `Drafts`, `Final`, `Archived`)
+  and by kind. A Markdown document shows in blocks, and one with the
+  headings of a report shows as the report of an assignment does. Each block
+  and card has a `+` for a comment, which the viewer writes to the comments
+  file of the document and commits. The `Versions` fold lists the commits
+  of the file, and `?rev=<sha>` shows an old version, read-only. An HTML
+  document shows in a sandboxed frame, with scripts only for
+  `scripts: true`. An output of kind `document` on an assignment page links
+  to its document. A guest has no Documents section. See
+  [operations.md](operations.md#the-documents-section).
 - **A definition reads as a document.** In the viewer, the definition of a
   saved assignment, a draft, or a run shows its fields as a short list of
   properties and its goal as Markdown, as a wiki page shows it. Each field

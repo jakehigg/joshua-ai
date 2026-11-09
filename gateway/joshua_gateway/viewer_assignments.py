@@ -48,25 +48,23 @@ its task boxes, the next step, the last checkpoint, and the outputs so far.
 A page of an assignment that is in progress refreshes itself every 20
 seconds with a ``<meta>`` element.
 
-One small script, :data:`COPY_SCRIPT`, shows the copy button of each
-decision. The policy of the viewer allows that script by its hash and no
-other. With no script, the buttons stay hidden and the page is the same.
+The blocks and the showcase of a report are in ``viewer_showcase``, and the
+"+", the forms, and the comment cards are in ``viewer_comments``. The
+documents section uses the same two modules. One small script,
+``viewer_showcase.COPY_SCRIPT``, shows the copy button of each decision.
 
 The functions here build data and HTML only. The routes live in ``viewer``.
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from html import escape
 from typing import Any, Final
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 import httpx
 import yaml
@@ -76,6 +74,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from joshua_gateway import viewer_blocks as vb
 from joshua_gateway import viewer_report as rp
+from joshua_gateway import viewer_showcase as sc
+from joshua_gateway.viewer_comments import (
+    CommentForms,
+    Gutter,
+    comments_badge,
+    time_html,
+)
 from joshua_gateway.viewer_limits import when_text
 from joshua_gateway.viewer_usage import exact, short
 
@@ -125,10 +130,6 @@ _STATUS_LABEL = {
 
 # The limit windows, as the usage page names them.
 _WINDOW_LABEL = {"five_hour": "5-hour", "seven_day": "weekly"}
-
-# The wiki renderer: raw HTML is off, so a ``<script>`` in a plan renders as
-# text, and markdown-it refuses a ``javascript:`` link.
-_MD = vb.MD
 
 
 # -- the contract of the read API -------------------------------------------
@@ -411,48 +412,6 @@ def parse_state(raw: str | None) -> str | None:
 # -- small parts ------------------------------------------------------------
 
 
-def _moment(text: str | None) -> datetime | None:
-    if not text:
-        return None
-    try:
-        moment = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    return moment if moment.tzinfo is not None else None
-
-
-def ago(seconds: float) -> str:
-    """A past interval as a person reads it: ``just now``, ``5m ago``,
-    ``2h ago``, ``3d ago``. A time in the future is ``just now``."""
-    if seconds < 60:
-        return "just now"
-    minutes = int(seconds // 60)
-    if minutes < 60:
-        return f"{minutes}m ago"
-    hours = minutes // 60
-    if hours < 48:
-        return f"{hours}h ago"
-    days = hours // 24
-    if days < 60:
-        return f"{days}d ago"
-    return f"{days // 30}mo ago"
-
-
-def time_html(text: str | None, *, tz: tzinfo, now: datetime) -> str:
-    """A ``<time>`` element: the relative time, with the full time in the
-    ``title`` attribute. "" when ``text`` is not a time with an offset."""
-    moment = _moment(text)
-    if moment is None:
-        return ""
-    local = moment.astimezone(tz)
-    full = f"{local:%Y-%m-%d %H:%M} {local.tzname() or ''}".strip()
-    label = ago((now - moment).total_seconds())
-    return (
-        f'<time datetime="{escape(moment.isoformat())}" title="{escape(full)}">'
-        f"{escape(label)}</time>"
-    )
-
-
 def duration(seconds: int) -> str:
     """A working time: ``45s``, ``12m``, ``1h 20m``."""
     seconds = max(0, seconds)
@@ -469,20 +428,6 @@ def status_chip(status: str) -> str:
     css = _STATUS_CLASS.get(status, "plain")
     label = _STATUS_LABEL.get(status, status.replace("_", " "))
     return f'<span class="j-badge {css}">{escape(label)}</span>'
-
-
-def is_url(ref: str) -> bool:
-    """True for an ``http`` or ``https`` URL with a host."""
-    try:
-        parsed = urlparse(ref.strip())
-    except ValueError:
-        return False
-    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
-
-
-def markdown(text: str) -> str:
-    """Markdown as the wiki renders it."""
-    return _MD.render(text)
 
 
 def _when(item: Item, *, tz: tzinfo, now: datetime) -> str:
@@ -541,10 +486,10 @@ def item_row(item: Item, *, tz: tzinfo, now: datetime) -> str:
             _when(item, tz=tz, now=now),
             escape(item.model),
             tokens,
-            _count(outputs, "output") if outputs else "",
+            sc.count(outputs, "output") if outputs else "",
         ]
     )
-    lede = f'<span class="a-row-line">{_inline(line)}</span>' if line else ""
+    lede = f'<span class="a-row-line">{sc.inline(line)}</span>' if line else ""
     return (
         '<li class="j-list-row a-row"><div class="j-list-main">'
         f'<a class="j-list-title wrap" href="/assignments/{item.id}">{escape(item.title)}</a>'
@@ -659,138 +604,10 @@ def _notice(item: Detail, *, tz: tzinfo, now: datetime) -> str:
     return ""
 
 
-def _section(
-    title: str, body: str, *, stamp: str = "", count: str = "", css: str = "a-section"
-) -> str:
-    when = f'<span class="j-meta">updated {stamp}</span>' if stamp else ""
-    badge = f'<span class="a-count">{escape(count)}</span>' if count else ""
-    return (
-        f'<section class="{css}"><div class="a-head"><h2>{escape(title)}</h2>{badge}{when}</div>'
-        f"{body}</section>"
-    )
-
-
 def _prose(text: str | None, empty: str) -> str:
     if text and text.strip():
-        return _doc(doc_html(text))
+        return sc.article(sc.doc_html(text))
     return f'<p class="j-faint">{escape(empty)}</p>'
-
-
-# The icon of each kind of output: name -> SVG path data on a 24px grid. A
-# kind matches the first name whose words it holds; any other kind is
-# "other".
-_KIND_ICONS: dict[str, str] = {
-    "task": '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
-    "page": '<path d="M7 3h7l5 5v13H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/>'
-    '<path d="M14 3v5h5M9 13h7M9 17h5"/>',
-    "issue": '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="1.6"/>',
-    "merge request": '<circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/>'
-    '<circle cx="18" cy="13" r="2.2"/><path d="M6 7.2v9.6M6 7.5c0 4 4 5.5 9.8 5.5"/>',
-    "journal": '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/>'
-    '<path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
-    "file": '<path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/>'
-    '<path d="M13 3v6h6"/>',
-    "other": '<path d="m12 3 2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/>',
-}
-# The words of a kind that name each icon, in the order they are tried.
-_KIND_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("merge request", ("merge request", "pull request", "merge", "mr", "pr")),
-    ("issue", ("issue", "bug", "ticket")),
-    ("task", ("task", "todo", "to-do")),
-    ("journal", ("journal",)),
-    ("page", ("page", "wiki", "doc")),
-    ("file", ("file", "attachment")),
-)
-_SHORT_WORD = re.compile(r"[a-z]+")
-
-
-def kind_icon(kind: str) -> str:
-    """The icon name of a kind of output: a fixed name of ``_KIND_ICONS``.
-
-    A long word matches anywhere in the kind; ``mr`` and ``pr`` match only as
-    a whole word, so "summary" is not a merge request."""
-    text = kind.lower()
-    words = set(_SHORT_WORD.findall(text))
-    for name, needles in _KIND_WORDS:
-        for needle in needles:
-            if (needle in words) if len(needle) <= 2 else (needle in text):
-                return name
-    return "other"
-
-
-def _svg(paths: str, css: str = "j-icon") -> str:
-    return f'<svg class="{css}" viewBox="0 0 24 24" aria-hidden="true">{paths}</svg>'
-
-
-def _inline(text: str) -> str:
-    """Inline Markdown, escaped, as the wiki renders it."""
-    return _MD.renderInline(text)
-
-
-def _ref_key(ref: str) -> str:
-    return ref.strip().strip("<>").rstrip("/")
-
-
-@dataclass(frozen=True)
-class Card:
-    """One output card: the recorded output and the note from the report."""
-
-    kind: str
-    ref: str
-    title: str
-    note: str = ""
-
-
-def output_cards(outputs: list[Output], report: rp.Report | None) -> list[Card]:
-    """The output cards. The recorded outputs are the cards; a line of the
-    Outputs section of the report gives the note of the card with the same
-    ``ref``. With no recorded output, the lines of the section are the cards."""
-    section = report.get(rp.OUTPUTS) if report is not None else None
-    lines = rp.output_lines(section.body) if section is not None else []
-    if outputs:
-        notes = {_ref_key(line.ref): line.note for line in lines if line.ref and line.note}
-        return [Card(o.kind, o.ref, o.title, notes.get(_ref_key(o.ref), "")) for o in outputs]
-    return [Card(line.kind, line.ref, line.title, line.note) for line in lines]
-
-
-def output_card(card: Card) -> str:
-    """One output: the icon of its kind, the title (a link when ``ref`` is an
-    ``http`` or ``https`` URL), any other ``ref`` as code, and the note."""
-    icon = _svg(_KIND_ICONS[kind_icon(card.kind)], "j-icon a-out-icon")
-    ref = card.ref.strip()
-    title = card.title or ref
-    if ref and is_url(ref):
-        host = urlparse(ref).netloc
-        head = (
-            f'<a class="a-out-title" href="{escape(ref)}" rel="noreferrer">{escape(title)}</a>'
-            f'<span class="a-out-ref">{escape(host)}</span>'
-        )
-    elif card.title:
-        code = f'<code class="a-out-ref">{escape(ref)}</code>' if ref else ""
-        head = f'<span class="a-out-title">{escape(card.title)}</span>{code}'
-    elif ref:
-        head = f'<code class="a-out-title">{escape(ref)}</code>'
-    else:
-        head = ""
-    note = f'<p class="a-out-note">{_inline(card.note)}</p>' if card.note else ""
-    return f'<li class="a-out">{icon}<div class="a-out-main">{head}{note}</div></li>'
-
-
-def _outputs(cards: list[Card], *, title: str = "Outputs") -> str:
-    """The output cards grouped by kind, in the order each kind first comes."""
-    if not cards:
-        return ""
-    groups: dict[str, list[Card]] = {}
-    for card in cards:
-        groups.setdefault(card.kind.strip().lower(), []).append(card)
-    body = "".join(
-        '<div class="a-group">'
-        f'<h3 class="j-label">{escape(group[0].kind.strip() or "other")}'
-        f' <span class="j-count">{len(group)}</span></h3>'
-        f'<ul class="a-cards a-outs">{"".join(output_card(c) for c in group)}</ul></div>'
-        for group in groups.values()
-    )
-    return _section(title, body, count=_count(len(cards), "output"))
 
 
 def _progress(checkpoints: list[Checkpoint], *, tz: tzinfo, now: datetime) -> str:
@@ -808,106 +625,6 @@ def spec_yaml(spec: Mapping[str, Any]) -> str:
     """The definition as YAML, in the order of the manager. Not escaped."""
     text = yaml.safe_dump(dict(spec), sort_keys=False, allow_unicode=True, width=100)
     return text.strip()
-
-
-# The longest comment, as the manager takes it.
-MAX_COMMENT = 2000
-
-
-@dataclass(frozen=True)
-class CommentForms:
-    """Where the comment forms of a definition post: ``action`` is the path of
-    the comments of the parent in the viewer, ``csrf`` the token of the forms."""
-
-    action: str
-    csrf: str
-
-
-def comments_badge(n: int) -> str:
-    """The count of open comments: "3 comments for Joshua", or "" for none."""
-    if n <= 0:
-        return ""
-    text = f"{n} comment{'' if n == 1 else 's'} for Joshua"
-    return f'<span class="j-badge accent a-comments">{escape(text)}</span>'
-
-
-def _csrf_input(forms: CommentForms) -> str:
-    return f'<input type="hidden" name="csrf" value="{escape(forms.csrf)}">'
-
-
-def _comment_card(
-    comment: Comment,
-    *,
-    forms: CommentForms | None,
-    tz: tzinfo,
-    now: datetime,
-    quote: bool = False,
-) -> str:
-    """One open comment: the body, the age, a stale mark, and Delete. With
-    ``quote``, the comment is on a line of a block that is not its first
-    line, and the card shows that line."""
-    age = time_html(comment.created_at, tz=tz, now=now)
-    stale = ""
-    was = ""
-    if comment.stale:
-        stale = '<span class="j-badge warn">line changed</span>'
-        was = (
-            '<p class="a-was"><span class="j-faint">It was on:</span> '
-            f"<code>{escape(comment.line_text)}</code></p>"
-        )
-    elif quote:
-        was = (
-            f'<p class="a-was"><span class="j-faint">Line {comment.line_no}:</span> '
-            f"<code>{escape(comment.line_text)}</code></p>"
-        )
-    delete = ""
-    if forms is not None:
-        action = f"{forms.action}/{comment.id}/delete"
-        delete = (
-            f'<form class="a-del" method="post" action="{escape(action)}">'
-            f'{_csrf_input(forms)}<button class="j-btn sm" type="submit">Delete</button></form>'
-        )
-    return (
-        f'<div class="a-comment{" stale" if comment.stale else ""}" id="C{comment.id}">'
-        f'<p class="a-comment-body">{escape(comment.body)}</p>{was}'
-        f'<div class="a-comment-foot"><span class="j-faint">{age}</span>{stale}{delete}</div></div>'
-    )
-
-
-def _add_form(n: int, text: str, forms: CommentForms, *, what: str = "") -> str:
-    """The "+" of a line or a block: a closed ``<details>`` with the form of a
-    new comment on line ``n``, whose text is ``text``."""
-    label = f"Comment on {what or f'line {n}'}"
-    return (
-        f'<details class="a-add"><summary class="a-plus" title="{escape(label)}" '
-        f'aria-label="{escape(label)}">+</summary>'
-        f'<form class="a-comment-form" method="post" action="{escape(forms.action)}">'
-        f'{_csrf_input(forms)}<input type="hidden" name="line_no" value="{n}">'
-        f'<input type="hidden" name="line_text" value="{escape(text)}">'
-        f'<div class="j-field"><textarea name="body" rows="3" maxlength="{MAX_COMMENT}" '
-        f'required aria-label="Your {escape(label[0].lower() + label[1:])}" '
-        'placeholder="Tell Joshua what to change"></textarea></div>'
-        '<button class="j-btn sm" type="submit">Comment</button></form></details>'
-    )
-
-
-def _resolved(comments: list[Comment], *, tz: tzinfo, now: datetime) -> str:
-    """The resolved comments, folded, each with the resolution of Joshua."""
-    if not comments:
-        return ""
-    rows = "".join(
-        f'<li class="a-comment resolved" id="C{c.id}">'
-        f'<p class="j-faint">Line {c.line_no}: <code>{escape(c.line_text)}</code></p>'
-        f'<p class="a-comment-body">{escape(c.body)}</p>'
-        f'<p class="a-resolution"><span class="j-label">Joshua</span> '
-        f"{escape(c.resolution or '')}"
-        f' <span class="j-faint">{time_html(c.resolved_at, tz=tz, now=now)}</span></p></li>'
-        for c in comments
-    )
-    return (
-        f'<details class="a-resolved"><summary>{len(comments)} resolved</summary>'
-        f'<ul class="a-resolved-list">{rows}</ul></details>'
-    )
 
 
 @dataclass(frozen=True)
@@ -1000,65 +717,10 @@ def definition_units(text: str) -> tuple[list[Unit], list[Unit]]:
                     found.header + part.last,
                     part.html,
                     f"a-block {part.kind} d{min(part.depth, vb.MAX_DEPTH)}",
-                    f"the {_BLOCK_NAMES.get(part.kind, 'block')} at line {first}",
+                    f"the {sc.BLOCK_NAMES.get(part.kind, 'block')} at line {first}",
                 )
             )
     return props, goal
-
-
-# What the "+" of a block of the goal names.
-_BLOCK_NAMES = {
-    "p": "paragraph",
-    "h": "heading",
-    "li": "list item",
-    "quote": "quote",
-    "code": "code block",
-    "table": "table",
-}
-
-
-def _unit_html(
-    unit: Unit,
-    lines: list[str],
-    comments: list[Comment],
-    *,
-    forms: CommentForms | None,
-    tz: tzinfo,
-    now: datetime,
-) -> str:
-    """One unit: its anchors (``L<n>`` for each of its lines), the body, the
-    "+" of its first line, and the open comments on any of its lines."""
-    cards = "".join(
-        _comment_card(c, forms=forms, tz=tz, now=now, quote=c.line_no != unit.first)
-        for c in comments
-    )
-    anchors = "".join(
-        f'<span class="a-anchor" id="L{n}"></span>' for n in range(unit.first + 1, unit.last + 1)
-    )
-    text = lines[unit.first - 1] if 1 <= unit.first <= len(lines) else ""
-    plus = _add_form(unit.first, text, forms, what=unit.what) if forms is not None else ""
-    css = f"a-unit {unit.css}" + (" has-comments" if cards else "")
-    return (
-        f'<div class="{css}" id="L{unit.first}">{anchors}'
-        f'<div class="a-unit-body">{unit.body}</div>{plus}{cards}</div>'
-    )
-
-
-def _source(lines: list[str], marked: set[int], forms: CommentForms | None) -> str:
-    """The definition as the manager gives it, in a closed ``<details>``: one
-    row a line with its number and its "+"."""
-    rows = []
-    for n, line in enumerate(lines, start=1):
-        plus = _add_form(n, line, forms) if forms is not None else ""
-        rows.append(
-            f'<li class="a-line{" has-comments" if n in marked else ""}" id="S{n}">'
-            f'<a class="a-ln" href="#S{n}">{n}</a>'
-            f'<code class="a-code">{escape(line)}</code>{plus}</li>'
-        )
-    return (
-        '<details class="a-source"><summary>Source</summary>'
-        f'<ol class="a-lines">{"".join(rows)}</ol></details>'
-    )
 
 
 def definition_html(
@@ -1089,42 +751,23 @@ def definition_html(
             f'<details class="a-def"{opened} id="definition">{summary}'
             f"<pre><code>{escape(spec_yaml(spec))}</code></pre></details>"
         )
-    lines = text.split("\n") if text else []
+    gutter = Gutter(text.split("\n") if text else [], comments, forms, tz, now)
     props, goal = definition_units(text)
-    placed: dict[int, list[Comment]] = {}
-    orphans: list[Comment] = []
-    for comment in open_comments:
-        home = next(
-            (n for n, u in enumerate(props + goal) if u.first <= comment.line_no <= u.last), None
-        )
-        if home is None:
-            orphans.append(comment)
-        else:
-            placed.setdefault(home, []).append(comment)
 
-    def units(part: list[Unit], start: int) -> str:
-        return "".join(
-            _unit_html(u, lines, placed.get(start + n, []), forms=forms, tz=tz, now=now)
-            for n, u in enumerate(part)
-        )
+    def units(part: list[Unit]) -> str:
+        return "".join(gutter.unit(u.first, u.last, u.body, u.css, u.what) for u in part)
 
     doc = ""
     if props:
-        doc += f'<div class="a-props">{units(props, 0)}</div>'
+        doc += f'<div class="a-props">{units(props)}</div>'
     if goal:
-        doc += f'<div class="a-goal j-prose">{units(goal, len(props))}</div>'
+        doc += f'<div class="a-goal j-prose">{units(goal)}</div>'
     if not doc:
         doc = '<p class="j-faint a-def-empty">The definition is empty.</p>'
-    gone = ""
-    if orphans:
-        cards = "".join(_comment_card(c, forms=forms, tz=tz, now=now) for c in orphans)
-        gone = f'<div class="a-orphans"><p class="j-label">On lines that are gone</p>{cards}</div>'
-    marked = {c.line_no for c in open_comments}
-    resolved = [c for c in comments if c.resolved_at is not None]
     return (
         f'<details class="a-def"{opened} id="definition">{summary}'
-        f'<div class="a-doc">{doc}</div>{gone}{_source(lines, marked, forms)}'
-        f"{_resolved(resolved, tz=tz, now=now)}</details>"
+        f'<div class="a-doc">{doc}</div>{gutter.orphans()}{gutter.source()}'
+        f"{gutter.resolved()}</details>"
     )
 
 
@@ -1141,61 +784,7 @@ def _definition(
     )
 
 
-def _count(n: int, noun: str) -> str:
-    return f"{n} {noun}" + ("" if n == 1 else "s")
-
-
 # -- the parts of a detail page ---------------------------------------------
-
-
-# A task box of a rendered plan: ``<li>[x] text`` or, in a loose list,
-# ``<li><p>[x] text``. Raw HTML is off, so the box came from the text.
-_RENDERED_BOX = re.compile(r"<li>(<p>)?\[([ xX])\] ")
-
-
-def _boxes(html: str) -> str:
-    """Draw each task box of rendered Markdown as a box."""
-
-    def box(match: re.Match[str]) -> str:
-        done = match.group(2) in "xX"
-        css, label = ("a-task done", "done") if done else ("a-task", "to do")
-        return (
-            f'<li class="{css}">{match.group(1) or ""}'
-            f'<span class="a-box" role="img" aria-label="{label}"></span>'
-        )
-
-    return _RENDERED_BOX.sub(box, html)
-
-
-def doc_html(text: str, *, boxes: bool = False) -> str:
-    """Markdown as a document of blocks, as the goal of a definition shows,
-    with no "+": one element a paragraph, heading, list item, quote, code
-    block, or table. With ``boxes``, each task box is drawn as a box."""
-    parts = []
-    for block in vb.blocks(text):
-        html = _boxes(block.html) if boxes else block.html
-        depth = min(block.depth, vb.MAX_DEPTH)
-        parts.append(f'<div class="a-block {block.kind} d{depth}">{html}</div>')
-    return "".join(parts)
-
-
-def plan_html(text: str) -> str:
-    """The plan as a document of blocks, with each task box drawn as a box."""
-    return doc_html(text, boxes=True)
-
-
-def _doc(html: str) -> str:
-    return f'<article class="j-prose a-blocks">{html}</article>'
-
-
-def _tile(value: str, label: str, *, title: str = "", css: str = "") -> str:
-    hint = f' title="{escape(title)}"' if title else ""
-    cls = f"j-stat {css}".strip()
-    return f'<div class="{cls}"{hint}><b>{value}</b><span>{escape(label)}</span></div>'
-
-
-def _tiles(tiles: list[str], *, label: str) -> str:
-    return f'<div class="j-stats a-stats" role="group" aria-label="{label}">{"".join(tiles)}</div>'
 
 
 def _breakdown(usage: Usage) -> str:
@@ -1210,22 +799,22 @@ def _hero_tiles(
 ) -> str:
     """The stat row of the hero: short numbers, each with a label."""
     tiles = [
-        _tile(
+        sc.tile(
             escape(short(item.usage.total)),
             "tokens",
             title=f"{exact(item.usage.total)} tokens: {_breakdown(item.usage)}",
         ),
-        _tile(escape(duration(item.working_s)), "working time"),
+        sc.tile(escape(duration(item.working_s)), "working time"),
     ]
     if turns is not None:
-        tiles.append(_tile(str(turns), "turns"))
+        tiles.append(sc.tile(str(turns), "turns"))
     if item.model:
-        tiles.append(_tile(escape(item.model), "model", css="a-stat-text"))
+        tiles.append(sc.tile(escape(item.model), "model", css="a-stat-text"))
     if outputs is not None:
-        tiles.append(_tile(str(outputs), "outputs" if outputs != 1 else "output"))
+        tiles.append(sc.tile(str(outputs), "outputs" if outputs != 1 else "output"))
     if decisions is not None:
-        tiles.append(_tile(str(decisions), "decisions" if decisions != 1 else "decision"))
-    return _tiles(tiles, label="Numbers")
+        tiles.append(sc.tile(str(decisions), "decisions" if decisions != 1 else "decision"))
+    return sc.tiles(tiles, label="Numbers")
 
 
 def _hero(
@@ -1243,7 +832,7 @@ def _hero(
         when = f"ended {time_html(item.finished_at, tz=tz, now=now)}"
     meta = f'<span class="j-meta">{when}</span>' if when else ""
     css = "a-lede generated" if generated else "a-lede"
-    lede_html = f'<p class="{css}">{_inline(lede)}</p>' if lede else ""
+    lede_html = f'<p class="{css}">{sc.inline(lede)}</p>' if lede else ""
     return (
         '<header class="a-hero">'
         f'<div class="a-chips">{status_chip(item.status)}{saved}{meta}</div>'
@@ -1251,133 +840,24 @@ def _hero(
     )
 
 
-def _highlights(section: rp.Section | None) -> str:
-    """The highlights as cards: the bold lead large, the sentence under it."""
-    if section is None or section.empty:
-        return ""
-    items = section.items
-    cards = []
-    for entry in items:
-        if entry.lead:
-            body = f'<p class="a-hl-text">{_inline(entry.body)}</p>' if entry.body else ""
-            cards.append(
-                f'<li class="a-hl"><strong class="a-hl-lead">{_inline(entry.lead)}</strong>'
-                f"{body}</li>"
-            )
-        else:
-            cards.append(f'<li class="a-hl"><p class="a-hl-text">{_inline(entry.text)}</p></li>')
-    grid = f'<ul class="a-cards a-hls">{"".join(cards)}</ul>' if cards else ""
-    rest = f'<div class="j-prose">{markdown(section.rest)}</div>' if section.rest else ""
-    return f'<section class="a-highlights" aria-label="Highlights">{grid}{rest}</section>'
-
-
-def _decision_items(section: rp.Section | None) -> list[rp.Item]:
-    if section is None or section.empty:
-        return []
-    return [entry for entry in section.items if not rp.is_none(entry.text)]
-
-
-def _decisions(assignment_id: int, section: rp.Section | None) -> str:
-    """The decisions as numbered cards, each with a copy button for Joshua.
-
-    The button is hidden; :data:`COPY_SCRIPT` shows it when the browser can
-    copy, so the page works the same with no script."""
-    items = _decision_items(section)
-    if section is None or (not items and section.empty):
-        return ""
-    cards = []
-    for number, entry in enumerate(items, start=1):
-        question, context = rp.decision_question(entry)
-        copy = f"Assignment {assignment_id}, decision {number}: {rp.plain(question)}"
-        ctx = f'<div class="j-prose a-ctx">{markdown(context)}</div>' if context else ""
-        cards.append(
-            f'<li class="a-decision"><span class="a-n" aria-hidden="true">{number}</span>'
-            f'<div class="a-decision-main"><p class="a-q">{_inline(question)}</p>{ctx}'
-            '<div class="a-decision-foot"><span class="j-faint">Tell Joshua your answer.</span>'
-            f'<button type="button" class="j-btn sm a-copy" data-copy="{escape(copy)}" hidden>'
-            "Copy</button></div></div></li>"
-        )
-    body = f'<ol class="a-decisions">{"".join(cards)}</ol>' if cards else ""
-    if section.rest and not rp.is_none(section.rest):
-        body += f'<div class="j-prose">{markdown(section.rest)}</div>'
-    count = _count(len(items), "decision") if items else ""
-    return _section("Decisions for you", body, count=count, css="a-section a-decide")
-
-
-# The longest goal, in lines and in characters, that shows open.
-_ASKED_LINES = 6
-_ASKED_CHARS = 600
-
-
-def _asked(section: rp.Section | None) -> str:
-    """What was asked, as a quote. A long one is folded."""
-    if section is None or section.empty:
-        return ""
-    quote = f'<blockquote class="j-prose a-quote">{markdown(section.body)}</blockquote>'
-    if section.body.count("\n") < _ASKED_LINES and len(section.body) <= _ASKED_CHARS:
-        return _section("What was asked", quote)
-    hint = rp.plain(" ".join(section.body.split()))[:120]
-    return (
-        '<details class="a-fold"><summary><span class="a-fold-title">What was asked</span>'
-        f'<span class="a-fold-hint">{escape(hint)}…</span></summary>'
-        f'<div class="a-fold-body">{quote}</div></details>'
-    )
-
-
-def _done(report: rp.Report) -> str:
-    """What was done as prose, with the text before the first section after
-    the lede and each unknown section under it."""
-    parts = []
-    section = report.get(rp.DONE)
-    if section is not None and not section.empty:
-        parts.append(section.body)
-    if report.preamble:
-        parts.append(report.preamble)
-    for extra in report.extra:
-        parts.append(f"## {extra.title}\n\n{extra.body}")
-    if not parts:
-        return ""
-    # A stop report holds the plan, so the task boxes are drawn here too.
-    prose = plan_html("\n\n".join(parts))
-    return _section("What was done", _doc(prose))
-
-
-def _follow_ups(section: rp.Section | None) -> str:
-    """The follow-ups as a static checklist."""
-    if section is None or section.empty:
-        return ""
-    items = [entry for entry in section.items if not rp.is_none(entry.text)]
-    body = ""
-    if items:
-        rows = "".join(
-            f'<li><span class="a-box" aria-hidden="true"></span>'
-            f"<span>{_inline(entry.text)}</span></li>"
-            for entry in items
-        )
-        body = f'<ul class="a-checklist">{rows}</ul>'
-    if section.rest and not rp.is_none(section.rest):
-        body += f'<div class="j-prose">{markdown(section.rest)}</div>'
-    return _section("Follow-ups", body) if body else ""
-
-
 def _cost_footer(item: Detail, *, turns: int | None) -> str:
     """The cost again, at the foot, with the full numbers."""
     usage = item.usage
     tiles = [
-        _tile(exact(usage.total), "tokens in all"),
-        _tile(exact(usage.input), "input"),
-        _tile(exact(usage.output), "output"),
-        _tile(exact(usage.cache_read), "cache read"),
-        _tile(exact(usage.cache_write), "cache write"),
+        sc.tile(exact(usage.total), "tokens in all"),
+        sc.tile(exact(usage.input), "input"),
+        sc.tile(exact(usage.output), "output"),
+        sc.tile(exact(usage.cache_read), "cache read"),
+        sc.tile(exact(usage.cache_write), "cache write"),
     ]
     if turns is not None:
-        tiles.append(_tile(exact(turns), "turns"))
-    tiles.append(_tile(escape(duration(item.working_s)), "working time"))
+        tiles.append(sc.tile(exact(turns), "turns"))
+    tiles.append(sc.tile(escape(duration(item.working_s)), "working time"))
     if item.model:
-        tiles.append(_tile(escape(item.model), "model", css="a-stat-text"))
+        tiles.append(sc.tile(escape(item.model), "model", css="a-stat-text"))
     return (
         '<footer class="a-foot"><h2 class="j-label">Cost</h2>'
-        f"{_tiles(tiles, label='Cost')}</footer>"
+        f"{sc.tiles(tiles, label='Cost')}</footer>"
     )
 
 
@@ -1410,7 +890,7 @@ def _now_strip(
     if progress.next_step:
         parts.append(
             '<p class="a-now-line"><span class="j-label">Next</span>'
-            f"<span>{_inline(progress.next_step)}</span></p>"
+            f"<span>{sc.inline(progress.next_step)}</span></p>"
         )
     if checkpoints:
         last = checkpoints[0]
@@ -1425,15 +905,6 @@ def _now_strip(
     return f'<section class="a-now" aria-label="Progress now">{"".join(parts)}</section>'
 
 
-def _fold(title: str, body: str, *, hint: str = "", css: str = "a-fold") -> str:
-    """A closed ``<details>`` with ``title`` and a short hint in its summary."""
-    return (
-        f'<details class="{css}"><summary><span class="a-fold-title">{escape(title)}</span>'
-        f"{hint}</summary>"
-        f'<div class="a-fold-body">{body}</div></details>'
-    )
-
-
 def _plan_fold(item: Detail, progress: rp.PlanProgress, *, tz: tzinfo, now: datetime) -> str:
     if not (item.plan and item.plan.strip()):
         return ""
@@ -1443,21 +914,21 @@ def _plan_fold(item: Detail, progress: rp.PlanProgress, *, tz: tzinfo, now: date
         hint = _bar(progress, "a-meter mini") + steps
     stamp = time_html(item.plan_at, tz=tz, now=now)
     when = f'<p class="j-meta">updated {stamp}</p>' if stamp else ""
-    body = f"{when}{_doc(plan_html(item.plan))}"
-    return _fold("Plan", body, hint=hint)
+    body = f"{when}{sc.article(sc.plan_html(item.plan))}"
+    return sc.fold("Plan", body, hint=hint)
 
 
 def _progress_fold(checkpoints: list[Checkpoint], *, tz: tzinfo, now: datetime) -> str:
     if not checkpoints:
         return ""
-    hint = f'<span class="a-fold-hint">{_count(len(checkpoints), "checkpoint")}</span>'
-    return _fold("Progress", _progress(checkpoints, tz=tz, now=now), hint=hint)
+    hint = f'<span class="a-fold-hint">{sc.count(len(checkpoints), "checkpoint")}</span>'
+    return sc.fold("Progress", _progress(checkpoints, tz=tz, now=now), hint=hint)
 
 
 def _error(item: Detail) -> str:
     if not item.error:
         return ""
-    return _section("Error", f'<pre class="a-error">{escape(item.error)}</pre>')
+    return sc.section("Error", f'<pre class="a-error">{escape(item.error)}</pre>')
 
 
 def _crumbs() -> str:
@@ -1482,21 +953,21 @@ def _report_page(
     forms: CommentForms | None = None,
 ) -> str:
     """A completed assignment with a report: the report is the page."""
-    cards = output_cards(item.outputs, report)
+    cards = sc.output_cards(item.outputs, report)
     turns = _turns(item, report)
-    decisions = len(_decision_items(report.get(rp.DECISIONS)))
+    decisions = len(sc.decision_items(report.get(rp.DECISIONS)))
     tiles = _hero_tiles(item, turns=turns, outputs=len(cards), decisions=decisions)
     progress = rp.plan_progress(item.plan)
     parts = [
         _crumbs(),
         _hero(item, lede=report.lede, generated=report.generated, tiles=tiles, tz=tz, now=now),
         _notice(item, tz=tz, now=now),
-        _highlights(report.get(rp.HIGHLIGHTS)),
-        _decisions(item.id, report.get(rp.DECISIONS)),
-        _outputs(cards),
-        _asked(report.get(rp.ASKED)),
-        _done(report),
-        _follow_ups(report.get(rp.FOLLOW_UPS)),
+        sc.highlights_html(report.get(rp.HIGHLIGHTS)),
+        sc.decisions_html(f"Assignment {item.id}", report.get(rp.DECISIONS)),
+        sc.outputs_html(cards),
+        sc.asked_html(report.get(rp.ASKED)),
+        sc.done_html(report),
+        sc.follow_ups_html(report.get(rp.FOLLOW_UPS)),
         _cost_footer(item, turns=turns),
         '<div class="a-folds">',
         _plan_fold(item, progress, tz=tz, now=now),
@@ -1504,7 +975,7 @@ def _report_page(
         _definition(item, open_=False, forms=forms, tz=tz, now=now),
         "</div>",
         _error(item),
-        COPY_SCRIPT_TAG if decisions else "",
+        sc.COPY_SCRIPT_TAG if decisions else "",
     ]
     return "".join(part for part in parts if part)
 
@@ -1514,7 +985,7 @@ def _plain_report_page(
 ) -> str:
     """A completed assignment whose report has none of the known headings:
     the report as Markdown, then the outputs."""
-    cards = output_cards(item.outputs, None)
+    cards = sc.output_cards(item.outputs, None)
     progress = rp.plan_progress(item.plan)
     stamp = time_html(item.report_at, tz=tz, now=now)
     parts = [
@@ -1528,8 +999,8 @@ def _plain_report_page(
             now=now,
         ),
         _notice(item, tz=tz, now=now),
-        _section("Report", _prose(item.report, ""), stamp=stamp),
-        _outputs(cards),
+        sc.section("Report", _prose(item.report, ""), stamp=stamp),
+        sc.outputs_html(cards),
         '<div class="a-folds">',
         _plan_fold(item, progress, tz=tz, now=now),
         _progress_fold(item.checkpoints, tz=tz, now=now),
@@ -1544,16 +1015,16 @@ def _progress_page(
     item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
 ) -> str:
     """An assignment with no report yet, or one in progress: the plan is the page."""
-    cards = output_cards(item.outputs, None)
+    cards = sc.output_cards(item.outputs, None)
     progress = rp.plan_progress(item.plan)
     plan = (
-        _doc(plan_html(item.plan))
+        sc.article(sc.plan_html(item.plan))
         if item.plan and item.plan.strip()
         else '<p class="j-faint">No plan yet.</p>'
     )
     report = ""
     if item.report and item.report.strip():
-        report = _fold("Report", _doc(doc_html(item.report)))
+        report = sc.fold("Report", sc.article(sc.doc_html(item.report)))
     parts = [
         _crumbs(),
         _hero(
@@ -1566,9 +1037,9 @@ def _progress_page(
         ),
         _notice(item, tz=tz, now=now),
         _now_strip(progress, item.checkpoints, tz=tz, now=now),
-        _section("Plan", plan, stamp=time_html(item.plan_at, tz=tz, now=now)),
-        _outputs(cards, title="Outputs so far" if item.state != "completed" else "Outputs"),
-        _section("Progress", _progress(item.checkpoints, tz=tz, now=now)),
+        sc.section("Plan", plan, stamp=time_html(item.plan_at, tz=tz, now=now)),
+        sc.outputs_html(cards, title="Outputs so far" if item.state != "completed" else "Outputs"),
+        sc.section("Progress", _progress(item.checkpoints, tz=tz, now=now)),
         '<div class="a-folds">',
         report,
         _definition(item, open_=False, forms=forms, tz=tz, now=now),
@@ -1631,21 +1102,6 @@ def detail_html(
             return _report_page(item, report, tz=tz, now=now, forms=forms)
         return _plain_report_page(item, tz=tz, now=now, forms=forms)
     return _progress_page(item, tz=tz, now=now, forms=forms)
-
-
-# The one script of the viewer: it shows the copy button of each decision and
-# copies its text. With no script, or no clipboard, the buttons stay hidden.
-COPY_SCRIPT = (
-    "(function(){if(!navigator.clipboard)return;"
-    'document.querySelectorAll("button.a-copy").forEach(function(b){'
-    'b.hidden=false;b.addEventListener("click",function(){'
-    "navigator.clipboard.writeText(b.dataset.copy).then(function(){"
-    'b.textContent="Copied";setTimeout(function(){b.textContent="Copy";},2000);});});});})();'
-)
-COPY_SCRIPT_TAG = f"<script>{COPY_SCRIPT}</script>"
-# The hash that the Content-Security-Policy of the viewer allows, and no other script.
-_DIGEST = hashlib.sha256(COPY_SCRIPT.encode()).digest()
-COPY_SCRIPT_HASH = "sha256-" + base64.b64encode(_DIGEST).decode()
 
 
 def refresh_meta(item: Detail) -> str:
@@ -1719,7 +1175,7 @@ def saved_detail_html(
         f'{head}<h1 class="j-doc-title">{escape(saved.name)}</h1>{title}'
         f'<p class="j-meta">{meta}</p>'
         f"{_definition(saved, open_=True, forms=forms, tz=tz, now=now)}"
-        f"{_section('Runs', runs)}"
+        f"{sc.section('Runs', runs)}"
     )
 
 
