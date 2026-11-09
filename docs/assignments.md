@@ -32,20 +32,21 @@ container holds those, and no secret that core holds:
 ## The tools
 
 The container serves MCP at `http://assignments:8000/mcp`. The gateway calls
-it for a person, with that person's bearer. Joshua gets sixteen tools:
+it for a person, with that person's bearer. Joshua gets seventeen tools:
 
 | Tool | What it does |
 |---|---|
-| `start_assignment(spec, id, saved)` | Checks the spec, clamps the budget to the maxima, stores the assignment, and starts it now. Returns the id, the status, the title, and `saved`. Give one of `spec`, `id` (a [draft](#drafts)), or `saved` (the name of a [saved assignment](#saved-assignments)); a `spec` beside `saved` is an override. When every slot is taken, it is refused with `busy`, and nothing is stored. See [no queue](#no-queue). |
+| `start_assignment(spec, id, saved, new)` | To start a draft, pass its id. Pass `spec` only for a new job that no draft covers. Pass `saved` to run a saved assignment. Checks the spec, clamps the budget to the maxima, stores the assignment, and starts it now. Returns the id, the status, the title, and `saved`. Give one of `id` (a [draft](#drafts), which runs with the same id), `spec`, or `saved` (the name of a [saved assignment](#saved-assignments)); a `spec` beside `saved` is an override. A `spec` alone is refused with `drafts_open` while the person has drafts, unless `new` is true. When every slot is taken, it is refused with `busy`, and nothing is stored. Each refusal has a `hint`. See [refusals of a start](#refusals-of-a-start) and [no queue](#no-queue). |
 | `draft_assignment(spec, saved)` | Checks the spec as `start_assignment` does, and stores it as a `draft`. Nothing runs. Returns the id, the status, the title, the notes, and `saved`. |
 | `update_assignment(id, spec)` | Replaces the whole spec of a draft. Any other status is refused with `not_a_draft`. Returns `open_comments` and `stale_comments` too. |
-| `delete_assignment(id)` | Deletes a draft and its comments. A run is never deleted: any other status is `not_a_draft`. |
+| `delete_assignment(id)` | Removes a draft from view; the person can ask for it back. The row and its comments stay. A run is never deleted: any other status is `not_a_draft`. |
+| `restore_assignment(id)` | Brings back a draft that `delete_assignment` removed, with its comments. A row that is not deleted is `not_deleted`. |
 | `assignment_status(id)` | The title, the status, the state, the plan, the report and `report_at`, the outputs, the next step, the last checkpoint, the usage, the turns, the open question, `open_request`, `granted_repos`, `inbox`, the limits at the stop, the summary, the error, and `saved`. Joshua reads the report here. |
 | `list_assignments(limit, status, state)` | The person's assignments, the newest first, each with its title, status, state, and `saved`. `limit` is 1 to 100 (default 10). `status` and `state` filter. |
 | `answer_assignment(id, text)` | Stores the answer and starts a `waiting` or `paused_limits` assignment again, when the limits are under its ceilings and a slot is free. It also answers a request for a repository or a file with a refusal or another way. See [questions and answers](#questions-and-answers). |
 | `grant_repo(id, repo)` | Adds one repository to a parked assignment and resumes it with the clone command. The repository must match `assignments.repos`, as a repository of a spec must. See [requests](#requests-for-a-repository-or-a-file). |
 | `provide_file(id, name, content)` | Writes one text file to `inbox/<name>` in the scratch directory of a parked assignment, and resumes it. See [requests](#requests-for-a-repository-or-a-file). |
-| `cancel_assignment(id)` | Stops the assignment and writes its report (see [the report](#the-report)). The plan and the report stay. A draft is refused with `draft`: delete it. |
+| `cancel_assignment(id)` | Stops the assignment and writes its report (see [the report](#the-report)). It returns when the session stopped and the slot is free, so a start right after it is not refused with `busy`. The plan and the report stay. A draft is refused with `draft`: delete it. |
 | `extend_assignment(id, tokens, working_time, five_hour_pct, seven_day_pct, max_turns)` | Raises one or more caps. Each value must be more than the current value. A ceiling above its maximum is clamped. A `budget_exceeded` or `time_exceeded` assignment continues its session when a slot is free, else the call is refused with `busy` and changes nothing. |
 | `save_assignment(name, spec)` | Checks the spec as `start_assignment` does, and stores it as the saved assignment `name` of the person. A saved assignment with the same name gets the new spec. Returns the id, the name, and the notes. |
 | `list_saved_assignments()` | The person's saved assignments, the newest first, each with its name, title, `runs`, and `last_run` (`id`, `status`, `finished_at`, or null). |
@@ -64,9 +65,39 @@ The state is what a person sees. The status is the detail:
 A rejected call returns `{"status": "rejected", "reason", "message"}`. The
 reasons are `disabled`, `invalid_spec`, `unknown_model`, `invalid_repo`,
 `repo_not_allowed`, `limits_unknown`, `invalid_status`, `invalid_state`,
-`invalid_arguments`, `busy`, `not_a_draft`, `draft`,
-`not_waiting`, `finished`, `not_raised`, `not_found`, `resolved`,
-`invalid_name`, `too_large`, `too_many`, `bad_inbox`, and `no_scratch`.
+`invalid_arguments`, `busy`, `drafts_open`, `not_a_draft`, `deleted`,
+`not_deleted`, `draft`, `not_waiting`, `finished`, `not_raised`,
+`not_found`, `resolved`, `invalid_name`, `too_large`, `too_many`,
+`bad_inbox`, and `no_scratch`.
+
+### Refusals of a start
+
+A refusal of `start_assignment` tells Joshua what to do next. It has
+`reason`, `message`, and `hint`: one sentence that Joshua can tell the
+person. Where it applies, it also has:
+
+- `retry_after_s`: the seconds after which a new start can work. For
+  `busy`, it is the working time that the running assignment has left,
+  from 5 minutes to 1 hour; for another person's run, 15 minutes. For
+  `limits_unknown`, 10 minutes.
+- `running`: `{"id", "title"}` of the running assignment of the person.
+  When only another person's assignment runs, `id` is null and `title` is
+  "another person's assignment".
+- `drafts`: `[{"id", "title"}, ...]`, the drafts of the person, the newest
+  first, at most 20.
+
+| Reason | When | The hint |
+|---|---|---|
+| `busy` | every slot is taken | "Assignment 7 is still running; start this one when it ends, do not create another." |
+| `drafts_open` | a `spec` alone, while the person has drafts | "Start the draft by id, or pass new: true for a job none of these covers." |
+| `not_a_draft` | `id` names a run | the status, and that a run does not start again |
+| `deleted` | `id` names a deleted draft | `restore_assignment(id)` first, when the person wants it |
+| `limits_unknown` | core cannot say how much of the limits is used | start it again in a few minutes, or give a token cap |
+| any other | a bad argument or a bad spec | what to change |
+
+An answer, a grant, a file, or an extension that is refused with `busy` has
+the same fields, and its hint says to give it again when the running
+assignment ends.
 
 ### Who may call
 
@@ -167,6 +198,7 @@ draft_assignment(spec={"goal": "...", "title": "Docs clean-up"})
 update_assignment(id=14, spec={"goal": "...", "title": "Docs clean-up", "model": "opus"})
 start_assignment(id=14)
 delete_assignment(id=14)
+restore_assignment(id=14)
 ```
 
 - `draft_assignment` checks the spec as `start_assignment` does, and stores
@@ -178,9 +210,17 @@ delete_assignment(id=14)
   that changed becomes `stale`. Any other status gets `not_a_draft`.
 - `start_assignment(id=...)` checks the spec again, because the
   configuration can change, then starts the draft as a new run with the same
-  id.
-- `delete_assignment` deletes a draft and its comments. The manager never
-  deletes a run.
+  id. The run is the row of the draft, so the definition that the person
+  read is the definition that runs.
+- `start_assignment(spec=...)` is refused with `drafts_open` while the
+  person has drafts, and the refusal lists them. Joshua starts the draft
+  that the person means by its id. `new: true` starts a spec for a job that
+  none of the drafts covers.
+- `delete_assignment` removes a draft from view. It sets `deleted_at`, and
+  the row and its comments stay. A deleted draft is in no list, not in the
+  [read API](#the-read-api), and not in the viewer, and a tool that names
+  it gets `404`. `restore_assignment(id)` brings it back as a draft. The
+  manager never deletes a run.
 - A draft takes comments on its definition through the same routes as a run:
   `/v1/assignments/{id}/comments`.
 - The definition of a run stays with the run, in its `spec`, after it ends.
@@ -192,13 +232,18 @@ manager refuses it with the reason `busy` and stores nothing. Nothing waits
 for a slot, and nothing starts when an assignment ends.
 
 ```
-{"status": "rejected", "reason": "busy", "running": 12,
- "message": "assignment 12 is running, and assignments.max_concurrent is 1. ..."}
+{"status": "rejected", "reason": "busy",
+ "running": {"id": 12, "title": "Docs clean-up"}, "retry_after_s": 900,
+ "message": "assignment 12 is running, and assignments.max_concurrent is 1. ...",
+ "hint": "Assignment 12 is still running; start this one when it ends, do not create another."}
 ```
 
-- `running` is the id of the newest running assignment of the person. When
-  only assignments of other people run, it is null, and the message does
-  not name them.
+- `running` names the newest running assignment of the person. When only
+  assignments of other people run, its `id` is null, its `title` is
+  "another person's assignment", and the message does not name them.
+- `cancel_assignment` holds the slot until the session stopped and the
+  row is `cancelled`. A start that arrives during a cancel waits for it, so
+  it is not refused with `busy`.
 - The manager refuses an answer or an extension that must start a session
   with `busy` in the same way. It changes nothing.
 - When the person wants several jobs in a row, Joshua starts the next one
@@ -738,7 +783,7 @@ in the runtime image with Docker. On Linux, the unit suite runs the same test.
 
 | Status | Meaning |
 |---|---|
-| `draft` | Stored, and has not run. Only `start_assignment(id=...)` runs it. |
+| `draft` | Stored, and has not run. Only `start_assignment(id=...)` runs it, as the same row. A draft that `delete_assignment` removed keeps this status, and has `deleted_at`. |
 | `running` | Holds a slot and works. |
 | `waiting` | Stopped with a question. Holds no slot, and waits with no time limit. |
 | `paused_limits` | Stopped at a ceiling of the subscription windows, or with unknown limits. Holds no slot. |
@@ -808,13 +853,15 @@ holds the plan, the report, and the outputs (`plan`, `plan_at`, `report`,
 `report_at`, `outputs`), the open request of the worker (`open_request`,
 `{"kind", "ref", "reason"}`, beside its text in `open_question`), the
 repositories that Joshua granted (`granted_repos`, a list), and the files
-that Joshua provided (`inbox`, a list of `{"name", "bytes", "at"}`). The
-column `page_path` stays for the rows of an
+that Joshua provided (`inbox`, a list of `{"name", "bytes", "at"}`), and
+when `delete_assignment` removed a draft from view (`deleted_at`, or null).
+The column `page_path` stays for the rows of an
 earlier release, and nothing writes it. A row of `comment` holds one comment
 of a person on a line of a definition: `saved_id` or `assignment_id` (one of
 the two, never both), `target` (`definition`), `line_no`, `line_text`,
 `body`, `created_at`, `resolved_at`, and `resolution`. The comments of a
-saved assignment or a run go when it is deleted. The schema is additive only. `make backup` dumps the whole database, so a backup holds it.
+saved assignment go when it is deleted. The comments of a deleted draft
+stay with it. The schema is additive only. `make backup` dumps the whole database, so a backup holds it.
 
 Each store operation takes its own connection from a pool, so the manager can
 serve the gateway and the runner at the same time. An operation that starts
@@ -890,6 +937,7 @@ Who may call:
   `person` is `400`.
 - A row of another person is `404`, the same as a row that does not exist.
   A list holds only the rows of that person.
+- A deleted draft is `404`, also its comment routes, and no list holds it.
 - No answer holds a token or a bearer.
 
 The shapes:
@@ -1018,6 +1066,14 @@ tells Joshua:
 - that the manager holds no queue: when a start is refused with `busy`,
   Joshua tells the person what runs, starts the next job when the report of
   the one before it arrives, and schedules a retry for a scheduled start;
+- which assignment the person means: "start draft N" or "start assignment
+  N" is `start_assignment(id=N)`, a regular job is
+  `start_assignment(saved=...)`, and a new spec is only for a job that has
+  no draft and no saved assignment. At `drafts_open`, Joshua names the
+  drafts and asks which one. At `busy`, Joshua schedules a reminder with
+  `schedule_task` for `retry_after_s` and never starts a copy. Joshua
+  deletes a draft only when the person asks, changes a draft with
+  `update_assignment`, and quotes the `hint` of each refusal;
 - how budget words become the `budget` block. "Don't burn all my tokens"
   takes the defaults. "Use up to 80% of my 5-hour budget" is
   `five_hour_pct: 80`. "You can have half the week" is `seven_day_pct: 50`.
