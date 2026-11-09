@@ -157,6 +157,11 @@ secrets:
       JOSHUA_TOKEN_ASSIGNMENTS: {}
       ASSIGNMENTS_TOKENS: {}
       ADDON_TOKEN: {}
+      # The viewer's own fleet token, the same value as in the viewer secret.
+      # The manager checks it on the read API (assignments.read_callers), so
+      # the viewer can show a person their assignments. It is never a bearer
+      # of /mcp.
+      JOSHUA_TOKEN_VIEWER: {}
 
 # The shared /data volume. All three containers mount it at once, so the access
 # mode is ReadWriteMany and the class must support it.
@@ -327,7 +332,8 @@ assignments:
     existingClaim: ""
     sizeLimit: 10Gi
   # The pod may reach only gateway, channels, core, the database, DNS, and the
-  # git hosts below, and only the gateway may reach it.
+  # git hosts below. Only the gateway may reach it, and the viewer too when
+  # viewer.enabled is true (the read API).
   networkPolicy:
     enabled: true
     # The DNS pods. The default fits a cluster that runs CoreDNS as kube-dns

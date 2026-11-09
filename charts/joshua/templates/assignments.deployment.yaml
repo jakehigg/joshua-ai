@@ -1,8 +1,8 @@
 {{- if .Values.assignments.enabled }}
 {{/* The assignments container: long jobs that run for a member in the
      background. It holds no model credential and no upstream credential. It
-     reads /data (the people file) and writes nothing there. The gateway is its
-     only caller.
+     reads /data (the people file) and writes nothing there. The gateway calls
+     /mcp, and the viewer, when it is on, calls the read API under /v1/.
 
      Two switches turn it on, and both are needed. This one puts the pod in the
      cluster. `assignments.enabled: true` inside `config` lets the process
@@ -107,9 +107,10 @@ spec:
 {{- if .Values.assignments.networkPolicy.enabled }}
 {{- $np := .Values.assignments.networkPolicy }}
 ---
-{{/* Only the gateway reaches the container. The container reaches gateway,
-     channels, core, the database, DNS, and the git hosts, and nothing else:
-     no model server and no other host on the internet. */}}
+{{/* Only the gateway reaches the container, and the viewer when it is on (the
+     read API). The container reaches gateway, channels, core, the database,
+     DNS, and the git hosts, and nothing else: no model server and no other
+     host on the internet. */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -129,6 +130,11 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: joshua-gateway
+        {{- if .Values.viewer.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: joshua-viewer
+        {{- end }}
         {{- with $np.extraIngress }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
