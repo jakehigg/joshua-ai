@@ -31,16 +31,19 @@ container holds those, and no secret that core holds:
 ## The tools
 
 The container serves MCP at `http://assignments:8000/mcp`. The gateway calls
-it for a person, with that person's bearer. Joshua gets six tools:
+it for a person, with that person's bearer. Joshua gets nine tools:
 
 | Tool | What it does |
 |---|---|
-| `start_assignment(spec)` | Checks the spec, clamps the budget to the maxima, stores the assignment, and starts it when a slot is free. Returns the id, the status, and the title. |
-| `assignment_status(id)` | The title, the status, the state, the plan, the report and `report_at`, the outputs, the next step, the last checkpoint, the usage, the turns, the open question, the limits at the stop, the summary, and the error. Joshua reads the report here. |
-| `list_assignments(limit, status, state)` | The person's assignments, the newest first, each with its title, status, and state. `limit` is 1 to 100 (default 10). `status` and `state` filter. |
+| `start_assignment(spec, saved)` | Checks the spec, clamps the budget to the maxima, stores the assignment, and starts it when a slot is free. Returns the id, the status, the title, and `saved`. Give `spec`, or `saved`, the name of a [saved assignment](#saved-assignments). |
+| `assignment_status(id)` | The title, the status, the state, the plan, the report and `report_at`, the outputs, the next step, the last checkpoint, the usage, the turns, the open question, the limits at the stop, the summary, the error, and `saved`. Joshua reads the report here. |
+| `list_assignments(limit, status, state)` | The person's assignments, the newest first, each with its title, status, state, and `saved`. `limit` is 1 to 100 (default 10). `status` and `state` filter. |
 | `answer_assignment(id, text)` | Stores the answer and starts a `waiting` or `paused_limits` assignment again, when the limits are under its ceilings. See [questions and answers](#questions-and-answers). |
 | `cancel_assignment(id)` | Stops the assignment and writes its report (see [the report](#the-report)). The plan and the report stay. |
 | `extend_assignment(id, tokens, working_time, five_hour_pct, seven_day_pct, max_turns)` | Raises one or more caps. Each value must be more than the current value. A ceiling above its maximum is clamped. A `budget_exceeded` or `time_exceeded` assignment continues its session. |
+| `save_assignment(name, spec)` | Checks the spec as `start_assignment` does, and stores it as the saved assignment `name` of the person. A saved assignment with the same name gets the new spec. Returns the id, the name, and the notes. |
+| `list_saved_assignments()` | The person's saved assignments, the newest first, each with its name, title, `runs`, and `last_run` (`id`, `status`, `finished_at`, or null). |
+| `delete_saved_assignment(name)` | Deletes one saved assignment. Its runs stay. |
 
 The state is what a person sees. The status is the detail:
 
@@ -54,7 +57,7 @@ A rejected call returns `{"status": "rejected", "reason", "message"}`. The
 reasons are `disabled`, `invalid_spec`, `unknown_model`, `invalid_repo`,
 `repo_not_allowed`, `limits_unknown`, `invalid_status`, `invalid_state`,
 `invalid_arguments`,
-`not_waiting`, `finished`, and `not_raised`.
+`not_waiting`, `finished`, `not_raised`, and `not_found`.
 
 ### Who may call
 
@@ -108,6 +111,37 @@ form in lower case.
 Without `title`, the title is the first sentence of the first line of the
 goal, cut at a word to 80 characters. The container stores the title in the
 spec.
+
+## Saved assignments
+
+A saved assignment is a spec with a name and no run. A person saves a job
+that recurs, such as a monthly clean-up of the docs, and starts it again by
+name:
+
+```
+save_assignment(name="docs-cleanup", spec={"goal": "...", "title": "Docs clean-up"})
+start_assignment(saved="docs-cleanup")
+start_assignment(saved="docs-cleanup", spec={"model": "opus"})
+```
+
+- A name is 2 to 60 lower case letters, digits, and hyphens. It is unique
+  for a person, and two people can each have a `docs-cleanup`.
+- `save_assignment` checks the spec as `start_assignment` does, so a bad
+  spec is refused at save. It stores the spec as given, so a default and a
+  clamp apply at each run, from the configuration of that time. The `notes`
+  say which ceilings a run clamps now.
+- With `saved`, the stored spec is the base. A `spec` beside it replaces
+  the top-level fields that it gives, for that run only. A `budget` in it
+  replaces the whole `budget` block. The result is checked as a new spec.
+- The run keeps the id of the saved assignment. `assignment_status`,
+  `list_assignments`, and the reply of `start_assignment` give
+  `saved: {"id", "name"}`, or null for a run with no saved assignment.
+- A person sees, starts, and deletes only their own saved assignments.
+  Another person's name is `not_found`.
+- A delete keeps the runs. Their `saved` becomes null.
+
+The container runs nothing on a clock. For a schedule, Joshua makes a
+scheduled task whose prompt says "Start the saved assignment docs-cleanup".
 
 ## The runner
 
@@ -591,7 +625,10 @@ the destination, never the text or a token.
 
 The container keeps its rows in the shared Postgres, in the schema
 `assignments`, apart from the tables of core. It makes the schema at start:
-the tables `assignment`, `checkpoint`, and `slice`. The row of an assignment
+the tables `assignment`, `checkpoint`, `slice`, and `saved`. A row of
+`saved` holds the person, the name, and the spec of a saved assignment. The
+column `saved_id` of `assignment` names the saved assignment of a run, and
+becomes null when that saved assignment is deleted. The row of an assignment
 holds the plan, the report, and the outputs (`plan`, `plan_at`, `report`,
 `report_at`, `outputs`). The column `page_path` stays for the rows of an
 earlier release, and nothing writes it. The schema is additive only. `make backup` dumps the whole database, so a backup holds it.
@@ -668,7 +705,10 @@ assignments tools, `internet`, and `schedule_task`. The page tells Joshua:
 - when a result arrives, to read the report and the outputs from
   `assignment_status`, and to tell the person the outputs as links or
   references, the decisions as questions, the follow-ups, and the cost in one
-  line.
+  line;
+- when the person wants a job to be repeatable, to save it with
+  `save_assignment` and start it by name. A schedule is a scheduled task
+  whose prompt starts the saved assignment.
 
 ## Configuration
 

@@ -6,6 +6,14 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Saved assignments.** Joshua can save the spec of a job that recurs
+  under a short name with `save_assignment`, and start it again with
+  `start_assignment(saved="<name>")`. A `spec` beside `saved` changes the
+  fields that it gives for that run. `list_saved_assignments` gives the runs
+  and the last run, and `delete_saved_assignment` deletes one.
+  `assignment_status` and `list_assignments` give `saved`. A schedule is a
+  scheduled task that starts the saved assignment. See
+  [assignments.md](assignments.md#saved-assignments).
 - The viewer shows the report of a completed assignment as the page: a head
   with the first sentence and the numbers, the highlights and the decisions
   as cards, the outputs as cards by kind, and the cost. Each decision has a
