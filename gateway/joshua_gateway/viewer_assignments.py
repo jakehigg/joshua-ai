@@ -8,13 +8,16 @@ its own fleet token, and names the person who signed in as ``person``. The
 manager shows a person only their own assignments.
 
 A person reads an assignment here and tells Joshua what to change. The one
-write is a comment on a line of a definition: the definition shows each line
-with its number, and the "+" of a line opens a plain form. The viewer sends
-the comment to the manager as the person who signed in
-(``POST /v1/assignments/{id}/comments`` or ``POST /v1/saved/{id}/comments``),
-and a Delete button of an open comment deletes it. Joshua reads the comments,
-changes the spec, and resolves them. The line numbers count the lines of the
-``definition`` text of the manager, so the viewer shows that text as it is.
+write is a comment on a line of a definition. The definition shows as a
+document: the fields as a list of properties, then the goal as Markdown, cut
+into blocks by ``viewer_blocks``. Each field and each block has a "+" that
+opens a plain form for its first line, and a ``Source`` fold gives each line
+of the text with its number and its own "+". The viewer sends the comment to
+the manager as the person who signed in (``POST /v1/assignments/{id}/comments``
+or ``POST /v1/saved/{id}/comments``), and a Delete button of an open comment
+deletes it. Joshua reads the comments, changes the spec, and resolves them.
+The line numbers count the lines of the ``definition`` text of the manager,
+so a comment shows under the field or the block that holds its line.
 
 The viewer needs ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER``. With either
 one missing, :func:`from_env` returns None and the pages say so. A call that
@@ -25,8 +28,9 @@ in these cases, except a detail page that the manager does not know, which is
 
 Every string from the manager is untrusted, and the HTML escapes each one. The
 plan and the report are Markdown, rendered as a wiki page is, with raw HTML
-off. A reference of an output is a link only when it is an ``http`` or
-``https`` URL with a host. The layout has no table: the texts are long, so a
+off, in the same blocks as the goal but with no "+". A reference of an output
+is a link only when it is an ``http`` or ``https`` URL with a host. The
+layout has no table: the texts are long, so a
 detail page is a document.
 
 A draft has not run. Its page is the definition, open, with the "+" of each
@@ -55,6 +59,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -67,9 +72,9 @@ import httpx
 import yaml
 from joshua_shared.http import FleetClient
 from joshua_shared.log import get_logger
-from markdown_it import MarkdownIt
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from joshua_gateway import viewer_blocks as vb
 from joshua_gateway import viewer_report as rp
 from joshua_gateway.viewer_limits import when_text
 from joshua_gateway.viewer_usage import exact, short
@@ -123,7 +128,7 @@ _WINDOW_LABEL = {"five_hour": "5-hour", "seven_day": "weekly"}
 
 # The wiki renderer: raw HTML is off, so a ``<script>`` in a plan renders as
 # text, and markdown-it refuses a ``javascript:`` link.
-_MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table", "strikethrough"])
+_MD = vb.MD
 
 
 # -- the contract of the read API -------------------------------------------
@@ -639,7 +644,7 @@ def _section(
 
 def _prose(text: str | None, empty: str) -> str:
     if text and text.strip():
-        return f'<article class="j-prose">{markdown(text)}</article>'
+        return _doc(doc_html(text))
     return f'<p class="j-faint">{escape(empty)}</p>'
 
 
@@ -803,9 +808,16 @@ def _csrf_input(forms: CommentForms) -> str:
 
 
 def _comment_card(
-    comment: Comment, *, forms: CommentForms | None, tz: tzinfo, now: datetime
+    comment: Comment,
+    *,
+    forms: CommentForms | None,
+    tz: tzinfo,
+    now: datetime,
+    quote: bool = False,
 ) -> str:
-    """One open comment: the body, the age, a stale mark, and Delete."""
+    """One open comment: the body, the age, a stale mark, and Delete. With
+    ``quote``, the comment is on a line of a block that is not its first
+    line, and the card shows that line."""
     age = time_html(comment.created_at, tz=tz, now=now)
     stale = ""
     was = ""
@@ -813,6 +825,11 @@ def _comment_card(
         stale = '<span class="j-badge warn">line changed</span>'
         was = (
             '<p class="a-was"><span class="j-faint">It was on:</span> '
+            f"<code>{escape(comment.line_text)}</code></p>"
+        )
+    elif quote:
+        was = (
+            f'<p class="a-was"><span class="j-faint">Line {comment.line_no}:</span> '
             f"<code>{escape(comment.line_text)}</code></p>"
         )
     delete = ""
@@ -829,16 +846,18 @@ def _comment_card(
     )
 
 
-def _add_form(n: int, text: str, forms: CommentForms) -> str:
-    """The "+" of a line: a closed ``<details>`` with the form of a new comment."""
+def _add_form(n: int, text: str, forms: CommentForms, *, what: str = "") -> str:
+    """The "+" of a line or a block: a closed ``<details>`` with the form of a
+    new comment on line ``n``, whose text is ``text``."""
+    label = f"Comment on {what or f'line {n}'}"
     return (
-        f'<details class="a-add"><summary class="a-plus" title="Comment on line {n}" '
-        f'aria-label="Comment on line {n}">+</summary>'
+        f'<details class="a-add"><summary class="a-plus" title="{escape(label)}" '
+        f'aria-label="{escape(label)}">+</summary>'
         f'<form class="a-comment-form" method="post" action="{escape(forms.action)}">'
         f'{_csrf_input(forms)}<input type="hidden" name="line_no" value="{n}">'
         f'<input type="hidden" name="line_text" value="{escape(text)}">'
         f'<div class="j-field"><textarea name="body" rows="3" maxlength="{MAX_COMMENT}" '
-        f'required aria-label="Your comment on line {n}" '
+        f'required aria-label="Your {escape(label[0].lower() + label[1:])}" '
         'placeholder="Tell Joshua what to change"></textarea></div>'
         '<button class="j-btn sm" type="submit">Comment</button></form></details>'
     )
@@ -863,6 +882,157 @@ def _resolved(comments: list[Comment], *, tz: tzinfo, now: datetime) -> str:
     )
 
 
+@dataclass(frozen=True)
+class Unit:
+    """One commentable part of a definition: lines ``first`` to ``last`` (from
+    1) of the text, its HTML, its CSS class, and what its "+" names."""
+
+    first: int
+    last: int
+    body: str
+    css: str
+    what: str
+
+
+def _label(key: str) -> str:
+    return key.replace("_", " ")
+
+
+def _tag_text(value: Any) -> str:
+    """One value in a list or a mapping, as plain text. Not escaped."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if value is None:
+        return "none"
+    if isinstance(value, str | int | float):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _tags(values: list[str]) -> str:
+    tags = "".join(f'<span class="a-tag">{escape(v)}</span>' for v in values)
+    return f'<span class="a-tags">{tags}</span>'
+
+
+_NONE_HTML = '<span class="j-faint">none</span>'
+
+
+def prop_value(item: vb.Field) -> str:
+    """The value of a field of a definition, as HTML: text, yes or no, tags
+    for a list or a mapping, and the source lines when YAML cannot read them."""
+    if not item.parsed:
+        rest = "\n".join(item.lines)
+        return f'<code class="a-code">{escape(rest)}</code>'
+    value = item.value
+    if isinstance(value, list | dict) and not value:
+        return _NONE_HTML
+    if isinstance(value, list):
+        return _tags([_tag_text(v) for v in value])
+    if isinstance(value, dict):
+        return _tags([f"{_label(str(k))}: {_tag_text(v)}" for k, v in value.items()])
+    if value is None or value == "":
+        return _NONE_HTML
+    return f'<span class="a-prop-text">{escape(_tag_text(value))}</span>'
+
+
+def _prop(item: vb.Field, *, label: str, value: str) -> Unit:
+    body = (
+        f'<span class="a-prop-key">{escape(label)}</span><span class="a-prop-value">{value}</span>'
+    )
+    return Unit(item.first, item.last, body, "a-prop", f"the field {label or 'here'}")
+
+
+def definition_units(text: str) -> tuple[list[Unit], list[Unit]]:
+    """The fields of a definition (all but the goal), and the goal: its head,
+    then one unit a block of its Markdown. A goal that is not a block scalar
+    is a field."""
+    props: list[Unit] = []
+    goal: list[Unit] = []
+    for item in vb.fields(text):
+        found = vb.goal_offset(item) if item.key == "goal" else None
+        if found is None:
+            props.append(_prop(item, label=_label(item.key), value=prop_value(item)))
+            continue
+        parts = vb.blocks(found.markdown)
+        head_last = found.header + parts[0].first - 1 if parts else found.last
+        goal.append(
+            Unit(
+                found.header,
+                head_last,
+                '<span class="a-prop-key">goal</span>',
+                "a-goal-head",
+                "the goal",
+            )
+        )
+        for part in parts:
+            first = found.header + part.first
+            goal.append(
+                Unit(
+                    first,
+                    found.header + part.last,
+                    part.html,
+                    f"a-block {part.kind} d{min(part.depth, vb.MAX_DEPTH)}",
+                    f"the {_BLOCK_NAMES.get(part.kind, 'block')} at line {first}",
+                )
+            )
+    return props, goal
+
+
+# What the "+" of a block of the goal names.
+_BLOCK_NAMES = {
+    "p": "paragraph",
+    "h": "heading",
+    "li": "list item",
+    "quote": "quote",
+    "code": "code block",
+    "table": "table",
+}
+
+
+def _unit_html(
+    unit: Unit,
+    lines: list[str],
+    comments: list[Comment],
+    *,
+    forms: CommentForms | None,
+    tz: tzinfo,
+    now: datetime,
+) -> str:
+    """One unit: its anchors (``L<n>`` for each of its lines), the body, the
+    "+" of its first line, and the open comments on any of its lines."""
+    cards = "".join(
+        _comment_card(c, forms=forms, tz=tz, now=now, quote=c.line_no != unit.first)
+        for c in comments
+    )
+    anchors = "".join(
+        f'<span class="a-anchor" id="L{n}"></span>' for n in range(unit.first + 1, unit.last + 1)
+    )
+    text = lines[unit.first - 1] if 1 <= unit.first <= len(lines) else ""
+    plus = _add_form(unit.first, text, forms, what=unit.what) if forms is not None else ""
+    css = f"a-unit {unit.css}" + (" has-comments" if cards else "")
+    return (
+        f'<div class="{css}" id="L{unit.first}">{anchors}'
+        f'<div class="a-unit-body">{unit.body}</div>{plus}{cards}</div>'
+    )
+
+
+def _source(lines: list[str], marked: set[int], forms: CommentForms | None) -> str:
+    """The definition as the manager gives it, in a closed ``<details>``: one
+    row a line with its number and its "+"."""
+    rows = []
+    for n, line in enumerate(lines, start=1):
+        plus = _add_form(n, line, forms) if forms is not None else ""
+        rows.append(
+            f'<li class="a-line{" has-comments" if n in marked else ""}" id="S{n}">'
+            f'<a class="a-ln" href="#S{n}">{n}</a>'
+            f'<code class="a-code">{escape(line)}</code>{plus}</li>'
+        )
+    return (
+        '<details class="a-source"><summary>Source</summary>'
+        f'<ol class="a-lines">{"".join(rows)}</ol></details>'
+    )
+
+
 def definition_html(
     text: str | None,
     spec: Mapping[str, Any],
@@ -873,9 +1043,11 @@ def definition_html(
     tz: tzinfo,
     now: datetime,
 ) -> str:
-    """The definition in a ``<details>``: one row per line with its number, the
-    "+" of the line, and the open comments under it. The resolved comments
-    fold under the lines.
+    """The definition in a ``<details>``, as a document: the fields as a list
+    of properties, then the goal as Markdown, one block a unit. Each unit has
+    the "+" of its first line and shows the open comments on any of its
+    lines. A ``Source`` fold under it gives each line with its number and its
+    "+". The resolved comments fold at the end.
 
     ``text`` is the definition of the manager. Without it (an older manager),
     the spec shows as YAML with no line numbers and no form, because a line
@@ -890,30 +1062,40 @@ def definition_html(
             f"<pre><code>{escape(spec_yaml(spec))}</code></pre></details>"
         )
     lines = text.split("\n") if text else []
-    by_line: dict[int, list[Comment]] = {}
+    props, goal = definition_units(text)
+    placed: dict[int, list[Comment]] = {}
     orphans: list[Comment] = []
     for comment in open_comments:
-        if 1 <= comment.line_no <= len(lines):
-            by_line.setdefault(comment.line_no, []).append(comment)
-        else:
-            orphans.append(comment)
-    rows = []
-    for n, line in enumerate(lines, start=1):
-        cards = "".join(_comment_card(c, forms=forms, tz=tz, now=now) for c in by_line.get(n, []))
-        plus = _add_form(n, line, forms) if forms is not None else ""
-        rows.append(
-            f'<li class="a-line{" has-comments" if cards else ""}" id="L{n}">'
-            f'<a class="a-ln" href="#L{n}">{n}</a>'
-            f'<code class="a-code">{escape(line)}</code>{plus}{cards}</li>'
+        home = next(
+            (n for n, u in enumerate(props + goal) if u.first <= comment.line_no <= u.last), None
         )
+        if home is None:
+            orphans.append(comment)
+        else:
+            placed.setdefault(home, []).append(comment)
+
+    def units(part: list[Unit], start: int) -> str:
+        return "".join(
+            _unit_html(u, lines, placed.get(start + n, []), forms=forms, tz=tz, now=now)
+            for n, u in enumerate(part)
+        )
+
+    doc = ""
+    if props:
+        doc += f'<div class="a-props">{units(props, 0)}</div>'
+    if goal:
+        doc += f'<div class="a-goal j-prose">{units(goal, len(props))}</div>'
+    if not doc:
+        doc = '<p class="j-faint a-def-empty">The definition is empty.</p>'
     gone = ""
     if orphans:
         cards = "".join(_comment_card(c, forms=forms, tz=tz, now=now) for c in orphans)
         gone = f'<div class="a-orphans"><p class="j-label">On lines that are gone</p>{cards}</div>'
+    marked = {c.line_no for c in open_comments}
     resolved = [c for c in comments if c.resolved_at is not None]
     return (
         f'<details class="a-def"{opened} id="definition">{summary}'
-        f'<ol class="a-lines">{"".join(rows)}</ol>{gone}'
+        f'<div class="a-doc">{doc}</div>{gone}{_source(lines, marked, forms)}'
         f"{_resolved(resolved, tz=tz, now=now)}</details>"
     )
 
@@ -943,8 +1125,8 @@ def _count(n: int, noun: str) -> str:
 _RENDERED_BOX = re.compile(r"<li>(<p>)?\[([ xX])\] ")
 
 
-def plan_html(text: str) -> str:
-    """The plan as Markdown, with each task box drawn as a box."""
+def _boxes(html: str) -> str:
+    """Draw each task box of rendered Markdown as a box."""
 
     def box(match: re.Match[str]) -> str:
         done = match.group(2) in "xX"
@@ -954,7 +1136,28 @@ def plan_html(text: str) -> str:
             f'<span class="a-box" role="img" aria-label="{label}"></span>'
         )
 
-    return _RENDERED_BOX.sub(box, markdown(text))
+    return _RENDERED_BOX.sub(box, html)
+
+
+def doc_html(text: str, *, boxes: bool = False) -> str:
+    """Markdown as a document of blocks, as the goal of a definition shows,
+    with no "+": one element a paragraph, heading, list item, quote, code
+    block, or table. With ``boxes``, each task box is drawn as a box."""
+    parts = []
+    for block in vb.blocks(text):
+        html = _boxes(block.html) if boxes else block.html
+        depth = min(block.depth, vb.MAX_DEPTH)
+        parts.append(f'<div class="a-block {block.kind} d{depth}">{html}</div>')
+    return "".join(parts)
+
+
+def plan_html(text: str) -> str:
+    """The plan as a document of blocks, with each task box drawn as a box."""
+    return doc_html(text, boxes=True)
+
+
+def _doc(html: str) -> str:
+    return f'<article class="j-prose a-blocks">{html}</article>'
 
 
 def _tile(value: str, label: str, *, title: str = "", css: str = "") -> str:
@@ -1108,7 +1311,7 @@ def _done(report: rp.Report) -> str:
         return ""
     # A stop report holds the plan, so the task boxes are drawn here too.
     prose = plan_html("\n\n".join(parts))
-    return _section("What was done", f'<article class="j-prose">{prose}</article>')
+    return _section("What was done", _doc(prose))
 
 
 def _follow_ups(section: rp.Section | None) -> str:
@@ -1212,7 +1415,7 @@ def _plan_fold(item: Detail, progress: rp.PlanProgress, *, tz: tzinfo, now: date
         hint = _bar(progress, "a-meter mini") + steps
     stamp = time_html(item.plan_at, tz=tz, now=now)
     when = f'<p class="j-meta">updated {stamp}</p>' if stamp else ""
-    body = f'{when}<article class="j-prose">{plan_html(item.plan)}</article>'
+    body = f"{when}{_doc(plan_html(item.plan))}"
     return _fold("Plan", body, hint=hint)
 
 
@@ -1316,13 +1519,13 @@ def _progress_page(
     cards = output_cards(item.outputs, None)
     progress = rp.plan_progress(item.plan)
     plan = (
-        f'<article class="j-prose">{plan_html(item.plan)}</article>'
+        _doc(plan_html(item.plan))
         if item.plan and item.plan.strip()
         else '<p class="j-faint">No plan yet.</p>'
     )
     report = ""
     if item.report and item.report.strip():
-        report = _fold("Report", f'<article class="j-prose">{markdown(item.report)}</article>')
+        report = _fold("Report", _doc(doc_html(item.report)))
     parts = [
         _crumbs(),
         _hero(
