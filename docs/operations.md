@@ -1042,8 +1042,8 @@ A document opens at `/documents/<owner>/<slug>`:
   the sandbox allows scripts and nothing more. The frame also gets the
   content policy of the viewer, so the policy still blocks a `<style>`
   element, a `style` attribute, and a script inside the document.
-- The `Source` fold gives each line of the file, frontmatter included, with
-  its number and a `+`.
+- The `Source` fold gives the frontmatter first, with no number and no `+`,
+  then each line of the body with its number and a `+`.
 - The `Versions` fold lists the commits of the file in the git repository of
   `/data/documents`, newest first. Click a version to read it at
   `?rev=<sha>`. An old version is read-only and has no comments.
@@ -1051,11 +1051,13 @@ A document opens at `/documents/<owner>/<slug>`:
 To comment on a document, use the `+` of a block, a card, a heading, or a line
 of `Source`, as on a definition (see
 [Comments on a definition](#comments-on-a-definition)). The `+` of the head
-of the page names the `title` line. The viewer appends the comment to the
+of the page is a comment on the document as a whole. The viewer appends the comment to the
 comments file beside the document, `<slug>.comments.jsonl`, with you as its
 `author`, and commits it with the author Joshua and the message
 `viewer: comment documents/<owner>/<slug>.md`. A comment names one line of
-the file, from 1, frontmatter included. `Delete` removes your own open
+the body, from 1 at the first line after the frontmatter, so a change of the
+frontmatter never moves a comment. Line 0 is the document as a whole, and
+its `line_text` is the `title:` line. `Delete` removes your own open
 comment from the file, with one more commit. You cannot delete a comment of
 another person or a resolved comment. Tell Joshua that you left comments:
 Joshua reads them, changes the document, and resolves each one. The form has

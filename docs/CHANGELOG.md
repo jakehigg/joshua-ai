@@ -6,6 +6,27 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Documents: a fourth memory surface.** The new builtin `documents` MCP
+  keeps what Joshua works on or makes for a member (a plan, a report, a spec,
+  an artifact, a note) at `/data/documents/<person id>/` and
+  `/data/documents/shared/`, out of the wiki. Turn it on with
+  `mcp.documents: {kind: builtin, allow: all}`; there is nothing else to set.
+  The folder is its own git repository, made on the first write, with one
+  commit per write. Each document has YAML frontmatter; the server sets
+  `author`, `created`, and `updated`. The tools are `list_documents`,
+  `read_document`, `write_document`, `set_document_status`,
+  `search_documents`, `promote_document`, `trash_document`,
+  `document_comments`, and `resolve_document_comment`. Comments are in
+  `<slug>.comments.jsonl` beside the document. A comment names a line of the
+  body, from 1, so a change of the frontmatter never moves it; line 0 is the
+  document as a whole. The viewer now numbers the lines of a document the
+  same way. Members only: a member never
+  reaches the folder of another member, and a guest gets no tools.
+  `write_file` now refuses a wiki page whose frontmatter has `kind` `plan`,
+  `report`, `spec`, `artifact`, or `draft`, or `status: draft`. A member
+  session that holds the server gets the skill page
+  `prompts/builtin/skills/documents.md`. See
+  [config.md](config.md#the-documents-mcp).
 - **The memory finds documents by title and summary.** A new index source,
   `documents`, writes one row for each document in `documents/<owner>/`: the
   title, the kind, the status, and the `summary` (or the first paragraph),

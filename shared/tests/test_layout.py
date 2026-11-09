@@ -720,6 +720,24 @@ def test_attachment_area_reads_the_path(rel: str, area: str | None) -> None:
     assert layout.attachment_area(rel) == area
 
 
+# -- documents ---------------------------------------------------------------
+
+
 def test_the_documents_root_is_beside_the_wiki(tmp_path: Path) -> None:
     assert layout.documents_root(tmp_path) == tmp_path / "documents"
     assert not (tmp_path / "documents").exists()
+    assert layout.documents_owner_dir("alex", tmp_path) == tmp_path / "documents" / "alex"
+    assert layout.documents_owner_dir("shared", tmp_path) == tmp_path / "documents" / "shared"
+
+
+@pytest.mark.parametrize("owner", ["..", "a/b", "", "Alex"])
+def test_a_bad_document_owner_is_refused(tmp_path: Path, owner: str) -> None:
+    with pytest.raises(ValueError):
+        layout.documents_owner_dir(owner, tmp_path)
+
+
+def test_the_documents_trash_takes_a_stamp(tmp_path: Path) -> None:
+    stamp = layout.documents_trash_dir("20261109T120000Z", tmp_path)
+    assert stamp == tmp_path / "documents" / ".trash" / "20261109T120000Z"
+    with pytest.raises(ValueError):
+        layout.documents_trash_dir("../x", tmp_path)

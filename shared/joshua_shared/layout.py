@@ -24,6 +24,14 @@ Every person reads the wiki and a member writes it. A person's own files
 outside the wiki are `attachments/` and, for the terminal channel, `cli/`,
 under `<data>/people/<id>/`.
 
+`<data>/documents/` holds what Joshua works on or has produced for a member: a
+plan, a report, a spec. `documents/<id>/` is one member's folder,
+`documents/shared/` is the folder every member uses, and
+`documents/.trash/<UTC timestamp>/` holds a removed document. The gateway's
+`documents` server makes the folder, and its own git repository, on first use.
+A document `<slug>.md` (or `<slug>.html`) has its comments in
+`<slug>.comments.jsonl` beside it.
+
 Production mounts the volume at `/data`. Tests override the root with the
 `JOSHUA_DATA_DIR` environment variable. A function also takes an optional `root`
 so a caller with its own data directory (the people CLI, the registration tool)
@@ -73,6 +81,11 @@ EVENTS_BUCKET = "events"
 
 # `everyone` names the shared profile page, so no person id may use it.
 SHARED_PROFILE_NAME = "everyone"
+
+# The documents root, its folder for every member, and its trash.
+DOCUMENTS = "documents"
+DOCUMENTS_SHARED = "shared"
+DOCUMENTS_TRASH = ".trash"
 
 _PERSON_ID_RE = PERSON_ID_RE
 _JOURNAL_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
@@ -173,6 +186,25 @@ def docs_root(root: Path | str | None = None) -> Path:
     for their own and keeps notes in it.
     """
     return wiki_root(root) / "joshua-docs"
+
+
+def documents_owner_dir(owner: str, root: Path | str | None = None) -> Path:
+    """`<data>/documents/<owner>`, for a person id or `shared`.
+
+    `shared` is always the folder that every member uses, so a person whose id
+    is `shared` has no folder of their own here. Raises `ValueError` for an
+    invalid person id.
+    """
+    if owner == DOCUMENTS_SHARED:
+        return documents_root(root) / DOCUMENTS_SHARED
+    return documents_root(root) / safe_segment(owner)
+
+
+def documents_trash_dir(stamp: str, root: Path | str | None = None) -> Path:
+    """`<data>/documents/.trash/<stamp>`, where a removed document goes."""
+    if not _GROUP_SEGMENT_RE.match(stamp):
+        raise ValueError(f"invalid trash stamp: {stamp!r}")
+    return documents_root(root) / DOCUMENTS_TRASH / stamp
 
 
 def home_path(root: Path | str | None = None) -> Path:

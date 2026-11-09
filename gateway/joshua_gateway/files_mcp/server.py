@@ -61,6 +61,7 @@ from mcp.server.lowlevel import Server
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
+from joshua_gateway.files_mcp.boundary import BoundaryError, check_boundary
 from joshua_gateway.files_mcp.paths import (
     DIR_ROOTS,
     UNKNOWN,
@@ -124,12 +125,17 @@ def data_root() -> Path:
 def build_builtin_server(name: str, options: dict[str, Any]) -> Server:
     """Build the in-process ``Server`` for a builtin catalog entry.
 
-    Only ``files`` exists today; ``viewer`` and ``research`` are reserved names.
+    ``files`` and ``documents`` exist; ``viewer`` and ``research`` are reserved
+    names.
     """
     if name == "files":
         from joshua_shared import config
 
         return build_files_server(data_root(), timezone=config.load().timezone)
+    if name == "documents":
+        from joshua_gateway.documents_mcp.server import build_documents_server
+
+        return build_documents_server(data_root())
     raise ValueError(f"unknown builtin server: {name}")
 
 
@@ -203,7 +209,9 @@ TOOLS = [
             "Write one .md file under wiki/. mode create fails if the file "
             "exists; overwrite replaces it; append adds to it. Max 256 KB. A "
             "path under wiki/journal/ is refused: the journal has one writer, "
-            "write_journal_entry."
+            "write_journal_entry. A page whose frontmatter has kind plan, "
+            "report, spec, artifact, or draft, or status draft, is refused: "
+            "it is a document, written with write_document."
         ),
         input_schema={
             "type": "object",
@@ -531,11 +539,37 @@ def _in_journal(abs_path: Path, root_dir: Path) -> bool:
 def _write_file(
     roots: dict[str, Root], args: dict[str, Any], tz: ZoneInfo, root_dir: Path
 ) -> types.CallToolResult:
-    content = args.get("content", "")
-    mode = args.get("mode", "create")
+    return _json(
+        write_wiki_page(
+            roots,
+            args.get("path", ""),
+            args.get("content", ""),
+            args.get("mode", "create"),
+            root_dir,
+        )
+    )
+
+
+def write_wiki_page(
+    roots: dict[str, Root],
+    path: str,
+    content: str,
+    mode: str,
+    root_dir: Path,
+    *,
+    tool: str = "write_file",
+) -> dict[str, Any]:
+    """Write one wiki page and commit it, the one code path for a free wiki write.
+
+    ``write_file`` and the documents server's ``promote_document`` both write
+    through here. Raises ``PathError`` or ``FilesError`` for a refused write:
+    a path outside a writable root, the journal, a page that is a document
+    (``boundary.check_boundary``), invalid frontmatter, a create over a file
+    that exists, or a result over 256 KB. The commit message is
+    ``<tool>: <path in the wiki>``.
+    """
     if mode not in ("create", "overwrite", "append"):
         raise FilesError("mode must be create, overwrite, or append")
-    path = args.get("path", "")
     root, abs_path = resolve(path, roots, write=True)
     if _in_journal(abs_path, root_dir):
         raise FilesError("the journal is written with write_journal_entry")
@@ -548,10 +582,14 @@ def _write_file(
         data = abs_path.read_bytes() + data
     if len(data) > MAX_BYTES:
         raise FilesError("file exceeds 256 KB")
+    try:
+        check_boundary(path, data.decode("utf-8", errors="replace"), tool=tool)
+    except BoundaryError as exc:
+        raise FilesError(exc.message) from exc
 
     _atomic_write(abs_path, data)
-    _commit_wiki(root, [abs_path], f"write_file: {_wiki_rel(root, abs_path)}")
-    return _json({"path": path, "bytes": len(data)})
+    _commit_wiki(root, [abs_path], f"{tool}: {_wiki_rel(root, abs_path)}")
+    return {"path": path, "bytes": len(data)}
 
 
 # The folders of the wiki that another writer owns. A rename never

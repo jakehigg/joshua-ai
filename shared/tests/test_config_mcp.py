@@ -608,3 +608,15 @@ def test_identities_refuse_a_group_that_is_not_allowed() -> None:
             """
         )
     assert "unknown person id 'team'" in str(exc.value)
+
+
+def test_documents_is_a_builtin_server() -> None:
+    cfg = parse_mcp(
+        """
+        documents:
+          kind: builtin
+          allow: all
+        """
+    )
+    assert cfg.mcp["documents"].kind == "builtin"
+    assert "documents" in config.BUILTIN_SERVER_NAMES

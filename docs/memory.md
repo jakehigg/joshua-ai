@@ -4,6 +4,69 @@ Joshua remembers each person through Markdown files on the data volume. The
 in-core RAG indexes those files and injects the relevant parts into each turn.
 This page covers how long-term memory is written, and how Joshua finds it again.
 
+## Documents
+
+Joshua keeps four kinds of text, and each one has its own place:
+
+| Surface | What it holds | Where |
+|---|---|---|
+| wiki | what Joshua knows: reference that will still be true next month | `wiki/` |
+| journal | what happened | `wiki/journal/` |
+| knowledge | what a person gave Joshua to read | an MCP server of its own, when you add one |
+| documents | what Joshua works on or has made: a plan, a report, a spec, a meal plan, an artifact | `documents/` |
+
+A document belongs to a member (or to `documents/shared/`), changes many
+times, and has a status: `draft`, `active`, `final`, or `archived`. Each
+write is one version in the git repository of `documents/`. The index holds
+the title and the summary of a document, never its body, so a long plan does
+not come back in every turn that touches its subject. Joshua reads a
+document with `read_document` when it needs it. See
+[Documents in the index](#documents-in-the-index).
+
+The wiki does not take a document. `write_file` refuses a page whose
+frontmatter says `kind: plan`, `report`, `spec`, `artifact`, or `draft`, or
+`status: draft`. When a finished document holds something durable, such as a
+recipe out of a meal plan, Joshua writes that part to the wiki with
+`promote_document`, and the document is archived. The skill page
+`prompts/builtin/skills/documents.md` tells Joshua when to use which, and
+goes only to a member session that holds the `documents` server.
+[config.md](config.md#the-documents-mcp) has the tools, the access rules,
+and the frontmatter.
+
+### Documents in the index
+
+A document lives in `documents/<owner>/<slug>.md`, where `<owner>` is a
+member id or `shared`. The `documents` source does not index the body. It
+writes one row for each document, with:
+
+- the `title` of the frontmatter;
+- the `kind` (`plan`, `report`, `spec`, `artifact`, or `note`, default
+  `note`) and the `status` (`draft`, `active`, or `final`, default `draft`);
+- the `summary` of the frontmatter or, when there is none, the first
+  paragraph of the body, cut to 500 characters;
+- the path.
+
+The source does not index a document with `status: archived`, a document
+with `format: html`, or an `.html` file. When a document changes to
+`archived`, the next pass removes its row. A folder that is not a member id
+and is not `shared` is ignored, and so is a dot entry such as `.trash/`. When
+`documents/` does not exist, the source finds nothing and does nothing.
+
+Recall never shows the body of a document. `search_memory` and the note of a
+turn show a document as one line:
+
+```
+document: Party plan (documents/alex/party-plan.md, plan, active)
+```
+
+The agent reads the document with `read_document` when it needs the body.
+
+Only a conversation of one member finds a document: that member's own
+documents and the shared ones. A group chat and a guest find no document,
+and a member never finds the documents of another member.
+`memory.documents.enabled: false` turns the source off, and the next pass
+removes its rows.
+
 ## How Joshua finds what it wrote
 
 Joshua does not read every file on each turn. It searches them.
@@ -53,41 +116,6 @@ reaches the page of the school handbook that holds it. The row carries the
 description as its title, and the words came from outside, so its provenance
 is `external`. `attachments.extract.embed: false` turns this off. A file with
 no text in it is not indexed at all.
-
-### Documents in the index
-
-A document is a plan, a report, a spec, or another text that a member works on
-with Joshua. It lives in `documents/<owner>/<slug>.md`, where `<owner>` is a
-member id or `shared`. The `documents` source does not index the body. It
-writes one row for each document, with:
-
-- the `title` of the frontmatter;
-- the `kind` (`plan`, `report`, `spec`, `artifact`, or `note`, default
-  `note`) and the `status` (`draft`, `active`, or `final`, default `draft`);
-- the `summary` of the frontmatter or, when there is none, the first
-  paragraph of the body, cut to 500 characters;
-- the path.
-
-The source does not index a document with `status: archived`, a document
-with `format: html`, or an `.html` file. When a document changes to
-`archived`, the next pass removes its row. A folder that is not a member id
-and is not `shared` is ignored, and so is a dot entry such as `.trash/`. When
-`documents/` does not exist, the source finds nothing and does nothing.
-
-Recall never shows the body of a document. `search_memory` and the note of a
-turn show a document as one line:
-
-```
-document: Party plan (documents/alex/party-plan.md, plan, active)
-```
-
-The agent reads the document with `read_document` when it needs the body.
-
-Only a conversation of one member finds a document: that member's own
-documents and the shared ones. A group chat and a guest find no document,
-and a member never finds the documents of another member.
-`memory.documents.enabled: false` turns the source off, and the next pass
-removes its rows.
 
 The indexer re-reads the volume every `memory.index_interval_s` seconds (60 by
 default). It compares each file against the index by content, so a file that did

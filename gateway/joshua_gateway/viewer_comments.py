@@ -186,13 +186,19 @@ def add_form(n: int, text: str, forms: CommentForms, *, what: str = "") -> str:
     )
 
 
+def _where(comment: Comment) -> str:
+    """ "Line N", or "The document" for line 0, the document as a whole."""
+    n = int(comment.line_no)
+    return "The document" if n == 0 else f"Line {n}"
+
+
 def resolved_html(comments: Sequence[Comment], *, tz: tzinfo, now: datetime) -> str:
     """The resolved comments, folded, each with the resolution of Joshua."""
     if not comments:
         return ""
     rows = "".join(
         f'<li class="a-comment resolved" id="C{_dom_id(c.id)}">'
-        f'<p class="j-faint">Line {int(c.line_no)}: <code>{escape(c.line_text)}</code></p>'
+        f'<p class="j-faint">{_where(c)}: <code>{escape(c.line_text)}</code></p>'
         f'<p class="a-comment-body">{escape(c.body)}</p>'
         f'<p class="a-resolution"><span class="j-label">Joshua</span> '
         f"{escape(c.resolution or '')}"
@@ -205,10 +211,20 @@ def resolved_html(comments: Sequence[Comment], *, tz: tzinfo, now: datetime) -> 
     )
 
 
-def source_html(lines: Sequence[str], marked: set[int], forms: CommentForms | None) -> str:
+def source_html(
+    lines: Sequence[str],
+    marked: set[int],
+    forms: CommentForms | None,
+    preamble: Sequence[str] = (),
+) -> str:
     """The text as it is stored, in a closed ``<details>``: one row a line
-    with its number and, with ``forms``, its "+"."""
-    rows = []
+    with its number and, with ``forms``, its "+". The ``preamble`` lines (the
+    frontmatter of a document) come first, with no number and no "+"."""
+    rows = [
+        f'<li class="a-line a-pre"><span class="a-ln"></span>'
+        f'<code class="a-code j-faint">{escape(line)}</code></li>'
+        for line in preamble
+    ]
     for n, line in enumerate(lines, start=1):
         plus = add_form(n, line, forms) if forms is not None else ""
         rows.append(
@@ -229,10 +245,12 @@ def source_html(lines: Sequence[str], marked: set[int], forms: CommentForms | No
 class Gutter:
     """The comments of one text, given out to the units of a page.
 
-    ``lines`` are the lines of the stored text. ``offset`` is added to each
-    line number that a renderer gives, so a renderer of the body of a
-    document counts from the first line of the body. ``author`` set, only the
-    comments whose ``author`` is that value get a Delete button."""
+    ``lines`` are the lines that a comment counts from 1: the definition of
+    an assignment, or the body of a document. ``offset`` is added to each
+    line number that a renderer gives. ``preamble`` are lines that the
+    ``Source`` fold shows first with no number and no "+" (the frontmatter of
+    a document). ``author`` set, only the comments whose ``author`` is that
+    value get a Delete button."""
 
     lines: list[str]
     comments: Sequence[Comment]
@@ -241,6 +259,7 @@ class Gutter:
     now: datetime
     offset: int = 0
     author: str | None = None
+    preamble: Sequence[str] = ()
     _placed: set[int] = field(default_factory=set)
 
     @property
@@ -320,7 +339,9 @@ class Gutter:
 
     def source(self) -> str:
         """The whole text with a "+" on each line, folded."""
-        return source_html(self.lines, {c.line_no for c in self.open}, self.forms)
+        return source_html(
+            self.lines, {c.line_no for c in self.open}, self.forms, preamble=self.preamble
+        )
 
     def resolved(self) -> str:
         """The resolved comments, folded."""

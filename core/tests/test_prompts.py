@@ -204,6 +204,50 @@ def test_the_assignments_skill_goes_only_to_a_session_that_holds_the_server() ->
     assert "## Assignments" not in guest
 
 
+def test_the_documents_skill_goes_only_to_a_member_session_that_holds_the_server() -> None:
+    composer = PromptComposer()
+    profile = derive_profile(_MEMBER, _DM)
+    without = composer.compose(profile, _MEMBER, _DM, servers=["files", "assignments"])
+    held = composer.compose(profile, _MEMBER, _DM, servers=["files", "documents"])
+    assert "## Documents" not in without
+    assert "## Documents" in held
+    guest = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM, servers=["documents"])
+    assert "## Documents" not in guest
+
+
+def test_the_documents_skill_says_what_a_document_is_and_how_to_keep_it() -> None:
+    page = (
+        Path(__file__).parents[1]
+        / "joshua_core"
+        / "prompts"
+        / "builtin"
+        / "skills"
+        / "documents.md"
+    ).read_text()
+    for words in (
+        "what will still be true next month",
+        "When in doubt, a document.",
+        "`write_document`",
+        "`documents/<person id>/<slug>.md`",
+        "`documents/shared/<slug>.md`",
+        "`draft` while it changes",
+        "`active` while it is\n  in use",
+        "`final` when it is done",
+        "the viewer, Documents, and the path",
+        "`document_comments(path)`",
+        "`line_now`",
+        "`resolve_document_comment(path, id, resolution)`",
+        "`promote_document(path, wiki_path, markdown)`",
+        "in one\nentry",
+        "Never write a plan, a draft, or a report into the wiki.",
+        "`trash_document`",
+    ):
+        assert words in page, words
+    lowered = page.lower()
+    for banned in ("http://", "https://", "gitlab", "github", "kubernetes"):
+        assert banned not in lowered, banned
+
+
 def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local() -> None:
     page = (
         Path(__file__).parents[1]

@@ -33,6 +33,12 @@ already at the new path stays where it is. See [Migration](#migration).
 /data/people/<person_id>/cli/outbox.jsonl        (the terminal channel's outbox)
 /data/shared/attachments/<group>/YYYY/MM/<file>  (files from a group chat)
 /data/inbox/                                     (channels scratch, short-lived)
+/data/documents/<person_id>/<slug>.md            a document of one member; gateway writes it
+/data/documents/<person_id>/<slug>.html          an HTML document (an artifact)
+/data/documents/<person_id>/<slug>.comments.jsonl  the comments on that document
+/data/documents/shared/<slug>.md                 a document for every member
+/data/documents/.trash/<UTC timestamp>/<owner>/  removed documents and their comments
+/data/documents/.git/                            the documents' own git repository
 ```
 
 `person_id` is a slug that matches `^[a-z0-9][a-z0-9-]{0,31}$`.
@@ -62,8 +68,12 @@ may write comes from their role, never from the path. See `security.md`.
   roster, so a write makes no page beside a real one. `save_attachment` copies
   a file into `wiki/attachments/` for a member.
 
+- gateway (documents MCP) writes `documents/` for a member: their own
+  folder and `shared/`.
+
 Nobody else writes. `/data/wiki/**` and `/data/shared/**` are readable by
-everyone.
+everyone. `/data/documents/<id>/` is readable by that member only, and
+`/data/documents/shared/` by every member.
 
 ## The wiki
 
@@ -144,6 +154,21 @@ The sections never change:
 `wiki/people/everyone.md` is the shared profile: who is who, shared facts,
 and standing shared preferences. It has the same shape. Nightly reflection
 writes it. Every member reads it in their own system prompt.
+
+## Documents
+
+`/data/documents/` holds what Joshua works on or makes for a member: a plan,
+a report, a spec, an artifact. It is not the wiki. `documents/<id>/` is one
+member's folder and `documents/shared/` is for every member. The gateway's
+`documents` server makes the folder, `shared/`, and the git repository on the
+first write, so there is nothing to set up. Each write is one commit.
+
+A document is `<slug>.md` or `<slug>.html`, with YAML frontmatter at the top.
+Its comments are in `<slug>.comments.jsonl` beside it, one JSON object per
+line, in the same repository. `trash_document` moves both to
+`.trash/<UTC timestamp>/<owner>/`, which the repository ignores, so git
+records the removal only. [config.md](config.md#the-documents-mcp) has the
+frontmatter and the comment fields.
 
 ## Attachments
 

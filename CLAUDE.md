@@ -58,7 +58,7 @@ paths, prompts, or docs. Do not call the journal a "blog", and do not write
 the journal moved into the wiki. Do not use "sidecar": it named three
 different things here, and a reader had to guess which. `/data/people.yaml` is
 **the people file**, a `.meta.json` beside an attachment is **the metadata
-file**, and a container beside another container is **a container**. Examples of who can share Joshua ("a family, friends,
+file**, a `<slug>.comments.jsonl` beside a document is **the comments file**, and a container beside another container is **a container**. Examples of who can share Joshua ("a family, friends,
 a team") are fine in a sentence.
 
 ## Repo layout
@@ -187,6 +187,10 @@ One volume mounts at `/data` in all three containers:
 /data/people/<id>/cli/outbox.jsonl               channels writes it
 /data/shared/attachments/<group>/YYYY/MM/        channels writes it
 /data/inbox/                                     channels scratch, short-lived
+/data/documents/<id>/<slug>.md                   a member's document; gateway writes it for that member
+/data/documents/shared/<slug>.md                 a document for every member; gateway writes it
+/data/documents/<owner>/<slug>.comments.jsonl    the comments on a document
+/data/documents/.git                             the documents' own git repository; gateway writes it
 ```
 
 Nobody else writes anything. `people/` and `shared/` are read-only through the
@@ -252,8 +256,8 @@ links the platform binary, so the install passes
 Never add `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebSearch`, or
 `WebFetch` to the agent's tool list. `engine/agent.py` passes `tools=[]` and
 asserts it. Every capability is an MCP server: `recall`, `history`,
-`internet`, `scheduling`, `registration`, and `limits` inside `core`, and `files` plus
-every configured upstream behind `gateway`. If a task seems to need a
+`internet`, `scheduling`, `registration`, and `limits` inside `core`, and `files`,
+`documents`, and every configured upstream behind `gateway`. If a task seems to need a
 built-in tool, the task is wrong. Open an issue.
 
 **One narrow exception for the agent: `ToolSearch`.** With tool search on for
