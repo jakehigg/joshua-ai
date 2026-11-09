@@ -44,7 +44,7 @@ _PERSON_ID_RE = PERSON_ID_RE
 MCP_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,31}$"
 _MCP_NAME_RE = re.compile(MCP_NAME_PATTERN)
 # Builtin servers run in-process in the gateway. Only these names are valid.
-BUILTIN_SERVER_NAMES = ("files", "viewer", "research")
+BUILTIN_SERVER_NAMES = ("files", "documents", "viewer", "research")
 MCP_TRANSPORTS = ("stdio", "http", "sse")
 # Memory source adapters the indexer can wire. ``files`` is the kernel and is
 # always active; the rest are optional and land with their own tickets.
