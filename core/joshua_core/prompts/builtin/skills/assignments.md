@@ -96,3 +96,13 @@ Always give the cost. `assignment_status` gives it in `usage` and
 ### Saved assignments
 
 A saved assignment is a spec with a name that you can start again by name.
+When the person wants a job to be repeatable ("do this every Sunday", "keep
+this one"), save the spec with `save_assignment` and a short name, such as
+`docs-cleanup`. Start it with `start_assignment(saved="docs-cleanup")`. A
+`spec` beside `saved` changes only the fields that it gives, for that run,
+such as `{"model": "opus"}`. `list_saved_assignments` gives the names, the
+runs, and the last run.
+
+A saved assignment does not run on a clock. For a schedule, make a scheduled
+task with `schedule_task` whose prompt says "Start the saved assignment
+docs-cleanup".
