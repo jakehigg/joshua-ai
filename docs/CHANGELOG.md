@@ -6,6 +6,20 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Drafts instead of a queue.** The assignments container holds no queue
+  now. `start_assignment` starts an assignment at once, or it is refused
+  with the reason `busy` and the id of your running assignment; nothing
+  waits for a slot. `assignments.max_concurrent` stays the ceiling. The new
+  tool `draft_assignment` stores an assignment as a `draft` that does not
+  run. `update_assignment` changes the spec of a draft, `delete_assignment`
+  deletes a draft, and `start_assignment(id=...)` starts one. A draft takes
+  comments on its lines in the viewer. The status `queued` is gone: at
+  start, each `queued` row becomes a `draft`. The state filter of
+  `list_assignments` and of the read API takes `draft` in place of `queued`,
+  and `/readyz` counts `draft` in place of `queued`. In the viewer, the
+  pills are `Drafts`, `In progress`, and `Completed`, and a draft opens
+  with its definition and the comment form of each line. See
+  [assignments.md](assignments.md#drafts).
 - **Comments on a definition.** In the viewer, click the `+` beside a line of
   the definition of a saved assignment or a run, and write what to change.
   Joshua reads the comments with the new tool `assignment_comments`, changes

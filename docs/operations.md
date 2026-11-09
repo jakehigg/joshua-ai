@@ -883,11 +883,12 @@ change an assignment, tell Joshua, or leave a comment on a line of its
 definition (see [comments on a definition](#comments-on-a-definition)). The
 viewer writes nothing else here.
 
-Three pills at the top give the states: `In progress`, `Queued`, and
+Three pills at the top give the states: `Drafts`, `In progress`, and
 `Completed`. With no pill chosen, the page shows the assignments in progress,
-or the completed ones when none is in progress, never the queued ones. When
-the assignments container does not answer, no pill is selected. Each row gives the title, the
-status, the time it started (or was made), the model, and the total tokens. A
+else the drafts when there is one, else the completed ones. When the
+assignments container does not answer, no pill is selected. Each row gives
+the title, the status, the time it started (or was made), the model, and the
+total tokens (not for a draft). A
 row with an open question has a `question` mark. A time such as `2h ago` gives
 the full time in the instance `timezone` when you hold the pointer on it. The
 newest assignment is first. Under the title, a row also gives the first
@@ -896,6 +897,12 @@ the number of outputs. The list of the manager gives these, so the page makes
 one call.
 
 Click a title to open the assignment as a document.
+
+A draft has not run, so its page is its definition. The page gives the
+title, the status, the saved assignment it came from (if any), the count of
+open comments, and the line "Tell Joshua to start it, or leave comments
+first." Under it is the **Definition**, open, with a `+` on each line for a
+comment. A draft has no plan, no report, and no progress.
 
 While the assignment is in progress, or when it has no report, the plan is
 the page:
@@ -959,13 +966,14 @@ open comments shows the count, such as `2 comments for Joshua`.
 You do not edit a definition in the viewer. You tell Joshua what to change,
 line by line:
 
-1. Open the definition of a saved assignment, or of a run.
+1. Open the definition of a saved assignment, a draft, or a run.
 2. Hold the pointer on a line, and click the `+` beside its number.
 3. Write what to change, such as "delete this line" or "use opus here", and
    click `Comment`. The page opens again at that line.
 4. Tell Joshua that you left comments. Joshua reads them with
-   `assignment_comments`, saves the changed spec (or starts a new run with
-   it), and resolves each comment with one line on what it did.
+   `assignment_comments`, saves the changed spec (gives it to the draft, or
+   starts a new run with it), and resolves each comment with one line on what
+   it did.
 
 An open comment shows under its line, with its age and a `Delete` button.
 Only the open comments that you wrote have the button. When the line changed

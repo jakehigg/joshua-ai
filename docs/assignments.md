@@ -32,34 +32,37 @@ container holds those, and no secret that core holds:
 ## The tools
 
 The container serves MCP at `http://assignments:8000/mcp`. The gateway calls
-it for a person, with that person's bearer. Joshua gets eleven tools:
+it for a person, with that person's bearer. Joshua gets fourteen tools:
 
 | Tool | What it does |
 |---|---|
-| `start_assignment(spec, saved)` | Checks the spec, clamps the budget to the maxima, stores the assignment, and starts it when a slot is free. Returns the id, the status, the title, and `saved`. Give `spec`, or `saved`, the name of a [saved assignment](#saved-assignments). |
+| `start_assignment(spec, id, saved)` | Checks the spec, clamps the budget to the maxima, stores the assignment, and starts it now. Returns the id, the status, the title, and `saved`. Give one of `spec`, `id` (a [draft](#drafts)), or `saved` (the name of a [saved assignment](#saved-assignments)); a `spec` beside `saved` is an override. When every slot is taken, it is refused with `busy`, and nothing is stored. See [no queue](#no-queue). |
+| `draft_assignment(spec, saved)` | Checks the spec as `start_assignment` does, and stores it as a `draft`. Nothing runs. Returns the id, the status, the title, the notes, and `saved`. |
+| `update_assignment(id, spec)` | Replaces the whole spec of a draft. Any other status is refused with `not_a_draft`. Returns `open_comments` and `stale_comments` too. |
+| `delete_assignment(id)` | Deletes a draft and its comments. A run is never deleted: any other status is `not_a_draft`. |
 | `assignment_status(id)` | The title, the status, the state, the plan, the report and `report_at`, the outputs, the next step, the last checkpoint, the usage, the turns, the open question, the limits at the stop, the summary, the error, and `saved`. Joshua reads the report here. |
 | `list_assignments(limit, status, state)` | The person's assignments, the newest first, each with its title, status, state, and `saved`. `limit` is 1 to 100 (default 10). `status` and `state` filter. |
-| `answer_assignment(id, text)` | Stores the answer and starts a `waiting` or `paused_limits` assignment again, when the limits are under its ceilings. See [questions and answers](#questions-and-answers). |
-| `cancel_assignment(id)` | Stops the assignment and writes its report (see [the report](#the-report)). The plan and the report stay. |
-| `extend_assignment(id, tokens, working_time, five_hour_pct, seven_day_pct, max_turns)` | Raises one or more caps. Each value must be more than the current value. A ceiling above its maximum is clamped. A `budget_exceeded` or `time_exceeded` assignment continues its session. |
+| `answer_assignment(id, text)` | Stores the answer and starts a `waiting` or `paused_limits` assignment again, when the limits are under its ceilings and a slot is free. See [questions and answers](#questions-and-answers). |
+| `cancel_assignment(id)` | Stops the assignment and writes its report (see [the report](#the-report)). The plan and the report stay. A draft is refused with `draft`: delete it. |
+| `extend_assignment(id, tokens, working_time, five_hour_pct, seven_day_pct, max_turns)` | Raises one or more caps. Each value must be more than the current value. A ceiling above its maximum is clamped. A `budget_exceeded` or `time_exceeded` assignment continues its session when a slot is free, else the call is refused with `busy` and changes nothing. |
 | `save_assignment(name, spec)` | Checks the spec as `start_assignment` does, and stores it as the saved assignment `name` of the person. A saved assignment with the same name gets the new spec. Returns the id, the name, and the notes. |
 | `list_saved_assignments()` | The person's saved assignments, the newest first, each with its name, title, `runs`, and `last_run` (`id`, `status`, `finished_at`, or null). |
 | `delete_saved_assignment(name)` | Deletes one saved assignment. Its runs stay. |
-| `assignment_comments(saved, id)` | The open comments of the person on the definition of the saved assignment `saved` (a name) or of the run `id`. Each has `id`, `line_no`, `line_text`, `line_now`, `stale`, `body`, and `created_at`. The answer also has the spec and the `definition`. See [comments on a definition](#comments-on-a-definition). |
+| `assignment_comments(saved, id)` | The open comments of the person on the definition of the saved assignment `saved` (a name) or of the draft or run `id`. Each has `id`, `line_no`, `line_text`, `line_now`, `stale`, `body`, and `created_at`. The answer also has the spec and the `definition`. See [comments on a definition](#comments-on-a-definition). |
 | `resolve_comment(comment_id, resolution)` | Marks one open comment of the person resolved, with one line (at most 300 characters) on what was done. |
 
 The state is what a person sees. The status is the detail:
 
 | State | Statuses |
 |---|---|
-| `queued` | `queued` |
+| `draft` | `draft` |
 | `in_progress` | `running`, `waiting`, `paused_limits` |
 | `completed` | `done`, `failed`, `cancelled`, `budget_exceeded`, `time_exceeded` |
 
 A rejected call returns `{"status": "rejected", "reason", "message"}`. The
 reasons are `disabled`, `invalid_spec`, `unknown_model`, `invalid_repo`,
 `repo_not_allowed`, `limits_unknown`, `invalid_status`, `invalid_state`,
-`invalid_arguments`,
+`invalid_arguments`, `busy`, `not_a_draft`, `draft`,
 `not_waiting`, `finished`, `not_raised`, `not_found`, and `resolved`.
 
 ### Who may call
@@ -146,6 +149,57 @@ start_assignment(saved="docs-cleanup", spec={"model": "opus"})
 
 The container runs nothing on a clock. For a schedule, Joshua makes a
 scheduled task whose prompt says "Start the saved assignment docs-cleanup".
+When that start is refused with `busy`, Joshua schedules a retry.
+
+A saved assignment is for a job that repeats. To hold a one-off job for
+review, Joshua makes a draft.
+
+## Drafts
+
+A draft is an assignment that is stored and has not run. A person reads it
+in the viewer, leaves comments on its lines, and tells Joshua to start it.
+
+```
+draft_assignment(spec={"goal": "...", "title": "Docs clean-up"})
+update_assignment(id=14, spec={"goal": "...", "title": "Docs clean-up", "model": "opus"})
+start_assignment(id=14)
+delete_assignment(id=14)
+```
+
+- `draft_assignment` checks the spec as `start_assignment` does, and stores
+  the filled spec, so the person sees what will run. It takes no slot and
+  starts no session. With `saved`, the draft comes from a saved assignment
+  and keeps its id, but a draft is not a run of it: `runs` and `last_run`
+  do not count it.
+- `update_assignment` replaces the whole spec of a draft. A comment on a line
+  that changed becomes `stale`. Any other status gets `not_a_draft`.
+- `start_assignment(id=...)` checks the spec again, because the
+  configuration can change, then starts the draft as a new run with the same
+  id.
+- `delete_assignment` deletes a draft and its comments. The manager never
+  deletes a run.
+- A draft takes comments on its definition through the same routes as a run:
+  `/v1/assignments/{id}/comments`.
+- The definition of a run stays with the run, in its `spec`, after it ends.
+
+## No queue
+
+The manager holds no queue. `start_assignment` takes a slot at once, or the
+manager refuses it with the reason `busy` and stores nothing. Nothing waits
+for a slot, and nothing starts when an assignment ends.
+
+```
+{"status": "rejected", "reason": "busy", "running": 12,
+ "message": "assignment 12 is running, and assignments.max_concurrent is 1. ..."}
+```
+
+- `running` is the id of the newest running assignment of the person. When
+  only assignments of other people run, it is null, and the message does
+  not name them.
+- The manager refuses an answer or an extension that must start a session
+  with `busy` in the same way. It changes nothing.
+- When the person wants several jobs in a row, Joshua starts the next one
+  when the report of the one before it arrives.
 
 ## The runner
 
@@ -322,7 +376,7 @@ An assignment stops with a question on one path:
    question (see [a stalled assignment](#a-stalled-assignment)).
 2. The row gets the question and the status `waiting`. The clock stops. The
    session closes, and the row keeps its id. The scratch directory stays. The
-   slot is free, so the next queued assignment can run.
+   slot is free.
 3. Joshua gets one question event (see [the events](#the-events)).
 4. A `waiting` assignment waits with no time limit. Nothing ends it but
    `answer_assignment` or `cancel_assignment`.
@@ -336,8 +390,9 @@ An assignment stops with a question on one path:
    limits are unknown with `when_unknown: refuse` and no token cap, the
    assignment stays parked. The reply says so, and when the window resets.
    A later answer adds its text after the stored one;
-3. sets the assignment `queued`. When a slot is free, the runner continues
-   the stored session with this message:
+3. takes a slot, or refuses with `busy` and stores nothing when every slot
+   is taken. With a slot, the runner continues the stored session with this
+   message:
 
 ```
 Read your plan with `read_plan` before anything else.
@@ -350,17 +405,21 @@ clears the answer on the row, so a restart after that does not send it again.
 
 ## Resume after a restart
 
-At start, the manager puts each `running` assignment back in the queue. The
-runner continues its stored session with this message:
+At start, the manager gives each `running` assignment back to the runner. It
+keeps its slot. The runner continues its stored session with this message:
 
 ```
 Read your plan with `read_plan` before anything else; the pod restarted.
 Continue. Budget: ...
 ```
 
-A `waiting` or `paused_limits` assignment stays as it is. A `queued`
-assignment with no session starts a new session. A `queued` assignment with a
-stored answer that was not sent yet continues with that answer.
+A `waiting`, `paused_limits`, or `draft` assignment stays as it is. A
+`running` assignment with no session starts a new session. A `running`
+assignment with a stored answer that was not sent yet continues with that
+answer.
+
+At schema init, each row in the status `queued` of an earlier release becomes
+a `draft`. The change runs at each start and changes nothing a second time.
 
 ## Extend an assignment
 
@@ -368,9 +427,10 @@ stored answer that was not sent yet continues with that answer.
 `seven_day_pct`, or `max_turns`. Each value must be more than the current
 one. A ceiling above its maximum becomes the maximum. `max_turns` is at most
 10000. It works on an assignment that has not ended, and on a
-`budget_exceeded` or `time_exceeded` assignment: that assignment goes back to
-the queue and continues its session with "Read your plan with `read_plan`
-before anything else. Your caps were raised; continue." When the raised cap is not
+`budget_exceeded` or `time_exceeded` assignment: when a slot is free, that
+assignment continues its session with "Read your plan with `read_plan`
+before anything else. Your caps were raised; continue." When every slot is
+taken, the call is refused with `busy` and the caps do not change. When the raised cap is not
 the one that it reached, it ends again at once. Any other assignment that
 ended gets `finished`.
 
@@ -408,7 +468,8 @@ local bare repository.
 
 An assignment has four parts, and all four are in the store:
 
-- **The definition**: the spec, as `start_assignment` stored it.
+- **The definition**: the spec, as `start_assignment` or `draft_assignment`
+  stored it.
 - **The plan**: the plan and the progress log of the worker, in Markdown.
   The worker writes it with `write_plan` before any other tool call, and
   writes it again as it works, so the plan is current while it runs.
@@ -579,7 +640,7 @@ in the runtime image with Docker. On Linux, the unit suite runs the same test.
 
 | Status | Meaning |
 |---|---|
-| `queued` | Stored, and waits for a slot. |
+| `draft` | Stored, and has not run. Only `start_assignment(id=...)` runs it. |
 | `running` | Holds a slot and works. |
 | `waiting` | Stopped with a question. Holds no slot, and waits with no time limit. |
 | `paused_limits` | Stopped at a ceiling of the subscription windows, or with unknown limits. Holds no slot. |
@@ -589,9 +650,10 @@ in the runtime image with Docker. On Linux, the unit suite runs the same test.
 | `budget_exceeded` | Ended at its token cap or at `max_turns`. `extend_assignment` continues it. |
 | `time_exceeded` | Ended at its working time. `extend_assignment` continues it. |
 
-`assignments.max_concurrent` counts `running` assignments only. When an
-assignment stops, the next `queued` assignment starts. A restart puts each
-`running` assignment back in the queue, and the runner continues it (see
+`assignments.max_concurrent` counts `running` assignments only. It is the
+ceiling: a start past it is refused with `busy` (see [no queue](#no-queue)).
+When an assignment stops, nothing else starts. A restart gives each
+`running` assignment back to the runner (see
 [resume after a restart](#resume-after-a-restart)).
 
 ## The events
@@ -697,7 +759,7 @@ beside `/mcp`. The only writes are the comments on a definition. Any other
 method gets `405`.
 
 ```
-GET    /v1/assignments?person=<id>&state=<queued|in_progress|completed>&limit=<1..200>
+GET    /v1/assignments?person=<id>&state=<draft|in_progress|completed>&limit=<1..200>
 GET    /v1/assignments/{id}?person=<id>
 GET    /v1/saved?person=<id>
 GET    /v1/saved/{id}?person=<id>
@@ -763,7 +825,8 @@ comment      = {"id": int, "target": "definition", "line_no": int, "line_text": 
   first, at most 200.
 - `GET /v1/saved` gives a `saved_list`, the newest first.
 - `GET /v1/saved/{id}` gives a `saved_detail`. `runs_list` holds the runs,
-  the newest first, at most 50.
+  the newest first, at most 50. A draft is not a run, so `runs_list`,
+  `runs`, and `last_run` do not count it.
 - `model` is the key of `assignments.models` that the spec names. `total` is
   the sum of the four counts. `outputs_count` is the number of recorded
   outputs.
@@ -779,8 +842,8 @@ comment      = {"id": int, "target": "definition", "line_no": int, "line_text": 
 
 ### Comments on a definition
 
-A person comments on one line of the definition of a saved assignment or of
-a run, in the viewer. Joshua reads the comments, changes the spec, and
+A person comments on one line of the definition of a saved assignment, a
+draft, or a run, in the viewer. Joshua reads the comments, changes the spec, and
 resolves them. Only Joshua changes a definition.
 
 The definition is the spec as YAML from one function of the container, which
@@ -827,6 +890,12 @@ assignments tools, `internet`, and `schedule_task`. The page tells Joshua:
   names where each result goes. When it names no place, Joshua asks the
   person one question, or writes "the report" when the person wants only to
   read the result;
+- to make a draft with `draft_assignment` when the person wants to read the
+  assignment first, to apply comments on it with `update_assignment`, and to
+  start it with `start_assignment(id=...)` when the person says go;
+- that the manager holds no queue: when a start is refused with `busy`,
+  Joshua tells the person what runs, starts the next job when the report of
+  the one before it arrives, and schedules a retry for a scheduled start;
 - how budget words become the `budget` block. "Don't burn all my tokens"
   takes the defaults. "Use up to 80% of my 5-hour budget" is
   `five_hour_pct: 80`. "You can have half the week" is `seven_day_pct: 50`.
@@ -846,8 +915,8 @@ assignments tools, `internet`, and `schedule_task`. The page tells Joshua:
   `save_assignment` and start it by name. A schedule is a scheduled task
   whose prompt starts the saved assignment;
 - when the person left comments on a definition, to read them with
-  `assignment_comments`, to save the changed spec (or start a new run with
-  it), to resolve each with `resolve_comment` and one line, and to tell the
+  `assignment_comments`, to save the changed spec, give it to the draft with
+  `update_assignment`, or start a new run with it, to resolve each with `resolve_comment` and one line, and to tell the
   person in short. A comment is the request of the person, because only the
   person who signed in to the viewer can write one.
 

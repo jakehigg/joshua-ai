@@ -374,7 +374,7 @@ usage:
 #     max_five_hour_pct: 90            # a spec may go this high and no higher
 #     max_seven_day_pct: 95
 #     when_unknown: refuse             # refuse | run, when core cannot read the windows
-#   max_concurrent: 1                  # running assignments; a parked one holds no slot
+#   max_concurrent: 1                  # running assignments; no queue: a start past it is busy
 #   slice_turns: 10                    # model turns between two reads of the limits
 #   stall_slices: 3                    # slices with no new checkpoint before it stops and asks
 #   keep_failed_work: 7d               # how long the scratch of a failed assignment stays

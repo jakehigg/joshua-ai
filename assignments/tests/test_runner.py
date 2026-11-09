@@ -64,7 +64,7 @@ async def test_a_holding_stub_never_ends_and_cancel_stops_it() -> None:
     await runner.start(row)
     await runner.idle()
     await asyncio.sleep(0)
-    assert host.store.rows[row["id"]]["status"] == "queued"
+    assert host.store.rows[row["id"]]["status"] == "draft"
     task = runner.tasks[row["id"]]
     await runner.cancel(row)
     await asyncio.sleep(0)

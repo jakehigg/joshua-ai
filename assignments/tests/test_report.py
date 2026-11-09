@@ -38,7 +38,7 @@ def costly(**fields) -> dict:
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
-        ("queued", "queued"),
+        ("draft", "draft"),
         ("running", "in_progress"),
         ("waiting", "in_progress"),
         ("paused_limits", "in_progress"),
@@ -54,7 +54,7 @@ def test_the_state_of_each_status(status: str, expected: str) -> None:
 
 
 def test_the_statuses_of_each_state_cover_every_status_once() -> None:
-    assert STATES == ("queued", "in_progress", "completed")
+    assert STATES == ("draft", "in_progress", "completed")
     assert statuses_of("in_progress") == ("running", "waiting", "paused_limits")
     assert sorted(s for name in STATES for s in statuses_of(name)) == sorted(STATUSES)
 

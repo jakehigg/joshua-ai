@@ -162,16 +162,15 @@ async def test_an_answer_stored_before_a_restart_is_sent_once(tmp_path, channels
     store = FakeStore()
     sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore(), store=store)
-    queued = await make_running(store, h.work, session="sess-7", answer="Use ops.")
-    await store.update(queued, status="queued")
+    running = await make_running(store, h.work, session="sess-7", answer="Use ops.")
     await h.manager.open()
     await h.runner.idle()
     [client] = sdk.clients
     assert client.prompt.startswith(prompts.READ_PLAN_FIRST + "\nAnswer: Use ops.")
-    assert store.rows[queued]["answer"] is None
+    assert store.rows[running]["answer"] is None
 
 
-async def test_a_queued_row_with_no_session_starts_fresh(tmp_path, channels) -> None:
+async def test_a_running_row_with_no_session_starts_fresh(tmp_path, channels) -> None:
     store = FakeStore()
     sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore(), store=store)

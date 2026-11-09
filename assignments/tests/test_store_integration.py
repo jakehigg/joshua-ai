@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import anyio
 import psycopg
 import pytest
-from joshua_assignments.store import PgStore
+from joshua_assignments.store import Parent, PgStore
 
 pytestmark = pytest.mark.integration
 
@@ -47,7 +47,7 @@ async def create(store: PgStore, person: str = "alex") -> dict:
 
 async def test_create_get_and_a_restart_finds_the_rows(store) -> None:
     row = await create(store)
-    assert row["status"] == "queued"
+    assert row["status"] == "draft"
     assert row["page_path"] is None
     assert row["spec"]["budget"] == {"five_hour_pct": 70}
     await store.add_checkpoint(row["id"], "plan written")
@@ -66,11 +66,11 @@ async def test_create_get_and_a_restart_finds_the_rows(store) -> None:
     await store.open()
 
 
-async def test_update_list_counts_and_the_queue(store) -> None:
+async def test_update_list_counts_and_the_running_rows(store) -> None:
     a = await create(store)
     b = await create(store)
     c = await create(store, person="mia")
-    assert (await store.next_queued())["id"] == a["id"]
+    assert await store.running() == []
     updated = await store.update(
         a["id"],
         status="running",
@@ -87,9 +87,10 @@ async def test_update_list_counts_and_the_queue(store) -> None:
     assert [r["id"] for r in await store.recent("alex", 10)] == [b["id"], a["id"]]
     assert [r["id"] for r in await store.recent(None, 2)] == [c["id"], b["id"]]
     assert [r["id"] for r in await store.recent("alex", 10, "running")] == [a["id"]]
-    assert await store.counts() == {"running": 1, "queued": 2}
-    assert await store.requeue_running() == [a["id"]]
-    assert await store.counts() == {"queued": 3}
+    assert await store.counts() == {"running": 1, "draft": 2}
+    assert [r["id"] for r in await store.running()] == [a["id"]]
+    model = await store.update(b["id"], model="claude-opus-5")
+    assert model["model"] == "claude-opus-5"
     assert await store.last_checkpoint(a["id"]) is None
     assert await store.ping() is True
     with pytest.raises(ValueError):
@@ -218,7 +219,7 @@ async def test_recent_filters_by_a_set_of_statuses(store) -> None:
     await store.update(b["id"], status="done")
     ids = [r["id"] for r in await store.recent("alex", 10, None, ["running", "waiting"])]
     assert ids == [a["id"]]
-    ids = [r["id"] for r in await store.recent("alex", 10, "queued", ["queued", "done"])]
+    ids = [r["id"] for r in await store.recent("alex", 10, "draft", ["draft", "done"])]
     assert ids == [c["id"]]
 
 
@@ -246,7 +247,12 @@ async def test_saved_assignments_their_runs_and_a_delete(store) -> None:
     assert await store.find_saved("alex", "nothing") is None
 
     run_a = await store.create(
-        person_id="alex", conversation_id=None, spec={"goal": "g"}, model="m", saved_id=first["id"]
+        person_id="alex",
+        conversation_id=None,
+        spec={"goal": "g"},
+        model="m",
+        status="running",
+        saved_id=first["id"],
     )
     run_b = await store.create(
         person_id="alex", conversation_id=None, spec={"goal": "g"}, model="m", saved_id=first["id"]
@@ -345,3 +351,77 @@ async def test_a_comment_needs_exactly_one_parent(store) -> None:
                     "1, 'x', 'y')",
                     (saved_id, assignment_id),
                 )
+
+
+async def test_create_takes_a_status(store) -> None:
+    row = await store.create(
+        person_id="alex", conversation_id=None, spec={"goal": "x"}, model="m", status="running"
+    )
+    assert row["status"] == "running"
+    with pytest.raises(ValueError):
+        await store.create(
+            person_id="alex", conversation_id=None, spec={"goal": "x"}, model="m", status="queued"
+        )
+
+
+async def test_a_queued_row_of_an_earlier_release_becomes_a_draft(store) -> None:
+    row = await create(store)
+    async with store.pool.connection() as conn:
+        await conn.execute(
+            "UPDATE assignments.assignment SET status = 'queued' WHERE id = %s", (row["id"],)
+        )
+        await conn.execute(
+            "ALTER TABLE assignments.assignment ALTER COLUMN status SET DEFAULT 'queued'"
+        )
+    await store.close()
+    await store.open()
+    assert (await store.get(row["id"]))["status"] == "draft"
+    # The migration runs at each start and changes nothing more.
+    await store.close()
+    await store.open()
+    assert await store.counts() == {"draft": 1}
+    async with store.pool.connection() as conn:
+        cur = await conn.execute(
+            "INSERT INTO assignments.assignment (person_id, spec, model) "
+            "VALUES ('alex', '{}', 'm') RETURNING status"
+        )
+        assert (await cur.fetchone())["status"] == "draft"
+
+
+async def test_only_a_draft_that_never_ran_is_deleted(store) -> None:
+    draft = await create(store)
+    ran = await create(store)
+    done = await create(store)
+    await store.update(ran["id"], started_at=NOW)
+    await store.update(done["id"], status="done", started_at=NOW)
+    await store.add_comment(
+        "alex",
+        Parent("assignment", draft["id"]),
+        target="definition",
+        line_no=1,
+        line_text="goal: Audit",
+        body="Shorter.",
+    )
+    assert await store.delete_draft(draft["id"]) is True
+    assert await store.get(draft["id"]) is None
+    assert await store.comments("alex", Parent("assignment", draft["id"])) == []
+    assert await store.delete_draft(draft["id"]) is False
+    assert await store.delete_draft(ran["id"]) is False
+    assert await store.delete_draft(done["id"]) is False
+    assert await store.get(done["id"]) is not None
+
+
+async def test_a_draft_is_not_a_run_of_its_saved_assignment(store) -> None:
+    saved = await store.put_saved("alex", "docs", {"goal": "Docs"})
+    draft = await store.create(
+        person_id="alex",
+        conversation_id=None,
+        spec={"goal": "Docs"},
+        model="m",
+        saved_id=saved["id"],
+    )
+    found = await store.get_saved(saved["id"])
+    assert found["runs"] == 0 and found["last_run"] is None
+    await store.update(draft["id"], status="running")
+    found = await store.get_saved(saved["id"])
+    assert found["runs"] == 1 and found["last_run"]["id"] == draft["id"]

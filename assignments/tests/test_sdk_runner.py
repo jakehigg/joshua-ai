@@ -435,8 +435,8 @@ async def test_no_working_time_left_ends_before_a_slice(tmp_path, channels) -> N
     h = Harness(tmp_path, FakeSdk(), FakeCore(), store=store)
     started = await h.manager.start("alex", spec(working_time="1m"))
     await h.runner.cancel({"id": started["id"]})
-    store.rows[started["id"]].update(status="queued", working_s=60, started_at=FIXED_NOW)
-    await h.manager.dispatch()
+    store.rows[started["id"]].update(status="waiting", working_s=60, started_at=FIXED_NOW)
+    await h.manager.answer(h.row(started["id"]), "go on")
     await h.runner.idle()
     assert h.row(started["id"])["status"] == "time_exceeded"
 

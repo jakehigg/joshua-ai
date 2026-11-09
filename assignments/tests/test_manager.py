@@ -1,4 +1,4 @@
-"""The manager rules: the queue, the slots, a restart, and each refusal."""
+"""The manager rules: the slots, no queue, a restart, and each refusal."""
 
 from __future__ import annotations
 
@@ -21,24 +21,45 @@ def make_manager(
     )
 
 
-async def test_max_concurrent_keeps_the_rest_queued(channels) -> None:
+async def ended(manager: Manager, person: str = "alex", **fields) -> dict:
+    """Start an assignment, then end it at once with ``fields``, so the slot is free."""
+    started = await manager.start(person, spec())
+    await manager.runner.cancel({"id": started["id"]})
+    await manager.store.update(started["id"], **({"status": "done"} | fields))
+    return started
+
+
+async def test_a_start_while_busy_is_refused_and_stores_nothing(channels) -> None:
     manager = make_manager(delay=None)
     first = await manager.start("alex", spec())
     second = await manager.start("alex", spec())
     assert first["status"] == "running"
-    assert second["status"] == "queued"
+    assert second["status"] == "rejected" and second["reason"] == "busy"
+    assert second["running"] == first["id"]
+    assert f"assignment {first['id']} is running" in second["message"]
+    assert list(manager.store.rows) == [first["id"]]
     await manager.cancel(await manager.store.get(first["id"]))
-    assert (await manager.store.get(second["id"]))["status"] == "running"
+    third = await manager.start("alex", spec())
+    assert third["status"] == "running"
 
 
-async def test_a_finished_run_starts_the_next_one(channels) -> None:
+async def test_busy_does_not_name_the_assignment_of_another_person(channels) -> None:
+    manager = make_manager(delay=None)
+    await manager.start("mia", spec())
+    refused = await manager.start("alex", spec())
+    assert refused["reason"] == "busy" and refused["running"] is None
+    assert "another person" in refused["message"]
+
+
+async def test_a_finished_run_starts_nothing(channels) -> None:
     manager = make_manager()
     await manager.start("alex", spec())
-    await manager.start("alex", spec())
     await manager.runner.idle()
-    statuses = [row["status"] for row in manager.store.rows.values()]
-    assert statuses == ["done", "done"]
-    assert len(channels.requests) == 2
+    await manager.draft("alex", spec())
+    await manager.stopped(1)
+    assert [row["status"] for row in manager.store.rows.values()] == ["done", "draft"]
+    assert not hasattr(manager, "dispatch")
+    assert not hasattr(manager.store, "next_queued")
 
 
 async def test_two_slots_run_two(channels) -> None:
@@ -123,33 +144,36 @@ async def test_a_long_conversation_id_is_cut(channels) -> None:
 
 async def test_recent_filters_and_clamps(channels) -> None:
     manager = make_manager(delay=None)
-    await manager.start("alex", spec())
-    await manager.start("alex", spec())
-    await manager.start("mia", spec())
+    await ended(manager)
+    await manager.draft("alex", spec())
+    await ended(manager, "mia")
     assert len((await manager.recent("alex", 0, None))["assignments"]) == 1
-    assert [a["id"] for a in (await manager.recent("alex", 500, "queued"))["assignments"]] == [2]
+    assert [a["id"] for a in (await manager.recent("alex", 500, "draft"))["assignments"]] == [2]
     assert len((await manager.recent(None, 10, None))["assignments"]) == 3
     assert (await manager.recent("alex", 10, "bogus"))["reason"] == "invalid_status"
 
 
 async def test_recent_filters_by_state_and_gives_title_and_state(channels) -> None:
-    manager = make_manager(delay=None)
+    manager = make_manager("  max_concurrent: 3\n", delay=None)
     first = await manager.start("alex", spec(title="Weekly audit"))
     second = await manager.start("alex", spec())
     await manager.store.update(second["id"], status="waiting")
     third = await manager.start("alex", spec())
     await manager.store.update(third["id"], status="failed")
+    fourth = await manager.draft("alex", spec(title="Later"))
 
     def ids(reply: dict) -> list[int]:
         return [a["id"] for a in reply["assignments"]]
 
     assert ids(await manager.recent("alex", 10, None, "in_progress")) == [second["id"], first["id"]]
     assert ids(await manager.recent("alex", 10, None, "completed")) == [third["id"]]
-    assert ids(await manager.recent("alex", 10, None, "queued")) == []
+    assert ids(await manager.recent("alex", 10, None, "draft")) == [fourth["id"]]
+    assert (await manager.recent("alex", 10, None, "queued"))["reason"] == "invalid_state"
     assert ids(await manager.recent("alex", 10, "waiting", "in_progress")) == [second["id"]]
     assert (await manager.recent("alex", 10, None, "done"))["reason"] == "invalid_state"
     listed = (await manager.recent("alex", 10, None))["assignments"]
     assert [(a["title"], a["state"]) for a in listed] == [
+        ("Later", "draft"),
         ("Audit the gitops repo", "completed"),
         ("Audit the gitops repo", "in_progress"),
         ("Weekly audit", "in_progress"),
@@ -258,7 +282,7 @@ def test_is_member() -> None:
 
 
 def test_the_views_of_a_bare_row() -> None:
-    row = {"id": 1, "person_id": "alex", "status": "queued"}
+    row = {"id": 1, "person_id": "alex", "status": "draft"}
     assert summary_view(row)["goal"] == ""
     view = full_view(row, None)
     assert view["last_checkpoint"] is None
@@ -266,7 +290,7 @@ def test_the_views_of_a_bare_row() -> None:
     assert view["repos"] == []
 
 
-async def test_a_failed_sweep_never_stops_the_queue(channels) -> None:
+async def test_a_failed_sweep_never_stops_a_start(channels) -> None:
     from joshua_assignments.runner import StubRunner
 
     class Sweeping(StubRunner):

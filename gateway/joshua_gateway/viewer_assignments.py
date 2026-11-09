@@ -29,6 +29,10 @@ off. A reference of an output is a link only when it is an ``http`` or
 ``https`` URL with a host. The layout has no table: the texts are long, so a
 detail page is a document.
 
+A draft has not run. Its page is the definition, open, with the "+" of each
+line: the person reads it and leaves comments, and Joshua starts it when the
+person says so. A draft has no plan, no report, and no progress.
+
 A completed assignment with a report shows the report as the page.
 ``viewer_report`` cuts the report at its fixed headings, and each section
 gets its own element: a hero with the lede and a stat row, the highlights as
@@ -87,12 +91,18 @@ LIST_LIMIT = 100
 REFRESH_S = 20
 
 # The states as a person sees them, in the order of the pills.
-STATES = (("in_progress", "In progress"), ("queued", "Queued"), ("completed", "Completed"))
+STATES = (("draft", "Drafts"), ("in_progress", "In progress"), ("completed", "Completed"))
+# What the list says when a state has no assignment.
+_EMPTY = {
+    "draft": "No draft.",
+    "in_progress": "No assignment is in progress.",
+    "completed": "No assignment is completed.",
+}
 _STATE_KEYS = frozenset(key for key, _ in STATES)
 
 # The badge class of each status of the store. An unknown status is plain.
 _STATUS_CLASS = {
-    "queued": "plain",
+    "draft": "plain",
     "running": "accent",
     "waiting": "warn",
     "paused_limits": "warn",
@@ -508,12 +518,16 @@ def item_row(item: Item, *, tz: tzinfo, now: datetime) -> str:
     )
     line = row_line(item)
     outputs = item.outputs_count
+    tokens = (
+        f'<span title="{exact(item.usage.total)} tokens">{short(item.usage.total)} tokens</span>'
+        if item.state != "draft"
+        else ""
+    )
     sub = _sub(
         [
             _when(item, tz=tz, now=now),
             escape(item.model),
-            f'<span title="{exact(item.usage.total)} tokens">'
-            f"{short(item.usage.total)} tokens</span>",
+            tokens,
             _count(outputs, "output") if outputs else "",
         ]
     )
@@ -566,8 +580,8 @@ def list_html(
     if body is None:
         return head + _no_answer()
     if not body.items:
-        label = dict(STATES).get(state or "", "here").lower()
-        return f'{head}<p class="j-empty">No assignment is {escape(label)}.</p>'
+        text = _EMPTY.get(state or "", "No assignment here.")
+        return f'{head}<p class="j-empty">{escape(text)}</p>'
     return head + _rows(body.items, tz=tz, now=now)
 
 
@@ -1333,10 +1347,44 @@ def _progress_page(
     return "".join(part for part in parts if part)
 
 
+# The line on the page of a draft.
+DRAFT_LINE = "Tell Joshua to start it, or leave comments first."
+
+
+def _draft_page(
+    item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
+) -> str:
+    """A draft: the head, then the definition open with the "+" of each line.
+
+    A draft never ran, so there is no plan, no report, and no progress."""
+    saved = (
+        f'<a class="j-chip a-saved" href="/assignments/saved/{item.saved.id}">'
+        f"saved: {escape(item.saved.name)}</a>"
+        if item.saved
+        else ""
+    )
+    when = _when(item, tz=tz, now=now)
+    meta = f'<span class="j-meta">{when}</span>' if when else ""
+    badge = comments_badge(item.open_comments)
+    parts = [
+        _crumbs(),
+        '<header class="a-hero">'
+        f'<div class="a-chips">{status_chip(item.status)}{saved}{badge}{meta}</div>'
+        f'<h1 class="j-doc-title">{escape(item.title)}</h1>'
+        f'<p class="a-lede a-draft-line">{escape(DRAFT_LINE)}</p></header>',
+        _definition(item, open_=True, forms=forms, tz=tz, now=now),
+        _error(item),
+    ]
+    return "".join(part for part in parts if part)
+
+
 def detail_html(
     item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
 ) -> str:
     """The body of ``/assignments/{id}``: a document, top to bottom.
+
+    A draft shows its definition open, for comments, and nothing else of a
+    run.
 
     A completed assignment with a report shows the report: a hero, the
     highlights, the decisions, the outputs, what was asked and done, the
@@ -1344,6 +1392,8 @@ def detail_html(
     folded under it. Any other assignment shows its plan, with the progress
     of the plan and the outputs so far. With ``forms``, each line of the
     definition has a form for a comment."""
+    if item.state == "draft":
+        return _draft_page(item, tz=tz, now=now, forms=forms)
     if item.state == "completed" and item.report and item.report.strip():
         report = rp.parse(item.report)
         if report.structured:

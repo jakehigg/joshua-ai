@@ -214,7 +214,7 @@ async def test_a_network_error_is_none() -> None:
         raise httpx.ReadTimeout("slow", request=request)
 
     client = am.AssignmentsClient("http://assignments", "t", transport=httpx.MockTransport(fail))
-    assert await client.list("alex", "queued") is None
+    assert await client.list("alex", "draft") is None
     assert await client.detail("alex", 1) is None
 
 
@@ -244,12 +244,12 @@ def test_readyz_reports_the_assignments(data, monkeypatch) -> None:
 
 
 def test_the_person_and_the_token_go_to_the_manager(data, monkeypatch) -> None:
-    manager = _with(monkeypatch, FakeManager({"/v1/assignments?state=queued": {"items": []}}))
-    _get("/assignments", state="queued")
+    manager = _with(monkeypatch, FakeManager({"/v1/assignments?state=draft": {"items": []}}))
+    _get("/assignments", state="draft")
     (request,) = manager.requests
     assert request.headers["Authorization"] == f"Bearer {VIEWER_TOKEN}"
     assert request.url.params["person"] == "alex"
-    assert request.url.params["state"] == "queued"
+    assert request.url.params["state"] == "draft"
     assert request.url.params["limit"] == str(am.LIST_LIMIT)
 
 
@@ -286,13 +286,14 @@ def test_the_default_is_in_progress_when_one_exists(data, monkeypatch) -> None:
     assert [r.url.path for r in manager.requests] == ["/v1/assignments"]
 
 
-def test_the_default_is_completed_when_nothing_is_in_progress(data, monkeypatch) -> None:
+def test_the_default_is_completed_when_nothing_is_in_progress_or_drafted(data, monkeypatch) -> None:
     done = item(id=5, title="Old job", status="done", state="completed")
     manager = _with(
         monkeypatch,
         FakeManager(
             {
                 "/v1/assignments?state=in_progress": {"items": []},
+                "/v1/assignments?state=draft": {"items": []},
                 "/v1/assignments?state=completed": {"items": [done]},
             }
         ),
@@ -301,18 +302,36 @@ def test_the_default_is_completed_when_nothing_is_in_progress(data, monkeypatch)
     assert '<span class="j-chip on" aria-current="true">Completed</span>' in html
     assert "Old job" in html
     states = [r.url.params.get("state") for r in manager.requests]
-    assert states == ["in_progress", "completed"]
-    assert '<span class="j-chip on" aria-current="true">Queued</span>' not in html
+    assert states == ["in_progress", "draft", "completed"]
 
 
-def test_the_default_is_completed_also_when_only_a_queued_one_exists(data, monkeypatch) -> None:
+def test_the_default_is_drafts_when_nothing_is_in_progress(data, monkeypatch) -> None:
+    drafted = item(id=9, title="Review first", status="draft", state="draft", started_at=None)
+    manager = _with(
+        monkeypatch,
+        FakeManager(
+            {
+                "/v1/assignments?state=in_progress": {"items": []},
+                "/v1/assignments?state=draft": {"items": [drafted]},
+                "/v1/assignments?state=completed": {"items": [item(state="completed")]},
+            }
+        ),
+    )
+    html = _main(_get("/assignments").text)
+    assert '<span class="j-chip on" aria-current="true">Drafts</span>' in html
+    assert 'href="/assignments/9">Review first</a>' in html
+    assert "created" in html and "tokens" not in html
+    assert [r.url.params.get("state") for r in manager.requests] == ["in_progress", "draft"]
+
+
+def test_the_default_is_completed_when_every_state_is_empty(data, monkeypatch) -> None:
     _with(
         monkeypatch,
         FakeManager(
             {
                 "/v1/assignments?state=in_progress": {"items": []},
+                "/v1/assignments?state=draft": {"items": []},
                 "/v1/assignments?state=completed": {"items": []},
-                "/v1/assignments?state=queued": {"items": [item(state="queued")]},
             }
         ),
     )
@@ -321,7 +340,17 @@ def test_the_default_is_completed_also_when_only_a_queued_one_exists(data, monke
     assert "No assignment is completed." in html
 
 
-@pytest.mark.parametrize("query", [{}, {"state": "queued"}])
+def test_the_pills_are_drafts_in_progress_and_completed(data, monkeypatch) -> None:
+    _with(monkeypatch, FakeManager({"/v1/assignments?state=draft": {"items": []}}))
+    html = _main(_get("/assignments", state="draft").text)
+    labels = [label for _, label in am.STATES]
+    assert labels == ["Drafts", "In progress", "Completed"]
+    positions = [html.index(f">{label}<") for label in labels]
+    assert positions == sorted(positions)
+    assert "Queued" not in html and "queued" not in html
+
+
+@pytest.mark.parametrize("query", [{}, {"state": "draft"}])
 def test_no_pill_is_selected_when_the_manager_does_not_answer(data, monkeypatch, query) -> None:
     _with(monkeypatch, FakeManager(status=503))
     html = _main(_get("/assignments", **query).text)
@@ -337,7 +366,7 @@ def test_no_pill_is_selected_when_the_second_read_fails(data, monkeypatch) -> No
         FakeManager(
             {
                 "/v1/assignments?state=in_progress": {"items": []},
-                "/v1/assignments?state=completed": 503,
+                "/v1/assignments?state=draft": 503,
             }
         ),
     )
@@ -370,13 +399,20 @@ def test_the_headings_are_lower_case_as_in_the_other_sections(data, monkeypatch)
     assert '<a href="/assignments/saved">saved</a>' in one
 
 
-@pytest.mark.parametrize("state", ["queued", "in_progress", "completed"])
-def test_each_state_has_its_pill_and_an_empty_text(data, monkeypatch, state) -> None:
+@pytest.mark.parametrize(
+    ("state", "empty"),
+    [
+        ("draft", "No draft."),
+        ("in_progress", "No assignment is in progress."),
+        ("completed", "No assignment is completed."),
+    ],
+)
+def test_each_state_has_its_pill_and_an_empty_text(data, monkeypatch, state, empty) -> None:
     _with(monkeypatch, FakeManager({f"/v1/assignments?state={state}": {"items": []}}))
     html = _main(_get("/assignments", state=state).text)
     label = dict(am.STATES)[state]
     assert f'<span class="j-chip on" aria-current="true">{label}</span>' in html
-    assert f"No assignment is {label.lower()}." in html
+    assert empty in html
     for other, _ in am.STATES:
         if other != state:
             assert f'href="/assignments?state={other}"' in html
@@ -530,7 +566,7 @@ def test_outputs_show_also_with_no_report(data, monkeypatch) -> None:
 def test_the_page_refreshes_only_while_in_progress(data, monkeypatch) -> None:
     manager = _with(monkeypatch, FakeManager({"/v1/assignments/7": detail()}))
     assert '<meta http-equiv="refresh" content="20">' in _get("/assignments/7").text
-    for state, status in (("queued", "queued"), ("completed", "done")):
+    for state, status in (("draft", "draft"), ("completed", "done")):
         manager.routes["/v1/assignments/7"] = detail(state=state, status=status)
         assert 'http-equiv="refresh"' not in _get("/assignments/7").text, state
 
@@ -703,7 +739,8 @@ def test_an_unknown_status_is_a_plain_chip() -> None:
 
 
 def test_parse_state() -> None:
-    assert am.parse_state("queued") == "queued"
+    assert am.parse_state("draft") == "draft"
+    assert am.parse_state("queued") is None
     assert am.parse_state(None) is None
     assert am.parse_state("running") is None
 
@@ -1278,3 +1315,78 @@ def test_a_page_in_progress_shows_the_turns_of_the_manager(data, monkeypatch) ->
     assert "<b>14</b><span>turns</span>" in html
     html, _ = _page_of(monkeypatch, detail())
     assert "<span>turns</span>" not in html
+
+
+# -- a draft ------------------------------------------------------------------
+
+
+def draft_detail(**fields: Any) -> dict[str, Any]:
+    return (
+        detail(
+            id=9,
+            title="Review the docs first",
+            status="draft",
+            state="draft",
+            started_at=None,
+            working_s=0,
+            plan=None,
+            plan_at=None,
+            checkpoints=[],
+            definition=DEFINITION,
+        )
+        | fields
+    )
+
+
+def test_a_draft_page_is_the_definition_open_for_comments(data, monkeypatch) -> None:
+    body = draft_detail(
+        saved={"id": 3, "name": "docs-cleanup"},
+        comments=[comment()],
+        open_comments=1,
+    )
+    _with(monkeypatch, FakeManager({"/v1/assignments/9": body}))
+    response = _get("/assignments/9")
+    assert response.status_code == 200
+    html = _main(response.text)
+    assert '<h1 class="j-doc-title">Review the docs first</h1>' in html
+    assert am.DRAFT_LINE in html
+    assert '<span class="j-badge plain">draft</span>' in html
+    assert 'href="/assignments/saved/3">saved: docs-cleanup</a>' in html
+    assert "1 comment for Joshua" in html
+    assert '<details class="a-def" open id="definition">' in html
+    assert html.count('<details class="a-add">') == len(DEFINITION.split("\n"))
+    assert 'action="/assignments/9/comments"' in html
+    assert 'action="/assignments/9/comments/11/delete"' in html
+    # A draft never ran: no plan, no report, no progress, no stat row.
+    for absent in ("<h2>Plan</h2>", "<h2>Progress</h2>", "Report", "a-now", "a-stats", "tokens"):
+        assert absent not in html, absent
+    assert 'http-equiv="refresh"' not in response.text
+
+
+def test_a_draft_with_no_comment_still_has_the_definition_open(data, monkeypatch) -> None:
+    _with(monkeypatch, FakeManager({"/v1/assignments/9": draft_detail()}))
+    html = _main(_get("/assignments/9").text)
+    assert '<details class="a-def" open id="definition"><summary>Definition</summary>' in html
+    assert "for Joshua" not in html and "saved:" not in html
+    assert ">created <time" in html
+
+
+def test_a_run_page_keeps_the_definition_folded(data, monkeypatch) -> None:
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": detail(definition=DEFINITION)}))
+    html = _main(_get("/assignments/7").text)
+    assert am.DRAFT_LINE not in html
+    assert "<h2>Plan</h2>" in html
+    assert html.index("<h2>Plan</h2>") < html.index('<details class="a-def" id="definition">')
+
+
+def test_a_comment_on_a_draft_goes_to_the_manager(data, monkeypatch) -> None:
+    manager = _with(monkeypatch, CommentManager({"/v1/assignments/9": draft_detail()}))
+    client = _client()
+    csrf = _csrf(client.get("/assignments/9", auth=ALEX).text)
+    form = {"csrf": csrf, "line_no": "4", "line_text": "model: sonnet", "body": "Use opus."}
+    response = client.post("/assignments/9/comments", data=form, auth=ALEX)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/assignments/9#L4"
+    [sent] = [r for r in manager.requests if r.method == "POST"]
+    assert sent.url.path == "/v1/assignments/9/comments"
+    assert sent.url.params["person"] == "alex"

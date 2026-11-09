@@ -22,7 +22,7 @@ from joshua_assignments.store import (
 
 def test_the_statuses_are_the_nine_of_the_plan() -> None:
     assert STATUSES == (
-        "queued",
+        "draft",
         "running",
         "waiting",
         "paused_limits",

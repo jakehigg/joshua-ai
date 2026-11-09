@@ -41,7 +41,14 @@ from joshua_assignments.digest import lede, next_step
 from joshua_assignments.manager import Manager, saved_ref
 from joshua_assignments.settings import Settings
 from joshua_assignments.spec import assignment_title
-from joshua_assignments.store import STATES, USAGE_FIELDS, Parent, state, statuses_of
+from joshua_assignments.store import (
+    RUN_STATUSES,
+    STATES,
+    USAGE_FIELDS,
+    Parent,
+    state,
+    statuses_of,
+)
 
 logger = get_logger("joshua_assignments.read_api")
 
@@ -220,7 +227,7 @@ class ReadApi:
         row = await store.get_saved(int(request.path_params["saved_id"]))
         if row is None or row["person_id"] != person:
             return _not_found()
-        runs = await store.recent(person, MAX_RUNS, saved_id=row["id"])
+        runs = await store.recent(person, MAX_RUNS, statuses=RUN_STATUSES, saved_id=row["id"])
         names = {int(row["id"]): row["name"]}
         comments = await store.comments(person, Parent("saved", int(row["id"])))
         part = comments_part(row.get("spec"), comments)
