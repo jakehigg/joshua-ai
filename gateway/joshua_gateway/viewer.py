@@ -23,9 +23,10 @@ text and people. A guest reads.
 
 ``viewer.anonymous`` opens the viewer: a request with no ``Authorization``
 header gets full access, read and write, as a synthetic "anonymous" identity,
-so a private network needs no sign-in. A request that carries credentials is
-still checked, so a member can sign in by password too. ``viewer.users`` is
-how a household adds restrictions back.
+so a private network needs no sign-in. When ``viewer.anonymous`` names a
+member, such a request is served as that member, as if they signed in. A
+request that carries credentials is still checked, so a member can sign in by
+password too. ``viewer.users`` is how a household adds restrictions back.
 
 Start it with ``python -m joshua_gateway.viewer``. It refuses to start when
 ``viewer.enabled`` is false. Put a reverse proxy in front for TLS; the viewer
@@ -204,22 +205,36 @@ def _password_reference(cfg: Any, user: str) -> str:
     return os.environ.get(f"{VIEWER_PW_PREFIX}{user.upper().replace('-', '_')}", "")
 
 
+def _anonymous_person(cfg: config.JoshuaConfig) -> Person | None:
+    """The person a request with no credentials gets, or None.
+
+    ``viewer.anonymous: true`` gives the synthetic anonymous identity, which
+    has full member access. A person id gives that member, exactly as if they
+    signed in. The config check makes sure that the id names a member.
+    """
+    anonymous = cfg.viewer.anonymous
+    if anonymous is True:
+        return _ANONYMOUS_PERSON
+    if isinstance(anonymous, str):
+        return cfg.person(anonymous)
+    return None
+
+
 def _authenticate(request: Request) -> Person | None:
     """Return the signed-in person, or None for a missing or wrong credential.
 
     A wrong user and a wrong password fail the same way. A person named in
     ``viewer.users`` who is no longer in ``people`` cannot sign in.
 
-    A request with no ``Authorization`` header is served as the synthetic
-    anonymous identity when ``viewer.anonymous`` is true, so a private
-    network needs no password. That identity has full member access. A
-    request that does carry credentials is always checked against
-    ``viewer.users``, so a member can still sign in by password too.
+    A request with no ``Authorization`` header is served as the person of
+    ``_anonymous_person``, so a private network needs no password. A request
+    that does carry credentials is always checked against ``viewer.users``, so
+    a member can still sign in by password too.
     """
     cfg = config.load()
     creds = _basic_credentials(request)
     if creds is None:
-        return _ANONYMOUS_PERSON if cfg.viewer.anonymous else None
+        return _anonymous_person(cfg)
     user, password = creds
     if not _check_password(_password_reference(cfg, user), password):
         return None
@@ -1269,7 +1284,7 @@ async def readyz(request: Request) -> JSONResponse:
             "ok": True,
             "enabled": cfg.viewer.enabled,
             "users": len(cfg.viewer.users),
-            "anonymous": cfg.viewer.anonymous,
+            "anonymous": cfg.viewer.anonymous is not False,
             "data": data_root().is_dir(),
             "core_search": search_mod.from_env(os.environ) is not None,
             "assignments": assignments_mod.from_env(os.environ) is not None,
@@ -1351,7 +1366,7 @@ def main() -> None:
         {
             "message": "viewer up",
             "users": len(cfg.viewer.users),
-            "anonymous": cfg.viewer.anonymous,
+            "anonymous": cfg.viewer.anonymous is not False,
         }
     )
     uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
