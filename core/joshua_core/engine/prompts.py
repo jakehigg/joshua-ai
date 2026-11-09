@@ -117,7 +117,7 @@ TOOLS_BLOCK = (
 # The MCP servers that ship a skill page, ``builtin/skills/<server>.md``. The
 # page goes into the prompt of a session that holds the server, and of no
 # other session, so a deployment without it pays nothing.
-SERVER_SKILLS = ("assignments",)
+SERVER_SKILLS = ("assignments", "documents")
 
 
 class PromptComposer:
