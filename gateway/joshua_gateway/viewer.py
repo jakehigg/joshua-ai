@@ -796,8 +796,16 @@ async def assignments_list(request: Request, person: Person) -> Response:
                 state = "completed"
         else:
             body = await client.list(person.id, state)
+    details: dict[int, assignments_mod.Detail] = {}
+    if client is not None and body is not None:
+        details = await client.details(person.id, assignments_mod.row_ids(body.items))
     html = assignments_mod.list_html(
-        body, state=state or "in_progress", configured=client is not None, tz=tz, now=now
+        body,
+        state=state or "in_progress",
+        configured=client is not None,
+        tz=tz,
+        now=now,
+        details=details,
     )
     return _page("assignments", html, section="assignments")
 
@@ -1274,13 +1282,16 @@ class SecurityHeaders(BaseHTTPMiddleware):
 
     ``default-src 'none'`` blocks every sub-resource; the page loads its
     stylesheets from ``'self'`` and its images from ``'self'`` (attachments,
-    the logo and the icons). There is no script.
+    the logo and the icons). The only script that runs is the copy script of
+    an assignment page, allowed by its hash: no other script, inline or from
+    a file, runs.
     """
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; img-src 'self'; style-src 'self'"
+            "default-src 'none'; img-src 'self'; style-src 'self'; "
+            f"script-src '{assignments_mod.COPY_SCRIPT_HASH}'"
         )
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"

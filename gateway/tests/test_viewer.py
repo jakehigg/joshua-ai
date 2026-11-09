@@ -228,9 +228,12 @@ def test_image_attachment_renders_inline(client):
 
 def test_security_headers_on_every_response(client):
     response = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW))
+    # The one script the policy allows is the copy script, by its hash.
     assert response.headers["content-security-policy"] == (
-        "default-src 'none'; img-src 'self'; style-src 'self'"
+        "default-src 'none'; img-src 'self'; style-src 'self'; "
+        f"script-src '{viewer.assignments_mod.COPY_SCRIPT_HASH}'"
     )
+    assert "unsafe-inline" not in response.headers["content-security-policy"]
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["x-content-type-options"] == "nosniff"
 

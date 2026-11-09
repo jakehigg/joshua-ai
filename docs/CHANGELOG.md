@@ -6,6 +6,13 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- The viewer shows the report of a completed assignment as the page: a head
+  with the first sentence and the numbers, the highlights and the decisions
+  as cards, the outputs as cards by kind, and the cost. Each decision has a
+  `Copy` button for the text to paste to Joshua. An assignment in progress
+  shows a bar from the check boxes of its plan, the next step, and the
+  outputs so far. A list row shows the first sentence of the report or the
+  next step.
 - The viewer has a fifth section, **Assignments**, at `/assignments`. A
   person reads their own assignments there: the state, the plan, the report
   and its outputs, the progress, and the definition. The saved assignments
