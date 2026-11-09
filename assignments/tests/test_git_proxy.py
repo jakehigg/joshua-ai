@@ -273,6 +273,28 @@ async def test_a_repository_outside_the_spec_or_the_allowlist_is_refused(tmp_pat
     assert s.host.requests == []
 
 
+async def test_a_granted_repo_is_admitted_and_an_ungranted_one_is_refused(tmp_path) -> None:
+    async with Setup(tmp_path) as s:
+        row = await running_row(s.store, [])
+        s.configure(row["id"])
+        rc, out = await s.git("clone", f"https://{REPO}", str(tmp_path / "a"))
+        assert rc != 0 and "request_resource" in out
+        assert s.host.requests == []
+        # grant_repo stores the repository; the proxy admits it from then on.
+        await s.store.update(row["id"], granted_repos=[REPO])
+        rc, out = await s.git("clone", f"https://{REPO}", str(tmp_path / "b"))
+        assert rc == 0, out
+        seen = len(s.host.requests)
+        # A granted repository must still match assignments.repos now.
+        await s.store.update(row["id"], granted_repos=[REPO, "gitlab.example.net/other/x"])
+        rc, out = await s.git("clone", "https://gitlab.example.net/other/x", str(tmp_path / "c"))
+        assert rc != 0 and "403" in out
+        s.cfg = make_config(text=CONFIG)
+        rc, out = await s.git("clone", f"https://{REPO}", str(tmp_path / "d"))
+        assert rc != 0 and "403" in out
+    assert len(s.host.requests) == seen
+
+
 async def test_a_wrong_or_revoked_secret_and_a_parked_assignment_get_403(tmp_path) -> None:
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [REPO])

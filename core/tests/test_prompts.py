@@ -246,6 +246,16 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "start the next one when the\n  report of the previous one arrives",
         "do not ask the manager to queue it",
         "schedule yourself a retry with\n  `schedule_task`",
+        "### A request for a repository or a file",
+        "requests a repository",
+        "Check that the repository is one the person may use, then\n  call `grant_repo(id, repo)`",
+        "refuse with\n  `answer_assignment(id, text)`",
+        "`internet` tool for a web\n  page or a manual",
+        "`read_file` for a page that you can read",
+        "`provide_file(id, name, content)` with a clear file name",
+        "give the part that matters",
+        "Ask the person only when the request needs their permission",
+        "`[IGNORE]`",
     ):
         assert words in page, words
     lowered = page.lower()
@@ -255,5 +265,10 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
     for banned in ("gitlab", "github", "audit", "journal", "kubernetes", "http://", "https://"):
         assert banned not in lowered, banned
     # The plan and the report live in the assignments store, not in the wiki.
+    # A request for a file can name read_file; no other section names a file tool.
+    start = lowered.index("### a request for a repository or a file")
+    rest = lowered[:start] + lowered[lowered.index("### a limits stop") :]
     for banned in ("read_file", "write_file", "wiki", "page_path", "plan page", "developer"):
+        assert banned not in rest, banned
+    for banned in ("write_file", "wiki", "page_path", "plan page", "developer"):
         assert banned not in lowered, banned

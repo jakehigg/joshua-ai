@@ -135,6 +135,22 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
             "required": ["question"],
         },
     ),
+    "request_resource": (
+        "Stop the assignment and ask Joshua for more: kind is repo (ref is a repository "
+        "as host/group/name), file (ref is a short name of a document, such as 'the "
+        "latest X manual'), or info (ref is a question, as with ask). reason says what "
+        "it is for. The answer arrives in a later message: a repository to clone, a "
+        "file in inbox/, or a refusal.",
+        {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["repo", "file", "info"]},
+                "ref": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["kind", "ref", "reason"],
+        },
+    ),
     "wait": (
         "Wait up to 600 seconds, for example for a pipeline. Working time runs.",
         {

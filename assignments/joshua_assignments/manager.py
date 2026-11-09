@@ -15,6 +15,12 @@ are under the ceilings and a slot is free. ``extend_assignment`` starts a
 free. At start, each ``running`` assignment resumes its session with a note
 that the container restarted.
 
+A worker can park with a request for a repository or a file.
+``grant_repo`` adds a repository that ``assignments.repos`` allows, and
+``provide_file`` writes a text file to ``inbox/`` of the scratch directory
+(see ``inbox``). Each resumes the assignment as ``answer_assignment`` does,
+with the same ``busy`` refusal, and clears the open request.
+
 A draft takes a new spec with ``update_draft`` and goes with
 ``delete_draft``. A row that ran is never deleted.
 
@@ -30,8 +36,9 @@ reason is a fixed word.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from joshua_shared import config
@@ -39,10 +46,11 @@ from joshua_shared.config import Assignments, JoshuaConfig
 from joshua_shared.log import get_logger
 from pydantic import ValidationError
 
-from joshua_assignments import budget, notify, report
+from joshua_assignments import budget, inbox, notify, prompts, report
 from joshua_assignments import definition as definition_mod
 from joshua_assignments.comments import CommentRefused, comment_view, resolution_text
 from joshua_assignments.core_client import CoreClient
+from joshua_assignments.repos import in_scope
 from joshua_assignments.runner import Runner, StubRunner
 from joshua_assignments.settings import Settings
 from joshua_assignments.spec import (
@@ -53,6 +61,7 @@ from joshua_assignments.spec import (
     SpecRefused,
     assignment_title,
     check_duration,
+    check_repo,
     clamp,
     first_error,
     resolve,
@@ -164,7 +173,10 @@ def full_view(
         "turns": row.get("turns") or 0,
         "working_s": row.get("working_s") or 0,
         "open_question": row.get("open_question"),
+        "open_request": row.get("open_request"),
         "asked_at": _iso(row.get("asked_at")),
+        "granted_repos": row.get("granted_repos") or [],
+        "inbox": inbox.records(row.get("inbox")),
         "stopped_at_limits": row.get("stopped_at_limits"),
         "summary": row.get("summary"),
         "follow_ups": row.get("follow_ups"),
@@ -750,53 +762,167 @@ class Manager:
         names = await self._names(rows)
         return {"assignments": [summary_view(row, names) for row in rows]}
 
+    @staticmethod
+    def _not_waiting(row: dict[str, Any]) -> dict[str, Any] | None:
+        if row["status"] in PARKED:
+            return None
+        return rejected(
+            "not_waiting",
+            f"assignment {row['id']} is {row['status']}; only a waiting or "
+            "paused_limits assignment takes an answer",
+        )
+
     async def answer(self, row: dict[str, Any], text: str) -> dict[str, Any]:
+        """Give a parked assignment its answer and resume it.
+
+        It answers a question, and a request for a repository or a file with
+        a refusal or another way."""
         text = (text or "").strip()
         if not text:
             return rejected("invalid_arguments", "text is empty")
         if len(text) > MAX_GOAL_CHARS:
             return rejected("invalid_arguments", f"text is longer than {MAX_GOAL_CHARS} characters")
-        if row["status"] not in PARKED:
-            return rejected(
-                "not_waiting",
-                f"assignment {row['id']} is {row['status']}; only a waiting or "
-                "paused_limits assignment takes an answer",
-            )
+        refused = self._not_waiting(row)
+        if refused is not None:
+            return refused
+        return await self._resume(row, text, what="answer")
+
+    async def _resume(
+        self,
+        row: dict[str, Any],
+        text: str,
+        *,
+        what: str,
+        stored: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+    ) -> dict[str, Any]:
+        """Resume the parked ``row`` with the message ``text``.
+
+        ``stored`` stores the grant or the file, and returns the row fields it
+        changes. It runs only when the assignment is not refused as ``busy``.
+        Over a ceiling, the change and the text are stored, and the
+        assignment stays parked; the request stays open."""
         # An answer that is stored and not sent yet stays: the new text follows it.
         earlier = (row.get("answer") or "").strip()
         if earlier and earlier != text:
             text = f"{earlier}\n{text}"[-MAX_GOAL_CHARS:]
         over = await self._still_over(row)
         if over is not None:
-            await self.store.update(row["id"], answer=text)
-            logger.info({"message": "answer stored; over a ceiling", "assignment_id": row["id"]})
+            fields = await stored() if stored is not None else {}
+            await self.store.update(row["id"], answer=text, **fields)
+            logger.info({"message": f"{what} stored; over a ceiling", "assignment_id": row["id"]})
             return {
                 "id": row["id"],
                 "status": row["status"],
                 "message": f"Assignment {row['id']} stays {row['status']}. {over} "
-                "The answer is stored. Answer again when the window resets, or raise the "
+                f"The {what} is stored. Answer again when the window resets, or raise the "
                 "ceiling with extend_assignment.",
             }
         async with self._slot_lock:
             busy = await self._busy(row["person_id"])
             if busy is not None:
                 busy["message"] = (
-                    f"assignment {row['id']} stays {row['status']} and the answer is not "
+                    f"assignment {row['id']} stays {row['status']} and the {what} is not "
                     f"stored: {busy['message']}"
                 )
                 return busy
             current = await self.store.get(row["id"])
             if current is None or current["status"] not in PARKED:
                 return rejected("not_waiting", f"assignment {row['id']} is not parked now")
+            fields = await stored() if stored is not None else {}
             current = await self._run(
-                current, "answer", answer=text, open_question=None, stopped_at_limits=None
+                current,
+                "answer",
+                answer=text,
+                open_question=None,
+                open_request=None,
+                stopped_at_limits=None,
+                **fields,
             )
-        logger.info({"message": "assignment answered", "assignment_id": row["id"]})
+        logger.info({"message": f"assignment resumed: {what}", "assignment_id": row["id"]})
         return {
             "id": row["id"],
             "status": current["status"],
-            "message": f"The answer is stored. Assignment {row['id']} is {current['status']}.",
+            "message": f"The {what} is stored. Assignment {row['id']} is {current['status']}.",
         }
+
+    async def grant_repo(self, row: dict[str, Any], raw_repo: Any) -> dict[str, Any]:
+        """Add one repository to the parked ``row`` and resume it with its clone command.
+
+        The repository is checked against ``assignments.repos`` as a repository
+        of a spec is, so a grant never goes past the allowlist."""
+        if not self.section.enabled:
+            return rejected("disabled", "assignments.enabled is false in joshua.yaml")
+        refused = self._not_waiting(row)
+        if refused is not None:
+            return refused
+        try:
+            repo = check_repo(raw_repo, self.section)
+        except SpecRefused as exc:
+            return rejected(exc.reason, exc.message)
+        granted = [r for r in row.get("granted_repos") or [] if isinstance(r, str)]
+        if repo not in granted and repo not in in_scope(row):
+            granted.append(repo)
+        work = self._work_dir(row["id"]) or Path(str(int(row["id"])))
+        text = prompts.granted_text({**row, "granted_repos": granted}, repo, work)
+
+        async def stored() -> dict[str, Any]:
+            return {"granted_repos": granted}
+
+        reply = await self._resume(row, text, what="grant", stored=stored)
+        if reply.get("status") != "rejected":
+            logger.info({"message": "repository granted", "assignment_id": row["id"]})
+            reply["repo"] = repo
+            reply["granted_repos"] = granted
+        return reply
+
+    async def provide_file(
+        self, row: dict[str, Any], raw_name: Any, content: Any
+    ) -> dict[str, Any]:
+        """Write ``content`` to ``inbox/<name>`` of the parked ``row`` and resume it.
+
+        The manager writes the file, so the session never gets a path out of
+        ``inbox/``. The caps of ``inbox`` hold, and the row records the file."""
+        if not self.section.enabled:
+            return rejected("disabled", "assignments.enabled is false in joshua.yaml")
+        refused = self._not_waiting(row)
+        if refused is not None:
+            return refused
+        if not isinstance(content, str):
+            return rejected("invalid_arguments", "content is text")
+        data = content.encode("utf-8")
+        files = inbox.records(row.get("inbox"))
+        try:
+            name = inbox.check_name(raw_name)
+            inbox.check_caps(files, name, len(data))
+        except inbox.InboxRefused as exc:
+            return rejected(exc.reason, exc.message)
+        work = self._work_dir(row["id"])
+        if work is None:
+            return rejected("no_scratch", "this runner has no scratch directory")
+
+        async def stored() -> dict[str, Any]:
+            current = await self.store.get(row["id"]) or row
+            now_files = inbox.records(current.get("inbox"))
+            inbox.check_caps(now_files, name, len(data))
+            await asyncio.to_thread(inbox.write, work, name, data)
+            return {"inbox": inbox.with_record(now_files, name, len(data), self.clock())}
+
+        try:
+            reply = await self._resume(
+                row, prompts.provided_text(name, len(data)), what="file", stored=stored
+            )
+        except inbox.InboxRefused as exc:
+            return rejected(exc.reason, exc.message)
+        if reply.get("status") != "rejected":
+            logger.info(
+                {"message": "file provided", "assignment_id": row["id"], "bytes": len(data)}
+            )
+            reply["file"] = {"name": name, "path": f"{inbox.INBOX_DIR}/{name}", "bytes": len(data)}
+        return reply
+
+    def _work_dir(self, assignment_id: int) -> Path | None:
+        work_dir = getattr(self.runner, "work_dir", None)
+        return work_dir(int(assignment_id)) if work_dir is not None else None
 
     async def _still_over(self, row: dict[str, Any]) -> str | None:
         """Why the limits keep the assignment parked, or None when it may run.

@@ -28,6 +28,7 @@ ITEM_KEYS = {
     "lede",
     "next_step",
     "open_question",
+    "open_request",
     "asked_at",
     "stopped_at_limits",
     "saved",
@@ -47,6 +48,8 @@ DETAIL_KEYS = ITEM_KEYS | {
     "definition",
     "comments",
     "open_comments",
+    "granted_repos",
+    "inbox",
 }
 SAVED_KEYS = {
     "id",

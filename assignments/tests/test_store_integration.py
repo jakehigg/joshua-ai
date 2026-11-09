@@ -425,3 +425,28 @@ async def test_a_draft_is_not_a_run_of_its_saved_assignment(store) -> None:
     await store.update(draft["id"], status="running")
     found = await store.get_saved(saved["id"])
     assert found["runs"] == 1 and found["last_run"]["id"] == draft["id"]
+
+
+async def test_the_request_the_grants_and_the_inbox_are_stored(store) -> None:
+    row = await create(store)
+    assert row["open_request"] is None and row["granted_repos"] is None and row["inbox"] is None
+    request = {"kind": "repo", "ref": "gitlab.example.net/infra/screen", "reason": "To read it."}
+    files = [{"name": "manual.md", "bytes": 12, "at": NOW.isoformat()}]
+    await store.update(
+        row["id"],
+        open_request=request,
+        granted_repos=["gitlab.example.net/infra/screen"],
+        inbox=files,
+    )
+    found = await store.get(row["id"])
+    assert found["open_request"] == request
+    assert found["granted_repos"] == ["gitlab.example.net/infra/screen"]
+    assert found["inbox"] == files
+    await store.update(row["id"], open_request=None)
+    assert (await store.get(row["id"]))["open_request"] is None
+    async with store.pool.connection() as conn:
+        for column in ("open_request", "granted_repos", "inbox"):
+            await conn.execute(f"ALTER TABLE assignments.assignment DROP COLUMN {column}")
+    await store.close()
+    await store.open()
+    assert (await store.get(row["id"]))["inbox"] is None

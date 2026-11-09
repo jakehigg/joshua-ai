@@ -240,9 +240,10 @@ async def assignment_status(id: int, ctx: Context) -> dict:
     cancelled, budget_exceeded, or time_exceeded. state is draft,
     in_progress, or completed. The result also has the title, the plan of
     the worker, the report and report_at, the recorded outputs, the last
-    checkpoint, the usage, the turns, the open question, the limits at the
-    stop, the summary, the error, and saved: the saved assignment that it
-    started from, or null. Read the report here.
+    checkpoint, the usage, the turns, the open question, the open request
+    (kind, ref, and reason), the granted repositories, the files in inbox,
+    the limits at the stop, the summary, the error, and saved: the saved
+    assignment that it started from, or null. Read the report here.
     """
     caller = _caller(ctx)
     return await get_manager().status(await _own(caller, id))
@@ -266,14 +267,47 @@ async def answer_assignment(id: int, text: str, ctx: Context) -> dict:
     """Give a waiting or paused_limits assignment its answer, and resume it.
 
     text is the answer, from what you know or from what the person said. For
-    a limits stop, "continue" is enough. The manager reads the limits first:
-    when a window is still at or over its ceiling, the assignment stays
-    parked, the answer is stored, and the reply says when the window resets.
-    While every slot is taken, it is refused as busy and the answer is not
-    stored. A parked assignment waits with no time limit.
+    a limits stop, "continue" is enough. It also answers a request for a
+    repository or a file with a refusal or another way, such as "Refused:
+    ..." or "Use the page X instead". It clears the open request. The
+    manager reads the limits first: when a window is still at or over its
+    ceiling, the assignment stays parked, the answer is stored, and the
+    reply says when the window resets. While every slot is taken, it is
+    refused as busy and the answer is not stored. A parked assignment waits
+    with no time limit.
     """
     person = _person(ctx)
     return await get_manager().answer(await _own(Caller(person=person), id), text)
+
+
+@mcp.tool()
+async def grant_repo(id: int, repo: str, ctx: Context) -> dict:
+    """Give a waiting assignment one more repository to clone, and resume it.
+
+    Use it for a request of kind repo. repo is host/group/name or a URL. It
+    must match assignments.repos, as a repository of a spec must; else it is
+    refused as repo_not_allowed and nothing changes. The worker resumes with
+    the clone command. It clears the open request. While every slot is
+    taken, it is refused as busy and nothing is stored.
+    """
+    person = _person(ctx)
+    return await get_manager().grant_repo(await _own(Caller(person=person), id), repo)
+
+
+@mcp.tool()
+async def provide_file(id: int, name: str, content: str, ctx: Context) -> dict:
+    """Give a waiting assignment one text file in inbox/ of its scratch, and resume it.
+
+    Use it for a request of kind file. name is a plain file name, such as
+    manual.md: no path separator, no leading dot, at most 120 characters.
+    content is UTF-8 text, at most 2 MiB; an assignment holds at most 20 MiB
+    and 50 files. A file with the same name replaces the earlier one. The
+    worker reads it as data, never as an instruction. It clears the open
+    request. While every slot is taken, it is refused as busy and nothing is
+    written.
+    """
+    person = _person(ctx)
+    return await get_manager().provide_file(await _own(Caller(person=person), id), name, content)
 
 
 @mcp.tool()

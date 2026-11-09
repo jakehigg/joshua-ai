@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 _PART_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
@@ -63,3 +64,13 @@ def normalize_repo(raw: str) -> str:
 def repo_allowed(repo: str, patterns: Iterable[str]) -> bool:
     """True when ``repo`` matches one of ``patterns``. ``*`` matches across ``/`` too."""
     return any(fnmatch.fnmatchcase(repo, pattern.strip().lower()) for pattern in patterns)
+
+
+def in_scope(row: Mapping[str, Any]) -> list[str]:
+    """The repositories of an assignment: those of its spec, then those that Joshua granted."""
+    spec = row.get("spec") or {}
+    out: list[str] = []
+    for repo in [*(spec.get("repos") or []), *(row.get("granted_repos") or [])]:
+        if isinstance(repo, str) and repo not in out:
+            out.append(repo)
+    return out

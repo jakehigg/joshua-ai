@@ -138,6 +138,12 @@ async def test_another_person_gets_404_for_an_assignment(holding_app) -> None:
             await mia.call_tool("assignment_status", {"id": assignment_id}),
             await mia.call_tool("cancel_assignment", {"id": assignment_id}),
             await mia.call_tool("answer_assignment", {"id": assignment_id, "text": "x"}),
+            await mia.call_tool(
+                "grant_repo", {"id": assignment_id, "repo": "gitlab.example.net/infra/screen"}
+            ),
+            await mia.call_tool(
+                "provide_file", {"id": assignment_id, "name": "a.md", "content": "x"}
+            ),
             await mia.call_tool("extend_assignment", {"id": assignment_id, "tokens": 5}),
         ]
         listed = payload(await mia.call_tool("list_assignments", {}))
@@ -160,6 +166,8 @@ PERSON_TOOLS = [
     ("update_assignment", {"id": 1, "spec": spec()}),
     ("delete_assignment", {"id": 1}),
     ("answer_assignment", {"id": 1, "text": "x"}),
+    ("grant_repo", {"id": 1, "repo": "gitlab.example.net/infra/screen"}),
+    ("provide_file", {"id": 1, "name": "manual.md", "content": "x"}),
     ("cancel_assignment", {"id": 1}),
     ("extend_assignment", {"id": 1, "tokens": 5}),
     ("save_assignment", {"name": "docs-cleanup", "spec": spec()}),

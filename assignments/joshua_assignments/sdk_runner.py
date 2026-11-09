@@ -59,12 +59,19 @@ from joshua_shared.gateway_mcp import allowed_gateway_servers, gateway_servers
 from joshua_shared.limits import parse_event_windows
 from joshua_shared.log import get_logger
 
-from joshua_assignments import budget, prompts, report, session, stall
+from joshua_assignments import budget, inbox, prompts, report, session, stall
 from joshua_assignments.clock import Clock
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.git_proxy import GitProxy, git_config, write_git_config
+from joshua_assignments.repos import RepoError, in_scope, normalize_repo
 from joshua_assignments.runner import RunnerHost
-from joshua_assignments.store import FINISHED, KEEP_SCRATCH, USAGE_FIELDS
+from joshua_assignments.store import (
+    FINISHED,
+    KEEP_SCRATCH,
+    REQUEST_KINDS,
+    USAGE_FIELDS,
+    request_question,
+)
 
 logger = get_logger("joshua_assignments.sdk_runner")
 
@@ -72,6 +79,8 @@ WORK_ROOT = Path("/work")
 MAX_WAIT_S = 600
 MAX_NOTE = 2000
 MAX_QUESTION = 2000
+MAX_REQUEST_REF = 500
+MAX_REQUEST_REASON = 1500
 MAX_SUMMARY = 4000
 MAX_FOLLOW_UPS = 20
 MAX_FOLLOW_UP = 500
@@ -83,6 +92,10 @@ ASK_REPLY = (
     "Stop now and make no other tool call."
 )
 FINISH_REPLY = "The assignment is finished. Stop now."
+IN_SCOPE_REPLY = (
+    "The repository {repo} is already in scope. Clone it with the command of the "
+    "first message, or of the message that granted it."
+)
 NO_REPORT = "write_report first. finish needs your report."
 
 
@@ -135,6 +148,7 @@ class AssignmentTools:
             "write_report": self.write_report,
             "checkpoint": self.checkpoint,
             "ask": self.ask,
+            "request_resource": self.request_resource,
             "wait": self.wait,
             "finish": self.finish,
         }
@@ -191,11 +205,38 @@ class AssignmentTools:
         question = _text(args.get("question"))
         if not question:
             return _reply("Give one clear question.", is_error=True)
-        self.question = question[:MAX_QUESTION]
+        return await self._park("info", question[:MAX_QUESTION], "")
+
+    async def request_resource(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Park the assignment with a request for a repository, a file, or an answer."""
+        kind = _text(args.get("kind"))
+        ref = _text(args.get("ref"))
+        reason = _text(args.get("reason"))[:MAX_REQUEST_REASON]
+        if kind not in REQUEST_KINDS:
+            return _reply("kind is repo, file, or info.", is_error=True)
+        if not ref:
+            return _reply("Give the ref: what you need.", is_error=True)
+        if kind == "repo":
+            try:
+                ref = normalize_repo(ref)
+            except RepoError as exc:
+                return _reply(str(exc), is_error=True)
+            row = await self.host.store.get(self.assignment_id)
+            if row is not None and ref in in_scope(row):
+                return _reply(IN_SCOPE_REPLY.format(repo=ref))
+        limit = MAX_QUESTION if kind == "info" else MAX_REQUEST_REF
+        return await self._park(kind, ref[:limit], reason)
+
+    async def _park(self, kind: str, ref: str, reason: str) -> dict[str, Any]:
+        """Store the request and its text, and ask the runner to stop."""
+        self.question = request_question(kind, ref, reason)
         await self.host.store.update(
-            self.assignment_id, open_question=self.question, asked_at=self.host.clock()
+            self.assignment_id,
+            open_question=self.question,
+            open_request={"kind": kind, "ref": ref, "reason": reason},
+            asked_at=self.host.clock(),
         )
-        logger.info({"message": "ask", "assignment_id": self.assignment_id})
+        logger.info({"message": "ask", "assignment_id": self.assignment_id, "kind": kind})
         return _reply(ASK_REPLY)
 
     async def wait(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -385,7 +426,9 @@ class SdkRunner:
         """Park the assignment as ``waiting`` with the automatic question of a stall."""
         checkpoint = await self.host.store.last_checkpoint(row["id"])
         question = counter.question(checkpoint["note"] if checkpoint else None)
-        await self.host.store.update(row["id"], open_question=question, asked_at=self.host.clock())
+        await self.host.store.update(
+            row["id"], open_question=question, open_request=None, asked_at=self.host.clock()
+        )
         logger.info(
             {"message": "stalled; asking", "assignment_id": row["id"], "slices": counter.slices}
         )
@@ -417,7 +460,7 @@ class SdkRunner:
         if self.git is None or self.git.port is None:
             return
         secret = self.git.grant(row["id"])
-        hosts = {repo.split("/", 1)[0] for repo in (row.get("spec") or {}).get("repos") or []}
+        hosts = {repo.split("/", 1)[0] for repo in in_scope(row)}
         write_git_config(home, git_config(self.git.port, secret, hosts))
 
     async def _work(self, assignment_id: int, reason: str | None, answer: str | None) -> None:
@@ -439,11 +482,17 @@ class SdkRunner:
             await self._end(assignment_id, "failed", error="not_configured")
             return
         work = self.work_dir(assignment_id)
-        scratch_lost = not work.exists() and bool(row.get("session_id"))
+        # ``.home`` holds the session. ``provide_file`` can make the scratch
+        # directory again with only ``inbox/`` in it.
+        scratch_lost = not (work / ".home").exists() and bool(row.get("session_id"))
+        inbox_gone: list[str] = []
         if scratch_lost:
             # The session record was in the scratch, so the session cannot continue.
             logger.info({"message": "scratch gone; new session", "assignment_id": assignment_id})
-            row = await store.update(assignment_id, session_id=None) or row
+            files = inbox.records(row.get("inbox"))
+            inbox_gone = inbox.missing(work, files)
+            kept = [item for item in files if item["name"] not in inbox_gone]
+            row = await store.update(assignment_id, session_id=None, inbox=kept or None) or row
         home = work / ".home"
         config_dir = home / ".claude"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -513,6 +562,7 @@ class SdkRunner:
                     work,
                     resumed=scratch_lost,
                     has_tasks=prompts.TASKS_SERVER in self._gateway(row),
+                    inbox_gone=inbox_gone,
                 )
                 if answer:
                     prompt += f"\nAnswer: {answer.strip()[: prompts.MAX_ANSWER]}"

@@ -20,8 +20,9 @@ For each request, the proxy:
 
 1. finds the assignment of the secret. A missing or wrong secret gets 403;
 2. reads the repository from the path (``/<host>/<group>/<name>.git/...``),
-   and refuses it unless it is in ``repos`` of the spec and matches
-   ``assignments.repos`` now. A refused repository gets no credential;
+   and refuses it unless it is in ``repos`` of the spec or in
+   ``granted_repos`` (``grant_repo``), and matches ``assignments.repos`` now.
+   A refused repository gets no credential;
 3. refuses a push: ``git-receive-pack`` gets 403. The proxy forwards only
    the two requests of a fetch, ``GET info/refs?service=git-upload-pack``
    and ``POST git-upload-pack``. Every other request gets 403;
@@ -57,7 +58,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-from joshua_assignments.repos import RepoError, normalize_repo, repo_allowed
+from joshua_assignments.repos import RepoError, in_scope, normalize_repo, repo_allowed
 from joshua_assignments.store import Store
 
 logger = get_logger("joshua_assignments.git_proxy")
@@ -231,8 +232,7 @@ class GitProxy:
         row = await self.store.get(assignment_id)
         if row is None or row["status"] != "running":
             return False
-        spec_repos = (row.get("spec") or {}).get("repos") or []
-        return repo in spec_repos and repo_allowed(repo, self.load_config().assignments.repos)
+        return repo in in_scope(row) and repo_allowed(repo, self.load_config().assignments.repos)
 
     def _credential(self, host: str) -> tuple[bool, str | None]:
         """``(True, header)`` for a host, or ``(False, None)`` when its token is missing.
@@ -277,7 +277,8 @@ class GitProxy:
                 {"message": "git proxy refused a repository", "assignment_id": assignment_id}
             )
             return _refuse(
-                "This repository is not in the repos of the assignment and assignments.repos.\n"
+                "This repository is not in the repos of the assignment and assignments.repos. "
+                "Ask Joshua for it with request_resource.\n"
             )
         host = repo.split("/", 1)[0]
         ok, credential = self._credential(host)

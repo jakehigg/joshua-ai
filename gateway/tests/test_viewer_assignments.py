@@ -584,6 +584,42 @@ def test_an_open_question_shows_a_notice(data, monkeypatch) -> None:
     assert html.index("</aside>") < html.index("<h2>Plan</h2>")
 
 
+@pytest.mark.parametrize(
+    ("kind", "ref", "heading"),
+    [
+        ("repo", "git.example.com/group/<screen>", "The assignment requests a repository"),
+        ("file", "the latest <X> manual", "The assignment requests a file"),
+    ],
+)
+def test_an_open_request_shows_its_kind_ref_and_reason(
+    data, monkeypatch, kind: str, ref: str, heading: str
+) -> None:
+    body = detail(
+        status="waiting",
+        open_question=f"Requests a thing: {ref}",
+        open_request={"kind": kind, "ref": ref, "reason": "To see <how> it is done."},
+        asked_at=_iso(timedelta(minutes=5)),
+    )
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    html = _main(_get("/assignments/7").text)
+    notice = html[html.index('<aside class="a-notice warn"') : html.index("</aside>")]
+    assert f"<strong>{heading} <time" in notice and ">5m ago</time>" in notice
+    assert f"<code>{escape(ref)}</code>" in notice
+    assert "Reason: To see &lt;how&gt; it is done." in notice
+    assert "<form" not in notice and "Requests a thing" not in notice
+
+
+def test_a_question_request_shows_as_a_question(data, monkeypatch) -> None:
+    body = detail(
+        status="waiting",
+        open_question="Which branch?",
+        open_request={"kind": "info", "ref": "Which branch?", "reason": ""},
+    )
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    html = _main(_get("/assignments/7").text)
+    assert "<strong>The assignment asks</strong>" in html and "Which branch?" in html
+
+
 def test_a_limits_stop_shows_a_notice(data, monkeypatch) -> None:
     stop = {
         "at": _iso(timedelta(minutes=10)),

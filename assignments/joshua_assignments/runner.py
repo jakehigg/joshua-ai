@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 from joshua_shared.config import JoshuaConfig
@@ -74,14 +75,29 @@ class Runner(Protocol):
 
     async def cancel(self, assignment: dict[str, Any]) -> None: ...
 
+    def work_dir(self, assignment_id: int) -> Path | None:
+        """The scratch directory of an assignment, or None when the runner has none."""
+        ...
+
 
 class StubRunner:
-    """A runner with no model. ``delay_s`` is how long a run takes; None never ends."""
+    """A runner with no model. ``delay_s`` is how long a run takes; None never ends.
 
-    def __init__(self, host: RunnerHost, delay_s: float | None = 0.0) -> None:
+    ``work_root`` is where the scratch directories are, for ``provide_file``.
+    With None, the stub has no scratch directory."""
+
+    def __init__(
+        self, host: RunnerHost, delay_s: float | None = 0.0, work_root: Path | None = None
+    ) -> None:
         self.host = host
         self.delay_s = delay_s
+        self.work_root = work_root
         self.tasks: dict[int, asyncio.Task[None]] = {}
+
+    def work_dir(self, assignment_id: int) -> Path | None:
+        if self.work_root is None:
+            return None
+        return self.work_root / str(int(assignment_id))
 
     async def start(self, assignment: dict[str, Any]) -> None:
         self._spawn(assignment["id"])

@@ -16,6 +16,19 @@ with the images and the packaged chart, are at
   names one line, so Joshua reads it as before. The plan and the report on
   the page of a run show in the same blocks, with no `+`. See
   [operations.md](operations.md#comments-on-a-definition).
+- **A worker can request a repository or a file.** The worker tool
+  `request_resource(kind, ref, reason)` stops an assignment as `waiting` with
+  a request: `repo`, `file`, or `info` (the same as `ask`). Joshua gets an
+  event that says "requests a repository" or "requests a file". The new tool
+  `grant_repo(id, repo)` adds a repository that matches `assignments.repos`,
+  and the git proxy admits it from then on. The new tool
+  `provide_file(id, name, content)` writes a text file to `inbox/` in the
+  scratch directory (2 MiB for one file, 20 MiB and 50 files for one
+  assignment). `answer_assignment` can refuse a request. The store gets the
+  columns `open_request`, `granted_repos`, and `inbox`, and the read API
+  gives them. In the viewer, the notice band of an in-progress assignment
+  shows the kind, the ref, and the reason of a request. See
+  [assignments.md](assignments.md#requests-for-a-repository-or-a-file).
 - **Drafts instead of a queue.** The assignments container holds no queue
   now. `start_assignment` starts an assignment at once, or it is refused
   with the reason `busy` and the id of your running assignment; nothing

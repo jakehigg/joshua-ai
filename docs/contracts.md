@@ -478,9 +478,9 @@ true and its profile runs. [assignments.md](assignments.md) has the tools.
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok", "database", "channels", "people", "draft", "running", "waiting", "paused_limits"}`: booleans and counts only. `503` when the database does not answer. |
-| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the fourteen tools. `start_assignment` takes a slot at once or is refused with the reason `busy`; there is no queue. `401` for a missing or wrong bearer, and for a fleet token. |
-| `GET /v1/assignments?person=&state=&limit=` | `assignments.read_callers` (default `viewer`) | none | `{"items": [item, ...]}`, the newest first. Each item has the counts, the state, `lede`, and `next_step`. `state` is `draft`, `in_progress`, or `completed`. `limit` 1 to 200, default 50. |
-| `GET /v1/assignments/{id}?person=` | the same | none | one assignment: item plus spec, definition, comments, open_comments, plan, report, outputs, checkpoints (newest first, at most 200), summary, follow-ups, answer, error |
+| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the sixteen tools. `start_assignment` takes a slot at once or is refused with the reason `busy`; there is no queue. `grant_repo` and `provide_file` answer a request of a worker for a repository or a file. `401` for a missing or wrong bearer, and for a fleet token. |
+| `GET /v1/assignments?person=&state=&limit=` | `assignments.read_callers` (default `viewer`) | none | `{"items": [item, ...]}`, the newest first. Each item has the counts, the state, `lede`, `next_step`, `open_question`, and `open_request` (`{"kind", "ref", "reason"}` or null). `state` is `draft`, `in_progress`, or `completed`. `limit` 1 to 200, default 50. |
+| `GET /v1/assignments/{id}?person=` | the same | none | one assignment: item plus spec, definition, comments, open_comments, plan, report, outputs, checkpoints (newest first, at most 200), summary, follow-ups, answer, error, granted_repos, inbox |
 | `GET /v1/saved?person=` | the same | none | `{"items": [saved_item, ...]}`, the newest first, each with `open_comments` |
 | `GET /v1/saved/{id}?person=` | the same | none | one saved assignment plus `definition`, `comments`, and `runs_list` (newest first, at most 50; a draft is not a run) |
 | `GET /v1/assignments/{id}/comments?person=`, `GET /v1/saved/{id}/comments?person=` | the same | none | `{"items": [comment, ...]}`, the oldest first |
@@ -504,7 +504,8 @@ session calls it, through the `.gitconfig` that the runner writes in the
 | `POST /<host>/<repo>/git-upload-pack` | the same | the git request | the reply of the host |
 
 Every other request gets `403`: a missing or wrong secret, a repository that
-is not in the spec or not in `assignments.repos`, a push
+is not in the spec or the granted repositories (`grant_repo`), or not in
+`assignments.repos`, a push
 (`git-receive-pack`), a missing token, and any other path. A `401` or a
 redirect from the host is `403` or `502`, so git never asks for a password.
 
@@ -523,7 +524,7 @@ bearer):
 
 | Route | When | Body |
 |---|---|---|
-| channels `POST /v1/events` | the report or the question of an assignment | `{"destination": str, "text": str}`. Channels accepts it only when `assignments` is in `channels.webhooks.allowed_callers`. |
+| channels `POST /v1/events` | the report, the question, or the request of an assignment | `{"destination": str, "text": str}`. Channels accepts it only when `assignments` is in `channels.webhooks.allowed_callers`. |
 | core `GET /v1/limits` | before each slice, and at `start_assignment` when `when_unknown` is `refuse` and the spec has no `budget.tokens` | none |
 | core `POST /v1/usage` | after each slice that used tokens | one row: kind and name `assignment`, `worker` the model name of the spec, `run_id` the id, `person_id`, `model`, `calls`, `usage`, and `ref` `<id>:slice:<n>` |
 | core `ANY /v1/model/{path}` | each model call of a session, from the Claude CLI | a Claude API request |
