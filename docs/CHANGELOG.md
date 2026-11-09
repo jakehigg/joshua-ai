@@ -6,44 +6,114 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
-- **Assignments: an answer changes the document, and a re-run keeps its
-  lineage.** The event for a comment on a report or a plan now tells Joshua
-  to apply it to the document or the tasks, not to start an assignment for
-  it, and to resolve it only after the change. `resolve_comment` takes
-  `applied`: the document paths, tasks, or issue URLs that changed. A
-  resolution with none is refused as `nothing_applied`. The viewer shows
-  them under the resolution. `start_assignment(rerun=N, note)` starts a new
-  run with the spec of the ended assignment N and the note of the person at
-  the start of the goal. `assignment_status` and the read API give
-  `parent_id` and `rerun_of`, and the viewer shows "run k of assignment N"
-  and a fold with each run. The store columns `assignment.parent_id` and
-  `comment.applied` are new. The manager and the gateway log each refused
-  tool call with its reason, and never an argument. See
-  [assignments.md](assignments.md#re-runs).
-- **Docs: a guide for assignments, and one for documents.**
-  [assignments.md](assignments.md) now opens with a guide for the person:
-  what an assignment is, what to say to Joshua at each step, the flow from
-  draft to completed, what the worker can and cannot do, and where each
-  part is in the viewer. The reference follows. The new
-  [documents.md](documents.md) is the guide for documents and artifacts.
-  The README, the quickstart, memory.md, and operations.md link to both.
-- **Assignments: answer a decision on the report page, and Joshua hears it.**
-  The page of a completed assignment opens with a lead band: "N decisions
-  wait for you", with a link to them, and the outputs as cards, the
-  documents first, each with an `Open` link. The outputs section lower on
-  the page is gone. Each decision card has a text box and `Send to Joshua`
-  in place of the `Copy` button. The answer is a comment on the report, and
-  the card shows it with `Sent to Joshua` and the time, then the resolution
-  of Joshua. The plan and the report take a comment on each block with the
-  `+`, as a definition does. The comment routes take `target` (`definition`,
-  `plan`, or `report`), and `assignment_comments` takes `target` and gives
-  the target of each comment. A comment on the plan or the report of a
-  completed assignment goes to your conversation as one event, for the
-  comments of two minutes, with a header that says that the text is from
-  you. The store column `comment.sent_at` is new. The assignment pages of the
-  viewer have no script now. See
-  [assignments.md](assignments.md#comments-on-a-plan-or-a-report).
-- **Assignments: Joshua starts exactly the work you mean.** A refusal of
+## 0.2.1 - 2026-11-09
+
+Joshua now keeps documents for each member: plans, reports, specs, artifacts,
+and notes, in a git repository of their own beside the wiki. Assignments write
+their deliverables as documents, start as drafts instead of in a queue, can
+be saved and started again by name, and take comments that Joshua applies.
+The viewer has an Assignments section and a Documents section.
+
+### Upgrading from 0.2.0
+
+**Nothing needs a change.** Your `joshua.yaml` from 0.2.0 loads as it is. The
+assignments store adds its new columns at start, and each `queued`
+assignment becomes a `draft`. Then:
+
+1. On Kubernetes, when the viewer and assignments are both on, add
+   `JOSHUA_TOKEN_VIEWER` to the assignments Secret, with the value of the
+   viewer Secret. Compose gives it to the container from `.env`.
+2. A caller that filters assignments by state uses `draft` in place of
+   `queued`, in `list_assignments` and in the read API.
+3. To use documents, add `mcp.documents: {kind: builtin, allow: all}`. See
+   [documents.md](documents.md).
+4. `write_file` now refuses a wiki page whose frontmatter has `kind` `plan`,
+   `report`, `spec`, `artifact`, or `draft`, or `status: draft`. Write such
+   a page as a document.
+
+### Assignments
+
+- **The plan and the report of an assignment are in the store, not the
+  wiki (#96, #98).** The worker writes its plan with `write_plan`, records
+  each output with `record_output`, and writes a report with `write_report`
+  before it calls `finish`. The runner adds the cost to the report. When an
+  assignment stops in another status than `done` with no report, the
+  runner writes one. `assignment_status` gives the title, the state, the
+  plan, the report, and the outputs, and `list_assignments` filters by
+  state. A spec can give a `title`. A session no longer gets the `files`
+  server when `tools` leaves it out. The skill page tells Joshua to read the
+  plan, the report, and the outputs with `assignment_status`. The plan pages
+  that earlier assignments wrote in `wiki/assignments/` stay where they are.
+  See [assignments.md](assignments.md#the-plan-the-outputs-and-the-report).
+- **Saved assignments (#102).** Joshua can save the spec of a job that
+  recurs under a short name with `save_assignment`, and start it again with
+  `start_assignment(saved="<name>")`. A `spec` beside `saved` changes the
+  fields that it gives for that run. `list_saved_assignments` gives the runs
+  and the last run, and `delete_saved_assignment` deletes one.
+  `assignment_status` and `list_assignments` give `saved`. A schedule is a
+  scheduled task that starts the saved assignment. See
+  [assignments.md](assignments.md#saved-assignments).
+- **The assignments container has a read API for the viewer (#105).**
+  `GET /v1/assignments`, `GET /v1/assignments/{id}`, `GET /v1/saved`, and
+  `GET /v1/saved/{id}` give a person's assignments and saved assignments as
+  JSON. They take the fleet token of a caller in the new key
+  `assignments.read_callers` (default `viewer`). Compose gives the container
+  `JOSHUA_TOKEN_VIEWER`. On Kubernetes, add `JOSHUA_TOKEN_VIEWER` to the
+  assignments Secret, with the value of the viewer Secret; the chart lets
+  the viewer pod reach the container. See
+  [assignments.md](assignments.md#the-read-api).
+- **A report that the runner writes at a stop puts each heading of the plan
+  two levels down (#105).** A heading of the plan no longer looks like a
+  section of the report.
+- **Comments on a definition (#108).** In the viewer, click the `+` beside a
+  line of the definition of a saved assignment or a run, and write what to
+  change. Joshua reads the comments with the new tool
+  `assignment_comments`, changes the spec, and resolves each one with
+  `resolve_comment`. The definition shows the open comments under their
+  lines, a `line changed` mark when a line changed, and the resolved
+  comments in a group. The assignments container stores the comments in the
+  new table `assignments.comment`, and the read API gets the comment routes.
+  See [assignments.md](assignments.md#comments-on-a-definition).
+- **Drafts instead of a queue (#110).** The assignments container holds no
+  queue now. `start_assignment` starts an assignment at once, or it is
+  refused with the reason `busy` and the id of your running assignment;
+  nothing waits for a slot. `assignments.max_concurrent` stays the ceiling.
+  The new tool `draft_assignment` stores an assignment as a `draft` that
+  does not run. `update_assignment` changes the spec of a draft,
+  `delete_assignment` removes a draft, and `start_assignment(id=...)` starts
+  one. A draft takes comments on its lines in the viewer. The status
+  `queued` is gone: at start, each `queued` row becomes a `draft`. The state
+  filter of `list_assignments` and of the read API takes `draft` in place of
+  `queued`, and `/readyz` counts `draft` in place of `queued`. See
+  [assignments.md](assignments.md#drafts).
+- **A worker can request a repository or a file (#115).** The worker tool
+  `request_resource(kind, ref, reason)` stops an assignment as `waiting` with
+  a request: `repo`, `file`, or `info` (the same as `ask`). Joshua gets an
+  event that says "requests a repository" or "requests a file". The new tool
+  `grant_repo(id, repo)` adds a repository that matches `assignments.repos`,
+  and the git proxy admits it from then on. The new tool
+  `provide_file(id, name, content)` writes a text file to `inbox/` in the
+  scratch directory (2 MiB for one file, 20 MiB and 50 files for one
+  assignment). `answer_assignment` can refuse a request. The store gets the
+  columns `open_request`, `granted_repos`, and `inbox`, and the read API
+  gives them. In the viewer, the notice band of an in-progress assignment
+  shows the kind, the ref, and the reason of a request. See
+  [assignments.md](assignments.md#requests-for-a-repository-or-a-file).
+- **Assignments write deliverables as documents (#125).** The session of an
+  assignment now always holds the `documents` server when the person may
+  reach it, also when the spec narrows `tools`. The first message tells the
+  worker to write each deliverable with `write_document` under
+  `documents/<person>/` and to record it as an output of kind `document`,
+  with the path as ref. The system prompt says that a long text with no
+  named place is a document, and that a plan, a draft, or a report never
+  goes into the wiki. The gateway sets `author: assignment:<id>` and
+  `assignment: <id>` on a document that an assignment makes. The report that
+  the runner generates names the viewer page `/documents/<owner>/<slug>` of
+  each document. The skill page names a document as the default place for a
+  plan, a spec, or a report that the person will read and refine. The plan
+  and the report of the run stay in the assignments store. See
+  [assignments.md](assignments.md#deliverables-are-documents).
+- **Joshua starts exactly the work you mean (#127).** A refusal of
   `start_assignment` now has a `hint`, one sentence that Joshua tells you,
   and where it applies `retry_after_s`, `running` (the id and the title;
   another person's run has no id), and `drafts`. `busy` says "assignment N
@@ -59,162 +129,126 @@ with the images and the packaged chart, are at
   assignment the person means". The page and the row of a draft in the
   viewer say "Tell Joshua: start assignment N". See
   [assignments.md](assignments.md#refusals-of-a-start).
-- **Assignments write deliverables as documents.** The session of an
-  assignment now always holds the `documents` server when the person may
-  reach it, also when the spec narrows `tools`. The first message tells the
-  worker to write each deliverable with `write_document` under
-  `documents/<person>/` and to record it as an output of kind `document`,
-  with the path as ref. The system prompt says that a long text with no
-  named place is a document, and that a plan, a draft, or a report never
-  goes into the wiki. The gateway sets `author: assignment:<id>` and
-  `assignment: <id>` on a document that an assignment makes. The report that
-  the runner generates names the viewer page `/documents/<owner>/<slug>` of
-  each document. The skill page names a document as the default place for a
-  plan, a spec, or a report that the person will read and refine. The plan
-  and the report of the run stay in the assignments store. See
-  [assignments.md](assignments.md#deliverables-are-documents).
-- **Documents: a fourth memory surface.** The new builtin `documents` MCP
-  keeps what Joshua works on or makes for a member (a plan, a report, a spec,
-  an artifact, a note) at `/data/documents/<person id>/` and
+- **Answer a decision on the report page, and Joshua hears it (#129).** The
+  page of a completed assignment opens with a lead band: "N decisions wait
+  for you", with a link to them, and the outputs as cards, the documents
+  first, each with an `Open` link. The outputs section lower on the page is
+  gone. Each decision card has a text box and `Send to Joshua` in place of
+  the `Copy` button. The answer is a comment on the report, and the card
+  shows it with `Sent to Joshua` and the time, then the resolution of
+  Joshua. The plan and the report take a comment on each block with the
+  `+`, as a definition does. The comment routes take `target`
+  (`definition`, `plan`, or `report`), and `assignment_comments` takes
+  `target` and gives the target of each comment. A comment on the plan or
+  the report of a completed assignment goes to your conversation as one
+  event, for the comments of two minutes, with a header that says that the
+  text is from you. The store column `comment.sent_at` is new. The
+  assignment pages of the viewer have no script now. See
+  [assignments.md](assignments.md#comments-on-a-plan-or-a-report).
+- **An answer changes the document, and a re-run keeps its lineage
+  (#134).** The event for a comment on a report or a plan now tells Joshua
+  to apply it to the document or the tasks, not to start an assignment for
+  it, and to resolve it only after the change. `resolve_comment` takes
+  `applied`: the document paths, tasks, or issue URLs that changed. A
+  resolution with none is refused as `nothing_applied`. The viewer shows
+  them under the resolution. `start_assignment(rerun=N, note)` starts a new
+  run with the spec of the ended assignment N and the note of the person at
+  the start of the goal. `assignment_status` and the read API give
+  `parent_id` and `rerun_of`, and the viewer shows "run k of assignment N"
+  and a fold with each run. The store columns `assignment.parent_id` and
+  `comment.applied` are new. The manager and the gateway log each refused
+  tool call with its reason, and never an argument. See
+  [assignments.md](assignments.md#re-runs).
+
+### Documents
+
+- **Documents: a fourth memory surface (#121).** The new builtin `documents`
+  MCP keeps what Joshua works on or makes for a member (a plan, a report, a
+  spec, an artifact, a note) at `/data/documents/<person id>/` and
   `/data/documents/shared/`, out of the wiki. Turn it on with
-  `mcp.documents: {kind: builtin, allow: all}`; there is nothing else to set.
-  The folder is its own git repository, made on the first write, with one
-  commit per write. Each document has YAML frontmatter; the server sets
+  `mcp.documents: {kind: builtin, allow: all}`; there is nothing else to
+  set. The folder is its own git repository, made on the first write, with
+  one commit per write. Each document has YAML frontmatter; the server sets
   `author`, `created`, and `updated`. The tools are `list_documents`,
   `read_document`, `write_document`, `set_document_status`,
   `search_documents`, `promote_document`, `trash_document`,
   `document_comments`, and `resolve_document_comment`. Comments are in
-  `<slug>.comments.jsonl` beside the document. A comment names a line of the
-  body, from 1, so a change of the frontmatter never moves it; line 0 is the
-  document as a whole. The viewer now numbers the lines of a document the
-  same way. Members only: a member never
-  reaches the folder of another member, and a guest gets no tools.
-  `write_file` now refuses a wiki page whose frontmatter has `kind` `plan`,
-  `report`, `spec`, `artifact`, or `draft`, or `status: draft`. A member
-  session that holds the server gets the skill page
-  `prompts/builtin/skills/documents.md`. See
+  `<slug>.comments.jsonl` beside the document. A comment names a line of
+  the body, from 1, so a change of the frontmatter never moves it; line 0 is
+  the document as a whole. The viewer numbers the lines of a document the
+  same way. Members only: a member never reaches the folder of another
+  member, and a guest gets no tools. `write_file` now refuses a wiki page
+  whose frontmatter has `kind` `plan`, `report`, `spec`, `artifact`, or
+  `draft`, or `status: draft`. A member session that holds the server gets
+  the skill page `prompts/builtin/skills/documents.md`. See
   [config.md](config.md#the-documents-mcp).
-- **The memory finds documents by title and summary.** A new index source,
-  `documents`, writes one row for each document in `documents/<owner>/`: the
-  title, the kind, the status, and the `summary` (or the first paragraph),
-  never the body. It skips an archived document and an `html` document, and
-  it re-reads the volume on `memory.index_interval_s`. Recall shows a document
-  as `document: <title> (<path>, <kind>, <status>)`, and Joshua opens it with
-  `read_document`. Only a conversation of the member who owns a document finds
-  it, and the shared documents are found by every member. A group chat and a
-  guest find none. `POST /v1/memory/search` accepts `source: documents` with a
-  `person`, and the viewer's search page links a document to
-  `/documents/<owner>/<slug>`. `memory.documents.enabled` (default `true`)
-  turns it off. With no `documents/` folder the source does nothing. See
-  [memory.md](memory.md#documents-in-the-index).
 
-- **The viewer has a Documents section.** `/documents` lists your documents
-  and the shared ones by status (`Active`, `Drafts`, `Final`, `Archived`)
-  and by kind. A Markdown document shows in blocks, and one with the
-  headings of a report shows as the report of an assignment does. Each block
-  and card has a `+` for a comment, which the viewer writes to the comments
-  file of the document and commits. The `Versions` fold lists the commits
-  of the file, and `?rev=<sha>` shows an old version, read-only. An HTML
-  document shows in a sandboxed frame, with scripts only for
-  `scripts: true`. An output of kind `document` on an assignment page links
-  to its document. A guest has no Documents section. See
-  [operations.md](operations.md#the-documents-section).
-- **A definition reads as a document.** In the viewer, the definition of a
-  saved assignment, a draft, or a run shows its fields as a short list of
+### Viewer
+
+- **An Assignments section (#97).** The viewer has a fifth section,
+  **Assignments**, at `/assignments`. A person reads their own assignments
+  there: the state, the plan, the report and its outputs, the progress, and
+  the definition. The saved assignments are at `/assignments/saved`. The
+  viewer needs `ASSIGNMENTS_URL`: compose sets it, and the chart sets it
+  when `assignments.enabled` is true.
+- **The report of a completed assignment is the page (#103).** The page has
+  a head with the first sentence and the numbers, the highlights and the
+  decisions as cards, and the cost. An assignment in progress shows a bar
+  from the check boxes of its plan, the next step, and the outputs so far.
+  A list row shows the first sentence of the report or the next step.
+- **An open viewer can belong to a member (#107).** `viewer.anonymous` now
+  also takes a person id. A request with no password is then served as that
+  member, as if they signed in: their profile, attachments, assignments,
+  and saved assignments. The id must name a member in `people`; a guest or
+  an unknown id stops the config load. `true` keeps the synthetic
+  `anonymous` identity. See [config.md](config.md#viewer).
+- **A definition reads as a document (#114).** The definition of a saved
+  assignment, a draft, or a run shows its fields as a short list of
   properties and its goal as Markdown, as a wiki page shows it. Each field
   and each block of the goal (a paragraph, a heading, a list item, a quote,
   a code block, or a table) has its own `+` for a comment, and a comment
   shows under the block that holds its line. The `Source` fold under it
   gives each line of the YAML with its number and its `+`. A comment still
-  names one line, so Joshua reads it as before. The plan and the report on
-  the page of a run show in the same blocks, with no `+`. See
+  names one line, so Joshua reads it as before. See
   [operations.md](operations.md#comments-on-a-definition).
-- **A worker can request a repository or a file.** The worker tool
-  `request_resource(kind, ref, reason)` stops an assignment as `waiting` with
-  a request: `repo`, `file`, or `info` (the same as `ask`). Joshua gets an
-  event that says "requests a repository" or "requests a file". The new tool
-  `grant_repo(id, repo)` adds a repository that matches `assignments.repos`,
-  and the git proxy admits it from then on. The new tool
-  `provide_file(id, name, content)` writes a text file to `inbox/` in the
-  scratch directory (2 MiB for one file, 20 MiB and 50 files for one
-  assignment). `answer_assignment` can refuse a request. The store gets the
-  columns `open_request`, `granted_repos`, and `inbox`, and the read API
-  gives them. In the viewer, the notice band of an in-progress assignment
-  shows the kind, the ref, and the reason of a request. See
-  [assignments.md](assignments.md#requests-for-a-repository-or-a-file).
-- **Drafts instead of a queue.** The assignments container holds no queue
-  now. `start_assignment` starts an assignment at once, or it is refused
-  with the reason `busy` and the id of your running assignment; nothing
-  waits for a slot. `assignments.max_concurrent` stays the ceiling. The new
-  tool `draft_assignment` stores an assignment as a `draft` that does not
-  run. `update_assignment` changes the spec of a draft, `delete_assignment`
-  deletes a draft, and `start_assignment(id=...)` starts one. A draft takes
-  comments on its lines in the viewer. The status `queued` is gone: at
-  start, each `queued` row becomes a `draft`. The state filter of
-  `list_assignments` and of the read API takes `draft` in place of `queued`,
-  and `/readyz` counts `draft` in place of `queued`. In the viewer, the
-  pills are `Drafts`, `In progress`, and `Completed`, and a draft opens
-  with its definition and the comment form of each line. See
-  [assignments.md](assignments.md#drafts).
-- **Comments on a definition.** In the viewer, click the `+` beside a line of
-  the definition of a saved assignment or a run, and write what to change.
-  Joshua reads the comments with the new tool `assignment_comments`, changes
-  the spec, and resolves each one with `resolve_comment`. The definition
-  shows its lines with numbers, the open comments under their lines, a
-  `line changed` mark when a line changed, and the resolved comments in a
-  group. The assignments container stores the comments in the new table
-  `assignments.comment`, and the read API gets the comment routes. See
-  [assignments.md](assignments.md#comments-on-a-definition).
-- **An open viewer can belong to a member.** `viewer.anonymous` now also
-  takes a person id. A request with no password is then served as that
-  member, as if they signed in: their profile, attachments, assignments, and
-  saved assignments. The id must name a member in `people`; a guest or an
-  unknown id stops the config load. `true` keeps the synthetic `anonymous`
-  identity. See [config.md](config.md#viewer).
-- **The assignments container has a read API for the viewer.**
-  `GET /v1/assignments`, `GET /v1/assignments/{id}`, `GET /v1/saved`, and
-  `GET /v1/saved/{id}` give a person's assignments and saved assignments as
-  JSON. They take the fleet token of a caller in the new key
-  `assignments.read_callers` (default `viewer`). Compose gives the container
-  `JOSHUA_TOKEN_VIEWER`. On Kubernetes, add `JOSHUA_TOKEN_VIEWER` to the
-  assignments Secret, with the value of the viewer Secret; the chart lets
-  the viewer pod reach the container. See
-  [assignments.md](assignments.md#the-read-api).
-- A report that the runner writes at a stop puts each heading of the plan
-  two levels down, so a heading of the plan does not look like a section of
-  the report.
-- **Saved assignments.** Joshua can save the spec of a job that recurs
-  under a short name with `save_assignment`, and start it again with
-  `start_assignment(saved="<name>")`. A `spec` beside `saved` changes the
-  fields that it gives for that run. `list_saved_assignments` gives the runs
-  and the last run, and `delete_saved_assignment` deletes one.
-  `assignment_status` and `list_assignments` give `saved`. A schedule is a
-  scheduled task that starts the saved assignment. See
-  [assignments.md](assignments.md#saved-assignments).
-- The viewer shows the report of a completed assignment as the page: a head
-  with the first sentence and the numbers, the highlights and the decisions
-  as cards, the outputs as cards by kind, and the cost. Each decision has a
-  `Copy` button for the text to paste to Joshua. An assignment in progress
-  shows a bar from the check boxes of its plan, the next step, and the
-  outputs so far. A list row shows the first sentence of the report or the
-  next step.
-- The viewer has a fifth section, **Assignments**, at `/assignments`. A
-  person reads their own assignments there: the state, the plan, the report
-  and its outputs, the progress, and the definition. The saved assignments
-  are at `/assignments/saved`. The viewer needs `ASSIGNMENTS_URL`: compose
-  sets it, and the chart sets it when `assignments.enabled` is true.
-- **The plan and the report of an assignment are in the store, not the
-  wiki.** The worker writes its plan with `write_plan`, records each output
-  with `record_output`, and writes a report with `write_report` before it
-  calls `finish`. The runner adds the cost to the report. When an
-  assignment stops in another status than `done` with no report, the
-  runner writes one. `assignment_status` gives the title, the state
-  (`queued`, `in_progress`, `completed`), the plan, the report, and the
-  outputs, and `list_assignments` filters by state. A spec can give a
-  `title`. A session no longer gets the `files` server when `tools` leaves
-  it out. The plan pages that earlier assignments wrote in
-  `wiki/assignments/` stay where they are. See
-  [assignments.md](assignments.md#the-plan-the-outputs-and-the-report).
+- **A Documents section (#122).** `/documents` lists your documents and the
+  shared ones by status (`Active`, `Drafts`, `Final`, `Archived`) and by
+  kind. A Markdown document shows in blocks, and one with the headings of a
+  report shows as the report of an assignment does. Each block and card has
+  a `+` for a comment, which the viewer writes to the comments file of the
+  document and commits. The `Versions` fold lists the commits of the file,
+  and `?rev=<sha>` shows an old version, read-only. An HTML document shows
+  in a sandboxed frame, with scripts only for `scripts: true`. An output of
+  kind `document` on an assignment page links to its document. A guest has
+  no Documents section. See
+  [operations.md](operations.md#the-documents-section).
+
+### Core and memory
+
+- **The memory finds documents by title and summary (#120).** A new index
+  source, `documents`, writes one row for each document in
+  `documents/<owner>/`: the title, the kind, the status, and the `summary`
+  (or the first paragraph), never the body. It skips an archived document
+  and an `html` document, and it reads the volume again on
+  `memory.index_interval_s`. Recall shows a document as
+  `document: <title> (<path>, <kind>, <status>)`, and Joshua opens it with
+  `read_document`. Only a conversation of the member who owns a document
+  finds it, and every member finds the shared documents. A group chat and a
+  guest find none. `POST /v1/memory/search` accepts `source: documents` with
+  a `person`, and the search page of the viewer links a document to
+  `/documents/<owner>/<slug>`. `memory.documents.enabled` (default `true`)
+  turns it off. With no `documents/` folder the source does nothing. See
+  [memory.md](memory.md#documents-in-the-index).
+
+### Docs
+
+- **A guide for assignments, and one for documents (#133).**
+  [assignments.md](assignments.md) now opens with a guide for the person:
+  what an assignment is, what to say to Joshua at each step, the flow from
+  draft to completed, what the worker can and cannot do, and where each
+  part is in the viewer. The reference follows. The new
+  [documents.md](documents.md) is the guide for documents and artifacts.
+  The README, the quickstart, memory.md, and operations.md link to both.
 
 ## 0.2.0 - 2026-11-08
 
