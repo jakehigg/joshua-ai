@@ -190,7 +190,10 @@ mcp:
     allow: all
 ```
 
-`documents` gives its tools to a member only, whatever `allow` says. See
+`documents` gives its tools to a member only, whatever `allow` says. The
+session of an assignment always holds `documents` when the person may reach
+it, also when the spec narrows `tools`, and the server writes
+`author: assignment:<id>` on the documents that it makes. See
 [config.md](config.md#the-documents-mcp).
 
 ## What this mechanism does not run

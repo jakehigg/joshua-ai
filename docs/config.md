@@ -955,11 +955,23 @@ Each document starts with YAML frontmatter:
 | `format` | `markdown` or `html`, from the file name | the server |
 | `tags` | a list of words | the caller |
 | `summary` | one line; else the first paragraph is used | the caller |
-| `author` | the person id of the first write | the server |
+| `author` | the person id of the first write, or `assignment:<id>` | the server |
+| `assignment` | the id of the assignment that wrote it, optional | the server |
 | `created`, `updated` | ISO date-time, UTC | the server |
 | `promoted_to` | a wiki path | `promote_document` |
 
-A caller cannot set `author`, `created`, `updated`, or `promoted_to`, and a
+When the session of an assignment writes a new document, `author` is
+`assignment:<id>` and `assignment` is `<id>`. When it changes a document that
+has no `assignment`, the server adds it, and `author` stays. The server knows
+an assignment from two things together: the fleet identity `assignments` and
+the conversation header `assignment:<id>`, which the session of that
+assignment sends. A request from core is never an assignment, whatever its
+conversation header says. This is attribution only: the person header still
+decides which folders the request reaches. See
+[assignments.md](assignments.md#deliverables-are-documents).
+
+A caller cannot set `author`, `assignment`, `created`, `updated`, or
+`promoted_to`, and a
 `body` that holds its own frontmatter is refused. On a replace, the fields
 that the call gives change, and the others stay.
 

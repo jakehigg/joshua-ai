@@ -6,6 +6,20 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Assignments write deliverables as documents.** The session of an
+  assignment now always holds the `documents` server when the person may
+  reach it, also when the spec narrows `tools`. The first message tells the
+  worker to write each deliverable with `write_document` under
+  `documents/<person>/` and to record it as an output of kind `document`,
+  with the path as ref. The system prompt says that a long text with no
+  named place is a document, and that a plan, a draft, or a report never
+  goes into the wiki. The gateway sets `author: assignment:<id>` and
+  `assignment: <id>` on a document that an assignment makes. The report that
+  the runner generates names the viewer page `/documents/<owner>/<slug>` of
+  each document. The skill page names a document as the default place for a
+  plan, a spec, or a report that the person will read and refine. The plan
+  and the report of the run stay in the assignments store. See
+  [assignments.md](assignments.md#deliverables-are-documents).
 - **Documents: a fourth memory surface.** The new builtin `documents` MCP
   keeps what Joshua works on or makes for a member (a plan, a report, a spec,
   an artifact, a note) at `/data/documents/<person id>/` and
