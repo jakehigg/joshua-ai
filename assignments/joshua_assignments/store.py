@@ -230,6 +230,7 @@ class Store(Protocol):
         limit: int,
         status: str | None = None,
         statuses: Collection[str] | None = None,
+        saved_id: int | None = None,
     ) -> list[dict[str, Any]]: ...
 
     async def update(self, assignment_id: int, **fields: Any) -> dict[str, Any] | None: ...
@@ -237,6 +238,8 @@ class Store(Protocol):
     async def add_checkpoint(self, assignment_id: int, note: str) -> None: ...
 
     async def last_checkpoint(self, assignment_id: int) -> dict[str, Any] | None: ...
+
+    async def checkpoints(self, assignment_id: int, limit: int) -> list[dict[str, Any]]: ...
 
     async def write_plan(self, assignment_id: int, markdown: str) -> None: ...
 
@@ -432,8 +435,9 @@ class PgStore:
         limit: int,
         status: str | None = None,
         statuses: Collection[str] | None = None,
+        saved_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        """The newest rows. ``status`` and ``statuses`` filter, and both apply."""
+        """The newest rows. ``status``, ``statuses``, and ``saved_id`` filter, and all apply."""
         clauses: list[str] = []
         params: list[Any] = []
         if person_id is not None:
@@ -445,6 +449,9 @@ class PgStore:
         if statuses is not None:
             clauses.append("status = ANY(%s)")
             params.append(list(statuses))
+        if saved_id is not None:
+            clauses.append("saved_id = %s")
+            params.append(saved_id)
         where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
         async with self._pool().connection() as conn:
             cur = await conn.execute(
@@ -491,6 +498,18 @@ class PgStore:
             )
             row = await cur.fetchone()
         return dict(row) if row else None
+
+    @shielded
+    async def checkpoints(self, assignment_id: int, limit: int) -> list[dict[str, Any]]:
+        """The newest ``limit`` checkpoints of an assignment, the newest first."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "SELECT at, note FROM assignments.checkpoint WHERE assignment_id = %s "
+                "ORDER BY id DESC LIMIT %s",
+                (assignment_id, limit),
+            )
+            rows = await cur.fetchall()
+        return [dict(row) for row in rows]
 
     @shielded
     async def write_plan(self, assignment_id: int, markdown: str) -> None:
