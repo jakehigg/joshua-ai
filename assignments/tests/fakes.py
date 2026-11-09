@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from typing import Any
 
-from joshua_assignments.store import USAGE_FIELDS, check_fields
+from joshua_assignments.store import USAGE_FIELDS, check_fields, output_record
 
 FIXED_NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
 
@@ -39,7 +39,6 @@ class FakeStore:
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
-        page_path: Callable[[int], str],
     ) -> dict[str, Any]:
         assignment_id = self._next
         self._next += 1
@@ -51,7 +50,7 @@ class FakeStore:
             "status": "queued",
             "model": model,
             "session_id": None,
-            "page_path": page_path(assignment_id),
+            "page_path": None,
             **{name: 0 for name in USAGE_FIELDS},
             "turns": 0,
             "created_at": self.clock(),
@@ -65,6 +64,11 @@ class FakeStore:
             "summary": None,
             "follow_ups": None,
             "error": None,
+            "plan": None,
+            "plan_at": None,
+            "report": None,
+            "report_at": None,
+            "outputs": None,
         }
         self.rows[assignment_id] = row
         return copy.deepcopy(row)
@@ -74,13 +78,18 @@ class FakeStore:
         return copy.deepcopy(row) if row else None
 
     async def recent(
-        self, person_id: str | None, limit: int, status: str | None = None
+        self,
+        person_id: str | None,
+        limit: int,
+        status: str | None = None,
+        statuses: Collection[str] | None = None,
     ) -> list[dict[str, Any]]:
         rows = [
             row
             for row in sorted(self.rows.values(), key=lambda r: r["id"], reverse=True)
             if (person_id is None or row["person_id"] == person_id)
             and (status is None or row["status"] == status)
+            and (statuses is None or row["status"] in statuses)
         ]
         return copy.deepcopy(rows[:limit])
 
@@ -98,6 +107,29 @@ class FakeStore:
     async def last_checkpoint(self, assignment_id: int) -> dict[str, Any] | None:
         mine = [c for c in self.checkpoints if c["assignment_id"] == assignment_id]
         return {"at": mine[-1]["at"], "note": mine[-1]["note"]} if mine else None
+
+    async def write_plan(self, assignment_id: int, markdown: str) -> None:
+        row = self.rows.get(assignment_id)
+        if row is not None:
+            row.update(plan=markdown, plan_at=self.clock())
+
+    async def read_plan(self, assignment_id: int) -> str | None:
+        row = self.rows.get(assignment_id)
+        return row["plan"] if row else None
+
+    async def add_output(self, assignment_id: int, kind: str, ref: str, title: str) -> int:
+        row = self.rows.get(assignment_id)
+        if row is None:
+            return 0
+        kind, ref, title = output_record(kind, ref, title)
+        outputs = row["outputs"] = list(row["outputs"] or [])
+        outputs.append({"kind": kind, "ref": ref, "title": title, "at": self.clock().isoformat()})
+        return len(outputs)
+
+    async def write_report(self, assignment_id: int, markdown: str) -> None:
+        row = self.rows.get(assignment_id)
+        if row is not None:
+            row.update(report=markdown, report_at=self.clock())
 
     async def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}

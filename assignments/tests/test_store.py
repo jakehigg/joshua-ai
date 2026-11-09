@@ -85,6 +85,20 @@ def test_the_schema_has_every_column_of_the_plan() -> None:
         assert re.search(rf"\n\s+{column}\s", SCHEMA_SQL), column
 
 
+def test_the_schema_adds_the_plan_the_report_and_the_outputs() -> None:
+    for column, kind in (
+        ("plan", "TEXT"),
+        ("plan_at", "TIMESTAMPTZ"),
+        ("report", "TEXT"),
+        ("report_at", "TIMESTAMPTZ"),
+        ("outputs", "JSONB"),
+    ):
+        line = f"ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS {column} {kind};"
+        assert line in SCHEMA_SQL
+    # page_path stays a column, and nothing writes it.
+    assert "page_path" not in UPDATABLE and {"plan", "report", "outputs"}.isdisjoint(UPDATABLE)
+
+
 async def test_a_store_that_is_not_open_refuses() -> None:
     store = PgStore("postgresql://unused")
     with pytest.raises(RuntimeError):

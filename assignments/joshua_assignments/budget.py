@@ -169,7 +169,7 @@ def number_text(value: Any) -> str:
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
 
 
-def limits_stop_text(record: dict[str, Any], page: str | None, timezone: str) -> str:
+def limits_stop_text(record: dict[str, Any], timezone: str) -> str:
     """The text of a limits stop, for the question event. It comes from the record only."""
     lines: list[str] = []
     window = record.get("window")
@@ -188,7 +188,6 @@ def limits_stop_text(record: dict[str, Any], page: str | None, timezone: str) ->
     step = record.get("next_step")
     if step:
         lines.append(f"My next step: {step}.".replace("..", "."))
-    lines.append(f"My plan and progress are at {page}.")
     if window in LABELS:
         lines.append("Tell me to continue, or stop me.")
     else:

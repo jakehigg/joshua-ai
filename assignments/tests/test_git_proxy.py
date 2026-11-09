@@ -137,7 +137,6 @@ async def running_row(store: FakeStore, repos: list[str]) -> dict[str, Any]:
         conversation_id=None,
         spec={"goal": "g", "repos": repos, "budget": {"five_hour_pct": 70, "seven_day_pct": 85}},
         model="claude-sonnet-5",
-        page_path=lambda i: f"assignments/{i}-g.md",
     )
     await store.update(row["id"], status="running")
     return row

@@ -87,6 +87,17 @@ def call(name: str, **args: Any) -> tuple[str, str, dict[str, Any]]:
     return ("tool", name, args)
 
 
+REPORT = (
+    "# Audit the gitops repo\n## What was asked\nAudit it.\n## What was done\nRead it.\n"
+    "## Outputs\nNone.\n## Decisions for you\nNone.\n## Follow-ups\nNone."
+)
+
+
+def done(summary: str = "ok", report: str = REPORT, **args: Any) -> list[tuple[str, str, dict]]:
+    """Two script steps: the model writes its report, then calls ``finish``."""
+    return [call("write_report", markdown=report), call("finish", summary=summary, **args)]
+
+
 def shell(run: Callable[[Any], Any]) -> tuple[str, Callable[[Any], Any]]:
     """A script step: the session runs a command. ``run`` gets the options."""
     return ("shell", run)

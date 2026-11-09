@@ -19,7 +19,7 @@ import pytest
 from fakes import FIXED_NOW, FakeStore
 from joshua_assignments import prompts
 from joshua_assignments.git_proxy import GitProxy
-from sdk_fakes import SESSION, FakeCore, FakeSdk, assistant, call, init, result, shell
+from sdk_fakes import SESSION, FakeCore, FakeSdk, assistant, call, done, init, result, shell
 from test_git_proxy import TOKEN, FakeGitHost, basic, make_bare
 from test_sdk_runner import SECRET_ENV, Harness, max_turns_slice, spec
 
@@ -42,8 +42,8 @@ async def test_ask_frees_the_slot_and_the_answer_resumes_the_same_session(
 ) -> None:
     sdk = FakeSdk(
         asking(),
-        [call("finish", summary="Second done."), result("success")],
-        [call("finish", summary="First done."), result("success")],
+        [*done("Second done."), result("success")],
+        [*done("First done."), result("success")],
     )
     h = Harness(tmp_path, sdk, FakeCore())
     first = await h.start()
@@ -62,7 +62,7 @@ async def test_ask_frees_the_slot_and_the_answer_resumes_the_same_session(
     resumed = sdk.clients[-1]
     assert resumed.options.resume == SESSION
     assert resumed.prompt.startswith(
-        "Read your plan page before anything else.\nAnswer: The ops project."
+        "Read your plan with `read_plan` before anything else.\nAnswer: The ops project."
     )
     row = h.row(first["id"])
     assert row["status"] == "done"
@@ -72,7 +72,7 @@ async def test_ask_frees_the_slot_and_the_answer_resumes_the_same_session(
 
 async def test_an_answer_over_the_ceiling_stays_parked_and_says_so(tmp_path, channels) -> None:
     core = FakeCore()
-    sdk = FakeSdk(asking(), [call("finish", summary="ok"), result("success")])
+    sdk = FakeSdk(asking(), [*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, core)
     started = await h.start(budget={"five_hour_pct": 80})
     core.five_hour = 85.0
@@ -130,7 +130,6 @@ async def make_running(store: FakeStore, work: Path, *, session: str | None, **f
         conversation_id=None,
         spec={**spec(), "model": "sonnet", "budget": {"five_hour_pct": 70, "seven_day_pct": 85}},
         model="claude-sonnet-5",
-        page_path=lambda i: f"assignments/{i}-audit.md",
     )
     await store.update(
         row["id"], status="running", started_at=FIXED_NOW, session_id=session, **fields
@@ -144,7 +143,7 @@ async def test_a_restart_resumes_a_running_row_with_the_restart_line_and_no_old_
     tmp_path, channels
 ) -> None:
     store = FakeStore()
-    sdk = FakeSdk([call("finish", summary="ok"), result("success")])
+    sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore(), store=store)
     running = await make_running(store, h.work, session="sess-7")
     waiting = await make_running(store, h.work, session="sess-8")
@@ -161,32 +160,32 @@ async def test_a_restart_resumes_a_running_row_with_the_restart_line_and_no_old_
 
 async def test_an_answer_stored_before_a_restart_is_sent_once(tmp_path, channels) -> None:
     store = FakeStore()
-    sdk = FakeSdk([call("finish", summary="ok"), result("success")])
+    sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore(), store=store)
     queued = await make_running(store, h.work, session="sess-7", answer="Use ops.")
     await store.update(queued, status="queued")
     await h.manager.open()
     await h.runner.idle()
     [client] = sdk.clients
-    assert client.prompt.startswith(prompts.READ_PAGE_FIRST + "\nAnswer: Use ops.")
+    assert client.prompt.startswith(prompts.READ_PLAN_FIRST + "\nAnswer: Use ops.")
     assert store.rows[queued]["answer"] is None
 
 
 async def test_a_queued_row_with_no_session_starts_fresh(tmp_path, channels) -> None:
     store = FakeStore()
-    sdk = FakeSdk([call("finish", summary="ok"), result("success")])
+    sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore(), store=store)
     row_id = await make_running(store, h.work, session=None)
     await h.manager.open()
     await h.runner.idle()
     [client] = sdk.clients
     assert client.options.resume is None
-    assert client.prompt.startswith(f"Assignment {row_id}.")
+    assert client.prompt.startswith(f"Assignment {row_id}: Audit the gitops repo\n")
 
 
-async def test_a_lost_scratch_starts_a_new_session_that_reads_the_page(tmp_path, channels) -> None:
+async def test_a_lost_scratch_starts_a_new_session_that_reads_the_plan(tmp_path, channels) -> None:
     store = FakeStore()
-    sdk = FakeSdk([call("finish", summary="ok"), result("success")])
+    sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore(), store=store)
     row_id = await make_running(store, h.work, session="sess-7")
     shutil.rmtree(h.work / str(row_id))
@@ -199,7 +198,7 @@ async def test_a_lost_scratch_starts_a_new_session_that_reads_the_page(tmp_path,
 
 
 async def test_extend_resumes_a_budget_exceeded_assignment(tmp_path, channels) -> None:
-    sdk = FakeSdk(max_turns_slice("m1"), [call("finish", summary="ok"), result("success")])
+    sdk = FakeSdk(max_turns_slice("m1"), [*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore())
     started = await h.start(budget={"tokens": 1000})
     assert h.row(started["id"])["status"] == "budget_exceeded"
@@ -215,7 +214,7 @@ async def test_extend_resumes_a_budget_exceeded_assignment(tmp_path, channels) -
 
 async def test_extend_resumes_a_time_exceeded_assignment(tmp_path, channels) -> None:
     store = FakeStore()
-    sdk = FakeSdk([call("finish", summary="ok"), result("success")])
+    sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore(), store=store)
     row_id = await make_running(store, h.work, session="sess-7", working_s=3600)
     await store.update(row_id, status="time_exceeded", error="working_time", finished_at=FIXED_NOW)
@@ -254,13 +253,13 @@ async def test_extend_raises_max_turns_and_refuses_an_ended_assignment(tmp_path,
 async def test_the_follow_up_rule_follows_the_servers_of_the_session(
     tmp_path, channels, fields, has_tasks
 ) -> None:
-    sdk = FakeSdk([call("finish", summary="ok"), result("success")])
+    sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore())
     await h.start(**fields)
     [client] = sdk.clients
     assert ("tasks" in client.options.mcp_servers) is has_tasks
     assert ("tasks project ops" in client.prompt) is has_tasks
-    assert (prompts.FOLLOW_UPS_ON_PAGE in client.prompt) is not has_tasks
+    assert "page" not in client.prompt
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git binary required")
@@ -318,7 +317,7 @@ async def test_a_session_clones_through_the_proxy_and_never_holds_the_token(
         seen["push"] = await run_git(options, "push", "origin", "HEAD:main", cwd=repo)
         return {}
 
-    sdk = FakeSdk([init(), shell(clone), shell(push), call("finish", summary="ok"), result()])
+    sdk = FakeSdk([init(), shell(clone), shell(push), *done("ok"), result()])
     h = Harness(tmp_path, sdk, FakeCore(), store=store, extra=GIT_EXTRA, git=git)
     h.runner.environ = environ
     await h.manager.open()

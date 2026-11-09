@@ -63,25 +63,25 @@ def test_next_step() -> None:
 def test_the_stop_text_in_the_instance_timezone() -> None:
     check = budget.check_limits(answer(80, 10), CEILINGS)
     record = budget.stop_record(check, CEILINGS, at=NOW, source="limits", next_step_text="step 3.")
-    text = budget.limits_stop_text(record, "assignments/1-x.md", "America/New_York")
+    text = budget.limits_stop_text(record, "America/New_York")
     assert text == (
         "I stopped because the 5-hour window is at 80 percent, and my ceiling is 80 percent. "
         "It resets at 23:30 on 2026-03-04. My next step: step 3. "
-        "My plan and progress are at assignments/1-x.md. Tell me to continue, or stop me."
+        "Tell me to continue, or stop me."
     )
     record["resets_at"] = None
     record["used_pct"] = 80.5
-    assert "80.5 percent" in budget.limits_stop_text(record, "p", "UTC")
-    assert "Core does not say when it resets." in budget.limits_stop_text(record, "p", "UTC")
+    assert "80.5 percent" in budget.limits_stop_text(record, "UTC")
+    assert "Core does not say when it resets." in budget.limits_stop_text(record, "UTC")
     record["resets_at"] = "soon"
-    assert "Core does not say" in budget.limits_stop_text(record, "p", "UTC")
+    assert "Core does not say" in budget.limits_stop_text(record, "UTC")
 
 
 def test_the_unknown_stop_text() -> None:
     check = budget.check_limits(None, CEILINGS)
     record = budget.stop_record(check, CEILINGS, at=NOW, source="limits", next_step_text=None)
     assert record["reason"] == "limits_unknown"
-    text = budget.limits_stop_text(record, "p", "UTC")
+    text = budget.limits_stop_text(record, "UTC")
     assert "cannot say how much" in text and "extend_assignment" in text
 
 

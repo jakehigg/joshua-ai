@@ -27,7 +27,11 @@ it). It stays while the assignment is parked, and after it ends as
 goes when the assignment ends in another way. ``sweep`` removes a kept
 scratch after ``assignments.keep_failed_work``. When the scratch of an
 assignment with a session id is gone, the runner starts a new session that
-reads the plan page first.
+reads its plan first.
+
+The plan, the outputs, and the report are in the store (see ``report``).
+Each stop writes the report: the worker's with the cost added, or, when the
+worker wrote none, a report that the runner makes from the row.
 
 With a ``GitProxy``, each session gets a new secret for the proxy and a
 ``.gitconfig`` in its ``HOME`` that sends every ``https://`` git URL there.
@@ -55,7 +59,7 @@ from joshua_shared.gateway_mcp import allowed_gateway_servers, gateway_servers
 from joshua_shared.limits import parse_event_windows
 from joshua_shared.log import get_logger
 
-from joshua_assignments import budget, prompts, session, stall
+from joshua_assignments import budget, prompts, report, session, stall
 from joshua_assignments.clock import Clock
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.git_proxy import GitProxy, git_config, write_git_config
@@ -72,8 +76,6 @@ MAX_SUMMARY = 4000
 MAX_FOLLOW_UPS = 20
 MAX_FOLLOW_UP = 500
 CANCEL_TIMEOUT_S = 30.0
-# The server that the plan page needs. ``tools`` in a spec never removes it.
-FILES_SERVER = "files"
 _LABEL_RE = re.compile(r"^[A-Za-z0-9\[][A-Za-z0-9._:/@\[\]-]{0,63}\Z")
 
 ASK_REPLY = (
@@ -81,6 +83,7 @@ ASK_REPLY = (
     "Stop now and make no other tool call."
 )
 FINISH_REPLY = "The assignment is finished. Stop now."
+NO_REPORT = "write_report first. finish needs your report."
 
 
 def _text(value: Any) -> str:
@@ -126,11 +129,55 @@ class AssignmentTools:
 
     def handlers(self) -> dict[str, session.ToolHandler]:
         return {
+            "write_plan": self.write_plan,
+            "read_plan": self.read_plan,
+            "record_output": self.record_output,
+            "write_report": self.write_report,
             "checkpoint": self.checkpoint,
             "ask": self.ask,
             "wait": self.wait,
             "finish": self.finish,
         }
+
+    async def write_plan(self, args: dict[str, Any]) -> dict[str, Any]:
+        markdown = _text(args.get("markdown"))
+        if not markdown:
+            return _reply("Give the plan as Markdown.", is_error=True)
+        size = len(markdown.encode("utf-8"))
+        if size > report.MAX_PLAN:
+            return _reply(
+                f"The plan is {size} bytes; the maximum is {report.MAX_PLAN} bytes. "
+                "Make it shorter.",
+                is_error=True,
+            )
+        await self.host.store.write_plan(self.assignment_id, markdown)
+        return _reply("Plan stored.")
+
+    async def read_plan(self, args: dict[str, Any]) -> dict[str, Any]:
+        return _reply(await self.host.store.read_plan(self.assignment_id) or "")
+
+    async def record_output(self, args: dict[str, Any]) -> dict[str, Any]:
+        kind, ref = _text(args.get("kind")), _text(args.get("ref"))
+        if not kind or not ref:
+            return _reply("Give a kind and a ref.", is_error=True)
+        count = await self.host.store.add_output(
+            self.assignment_id, kind, ref, _text(args.get("title"))
+        )
+        return _reply(f"Output recorded. Outputs: {count}.")
+
+    async def write_report(self, args: dict[str, Any]) -> dict[str, Any]:
+        markdown = _text(args.get("markdown"))
+        if not markdown:
+            return _reply("Give the report as Markdown.", is_error=True)
+        size = len(markdown.encode("utf-8"))
+        if size > report.MAX_REPORT:
+            return _reply(
+                f"The report is {size} bytes; the maximum is {report.MAX_REPORT} bytes. "
+                "Make it shorter.",
+                is_error=True,
+            )
+        await self.host.store.write_report(self.assignment_id, markdown)
+        return _reply("Report stored. The runner adds the cost.")
 
     async def checkpoint(self, args: dict[str, Any]) -> dict[str, Any]:
         note = _text(args.get("note"))
@@ -164,6 +211,9 @@ class AssignmentTools:
         summary = _text(args.get("summary"))
         if not summary:
             return _reply("Give the summary.", is_error=True)
+        row = await self.host.store.get(self.assignment_id)
+        if row is None or not report.has_worker_report(row):
+            return _reply(NO_REPORT, is_error=True)
         raw = args.get("follow_ups") or []
         items = raw if isinstance(raw, list) else [raw]
         follow_ups = [_text(item)[:MAX_FOLLOW_UP] for item in items if _text(item)]
@@ -302,10 +352,15 @@ class SdkRunner:
             await self._end(assignment_id, "failed", error=f"runner_{type(exc).__name__}")
 
     async def _end(self, assignment_id: int, status: str, **fields: Any) -> None:
-        """End or park the assignment, keep or remove its scratch, and tell the host."""
+        """End or park the assignment and tell the host.
+
+        It writes the report first, and keeps or removes the scratch.
+        """
+        now = self.host.clock()
         if status in FINISHED:
-            fields["finished_at"] = self.host.clock()
+            fields["finished_at"] = now
         await self.host.store.update(assignment_id, status=status, **fields)
+        await report.finalize(self.host.store, assignment_id, now, self.host.load_config().timezone)
         if status in FINISHED and status not in KEEP_SCRATCH:
             self.remove_work(assignment_id)
         logger.info(
@@ -329,7 +384,7 @@ class SdkRunner:
     async def _park_stalled(self, row: dict[str, Any], counter: stall.StallCounter) -> None:
         """Park the assignment as ``waiting`` with the automatic question of a stall."""
         checkpoint = await self.host.store.last_checkpoint(row["id"])
-        question = counter.question(checkpoint["note"] if checkpoint else None, row["page_path"])
+        question = counter.question(checkpoint["note"] if checkpoint else None)
         await self.host.store.update(row["id"], open_question=question, asked_at=self.host.clock())
         logger.info(
             {"message": "stalled; asking", "assignment_id": row["id"], "slices": counter.slices}
@@ -345,7 +400,7 @@ class SdkRunner:
         ]
         narrow = (row.get("spec") or {}).get("tools")
         if narrow is not None:
-            names = [name for name in names if name in narrow or name == FILES_SERVER]
+            names = [name for name in names if name in narrow]
         settings = self.host.settings
         assert settings.gateway_url is not None
         return gateway_servers(

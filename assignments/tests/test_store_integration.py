@@ -42,14 +42,13 @@ async def create(store: PgStore, person: str = "alex") -> dict:
         conversation_id="conv-1",
         spec={"goal": "Audit", "budget": {"five_hour_pct": 70}},
         model="claude-sonnet-5",
-        page_path=lambda i: f"assignments/{i}-audit.md",
     )
 
 
 async def test_create_get_and_a_restart_finds_the_rows(store) -> None:
     row = await create(store)
     assert row["status"] == "queued"
-    assert row["page_path"] == f"assignments/{row['id']}-audit.md"
+    assert row["page_path"] is None
     assert row["spec"]["budget"] == {"five_hour_pct": 70}
     await store.add_checkpoint(row["id"], "plan written")
     await store.close()
@@ -187,3 +186,48 @@ async def test_a_cancelled_caller_leaves_a_clean_connection(store, caplog) -> No
     assert "psycopg" not in caplog.text
     await store.open()
     assert (await store.get(row["id"]))["summary"] == "kept"
+
+
+async def test_the_plan_the_outputs_and_the_report(store) -> None:
+    row = await create(store)
+    assert row["plan"] is None and row["report"] is None and row["outputs"] is None
+    assert await store.read_plan(row["id"]) is None
+    await store.write_plan(row["id"], "# Plan\n1. [ ] Clone.")
+    await store.write_plan(row["id"], "# Plan\n1. [x] Clone.")
+    assert await store.read_plan(row["id"]) == "# Plan\n1. [x] Clone."
+    assert await store.read_plan(9999) is None
+    assert await store.add_output(row["id"], "issue", "ops#1", "First") == 1
+    assert await store.add_output(row["id"], "k" * 99, "r" * 999, "t" * 999) == 2
+    assert await store.add_output(9999, "issue", "x", "y") == 0
+    await store.write_report(row["id"], "# Audit\n## What was asked")
+    found = await store.get(row["id"])
+    assert found["plan_at"] is not None and found["report_at"] is not None
+    assert found["report"] == "# Audit\n## What was asked"
+    first, second = found["outputs"]
+    assert (first["kind"], first["ref"], first["title"]) == ("issue", "ops#1", "First")
+    assert datetime.fromisoformat(first["at"]).tzinfo is not None
+    assert [len(second[f]) for f in ("kind", "ref", "title")] == [40, 500, 200]
+    assert found["page_path"] is None
+
+
+async def test_recent_filters_by_a_set_of_statuses(store) -> None:
+    a = await create(store)
+    b = await create(store)
+    c = await create(store)
+    await store.update(a["id"], status="waiting")
+    await store.update(b["id"], status="done")
+    ids = [r["id"] for r in await store.recent("alex", 10, None, ["running", "waiting"])]
+    assert ids == [a["id"]]
+    ids = [r["id"] for r in await store.recent("alex", 10, "queued", ["queued", "done"])]
+    assert ids == [c["id"]]
+
+
+async def test_the_new_columns_are_added_to_an_older_table(store) -> None:
+    row = await create(store)
+    async with store.pool.connection() as conn:
+        for column in ("plan", "plan_at", "report", "report_at", "outputs"):
+            await conn.execute(f"ALTER TABLE assignments.assignment DROP COLUMN {column}")
+    await store.close()
+    await store.open()
+    await store.write_report(row["id"], "# R")
+    assert (await store.get(row["id"]))["report"] == "# R"

@@ -132,6 +132,46 @@ async def test_recent_filters_and_clamps(channels) -> None:
     assert (await manager.recent("alex", 10, "bogus"))["reason"] == "invalid_status"
 
 
+async def test_recent_filters_by_state_and_gives_title_and_state(channels) -> None:
+    manager = make_manager(delay=None)
+    first = await manager.start("alex", spec(title="Weekly audit"))
+    second = await manager.start("alex", spec())
+    await manager.store.update(second["id"], status="waiting")
+    third = await manager.start("alex", spec())
+    await manager.store.update(third["id"], status="failed")
+
+    def ids(reply: dict) -> list[int]:
+        return [a["id"] for a in reply["assignments"]]
+
+    assert ids(await manager.recent("alex", 10, None, "in_progress")) == [second["id"], first["id"]]
+    assert ids(await manager.recent("alex", 10, None, "completed")) == [third["id"]]
+    assert ids(await manager.recent("alex", 10, None, "queued")) == []
+    assert ids(await manager.recent("alex", 10, "waiting", "in_progress")) == [second["id"]]
+    assert (await manager.recent("alex", 10, None, "done"))["reason"] == "invalid_state"
+    listed = (await manager.recent("alex", 10, None))["assignments"]
+    assert [(a["title"], a["state"]) for a in listed] == [
+        ("Audit the gitops repo", "completed"),
+        ("Audit the gitops repo", "in_progress"),
+        ("Weekly audit", "in_progress"),
+    ]
+    assert all("page_path" not in a for a in listed)
+
+
+async def test_status_gives_the_plan_the_report_and_the_outputs(channels) -> None:
+    manager = make_manager(delay=None)
+    started = await manager.start("alex", spec())
+    assert started["title"] == "Audit the gitops repo" and "page_path" not in started
+    store = manager.store
+    await store.write_plan(started["id"], "# Plan")
+    await store.add_output(started["id"], "issue", "ops#1", "First")
+    await store.write_report(started["id"], "# Audit")
+    status = await manager.status(await store.get(started["id"]))
+    assert status["state"] == "in_progress" and status["title"] == "Audit the gitops repo"
+    assert status["plan"] == "# Plan" and status["report"] == "# Audit"
+    assert status["report_at"] == FIXED_NOW.isoformat()
+    assert [o["ref"] for o in status["outputs"]] == ["ops#1"]
+
+
 async def test_answer_refusals(channels) -> None:
     manager = make_manager(delay=None)
     started = await manager.start("alex", spec())
