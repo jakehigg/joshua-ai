@@ -53,17 +53,17 @@ def test_the_counter_stops_at_the_limit_and_a_checkpoint_resets_it() -> None:
     assert stall.StallCounter(0, WORK).limit == 1
 
 
-def test_the_question_names_the_checkpoint_the_errors_and_the_page() -> None:
+def test_the_question_names_the_checkpoint_and_the_errors() -> None:
     counter = stall.StallCounter(2, WORK)
     counter.slice_ended(progress=False, errors=["git clone: 502"])
     counter.slice_ended(progress=False, errors=["git clone: 502"])
-    text = counter.question("cloning.\nNext: " + "y" * 900, "assignments/12-x.md")
+    text = counter.question("cloning.\nNext: " + "y" * 900)
     assert text.startswith("I stopped because 2 slices in a row ended with no new checkpoint")
     assert "My last checkpoint: cloning. Next: y" in text
     assert "y" * (stall.MAX_CHECKPOINT) not in text
     assert text.count("- git clone: 502") == 1
-    assert "My plan and progress are at assignments/12-x.md." in text
+    assert "page" not in text and text.endswith("Tell me how to continue, or stop me.")
     empty = stall.StallCounter(1, WORK)
     empty.slice_ended(progress=False, errors=[])
-    assert "I have no checkpoint." in empty.question(None, "p")
-    assert "I saw no tool error." in empty.question(None, "p")
+    assert "I have no checkpoint." in empty.question(None)
+    assert "I saw no tool error." in empty.question(None)

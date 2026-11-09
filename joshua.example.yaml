@@ -144,9 +144,8 @@ memory:
   recency_bonus: 0.08
   recency_half_life_days: 14.0
   # Top-level wiki folders that the memory never holds: the files source does
-  # not index them, and no search returns a page in them. The assignments
-  # write their plan pages in wiki/assignments/. An empty value excludes
-  # nothing.
+  # not index them, and no search returns a page in them. An empty value
+  # excludes nothing.
   exclude_folders:
     - assignments
   # Snapshots: fixed MCP tool calls that core runs on a cadence, with no

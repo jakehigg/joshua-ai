@@ -7,11 +7,12 @@ from conftest import make_config
 from joshua_assignments.spec import (
     AssignmentSpec,
     SpecRefused,
+    assignment_title,
     check_duration,
     first_error,
-    page_path,
     resolve,
     slug,
+    title_of,
 )
 from pydantic import ValidationError
 
@@ -24,6 +25,7 @@ def test_a_minimal_spec_takes_every_default() -> None:
     resolved = resolve(AssignmentSpec(goal="  Tidy the wiki  "), section())
     assert resolved.spec == {
         "goal": "Tidy the wiki",
+        "title": "Tidy the wiki",
         "model": "sonnet",
         "budget": {"five_hour_pct": 70, "seven_day_pct": 85, "tokens": None},
         "max_turns": 200,
@@ -100,6 +102,7 @@ def test_a_bad_repo_is_refused() -> None:
         {"goal": "x", "max_turns": 0},
         {"goal": "x", "working_time": "soon"},
         {"goal": "x", "working_time": "0h"},
+        {"goal": "x", "title": "t" * 121},
         {"goal": "x", "tools": ["Not A Server"]},
         {"goal": "x", "unknown": 1},
         {"goal": "x", "repos": ["a"] * 21},
@@ -139,5 +142,28 @@ def test_slug(goal: str, expected: str) -> None:
     assert len(slug(goal)) <= 40
 
 
-def test_page_path() -> None:
-    assert page_path(12, "Audit kubernetes gitops") == "assignments/12-audit-kubernetes-gitops.md"
+@pytest.mark.parametrize(
+    ("goal", "expected"),
+    [
+        ("Audit the gitops repo. Then file issues.", "Audit the gitops repo"),
+        ("\n  Is it done? Say so.\nsecond line", "Is it done?"),
+        ("Tidy the wiki", "Tidy the wiki"),
+        ("word " * 30, " ".join(["word"] * 16)),
+        ("x" * 100, "x" * 80),
+        ("  ", "Assignment"),
+    ],
+)
+def test_title_of(goal: str, expected: str) -> None:
+    assert title_of(goal) == expected
+    assert len(title_of(goal)) <= 80
+
+
+def test_a_spec_title_wins_and_is_kept_in_the_spec() -> None:
+    spec = AssignmentSpec.model_validate({"goal": "Audit it. Now.", "title": "  Weekly   audit "})
+    resolved = resolve(spec, section())
+    assert resolved.spec["title"] == "Weekly audit"
+    assert assignment_title(resolved.spec) == "Weekly audit"
+    assert assignment_title({"goal": "Audit it. Now."}) == "Audit it"
+    assert assignment_title(None) == "Assignment"
+    blank = AssignmentSpec.model_validate({"goal": "Audit it.", "title": " "})
+    assert resolve(blank, section()).spec["title"] == "Audit it"

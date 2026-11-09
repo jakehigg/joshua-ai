@@ -10,7 +10,7 @@ work runs in the background. When the work stops, the runner writes the row
 and calls ``RunnerHost.stopped``, and the manager sends the event.
 
 ``StubRunner`` makes no model call. It ends each assignment as ``done``
-with a fixed summary, so the manager and the store are testable with no SDK.
+with a fixed summary and a fixed report, so the manager and the store are testable with no SDK.
 ``joshua_assignments.sdk_runner.SdkRunner`` is the runner with a real
 session.
 """
@@ -25,15 +25,30 @@ from typing import Any, Protocol
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
+from joshua_assignments import report
 from joshua_assignments.settings import Settings
+from joshua_assignments.spec import assignment_title
 from joshua_assignments.store import Store
 
 logger = get_logger("joshua_assignments.runner")
 
-STUB_SUMMARY = (
-    "The stub runner ran this assignment. No model call ran, and nothing changed. "
-    "The plan page was not written."
-)
+STUB_SUMMARY = "The stub runner ran this assignment. No model call ran, and nothing changed."
+
+
+def stub_report(row: dict[str, Any]) -> str:
+    """The report of the stub runner, in the shape of the system prompt, with no cost."""
+    spec = row.get("spec") or {}
+    body = {
+        "Highlights": "- **No model call** The stub runner changed nothing.",
+        "What was asked": str(spec.get("goal") or "").strip() or "No goal.",
+        "What was done": STUB_SUMMARY,
+        "Outputs": "None.",
+        "Decisions for you": "None.",
+        "Follow-ups": "None.",
+    }
+    parts = [f"# {assignment_title(spec)}", "This is a test report of the stub runner."]
+    parts += [f"## {name}\n\n{body[name]}" for name in report.SECTIONS]
+    return "\n\n".join(parts)
 
 
 class RunnerHost(Protocol):
@@ -103,12 +118,16 @@ class StubRunner:
         await asyncio.sleep(self.delay_s or 0)
         store = self.host.store
         await store.add_checkpoint(assignment_id, "the stub runner finished")
+        row = await store.get(assignment_id)
+        await store.write_report(assignment_id, stub_report(row or {}))
+        now = self.host.clock()
         await store.update(
             assignment_id,
             status="done",
             summary=STUB_SUMMARY,
             follow_ups=[],
-            finished_at=self.host.clock(),
+            finished_at=now,
         )
+        await report.finalize(store, assignment_id, now, self.host.load_config().timezone)
         logger.info({"message": "stub run finished", "assignment_id": assignment_id})
         await self.host.stopped(assignment_id)

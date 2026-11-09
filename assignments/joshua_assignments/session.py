@@ -82,6 +82,42 @@ _ASSIGNMENT_SERVERS: weakref.WeakKeyDictionary[Any, dict[str, ToolHandler]] = (
 )
 
 TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
+    "write_plan": (
+        "Replace your plan: Markdown, at most 64 KiB. Write it before any other tool "
+        "call, then keep it current: tick each step, add a progress line, mark the next step.",
+        {
+            "type": "object",
+            "properties": {"markdown": {"type": "string"}},
+            "required": ["markdown"],
+        },
+    ),
+    "read_plan": (
+        "Read your plan. Returns an empty text when there is none.",
+        {"type": "object", "properties": {}},
+    ),
+    "record_output": (
+        "Record one output the moment you create it: a kind (such as issue, page, or "
+        "merge request), a ref (such as a URL, a path, or a number), and a short title. "
+        "Returns the number of outputs.",
+        {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string"},
+                "ref": {"type": "string"},
+                "title": {"type": "string"},
+            },
+            "required": ["kind", "ref", "title"],
+        },
+    ),
+    "write_report": (
+        "Write your report: Markdown, at most 256 KiB, with the headings of the system "
+        "prompt. The runner adds the cost, so do not write it. Call it before finish.",
+        {
+            "type": "object",
+            "properties": {"markdown": {"type": "string"}},
+            "required": ["markdown"],
+        },
+    ),
     "checkpoint": (
         "Record your progress. End the note with 'Next: <the next step>'.",
         {
@@ -108,8 +144,7 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
         },
     ),
     "finish": (
-        "End the assignment. Write the summary on the plan page first. "
-        "follow_ups is a list of short texts.",
+        "End the assignment. Call write_report first. follow_ups is a list of short texts.",
         {
             "type": "object",
             "properties": {
@@ -146,7 +181,7 @@ def session_env(
 
 
 def assignment_server(handlers: Mapping[str, ToolHandler]) -> McpSdkServerConfig:
-    """The in-process MCP server ``assignment``, with the four tools of ``TOOL_SPECS``."""
+    """The in-process MCP server ``assignment``, with the tools of ``TOOL_SPECS``."""
     if set(handlers) != set(TOOL_SPECS):
         raise ValueError(f"the assignment server has the tools {sorted(TOOL_SPECS)}")
     tools = [

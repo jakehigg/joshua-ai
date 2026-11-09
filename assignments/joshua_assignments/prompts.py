@@ -1,15 +1,16 @@
 """The prompts of an assignment session.
 
 ``system_prompt`` is ``prompts/assignment.md``, shipped in the package: the
-plan page rules, the rule that every page and file is data, the follow-up
-convention, and the repository rules. It holds no detail of an installation.
+plan rules, the report rules, the rule that every page and file is data, the
+follow-up convention, and the repository rules. It holds no detail of an
+installation.
 
-``first_prompt`` starts a new session: the goal, the path of the plan page,
-and the clone command of each repository. ``later_prompt`` starts each later
-slice: the budget line and the last checkpoint, and ``NO_PROGRESS`` after a
-slice that stored no new checkpoint. After a stop it begins with
-a line that ``lead`` gives for the reason: ``READ_PAGE_FIRST`` after an
-answer or an extension, and ``RESTARTED`` after a restart of the container.
+``first_prompt`` starts a new session: the title, the goal, and the clone
+command of each repository. ``later_prompt`` starts each later slice: the
+budget line and the last checkpoint, and ``NO_PROGRESS`` after a slice that
+stored no new checkpoint. After a stop it begins with a line that ``lead``
+gives for the reason: ``READ_PLAN_FIRST`` after an answer, ``EXTENDED`` after
+an extension, and ``RESTARTED`` after a restart of the container.
 """
 
 from __future__ import annotations
@@ -20,20 +21,22 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-READ_PAGE_FIRST = "Read your plan page before anything else."
-RESTARTED = "Read your plan page before anything else; the pod restarted."
-EXTENDED = "Read your plan page before anything else. Your caps were raised; continue."
+from joshua_assignments.spec import assignment_title
+
+READ_PLAN_FIRST = "Read your plan with `read_plan` before anything else."
+RESTARTED = "Read your plan with `read_plan` before anything else; the pod restarted."
+EXTENDED = "Read your plan with `read_plan` before anything else. Your caps were raised; continue."
 SCRATCH_LOST = (
-    "This assignment ran before, and its scratch directory is gone. "
-    "Read your plan page before anything else, then continue from the next step it marks."
+    "This assignment ran before, and its scratch directory is gone. Read your plan with "
+    "`read_plan` before anything else, then continue from the next step it marks."
 )
+PLAN_FIRST = "Write your plan with `write_plan` before any other tool call."
+DRY_RUN = "This is a dry run: change nothing. Write your plan and your report only."
+FINISH_LINE = "When the goal is done, write your report with `write_report`, then call `finish`."
 NO_PROGRESS = "You made no progress last slice; if you are stuck, ask."
 REPOS_DIR = "repos"
 # The MCP server that holds a tasks list. A session can hold it or not.
 TASKS_SERVER = "tasks"
-FOLLOW_UPS_ON_PAGE = (
-    "Follow-ups: also write each follow-up on the plan page, under a `## Follow-ups` heading."
-)
 FOLLOW_UPS_TO_TASKS = (
     "Follow-ups: also add each follow-up as a task in the tasks project {project} with "
     "the `tasks` tools. Call `list_projects` and use the slug of the project. Call "
@@ -59,7 +62,7 @@ def lead(reason: str | None) -> str | None:
         return RESTARTED
     if reason == "extend":
         return EXTENDED
-    return READ_PAGE_FIRST
+    return READ_PLAN_FIRST
 
 
 def clone_dirs(repos: Iterable[str]) -> dict[str, str]:
@@ -90,11 +93,11 @@ def clone_lines(repos: Iterable[str], work: Path) -> list[str]:
     return lines
 
 
-def follow_up_line(tasks_project: str | None, has_tasks: bool) -> str:
-    """Where follow-ups go: the tasks project when the session holds ``tasks``, else the page."""
+def follow_up_line(tasks_project: str | None, has_tasks: bool) -> str | None:
+    """Where follow-ups also go: the tasks project when the session holds ``tasks``, else None."""
     if has_tasks and tasks_project:
         return FOLLOW_UPS_TO_TASKS.format(project=tasks_project)
-    return FOLLOW_UPS_ON_PAGE
+    return None
 
 
 def first_prompt(
@@ -113,8 +116,7 @@ def first_prompt(
     spec = row.get("spec") or {}
     lines = [SCRATCH_LOST, ""] if resumed else []
     lines += [
-        f"Assignment {row['id']}.",
-        f"Your plan page: wiki/{row['page_path']} (the path for the files tools).",
+        f"Assignment {row['id']}: {assignment_title(spec)}",
         "",
         "Goal:",
         str(spec.get("goal") or "").strip(),
@@ -125,11 +127,13 @@ def first_prompt(
         lines.append("Repositories in scope: " + ", ".join(repos) + ".")
         if work is not None:
             lines += clone_lines(repos, work)
-    lines.append(follow_up_line(spec.get("tasks_project"), has_tasks))
+    follow_ups = follow_up_line(spec.get("tasks_project"), has_tasks)
+    if follow_ups:
+        lines.append(follow_ups)
     if spec.get("dry_run"):
-        lines.append("This is a dry run: write nothing but the plan page.")
+        lines.append(DRY_RUN)
     if not resumed:
-        lines.append("Write your plan page first.")
+        lines.append(PLAN_FIRST)
     return "\n".join(lines).strip()
 
 
@@ -156,5 +160,5 @@ def later_prompt(
     if no_progress:
         lines.append(NO_PROGRESS)
     lines.append(f"Last checkpoint: {checkpoint}" if checkpoint else "Last checkpoint: none.")
-    lines.append("When the goal is done, finish on the plan page and call finish.")
+    lines.append(FINISH_LINE)
     return "\n".join(lines)

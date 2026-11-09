@@ -11,6 +11,18 @@ with the images and the packaged chart, are at
   and its outputs, the progress, and the definition. The saved assignments
   are at `/assignments/saved`. The viewer needs `ASSIGNMENTS_URL`: compose
   sets it, and the chart sets it when `assignments.enabled` is true.
+- **The plan and the report of an assignment are in the store, not the
+  wiki.** The worker writes its plan with `write_plan`, records each output
+  with `record_output`, and writes a report with `write_report` before it
+  calls `finish`. The runner adds the cost to the report. When an
+  assignment stops in another status than `done` with no report, the
+  runner writes one. `assignment_status` gives the title, the state
+  (`queued`, `in_progress`, `completed`), the plan, the report, and the
+  outputs, and `list_assignments` filters by state. A spec can give a
+  `title`. A session no longer gets the `files` server when `tools` leaves
+  it out. The plan pages that earlier assignments wrote in
+  `wiki/assignments/` stay where they are. See
+  [assignments.md](assignments.md#the-plan-the-outputs-and-the-report).
 
 ## 0.2.0 - 2026-11-08
 

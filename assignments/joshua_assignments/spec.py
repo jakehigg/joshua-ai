@@ -25,6 +25,9 @@ MAX_TURNS = 10000
 # own destination, ``assignments.people.<id>.notify``.
 REPORT_TO_CONVERSATION = "conversation"
 SLUG_CHARS = 40
+MAX_TITLE = 120
+# A title that ``title_of`` makes from the goal is at most this long.
+TITLE_CHARS = 80
 _MCP_NAME_RE = re.compile(MCP_NAME_PATTERN)
 
 
@@ -58,6 +61,7 @@ class AssignmentSpec(_Spec):
     """What a caller gives ``start_assignment``."""
 
     goal: str = Field(min_length=1, max_length=MAX_GOAL_CHARS)
+    title: str | None = Field(default=None, max_length=MAX_TITLE)
     model: str | None = None
     budget: Budget = Budget()
     max_turns: int | None = Field(default=None, gt=0, le=MAX_TURNS)
@@ -74,6 +78,13 @@ class AssignmentSpec(_Spec):
         if not value.strip():
             raise ValueError("goal is empty")
         return value.strip()
+
+    @field_validator("title")
+    @classmethod
+    def _title_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return " ".join(value.split()) or None
 
     @field_validator("working_time")
     @classmethod
@@ -162,6 +173,7 @@ def resolve(spec: AssignmentSpec, section: Assignments) -> Resolved:
     persona = section.models[model]
     resolved = {
         "goal": spec.goal,
+        "title": spec.title or title_of(spec.goal),
         "model": model,
         "budget": {"five_hour_pct": five, "seven_day_pct": seven, "tokens": spec.budget.tokens},
         "max_turns": spec.max_turns or section.default_max_turns,
@@ -175,20 +187,40 @@ def resolve(spec: AssignmentSpec, section: Assignments) -> Resolved:
     return Resolved(spec=resolved, model_id=persona.model, effort=persona.effort, notes=notes)
 
 
-def slug(goal: str) -> str:
-    """The first line of ``goal`` with text, in kebab case, at most ``SLUG_CHARS`` long."""
-    line = next((text for text in goal.splitlines() if text.strip()), "")
-    ascii_text = unicodedata.normalize("NFKD", line).encode("ascii", "ignore").decode()
-    words = re.findall(r"[a-z0-9]+", ascii_text.lower())
+def _first_line(goal: str) -> str:
+    return next((text.strip() for text in goal.splitlines() if text.strip()), "")
+
+
+def _cut(words: list[str], limit: int, sep: str) -> str:
+    """The first words of ``words``, joined by ``sep``, at most ``limit`` long."""
     out = ""
     for word in words:
-        candidate = f"{out}-{word}" if out else word
-        if len(candidate) > SLUG_CHARS:
+        candidate = f"{out}{sep}{word}" if out else word
+        if len(candidate) > limit:
             break
         out = candidate
-    return out or "assignment"
+    return out
 
 
-def page_path(assignment_id: int, goal: str) -> str:
-    """The plan page of an assignment, relative to the wiki."""
-    return f"assignments/{assignment_id}-{slug(goal)}.md"
+def slug(goal: str) -> str:
+    """The first line of ``goal`` with text, in kebab case, at most ``SLUG_CHARS`` long."""
+    ascii_text = unicodedata.normalize("NFKD", _first_line(goal)).encode("ascii", "ignore").decode()
+    words = re.findall(r"[a-z0-9]+", ascii_text.lower())
+    return _cut(words, SLUG_CHARS, "-") or "assignment"
+
+
+def title_of(goal: str) -> str:
+    """The first sentence of ``goal``, at most ``TITLE_CHARS`` long, cut at a word."""
+    line = _first_line(goal)
+    sentence = re.split(r"(?<=[.!?])\s", line, maxsplit=1)[0].rstrip(".")
+    words = sentence.split()
+    title = _cut(words, TITLE_CHARS, " ")
+    if not title and words:
+        title = words[0][:TITLE_CHARS]
+    return title or "Assignment"
+
+
+def assignment_title(spec: dict[str, Any] | None) -> str:
+    """The title of an assignment: ``title`` of its spec, else one from its goal."""
+    spec = spec or {}
+    return str(spec.get("title") or title_of(str(spec.get("goal") or "")))

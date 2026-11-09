@@ -100,10 +100,12 @@ async def _own(caller: Caller, assignment_id: int) -> dict[str, Any]:
 
 @mcp.tool()
 async def start_assignment(spec: dict[str, Any], ctx: Context) -> dict:
-    """Start a long job that runs in the background. Returns id, status, and page_path at once.
+    """Start a long job that runs in the background. Returns id, status, and title at once.
 
     spec is the whole brief; the assignment sees nothing else of the chat:
-    goal (required): what to do and what done means. model: a name from
+    goal (required): what to do, what done means, and where each result goes.
+    title: a short name, at most 120 characters; without it, the first
+    sentence of the goal. model: a name from
     assignments.models; without it, the default. budget: five_hour_pct and
     seven_day_pct stop the assignment when that subscription window reaches
     the percent used; tokens caps its own tokens. A ceiling above the
@@ -112,8 +114,8 @@ async def start_assignment(spec: dict[str, Any], ctx: Context) -> dict:
     repos: what it may clone, each in assignments.repos. tools: the MCP
     servers it may use, from the ones you may use. tasks_project: where
     follow-ups go. report_to: conversation, or a destination name. dry_run:
-    true plans and reports and writes nothing but the plan page. The report
-    and any question arrive later as a turn in the conversation.
+    true plans and reports and changes nothing. The report and any question
+    arrive later as a turn in the conversation.
     """
     person = _person(ctx)
     conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
@@ -125,19 +127,27 @@ async def assignment_status(id: int, ctx: Context) -> dict:
     """The state of one assignment.
 
     status is queued, running, waiting, paused_limits, done, failed,
-    cancelled, budget_exceeded, or time_exceeded. The result also has the
-    plan page path, the last checkpoint, the usage, the turns, the open
-    question, the limits at the stop, the summary, and the error.
+    cancelled, budget_exceeded, or time_exceeded. state is queued,
+    in_progress, or completed. The result also has the title, the plan of
+    the worker, the report and report_at, the recorded outputs, the last
+    checkpoint, the usage, the turns, the open question, the limits at the
+    stop, the summary, and the error. Read the report here.
     """
     caller = _caller(ctx)
     return await get_manager().status(await _own(caller, id))
 
 
 @mcp.tool()
-async def list_assignments(ctx: Context, limit: int = 10, status: str | None = None) -> dict:
-    """The person's assignments, the newest first. limit is 1 to 100. status filters."""
+async def list_assignments(
+    ctx: Context, limit: int = 10, status: str | None = None, state: str | None = None
+) -> dict:
+    """The person's assignments, the newest first, each with its title and state.
+
+    limit is 1 to 100. status filters by status. state filters by state:
+    queued, in_progress, or completed.
+    """
     caller = _caller(ctx)
-    return await get_manager().recent(caller.person, limit, status)
+    return await get_manager().recent(caller.person, limit, status, state)
 
 
 @mcp.tool()
@@ -156,7 +166,7 @@ async def answer_assignment(id: int, text: str, ctx: Context) -> dict:
 
 @mcp.tool()
 async def cancel_assignment(id: int, ctx: Context) -> dict:
-    """Stop an assignment. The row and the plan page stay."""
+    """Stop an assignment. The runner writes its report; the plan and the report stay."""
     person = _person(ctx)
     return await get_manager().cancel(await _own(Caller(person=person), id))
 

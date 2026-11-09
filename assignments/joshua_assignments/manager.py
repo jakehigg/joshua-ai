@@ -29,7 +29,7 @@ from joshua_shared.config import Assignments, JoshuaConfig
 from joshua_shared.log import get_logger
 from pydantic import ValidationError
 
-from joshua_assignments import budget, notify
+from joshua_assignments import budget, notify, report
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.runner import Runner, StubRunner
 from joshua_assignments.settings import Settings
@@ -38,19 +38,22 @@ from joshua_assignments.spec import (
     MAX_TURNS,
     AssignmentSpec,
     SpecRefused,
+    assignment_title,
     check_duration,
     clamp,
     first_error,
-    page_path,
     resolve,
 )
 from joshua_assignments.store import (
     FINISHED,
     PARKED,
     RESUMABLE,
+    STATES,
     STATUSES,
     USAGE_FIELDS,
     Store,
+    state,
+    statuses_of,
 )
 
 logger = get_logger("joshua_assignments.manager")
@@ -74,10 +77,11 @@ def summary_view(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
         "person": row["person_id"],
+        "title": assignment_title(spec),
         "status": row["status"],
+        "state": state(row["status"]),
         "goal": goal.splitlines()[0][:200] if goal else "",
         "model": spec.get("model"),
-        "page_path": row.get("page_path"),
         "created_at": _iso(row.get("created_at")),
         "finished_at": _iso(row.get("finished_at")),
     }
@@ -87,7 +91,8 @@ def full_view(row: dict[str, Any], checkpoint: dict[str, Any] | None) -> dict[st
     """The whole state of an assignment, for ``assignment_status``.
 
     ``next_step`` comes from the latest checkpoint note: the text after
-    ``Next:``, else the whole note. The plan page is the full record.
+    ``Next:``, else the whole note. ``plan`` is the plan of the worker, and
+    ``report`` is the report, with ``outputs`` the recorded outputs.
     """
     spec = row.get("spec") or {}
     return {
@@ -118,6 +123,11 @@ def full_view(row: dict[str, Any], checkpoint: dict[str, Any] | None) -> dict[st
         "follow_ups": row.get("follow_ups"),
         "error": row.get("error"),
         "started_at": _iso(row.get("started_at")),
+        "plan": row.get("plan"),
+        "plan_at": _iso(row.get("plan_at")),
+        "report": row.get("report"),
+        "report_at": _iso(row.get("report_at")),
+        "outputs": row.get("outputs") or [],
     }
 
 
@@ -224,7 +234,7 @@ class Manager:
         if row is not None:
             if row["status"] == "paused_limits" and row.get("stopped_at_limits"):
                 text = budget.limits_stop_text(
-                    row["stopped_at_limits"], row.get("page_path"), self.load_config().timezone
+                    row["stopped_at_limits"], self.load_config().timezone
                 )
                 await notify.send_question(self.settings, self.section, row, text)
             elif row["status"] in PARKED:
@@ -263,7 +273,6 @@ class Manager:
             conversation_id=conversation_id or None,
             spec=resolved.spec,
             model=resolved.model_id,
-            page_path=lambda assignment_id: page_path(assignment_id, spec.goal),
         )
         logger.info(
             {
@@ -282,7 +291,7 @@ class Manager:
         return {
             "id": row["id"],
             "status": current["status"],
-            "page_path": row["page_path"],
+            "title": resolved.spec["title"],
             "model": resolved.spec["model"],
             "budget": resolved.spec["budget"],
             "max_turns": resolved.spec["max_turns"],
@@ -310,11 +319,16 @@ class Manager:
         checkpoint = await self.store.last_checkpoint(row["id"])
         return full_view(row, checkpoint)
 
-    async def recent(self, person: str | None, limit: int, status: str | None) -> dict[str, Any]:
+    async def recent(
+        self, person: str | None, limit: int, status: str | None, state: str | None = None
+    ) -> dict[str, Any]:
         if status is not None and status not in STATUSES:
             return rejected("invalid_status", f"status is one of {', '.join(STATUSES)}")
+        if state is not None and state not in STATES:
+            return rejected("invalid_state", f"state is one of {', '.join(STATES)}")
         limit = max(1, min(int(limit), MAX_LIST))
-        rows = await self.store.recent(person, limit, status)
+        statuses = statuses_of(state) if state is not None else None
+        rows = await self.store.recent(person, limit, status, statuses)
         return {"assignments": [summary_view(row) for row in rows]}
 
     async def answer(self, row: dict[str, Any], text: str) -> dict[str, Any]:
@@ -385,14 +399,16 @@ class Manager:
         if row["status"] in FINISHED:
             return rejected("finished", f"assignment {row['id']} has ended: {row['status']}")
         await self.runner.cancel(row)
-        await self.store.update(row["id"], status="cancelled", finished_at=self.clock())
+        now = self.clock()
+        await self.store.update(row["id"], status="cancelled", finished_at=now)
+        await report.finalize(self.store, row["id"], now, self.load_config().timezone)
         logger.info({"message": "assignment cancelled", "assignment_id": row["id"]})
         await self.dispatch()
         return {
             "id": row["id"],
             "status": "cancelled",
-            "page_path": row.get("page_path"),
-            "message": f"Assignment {row['id']} is cancelled. The row and the plan page stay.",
+            "message": f"Assignment {row['id']} is cancelled. The plan and the report stay; "
+            f"read them with assignment_status({row['id']}).",
         }
 
     async def extend(

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Collection, Coroutine
 from datetime import datetime
 from typing import Any, Concatenate, Protocol
 
@@ -51,15 +51,21 @@ FINISHED = frozenset({"done", "failed", "cancelled", "budget_exceeded", "time_ex
 RESUMABLE = frozenset({"budget_exceeded", "time_exceeded"})
 # An ended assignment whose scratch stays for ``assignments.keep_failed_work``.
 KEEP_SCRATCH = frozenset({"failed", *RESUMABLE})
+# What a person sees: three states. ``state`` maps each status to one.
+STATES = ("queued", "in_progress", "completed")
+IN_PROGRESS = frozenset({"running", *PARKED})
 USAGE_FIELDS = ("input", "output", "cache_read", "cache_write")
-JSON_FIELDS = frozenset({"spec", "stopped_at_limits", "follow_ups"})
+JSON_FIELDS = frozenset({"spec", "stopped_at_limits", "follow_ups", "outputs"})
+# The caps of one output. ``add_output`` cuts each field to its cap.
+MAX_OUTPUT_KIND = 40
+MAX_OUTPUT_REF = 500
+MAX_OUTPUT_TITLE = 200
 # The columns ``update`` may set.
 UPDATABLE = frozenset(
     {
         "spec",
         "status",
         "session_id",
-        "page_path",
         *USAGE_FIELDS,
         "turns",
         "started_at",
@@ -89,6 +95,7 @@ CREATE TABLE IF NOT EXISTS assignments.assignment (
     status            TEXT NOT NULL DEFAULT 'queued',
     model             TEXT NOT NULL,
     session_id        TEXT,
+    -- No longer written. A row from an earlier release keeps its value.
     page_path         TEXT,
     input             BIGINT NOT NULL DEFAULT 0,
     output            BIGINT NOT NULL DEFAULT 0,
@@ -107,6 +114,13 @@ CREATE TABLE IF NOT EXISTS assignments.assignment (
     follow_ups        JSONB,
     error             TEXT
 );
+-- The plan of the worker (Markdown, replaced whole), the report (Markdown),
+-- and the outputs: a list of {"kind", "ref", "title", "at"}.
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS plan TEXT;
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS plan_at TIMESTAMPTZ;
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS report TEXT;
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS report_at TIMESTAMPTZ;
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS outputs JSONB;
 CREATE INDEX IF NOT EXISTS idx_assignment_person
     ON assignments.assignment (person_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_assignment_status
@@ -155,13 +169,16 @@ class Store(Protocol):
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
-        page_path: Callable[[int], str],
     ) -> dict[str, Any]: ...
 
     async def get(self, assignment_id: int) -> dict[str, Any] | None: ...
 
     async def recent(
-        self, person_id: str | None, limit: int, status: str | None = None
+        self,
+        person_id: str | None,
+        limit: int,
+        status: str | None = None,
+        statuses: Collection[str] | None = None,
     ) -> list[dict[str, Any]]: ...
 
     async def update(self, assignment_id: int, **fields: Any) -> dict[str, Any] | None: ...
@@ -169,6 +186,14 @@ class Store(Protocol):
     async def add_checkpoint(self, assignment_id: int, note: str) -> None: ...
 
     async def last_checkpoint(self, assignment_id: int) -> dict[str, Any] | None: ...
+
+    async def write_plan(self, assignment_id: int, markdown: str) -> None: ...
+
+    async def read_plan(self, assignment_id: int) -> str | None: ...
+
+    async def add_output(self, assignment_id: int, kind: str, ref: str, title: str) -> int: ...
+
+    async def write_report(self, assignment_id: int, markdown: str) -> None: ...
 
     async def counts(self) -> dict[str, int]: ...
 
@@ -189,6 +214,29 @@ class Store(Protocol):
         ended_at: datetime,
         reason: str,
     ) -> None: ...
+
+
+def state(status: str) -> str:
+    """The state that a person sees for ``status``: queued, in_progress, or completed."""
+    if status == "queued":
+        return "queued"
+    if status in IN_PROGRESS:
+        return "in_progress"
+    return "completed"
+
+
+def statuses_of(state_name: str) -> tuple[str, ...]:
+    """The statuses of one state, in the order of ``STATUSES``."""
+    return tuple(status for status in STATUSES if state(status) == state_name)
+
+
+def output_record(kind: str, ref: str, title: str) -> tuple[str, str, str]:
+    """``kind``, ``ref``, and ``title``, each stripped and cut to its cap."""
+    return (
+        kind.strip()[:MAX_OUTPUT_KIND],
+        ref.strip()[:MAX_OUTPUT_REF],
+        title.strip()[:MAX_OUTPUT_TITLE],
+    )
 
 
 def check_fields(fields: dict[str, Any]) -> None:
@@ -290,19 +338,12 @@ class PgStore:
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
-        page_path: Callable[[int], str],
     ) -> dict[str, Any]:
-        async with self._pool().connection() as conn, conn.transaction():
+        async with self._pool().connection() as conn:
             cur = await conn.execute(
                 "INSERT INTO assignments.assignment (person_id, conversation_id, spec, model) "
-                "VALUES (%s, %s, %s, %s) RETURNING id",
+                "VALUES (%s, %s, %s, %s) RETURNING *",
                 (person_id, conversation_id, Jsonb(spec), model),
-            )
-            row = await cur.fetchone()
-            assert row is not None
-            cur = await conn.execute(
-                "UPDATE assignments.assignment SET page_path = %s WHERE id = %s RETURNING *",
-                (page_path(row["id"]), row["id"]),
             )
             created = await cur.fetchone()
         assert created is not None
@@ -319,15 +360,24 @@ class PgStore:
 
     @shielded
     async def recent(
-        self, person_id: str | None, limit: int, status: str | None = None
+        self,
+        person_id: str | None,
+        limit: int,
+        status: str | None = None,
+        statuses: Collection[str] | None = None,
     ) -> list[dict[str, Any]]:
-        clauses, params = [], []
+        """The newest rows. ``status`` and ``statuses`` filter, and both apply."""
+        clauses: list[str] = []
+        params: list[Any] = []
         if person_id is not None:
             clauses.append("person_id = %s")
             params.append(person_id)
         if status is not None:
             clauses.append("status = %s")
             params.append(status)
+        if statuses is not None:
+            clauses.append("status = ANY(%s)")
+            params.append(list(statuses))
         where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
         async with self._pool().connection() as conn:
             cur = await conn.execute(
@@ -374,6 +424,48 @@ class PgStore:
             )
             row = await cur.fetchone()
         return dict(row) if row else None
+
+    @shielded
+    async def write_plan(self, assignment_id: int, markdown: str) -> None:
+        """Replace the plan of the assignment."""
+        async with self._pool().connection() as conn:
+            await conn.execute(
+                "UPDATE assignments.assignment SET plan = %s, plan_at = now() WHERE id = %s",
+                (markdown, assignment_id),
+            )
+
+    @shielded
+    async def read_plan(self, assignment_id: int) -> str | None:
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "SELECT plan FROM assignments.assignment WHERE id = %s", (assignment_id,)
+            )
+            row = await cur.fetchone()
+        return row["plan"] if row else None
+
+    @shielded
+    async def add_output(self, assignment_id: int, kind: str, ref: str, title: str) -> int:
+        """Append one output to the list. Returns the number of outputs, 0 for no row."""
+        kind, ref, title = output_record(kind, ref, title)
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "UPDATE assignments.assignment SET outputs = COALESCE(outputs, '[]'::jsonb) || "
+                "jsonb_build_array(jsonb_build_object("
+                "'kind', %s::text, 'ref', %s::text, 'title', %s::text, 'at', now())) "
+                "WHERE id = %s RETURNING jsonb_array_length(outputs) AS n",
+                (kind, ref, title, assignment_id),
+            )
+            row = await cur.fetchone()
+        return int(row["n"]) if row else 0
+
+    @shielded
+    async def write_report(self, assignment_id: int, markdown: str) -> None:
+        """Replace the report of the assignment."""
+        async with self._pool().connection() as conn:
+            await conn.execute(
+                "UPDATE assignments.assignment SET report = %s, report_at = now() WHERE id = %s",
+                (markdown, assignment_id),
+            )
 
     @shielded
     async def counts(self) -> dict[str, int]:

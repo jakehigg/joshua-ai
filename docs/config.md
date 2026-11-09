@@ -290,9 +290,8 @@ behavior a member teaches in chat. See [memory.md](memory.md#taught-skills).
 The `files` source does not index a page in them, so the next pass removes
 its rows. `search_memory`, the per-turn injection, and
 `POST /v1/memory/search` never return such a page, also when the index still
-holds it. The default excludes `wiki/assignments/`, where each assignment
-keeps its plan page. A plan page is work in progress, and it must not come
-back in a turn as a memory. An empty value excludes nothing.
+holds it. The default excludes `wiki/assignments/`. An empty value excludes
+nothing.
 
 ```yaml
 memory:
@@ -1144,6 +1143,12 @@ token from `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`. See
 member in the background. [assignments.md](assignments.md) explains the
 container, the spec, the tools, and the setup. Only the `assignments`
 container reads this section.
+
+The spec of one assignment is not in `joshua.yaml`: Joshua gives it to
+`start_assignment`. [assignments.md](assignments.md#the-spec) lists its
+fields. `title` is the short name of the assignment, at most 120 characters.
+Without it, the title is the first sentence of the goal, cut to 80
+characters.
 
 | Knob | Default | Effect |
 |---|---|---|

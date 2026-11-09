@@ -74,7 +74,7 @@ class StallCounter:
         self.errors = self.errors[-MAX_ERRORS:]
         return self.slices >= self.limit
 
-    def question(self, checkpoint: str | None, page: str | None) -> str:
+    def question(self, checkpoint: str | None) -> str:
         """The automatic question of a stalled assignment."""
         slices = "1 slice" if self.slices == 1 else f"{self.slices} slices"
         lines = [
@@ -92,6 +92,5 @@ class StallCounter:
             lines += [f"- {error}" for error in self.errors]
         else:
             lines.append("I saw no tool error.")
-        lines.append(f"My plan and progress are at {page}.")
         lines.append("Tell me how to continue, or stop me.")
         return "\n".join(lines)[:MAX_QUESTION]
