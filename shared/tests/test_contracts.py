@@ -15,6 +15,8 @@ from joshua_shared.contracts import (
     ResolveResponse,
     TurnAck,
     TurnEvent,
+    assignment_conversation,
+    assignment_of,
 )
 from pydantic import BaseModel, ValidationError
 
@@ -215,3 +217,29 @@ def test_the_forwarder_and_usage_paths() -> None:
 
     assert MODEL_FORWARDER_PATH == "/v1/model"
     assert USAGE_WRITE_PATH == "/v1/usage"
+
+
+def test_an_assignment_conversation_round_trips() -> None:
+    assert assignment_conversation(12) == "assignment:12"
+    assert assignment_of("assignments", assignment_conversation(12)) == 12
+
+
+@pytest.mark.parametrize(
+    ("identity", "conversation"),
+    [
+        ("core", "assignment:12"),
+        ("viewer", "assignment:12"),
+        ("assignments", None),
+        ("assignments", ""),
+        ("assignments", "assignment:"),
+        ("assignments", "assignment:0"),
+        ("assignments", "assignment:-3"),
+        ("assignments", "assignment:12x"),
+        ("assignments", "assignment:\u0661"),
+        ("assignments", "xassignment:12"),
+        ("assignments", "telegram:12"),
+        (None, "assignment:12"),
+    ],
+)
+def test_only_the_assignments_caller_names_an_assignment(identity, conversation) -> None:
+    assert assignment_of(identity, conversation) is None

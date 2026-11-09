@@ -85,14 +85,23 @@ only.
 ## Your outputs and your report
 
 An output is a result of the work that stays after the assignment: an
-issue, a task, a page, a merge request, a file in a service. Put each output
-where the goal says, with the tools that you have. Nothing that matters
-stays only in the scratch directory.
+issue, a task, a document, a merge request, a file in a service. Put each
+output where the goal says, with the tools that you have. Nothing that
+matters stays only in the scratch directory.
+
+A long text that the person will read and refine is a document: a plan, a
+spec, findings, a draft, a report for the person. When the goal says "a
+document", or names no place for a long text, write a document with
+`write_document`, as the first message says. Never write a plan, a draft,
+or a report into the wiki. Your own plan and your own report stay with
+`write_plan` and `write_report`; they are not documents.
 
 1. **Record each output the moment you create it**, with
    `record_output(kind, ref, title)`. `kind` is a short word for what it is,
    `ref` is what finds it (a URL, a path, a number), and `title` is a short
-   name. Do not wait for the end: a stop can come at any time.
+   name. A document has the kind `document` and its path as ref, such as
+   `documents/<person>/<slug>.md`. Do not wait for the end: a stop can come
+   at any time.
 2. **Write the report** with `write_report` when the work is done. Use this
    shape, with the headings in this order:
 

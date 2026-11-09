@@ -168,6 +168,91 @@ async def test_a_caller_cannot_forge_the_server_fields(gateway, data_root, monke
     assert sneaky.is_error is True and "frontmatter" in sneaky.content[0].text
 
 
+ASSIGNMENT_12 = {**ALEX, "X-Joshua-Conversation": "assignment:12"}
+
+
+async def call_as(app, identity: str, tool: str, args: dict, headers: dict):
+    async with gateway_session(app, "/documents", identity, headers) as session:
+        return await session.call_tool(tool, args)
+
+
+async def test_an_assignment_session_is_the_author(gateway, data_root):
+    app = gateway(both_yaml())
+    path = "documents/alex/findings.md"
+    async with lifespan(app):
+        res = await call_as(
+            app,
+            "assignments",
+            "write_document",
+            {"path": path, "body": "one\n", "title": "Findings", "kind": "report"},
+            ASSIGNMENT_12,
+        )
+        # Alex refines it in a chat: the author and the assignment stay.
+        await call(app, "write_document", {"path": path, "body": "two\n", "status": "active"})
+        fm = as_json(await call(app, "read_document", {"path": path}))["frontmatter"]
+        items = as_json(await call(app, "list_documents", {}))
+    assert res.is_error is False, res.content[0].text
+    assert fm["author"] == "assignment:12"
+    assert fm["assignment"] == 12
+    assert fm["status"] == "active"
+    assert items[0]["author"] == "assignment:12"
+    assert str(items[0]["assignment"]) == "12"
+
+
+async def test_an_assignment_that_edits_a_document_of_the_person_keeps_the_author(
+    gateway, data_root
+):
+    app = gateway(both_yaml())
+    path = "documents/alex/trip.md"
+    async with lifespan(app):
+        await call(app, "write_document", {"path": path, "body": "a\n", "title": "Trip"})
+        await call_as(
+            app, "assignments", "write_document", {"path": path, "body": "b\n"}, ASSIGNMENT_12
+        )
+        fm = as_json(await call(app, "read_document", {"path": path}))["frontmatter"]
+    assert fm["author"] == "alex"
+    assert fm["assignment"] == 12
+
+
+async def test_only_the_assignments_caller_writes_as_an_assignment(gateway, data_root):
+    app = gateway(both_yaml())
+    async with lifespan(app):
+        # Core sends a conversation that looks like an assignment: it is not one.
+        await call(
+            app,
+            "write_document",
+            {"path": "documents/alex/a.md", "body": "x\n", "title": "A"},
+            headers=ASSIGNMENT_12,
+        )
+        # The assignments caller with another conversation is the person.
+        await call_as(
+            app,
+            "assignments",
+            "write_document",
+            {"path": "documents/alex/b.md", "body": "x\n", "title": "B"},
+            {**ALEX, "X-Joshua-Conversation": "telegram:alex"},
+        )
+        fa = as_json(await call(app, "read_document", {"path": "documents/alex/a.md"}))
+        fb = as_json(await call(app, "read_document", {"path": "documents/alex/b.md"}))
+    for meta in (fa["frontmatter"], fb["frontmatter"]):
+        assert meta["author"] == "alex"
+        assert "assignment" not in meta
+
+
+async def test_an_assignment_reaches_only_the_folders_of_its_person(gateway, data_root):
+    app = gateway(both_yaml())
+    async with lifespan(app):
+        res = await call_as(
+            app,
+            "assignments",
+            "write_document",
+            {"path": "documents/mia/x.md", "body": "x\n", "title": "X"},
+            ASSIGNMENT_12,
+        )
+    assert res.is_error is True and "not yours" in res.content[0].text
+    assert not (docs(data_root) / "mia" / "x.md").exists()
+
+
 async def test_a_replace_keeps_the_fields_it_does_not_give(gateway, data_root):
     app = gateway(both_yaml())
     async with lifespan(app):

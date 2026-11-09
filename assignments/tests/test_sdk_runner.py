@@ -9,6 +9,7 @@ from pathlib import Path
 
 from conftest import make_config, make_settings
 from fakes import FIXED_NOW, FakeStore
+from joshua_assignments import prompts
 from joshua_assignments.manager import Manager
 from joshua_assignments.prompts import NO_PROGRESS, READ_PLAN_FIRST, RESTARTED
 from joshua_assignments.sdk_runner import (
@@ -44,6 +45,10 @@ mcp:
   files:
     kind: builtin
     allow: all
+  documents:
+    kind: builtin
+    allow:
+      - alex
   gitlab:
     type: http
     url: http://upstream.example/gitlab
@@ -494,7 +499,7 @@ async def test_the_session_holds_the_persons_gateway_servers_only(tmp_path, chan
     h = Harness(tmp_path, sdk, FakeCore())
     started = await h.start()
     options = sdk.clients[0].options
-    assert set(options.mcp_servers) == {"files", "gitlab", "tasks", "assignment"}
+    assert set(options.mcp_servers) == {"files", "documents", "gitlab", "tasks", "assignment"}
     gitlab = options.mcp_servers["gitlab"]
     assert gitlab["url"] == "http://gateway:8000/gitlab"
     assert gitlab["headers"]["X-Joshua-Conversation"] == f"assignment:{started['id']}"
@@ -514,9 +519,39 @@ async def test_spec_tools_narrow_the_servers_with_no_floor(tmp_path, channels) -
     sdk = FakeSdk([*done("ok"), result("success")], [*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, FakeCore())
     await h.start(tools=["gitlab", "private", "assignments"])
-    assert set(sdk.clients[0].options.mcp_servers) == {"gitlab", "assignment"}
+    assert set(sdk.clients[0].options.mcp_servers) == {"gitlab", "documents", "assignment"}
     await h.start(tools=[])
-    assert set(sdk.clients[1].options.mcp_servers) == {"assignment"}
+    assert set(sdk.clients[1].options.mcp_servers) == {"documents", "assignment"}
+
+
+async def test_the_session_always_holds_documents_when_the_person_has_it(
+    tmp_path, channels
+) -> None:
+    sdk = FakeSdk([*done("ok"), result("success")])
+    h = Harness(tmp_path, sdk, FakeCore())
+    started = await h.start(tools=["gitlab"])
+    client = sdk.clients[0]
+    documents = client.options.mcp_servers["documents"]
+    assert documents["url"] == "http://gateway:8000/documents"
+    # The gateway sets the author from this header and the assignments identity.
+    assert documents["headers"]["X-Joshua-Conversation"] == f"assignment:{started['id']}"
+    assert documents["headers"]["X-Joshua-Person"] == "alex"
+    assert (
+        "Deliverables go to documents: write each one with `write_document` under "
+        f"`documents/alex/`. The server sets `author: assignment:{started['id']}`"
+    ) in client.prompt
+    assert "an output of kind `document`, with the path as ref" in client.prompt
+
+
+async def test_a_person_without_documents_gets_no_documents_server(tmp_path, channels) -> None:
+    h = Harness(tmp_path, FakeSdk(), FakeCore())
+    for tools in (None, ["documents"], []):
+        row = {"id": 7, "person_id": "mia", "spec": {"goal": "g", "tools": tools}}
+        assert "documents" not in h.runner._gateway(row)
+    held = h.runner._gateway({"id": 7, "person_id": "mia", "spec": {"goal": "g"}})
+    assert prompts.DOCUMENTS_SERVER not in held
+    text = prompts.first_prompt({"id": 7, "person_id": "mia", "spec": {"goal": "g"}})
+    assert "write_document" not in text
 
 
 async def test_the_wait_and_checkpoint_tools(tmp_path, channels) -> None:

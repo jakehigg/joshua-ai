@@ -12,9 +12,12 @@ The spec is the whole brief. The assignment sees nothing else of this chat, so
 put everything that it needs in `goal`:
 
 - What to do, in the words of the person, and what "done" means.
-- Where each result goes. A goal with no place for its results is not
-  complete. Ask the person one question. When the person wants only to read
-  the result, say "the report".
+- Where each result goes: a document (the default for a plan, a spec, or a
+  report that the person will read and refine), a tool of the person, or
+  only the report. A goal with no place for its results is not complete.
+  Ask the person one question. When the person wants only to read the
+  result, say "the report". A document of an assignment is in the
+  documents of the person, and its output has the kind `document`.
 - Each limit that the person gave, such as "do not change anything" or
   "only look at the last month".
 

@@ -39,6 +39,13 @@ MAX_REPORT = 256 * 1024
 # A check box of a Markdown list item: ``1. [x] step`` or ``- [ ] step``.
 _BOX_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\]", re.MULTILINE)
 _URL_RE = re.compile(r"^https?://[^\s/]+\S*$")
+# A document path, ``documents/<owner>/<slug>.md`` or ``.html``. The owner is a
+# person id or ``shared``.
+_DOCUMENT_RE = re.compile(
+    r"^/?documents/(?P<owner>shared|[a-z0-9][a-z0-9-]{0,31})/"
+    r"(?P<slug>[A-Za-z0-9][A-Za-z0-9._-]{0,127})\.(?:md|html)$"
+)
+DOCUMENT_KIND = "document"
 
 
 def _lines(text: str | None) -> list[str]:
@@ -143,16 +150,29 @@ def _code(text: str) -> str:
     return text.replace("`", "'").replace("\n", " ")
 
 
+def document_page(ref: str) -> str | None:
+    """The viewer page ``/documents/<owner>/<slug>`` of a document path, or None."""
+    match = _DOCUMENT_RE.match(ref.strip())
+    if match is None or ".." in match.group("slug"):
+        return None
+    return f"/documents/{match.group('owner')}/{match.group('slug')}"
+
+
 def output_markdown(output: dict[str, Any]) -> str:
-    """One output as a Markdown list line: a link for a URL ref, else the ref as code."""
+    """One output as a Markdown list line: a link for a URL ref, else the ref as code.
+
+    An output of kind ``document`` also names its page in the viewer.
+    """
     kind = str(output.get("kind") or "output")
     ref = str(output.get("ref") or "")
     title = str(output.get("title") or "").strip()
     if _URL_RE.match(ref):
         return f"- {kind}: [{title or ref}]({ref})"
+    page = document_page(ref) if kind.strip().lower() == DOCUMENT_KIND else None
+    where = f", in the viewer at `{page}`" if page else ""
     if title:
-        return f"- {kind}: {title} — `{_code(ref)}`"
-    return f"- {kind}: `{_code(ref)}`"
+        return f"- {kind}: {title} — `{_code(ref)}`{where}"
+    return f"- {kind}: `{_code(ref)}`{where}"
 
 
 def generated(

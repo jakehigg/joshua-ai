@@ -54,7 +54,12 @@ from pathlib import Path
 from typing import Any
 
 from joshua_shared.config import parse_duration
-from joshua_shared.contracts import USAGE_MAX_COUNT, UsageWriteCounts, UsageWriteRow
+from joshua_shared.contracts import (
+    USAGE_MAX_COUNT,
+    UsageWriteCounts,
+    UsageWriteRow,
+    assignment_conversation,
+)
 from joshua_shared.gateway_mcp import allowed_gateway_servers, gateway_servers
 from joshua_shared.limits import parse_event_windows
 from joshua_shared.log import get_logger
@@ -435,7 +440,11 @@ class SdkRunner:
         await self._end(row["id"], "waiting")
 
     def _gateway(self, row: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """The gateway MCP servers of the person, built as core builds them."""
+        """The gateway MCP servers of the person, built as core builds them.
+
+        ``tools`` of the spec narrows the list, but never removes the
+        ``documents`` server when the person has it.
+        """
         cfg = self.host.load_config()
         person = row["person_id"]
         names = [
@@ -443,7 +452,8 @@ class SdkRunner:
         ]
         narrow = (row.get("spec") or {}).get("tools")
         if narrow is not None:
-            names = [name for name in names if name in narrow]
+            # ``tools`` never removes ``documents``: deliverables go there.
+            names = [n for n in names if n in narrow or n == prompts.DOCUMENTS_SERVER]
         settings = self.host.settings
         assert settings.gateway_url is not None
         return gateway_servers(
@@ -451,7 +461,7 @@ class SdkRunner:
             settings.gateway_url,
             settings.fleet_token,
             person,
-            f"assignment:{row['id']}",
+            assignment_conversation(row["id"]),
             role="member",
         )
 
@@ -557,11 +567,13 @@ class SdkRunner:
                     no_progress=counter.slices > 0,
                 )
             else:
+                held = self._gateway(row)
                 prompt = prompts.first_prompt(
                     row,
                     work,
                     resumed=scratch_lost,
-                    has_tasks=prompts.TASKS_SERVER in self._gateway(row),
+                    has_tasks=prompts.TASKS_SERVER in held,
+                    has_documents=prompts.DOCUMENTS_SERVER in held,
                     inbox_gone=inbox_gone,
                 )
                 if answer:

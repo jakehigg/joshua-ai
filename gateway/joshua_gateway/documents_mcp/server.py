@@ -19,7 +19,13 @@ and the person come from the request (``role_ctx``, ``person_ctx``), never from
 a tool argument.
 
 **Fields the server sets.** ``author``, ``created`` and ``updated`` are set
-here, and ``promoted_to`` only by ``promote_document``. A caller sets
+here, and ``promoted_to`` only by ``promote_document``. ``author`` is the
+person, or ``assignment:<id>`` when the session of an assignment writes the
+document. Then the server also sets ``assignment: <id>``. A request is of an
+assignment only when its fleet identity is ``assignments`` and its
+conversation header is ``assignment:<id>`` (``contracts.assignment_of``).
+This is attribution, not access control: the person still decides the
+folders. A caller sets
 ``title``, ``kind``, ``status``, ``format``, ``tags``, and ``summary``.
 """
 
@@ -35,6 +41,7 @@ from typing import Any
 
 import mcp_types as types
 from joshua_shared import layout
+from joshua_shared.contracts import assignment_of
 from joshua_shared.log import get_logger
 from mcp.server.lowlevel import Server
 
@@ -44,7 +51,7 @@ from joshua_gateway.documents_mcp.store import DocumentError
 from joshua_gateway.files_mcp.boundary import BoundaryError, check_boundary
 from joshua_gateway.files_mcp.paths import MEMBER, UNKNOWN, PathError
 from joshua_gateway.files_mcp.paths import roots as roots_for_role
-from joshua_gateway.observability import identity_ctx, person_ctx, role_ctx
+from joshua_gateway.observability import conversation_ctx, identity_ctx, person_ctx, role_ctx
 
 _logger = get_logger("documents_mcp")
 
@@ -219,6 +226,8 @@ class Request:
     root_dir: Path
     person: str | None
     member: bool
+    # The id of the assignment whose session sends the request, or None.
+    assignment: int | None = None
 
     def owners(self) -> list[str]:
         """The folders this request reaches: its own (when it has one) and shared."""
@@ -234,6 +243,12 @@ class Request:
         except ValueError:
             return None
         return person
+
+    def author(self) -> str:
+        """The ``author`` of a new document: ``assignment:<id>`` or the person."""
+        if self.assignment is not None:
+            return f"assignment:{self.assignment}"
+        return self.own() or UNKNOWN
 
 
 @dataclass(frozen=True)
@@ -281,7 +296,12 @@ def build_documents_server(
         role = role_ctx.get()
         if role is None and person is not None and person != UNKNOWN:
             role = roles(person)
-        return Request(root_dir=root_dir, person=person, member=role == MEMBER)
+        return Request(
+            root_dir=root_dir,
+            person=person,
+            member=role == MEMBER,
+            assignment=assignment_of(identity_ctx.get(), conversation_ctx.get()),
+        )
 
     async def on_list_tools(ctx, params):
         # The gateway lists the tools once at connect, with no request, for the
@@ -488,7 +508,9 @@ def _write_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
     meta.update({key: value for key, value in updates.items() if value is not None})
     now = _stamp(_now())
     meta["format"] = doc.fmt
-    meta["author"] = meta.get("author") or req.own() or UNKNOWN
+    meta["author"] = meta.get("author") or req.author()
+    if req.assignment is not None and not meta.get("assignment"):
+        meta["assignment"] = req.assignment
     meta["created"] = meta.get("created") or now
     meta["updated"] = now
 

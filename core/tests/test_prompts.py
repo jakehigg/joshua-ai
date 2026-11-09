@@ -269,6 +269,10 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         'answer_assignment(N, "continue")',
         "call `assignment_status`",
         "the report",
+        "Where each result goes: a document (the default for a plan, a spec, or a\n"
+        "  report that the person will read and refine), a tool of the person, or\n"
+        "  only the report.",
+        "its output has the kind `document`",
         "### Saved assignments",
         "save_assignment",
         'start_assignment(saved="docs-cleanup")',

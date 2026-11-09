@@ -45,9 +45,38 @@ def test_the_system_prompt_has_the_plan_and_report_rules_and_no_installation() -
     assert "Highlights has 3 to 5 bullets" in text and "write it as code" in text
     for banned in (
         "autrui", "http://", "https://", "family", "household", "create_task", "gitlab", "journal",
-        "wiki", "`files`", "write_file", "rename_file", "plan page", "developer", "index: false",
+        "`files`", "write_file", "rename_file", "plan page", "developer", "index: false",
     ):  # fmt: skip
         assert banned not in text
+    # The wiki is named once: a plan, a draft, or a report never goes there.
+    assert text.count("wiki") == 1
+    assert "Never write a plan, a draft,\nor a report into the wiki." in text
+
+
+def test_the_system_prompt_puts_a_long_text_in_a_document() -> None:
+    text = prompts.system_prompt()
+    for words in (
+        "A long text that the person will read and refine is a document",
+        'When the goal says "a\ndocument", or names no place for a long text, write a document '
+        "with\n`write_document`",
+        "A document has the kind `document` and its path as ref",
+        "Your own plan and your own report stay with\n`write_plan` and `write_report`",
+    ):
+        assert words in text, words
+
+
+def test_the_first_prompt_says_where_deliverables_go_when_the_session_holds_documents() -> None:
+    row = {"id": 12, "person_id": "alex", "spec": {"goal": "Write the trip plan."}}
+    text = prompts.first_prompt(row, has_documents=True)
+    assert (
+        "Deliverables go to documents: write each one with `write_document` under "
+        "`documents/alex/`. The server sets `author: assignment:12` and `assignment: 12`. "
+        "Record each one with `record_output` as an output of kind `document`, with the "
+        "path as ref."
+    ) in text
+    assert text.endswith(prompts.PLAN_FIRST)
+    without = prompts.first_prompt(row)
+    assert "Deliverables" not in without and "write_document" not in without
 
 
 def test_the_first_prompt_gives_the_title_and_the_goal_and_no_page() -> None:

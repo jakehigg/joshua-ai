@@ -30,6 +30,11 @@ recipe out of a meal plan, Joshua writes that part to the wiki with
 `promote_document`, and the document is archived. The skill page
 `prompts/builtin/skills/documents.md` tells Joshua when to use which, and
 goes only to a member session that holds the `documents` server.
+
+An assignment writes its deliverables as documents of the person, with
+`author: assignment:<id>`. Its own plan and report stay in the assignments
+store, out of the wiki and out of the documents. See
+[assignments.md](assignments.md#deliverables-are-documents).
 [config.md](config.md#the-documents-mcp) has the tools, the access rules,
 and the frontmatter.
 

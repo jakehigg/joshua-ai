@@ -100,7 +100,7 @@ budget:
 max_turns: 200     # soft cap on model turns; default assignments.default_max_turns
 working_time: 4h   # the clock runs only while it works; default assignments.default_working_time
 repos: [gitlab.example.net/infra/gitops]   # what it may clone, each in assignments.repos
-tools: [gitlab, tasks]     # optional: the MCP servers it may use
+tools: [gitlab, tasks]     # optional: the MCP servers it may use; documents always stays
 tasks_project: joshua      # where follow-ups go
 report_to: conversation    # or a destination name
 dry_run: false     # true: plan and report, and change nothing
@@ -219,8 +219,11 @@ The session has these tools, and no other:
   them for a turn of that person. The gateway gets the person, the role
   `member`, and the conversation `assignment:<id>`. The `assignments` server
   is never in the list, so an assignment cannot start an assignment. The
-  `tools` of the spec narrows the list. An empty list leaves no gateway
-  server.
+  `tools` of the spec narrows the list, but it never removes `documents`
+  when the person may reach it: deliverables go there (see
+  [deliverables are documents](#deliverables-are-documents)). An empty
+  list leaves only `documents`, or no gateway server for a person without
+  it.
 - The in-process `assignment` server:
 
 | Tool | What it does |
@@ -543,8 +546,39 @@ A person can comment on a line of the definition in the viewer (see
 [comments on a definition](#comments-on-a-definition)).
 
 `assignment_status` gives all four. None of them is in the wiki, so the
-memory index never holds them. The scratch directory is not an output: the
+memory index never holds them. The plan and the report stay in the store:
+they are never documents. The scratch directory is not an output: the
 container removes it.
+
+### Deliverables are documents
+
+A deliverable that the person will read and refine, such as a plan for the
+person, a spec, findings, or a draft, is a document of the person. When the
+session holds the `documents` server, the first message says:
+
+```
+Deliverables go to documents: write each one with `write_document` under
+`documents/<person>/`. The server sets `author: assignment:<id>` and
+`assignment: <id>`. Record each one with `record_output` as an output of
+kind `document`, with the path as ref.
+```
+
+The system prompt adds: when the goal says "a document", or names no place
+for a long text, write a document; never write a plan, a draft, or a report
+into the wiki.
+
+The gateway sets `author: assignment:<id>` and `assignment: <id>` on a new
+document when the request comes from the fleet identity `assignments` with
+the conversation header `assignment:<id>`. The session sends that header to
+every gateway server, so nothing new is needed. The session holds the fleet
+token of the container (see [what a session can see](#what-a-session-can-see)),
+so a command in it could send another assignment id. The value is
+attribution, not access control: the person header still limits the session
+to `documents/<person>/` and `documents/shared/`.
+
+The viewer links an output of kind `document` to its page,
+`/documents/<owner>/<slug>`, and the report that the runner generates names
+that page beside the path.
 
 The system prompt gives the worker these rules:
 
@@ -614,7 +648,8 @@ worker wrote no report, the runner writes one with the same headings:
   (`#` becomes `###`, at most `######`), so a plan heading such as
   `## Outputs` cannot take the place of a section of the report. A line in
   a fenced code block stays as it is;
-- Outputs: the recorded list;
+- Outputs: the recorded list. An output of kind `document` also names its
+  viewer page, `/documents/<owner>/<slug>`;
 - Decisions for you: the open question, when there is one, else "None.";
 - Follow-ups: "None.";
 - Cost.
@@ -637,8 +672,10 @@ follow-ups: each follow-up goes to `finish`. Each output goes where the goal say
 tools that the session holds.
 
 The first message gives the title, the goal, the clone command of each
-repository (of the spec, then each granted one), and the line "Write your plan with `write_plan` before any other
-tool call." Each follow-up goes to `finish` and into the report. When the
+repository (of the spec, then each granted one), where deliverables go
+when the session holds `documents` (see
+[deliverables are documents](#deliverables-are-documents)), and the line
+"Write your plan with `write_plan` before any other tool call." Each follow-up goes to `finish` and into the report. When the
 session holds the `tasks` server and the spec names `tasks_project`, the
 first message also says to add each follow-up as a task in that project.
 Each later slice starts with the budget and the last checkpoint. It ends
@@ -970,9 +1007,11 @@ tells Joshua:
 - that an assignment is a long job with many tool calls and a budget, and
   that Joshua does a short job itself;
 - how to build a spec from a request, with everything in `goal`. The goal
-  names where each result goes. When it names no place, Joshua asks the
-  person one question, or writes "the report" when the person wants only to
-  read the result;
+  names where each result goes: a document (the default for a plan, a spec,
+  or a report that the person will read and refine), a tool of the person,
+  or only the report. When it names no place, Joshua asks the person one
+  question, or writes "the report" when the person wants only to read the
+  result;
 - to make a draft with `draft_assignment` when the person wants to read the
   assignment first, to apply comments on it with `update_assignment`, and to
   start it with `start_assignment(id=...)` when the person says go;
