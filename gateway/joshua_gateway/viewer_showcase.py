@@ -16,9 +16,13 @@ each block of prose is a unit, anchored to its line of the text. The hero and
 the numbers at the top differ between an assignment and a document, so each
 section builds its own from :func:`tile` and :func:`tiles`.
 
-One small script, :data:`COPY_SCRIPT`, shows the copy button of each
-decision. The policy of the viewer allows that script by its hash and no
-other. With no script, the buttons stay hidden and the page is the same.
+On the report of an assignment, each decision card takes an answer: a plain
+form with a textarea and "Send to Joshua", which stores a comment on the
+first line of the decision. The card then shows the answer, or the
+resolution of Joshua. On a document, one small script, :data:`COPY_SCRIPT`,
+shows the copy button of each decision. The policy of the viewer allows that
+script by its hash and no other. With no script, the buttons stay hidden and
+the page is the same.
 
 Every string is untrusted and escaped. Raw HTML in Markdown is off, so a
 ``<script>`` renders as text. A reference is a link only when it is an
@@ -39,7 +43,7 @@ from urllib.parse import urlparse
 from joshua_gateway import viewer_blocks as vb
 from joshua_gateway import viewer_docstore as ds
 from joshua_gateway import viewer_report as rp
-from joshua_gateway.viewer_comments import Gutter
+from joshua_gateway.viewer_comments import Comment, Gutter, time_html
 
 # The wiki renderer: raw HTML is off, and markdown-it refuses a
 # ``javascript:`` link.
@@ -128,9 +132,10 @@ def doc_html(text: str, *, draw_boxes: bool = False) -> str:
     return blocks_html(text, draw_boxes=draw_boxes)
 
 
-def plan_html(text: str) -> str:
-    """The plan as a document of blocks, with each task box drawn as a box."""
-    return doc_html(text, draw_boxes=True)
+def plan_html(text: str, gutter: Gutter | None = None) -> str:
+    """The plan as a document of blocks, with each task box drawn as a box.
+    With ``gutter``, each block has its "+" and its comments."""
+    return blocks_html(text, gutter=gutter, draw_boxes=True)
 
 
 def article(html: str) -> str:
@@ -149,15 +154,17 @@ def section(
     css: str = "a-section",
     head: str = "",
     head_id: str = "",
+    sid: str = "",
 ) -> str:
     """A section with its heading. ``badge`` is a count beside the heading,
-    ``head`` more HTML in the heading row (the "+" of the heading), and
-    ``head_id`` the anchor of the heading."""
+    ``head`` more HTML in the heading row (the "+" of the heading),
+    ``head_id`` the anchor of the heading, and ``sid`` the id of the section."""
     when = f'<span class="j-meta">updated {stamp}</span>' if stamp else ""
     count_html = f'<span class="a-count">{escape(badge)}</span>' if badge else ""
     anchor = f' id="{escape(head_id)}"' if head_id else ""
+    section_id = f' id="{escape(sid)}"' if sid else ""
     return (
-        f'<section class="{css}"><div class="a-head"{anchor}><h2>{escape(title)}</h2>'
+        f'<section class="{css}"{section_id}><div class="a-head"{anchor}><h2>{escape(title)}</h2>'
         f"{count_html}{when}{head}</div>{body}</section>"
     )
 
@@ -171,10 +178,22 @@ def _heading_unit(gutter: Gutter | None, part: rp.Section) -> tuple[str, str, st
     return plus + anchors, gutter.unit_id(part.line), cards
 
 
-def fold(title: str, body: str, *, hint: str = "", css: str = "a-fold") -> str:
-    """A closed ``<details>`` with ``title`` and a short hint in its summary."""
+def fold(
+    title: str,
+    body: str,
+    *,
+    hint: str = "",
+    css: str = "a-fold",
+    open_: bool = False,
+    fid: str = "",
+) -> str:
+    """A ``<details>`` with ``title`` and a short hint in its summary, closed
+    unless ``open_``. ``fid`` is its id."""
+    opened = " open" if open_ else ""
+    ident = f' id="{escape(fid)}"' if fid else ""
     return (
-        f'<details class="{css}"><summary><span class="a-fold-title">{escape(title)}</span>'
+        f'<details class="{css}"{opened}{ident}><summary>'
+        f'<span class="a-fold-title">{escape(title)}</span>'
         f"{hint}</summary>"
         f'<div class="a-fold-body">{body}</div></details>'
     )
@@ -245,30 +264,125 @@ def decision_items(part: rp.Section | None) -> list[rp.Item]:
     return [entry for entry in part.items if not rp.is_none(entry.text)]
 
 
-def decisions_html(copy_prefix: str, part: rp.Section | None, gutter: Gutter | None = None) -> str:
-    """The decisions as numbered cards, each with a copy button for Joshua.
+def decision_ranges(part: rp.Section | None) -> list[tuple[int, int]]:
+    """The lines of the text that each decision of ``part`` holds, from 1."""
+    items = decision_items(part)
+    if part is None or not part.line or not items:
+        return []
+    return _item_ranges(part, items)
 
-    The copy text is "<copy_prefix>, decision <n>: <question>". The button is
-    hidden; :data:`COPY_SCRIPT` shows it when the browser can copy, so the
-    page works the same with no script."""
+
+# The words on the answer of a decision.
+SENT = "Sent to Joshua"
+SEND = "Send to Joshua"
+
+
+def _answer_html(gutter: Gutter, open_: list[Comment], done: list[Comment]) -> str:
+    """The answers of the person to one decision: each open one with "Sent to
+    Joshua", its time, and Delete; each resolved one with the resolution of
+    Joshua."""
+    forms = gutter.forms
+    parts = []
+    for comment in done:
+        when = time_html(comment.resolved_at, tz=gutter.tz, now=gutter.now)
+        parts.append(
+            f'<div class="a-answer resolved" id="C{escape(str(comment.id))}">'
+            f'<p class="a-answer-body">{escape(comment.body)}</p>'
+            f'<p class="a-resolution"><span class="j-label">Joshua</span> '
+            f"{escape(comment.resolution or '')}"
+            f' <span class="j-faint">{when}</span></p></div>'
+        )
+    for comment in open_:
+        when = time_html(comment.created_at, tz=gutter.tz, now=gutter.now)
+        delete = ""
+        if forms is not None and gutter.can_delete(comment):
+            delete = (
+                f'<form class="a-del" method="post" '
+                f'action="{escape(forms.action)}/{escape(str(comment.id))}/delete">'
+                f'<input type="hidden" name="csrf" value="{escape(forms.csrf)}">'
+                f'<input type="hidden" name="target" value="{escape(forms.target)}">'
+                '<button class="j-btn sm" type="submit">Delete</button></form>'
+            )
+        parts.append(
+            f'<div class="a-answer" id="C{escape(str(comment.id))}">'
+            f'<p class="a-answer-body">{escape(comment.body)}</p>'
+            f'<div class="a-comment-foot"><span class="j-badge ok">{SENT}</span>'
+            f'<span class="j-faint">{when}</span>{delete}</div></div>'
+        )
+    return "".join(parts)
+
+
+def _answer_form(gutter: Gutter, first: int, number: int) -> str:
+    """The form of an answer to decision ``number``, on line ``first``."""
+    forms = gutter.forms
+    if forms is None:
+        return ""
+    n = first + gutter.offset
+    label = f"Your answer to decision {number}"
+    return (
+        f'<form class="a-answer-form" method="post" action="{escape(forms.action)}">'
+        f'<input type="hidden" name="csrf" value="{escape(forms.csrf)}">'
+        f'<input type="hidden" name="target" value="{escape(forms.target)}">'
+        f'<input type="hidden" name="line_no" value="{int(n)}">'
+        f'<input type="hidden" name="line_text" value="{escape(gutter.text(n))}">'
+        f'<div class="j-field"><textarea name="body" rows="3" maxlength="2000" required '
+        f'aria-label="{escape(label)}" placeholder="Your answer"></textarea></div>'
+        f'<button class="j-btn sm primary" type="submit">{SEND}</button></form>'
+    )
+
+
+def decisions_html(
+    copy_prefix: str,
+    part: rp.Section | None,
+    gutter: Gutter | None = None,
+    *,
+    answers: bool = False,
+) -> str:
+    """The decisions as numbered cards.
+
+    With ``answers`` and a gutter, each card takes an answer: the answers of
+    the person on its lines, and the form while no answer is open. With
+    ``answers`` and no gutter, a card has the question only. Else each
+    card has a copy button for Joshua, with the text "<copy_prefix>, decision
+    <n>: <question>". That button is hidden; :data:`COPY_SCRIPT` shows it when
+    the browser can copy, so the page works the same with no script."""
     items = decision_items(part)
     if part is None or (not items and part.empty):
         return ""
     ranges = _item_ranges(part, items) if gutter is not None and part.line else None
+    answering = answers and gutter is not None and ranges is not None
     cards = []
     for number, entry in enumerate(items, start=1):
         question, context = rp.decision_question(entry)
-        copy = f"{copy_prefix}, decision {number}: {rp.plain(question)}"
         ctx = f'<div class="j-prose a-ctx">{markdown(context)}</div>' if context else ""
+        lines = ranges[number - 1] if ranges else None
+        if answering:
+            assert gutter is not None and lines is not None
+            open_, done = gutter.answers(*lines)
+            form = "" if open_ else _answer_form(gutter, lines[0], number)
+            foot = f'<div class="a-decision-answer">{_answer_html(gutter, open_, done)}{form}</div>'
+        elif answers:
+            foot = ""
+        else:
+            copy = f"{copy_prefix}, decision {number}: {rp.plain(question)}"
+            foot = (
+                '<div class="a-decision-foot"><span class="j-faint">Tell Joshua your answer.</span>'
+                f'<button type="button" class="j-btn sm a-copy" data-copy="{escape(copy)}" hidden>'
+                "Copy</button></div>"
+            )
         body = (
             f'<span class="a-n" aria-hidden="true">{number}</span>'
-            f'<div class="a-decision-main"><p class="a-q">{inline(question)}</p>{ctx}'
-            '<div class="a-decision-foot"><span class="j-faint">Tell Joshua your answer.</span>'
-            f'<button type="button" class="j-btn sm a-copy" data-copy="{escape(copy)}" hidden>'
-            "Copy</button></div></div>"
+            f'<div class="a-decision-main"><p class="a-q">{inline(question)}</p>{ctx}{foot}</div>'
         )
-        lines = ranges[number - 1] if ranges else None
-        cards.append(_card(gutter, lines, "a-decision", body, f"decision {number}"))
+        if answering:
+            assert gutter is not None and lines is not None
+            answered = " answered" if gutter_answered(gutter, lines) else ""
+            cards.append(
+                f'<li class="a-decision{answered}" id="{gutter.unit_id(lines[0])}">'
+                f"{gutter.anchors(*lines)}{body}</li>"
+            )
+        else:
+            cards.append(_card(gutter, lines, "a-decision", body, f"decision {number}"))
     body = f'<ol class="a-decisions">{"".join(cards)}</ol>' if cards else ""
     if part.rest and not rp.is_none(part.rest):
         body += f'<div class="j-prose">{markdown(part.rest)}</div>'
@@ -281,7 +395,19 @@ def decisions_html(copy_prefix: str, part: rp.Section | None, gutter: Gutter | N
         css="a-section a-decide",
         head=head,
         head_id=head_id,
+        sid="decisions" if answers else "",
     )
+
+
+def gutter_answered(gutter: Gutter, lines: tuple[int, int]) -> bool:
+    """True when a comment of the gutter, open or resolved, is on ``lines``."""
+    lo, hi = lines[0] + gutter.offset, lines[1] + gutter.offset
+    return any(lo <= c.line_no <= hi for c in gutter.comments)
+
+
+def decisions_waiting(part: rp.Section | None, gutter: Gutter) -> int:
+    """The decisions of ``part`` that have no answer in ``gutter``."""
+    return sum(1 for lines in decision_ranges(part) if not gutter_answered(gutter, lines))
 
 
 # -- outputs ----------------------------------------------------------------
@@ -386,6 +512,73 @@ def output_card_body(card: Card) -> str:
         head = ""
     note = f'<p class="a-out-note">{inline(card.note)}</p>' if card.note else ""
     return f'{icon}<div class="a-out-main">{head}{note}</div>'
+
+
+def card_href(card: Card) -> str | None:
+    """Where the Open link of an output goes: an ``http`` or ``https`` URL, the
+    viewer page of a document of kind ``document``, or None."""
+    ref = card.ref.strip()
+    if ref and is_url(ref):
+        return ref
+    if card.kind.strip().lower() == "document":
+        return ds.document_url(ref)
+    return None
+
+
+def lead_card(card: Card) -> str:
+    """One output in the lead band: the icon, the title, the kind, the note,
+    and an Open link when the output has a place to open."""
+    icon = svg(KIND_ICONS[kind_icon(card.kind)], "j-icon a-out-icon")
+    ref = card.ref.strip()
+    href = card_href(card)
+    title = escape(card.title or ref)
+    kind = escape(card.kind.strip() or "other")
+    code = f'<code class="a-out-ref">{escape(ref)}</code>' if ref and href is None else ""
+    note = f'<p class="a-out-note">{inline(card.note)}</p>' if card.note else ""
+    link = ""
+    if href is not None:
+        rel = ' rel="noreferrer"' if is_url(href) else ""
+        link = f'<a class="j-btn sm a-open" href="{escape(href)}"{rel}>Open</a>'
+    return (
+        f'<li class="a-out a-lead-out">{icon}<div class="a-out-main">'
+        f'<span class="a-out-title">{title}</span><span class="a-out-ref">{kind}</span>'
+        f"{code}{note}</div>{link}</li>"
+    )
+
+
+def lead_html(cards: list[Card], *, waiting: int, decisions: int, extra: str = "") -> str:
+    """The band at the top of a completed assignment: the decisions that wait
+    for the person, with a link to them, and the outputs as cards, the
+    documents first. ``extra`` is more HTML in the band (the comments on the
+    Outputs section of the report). "" when there is nothing to show."""
+    parts = []
+    if waiting:
+        parts.append(
+            '<a class="a-lead-decisions" href="#decisions">'
+            f"<b>{waiting}</b> {'decision waits' if waiting == 1 else 'decisions wait'} for you"
+            "</a>"
+        )
+    elif decisions:
+        parts.append(
+            '<a class="a-lead-decisions done" href="#decisions">'
+            f"{'The decision has' if decisions == 1 else f'All {decisions} decisions have'} "
+            "an answer</a>"
+        )
+    if cards:
+        ordered = sorted(cards, key=lambda c: c.kind.strip().lower() != "document")
+        rows = "".join(lead_card(card) for card in ordered)
+        parts.append(
+            f'<div class="a-lead-outputs"><h2 class="j-label">{count(len(cards), "output")}</h2>'
+            f'<ul class="a-cards a-outs">{rows}</ul>{extra}</div>'
+        )
+    elif extra:
+        parts.append(extra)
+    if not parts:
+        return ""
+    return (
+        f'<section class="a-lead" id="lead" aria-label="What waits for you">{"".join(parts)}'
+        "</section>"
+    )
 
 
 def output_card(card: Card) -> str:

@@ -8,7 +8,8 @@ its own fleet token, and names the person who signed in as ``person``. The
 manager shows a person only their own assignments.
 
 A person reads an assignment here and tells Joshua what to change. The one
-write is a comment on a line of a definition. The definition shows as a
+write is a comment on a line of a text of the assignment, its ``target``:
+the definition, the plan, or the report. The definition shows as a
 document: the fields as a list of properties, then the goal as Markdown, cut
 into blocks by ``viewer_blocks``. Each field and each block has a "+" that
 opens a plain form for its first line, and a ``Source`` fold gives each line
@@ -17,7 +18,10 @@ the manager as the person who signed in (``POST /v1/assignments/{id}/comments``
 or ``POST /v1/saved/{id}/comments``), and a Delete button of an open comment
 deletes it. Joshua reads the comments, changes the spec, and resolves them.
 The line numbers count the lines of the ``definition`` text of the manager,
-so a comment shows under the field or the block that holds its line.
+so a comment shows under the field or the block that holds its line. The
+plan and the report take comments the same way: each block has a "+", and
+the form sends ``target`` with it. The ids of their units start with ``P``
+and ``R``, so they differ from the ``L`` ids of the definition.
 
 The viewer needs ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER``. With either
 one missing, :func:`from_env` returns None and the pages say so. A call that
@@ -28,7 +32,7 @@ in these cases, except a detail page that the manager does not know, which is
 
 Every string from the manager is untrusted, and the HTML escapes each one. The
 plan and the report are Markdown, rendered as a wiki page is, with raw HTML
-off, in the same blocks as the goal but with no "+". A reference of an output
+off, in the same blocks as the goal. A reference of an output
 is a link only when it is an ``http`` or ``https`` URL with a host. The
 layout has no table: the texts are long, so a
 detail page is a document.
@@ -41,9 +45,14 @@ so Joshua starts that draft and not a copy of it.
 
 A completed assignment with a report shows the report as the page.
 ``viewer_report`` cuts the report at its fixed headings, and each section
-gets its own element: a hero with the lede and a stat row, the highlights as
-cards, the decisions as numbered cards, the outputs as cards by kind, what
-was asked, what was done, the follow-ups, and the cost. The plan, the
+gets its own element: a hero with the lede and a stat row, a lead band with
+the decisions that wait for the person and the outputs as cards (the
+documents first, each with an Open link), the highlights as cards, the
+decisions as numbered cards, what was asked, what was done, the follow-ups,
+and the cost. Each decision card takes an answer: a plain form that stores a
+comment on the report, on the first line of the decision. The card then
+shows the answer with "Sent to Joshua" and its time, and Joshua's
+resolution when it is resolved. The manager sends the answer to Joshua. The plan, the
 progress, and the definition fold under it. A report with none of the
 headings shows as Markdown. Any other assignment shows its plan, the bar of
 its task boxes, the next step, the last checkpoint, and the outputs so far.
@@ -52,8 +61,8 @@ seconds with a ``<meta>`` element.
 
 The blocks and the showcase of a report are in ``viewer_showcase``, and the
 "+", the forms, and the comment cards are in ``viewer_comments``. The
-documents section uses the same two modules. One small script,
-``viewer_showcase.COPY_SCRIPT``, shows the copy button of each decision.
+documents section uses the same two modules. The pages of this section have
+no script.
 
 The functions here build data and HTML only. The routes live in ``viewer``.
 """
@@ -62,7 +71,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from html import escape
 from typing import Any, Final
@@ -202,6 +211,7 @@ class Comment(_Model):
     target: str = "definition"
     line_no: int
     line_text: str = ""
+    line_now: str | None = None
     body: str = ""
     created_at: str | None = None
     resolved_at: str | None = None
@@ -372,11 +382,22 @@ class AssignmentsClient:
         return Written(response.status_code, error[:300])
 
     async def add_comment(
-        self, person: str, kind: str, parent_id: int, *, line_no: int, line_text: str, body: str
+        self,
+        person: str,
+        kind: str,
+        parent_id: int,
+        *,
+        line_no: int,
+        line_text: str,
+        body: str,
+        target: str = "definition",
     ) -> Written | None:
-        """Write a comment of ``person`` on line ``line_no`` of a definition."""
+        """Write a comment of ``person`` on line ``line_no`` of a text of the
+        assignment: its definition, its plan, or its report (``target``)."""
         path = f"{KINDS[kind]}/{parent_id}/comments"
-        fields = {"line_no": line_no, "line_text": line_text, "body": body}
+        fields: dict[str, Any] = {"line_no": line_no, "line_text": line_text, "body": body}
+        if target != "definition":
+            fields["target"] = target
         return await self._write("POST", path, person, fields)
 
     async def delete_comment(
@@ -783,8 +804,37 @@ def _definition(
     tz: tzinfo,
     now: datetime,
 ) -> str:
+    comments = [c for c in item.comments if c.target == "definition"]
     return definition_html(
-        item.definition, item.spec, item.comments, open_=open_, forms=forms, tz=tz, now=now
+        item.definition, item.spec, comments, open_=open_, forms=forms, tz=tz, now=now
+    )
+
+
+# The texts of a run that take comments beside its definition, and the start
+# of the ids of their units.
+TEXT_PREFIX = {"plan": "P", "report": "R"}
+
+
+def text_lines(text: str | None) -> list[str]:
+    """The lines of a plan or a report, as the manager counts them."""
+    return text.replace("\r\n", "\n").split("\n") if text else []
+
+
+def text_gutter(
+    item: Detail, target: str, forms: CommentForms | None, *, tz: tzinfo, now: datetime
+) -> Gutter:
+    """The gutter of the plan or the report of ``item``: its lines, its
+    comments, and forms that send ``target``."""
+    text = item.plan if target == "plan" else item.report
+    # A manager that gives no definition takes no comment on a line.
+    can_write = forms is not None and item.definition is not None
+    return Gutter(
+        text_lines(text),
+        [c for c in item.comments if c.target == target],
+        replace(forms, target=target) if can_write and forms is not None else None,
+        tz,
+        now,
+        prefix=TEXT_PREFIX[target],
     )
 
 
@@ -909,7 +959,16 @@ def _now_strip(
     return f'<section class="a-now" aria-label="Progress now">{"".join(parts)}</section>'
 
 
-def _plan_fold(item: Detail, progress: rp.PlanProgress, *, tz: tzinfo, now: datetime) -> str:
+def _plan_fold(
+    item: Detail,
+    progress: rp.PlanProgress,
+    *,
+    tz: tzinfo,
+    now: datetime,
+    forms: CommentForms | None = None,
+) -> str:
+    """The plan, folded, with the "+" of each block. It is open while it has
+    an open comment."""
     if not (item.plan and item.plan.strip()):
         return ""
     hint = ""
@@ -918,8 +977,17 @@ def _plan_fold(item: Detail, progress: rp.PlanProgress, *, tz: tzinfo, now: date
         hint = _bar(progress, "a-meter mini") + steps
     stamp = time_html(item.plan_at, tz=tz, now=now)
     when = f'<p class="j-meta">updated {stamp}</p>' if stamp else ""
-    body = f"{when}{sc.article(sc.plan_html(item.plan))}"
-    return sc.fold("Plan", body, hint=hint)
+    gutter = text_gutter(item, "plan", forms, tz=tz, now=now)
+    badge = comments_badge(len(gutter.open))
+    plan = sc.article(sc.plan_html(item.plan, live(gutter)))
+    body = f"{when}{plan}{gutter.orphans()}{gutter.resolved()}"
+    return sc.fold(
+        "Plan",
+        body,
+        hint=hint + (f" {badge}" if badge else ""),
+        open_=bool(gutter.open),
+        fid="plan",
+    )
 
 
 def _progress_fold(checkpoints: list[Checkpoint], *, tz: tzinfo, now: datetime) -> str:
@@ -948,6 +1016,34 @@ def _turns(item: Detail, report: rp.Report) -> int | None:
     return rp.turns(cost.body if cost else None)
 
 
+def live(gutter: Gutter) -> Gutter | None:
+    """``gutter``, or None when it has no form and no comment: then the text
+    renders as plain blocks."""
+    return gutter if gutter.forms is not None or gutter.comments else None
+
+
+def _report_gutter(
+    item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None
+) -> Gutter:
+    return text_gutter(item, "report", forms, tz=tz, now=now)
+
+
+def _outputs_comments(gutter: Gutter, report: rp.Report | None) -> str:
+    """The comments on the lines of the Outputs section of the report, which
+    the lead band shows in place of the section."""
+    part = report.get(rp.OUTPUTS) if report is not None else None
+    if part is None or not part.line:
+        return ""
+    return gutter.take(part.line, max(part.line, part.end))
+
+
+def _report_rest(gutter: Gutter) -> str:
+    """The comments on the report that no part of the page took, and the
+    resolved ones, folded."""
+    rest = gutter.orphans() + gutter.resolved()
+    return f'<div class="a-folds a-report-rest">{rest}</div>' if rest else ""
+
+
 def _report_page(
     item: Detail,
     report: rp.Report,
@@ -956,30 +1052,40 @@ def _report_page(
     now: datetime,
     forms: CommentForms | None = None,
 ) -> str:
-    """A completed assignment with a report: the report is the page."""
+    """A completed assignment with a report: the report is the page, under a
+    lead band with the decisions that wait and the outputs."""
     cards = sc.output_cards(item.outputs, report)
     turns = _turns(item, report)
-    decisions = len(sc.decision_items(report.get(rp.DECISIONS)))
+    decisions_part = report.get(rp.DECISIONS)
+    decisions = len(sc.decision_items(decisions_part))
     tiles = _hero_tiles(item, turns=turns, outputs=len(cards), decisions=decisions)
     progress = rp.plan_progress(item.plan)
+    full = _report_gutter(item, tz=tz, now=now, forms=forms)
+    gutter = live(full)
+    lead = sc.lead_html(
+        cards,
+        waiting=sc.decisions_waiting(decisions_part, full),
+        decisions=decisions,
+        extra=_outputs_comments(full, report),
+    )
     parts = [
         _crumbs(),
         _hero(item, lede=report.lede, generated=report.generated, tiles=tiles, tz=tz, now=now),
         _notice(item, tz=tz, now=now),
-        sc.highlights_html(report.get(rp.HIGHLIGHTS)),
-        sc.decisions_html(f"Assignment {item.id}", report.get(rp.DECISIONS)),
-        sc.outputs_html(cards),
-        sc.asked_html(report.get(rp.ASKED)),
-        sc.done_html(report),
-        sc.follow_ups_html(report.get(rp.FOLLOW_UPS)),
+        lead,
+        sc.highlights_html(report.get(rp.HIGHLIGHTS), gutter),
+        sc.decisions_html(f"Assignment {item.id}", decisions_part, gutter, answers=True),
+        sc.asked_html(report.get(rp.ASKED), gutter),
+        sc.done_html(report, gutter),
+        sc.follow_ups_html(report.get(rp.FOLLOW_UPS), gutter),
+        _report_rest(full),
         _cost_footer(item, turns=turns),
         '<div class="a-folds">',
-        _plan_fold(item, progress, tz=tz, now=now),
+        _plan_fold(item, progress, tz=tz, now=now, forms=forms),
         _progress_fold(item.checkpoints, tz=tz, now=now),
         _definition(item, open_=False, forms=forms, tz=tz, now=now),
         "</div>",
         _error(item),
-        sc.COPY_SCRIPT_TAG if decisions else "",
     ]
     return "".join(part for part in parts if part)
 
@@ -988,10 +1094,12 @@ def _plain_report_page(
     item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
 ) -> str:
     """A completed assignment whose report has none of the known headings:
-    the report as Markdown, then the outputs."""
+    the lead band with the outputs, then the report as blocks."""
     cards = sc.output_cards(item.outputs, None)
     progress = rp.plan_progress(item.plan)
     stamp = time_html(item.report_at, tz=tz, now=now)
+    gutter = _report_gutter(item, tz=tz, now=now, forms=forms)
+    report = sc.article(sc.blocks_html(item.report or "", gutter=live(gutter)))
     parts = [
         _crumbs(),
         _hero(
@@ -1003,10 +1111,11 @@ def _plain_report_page(
             now=now,
         ),
         _notice(item, tz=tz, now=now),
-        sc.section("Report", _prose(item.report, ""), stamp=stamp),
-        sc.outputs_html(cards),
+        sc.lead_html(cards, waiting=0, decisions=0),
+        sc.section("Report", report, stamp=stamp),
+        _report_rest(gutter),
         '<div class="a-folds">',
-        _plan_fold(item, progress, tz=tz, now=now),
+        _plan_fold(item, progress, tz=tz, now=now, forms=forms),
         _progress_fold(item.checkpoints, tz=tz, now=now),
         _definition(item, open_=False, forms=forms, tz=tz, now=now),
         "</div>",
@@ -1021,11 +1130,11 @@ def _progress_page(
     """An assignment with no report yet, or one in progress: the plan is the page."""
     cards = sc.output_cards(item.outputs, None)
     progress = rp.plan_progress(item.plan)
-    plan = (
-        sc.article(sc.plan_html(item.plan))
-        if item.plan and item.plan.strip()
-        else '<p class="j-faint">No plan yet.</p>'
-    )
+    plan = '<p class="j-faint">No plan yet.</p>'
+    if item.plan and item.plan.strip():
+        gutter = text_gutter(item, "plan", forms, tz=tz, now=now)
+        plan = sc.article(sc.plan_html(item.plan, live(gutter)))
+        plan += gutter.orphans() + gutter.resolved()
     report = ""
     if item.report and item.report.strip():
         report = sc.fold("Report", sc.article(sc.doc_html(item.report)))
@@ -1041,7 +1150,7 @@ def _progress_page(
         ),
         _notice(item, tz=tz, now=now),
         _now_strip(progress, item.checkpoints, tz=tz, now=now),
-        sc.section("Plan", plan, stamp=time_html(item.plan_at, tz=tz, now=now)),
+        sc.section("Plan", plan, stamp=time_html(item.plan_at, tz=tz, now=now), sid="plan"),
         sc.outputs_html(cards, title="Outputs so far" if item.state != "completed" else "Outputs"),
         sc.section("Progress", _progress(item.checkpoints, tz=tz, now=now)),
         '<div class="a-folds">',

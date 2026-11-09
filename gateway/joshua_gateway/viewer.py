@@ -22,8 +22,9 @@ A member has two write actions, both human actions in a browser that the
 agent never gets: a delete, which moves a wiki page to the trash under
 ``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
 text and people. A guest reads. A person can also comment on a line of the
-definition of their own assignment: the viewer sends the comment to the
-assignments manager as that person, and writes nothing itself. A member can
+definition, the plan, or the report of their own assignment, and answer a
+decision of its report: the viewer sends the comment to the assignments
+manager as that person, and writes nothing itself. A member can
 comment on a line of a document of their own or a shared one: the viewer
 writes the comment to the comments file of the document and commits it.
 
@@ -927,11 +928,20 @@ def _comment_forms(person: Person, kind: str, parent_id: int) -> comments_mod.Co
     )
 
 
+# The texts of an assignment that take a comment, and the anchor that the
+# page goes back to after a comment on each. A saved assignment has only a
+# definition.
+COMMENT_TARGETS = ("definition", "plan", "report")
+_TARGET_PREFIX = {"definition": "L", "plan": "P", "report": "R"}
+_TARGET_SECTION = {"definition": "definition", "plan": "plan", "report": "lead"}
+
+
 async def _comment_write(request: Request, person: Person, kind: str) -> Response:
     """Send one comment write of the person to the manager, then go back to the line.
 
-    The form carries the CSRF token of the definition, and a cross-site
-    ``Origin`` is refused. The manager writes the comment as the person who
+    The form carries the CSRF token of the assignment, and a cross-site
+    ``Origin`` is refused. ``target`` names the text (the definition, the
+    plan, or the report). The manager writes the comment as the person who
     signed in, on their own row only, and a row of another person is 404."""
     client = assignments_mod.from_env(os.environ)
     if client is None:
@@ -942,10 +952,16 @@ async def _comment_write(request: Request, person: Person, kind: str) -> Respons
     token = str(form.get("csrf", ""))
     if not _csrf_valid(person.id, f"comments:{base}", token) or not _origin_ok(request):
         return _forbidden()
+    target = str(form.get("target", "") or "definition")
+    if target not in COMMENT_TARGETS or (kind == "saved" and target != "definition"):
+        target = ""
     comment_id = request.path_params.get("cid")
-    if comment_id is not None:
+    if not target:
+        written: assignments_mod.Written | None = assignments_mod.Written(400, "a bad target")
+        anchor = ""
+    elif comment_id is not None:
         written = await client.delete_comment(person.id, kind, parent_id, int(comment_id))
-        anchor = "definition"
+        anchor = _TARGET_SECTION[target]
     else:
         try:
             line_no = int(str(form.get("line_no", "")))
@@ -958,8 +974,9 @@ async def _comment_write(request: Request, person: Person, kind: str) -> Respons
             line_no=line_no,
             line_text=str(form.get("line_text", "")),
             body=str(form.get("body", "")),
+            target=target,
         )
-        anchor = f"L{line_no}"
+        anchor = f"{_TARGET_PREFIX[target]}{line_no}"
     if written is not None and written.status == 404:
         return _not_found()
     if written is None or not written.ok:
@@ -970,7 +987,14 @@ async def _comment_write(request: Request, person: Person, kind: str) -> Respons
             f'<p><a href="{escape(base)}">Back</a></p>',
         )
         return _page("comment not stored", body, status=400, section="assignments")
-    logger.info({"message": "viewer comment", "kind": kind, "delete": comment_id is not None})
+    logger.info(
+        {
+            "message": "viewer comment",
+            "kind": kind,
+            "target": target,
+            "delete": comment_id is not None,
+        }
+    )
     return RedirectResponse(f"{base}#{anchor}", status_code=303)
 
 

@@ -1,8 +1,8 @@
 """The comment gutter of the viewer: the "+" of a block, its form, and the cards.
 
-A person comments on one line of a text: the definition of an assignment,
-which the assignments manager stores, or the source of a document, which the
-comments file of the document stores. Both use this one gutter. A comment
+A person comments on one line of a text: the definition, the plan, or the
+report of an assignment, which the assignments manager stores, or the source
+of a document, which the comments file of the document stores. Both use this one gutter. A comment
 anchors to a line (``line_no``, from 1, and ``line_text``, the line as it
 was), and each part of a rendered page that shows some lines of the text is a
 *unit*: it has the "+" of its first line, and it shows the open comments on
@@ -104,10 +104,12 @@ def time_html(text: str | None, *, tz: tzinfo, now: datetime) -> str:
 class CommentForms:
     """Where the comment forms of a text post: ``action`` is the path of the
     comments in the viewer, ``csrf`` the token of the forms. A delete posts to
-    ``<action>/<id>/delete``."""
+    ``<action>/<id>/delete``. ``target`` set, each form also sends it: the
+    text of an assignment that the comment is on (``plan`` or ``report``)."""
 
     action: str
     csrf: str
+    target: str = ""
 
 
 def comments_badge(n: int) -> str:
@@ -119,7 +121,13 @@ def comments_badge(n: int) -> str:
 
 
 def _csrf_input(forms: CommentForms) -> str:
-    return f'<input type="hidden" name="csrf" value="{escape(forms.csrf)}">'
+    """The hidden fields of every form: the CSRF token and, when set, the target."""
+    target = (
+        f'<input type="hidden" name="target" value="{escape(forms.target)}">'
+        if forms.target
+        else ""
+    )
+    return f'<input type="hidden" name="csrf" value="{escape(forms.csrf)}">{target}'
 
 
 def _dom_id(value: Any) -> str:
@@ -250,7 +258,8 @@ class Gutter:
     line number that a renderer gives. ``preamble`` are lines that the
     ``Source`` fold shows first with no number and no "+" (the frontmatter of
     a document). ``author`` set, only the comments whose ``author`` is that
-    value get a Delete button."""
+    value get a Delete button. ``prefix`` starts the id of each unit and
+    anchor (``L<n>``), so two texts on one page have no id in common."""
 
     lines: list[str]
     comments: Sequence[Comment]
@@ -260,7 +269,9 @@ class Gutter:
     offset: int = 0
     author: str | None = None
     preamble: Sequence[str] = ()
+    prefix: str = "L"
     _placed: set[int] = field(default_factory=set)
+    _answered: set[int] = field(default_factory=set)
 
     @property
     def open(self) -> list[Comment]:
@@ -304,7 +315,9 @@ class Gutter:
     def anchors(self, first: int, last: int) -> str:
         """An ``L<n>`` anchor for each line after the first of a unit."""
         lo, hi = first + self.offset, last + self.offset
-        return "".join(f'<span class="a-anchor" id="L{n}"></span>' for n in range(lo + 1, hi + 1))
+        return "".join(
+            f'<span class="a-anchor" id="{self.prefix}{n}"></span>' for n in range(lo + 1, hi + 1)
+        )
 
     def mark(self, first: int, last: int, what: str) -> tuple[str, str, str]:
         """The parts of a unit that a renderer places itself: the anchors, the
@@ -312,7 +325,28 @@ class Gutter:
         return self.anchors(first, last), self.plus(first, what), self.take(first, last)
 
     def unit_id(self, first: int) -> str:
-        return f"L{first + self.offset}"
+        return f"{self.prefix}{first + self.offset}"
+
+    def can_delete(self, comment: Comment) -> bool:
+        return self._can_delete(comment)
+
+    def answers(self, first: int, last: int) -> tuple[list[Comment], list[Comment]]:
+        """The open and the resolved comments on lines ``first`` to ``last``
+        (before the offset) that no unit took yet. The caller shows them, so
+        no other unit, :meth:`orphans`, or :meth:`resolved` shows them."""
+        lo, hi = first + self.offset, last + self.offset
+        open_, done = [], []
+        for index, comment in enumerate(self.open):
+            if index not in self._placed and lo <= comment.line_no <= hi:
+                self._placed.add(index)
+                open_.append(comment)
+        for index, comment in enumerate(self.comments):
+            if comment.resolved_at is None or index in self._answered:
+                continue
+            if lo <= comment.line_no <= hi:
+                self._answered.add(index)
+                done.append(comment)
+        return open_, done
 
     def unit(self, first: int, last: int, body: str, css: str, what: str) -> str:
         """One unit: its anchors, the body, the "+" of its first line, and the
@@ -345,5 +379,9 @@ class Gutter:
 
     def resolved(self) -> str:
         """The resolved comments, folded."""
-        done = [c for c in self.comments if c.resolved_at is not None]
+        done = [
+            c
+            for i, c in enumerate(self.comments)
+            if c.resolved_at is not None and i not in self._answered
+        ]
         return resolved_html(done, tz=self.tz, now=self.now)

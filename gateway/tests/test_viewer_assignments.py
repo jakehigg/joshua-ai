@@ -6,8 +6,6 @@ needed. The answers follow the read API contract of the manager.
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import textwrap
 from datetime import UTC, datetime, timedelta
@@ -843,9 +841,9 @@ def test_a_full_report_is_the_page(data, monkeypatch) -> None:
     assert 'http-equiv="refresh"' not in response.text
     order = [
         '<header class="a-hero">',
+        '<section class="a-lead" id="lead"',
         '<section class="a-highlights"',
         "<h2>Decisions for you</h2>",
-        "<h2>Outputs</h2>",
         "<h2>What was asked</h2>",
         "<h2>What was done</h2>",
         "<h2>Follow-ups</h2>",
@@ -875,20 +873,30 @@ def test_a_full_report_is_the_page(data, monkeypatch) -> None:
     assert '<strong class="a-hl-lead">42 dead links fixed</strong>' in html
     assert '<p class="a-hl-text">across 18 pages, in one merge request.</p>' in html
     assert "<h2>Highlights</h2>" not in html
-    # The decisions: numbered, with a count, a way to answer, and a copy button.
+    # The decisions: numbered, with a count, and no copy button: an older
+    # manager gives no definition, so the page has no form.
     decide = _between(html, "<h2>Decisions for you</h2>", "</section>")
     assert '<span class="a-count">2 decisions</span>' in decide
     assert '<p class="a-q">Delete the old install page?</p>' in decide
-    assert decide.count("Tell Joshua your answer.") == 2
-    assert 'data-copy="Assignment 7, decision 2: Keep the redirects for a year?" hidden>' in decide
-    # The outputs: grouped by kind, a note from the report by ref.
-    outputs = _between(html, "<h2>Outputs</h2>", "</section>")
-    assert '<span class="a-count">5 outputs</span>' in outputs
-    assert outputs.count('<div class="a-group">') == 4
-    assert 'merge request <span class="j-count">2</span>' in outputs
-    assert '<p class="a-out-note">every link fix, one commit a page</p>' in outputs
-    assert '<p class="a-out-note">the full list of what I checked</p>' in outputs
-    assert '<code class="a-out-title">snap-1</code>' in outputs
+    assert "Tell Joshua your answer." not in html and "data-copy" not in html
+    assert "a-answer-form" not in html
+    # The lead band: the decisions that wait, and the outputs with a note by ref.
+    lead = _between(html, '<section class="a-lead"', "</section>")
+    assert '<a class="a-lead-decisions" href="#decisions"><b>2</b> decisions wait for you</a>' in (
+        lead
+    )
+    assert '<h2 class="j-label">5 outputs</h2>' in lead
+    assert lead.count('<li class="a-out a-lead-out">') == 5
+    assert '<p class="a-out-note">every link fix, one commit a page</p>' in lead
+    assert '<p class="a-out-note">the full list of what I checked</p>' in lead
+    assert (
+        '<a class="j-btn sm a-open" href="https://git.example.com/docs/-/merge_requests/4" '
+        'rel="noreferrer">Open</a>' in lead
+    )
+    assert '<code class="a-out-ref">snap-1</code>' in lead
+    assert '<section class="a-section a-decide" id="decisions">' in html
+    # The outputs show once, in the band.
+    assert "<h2>Outputs</h2>" not in html
     # What was asked is a short quote, open.
     assert '<blockquote class="j-prose a-quote"><p>Clean up the docs: fix' in html
     # The follow-ups are a static checklist.
@@ -902,12 +910,8 @@ def test_a_full_report_is_the_page(data, monkeypatch) -> None:
     plan = _between(html, '<span class="a-fold-title">Plan</span>', "</summary>")
     assert '<svg class="a-meter mini"' in plan and "1 of 2 steps" in plan
     assert '<details class="a-fold" open' not in html
-    # The one script copies the decisions, and the policy allows it by hash.
-    assert html.count("<script>") == 1
-    assert f"<script>{sc.COPY_SCRIPT}</script>" in html
-    digest = hashlib.sha256(sc.COPY_SCRIPT.encode()).digest()
-    assert sc.COPY_SCRIPT_HASH == "sha256-" + base64.b64encode(digest).decode()
-    assert f"script-src '{sc.COPY_SCRIPT_HASH}'" in response.headers["content-security-policy"]
+    # The page has no script.
+    assert "<script" not in html
 
 
 def test_a_report_with_no_highlights_skips_the_cards(data, monkeypatch) -> None:
@@ -928,7 +932,7 @@ def test_a_report_with_no_highlights_skips_the_cards(data, monkeypatch) -> None:
     assert "<b>0</b><span>decisions</span>" in html
     assert "<b>22</b><span>turns</span>" in html
     # The recorded outputs are the cards; a line that names no recorded ref is no card.
-    assert '<span class="a-count">1 output</span>' in html
+    assert '<h2 class="j-label">1 output</h2>' in html
     assert "Pin the worker image" not in html
     assert '<p class="a-out-note">the web chart</p>' in html
     # An unknown heading goes under What was done.
@@ -947,7 +951,8 @@ def test_a_report_with_none_of_the_headings_is_plain_markdown(data, monkeypatch)
     assert "<li>one page needs a picture</li>" in report
     assert "## Highlights" in report
     assert "a-highlights" not in html
-    assert "<h2>Outputs</h2>" in html
+    assert '<h2 class="j-label">1 output</h2>' in html
+    assert html.index('<section class="a-lead"') < html.index("<h2>Report</h2>")
     assert '<span class="a-fold-title">Plan</span>' in html
 
 
@@ -963,11 +968,12 @@ def test_a_generated_stop_report_is_the_page(data, monkeypatch) -> None:
     assert '<p class="a-lede generated">Generated by the runner at failed' in html
     assert '<strong class="a-hl-lead">Stopped at failed</strong>' in html
     assert '<strong class="a-hl-lead">2 of 4 steps</strong>' in html
-    assert 'data-copy="Assignment 7, decision 1: Which project gets the issues?"' in html
+    assert '<p class="a-q">Which project gets the issues?</p>' in html
     # With no recorded output, the lines of the section are the cards.
-    outputs = _between(html, "<h2>Outputs</h2>", "</section>")
-    assert '<span class="a-out-title">First</span><code class="a-out-ref">ops#1</code>' in outputs
-    assert '<code class="a-out-title">notes/charts.txt</code>' in outputs
+    outputs = _between(html, '<section class="a-lead"', "</section>")
+    assert '<span class="a-out-title">First</span><span class="a-out-ref">issue</span>' in outputs
+    assert '<code class="a-out-ref">ops#1</code>' in outputs
+    assert '<code class="a-out-ref">notes/charts.txt</code>' in outputs
     assert "<b>9</b><span>turns</span>" in html
     assert '<span class="j-badge bad">failed</span>' in html
     assert html.index("<summary>Definition</summary>") < html.index("<h2>Error</h2>")
@@ -1037,11 +1043,9 @@ def test_a_hostile_report_is_escaped(data, monkeypatch) -> None:
     )
     outputs = [{"kind": "<k>", "ref": 'https://example.com/"><x', "title": "<t>", "at": None}]
     html, _ = _page_of(monkeypatch, done(report, outputs=outputs))
-    without_script = html.replace(f"<script>{sc.COPY_SCRIPT}</script>", "")
-    assert "<script" not in without_script
+    assert "<script" not in html
     assert "<img" not in html and "<u>" not in html and "<i>note" not in html
     assert 'href="javascript:' not in html
-    assert 'data-copy="Assignment 7, decision 1: Pick &quot;a&quot; &lt;b&gt;?&lt;/b&gt;"' in html
     assert 'href="https://example.com/&quot;&gt;&lt;x"' in html
     assert "&lt;k&gt;" in html and "&lt;t&gt;" in html
 
@@ -1186,8 +1190,10 @@ def test_the_definition_is_a_document_with_a_form_per_unit(data, monkeypatch) ->
     assert '<div class="a-unit a-goal-head" id="L2">' in html
     assert '<div class="a-unit a-block p d0" id="L3"><div class="a-unit-body">' in html
     assert "<p>Clean up the docs.</p>" in html
-    # Four units and four lines of the source: each has a "+".
-    assert html.count('<details class="a-add">') == 8
+    # Four units and four lines of the source: each has a "+". The three
+    # blocks of the plan have their own.
+    definition = html[html.index('<details class="a-def"') :]
+    assert definition.count('<details class="a-add">') == 8
     assert 'action="/assignments/7/comments"' in html
     # The source gives each line with its number, its text, and a "+".
     source = html[html.index('<details class="a-source">') :]
@@ -1612,22 +1618,32 @@ def test_a_hostile_definition_is_escaped(data, monkeypatch) -> None:
     assert "&lt;img src=x onerror=alert(1)&gt;" in html
 
 
-def test_the_plan_and_the_report_are_blocks_with_no_plus(data, monkeypatch) -> None:
+def test_the_plan_is_blocks_with_a_plus_and_the_report_fold_has_none(data, monkeypatch) -> None:
     plan = "# Plan\n\n- [x] read the pages\n  - [ ] a sub step\n- [ ] fix the links\n\nA note."
     body = detail(plan=plan, report="Some text.\n\n- one\n- two", definition=DEFINITION)
     _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
     html = _main(_get("/assignments/7").text)
     section = html[html.index("<h2>Plan</h2>") : html.index("</section>", html.index("<h2>Plan"))]
+    assert '<section class="a-section" id="plan">' in html
     assert '<article class="j-prose a-blocks">' in section
-    assert '<div class="a-block h d0"><h1>Plan</h1>' in section
-    assert '<div class="a-block li d0"><ul>\n<li class="a-task done">' in section
-    assert '<div class="a-block li d1"><ul>\n<li class="a-task">' in section
-    assert '<div class="a-block p d0"><p>A note.</p>' in section
+    assert '<div class="a-unit a-block h d0" id="P1"><span class="a-anchor" id="P2"></span>' in (
+        section
+    )
+    assert '<div class="a-unit-body"><h1>Plan</h1>' in section
+    assert '<div class="a-unit a-block li d0" id="P3">' in section
+    assert '<div class="a-unit-body"><ul>\n<li class="a-task done">' in section
+    assert '<div class="a-unit a-block li d1" id="P4">' in section
+    assert '<div class="a-unit a-block p d0" id="P7"><div class="a-unit-body"><p>A note.</p>' in (
+        section
+    )
+    # Each block of the plan has a "+" whose form sends the target.
+    assert section.count('<details class="a-add">') == 5
+    assert section.count('<input type="hidden" name="target" value="plan">') == 5
+    assert 'id="L' not in section
     report = html[html.index('<span class="a-fold-title">Report</span>') :]
     report = report[: report.index("</details>")]
     assert '<div class="a-block li d0"><ul>\n<li>one</li>' in report
-    for part in (section, report):
-        assert "a-add" not in part and "a-unit" not in part and 'id="L' not in part
+    assert "a-add" not in report and "a-unit" not in report
 
 
 def test_a_plain_report_and_what_was_done_are_blocks(data, monkeypatch) -> None:
@@ -1660,3 +1676,199 @@ def test_the_definition_fits_a_phone() -> None:
     assert ".a-tags { display: flex; flex-wrap: wrap;" in css
     assert "overflow-x: auto" in ui[ui.index(".j-prose pre {") :][:300]
     assert "overflow-x: auto" in ui[ui.index(".j-prose table {") :][:200]
+
+
+# -- answers on the report, and comments on the plan --------------------------
+
+# The lines of the decisions in the fixture "full".
+DECISION_1 = 26
+DECISION_2 = 27
+DECISION_1_TEXT = (
+    "1. **Delete the old install page?** It has no links to it, and the new page covers "
+    "the same steps."
+)
+
+
+def answered(**fields: Any) -> dict[str, Any]:
+    outputs = [
+        *FULL_OUTPUTS,
+        {"kind": "document", "ref": "documents/alex/docs-plan.md", "title": "Plan", "at": None},
+    ]
+    return done(report_fixture("full"), outputs=outputs, definition=DEFINITION) | fields
+
+
+def test_the_lead_band_puts_the_documents_first_with_an_open_link(data, monkeypatch) -> None:
+    html, _ = _page_of(monkeypatch, answered())
+    lead = _between(html, '<section class="a-lead"', "</section>")
+    assert '<h2 class="j-label">6 outputs</h2>' in lead
+    first = lead[lead.index('<li class="a-out a-lead-out">') :]
+    assert first.index("/documents/alex/docs-plan") < first.index("Fix 42 dead links")
+    assert '<a class="j-btn sm a-open" href="/documents/alex/docs-plan">Open</a>' in lead
+    # A reference that is not a place has no Open link.
+    task = lead[lead.index("Rewrite the backup page") :]
+    assert task.index('<code class="a-out-ref">tasks#12</code>') < task.index("</li>")
+    assert "a-open" not in task[: task.index("</li>")]
+
+
+def test_each_decision_takes_an_answer(data, monkeypatch) -> None:
+    html, response = _page_of(monkeypatch, answered())
+    decide = _between(html, '<section class="a-section a-decide" id="decisions">', "</section>")
+    assert decide.count('<form class="a-answer-form" method="post"') == 2
+    assert decide.count("Send to Joshua") == 2
+    assert decide.count('<input type="hidden" name="target" value="report">') >= 2
+    assert f'<input type="hidden" name="line_no" value="{DECISION_1}">' in decide
+    assert f'<input type="hidden" name="line_text" value="{DECISION_1_TEXT}">' in decide
+    assert "Tell Joshua your answer." not in html and "data-copy" not in html
+    assert "<script" not in html
+    assert f'<li class="a-decision" id="R{DECISION_1}">' in decide
+    assert "<b>2</b> decisions wait for you" in html
+    # The other parts of the report have a "+" that sends the report target.
+    highlights = _between(html, '<section class="a-highlights"', "</section>")
+    assert '<input type="hidden" name="target" value="report">' in highlights
+    # The policy of the page is the same as before.
+    assert "script-src" in response.headers["content-security-policy"]
+
+
+def test_an_answer_shows_sent_and_a_resolution_shows_joshua(data, monkeypatch) -> None:
+    comments = [
+        comment(
+            id=21,
+            target="report",
+            line_no=DECISION_1,
+            line_text=DECISION_1_TEXT,
+            body="Keep <it>.",
+            created_at=_iso(timedelta(minutes=2)),
+        ),
+        comment(
+            id=22,
+            target="report",
+            line_no=DECISION_2,
+            line_text="2. **Keep the redirects for a year?** They make the sidebar longer.",
+            body="Yes.",
+            resolved_at=_iso(timedelta(minutes=1)),
+            resolution="Kept the redirects until next year.",
+        ),
+    ]
+    html, _ = _page_of(monkeypatch, answered(comments=comments))
+    decide = _between(html, '<section class="a-section a-decide" id="decisions">', "</section>")
+    first = _between(decide, f'id="R{DECISION_1}"', "</li>")
+    assert '<p class="a-answer-body">Keep &lt;it&gt;.</p>' in first
+    assert '<span class="j-badge ok">Sent to Joshua</span>' in first and "2m ago" in first
+    assert 'action="/assignments/7/comments/21/delete"' in first
+    # An open answer replaces the form.
+    assert "a-answer-form" not in first
+    second = _between(decide, f'id="R{DECISION_2}"', "</li>")
+    assert "Sent to Joshua" not in second
+    assert '<span class="j-label">Joshua</span> Kept the redirects until next year.' in second
+    assert "/comments/22/delete" not in html
+    # Both are answered, and they show once: not again in the resolved fold.
+    assert "All 2 decisions have an answer" in html
+    assert html.count('id="C21"') == 1 and html.count('id="C22"') == 1
+    assert '<div class="a-folds a-report-rest">' not in html
+
+
+def test_an_answer_round_trip(data, monkeypatch) -> None:
+    manager = _with(monkeypatch, CommentManager({"/v1/assignments/7": answered()}))
+    client = _client()
+    csrf = _csrf(client.get("/assignments/7", auth=ALEX).text)
+    form = {
+        "csrf": csrf,
+        "target": "report",
+        "line_no": str(DECISION_1),
+        "line_text": DECISION_1_TEXT,
+        "body": "Delete it.",
+    }
+    response = client.post("/assignments/7/comments", data=form, auth=ALEX)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/assignments/7#R{DECISION_1}"
+    [sent] = [r for r in manager.requests if r.method == "POST"]
+    assert sent.url.params["person"] == "alex"
+    assert json.loads(sent.content) == {
+        "line_no": DECISION_1,
+        "line_text": DECISION_1_TEXT,
+        "body": "Delete it.",
+        "target": "report",
+    }
+    manager.write = 204
+    response = client.post(
+        "/assignments/7/comments/21/delete", data={"csrf": csrf, "target": "report"}, auth=ALEX
+    )
+    assert response.headers["location"] == "/assignments/7#lead"
+    response = client.post(
+        "/assignments/7/comments",
+        data=form | {"target": "plan", "line_no": "3"},
+        auth=ALEX,
+    )
+    assert response.headers["location"] == "/assignments/7#P3"
+
+
+@pytest.mark.parametrize(
+    ("path", "target"),
+    [
+        ("/assignments/7/comments", "summary"),
+        ("/assignments/saved/3/comments", "report"),
+        ("/assignments/saved/3/comments", "plan"),
+    ],
+)
+def test_a_bad_target_is_refused_and_not_sent(data, monkeypatch, path, target) -> None:
+    manager = _with(monkeypatch, CommentManager({}))
+    base = path.removesuffix("/comments")
+    good = viewer._csrf_token("alex", f"comments:{base}")
+    response = _client().post(
+        path,
+        data={"csrf": good, "target": target, "line_no": "1", "line_text": "x", "body": "y"},
+        auth=ALEX,
+    )
+    assert response.status_code == 400
+    assert manager.requests == []
+
+
+def test_an_answer_needs_the_csrf_token_and_the_origin(data, monkeypatch) -> None:
+    manager = _with(monkeypatch, CommentManager({}))
+    form = {"target": "report", "line_no": "26", "line_text": "x", "body": "y"}
+    client = _client()
+    assert client.post("/assignments/7/comments", data=form, auth=ALEX).status_code == 403
+    good = viewer._csrf_token("alex", "comments:/assignments/7")
+    response = client.post(
+        "/assignments/7/comments",
+        data=form | {"csrf": good},
+        headers={"Origin": "https://elsewhere.example"},
+        auth=ALEX,
+    )
+    assert response.status_code == 403
+    assert manager.requests == []
+
+
+def test_a_plan_comment_opens_the_plan_fold(data, monkeypatch) -> None:
+    comments = [
+        comment(id=31, target="plan", line_no=3, line_text="- [x] read the pages", body="Why?")
+    ]
+    html, _ = _page_of(monkeypatch, answered(comments=comments))
+    plan = html[html.index('<details class="a-fold" open id="plan">') :]
+    plan = plan[: plan.index('<details class="a-def"')]
+    assert "1 comment for Joshua" in plan
+    assert '<div class="a-unit a-block li d0 has-comments" id="P3">' in plan
+    assert 'id="C31"' in plan
+    assert '<input type="hidden" name="target" value="plan">' in plan
+    # The definition does not show a comment on the plan.
+    definition = html[html.index('<details class="a-def"') :]
+    assert 'id="C31"' not in definition and "for Joshua" not in definition
+
+
+def test_a_report_comment_on_the_outputs_shows_in_the_lead_band(data, monkeypatch) -> None:
+    line = 20
+    comments = [comment(id=41, target="report", line_no=line, line_text="x", body="Rename it.")]
+    html, _ = _page_of(monkeypatch, answered(comments=comments))
+    lead = _between(html, '<section class="a-lead"', "</section>")
+    assert 'id="C41"' in lead
+    assert "On lines that are gone" not in html
+
+
+def test_the_lead_band_and_the_answers_fit_a_phone() -> None:
+    css = (Path(viewer.__file__).parent / "viewer.css").read_text()
+    for rule in (
+        ".a-lead-out .a-open { flex: none; }",
+        "form.a-answer-form { display: flex; flex-direction: column;",
+        ".a-answer p { margin: 0 0 4px; overflow-wrap: anywhere; }",
+    ):
+        assert rule in css, rule

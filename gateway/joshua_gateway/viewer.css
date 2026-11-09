@@ -409,6 +409,30 @@ ol.a-decisions { list-style: none; margin: 0; padding: 0; display: flex; flex-di
   font-size: var(--j-text-sm);
 }
 .a-copy[hidden] { display: none; }
+.a-decision.answered { border-left-color: var(--j-ok); }
+.a-decision.answered .a-n { color: var(--j-ok); background: var(--j-ok-soft); }
+.a-decision-answer { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--j-line-soft); }
+.a-answer { padding: 8px 12px; font-size: var(--j-text-sm); background: var(--j-surface-2); border-left: 3px solid var(--j-accent); border-radius: var(--j-radius-sm); }
+.a-answer.resolved { border-left-color: var(--j-ok); }
+.a-answer p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.a-answer-body { white-space: pre-wrap; color: var(--j-text); }
+form.a-answer-form { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+form.a-answer-form .j-field { align-items: stretch; }
+form.a-answer-form .j-field textarea { min-height: 64px; }
+form.a-answer-form button { align-self: flex-start; }
+
+/* the lead band of a completed assignment: what waits, and the outputs */
+.a-lead { display: flex; flex-direction: column; gap: 12px; margin: 0 0 20px; }
+a.a-lead-decisions {
+  display: block; padding: 14px 16px; font-size: var(--j-text-lg); font-weight: 600;
+  color: var(--j-warn); background: var(--j-warn-soft); border: 1px solid var(--j-warn);
+  border-radius: var(--j-radius); text-decoration: none;
+}
+a.a-lead-decisions b { font-size: 22px; }
+a.a-lead-decisions.done { color: var(--j-ok); background: var(--j-ok-soft); border-color: var(--j-ok); font-size: var(--j-text-md); }
+.a-lead-outputs { display: flex; flex-direction: column; gap: 8px; }
+.a-lead-out { align-items: center; }
+.a-lead-out .a-open { flex: none; }
 
 /* an output: the icon of its kind, the title, the reference, the note */
 .a-group { display: flex; flex-direction: column; gap: 8px; }
