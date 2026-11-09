@@ -552,20 +552,30 @@ Core ships a skill page for Joshua, `prompts/builtin/skills/assignments.md`.
 Core adds it to the system prompt of a session that holds the `assignments`
 server, and of no other session. A guest never gets it. So when you add the
 `assignments` entry under `mcp:` for a person, Joshua gets the page for that
-person, with no other step. The page tells Joshua:
+person, with no other step. The page names no tool other than the
+assignments tools, `internet`, and `schedule_task`. The page tells Joshua:
 
-- how to build a spec from a request, with everything in `goal`;
+- that an assignment is a long job with many tool calls and a budget, and
+  that Joshua does a short job itself;
+- how to build a spec from a request, with everything in `goal`. The goal
+  names where each result goes. When it names no place, Joshua asks the
+  person one question, or writes "the report" when the person wants only to
+  read the result;
 - how budget words become the `budget` block. "Don't burn all my tokens"
   takes the defaults. "Use up to 80% of my 5-hour budget" is
   `five_hour_pct: 80`. "You can have half the week" is `seven_day_pct: 50`.
   A value above the maximum becomes the maximum;
-- to answer a question alone from memory, the wiki, or `internet`, and to ask
-  the person only for a preference, a permission, or something only they
-  know;
+- to answer a question alone from memory or `internet`, and to ask the
+  person only for a preference, a permission, or something only they know;
 - at a limits stop, to schedule itself a reminder for the reset time with
-  `scheduling`, then answer "continue";
-- to read the plan page when the person asks about progress;
-- to give the cost with every result.
+  `schedule_task`, then answer "continue";
+- when the person asks about progress, to read the plan from
+  `assignment_status`, and to name `/assignments/<id>` in the viewer when the
+  person uses the viewer;
+- when a result arrives, to read the report and the outputs from
+  `assignment_status`, and to tell the person the outputs as links or
+  references, the decisions as questions, the follow-ups, and the cost in one
+  line.
 
 ## Configuration
 
