@@ -10,7 +10,9 @@ Core never trusts ``framing`` from user input; only the scheduler and ops set it
 calls for its usage page. ``UsageWriteRequest`` is the body of core's
 ``POST /v1/usage``, which the assignments container calls to report the
 tokens of its own model calls. ``MODEL_FORWARDER_PATH`` is the prefix of
-core's model forwarder. ``LimitsResponse`` is the shape of core's
+core's model forwarder. ``assignment_conversation`` names the conversation
+of an assignment session, and ``assignment_of`` reads it back.
+``LimitsResponse`` is the shape of core's
 ``GET /v1/limits``: how much of the Claude subscription limits is used.
 ``WebSearchRequest`` and ``WebSearchResponse`` are
 the shapes of the gateway ``POST /v1/search``, which core calls for the
@@ -303,6 +305,33 @@ class UsageWriteResponse(_Model):
 # any method. A caller sets ``ANTHROPIC_BASE_URL`` to core's URL and this
 # prefix.
 MODEL_FORWARDER_PATH = "/v1/model"
+
+# The fleet identity of the assignments container, and the prefix of the
+# conversation header that a session of assignment N sends to the gateway:
+# ``assignment:N``.
+ASSIGNMENTS_IDENTITY = "assignments"
+ASSIGNMENT_CONVERSATION_PREFIX = "assignment:"
+
+
+def assignment_conversation(assignment_id: int) -> str:
+    """The conversation header of the session of an assignment: ``assignment:<id>``."""
+    return f"{ASSIGNMENT_CONVERSATION_PREFIX}{int(assignment_id)}"
+
+
+def assignment_of(identity: str | None, conversation: str | None) -> int | None:
+    """The assignment id of a request, or None.
+
+    A request is of an assignment only when the fleet identity is
+    ``assignments`` and the conversation is ``assignment:<digits>``. A
+    conversation of another caller, core too, is never an assignment.
+    """
+    if identity != ASSIGNMENTS_IDENTITY or not conversation:
+        return None
+    prefix, _, number = conversation.partition(ASSIGNMENT_CONVERSATION_PREFIX)
+    if prefix or not number.isascii() or not number.isdigit() or len(number) > 18:
+        return None
+    value = int(number)
+    return value if value > 0 else None
 
 
 # The path of core's subscription limits route. It has no bearer, as ``/healthz``.
