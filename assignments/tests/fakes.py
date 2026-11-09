@@ -80,6 +80,7 @@ class FakeStore:
             "saved_id": saved_id,
             "granted_repos": None,
             "inbox": None,
+            "deleted_at": None,
         }
         self.rows[assignment_id] = row
         return copy.deepcopy(row)
@@ -99,7 +100,8 @@ class FakeStore:
         rows = [
             row
             for row in sorted(self.rows.values(), key=lambda r: r["id"], reverse=True)
-            if (person_id is None or row["person_id"] == person_id)
+            if row["deleted_at"] is None
+            and (person_id is None or row["person_id"] == person_id)
             and (status is None or row["status"] == status)
             and (statuses is None or row["status"] in statuses)
             and (saved_id is None or row["saved_id"] == saved_id)
@@ -296,6 +298,8 @@ class FakeStore:
     async def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
         for row in self.rows.values():
+            if row["deleted_at"] is not None:
+                continue
             out[row["status"]] = out.get(row["status"], 0) + 1
         return out
 
@@ -305,12 +309,22 @@ class FakeStore:
 
     async def delete_draft(self, assignment_id: int) -> bool:
         row = self.rows.get(assignment_id)
-        if row is None or row["status"] != "draft" or row["started_at"] is not None:
+        if (
+            row is None
+            or row["status"] != "draft"
+            or row["started_at"] is not None
+            or row["deleted_at"] is not None
+        ):
             return False
-        del self.rows[assignment_id]
-        for cid in [c for c, r in self.comment_rows.items() if r["assignment_id"] == assignment_id]:
-            del self.comment_rows[cid]
+        row["deleted_at"] = self.clock()
         return True
+
+    async def restore_draft(self, assignment_id: int) -> dict[str, Any] | None:
+        row = self.rows.get(assignment_id)
+        if row is None or row["status"] != "draft" or row["deleted_at"] is None:
+            return None
+        row["deleted_at"] = None
+        return copy.deepcopy(row)
 
     async def next_slice_n(self, assignment_id: int) -> int:
         mine = [s["n"] for s in self.slices if s["assignment_id"] == assignment_id]

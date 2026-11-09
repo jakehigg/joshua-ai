@@ -146,6 +146,10 @@ ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS outputs JSONB;
 ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS open_request JSONB;
 ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS granted_repos JSONB;
 ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS inbox JSONB;
+-- When ``delete_assignment`` removed the draft from view, or NULL. A row
+-- with a value is in no list and not in the read API, and
+-- ``restore_assignment`` clears it.
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_assignment_person
     ON assignments.assignment (person_id, id DESC);
 
@@ -301,6 +305,8 @@ class Store(Protocol):
     async def update(self, assignment_id: int, **fields: Any) -> dict[str, Any] | None: ...
 
     async def delete_draft(self, assignment_id: int) -> bool: ...
+
+    async def restore_draft(self, assignment_id: int) -> dict[str, Any] | None: ...
 
     async def add_checkpoint(self, assignment_id: int, note: str) -> None: ...
 
@@ -539,8 +545,9 @@ class PgStore:
         statuses: Collection[str] | None = None,
         saved_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        """The newest rows. ``status``, ``statuses``, and ``saved_id`` filter, and all apply."""
-        clauses: list[str] = []
+        """The newest rows that are not deleted. ``status``, ``statuses``, and
+        ``saved_id`` filter, and all apply."""
+        clauses: list[str] = ["deleted_at IS NULL"]
         params: list[Any] = []
         if person_id is not None:
             clauses.append("person_id = %s")
@@ -554,7 +561,7 @@ class PgStore:
         if saved_id is not None:
             clauses.append("saved_id = %s")
             params.append(saved_id)
-        where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
+        where = f"WHERE {' AND '.join(clauses)} "
         async with self._pool().connection() as conn:
             cur = await conn.execute(
                 f"SELECT * FROM assignments.assignment {where}ORDER BY id DESC LIMIT %s",
@@ -584,17 +591,32 @@ class PgStore:
 
     @shielded
     async def delete_draft(self, assignment_id: int) -> bool:
-        """Delete one draft that never ran. False when there is no such draft.
+        """Remove one draft that never ran from view: set ``deleted_at``. False
+        when there is no such draft.
 
-        Its comments go with it. A row that ran is never deleted."""
+        The row and its comments stay, so ``restore_draft`` can bring it back.
+        A row that ran is never deleted."""
         async with self._pool().connection() as conn:
             cur = await conn.execute(
-                "DELETE FROM assignments.assignment WHERE id = %s AND status = 'draft' "
-                "AND started_at IS NULL RETURNING id",
+                "UPDATE assignments.assignment SET deleted_at = now() WHERE id = %s "
+                "AND status = 'draft' AND started_at IS NULL AND deleted_at IS NULL "
+                "RETURNING id",
                 (assignment_id,),
             )
             row = await cur.fetchone()
         return row is not None
+
+    @shielded
+    async def restore_draft(self, assignment_id: int) -> dict[str, Any] | None:
+        """Bring back one deleted draft: clear ``deleted_at``. None when there is none."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "UPDATE assignments.assignment SET deleted_at = NULL WHERE id = %s "
+                "AND status = 'draft' AND deleted_at IS NOT NULL RETURNING *",
+                (assignment_id,),
+            )
+            row = await cur.fetchone()
+        return dict(row) if row else None
 
     @shielded
     async def add_checkpoint(self, assignment_id: int, note: str) -> None:
@@ -832,7 +854,8 @@ class PgStore:
     async def counts(self) -> dict[str, int]:
         async with self._pool().connection() as conn:
             cur = await conn.execute(
-                "SELECT status, count(*) AS n FROM assignments.assignment GROUP BY status"
+                "SELECT status, count(*) AS n FROM assignments.assignment "
+                "WHERE deleted_at IS NULL GROUP BY status"
             )
             rows = await cur.fetchall()
         return {row["status"]: int(row["n"]) for row in rows}
