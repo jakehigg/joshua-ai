@@ -36,6 +36,21 @@ async def test_post_json_sends_body() -> None:
     assert b'"a"' in seen["body"]
 
 
+async def test_delete_sends_the_method_and_the_bearer() -> None:
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["auth"] = request.headers.get("authorization", "")
+        return httpx.Response(204)
+
+    client = http.FleetClient("http://svc", "t", transport=httpx.MockTransport(handler))
+    async with client:
+        resp = await client.delete("/thing/1", params={"person": "alex"})
+    assert resp.status_code == 204
+    assert seen == {"method": "DELETE", "auth": "Bearer t"}
+
+
 async def test_retries_connection_errors_then_succeeds() -> None:
     attempts = {"n": 0}
 

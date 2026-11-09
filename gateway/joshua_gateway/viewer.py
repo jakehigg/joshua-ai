@@ -19,7 +19,9 @@ never drift on who reads what.
 A member has two write actions, both human actions in a browser that the
 agent never gets: a delete, which moves a wiki page to the trash under
 ``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
-text and people. A guest reads.
+text and people. A guest reads. A person can also comment on a line of the
+definition of their own assignment: the viewer sends the comment to the
+assignments manager as that person, and writes nothing itself.
 
 ``viewer.anonymous`` opens the viewer: a request with no ``Authorization``
 header gets full access, read and write, as a synthetic "anonymous" identity,
@@ -840,9 +842,10 @@ async def assignment_page(request: Request, person: Person) -> Response:
         html = assignments_mod.unavailable_html(title, configured=True)
         return _page(title, html, section="assignments")
     tz, now = _clock()
+    forms = _comment_forms(person, "assignment", item.id)
     return _page(
         item.title,
-        assignments_mod.detail_html(item, tz=tz, now=now),
+        assignments_mod.detail_html(item, tz=tz, now=now, forms=forms),
         section="assignments",
         head=assignments_mod.refresh_meta(item),
     )
@@ -871,11 +874,79 @@ async def saved_page(request: Request, person: Person) -> Response:
         html = assignments_mod.unavailable_html(title, configured=True)
         return _page(title, html, section="assignments")
     tz, now = _clock()
+    forms = _comment_forms(person, "saved", saved.id)
     return _page(
         saved.name,
-        assignments_mod.saved_detail_html(saved, tz=tz, now=now),
+        assignments_mod.saved_detail_html(saved, tz=tz, now=now, forms=forms),
         section="assignments",
     )
+
+
+def _comment_base(kind: str, parent_id: int) -> str:
+    """The viewer path of an assignment (``assignment``) or a saved one (``saved``)."""
+    return f"/assignments/saved/{parent_id}" if kind == "saved" else f"/assignments/{parent_id}"
+
+
+def _comment_forms(person: Person, kind: str, parent_id: int) -> assignments_mod.CommentForms:
+    base = _comment_base(kind, parent_id)
+    return assignments_mod.CommentForms(
+        action=f"{base}/comments", csrf=_csrf_token(person.id, f"comments:{base}")
+    )
+
+
+async def _comment_write(request: Request, person: Person, kind: str) -> Response:
+    """Send one comment write of the person to the manager, then go back to the line.
+
+    The form carries the CSRF token of the definition, and a cross-site
+    ``Origin`` is refused. The manager writes the comment as the person who
+    signed in, on their own row only, and a row of another person is 404."""
+    client = assignments_mod.from_env(os.environ)
+    if client is None:
+        return _not_found()
+    parent_id = int(request.path_params["id"])
+    base = _comment_base(kind, parent_id)
+    form = await request.form()
+    token = str(form.get("csrf", ""))
+    if not _csrf_valid(person.id, f"comments:{base}", token) or not _origin_ok(request):
+        return _forbidden()
+    comment_id = request.path_params.get("cid")
+    if comment_id is not None:
+        written = await client.delete_comment(person.id, kind, parent_id, int(comment_id))
+        anchor = "definition"
+    else:
+        try:
+            line_no = int(str(form.get("line_no", "")))
+        except ValueError:
+            line_no = 0
+        written = await client.add_comment(
+            person.id,
+            kind,
+            parent_id,
+            line_no=line_no,
+            line_text=str(form.get("line_text", "")),
+            body=str(form.get("body", "")),
+        )
+        anchor = f"L{line_no}"
+    if written is not None and written.status == 404:
+        return _not_found()
+    if written is None or not written.ok:
+        reason = written.error if written is not None else "the manager did not answer"
+        body = assignments_mod.message_html(
+            "comment not stored",
+            f'<p class="j-error">{escape(reason or "The manager refused the comment.")}</p>'
+            f'<p><a href="{escape(base)}">Back</a></p>',
+        )
+        return _page("comment not stored", body, status=400, section="assignments")
+    logger.info({"message": "viewer comment", "kind": kind, "delete": comment_id is not None})
+    return RedirectResponse(f"{base}#{anchor}", status_code=303)
+
+
+async def comment_on_assignment(request: Request, person: Person) -> Response:
+    return await _comment_write(request, person, "assignment")
+
+
+async def comment_on_saved(request: Request, person: Person) -> Response:
+    return await _comment_write(request, person, "saved")
 
 
 def _now(tz: tzinfo) -> datetime:
@@ -1341,6 +1412,26 @@ def build_app() -> Starlette:
             Route("/assignments/saved", _require_auth(saved_list)),
             Route("/assignments/saved/{id:int}", _require_auth(saved_page)),
             Route("/assignments/{id:int}", _require_auth(assignment_page)),
+            Route(
+                "/assignments/{id:int}/comments",
+                _require_auth(comment_on_assignment),
+                methods=["POST"],
+            ),
+            Route(
+                "/assignments/{id:int}/comments/{cid:int}/delete",
+                _require_auth(comment_on_assignment),
+                methods=["POST"],
+            ),
+            Route(
+                "/assignments/saved/{id:int}/comments",
+                _require_auth(comment_on_saved),
+                methods=["POST"],
+            ),
+            Route(
+                "/assignments/saved/{id:int}/comments/{cid:int}/delete",
+                _require_auth(comment_on_saved),
+                methods=["POST"],
+            ),
             Route("/delete", _require_auth(delete), methods=["POST"]),
         ],
     )

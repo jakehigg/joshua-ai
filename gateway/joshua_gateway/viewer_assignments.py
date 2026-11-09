@@ -7,8 +7,14 @@ viewer asks the read API of the manager (``GET /v1/assignments``,
 its own fleet token, and names the person who signed in as ``person``. The
 manager shows a person only their own assignments.
 
-The section is read-only. A person reads an assignment here and tells Joshua
-what to change.
+A person reads an assignment here and tells Joshua what to change. The one
+write is a comment on a line of a definition: the definition shows each line
+with its number, and the "+" of a line opens a plain form. The viewer sends
+the comment to the manager as the person who signed in
+(``POST /v1/assignments/{id}/comments`` or ``POST /v1/saved/{id}/comments``),
+and a Delete button of an open comment deletes it. Joshua reads the comments,
+changes the spec, and resolves them. The line numbers count the lines of the
+``definition`` text of the manager, so the viewer shows that text as it is.
 
 The viewer needs ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER``. With either
 one missing, :func:`from_env` returns None and the pages say so. A call that
@@ -168,8 +174,23 @@ class Checkpoint(_Model):
     note: str = ""
 
 
+class Comment(_Model):
+    id: int
+    target: str = "definition"
+    line_no: int
+    line_text: str = ""
+    body: str = ""
+    created_at: str | None = None
+    resolved_at: str | None = None
+    resolution: str | None = None
+    stale: bool = False
+
+
 class Detail(Item):
     spec: dict[str, Any] = Field(default_factory=dict)
+    definition: str | None = None
+    comments: list[Comment] = Field(default_factory=list)
+    open_comments: int = 0
     plan: str | None = None
     plan_at: str | None = None
     report: str | None = None
@@ -201,6 +222,7 @@ class SavedItem(_Model):
     updated_at: str | None = None
     runs: int = 0
     last_run: LastRun | None = None
+    open_comments: int = 0
 
 
 class SavedList(_Model):
@@ -209,6 +231,8 @@ class SavedList(_Model):
 
 class SavedDetail(SavedItem):
     runs_list: list[Item] = Field(default_factory=list)
+    definition: str | None = None
+    comments: list[Comment] = Field(default_factory=list)
 
 
 # -- the client -------------------------------------------------------------
@@ -222,6 +246,21 @@ class NotFound:
 
 
 NOT_FOUND: Final = NotFound()
+
+# What a comment belongs to, and the path of its parent in the read API.
+KINDS = {"assignment": LIST_PATH, "saved": SAVED_PATH}
+
+
+@dataclass(frozen=True)
+class Written:
+    """The answer of the manager to a comment write: the status, and its error text."""
+
+    status: int
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.status in (201, 204)
 
 
 class AssignmentsClient:
@@ -314,6 +353,43 @@ class AssignmentsClient:
                 task.cancel()
             await asyncio.gather(*late, return_exceptions=True)
         return found
+
+    async def _write(self, method: str, path: str, person: str, body: Any = None) -> Written | None:
+        """Send one comment write. None when the manager did not answer."""
+        params = {"person": person}
+        try:
+            async with self._client() as client:
+                if method == "POST":
+                    response = await client.post_json(path, json=body, params=params)
+                else:
+                    response = await client.delete(path, params=params)
+        except httpx.HTTPError as exc:
+            logger.warning({"message": "comment write failed", "error": type(exc).__name__})
+            return None
+        error = ""
+        if response.status_code not in (201, 204):
+            logger.warning({"message": "comment write refused", "status": response.status_code})
+            try:
+                error = str(response.json().get("error") or "")
+            except (ValueError, AttributeError):
+                error = ""
+        return Written(response.status_code, error[:300])
+
+    async def add_comment(
+        self, person: str, kind: str, parent_id: int, *, line_no: int, line_text: str, body: str
+    ) -> Written | None:
+        """Write a comment of ``person`` on line ``line_no`` of a definition."""
+        path = f"{KINDS[kind]}/{parent_id}/comments"
+        fields = {"line_no": line_no, "line_text": line_text, "body": body}
+        return await self._write("POST", path, person, fields)
+
+    async def delete_comment(
+        self, person: str, kind: str, parent_id: int, comment_id: int
+    ) -> Written | None:
+        """Delete an open comment of ``person``."""
+        return await self._write(
+            "DELETE", f"{KINDS[kind]}/{parent_id}/comments/{comment_id}", person
+        )
 
     async def saved(self, person: str) -> SavedList | None:
         """The saved assignments of ``person``."""
@@ -733,11 +809,157 @@ def spec_yaml(spec: Mapping[str, Any]) -> str:
     return text.strip()
 
 
-def _definition(spec: Mapping[str, Any], *, open_: bool) -> str:
-    opened = " open" if open_ else ""
+# The longest comment, as the manager takes it.
+MAX_COMMENT = 2000
+
+
+@dataclass(frozen=True)
+class CommentForms:
+    """Where the comment forms of a definition post: ``action`` is the path of
+    the comments of the parent in the viewer, ``csrf`` the token of the forms."""
+
+    action: str
+    csrf: str
+
+
+def comments_badge(n: int) -> str:
+    """The count of open comments: "3 comments for Joshua", or "" for none."""
+    if n <= 0:
+        return ""
+    text = f"{n} comment{'' if n == 1 else 's'} for Joshua"
+    return f'<span class="j-badge accent a-comments">{escape(text)}</span>'
+
+
+def _csrf_input(forms: CommentForms) -> str:
+    return f'<input type="hidden" name="csrf" value="{escape(forms.csrf)}">'
+
+
+def _comment_card(
+    comment: Comment, *, forms: CommentForms | None, tz: tzinfo, now: datetime
+) -> str:
+    """One open comment: the body, the age, a stale mark, and Delete."""
+    age = time_html(comment.created_at, tz=tz, now=now)
+    stale = ""
+    was = ""
+    if comment.stale:
+        stale = '<span class="j-badge warn">line changed</span>'
+        was = (
+            '<p class="a-was"><span class="j-faint">It was on:</span> '
+            f"<code>{escape(comment.line_text)}</code></p>"
+        )
+    delete = ""
+    if forms is not None:
+        action = f"{forms.action}/{comment.id}/delete"
+        delete = (
+            f'<form class="a-del" method="post" action="{escape(action)}">'
+            f'{_csrf_input(forms)}<button class="j-btn sm" type="submit">Delete</button></form>'
+        )
     return (
-        f'<details class="a-def"{opened}><summary>Definition</summary>'
-        f"<pre><code>{escape(spec_yaml(spec))}</code></pre></details>"
+        f'<div class="a-comment{" stale" if comment.stale else ""}" id="C{comment.id}">'
+        f'<p class="a-comment-body">{escape(comment.body)}</p>{was}'
+        f'<div class="a-comment-foot"><span class="j-faint">{age}</span>{stale}{delete}</div></div>'
+    )
+
+
+def _add_form(n: int, text: str, forms: CommentForms) -> str:
+    """The "+" of a line: a closed ``<details>`` with the form of a new comment."""
+    return (
+        f'<details class="a-add"><summary class="a-plus" title="Comment on line {n}" '
+        f'aria-label="Comment on line {n}">+</summary>'
+        f'<form class="a-comment-form" method="post" action="{escape(forms.action)}">'
+        f'{_csrf_input(forms)}<input type="hidden" name="line_no" value="{n}">'
+        f'<input type="hidden" name="line_text" value="{escape(text)}">'
+        f'<div class="j-field"><textarea name="body" rows="3" maxlength="{MAX_COMMENT}" '
+        f'required aria-label="Your comment on line {n}" '
+        'placeholder="Tell Joshua what to change"></textarea></div>'
+        '<button class="j-btn sm" type="submit">Comment</button></form></details>'
+    )
+
+
+def _resolved(comments: list[Comment], *, tz: tzinfo, now: datetime) -> str:
+    """The resolved comments, folded, each with the resolution of Joshua."""
+    if not comments:
+        return ""
+    rows = "".join(
+        f'<li class="a-comment resolved" id="C{c.id}">'
+        f'<p class="j-faint">Line {c.line_no}: <code>{escape(c.line_text)}</code></p>'
+        f'<p class="a-comment-body">{escape(c.body)}</p>'
+        f'<p class="a-resolution"><span class="j-label">Joshua</span> '
+        f"{escape(c.resolution or '')}"
+        f' <span class="j-faint">{time_html(c.resolved_at, tz=tz, now=now)}</span></p></li>'
+        for c in comments
+    )
+    return (
+        f'<details class="a-resolved"><summary>{len(comments)} resolved</summary>'
+        f'<ul class="a-resolved-list">{rows}</ul></details>'
+    )
+
+
+def definition_html(
+    text: str | None,
+    spec: Mapping[str, Any],
+    comments: list[Comment],
+    *,
+    open_: bool,
+    forms: CommentForms | None,
+    tz: tzinfo,
+    now: datetime,
+) -> str:
+    """The definition in a ``<details>``: one row per line with its number, the
+    "+" of the line, and the open comments under it. The resolved comments
+    fold under the lines.
+
+    ``text`` is the definition of the manager. Without it (an older manager),
+    the spec shows as YAML with no line numbers and no form, because a line
+    number would not match the lines of the manager."""
+    open_comments = [c for c in comments if c.resolved_at is None]
+    badge = comments_badge(len(open_comments))
+    opened = " open" if open_ or open_comments else ""
+    summary = f"<summary>Definition{' ' + badge if badge else ''}</summary>"
+    if text is None:
+        return (
+            f'<details class="a-def"{opened} id="definition">{summary}'
+            f"<pre><code>{escape(spec_yaml(spec))}</code></pre></details>"
+        )
+    lines = text.split("\n") if text else []
+    by_line: dict[int, list[Comment]] = {}
+    orphans: list[Comment] = []
+    for comment in open_comments:
+        if 1 <= comment.line_no <= len(lines):
+            by_line.setdefault(comment.line_no, []).append(comment)
+        else:
+            orphans.append(comment)
+    rows = []
+    for n, line in enumerate(lines, start=1):
+        cards = "".join(_comment_card(c, forms=forms, tz=tz, now=now) for c in by_line.get(n, []))
+        plus = _add_form(n, line, forms) if forms is not None else ""
+        rows.append(
+            f'<li class="a-line{" has-comments" if cards else ""}" id="L{n}">'
+            f'<a class="a-ln" href="#L{n}">{n}</a>'
+            f'<code class="a-code">{escape(line)}</code>{plus}{cards}</li>'
+        )
+    gone = ""
+    if orphans:
+        cards = "".join(_comment_card(c, forms=forms, tz=tz, now=now) for c in orphans)
+        gone = f'<div class="a-orphans"><p class="j-label">On lines that are gone</p>{cards}</div>'
+    resolved = [c for c in comments if c.resolved_at is not None]
+    return (
+        f'<details class="a-def"{opened} id="definition">{summary}'
+        f'<ol class="a-lines">{"".join(rows)}</ol>{gone}'
+        f"{_resolved(resolved, tz=tz, now=now)}</details>"
+    )
+
+
+def _definition(
+    item: Detail | SavedDetail,
+    *,
+    open_: bool,
+    forms: CommentForms | None,
+    tz: tzinfo,
+    now: datetime,
+) -> str:
+    return definition_html(
+        item.definition, item.spec, item.comments, open_=open_, forms=forms, tz=tz, now=now
     )
 
 
@@ -1043,7 +1265,14 @@ def _crumbs() -> str:
     return '<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
 
 
-def _report_page(item: Detail, report: rp.Report, *, tz: tzinfo, now: datetime) -> str:
+def _report_page(
+    item: Detail,
+    report: rp.Report,
+    *,
+    tz: tzinfo,
+    now: datetime,
+    forms: CommentForms | None = None,
+) -> str:
     """A completed assignment with a report: the report is the page."""
     cards = output_cards(item.outputs, report)
     turns = rp.turns(report.get(rp.COST).body if report.get(rp.COST) else None)
@@ -1064,7 +1293,7 @@ def _report_page(item: Detail, report: rp.Report, *, tz: tzinfo, now: datetime) 
         '<div class="a-folds">',
         _plan_fold(item, progress, tz=tz, now=now),
         _progress_fold(item.checkpoints, tz=tz, now=now),
-        _definition(item.spec, open_=False),
+        _definition(item, open_=False, forms=forms, tz=tz, now=now),
         "</div>",
         _error(item),
         COPY_SCRIPT_TAG if decisions else "",
@@ -1072,7 +1301,9 @@ def _report_page(item: Detail, report: rp.Report, *, tz: tzinfo, now: datetime) 
     return "".join(part for part in parts if part)
 
 
-def _plain_report_page(item: Detail, *, tz: tzinfo, now: datetime) -> str:
+def _plain_report_page(
+    item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
+) -> str:
     """A completed assignment whose report has none of the known headings:
     the report as Markdown, then the outputs."""
     cards = output_cards(item.outputs, None)
@@ -1094,14 +1325,16 @@ def _plain_report_page(item: Detail, *, tz: tzinfo, now: datetime) -> str:
         '<div class="a-folds">',
         _plan_fold(item, progress, tz=tz, now=now),
         _progress_fold(item.checkpoints, tz=tz, now=now),
-        _definition(item.spec, open_=False),
+        _definition(item, open_=False, forms=forms, tz=tz, now=now),
         "</div>",
         _error(item),
     ]
     return "".join(part for part in parts if part)
 
 
-def _progress_page(item: Detail, *, tz: tzinfo, now: datetime) -> str:
+def _progress_page(
+    item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
+) -> str:
     """An assignment with no report yet, or one in progress: the plan is the page."""
     cards = output_cards(item.outputs, None)
     progress = rp.plan_progress(item.plan)
@@ -1130,27 +1363,30 @@ def _progress_page(item: Detail, *, tz: tzinfo, now: datetime) -> str:
         _section("Progress", _progress(item.checkpoints, tz=tz, now=now)),
         '<div class="a-folds">',
         report,
-        _definition(item.spec, open_=False),
+        _definition(item, open_=False, forms=forms, tz=tz, now=now),
         "</div>",
         _error(item),
     ]
     return "".join(part for part in parts if part)
 
 
-def detail_html(item: Detail, *, tz: tzinfo, now: datetime) -> str:
+def detail_html(
+    item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
+) -> str:
     """The body of ``/assignments/{id}``: a document, top to bottom.
 
     A completed assignment with a report shows the report: a hero, the
     highlights, the decisions, the outputs, what was asked and done, the
     follow-ups, and the cost, with the plan, the progress, and the definition
     folded under it. Any other assignment shows its plan, with the progress
-    of the plan and the outputs so far."""
+    of the plan and the outputs so far. With ``forms``, each line of the
+    definition has a form for a comment."""
     if item.state == "completed" and item.report and item.report.strip():
         report = rp.parse(item.report)
         if report.structured:
-            return _report_page(item, report, tz=tz, now=now)
-        return _plain_report_page(item, tz=tz, now=now)
-    return _progress_page(item, tz=tz, now=now)
+            return _report_page(item, report, tz=tz, now=now, forms=forms)
+        return _plain_report_page(item, tz=tz, now=now, forms=forms)
+    return _progress_page(item, tz=tz, now=now, forms=forms)
 
 
 # The one script of the viewer: it shows the copy button of each decision and
@@ -1192,7 +1428,7 @@ def saved_row(saved: SavedItem, *, tz: tzinfo, now: datetime) -> str:
         f'<a class="j-list-title wrap" href="/assignments/saved/{saved.id}">'
         f"{escape(saved.name)}</a>{title}"
         f'<span class="j-list-sub">{_sub([runs, last])}</span></div>'
-        f'<div class="a-chips">{chip}</div></li>'
+        f'<div class="a-chips">{comments_badge(saved.open_comments)}{chip}</div></li>'
     )
 
 
@@ -1216,8 +1452,11 @@ def saved_list_html(body: SavedList | None, *, configured: bool, tz: tzinfo, now
     return f'{head}<ul class="j-list a-list">{rows}</ul>'
 
 
-def saved_detail_html(saved: SavedDetail, *, tz: tzinfo, now: datetime) -> str:
-    """The body of ``/assignments/saved/{id}``: the definition open, then the runs."""
+def saved_detail_html(
+    saved: SavedDetail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
+) -> str:
+    """The body of ``/assignments/saved/{id}``: the definition open, then the runs.
+    With ``forms``, each line of the definition has a form for a comment."""
     head = _saved_head(' <span aria-hidden="true">/</span> <a href="/assignments/saved">saved</a>')
     title = f'<p class="a-lead">{escape(saved.title)}</p>' if saved.title else ""
     updated = time_html(saved.updated_at, tz=tz, now=now)
@@ -1235,7 +1474,7 @@ def saved_detail_html(saved: SavedDetail, *, tz: tzinfo, now: datetime) -> str:
     return (
         f'{head}<h1 class="j-doc-title">{escape(saved.name)}</h1>{title}'
         f'<p class="j-meta">{meta}</p>'
-        f"{_definition(saved.spec, open_=True)}"
+        f"{_definition(saved, open_=True, forms=forms, tz=tz, now=now)}"
         f"{_section('Runs', runs)}"
     )
 
