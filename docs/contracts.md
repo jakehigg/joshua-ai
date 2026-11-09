@@ -494,8 +494,8 @@ true and its profile runs. [assignments.md](assignments.md) has the tools.
 | `GET /v1/assignments/{id}?person=` | the same | none | one assignment: item plus spec, definition, comments, open_comments, plan, report, outputs, checkpoints (newest first, at most 200), summary, follow-ups, answer, error, granted_repos, inbox |
 | `GET /v1/saved?person=` | the same | none | `{"items": [saved_item, ...]}`, the newest first, each with `open_comments` |
 | `GET /v1/saved/{id}?person=` | the same | none | one saved assignment plus `definition`, `comments`, and `runs_list` (newest first, at most 50; a draft is not a run) |
-| `GET /v1/assignments/{id}/comments?person=`, `GET /v1/saved/{id}/comments?person=` | the same | none | `{"items": [comment, ...]}`, the oldest first |
-| `POST /v1/assignments/{id}/comments?person=`, `POST /v1/saved/{id}/comments?person=` | the same | `{"line_no", "line_text", "body"}` | `201` and the comment, written as `person`. `400` for a bad value, `409` past 200 open comments. |
+| `GET /v1/assignments/{id}/comments?person=`, `GET /v1/saved/{id}/comments?person=` | the same | none | `{"items": [comment, ...]}`, the oldest first. Each comment has `target`, `line_now`, and `stale`, computed against the text of its target. |
+| `POST /v1/assignments/{id}/comments?person=`, `POST /v1/saved/{id}/comments?person=` | the same | `{"line_no", "line_text", "body"}`, and `target` (`definition`, the default, `plan`, or `report`; a saved assignment takes `definition` only) | `201` and the comment, written as `person`. `400` for a bad value or target, `409` past 200 open comments. A comment on the plan or the report of a completed assignment goes to channels `POST /v1/events` as one event for the comments of two minutes. |
 | `DELETE /v1/assignments/{id}/comments/{comment_id}?person=`, `DELETE /v1/saved/{id}/comments/{comment_id}?person=` | the same | none | `204`. Only an open comment of `person`: `404` for another person's, `409` for a resolved one. |
 
 The read API takes only the fleet token of an identity in
@@ -536,7 +536,7 @@ bearer):
 
 | Route | When | Body |
 |---|---|---|
-| channels `POST /v1/events` | the report, the question, or the request of an assignment | `{"destination": str, "text": str}`. Channels accepts it only when `assignments` is in `channels.webhooks.allowed_callers`. |
+| channels `POST /v1/events` | the report, the question, or the request of an assignment, and the comments of the person on the plan or the report of a completed one | `{"destination": str, "text": str}`. Channels accepts it only when `assignments` is in `channels.webhooks.allowed_callers`. |
 | core `GET /v1/limits` | before each slice, and at `start_assignment` when `when_unknown` is `refuse` and the spec has no `budget.tokens` | none |
 | core `POST /v1/usage` | after each slice that used tokens | one row: kind and name `assignment`, `worker` the model name of the spec, `run_id` the id, `person_id`, `model`, `calls`, `usage`, and `ref` `<id>:slice:<n>` |
 | core `ANY /v1/model/{path}` | each model call of a session, from the Claude CLI | a Claude API request |

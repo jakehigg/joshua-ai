@@ -880,7 +880,9 @@ curl -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" \
 `/assignments` in the viewer shows the assignments of the person who signed
 in, and no other person's. The `Assignments` link in the menu opens it. To
 change an assignment, tell Joshua, or leave a comment on a line of its
-definition (see [comments on a definition](#comments-on-a-definition)). The
+definition (see [comments on a definition](#comments-on-a-definition)), its
+plan, or its report, or answer a decision of its report (see
+[answers and comments on a report](#answers-and-comments-on-a-report)). The
 viewer writes nothing else here.
 
 Three pills at the top give the states: `Drafts`, `In progress`, and
@@ -921,7 +923,7 @@ the page:
    no check boxes has no bar.
 4. **Plan**: the plan of the worker, as a wiki page shows it, with each check
    box drawn as a box. Each paragraph, heading, and list item is a block of
-   its own, as in the definition, but with no `+`.
+   its own, with a `+` for a comment, as in the definition.
 5. **Outputs so far**: the recorded outputs as cards.
 6. **Progress**: the checkpoints, newest first.
 7. **Report**, when there is one, and **Definition**, the spec as a
@@ -940,23 +942,26 @@ viewer finds each heading and shows each section in its own way:
 1. The head: the title, the status, the first sentence under the title in
    large type, and a row of numbers: the tokens, the working time, the turns,
    the model, the outputs, and the decisions.
-2. **Highlights**: each bullet is a card, with its bold lead in large type.
-3. **Decisions for you**: numbered cards, each with its question, its
-   context, and "Tell Joshua your answer". A `Copy` button copies
-   "Assignment 7, decision 1:" and the question, so you can paste it to
-   Joshua. The button shows only when the browser runs the one small script
-   of the page and can copy.
-4. **Outputs**: the recorded outputs as cards, grouped by kind, each with an
+2. The lead band: "N decisions wait for you", a link to the decisions, and
+   the outputs as cards, the documents first. Each card gives the title, the
+   kind, the note from the line of the report with the same reference, and an
    icon for its kind (task, page, issue, merge request, journal, file, or
-   other). An output whose reference is an `http` or `https` address is a
-   link. Any other reference shows as code. The line of the report with the
-   same reference gives the note under the title.
-5. **What was asked**, as a quote. A long one is folded.
+   other). An output whose reference is an `http` or `https` address, or a
+   document, has an `Open` link. Any other reference shows as code. When
+   each decision has an answer, the band says so.
+3. **Highlights**: each bullet is a card, with its bold lead in large type.
+4. **Decisions for you**: numbered cards, each with its question, its
+   context, a text box, and `Send to Joshua`.
+5. **What was asked**, as a quote.
 6. **What was done**, as prose. A section with a heading that the viewer does
    not know shows here too.
 7. **Follow-ups**, as a checklist.
 8. **Cost**: the full numbers.
-9. **Plan** with its bar, **Progress**, and **Definition**, folded.
+9. **Plan** with its bar, **Progress**, and **Definition**, folded. The plan
+   opens by itself when it has an open comment.
+
+Each card and each block of the report has a `+` for a comment. The pages of
+the assignments section have no script.
 
 A section that the report does not have, or that says "None.", does not
 show. A report with none of the headings shows as Markdown, as a wiki page
@@ -966,6 +971,28 @@ The `Saved` link beside the pills opens `/assignments/saved`: the saved
 assignments, each with its name, its title, the number of runs, and the last
 run. A saved assignment opens with its definition and its runs. A row with
 open comments shows the count, such as `2 comments for Joshua`.
+
+#### Answers and comments on a report
+
+1. Open a completed assignment. The lead band says how many decisions wait
+   for you. Click it to go to the decisions.
+2. Write your answer in the text box of a decision, and click
+   `Send to Joshua`. The page opens again at that decision.
+3. The card shows your answer, `Sent to Joshua`, and the time. While it is
+   open, a `Delete` button removes it, and the text box shows again.
+4. Joshua gets the answer in your conversation within about two minutes,
+   applies it, and resolves it. The card then shows the line from Joshua in
+   place of `Sent to Joshua`.
+
+A `+` on a block of the report or of the plan is a comment on that block, the
+same as on a definition. A comment on the plan or the report of a completed
+assignment goes to Joshua in the same way: the answers and comments of two
+minutes go as one message. A comment on a draft, on a definition, or on an
+assignment in progress does not: tell Joshua that you left it.
+
+The message goes to `assignments.people.<id>.notify` through channels, so the
+assignments container must be in `channels.webhooks.allowed_callers` (see
+[assignments.md](assignments.md#the-events)).
 
 #### Comments on a definition
 

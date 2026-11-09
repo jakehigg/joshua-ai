@@ -72,6 +72,23 @@ A channel-addressed event carries a `channel` and `text` and no `event_type`.
 - Without `verbatim`, core runs `text` as one turn framed as an injection (see
   `prompts/builtin/event.md`), then delivers the reply.
 
+### Events of the assignments container
+
+The assignments container sends channel-addressed events with its own fleet
+token, so `assignments` must be in `channels.webhooks.allowed_callers`. It
+sends three kinds, each with a fixed header from the container and the text
+of others in fenced blocks:
+
+- the report of an assignment that ended;
+- the question or the request of an assignment that stopped;
+- the comments of the person on the plan or the report of a completed
+  assignment, sent once for the comments of two minutes. The header,
+  "Assignment N: the person answered on its report" (or "commented on its
+  plan"), says that the comment text is data from the person who signed in
+  to the viewer.
+
+[assignments.md](assignments.md#the-events) gives each text.
+
 ## Request fields
 
 `kind: event` turns use these `TurnEvent` fields:

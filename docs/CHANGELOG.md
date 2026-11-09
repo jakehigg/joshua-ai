@@ -6,6 +6,22 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Assignments: answer a decision on the report page, and Joshua hears it.**
+  The page of a completed assignment opens with a lead band: "N decisions
+  wait for you", with a link to them, and the outputs as cards, the
+  documents first, each with an `Open` link. The outputs section lower on
+  the page is gone. Each decision card has a text box and `Send to Joshua`
+  in place of the `Copy` button. The answer is a comment on the report, and
+  the card shows it with `Sent to Joshua` and the time, then the resolution
+  of Joshua. The plan and the report take a comment on each block with the
+  `+`, as a definition does. The comment routes take `target` (`definition`,
+  `plan`, or `report`), and `assignment_comments` takes `target` and gives
+  the target of each comment. A comment on the plan or the report of a
+  completed assignment goes to your conversation as one event, for the
+  comments of two minutes, with a header that says that the text is from
+  you. The store column `comment.sent_at` is new. The assignment pages of the
+  viewer have no script now. See
+  [assignments.md](assignments.md#comments-on-a-plan-or-a-report).
 - **Assignments: Joshua starts exactly the work you mean.** A refusal of
   `start_assignment` now has a `hint`, one sentence that Joshua tells you,
   and where it applies `retry_after_s`, `running` (the id and the title;
