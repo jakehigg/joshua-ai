@@ -19,6 +19,8 @@ import httpx
 import pytest
 from joshua_gateway import viewer
 from joshua_gateway import viewer_assignments as am
+from joshua_gateway import viewer_comments as vc
+from joshua_gateway import viewer_showcase as sc
 from joshua_shared import config
 from starlette.testclient import TestClient
 
@@ -746,7 +748,7 @@ def test_a_saved_detail_with_no_run_says_so(data, monkeypatch) -> None:
     ],
 )
 def test_ago(seconds, text) -> None:
-    assert am.ago(seconds) == text
+    assert vc.ago(seconds) == text
 
 
 def test_duration() -> None:
@@ -757,18 +759,18 @@ def test_duration() -> None:
 
 
 def test_time_html_needs_an_offset() -> None:
-    assert am.time_html(None, tz=UTC, now=NOW) == ""
-    assert am.time_html("2026-11-09T10:00:00", tz=UTC, now=NOW) == ""
-    assert am.time_html("not a time", tz=UTC, now=NOW) == ""
+    assert vc.time_html(None, tz=UTC, now=NOW) == ""
+    assert vc.time_html("2026-11-09T10:00:00", tz=UTC, now=NOW) == ""
+    assert vc.time_html("not a time", tz=UTC, now=NOW) == ""
 
 
 def test_is_url() -> None:
-    assert am.is_url("https://git.example.com/x")
-    assert am.is_url("http://example.com")
-    assert not am.is_url("javascript:alert(1)")
-    assert not am.is_url("https://")
-    assert not am.is_url("tasks#12")
-    assert not am.is_url("http://[bad")
+    assert sc.is_url("https://git.example.com/x")
+    assert sc.is_url("http://example.com")
+    assert not sc.is_url("javascript:alert(1)")
+    assert not sc.is_url("https://")
+    assert not sc.is_url("tasks#12")
+    assert not sc.is_url("http://[bad")
 
 
 def test_an_unknown_status_is_a_plain_chip() -> None:
@@ -899,10 +901,10 @@ def test_a_full_report_is_the_page(data, monkeypatch) -> None:
     assert '<details class="a-fold" open' not in html
     # The one script copies the decisions, and the policy allows it by hash.
     assert html.count("<script>") == 1
-    assert f"<script>{am.COPY_SCRIPT}</script>" in html
-    digest = hashlib.sha256(am.COPY_SCRIPT.encode()).digest()
-    assert am.COPY_SCRIPT_HASH == "sha256-" + base64.b64encode(digest).decode()
-    assert f"script-src '{am.COPY_SCRIPT_HASH}'" in response.headers["content-security-policy"]
+    assert f"<script>{sc.COPY_SCRIPT}</script>" in html
+    digest = hashlib.sha256(sc.COPY_SCRIPT.encode()).digest()
+    assert sc.COPY_SCRIPT_HASH == "sha256-" + base64.b64encode(digest).decode()
+    assert f"script-src '{sc.COPY_SCRIPT_HASH}'" in response.headers["content-security-policy"]
 
 
 def test_a_report_with_no_highlights_skips_the_cards(data, monkeypatch) -> None:
@@ -969,22 +971,22 @@ def test_a_generated_stop_report_is_the_page(data, monkeypatch) -> None:
 
 
 def test_an_unknown_kind_gets_the_other_icon() -> None:
-    assert am.kind_icon("snapshot") == "other"
-    assert am.kind_icon("") == "other"
-    assert am.kind_icon("summary") == "other"
-    assert am.kind_icon("MR") == "merge request"
-    assert am.kind_icon("GitHub pull request") == "merge request"
-    assert am.kind_icon("Wiki page") == "page"
-    assert am.kind_icon("journal entry") == "journal"
-    assert am.kind_icon("bug") == "issue"
-    assert am.kind_icon("attachment") == "file"
-    assert am.kind_icon("todo") == "task"
-    other = am.output_card(am.Card("snapshot", "s-1", ""))
-    assert am._KIND_ICONS["other"] in other
+    assert sc.kind_icon("snapshot") == "other"
+    assert sc.kind_icon("") == "other"
+    assert sc.kind_icon("summary") == "other"
+    assert sc.kind_icon("MR") == "merge request"
+    assert sc.kind_icon("GitHub pull request") == "merge request"
+    assert sc.kind_icon("Wiki page") == "page"
+    assert sc.kind_icon("journal entry") == "journal"
+    assert sc.kind_icon("bug") == "issue"
+    assert sc.kind_icon("attachment") == "file"
+    assert sc.kind_icon("todo") == "task"
+    other = sc.output_card(sc.Card("snapshot", "s-1", ""))
+    assert sc.KIND_ICONS["other"] in other
 
 
 def test_a_card_with_only_a_note() -> None:
-    card = am.output_card(am.Card("", "", "", "a *line* with no kind"))
+    card = sc.output_card(sc.Card("", "", "", "a *line* with no kind"))
     assert '<div class="a-out-main"><p class="a-out-note">a <em>line</em> with no kind</p>' in card
 
 
@@ -1032,7 +1034,7 @@ def test_a_hostile_report_is_escaped(data, monkeypatch) -> None:
     )
     outputs = [{"kind": "<k>", "ref": 'https://example.com/"><x', "title": "<t>", "at": None}]
     html, _ = _page_of(monkeypatch, done(report, outputs=outputs))
-    without_script = html.replace(f"<script>{am.COPY_SCRIPT}</script>", "")
+    without_script = html.replace(f"<script>{sc.COPY_SCRIPT}</script>", "")
     assert "<script" not in without_script
     assert "<img" not in html and "<u>" not in html and "<i>note" not in html
     assert 'href="javascript:' not in html

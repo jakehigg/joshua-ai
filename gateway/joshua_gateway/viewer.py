@@ -76,6 +76,7 @@ from joshua_gateway import viewer_journal as journal
 from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
+from joshua_gateway import viewer_showcase as showcase_mod
 from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
@@ -1376,7 +1377,7 @@ class SecurityHeaders(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; img-src 'self'; style-src 'self'; "
-            f"script-src '{assignments_mod.COPY_SCRIPT_HASH}'"
+            f"script-src '{showcase_mod.COPY_SCRIPT_HASH}'"
         )
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
