@@ -106,17 +106,77 @@ def test_meaning_section_comes_first_and_links_the_page(data, monkeypatch) -> No
     assert "/wiki/pizza.md" in html  # the words section is still there
 
 
-def test_the_call_carries_the_viewer_token_and_names_no_person(data, monkeypatch) -> None:
+def test_the_wiki_call_names_no_person_and_the_documents_call_names_the_member(
+    data, monkeypatch
+) -> None:
+    core = FakeCore([])
+    _with_core(monkeypatch, core)
+    TestClient(viewer.build_app()).get("/search", params={"q": "oats"}, auth=ALEX)
+    bodies = {}
+    for request in core.requests:
+        assert request.url.path == search_mod.SEARCH_PATH
+        assert request.headers["authorization"] == f"Bearer {VIEWER_TOKEN}"
+        assert not any(k.lower().startswith("x-joshua") for k in request.headers)
+        body = json.loads(request.content)
+        bodies[body["source"]] = body
+    assert set(bodies) == {"files", "documents"}
+    assert bodies["files"]["query"] == "oats"
+    assert bodies["files"]["person"] is None
+    assert bodies["documents"]["person"] == "alex"
+
+
+def test_a_guest_search_names_no_person_and_asks_for_no_document(
+    data, monkeypatch, tmp_path
+) -> None:
+    cfg = tmp_path / "joshua.yaml"
+    cfg.write_text(CONFIG.replace("    name: Alex\n", "    name: Alex\n    role: guest\n"))
     core = FakeCore([])
     _with_core(monkeypatch, core)
     TestClient(viewer.build_app()).get("/search", params={"q": "oats"}, auth=ALEX)
     [request] = core.requests
-    assert request.url.path == search_mod.SEARCH_PATH
-    assert request.headers["authorization"] == f"Bearer {VIEWER_TOKEN}"
-    body = json.loads(request.content)
-    assert body["query"] == "oats"
+    assert json.loads(request.content)["source"] == "files"
     assert "alex" not in request.content.decode()
-    assert not any(k.lower().startswith("x-joshua") for k in request.headers)
+
+
+def test_a_document_hit_links_to_the_document_page(data, monkeypatch) -> None:
+    doc = _hit(
+        "documents/alex/party-plan.md",
+        title="Party plan",
+        text="Food and music.",
+        kind="document",
+        heading="plan, active",
+        date=None,
+    )
+    _with_core(monkeypatch, FakeCore([doc]))
+    html = TestClient(viewer.build_app()).get("/search", params={"q": "party"}, auth=ALEX).text
+    assert 'href="/documents/alex/party-plan"' in html
+    assert "document · plan, active" in html
+    assert "Party plan ›" not in html
+
+
+async def test_documents_merge_by_score_and_a_failed_documents_call_is_left_out() -> None:
+    wiki = {**_hit("wiki/a.md"), "score": 0.7}
+    doc = {**_hit("documents/alex/b.md", kind="document", date=None), "score": 0.9}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        return httpx.Response(
+            200, json={"results": [doc] if body["source"] == "documents" else [wiki]}
+        )
+
+    client = search_mod.CoreSearch("http://core", "t", transport=httpx.MockTransport(answer))
+    response = await client.search("x", person="alex")
+    assert response is not None
+    assert [h.path for h in response.results] == ["documents/alex/b.md", "wiki/a.md"]
+
+    def no_documents(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content)["source"] == "documents":
+            return httpx.Response(500)
+        return httpx.Response(200, json={"results": [wiki]})
+
+    client = search_mod.CoreSearch("http://core", "t", transport=httpx.MockTransport(no_documents))
+    response = await client.search("x", person="alex")
+    assert response is not None and [h.path for h in response.results] == ["wiki/a.md"]
 
 
 def test_core_down_says_so_and_keeps_words(data, monkeypatch) -> None:
@@ -154,6 +214,10 @@ def test_a_path_outside_the_wiki_is_not_linked() -> None:
     assert search_mod.viewer_url("shared/old.md") is None
     assert search_mod.viewer_url("wiki/../people/alex.md") is None
     assert search_mod.viewer_url("wiki/a b.md") == "/wiki/a%20b.md"
+    assert search_mod.viewer_url("documents/alex/plan.md") == "/documents/alex/plan"
+    assert search_mod.viewer_url("documents/alex/../mia/plan.md") is None
+    assert search_mod.viewer_url("documents/plan.md") is None
+    assert search_mod.viewer_url("documents/alex/page.html") is None
     response = SearchResponse(
         results=[
             SearchHit(**_hit("people/alex/attachments/scan.pdf", kind="wiki")),

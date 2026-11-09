@@ -65,7 +65,10 @@ Every route has an allowlist of fleet identities. The list is in
   scope and returns only pages under `wiki/`, of kind `wiki`, `journal`, or
   `profile`. It never returns a person's own attachments, although the index
   holds their text in the shared scope. The route checks each row again after
-  the database filter, and a test proves it.
+  the database filter, and a test proves it. A search with
+  `source: documents` names a member and returns only the title and the
+  summary of that member's documents and of the shared ones. A guest gets
+  none, and no member gets the documents of another member.
 
 - The gateway route `POST /v1/snapshots/{name}` admits only `core`, also
   when `assignments` is in `person_header_callers`, and its body is empty. The gateway reads the tool and the arguments of the snapshot from its

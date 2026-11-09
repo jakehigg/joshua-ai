@@ -161,6 +161,11 @@ def wiki_root(root: Path | str | None = None) -> Path:
     return _root(root) / "wiki"
 
 
+def documents_root(root: Path | str | None = None) -> Path:
+    """`<data>/documents`, the documents of each member and `shared/`."""
+    return _root(root) / "documents"
+
+
 def docs_root(root: Path | str | None = None) -> Path:
     """`<data>/wiki/joshua-docs`, the documentation the repo ships.
 

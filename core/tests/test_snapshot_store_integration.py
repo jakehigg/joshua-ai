@@ -1,6 +1,6 @@
 """The `snapshot_result` methods of `Repo`, the task list of one person, and
-the person rule of `MemoryStore.kb_search` for a snapshot row, against a
-real Postgres."""
+the person rule of `MemoryStore.kb_search` for a snapshot row and a document
+row, against a real Postgres."""
 
 from __future__ import annotations
 
@@ -89,3 +89,28 @@ async def test_snapshot_times_gives_the_latest_good_fetch(db, repo) -> None:
     times = await store.snapshot_times(["open-tasks", "never-good", "absent"])
     assert times == {"open-tasks": AT + timedelta(days=7)}
     assert await store.snapshot_times([]) == {}
+
+
+async def test_a_person_document_row_is_found_only_for_that_person(db, repo) -> None:
+    await repo.upsert_person("alex", "Alex")
+    store = MemoryStore(db.pool)
+    for person, path in (("alex", "documents/alex/plan.md"), (None, "documents/shared/meals.md")):
+        await store.kb_replace_item(
+            source="documents",
+            person_id=person,
+            path=path,
+            kind="document",
+            title="t",
+            provenance="own",
+            file_sha256="s",
+            file_mtime=AT,
+            doc_date=None,
+            chunks=[("plan, draft", "summary", _vec())],
+        )
+
+    async def paths(person: str | None) -> set[str]:
+        return {c.path for c in await store.kb_search(person, _vec(), k=10, min_sim=0.0)}
+
+    assert await paths("alex") == {"documents/alex/plan.md", "documents/shared/meals.md"}
+    assert await paths("mia") == {"documents/shared/meals.md"}
+    assert await paths(None) == {"documents/shared/meals.md"}

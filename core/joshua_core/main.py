@@ -40,6 +40,7 @@ from joshua_core.limits_api import build_limits_router
 from joshua_core.memory import embed
 from joshua_core.memory.indexer import Indexer, IndexerLoop
 from joshua_core.memory.nightly import NightlyReflector
+from joshua_core.memory.sources.documents import DOCUMENTS_SOURCE, DocumentsSource
 from joshua_core.memory.sources.files import FilesSource
 from joshua_core.memory.sources.memos import build_memos_source, schedule_seconds
 from joshua_core.memory.sources.snapshots import SOURCE_NAME as SNAPSHOTS_SOURCE
@@ -344,7 +345,8 @@ def _build_manager(
 def _build_memory(
     settings: JoshuaConfig, store: MemoryStore, manager: ConversationManager, repo: Repo
 ) -> tuple[Indexer, IndexerLoop]:
-    """Wire the in-core RAG: the ``files`` source (always on), any optional
+    """Wire the in-core RAG: the ``files`` source (always on), the
+    ``documents`` source unless ``memory.documents.enabled`` is false, any optional
     source adapter from ``memory.sources``, the ``snapshots`` source when
     ``memory.snapshots`` is not empty, the indexer, its interval loop, the
     ``recall`` builtin tool, the per-turn injection provider, and the taught-skill
@@ -361,6 +363,11 @@ def _build_memory(
         )
     }
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
+    if memory.documents.enabled:
+        sources[DOCUMENTS_SOURCE] = DocumentsSource(
+            data_dir, members=[p.id for p in settings.people if p.role == "member"]
+        )
+        intervals[DOCUMENTS_SOURCE] = float(memory.index_interval_s)
     for name, options in memory.sources.items():
         if name == "files":
             continue

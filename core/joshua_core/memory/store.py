@@ -23,6 +23,10 @@ logger = get_logger("memory.store")
 
 # The kind of a row from the `snapshots` source.
 SNAPSHOT_KIND = "snapshot"
+# The kind of a row from the `documents` source.
+DOCUMENT_KIND = "document"
+# The kinds whose row of one person only a search for that person finds.
+PERSON_KINDS = (SNAPSHOT_KIND, DOCUMENT_KIND)
 
 
 def _vec_literal(embedding: list[float]) -> str:
@@ -158,8 +162,10 @@ class MemoryStore:
         if one is wanted, has somewhere to go.
 
         One exception: a ``snapshot`` row scoped to a person is the state of a
-        live system for that person, and only a search for that person finds
-        it. A search with no person finds only the shared snapshot rows.
+        live system for that person, and a ``document`` row scoped to a person
+        is a document of that person. Only a search for that person finds such
+        a row. A search with no person finds only the shared rows of these
+        kinds.
 
         ``kinds`` limits the search to those kinds; ``exclude_kinds`` drops them
         (the taught-skill trigger rows are excluded from ordinary recall this
@@ -177,12 +183,12 @@ class MemoryStore:
         if exclude_kinds:
             clauses.append("NOT (kind = ANY(%s))")
             params.append(list(exclude_kinds))
-        # A snapshot row of one person is that person's live state, so only
-        # that person finds it.
+        # A snapshot row of one person is that person's live state, and a
+        # document row is that person's document, so only that person finds it.
         clauses.append(
-            "NOT (kind = %s AND person_id IS NOT NULL AND person_id IS DISTINCT FROM %s)"
+            "NOT (kind = ANY(%s) AND person_id IS NOT NULL AND person_id IS DISTINCT FROM %s)"
         )
-        params += [SNAPSHOT_KIND, person_id]
+        params += [list(PERSON_KINDS), person_id]
         clauses.append("1 - (embedding <=> %s::vector) >= %s")
         params += [vec, min_sim, vec, k]
         async with self._pool.connection() as conn:

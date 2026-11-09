@@ -35,7 +35,17 @@ TurnKind = Literal["message", "event"]
 # never in this list.
 SearchKind = Literal["wiki", "journal", "profile"]
 SEARCH_KINDS: tuple[SearchKind, ...] = ("wiki", "journal", "profile")
+# The sources a search can name. ``files`` (the default) is the wiki, the
+# journal, and the profiles. ``documents`` is one row per document of a
+# member and of ``documents/shared/``: the title, the kind, the status, and
+# the summary, never the body. A search of ``documents`` names the person.
+SearchSource = Literal["files", "documents"]
+# The kind of a hit: a kind of ``SEARCH_KINDS``, or ``document``.
+HitKind = Literal["wiki", "journal", "profile", "document"]
 SEARCH_DEFAULT_LIMIT = 10
+# Pydantic checks a pattern with the Rust regex engine, where ``$`` matches
+# only at the end of the text, never before a last newline.
+_PERSON_PATTERN = PERSON_ID_PATTERN.removesuffix(r"\Z") + "$"
 SEARCH_MAX_LIMIT = 25
 SEARCH_MAX_QUERY_CHARS = 1000
 
@@ -146,23 +156,30 @@ class ResolveResponse(_Model):
 
 class SearchRequest(_Model):
     """One search of the memory by meaning. ``kinds`` empty or absent means all
-    of ``SEARCH_KINDS``."""
+    of ``SEARCH_KINDS``; it applies to the ``files`` source only. ``source``
+    absent means ``files``. ``person`` names the member whose documents a
+    ``documents`` search reads, beside ``documents/shared/``; the caller
+    vouches for it, as the viewer does for the person who signed in."""
 
     query: str = Field(min_length=1, max_length=SEARCH_MAX_QUERY_CHARS)
     limit: int = Field(default=SEARCH_DEFAULT_LIMIT, ge=1, le=SEARCH_MAX_LIMIT)
     kinds: list[SearchKind] | None = None
+    source: SearchSource = "files"
+    person: str | None = Field(default=None, pattern=_PERSON_PATTERN)
 
 
 class SearchHit(_Model):
     """One passage. ``path`` is relative to the data volume, for example
     ``wiki/journal/2026/09/26/garden.md``. ``date`` is the journal day or a
-    frontmatter date, as ``YYYY-MM-DD``."""
+    frontmatter date, as ``YYYY-MM-DD``. A ``document`` hit has the path
+    ``documents/<owner>/<slug>.md``, the kind and the status of the document
+    in ``heading`` (``plan, draft``), and the summary in ``text``."""
 
     path: str
     title: str
     heading: str
     text: str
-    kind: SearchKind
+    kind: HitKind
     score: float
     date: str | None = None
 
@@ -234,7 +251,6 @@ USAGE_MAX_COUNT = 2**31 - 1
 # only at the end of the text, never before a last newline.
 # A label: a worker, a model, a server label such as ``[::1]:8080``, or a ref.
 _USAGE_LABEL_PATTERN = r"^[A-Za-z0-9\[][A-Za-z0-9._:/@\[\]-]*$"
-_PERSON_PATTERN = PERSON_ID_PATTERN.removesuffix(r"\Z") + "$"
 
 
 class UsageWriteCounts(_Model):

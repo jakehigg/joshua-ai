@@ -376,6 +376,12 @@ class MemorySearch(_Model):
     allowed_callers: list[str] = ["viewer", "mcp"]
 
 
+class MemoryDocuments(_Model):
+    # The ``documents`` source: one row per document of ``documents/``, with
+    # the title, the kind, the status, and the summary. Never the body.
+    enabled: bool = True
+
+
 _DURATION_RE = re.compile(r"^(\d+)\s*([smhd])$")
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -515,6 +521,7 @@ class Memory(_Model):
     inject: Inject = Inject()
     skills: Skills = Skills()
     search: MemorySearch = MemorySearch()
+    documents: MemoryDocuments = MemoryDocuments()
     embed_model: str = "BAAI/bge-small-en-v1.5"
     # Source adapters the indexer runs, name → adapter options. ``files`` is the
     # kernel and always runs even if absent here; an option ``schedule`` sets a

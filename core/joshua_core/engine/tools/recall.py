@@ -7,7 +7,10 @@ documents from another source (a memo, for example). A group turn
 carries the ``path`` the agent can open with the ``files`` tool ``read_file``.
 A result is a snippet of at most ``SNIPPET_CHARS`` characters unless the call
 asks for ``full``. A ``snapshot`` result has no file: in place of the path, it
-names the live tool that holds the current data.
+names the live tool that holds the current data. A ``document`` result is
+one line, ``document: <title> (<path>, <kind>, <status>)``, and never the body:
+the agent reads the document with ``read_document``. Only a conversation of a
+member finds a document, and only that member's own and the shared ones.
 """
 
 from __future__ import annotations
@@ -17,17 +20,18 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from joshua_shared.config import JoshuaConfig, Snapshot
+from joshua_shared.config import JoshuaConfig, Person, Snapshot
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
-from joshua_core.memory.search import search
+from joshua_core.memory.search import document_reader, search
 from joshua_core.memory.skills import SKILL_KIND
+from joshua_core.memory.sources.documents import document_pointer
 from joshua_core.memory.sources.snapshots import shown, snapshot_labels
-from joshua_core.memory.store import SNAPSHOT_KIND, MemoryStore
+from joshua_core.memory.store import DOCUMENT_KIND, SNAPSHOT_KIND, MemoryStore
 
 logger = get_logger("tools.recall")
 
@@ -60,6 +64,13 @@ def _result(
     snapshots: Mapping[str, Snapshot],
     labels: Mapping[str, str],
 ) -> dict[str, Any]:
+    if chunk.kind == DOCUMENT_KIND:
+        return {
+            "title": chunk.title,
+            "path": chunk.path,
+            "text": document_pointer(chunk),
+            "score": round(chunk.similarity or 0.0, 4),
+        }
     text = chunk.text or ""
     out: dict[str, Any] = {"title": chunk.title, "heading": chunk.heading}
     if chunk.kind == SNAPSHOT_KIND:
@@ -89,6 +100,7 @@ async def do_search_memory(
     full: bool = False,
     snapshots: Sequence[Snapshot] = (),
     exclude_folders: Sequence[str] = (),
+    people: Sequence[Person] = (),
 ) -> list[dict[str, Any]]:
     """Return ``[{path, title, heading, text, score}]`` for the caller's scope.
 
@@ -97,7 +109,9 @@ async def do_search_memory(
     chunk. A snapshot result carries ``snapshot`` (the live tool to call) in
     place of ``path``, with the time of the latest good fetch in ``deps.tz``;
     a snapshot chunk with no good fetch is dropped. An empty query or an
-    unavailable embedding model returns ``[]``.
+    unavailable embedding model returns ``[]``. A document result has the
+    pointer line as ``text``; it shows only when the person of the
+    conversation is a member of ``people``.
     """
     query = (query or "").strip()
     if not query:
@@ -118,6 +132,7 @@ async def do_search_memory(
         recency_half_life_days=recency_half_life_days,
         per_doc_cap=per_doc_cap,
         exclude_folders=exclude_folders,
+        document_reader=document_reader(people, deps.conversation.person_id),
     )
     labels = await snapshot_labels(store, chunks, deps.tz)
     by_name = {snap.name: snap for snap in snapshots}
@@ -160,6 +175,7 @@ def build_recall_server(
     per_doc_cap: int,
     snapshots: Sequence[Snapshot] = (),
     exclude_folders: Sequence[str] = (),
+    people: Sequence[Person] = (),
 ) -> Any:
     """Build the in-process ``recall`` MCP server bound to one conversation."""
 
@@ -170,7 +186,8 @@ def build_recall_server(
         "characters with its title and the file path: open the path with read_file, "
         "or pass full: true for the whole passage. A result with 'snapshot' in place "
         "of a path is the state of a live system at the time it names: call the "
-        "tool it names for the current data.",
+        "tool it names for the current data. A result whose text starts with "
+        "'document:' names a document: read it with read_document.",
         _SEARCH_SCHEMA,
     )
     async def search_memory(args: dict[str, Any]) -> dict[str, Any]:
@@ -187,6 +204,7 @@ def build_recall_server(
             full=args.get("full") is True,
             snapshots=snapshots,
             exclude_folders=exclude_folders,
+            people=people,
         )
         return _reply(json.dumps(results))
 
@@ -208,6 +226,7 @@ def register(manager: Any, store: MemoryStore, settings: JoshuaConfig) -> None:
             per_doc_cap=memory.per_doc_cap,
             snapshots=memory.snapshots,
             exclude_folders=memory.exclude_folders,
+            people=settings.people,
         )
 
     manager.register_builtin("recall", factory)

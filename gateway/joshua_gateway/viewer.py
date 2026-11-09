@@ -748,7 +748,8 @@ async def search(request: Request, person: Person) -> Response:
     meaning = ""
     core = search_mod.from_env(os.environ)
     if core is not None:
-        meaning = search_mod.meaning_html(await core.search(query))
+        reader = person.id if person.role == "member" else None
+        meaning = search_mod.meaning_html(await core.search(query, person=reader))
     hits = _search(_roots_for(person), query)
     if not hits:
         words = f'<p class="j-empty">No match for {escape(query)}.</p>'

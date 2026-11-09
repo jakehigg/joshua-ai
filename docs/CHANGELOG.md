@@ -6,6 +6,19 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The memory finds documents by title and summary.** A new index source,
+  `documents`, writes one row for each document in `documents/<owner>/`: the
+  title, the kind, the status, and the `summary` (or the first paragraph),
+  never the body. It skips an archived document and an `html` document, and
+  it re-reads the volume on `memory.index_interval_s`. Recall shows a document
+  as `document: <title> (<path>, <kind>, <status>)`, and Joshua opens it with
+  `read_document`. Only a conversation of the member who owns a document finds
+  it, and the shared documents are found by every member. A group chat and a
+  guest find none. `POST /v1/memory/search` accepts `source: documents` with a
+  `person`, and the viewer's search page links a document to
+  `/documents/<owner>/<slug>`. `memory.documents.enabled` (default `true`)
+  turns it off. With no `documents/` folder the source does nothing. See
+  [memory.md](memory.md#documents-in-the-index).
 - **A definition reads as a document.** In the viewer, the definition of a
   saved assignment, a draft, or a run shows its fields as a short list of
   properties and its goal as Markdown, as a wiki page shows it. Each field
