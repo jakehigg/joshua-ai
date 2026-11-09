@@ -35,8 +35,13 @@ async def test_a_start_while_busy_is_refused_and_stores_nothing(channels) -> Non
     second = await manager.start("alex", spec())
     assert first["status"] == "running"
     assert second["status"] == "rejected" and second["reason"] == "busy"
-    assert second["running"] == first["id"]
+    assert second["running"] == {"id": first["id"], "title": "Audit the gitops repo"}
     assert f"assignment {first['id']} is running" in second["message"]
+    assert second["hint"] == (
+        f"Assignment {first['id']} is still running; start this one when it ends, "
+        "do not create another."
+    )
+    assert isinstance(second["retry_after_s"], int)
     assert list(manager.store.rows) == [first["id"]]
     await manager.cancel(await manager.store.get(first["id"]))
     third = await manager.start("alex", spec())
@@ -47,8 +52,16 @@ async def test_busy_does_not_name_the_assignment_of_another_person(channels) -> 
     manager = make_manager(delay=None)
     await manager.start("mia", spec())
     refused = await manager.start("alex", spec())
-    assert refused["reason"] == "busy" and refused["running"] is None
+    assert refused["reason"] == "busy"
+    assert refused["running"] == {"id": None, "title": "another person's assignment"}
     assert "another person" in refused["message"]
+    assert refused["hint"] == (
+        "Another person's assignment is still running; start this one when it ends, "
+        "do not create another."
+    )
+    assert refused["retry_after_s"] == 900
+    # Nothing in the refusal names the run of the other person.
+    assert "assignment 1" not in refused["hint"] + refused["message"]
 
 
 async def test_a_finished_run_starts_nothing(channels) -> None:

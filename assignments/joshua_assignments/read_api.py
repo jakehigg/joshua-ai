@@ -14,8 +14,9 @@ bearer of ``/mcp`` is never one here.
 
 The caller names the person in the ``person`` query value, as the gateway
 names the person to core. A missing or bad ``person`` is 400. A row of
-another person is 404, the same as a row that does not exist. A list holds
-only the rows of that person. No answer holds a token or a bearer.
+another person is 404, the same as a row that does not exist, and so is a
+deleted draft, with its comments. A list holds only the rows of that person
+that are not deleted. No answer holds a token or a bearer.
 """
 
 from __future__ import annotations
@@ -174,6 +175,11 @@ def _not_found() -> JSONResponse:
     return _error(404, "not found")
 
 
+def _visible(row: dict[str, Any] | None, person: str) -> bool:
+    """True for a row of ``person`` that is not a deleted draft."""
+    return row is not None and row["person_id"] == person and row.get("deleted_at") is None
+
+
 class ReadApi:
     """The four routes, over the store of ``manager``."""
 
@@ -207,7 +213,7 @@ class ReadApi:
             return _error(400, "person is required: a person id")
         store = self.manager.store
         row = await store.get(int(request.path_params["assignment_id"]))
-        if row is None or row["person_id"] != person:
+        if not _visible(row, person):
             return _not_found()
         checkpoints = await store.checkpoints(row["id"], MAX_CHECKPOINTS)
         comments = await store.comments(person, Parent("assignment", int(row["id"])))
@@ -261,7 +267,7 @@ class ReadApi:
         else:
             parent = Parent("assignment", int(request.path_params["assignment_id"]))
             row = await store.get(parent.id)
-        if row is None or row["person_id"] != person:
+        if not _visible(row, person):
             return _not_found()
         return person, parent, definition_mod.lines(row.get("spec") or {})
 

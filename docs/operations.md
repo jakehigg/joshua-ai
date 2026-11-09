@@ -893,15 +893,18 @@ row with an open question has a `question` mark. A time such as `2h ago` gives
 the full time in the instance `timezone` when you hold the pointer on it. The
 newest assignment is first. Under the title, a row also gives the first
 sentence of the report when there is one, else the next step of the plan, and
-the number of outputs. The list of the manager gives these, so the page makes
-one call.
+the number of outputs. The row of a draft also gives, in muted type, the words
+to say: "Tell Joshua: start assignment N". The list of the manager gives
+these, so the page makes one call.
 
 Click a title to open the assignment as a document.
 
 A draft has not run, so its page is its definition. The page gives the
 title, the status, the saved assignment it came from (if any), the count of
-open comments, and the line "Tell Joshua to start it, or leave comments
-first." Under it is the **Definition**, open, with a `+` on each field and
+open comments, the words to say under the title, "Tell Joshua: start
+assignment N", and the line "Tell Joshua to start it, or leave comments
+first." With the id in the words, Joshua starts that draft and not a copy of
+it. Under it is the **Definition**, open, with a `+` on each field and
 each block of the goal for a comment. A draft has no plan, no report, and no
 progress.
 

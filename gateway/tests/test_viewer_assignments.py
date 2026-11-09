@@ -324,6 +324,8 @@ def test_the_default_is_drafts_when_nothing_is_in_progress(data, monkeypatch) ->
     assert '<span class="j-chip on" aria-current="true">Drafts</span>' in html
     assert 'href="/assignments/9">Review first</a>' in html
     assert "created" in html and "tokens" not in html
+    # The row of a draft gives the words to say, in muted type.
+    assert '<span class="a-row-line j-muted">Tell Joshua: start assignment 9</span>' in html
     assert [r.url.params.get("state") for r in manager.requests] == ["in_progress", "draft"]
 
 
@@ -446,6 +448,7 @@ def test_a_row_has_the_status_the_time_the_model_and_the_tokens(data, monkeypatc
     assert "sonnet" in html
     assert "12k tokens" in html
     assert html.count(">question</span>") == 1
+    assert "Tell Joshua: start assignment" not in html
 
 
 def test_a_hostile_title_and_model_are_escaped(data, monkeypatch) -> None:
@@ -1407,6 +1410,10 @@ def test_a_draft_page_is_the_definition_open_for_comments(data, monkeypatch) -> 
     html = _main(response.text)
     assert '<h1 class="j-doc-title">Review the docs first</h1>' in html
     assert am.DRAFT_LINE in html
+    # The words to say come just under the title.
+    title_at = html.index('<h1 class="j-doc-title">')
+    assert html.index("Tell Joshua: start assignment 9") > title_at
+    assert html.index("Tell Joshua: start assignment 9") < html.index(am.DRAFT_LINE)
     assert '<span class="j-badge plain">draft</span>' in html
     assert 'href="/assignments/saved/3">saved: docs-cleanup</a>' in html
     assert "1 comment for Joshua" in html
@@ -1433,6 +1440,7 @@ def test_a_run_page_keeps_the_definition_folded(data, monkeypatch) -> None:
     _with(monkeypatch, FakeManager({"/v1/assignments/7": detail(definition=DEFINITION)}))
     html = _main(_get("/assignments/7").text)
     assert am.DRAFT_LINE not in html
+    assert "Tell Joshua: start assignment" not in html
     assert "<h2>Plan</h2>" in html
     assert html.index("<h2>Plan</h2>") < html.index('<details class="a-def" id="definition">')
 

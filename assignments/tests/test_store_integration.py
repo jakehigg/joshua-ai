@@ -388,7 +388,7 @@ async def test_a_queued_row_of_an_earlier_release_becomes_a_draft(store) -> None
         assert (await cur.fetchone())["status"] == "draft"
 
 
-async def test_only_a_draft_that_never_ran_is_deleted(store) -> None:
+async def test_only_a_draft_that_never_ran_is_deleted_and_it_comes_back(store) -> None:
     draft = await create(store)
     ran = await create(store)
     done = await create(store)
@@ -403,9 +403,18 @@ async def test_only_a_draft_that_never_ran_is_deleted(store) -> None:
         body="Shorter.",
     )
     assert await store.delete_draft(draft["id"]) is True
-    assert await store.get(draft["id"]) is None
-    assert await store.comments("alex", Parent("assignment", draft["id"])) == []
+    # A delete only hides the draft: the row and its comment stay.
+    hidden = await store.get(draft["id"])
+    assert hidden is not None and hidden["deleted_at"] is not None
+    assert len(await store.comments("alex", Parent("assignment", draft["id"]))) == 1
+    assert draft["id"] not in [r["id"] for r in await store.recent("alex", 10)]
+    assert (await store.counts()).get("draft", 0) == 1  # only the row that ran
     assert await store.delete_draft(draft["id"]) is False
+    assert await store.restore_draft(ran["id"]) is None
+    back = await store.restore_draft(draft["id"])
+    assert back is not None and back["deleted_at"] is None and back["status"] == "draft"
+    assert await store.restore_draft(draft["id"]) is None
+    assert draft["id"] in [r["id"] for r in await store.recent("alex", 10)]
     assert await store.delete_draft(ran["id"]) is False
     assert await store.delete_draft(done["id"]) is False
     assert await store.get(done["id"]) is not None

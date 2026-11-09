@@ -6,6 +6,22 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Assignments: Joshua starts exactly the work you mean.** A refusal of
+  `start_assignment` now has a `hint`, one sentence that Joshua tells you,
+  and where it applies `retry_after_s`, `running` (the id and the title;
+  another person's run has no id), and `drafts`. `busy` says "assignment N
+  is still running; start this one when it ends, do not create another". A
+  new spec is refused as `drafts_open` while you have drafts, unless the
+  call passes `new: true`, so Joshua starts the draft by its id. A started
+  draft keeps its id. `cancel_assignment` returns only when the slot is
+  free, so a start right after it is not refused as `busy`.
+  `delete_assignment` now only removes a draft from view: the store column
+  `deleted_at` is set, the row and its comments stay, and the new tool
+  `restore_assignment` brings it back. A deleted draft is in no list, not in
+  the read API, and not in the viewer. The skill page has a section "Which
+  assignment the person means". The page and the row of a draft in the
+  viewer say "Tell Joshua: start assignment N". See
+  [assignments.md](assignments.md#refusals-of-a-start).
 - **Assignments write deliverables as documents.** The session of an
   assignment now always holds the `documents` server when the person may
   reach it, also when the spec narrows `tools`. The first message tells the

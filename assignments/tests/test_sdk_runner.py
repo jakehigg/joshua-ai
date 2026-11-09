@@ -325,6 +325,7 @@ async def test_when_unknown_refuse_refuses_a_spec_with_no_token_cap(tmp_path, ch
     h = Harness(tmp_path, FakeSdk(), core)
     refused = await h.manager.start("alex", spec())
     assert refused["status"] == "rejected" and refused["reason"] == "limits_unknown"
+    assert refused["retry_after_s"] == 600 and refused["hint"].endswith(".")
     assert h.store.rows == {}
     sdk = FakeSdk([*done("ok"), result("success")])
     h = Harness(tmp_path, sdk, core)

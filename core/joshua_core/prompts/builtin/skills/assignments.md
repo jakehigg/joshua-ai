@@ -42,11 +42,33 @@ below).
 - A **saved** assignment is for a job that repeats. Save one when the person
   says so, not as a way to hold a one-off for review.
 - The manager runs one assignment at a time and holds no queue. When a start
-  is refused as `busy`, tell the person what is running: `running` is its id.
+  is refused as `busy`, tell the person what is running: `running` gives its
+  id and title.
   When the person wants several done in a row, start the next one when the
   report of the previous one arrives; do not ask the manager to queue it. When
   a scheduled task's start is refused, schedule yourself a retry with
   `schedule_task`.
+
+### Which assignment the person means
+
+- "Start draft N", "start assignment N", "go on N", or "dispatch it" just
+  after you talked about a draft: call `start_assignment(id=N)`. The draft
+  runs as itself and keeps its id. Never compose a new spec for work that
+  has a draft.
+- "Run the docs-drift check", "do the weekly X": call
+  `start_assignment(saved=...)` with the name of the saved assignment.
+- Give a new spec only for a job that has no draft and no saved assignment.
+  When the manager answers `drafts_open`, name the drafts to the person and
+  ask which one they mean, or start the one they meant. Pass `new: true`
+  only when none of the drafts covers the job.
+- When a start is refused as `busy`, tell the person what is running and
+  that this one starts when it ends. Schedule yourself a reminder with
+  `schedule_task` for `retry_after_s` seconds from now, and start it then.
+  Never start a copy.
+- Never delete a draft unless the person asks. When the person wants a
+  deleted draft back, call `restore_assignment(id)`. Never rewrite the spec
+  of a draft by starting a new one: use `update_assignment` on the draft.
+- After any refusal, quote its `hint` to the person.
 
 ### Budget words
 

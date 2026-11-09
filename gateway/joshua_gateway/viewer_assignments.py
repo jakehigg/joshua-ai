@@ -35,7 +35,9 @@ detail page is a document.
 
 A draft has not run. Its page is the definition, open, with the "+" of each
 line: the person reads it and leaves comments, and Joshua starts it when the
-person says so. A draft has no plan, no report, and no progress.
+person says so. A draft has no plan, no report, and no progress. The page and
+the row of a draft give the words to say, "Tell Joshua: start assignment N",
+so Joshua starts that draft and not a copy of it.
 
 A completed assignment with a report shows the report as the page.
 ``viewer_report`` cuts the report at its fixed headings, and each section
@@ -490,6 +492,8 @@ def item_row(item: Item, *, tz: tzinfo, now: datetime) -> str:
         ]
     )
     lede = f'<span class="a-row-line">{sc.inline(line)}</span>' if line else ""
+    if item.state == "draft":
+        lede += f'<span class="a-row-line j-muted">{escape(start_phrase(item.id))}</span>'
     return (
         '<li class="j-list-row a-row"><div class="j-list-main">'
         f'<a class="j-list-title wrap" href="/assignments/{item.id}">{escape(item.title)}</a>'
@@ -1053,6 +1057,11 @@ def _progress_page(
 DRAFT_LINE = "Tell Joshua to start it, or leave comments first."
 
 
+def start_phrase(assignment_id: int) -> str:
+    """The words that make Joshua start exactly this draft."""
+    return f"Tell Joshua: start assignment {int(assignment_id)}"
+
+
 def _draft_page(
     item: Detail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
 ) -> str:
@@ -1073,6 +1082,7 @@ def _draft_page(
         '<header class="a-hero">'
         f'<div class="a-chips">{status_chip(item.status)}{saved}{badge}{meta}</div>'
         f'<h1 class="j-doc-title">{escape(item.title)}</h1>'
+        f'<p class="a-lede a-start-line">{escape(start_phrase(item.id))}</p>'
         f'<p class="a-lede a-draft-line">{escape(DRAFT_LINE)}</p></header>',
         _definition(item, open_=True, forms=forms, tz=tz, now=now),
         _error(item),

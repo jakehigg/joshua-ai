@@ -489,7 +489,7 @@ true and its profile runs. [assignments.md](assignments.md) has the tools.
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok", "database", "channels", "people", "draft", "running", "waiting", "paused_limits"}`: booleans and counts only. `503` when the database does not answer. |
-| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the sixteen tools. `start_assignment` takes a slot at once or is refused with the reason `busy`; there is no queue. `grant_repo` and `provide_file` answer a request of a worker for a repository or a file. `401` for a missing or wrong bearer, and for a fleet token. |
+| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the seventeen tools. `start_assignment` takes a slot at once or is refused with the reason `busy`; there is no queue. A refusal of `start_assignment` has `reason`, `message`, and `hint`, and where it applies `retry_after_s`, `running` (`{"id", "title"}`; another person's run has a null id), or `drafts`. A spec alone is refused as `drafts_open` while the person has drafts, unless `new` is true. `cancel_assignment` returns when the slot is free. `delete_assignment` hides a draft, and `restore_assignment` brings it back. `grant_repo` and `provide_file` answer a request of a worker for a repository or a file. `401` for a missing or wrong bearer, and for a fleet token. |
 | `GET /v1/assignments?person=&state=&limit=` | `assignments.read_callers` (default `viewer`) | none | `{"items": [item, ...]}`, the newest first. Each item has the counts, the state, `lede`, `next_step`, `open_question`, and `open_request` (`{"kind", "ref", "reason"}` or null). `state` is `draft`, `in_progress`, or `completed`. `limit` 1 to 200, default 50. |
 | `GET /v1/assignments/{id}?person=` | the same | none | one assignment: item plus spec, definition, comments, open_comments, plan, report, outputs, checkpoints (newest first, at most 200), summary, follow-ups, answer, error, granted_repos, inbox |
 | `GET /v1/saved?person=` | the same | none | `{"items": [saved_item, ...]}`, the newest first, each with `open_comments` |
@@ -501,7 +501,8 @@ true and its profile runs. [assignments.md](assignments.md) has the tools.
 The read API takes only the fleet token of an identity in
 `assignments.read_callers`, compared with its `JOSHUA_TOKEN_<NAME>`. A
 missing or wrong bearer is `401`. `person` is required (`400`). A row of
-another person is `404`, and so is a comment of another person.
+another person is `404`, and so is a comment of another person. A deleted
+draft is `404`, and no list holds it.
 [assignments.md](assignments.md#the-read-api) has the shapes.
 
 The git proxy is internal. It listens on `127.0.0.1` on a free port, in the
