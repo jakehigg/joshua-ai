@@ -560,7 +560,7 @@ def list_html(
 ) -> str:
     """The body of ``/assignments``. ``body`` None means the manager did not
     answer. ``state`` None selects no pill."""
-    head = f'<h1 class="j-doc-title">Assignments</h1>{_pills(state)}'
+    head = f'<h1 class="j-doc-title">assignments</h1>{_pills(state)}'
     if not configured:
         return head + _not_configured()
     if body is None:
@@ -1216,7 +1216,7 @@ def _error(item: Detail) -> str:
 
 
 def _crumbs() -> str:
-    return '<nav class="j-crumbs"><a href="/assignments">Assignments</a></nav>'
+    return '<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
 
 
 def _turns(item: Detail, report: rp.Report) -> int | None:
@@ -1396,12 +1396,12 @@ def saved_row(saved: SavedItem, *, tz: tzinfo, now: datetime) -> str:
 
 
 def _saved_head(extra: str = "") -> str:
-    return f'<nav class="j-crumbs"><a href="/assignments">Assignments</a>{extra}</nav>'
+    return f'<nav class="j-crumbs"><a href="/assignments">assignments</a>{extra}</nav>'
 
 
 def saved_list_html(body: SavedList | None, *, configured: bool, tz: tzinfo, now: datetime) -> str:
     """The body of ``/assignments/saved``."""
-    head = _saved_head() + '<h1 class="j-doc-title">Saved assignments</h1>'
+    head = _saved_head() + '<h1 class="j-doc-title">saved assignments</h1>'
     if not configured:
         return head + _not_configured()
     if body is None:
@@ -1420,7 +1420,7 @@ def saved_detail_html(
 ) -> str:
     """The body of ``/assignments/saved/{id}``: the definition open, then the runs.
     With ``forms``, each line of the definition has a form for a comment."""
-    head = _saved_head(' <span aria-hidden="true">/</span> <a href="/assignments/saved">Saved</a>')
+    head = _saved_head(' <span aria-hidden="true">/</span> <a href="/assignments/saved">saved</a>')
     title = f'<p class="a-lead">{escape(saved.title)}</p>' if saved.title else ""
     updated = time_html(saved.updated_at, tz=tz, now=now)
     meta = _sub(
@@ -1446,7 +1446,7 @@ def message_html(title: str, body: str) -> str:
     """A page body with a title and one message, for a manager that is not
     configured or did not answer. ``body`` is HTML."""
     return (
-        f'<nav class="j-crumbs"><a href="/assignments">Assignments</a></nav>'
+        f'<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
         f'<h1 class="j-doc-title">{escape(title)}</h1>{body}'
     )
 

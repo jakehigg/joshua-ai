@@ -820,14 +820,14 @@ async def assignments_list(request: Request, person: Person) -> Response:
     html = assignments_mod.list_html(
         body, state=state, configured=client is not None, tz=tz, now=now
     )
-    return _page("Assignments", html, section="assignments")
+    return _page("assignments", html, section="assignments")
 
 
 async def assignment_page(request: Request, person: Person) -> Response:
     """One assignment of the person who signed in, as a document. A row of
     another person is 404, as the manager answers."""
     client = assignments_mod.from_env(os.environ)
-    title = f"Assignment {request.path_params['id']}"
+    title = f"assignment {request.path_params['id']}"
     if client is None:
         html = assignments_mod.unavailable_html(title, configured=False)
         return _page(title, html, section="assignments")
@@ -853,13 +853,13 @@ async def saved_list(request: Request, person: Person) -> Response:
     body = await client.saved(person.id) if client is not None else None
     tz, now = _clock()
     html = assignments_mod.saved_list_html(body, configured=client is not None, tz=tz, now=now)
-    return _page("Saved assignments", html, section="assignments")
+    return _page("saved assignments", html, section="assignments")
 
 
 async def saved_page(request: Request, person: Person) -> Response:
     """One saved assignment of the person who signed in, with its runs."""
     client = assignments_mod.from_env(os.environ)
-    title = "Saved assignment"
+    title = "saved assignment"
     if client is None:
         html = assignments_mod.unavailable_html(title, configured=False)
         return _page(title, html, section="assignments")
@@ -928,11 +928,11 @@ async def _comment_write(request: Request, person: Person, kind: str) -> Respons
     if written is None or not written.ok:
         reason = written.error if written is not None else "the manager did not answer"
         body = assignments_mod.message_html(
-            "Comment not stored",
+            "comment not stored",
             f'<p class="j-error">{escape(reason or "The manager refused the comment.")}</p>'
             f'<p><a href="{escape(base)}">Back</a></p>',
         )
-        return _page("Comment not stored", body, status=400, section="assignments")
+        return _page("comment not stored", body, status=400, section="assignments")
     logger.info({"message": "viewer comment", "kind": kind, "delete": comment_id is not None})
     return RedirectResponse(f"{base}#{anchor}", status_code=303)
 

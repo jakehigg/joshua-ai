@@ -346,7 +346,7 @@ def test_no_pill_is_selected_when_the_second_read_fails(data, monkeypatch) -> No
     assert "did not answer" in html
 
 
-def test_the_headings_start_with_a_capital(data, monkeypatch) -> None:
+def test_the_headings_are_lower_case_as_in_the_other_sections(data, monkeypatch) -> None:
     _with(
         monkeypatch,
         FakeManager(
@@ -359,15 +359,15 @@ def test_the_headings_start_with_a_capital(data, monkeypatch) -> None:
         ),
     )
     listed = _get("/assignments").text
-    assert '<h1 class="j-doc-title">Assignments</h1>' in listed
-    assert "<title>Assignments</title>" in listed
-    assert '<a href="/assignments">Assignments</a>' in _get("/assignments/7").text
+    assert '<h1 class="j-doc-title">assignments</h1>' in listed
+    assert "<title>assignments</title>" in listed
+    assert '<a href="/assignments">assignments</a>' in _get("/assignments/7").text
     saved = _get("/assignments/saved").text
-    assert '<h1 class="j-doc-title">Saved assignments</h1>' in saved
-    assert "<title>Saved assignments</title>" in saved
+    assert '<h1 class="j-doc-title">saved assignments</h1>' in saved
+    assert "<title>saved assignments</title>" in saved
     one = _get("/assignments/saved/3").text
-    assert '<a href="/assignments">Assignments</a>' in one
-    assert '<a href="/assignments/saved">Saved</a>' in one
+    assert '<a href="/assignments">assignments</a>' in one
+    assert '<a href="/assignments/saved">saved</a>' in one
 
 
 @pytest.mark.parametrize("state", ["queued", "in_progress", "completed"])
