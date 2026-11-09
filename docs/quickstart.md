@@ -203,6 +203,10 @@ find under `docs/`:
 - [mcp-servers.md](mcp-servers.md): how to add a tool, and a tested entry for
   the weather and for Home Assistant.
 - [memory.md](memory.md): notes, journal, profiles, and retrieval.
+- [assignments.md](assignments.md): long jobs that Joshua runs in the
+  background, and what to say to Joshua for each step.
+- [documents.md](documents.md): plans, reports, and artifacts that Joshua
+  makes for you, and how you comment on them.
 - [operations.md](operations.md): logs, health, updates, backup, and the
   viewer, which is a web page for your notes.
 - [architecture.md](architecture.md) and [security.md](security.md): how the
