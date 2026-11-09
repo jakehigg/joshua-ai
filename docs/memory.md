@@ -19,6 +19,8 @@ are closest to it.
 |---|---|
 | `wiki/**.md`, including `wiki/journal/` and `wiki/people/` | everyone |
 | `shared/**.md` | everyone |
+| `documents/<id>/**.md`, the title and the summary only | that member |
+| `documents/shared/**.md`, the title and the summary only | every member |
 
 Joshua keeps its memory in one folder, the wiki. `wiki/journal/` is Joshua's
 own journal: what happened, in Joshua's voice, third person, names attached.
@@ -51,6 +53,41 @@ reaches the page of the school handbook that holds it. The row carries the
 description as its title, and the words came from outside, so its provenance
 is `external`. `attachments.extract.embed: false` turns this off. A file with
 no text in it is not indexed at all.
+
+### Documents in the index
+
+A document is a plan, a report, a spec, or another text that a member works on
+with Joshua. It lives in `documents/<owner>/<slug>.md`, where `<owner>` is a
+member id or `shared`. The `documents` source does not index the body. It
+writes one row for each document, with:
+
+- the `title` of the frontmatter;
+- the `kind` (`plan`, `report`, `spec`, `artifact`, or `note`, default
+  `note`) and the `status` (`draft`, `active`, or `final`, default `draft`);
+- the `summary` of the frontmatter or, when there is none, the first
+  paragraph of the body, cut to 500 characters;
+- the path.
+
+The source does not index a document with `status: archived`, a document
+with `format: html`, or an `.html` file. When a document changes to
+`archived`, the next pass removes its row. A folder that is not a member id
+and is not `shared` is ignored, and so is a dot entry such as `.trash/`. When
+`documents/` does not exist, the source finds nothing and does nothing.
+
+Recall never shows the body of a document. `search_memory` and the note of a
+turn show a document as one line:
+
+```
+document: Party plan (documents/alex/party-plan.md, plan, active)
+```
+
+The agent reads the document with `read_document` when it needs the body.
+
+Only a conversation of one member finds a document: that member's own
+documents and the shared ones. A group chat and a guest find no document,
+and a member never finds the documents of another member.
+`memory.documents.enabled: false` turns the source off, and the next pass
+removes its rows.
 
 The indexer re-reads the volume every `memory.index_interval_s` seconds (60 by
 default). It compares each file against the index by content, so a file that did
@@ -98,7 +135,9 @@ Read this when an answer is wrong. It says what Joshua read before it answered.
 
 The viewer and the joshua-mcp addon search the same index by meaning through
 `POST /v1/memory/search`. That route reads the wiki, the journal, and the
-profiles only. See [contracts.md](contracts.md#the-search-route).
+profiles. With `source: documents` and a `person`, it reads the documents of
+that member and the shared ones in place of the wiki, and the viewer links
+each one to `/documents/<owner>/<slug>`. See [contracts.md](contracts.md#the-search-route).
 
 `GET /admin/kb/status` reports the state of each source and the chunk count.
 `POST /admin/kb/reindex` re-indexes on demand.

@@ -113,7 +113,9 @@ Route allowlists, by default:
   also accepts `laptop` for a `cli` handle.
 - core `POST /v1/memory/search`: `memory.search.allowed_callers` (default
   `viewer`, `mcp`). An empty list turns it off. It names no person and returns
-  only `wiki/` pages of kind `wiki`, `journal`, or `profile`.
+  only `wiki/` pages of kind `wiki`, `journal`, or `profile`. With
+  `source: documents` it names a member and returns the title and summary of
+  that member's documents and the shared ones, never the body.
 - core `GET /v1/usage`: `usage.allowed_callers` (default `viewer`). An empty
   list turns it off. It returns token counts by day and group, and no person.
   `GET /admin/usage` gives the same answer to an admin caller.

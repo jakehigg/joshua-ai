@@ -277,7 +277,8 @@ behavior a member teaches in chat. See [memory.md](memory.md#taught-skills).
 
 | Key | Default | What it does |
 |---|---|---|
-| `index_interval_s` | `60` | how often the `files` source re-reads the volume |
+| `index_interval_s` | `60` | how often the `files` and `documents` sources re-read the volume |
+| `documents.enabled` | `true` | index the title and the summary of each document; `false` removes the rows |
 | `chunk_chars` | `1600` | target size of one chunk |
 | `min_sim` | `0.55` | floor for a search result, below the two decision thresholds |
 | `per_doc_cap` | `3` | most chunks one file may contribute to one search |
@@ -292,6 +293,17 @@ its rows. `search_memory`, the per-turn injection, and
 `POST /v1/memory/search` never return such a page, also when the index still
 holds it. The default excludes `wiki/assignments/`. An empty value excludes
 nothing.
+
+`documents.enabled` turns the `documents` source on or off. The source writes
+one row for each document in `documents/`: the title, the kind, the status,
+and the summary, never the body. It skips an archived document and an `html`
+document. See [memory.md](memory.md#documents-in-the-index).
+
+```yaml
+memory:
+  documents:
+    enabled: true
+```
 
 ```yaml
 memory:

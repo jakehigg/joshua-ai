@@ -105,7 +105,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}, "inference_overrides": int}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. `inference_overrides` counts the `inference` job blocks that set `base_url` or `model`. |
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
-| `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
+| `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?, "source"?, "person"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
 | `POST /v1/usage` | `usage.writers` (default `assignments`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment`, `413` over 1 MiB, `503` when the database fails. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
@@ -140,7 +140,18 @@ The search is always in the shared scope, and the body names no person. It
 reads the `files` source only, and returns only a page under `wiki/`: a wiki
 page, a journal entry or day page, or a profile. It never returns a person's
 own attachments, a row from another source, or a taught skill. `path` is
-relative to the data volume. `date` is `YYYY-MM-DD` or null. An empty list in
+relative to the data volume. `date` is `YYYY-MM-DD` or null.
+
+`source` is `files` (the default) or `documents`. Any other value gets `422`.
+A search of `documents` must name `person`, a person id; without it the
+route answers `400`. It reads the `documents` source only, and returns the
+documents of that person and the documents of `documents/shared/`, never the
+documents of another person. A hit has `kind: document`, the path
+`documents/<owner>/<slug>.md`, the kind and the status of the document in
+`heading` (`plan, active`), and the summary in `text`, never the body. When
+`person` is not a member, or `memory.documents.enabled` is `false`, the
+results are empty. `kinds` does not apply. The caller vouches for the person:
+the viewer sends the member who signed in. An empty list in
 `allowed_callers` turns the route off: every caller gets `403`. Core never
 logs the query.
 
