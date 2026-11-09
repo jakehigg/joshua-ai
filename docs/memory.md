@@ -6,7 +6,9 @@ This page covers how long-term memory is written, and how Joshua finds it again.
 
 ## Documents
 
-Joshua keeps four kinds of text, and each one has its own place:
+Joshua keeps four kinds of text, and each one has its own place.
+[documents.md](documents.md) is the guide for the person: what goes where,
+comments, versions, and what to say to Joshua.
 
 | Surface | What it holds | Where |
 |---|---|---|

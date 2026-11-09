@@ -6,6 +6,13 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Docs: a guide for assignments, and one for documents.**
+  [assignments.md](assignments.md) now opens with a guide for the person:
+  what an assignment is, what to say to Joshua at each step, the flow from
+  draft to completed, what the worker can and cannot do, and where each
+  part is in the viewer. The reference follows. The new
+  [documents.md](documents.md) is the guide for documents and artifacts.
+  The README, the quickstart, memory.md, and operations.md link to both.
 - **Assignments: answer a decision on the report page, and Joshua hears it.**
   The page of a completed assignment opens with a lead band: "N decisions
   wait for you", with a link to them, and the outputs as cards, the

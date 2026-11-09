@@ -877,6 +877,9 @@ curl -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" \
 
 ### The assignments section
 
+[assignments.md](assignments.md) opens with a guide: how a person uses an
+assignment, step by step, and the words to say to Joshua.
+
 `/assignments` in the viewer shows the assignments of the person who signed
 in, and no other person's. The `Assignments` link in the menu opens it. To
 change an assignment, tell Joshua, or leave a comment on a line of its
@@ -1041,6 +1044,9 @@ answer, the page says so and shows nothing old. `GET /readyz` on the viewer
 reports `assignments`.
 
 ### The documents section
+
+[documents.md](documents.md) is the guide for documents and artifacts: what
+goes where, comments, versions, and promote.
 
 `/documents` in the viewer shows the documents of the member who signed in
 and the shared documents. A document is a plan, a report, a spec, a note, or
