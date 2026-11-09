@@ -3,7 +3,11 @@
 ``GET /v1/assignments``, ``GET /v1/assignments/{id}``, ``GET /v1/saved``, and
 ``GET /v1/saved/{id}`` read the store. The comment routes
 (``/v1/assignments/{id}/comments`` and ``/v1/saved/{id}/comments``) read the
-comments on a definition, add one, and delete one: the only writes here. A
+comments, add one, and delete one: the only writes here. A comment of a run
+has a ``target``: its definition, its plan, or its report. A saved
+assignment has a definition only. A new comment on the plan or the report of
+a run that ended goes to the person's conversation as an event
+(:meth:`Manager.comment_added`). A
 comment is written as the person that ``person`` names, on a row of that
 person only, and only its author deletes it, while it is open. A caller sends its own fleet token,
 ``Authorization: Bearer <token>``. The bearer must be the
@@ -38,6 +42,7 @@ from joshua_assignments.comments import (
     comment_view,
     is_open,
     new_comment,
+    texts,
 )
 from joshua_assignments.digest import lede, next_step
 from joshua_assignments.manager import Manager, saved_ref
@@ -98,14 +103,15 @@ def item(row: dict[str, Any], names: Mapping[int, str]) -> dict[str, Any]:
     }
 
 
-def comments_part(spec: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def comments_part(parent: Mapping[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """``definition``, ``comments``, and ``open_comments`` of a detail.
 
-    ``definition`` is the spec as the text that the line numbers count."""
-    text = definition_mod.render(spec or {})
-    lines = text.split("\n") if text else []
+    ``definition`` is the spec as the text that the line numbers of a
+    definition comment count. The comments of every target are in
+    ``comments``, and ``open_comments`` counts them all."""
+    lines = texts(parent)
     return {
-        "definition": text,
+        "definition": definition_mod.render(parent.get("spec") or {}),
         "comments": [comment_view(row, lines) for row in rows],
         "open_comments": sum(1 for row in rows if is_open(row)),
     }
@@ -121,7 +127,7 @@ def detail(
     ``comments`` the oldest first."""
     return {
         **item(row, names),
-        **comments_part(row.get("spec"), comments or []),
+        **comments_part(row, comments or []),
         "spec": row.get("spec") or {},
         "plan": row.get("plan"),
         "plan_at": _iso(row.get("plan_at")),
@@ -240,7 +246,7 @@ class ReadApi:
         runs = await store.recent(person, MAX_RUNS, statuses=RUN_STATUSES, saved_id=row["id"])
         names = {int(row["id"]): row["name"]}
         comments = await store.comments(person, Parent("saved", int(row["id"])))
-        part = comments_part(row.get("spec"), comments)
+        part = comments_part({"spec": row.get("spec")}, comments)
         return JSONResponse(
             {
                 **saved_item(row, part["open_comments"]),
@@ -253,8 +259,8 @@ class ReadApi:
 
     async def _parent(
         self, request: Request, kind: str
-    ) -> tuple[str, Parent, list[str]] | JSONResponse:
-        """The person, the parent, and the lines of its definition, or the error.
+    ) -> tuple[str, Parent, dict[str, Any]] | JSONResponse:
+        """The person, the parent, and its row, or the error.
 
         A row of another person is 404, as a row that does not exist."""
         person = _person(request)
@@ -269,13 +275,17 @@ class ReadApi:
             row = await store.get(parent.id)
         if not _visible(row, person):
             return _not_found()
-        return person, parent, definition_mod.lines(row.get("spec") or {})
+        assert row is not None
+        if kind == "saved":
+            row = {"spec": row.get("spec")}
+        return person, parent, row
 
     async def _comments(self, request: Request, kind: str) -> Response:
         found = await self._parent(request, kind)
         if isinstance(found, JSONResponse):
             return found
-        person, parent, lines = found
+        person, parent, row = found
+        lines = texts(row)
         store = self.manager.store
         if request.method == "GET":
             rows = await store.comments(person, parent)
@@ -289,17 +299,20 @@ class ReadApi:
         except CommentRefused as exc:
             return _error(400, str(exc))
         if len(await store.comments(person, parent, open_only=True)) >= MAX_OPEN_COMMENTS:
-            return _error(409, f"a definition has at most {MAX_OPEN_COMMENTS} open comments")
-        row = await store.add_comment(person, parent, **fields)
+            return _error(409, f"a text has at most {MAX_OPEN_COMMENTS} open comments")
+        comment = await store.add_comment(person, parent, **fields)
         logger.info(
             {
                 "message": "comment stored",
-                "comment_id": row["id"],
+                "comment_id": comment["id"],
+                "target": comment["target"],
                 "person": person,
                 parent.column: parent.id,
             }
         )
-        return JSONResponse(comment_view(row, lines), status_code=201)
+        if parent.kind == "assignment":
+            await self.manager.comment_added(row, comment)
+        return JSONResponse(comment_view(comment, lines), status_code=201)
 
     async def _delete_comment(self, request: Request, kind: str) -> Response:
         found = await self._parent(request, kind)

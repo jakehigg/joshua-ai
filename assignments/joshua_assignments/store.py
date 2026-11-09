@@ -72,7 +72,10 @@ MAX_OUTPUT_KIND = 40
 MAX_OUTPUT_REF = 500
 MAX_OUTPUT_TITLE = 200
 # The targets of a comment, and the caps of one comment.
-COMMENT_TARGETS = ("definition",)
+# ``definition`` is the spec as YAML; ``plan`` and ``report`` are the texts of a run.
+COMMENT_TARGETS = ("definition", "plan", "report")
+# The targets whose comments on an ended run go to the person's conversation.
+EVENT_TARGETS = ("plan", "report")
 MAX_COMMENT_BODY = 2000
 MAX_COMMENT_RESOLUTION = 300
 # The columns ``update`` may set.
@@ -192,6 +195,9 @@ CREATE TABLE IF NOT EXISTS assignments.comment (
     resolution    TEXT,
     CONSTRAINT comment_one_parent CHECK ((saved_id IS NULL) <> (assignment_id IS NULL))
 );
+-- ``sent_at``: when the manager sent the comment to Joshua as an event. Only a
+-- comment on the plan or the report of an ended run is sent.
+ALTER TABLE assignments.comment ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_comment_saved
     ON assignments.comment (saved_id, id) WHERE saved_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_comment_assignment
@@ -362,6 +368,10 @@ class Store(Protocol):
     async def open_comment_counts(
         self, person_id: str, saved_ids: Collection[int]
     ) -> dict[int, int]: ...
+
+    async def unsent_comments(self, assignment_id: int | None = None) -> list[dict[str, Any]]: ...
+
+    async def mark_comments_sent(self, comment_ids: Collection[int]) -> None: ...
 
     async def counts(self) -> dict[str, int]: ...
 
@@ -849,6 +859,35 @@ class PgStore:
             )
             rows = await cur.fetchall()
         return {int(row["saved_id"]): int(row["n"]) for row in rows}
+
+    @shielded
+    async def unsent_comments(self, assignment_id: int | None = None) -> list[dict[str, Any]]:
+        """The open comments on a plan or a report that no event holds yet, the
+        oldest first: of the run ``assignment_id``, or of every run for None."""
+        where = "" if assignment_id is None else " AND assignment_id = %s"
+        params: tuple[Any, ...] = (list(EVENT_TARGETS),)
+        if assignment_id is not None:
+            params += (assignment_id,)
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM assignments.comment WHERE assignment_id IS NOT NULL "
+                "AND target = ANY(%s) AND sent_at IS NULL AND resolved_at IS NULL"
+                f"{where} ORDER BY id",
+                params,
+            )
+            rows = await cur.fetchall()
+        return [dict(row) for row in rows]
+
+    @shielded
+    async def mark_comments_sent(self, comment_ids: Collection[int]) -> None:
+        """Set ``sent_at`` of each comment of ``comment_ids``."""
+        if not comment_ids:
+            return
+        async with self._pool().connection() as conn:
+            await conn.execute(
+                "UPDATE assignments.comment SET sent_at = now() WHERE id = ANY(%s)",
+                (list(comment_ids),),
+            )
 
     @shielded
     async def counts(self) -> dict[str, int]:

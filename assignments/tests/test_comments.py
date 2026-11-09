@@ -75,6 +75,7 @@ async def test_a_comment_round_trip(app, parents, kind) -> None:
         "target",
         "line_no",
         "line_text",
+        "line_now",
         "body",
         "created_at",
         "resolved_at",
@@ -363,7 +364,7 @@ async def test_assignment_comments_with_a_bad_or_unknown_name(app) -> None:
 
 
 def test_a_new_comment_is_checked() -> None:
-    lines = ["a", "b"]
+    lines = {"definition": ["a", "b"]}
     assert comments_mod.new_comment(
         {"line_no": 2, "line_text": "b", "body": " x\r\ny "}, lines
     ) == {

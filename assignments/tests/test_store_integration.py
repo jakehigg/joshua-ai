@@ -339,6 +339,34 @@ async def test_comments_on_a_saved_assignment_and_a_run(store) -> None:
     assert len(await store.comments("alex", on_run)) == 1
 
 
+async def test_the_unsent_comments_on_a_plan_or_a_report(store) -> None:
+    run = await create(store)
+    other = await create(store)
+    saved = await store.put_saved("alex", "docs", {"goal": "g"})
+    on_run = Parent("assignment", run["id"])
+    fields = {"line_no": 1, "line_text": "# Docs", "body": "Keep it."}
+    report = await store.add_comment("alex", on_run, target="report", **fields)
+    plan = await store.add_comment("alex", on_run, target="plan", **fields)
+    await store.add_comment("alex", on_run, target="definition", **fields)
+    await store.add_comment("alex", Parent("saved", saved["id"]), target="definition", **fields)
+    elsewhere = await store.add_comment(
+        "alex", Parent("assignment", other["id"]), target="report", **fields
+    )
+    resolved = await store.add_comment("alex", on_run, target="report", **fields)
+    await store.resolve_comment("alex", resolved["id"], "Done.")
+    assert report["sent_at"] is None
+    assert [c["id"] for c in await store.unsent_comments(run["id"])] == [report["id"], plan["id"]]
+    assert [c["id"] for c in await store.unsent_comments()] == [
+        report["id"],
+        plan["id"],
+        elsewhere["id"],
+    ]
+    await store.mark_comments_sent([report["id"], plan["id"]])
+    await store.mark_comments_sent([])
+    assert await store.unsent_comments(run["id"]) == []
+    assert (await store.get_comment("alex", report["id"]))["sent_at"] is not None
+
+
 async def test_a_comment_needs_exactly_one_parent(store) -> None:
     run = await create(store)
     saved = await store.put_saved("alex", "docs", {"goal": "g"})
