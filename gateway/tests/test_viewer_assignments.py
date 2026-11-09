@@ -6,7 +6,6 @@ needed. The answers follow the read API contract of the manager.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import json
@@ -283,7 +282,8 @@ def test_the_default_is_in_progress_when_one_exists(data, monkeypatch) -> None:
     html = _main(_get("/assignments").text)
     assert '<span class="j-chip on" aria-current="true">In progress</span>' in html
     assert 'href="/assignments/7">Clean up the docs</a>' in html
-    assert [r.url.path for r in manager.requests] == ["/v1/assignments", "/v1/assignments/7"]
+    # The list items give the line under each title: no detail is read.
+    assert [r.url.path for r in manager.requests] == ["/v1/assignments"]
 
 
 def test_the_default_is_completed_when_nothing_is_in_progress(data, monkeypatch) -> None:
@@ -301,7 +301,73 @@ def test_the_default_is_completed_when_nothing_is_in_progress(data, monkeypatch)
     assert '<span class="j-chip on" aria-current="true">Completed</span>' in html
     assert "Old job" in html
     states = [r.url.params.get("state") for r in manager.requests]
-    assert states == ["in_progress", "completed", None]
+    assert states == ["in_progress", "completed"]
+    assert '<span class="j-chip on" aria-current="true">Queued</span>' not in html
+
+
+def test_the_default_is_completed_also_when_only_a_queued_one_exists(data, monkeypatch) -> None:
+    _with(
+        monkeypatch,
+        FakeManager(
+            {
+                "/v1/assignments?state=in_progress": {"items": []},
+                "/v1/assignments?state=completed": {"items": []},
+                "/v1/assignments?state=queued": {"items": [item(state="queued")]},
+            }
+        ),
+    )
+    html = _main(_get("/assignments").text)
+    assert '<span class="j-chip on" aria-current="true">Completed</span>' in html
+    assert "No assignment is completed." in html
+
+
+@pytest.mark.parametrize("query", [{}, {"state": "queued"}])
+def test_no_pill_is_selected_when_the_manager_does_not_answer(data, monkeypatch, query) -> None:
+    _with(monkeypatch, FakeManager(status=503))
+    html = _main(_get("/assignments", **query).text)
+    assert 'class="j-chip on"' not in html
+    assert "did not answer" in html
+    for key, _ in am.STATES:
+        assert f'href="/assignments?state={key}"' in html
+
+
+def test_no_pill_is_selected_when_the_second_read_fails(data, monkeypatch) -> None:
+    _with(
+        monkeypatch,
+        FakeManager(
+            {
+                "/v1/assignments?state=in_progress": {"items": []},
+                "/v1/assignments?state=completed": 503,
+            }
+        ),
+    )
+    html = _main(_get("/assignments").text)
+    assert 'class="j-chip on"' not in html
+    assert "did not answer" in html
+
+
+def test_the_headings_start_with_a_capital(data, monkeypatch) -> None:
+    _with(
+        monkeypatch,
+        FakeManager(
+            {
+                "/v1/assignments?state=in_progress": {"items": [item()]},
+                "/v1/assignments/7": detail(),
+                "/v1/saved": {"items": []},
+                "/v1/saved/3": saved_item() | {"runs_list": []},
+            }
+        ),
+    )
+    listed = _get("/assignments").text
+    assert '<h1 class="j-doc-title">Assignments</h1>' in listed
+    assert "<title>Assignments</title>" in listed
+    assert '<a href="/assignments">Assignments</a>' in _get("/assignments/7").text
+    saved = _get("/assignments/saved").text
+    assert '<h1 class="j-doc-title">Saved assignments</h1>' in saved
+    assert "<title>Saved assignments</title>" in saved
+    one = _get("/assignments/saved/3").text
+    assert '<a href="/assignments">Assignments</a>' in one
+    assert '<a href="/assignments/saved">Saved</a>' in one
 
 
 @pytest.mark.parametrize("state", ["queued", "in_progress", "completed"])
@@ -912,61 +978,40 @@ def test_a_completed_assignment_with_no_report_shows_its_plan(data, monkeypatch)
 
 def test_a_row_has_the_lede_or_the_next_step_and_the_outputs(data, monkeypatch) -> None:
     rows = [
-        item(id=1, title="Finished", status="done", state="completed"),
-        item(id=2, title="Running", status="failed", state="completed"),
+        item(
+            id=1,
+            title="Finished",
+            status="done",
+            state="completed",
+            lede="Your wiki has no dead links now <b>.</b>",
+            next_step="not this",
+            outputs_count=5,
+        ),
+        item(id=2, title="Running", status="failed", state="completed", next_step="`fix` it"),
         item(id=3, title="Missing", status="done", state="completed"),
     ]
-    manager = _with(
-        monkeypatch,
-        FakeManager(
-            {
-                "/v1/assignments?state=completed": {"items": rows},
-                "/v1/assignments/1": done(report_fixture("full"), id=1, outputs=FULL_OUTPUTS),
-                "/v1/assignments/2": detail(
-                    id=2, plan="- [x] a\n- [ ] **Next:** `fix` it", report="No headings."
-                ),
-                "/v1/assignments/3": 503,
-            }
-        ),
-    )
+    manager = _with(monkeypatch, FakeManager({"/v1/assignments?state=completed": {"items": rows}}))
     html = _main(_get("/assignments", state="completed").text)
     assert "<table" not in html
     first = _between(html, 'href="/assignments/1"', "</li>")
-    assert '<span class="a-row-line">Your wiki has no dead links now' in first
-    assert "5 outputs" in first
+    assert '<span class="a-row-line">Your wiki has no dead links now &lt;b&gt;' in first
+    assert "5 outputs" in first and "not this" not in first
     second = _between(html, 'href="/assignments/2"', "</li>")
     assert '<span class="a-row-line">Next: <code>fix</code> it</span>' in second
     assert "output" not in second
     third = _between(html, 'href="/assignments/3"', "</li>")
     assert "a-row-line" not in third
+    # One read for the whole page: no read of a detail.
+    assert [r.url.path for r in manager.requests] == ["/v1/assignments"]
     assert {r.url.params["person"] for r in manager.requests} == {"alex"}
 
 
-def test_a_queued_row_reads_no_detail(data, monkeypatch) -> None:
-    manager = _with(
-        monkeypatch,
-        FakeManager({"/v1/assignments?state=queued": {"items": [item(state="queued")]}}),
-    )
-    _get("/assignments", state="queued")
-    assert [r.url.path for r in manager.requests] == ["/v1/assignments"]
-
-
-def test_row_ids_take_the_first_rows_only() -> None:
-    items = [am.Item.model_validate(item(id=n)) for n in range(am.ROW_LINES + 5)]
-    assert am.row_ids(items) == list(range(am.ROW_LINES))
-
-
-async def test_details_leave_out_a_late_read(monkeypatch) -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/2"):
-            await asyncio.sleep(5)
-        return httpx.Response(200, json=detail(id=int(request.url.path.rsplit("/", 1)[1])))
-
-    monkeypatch.setattr(am, "ROW_BUDGET_S", 0.2)
-    client = am.AssignmentsClient("http://assignments", "t", transport=httpx.MockTransport(handler))
-    found = await client.details("alex", [1, 2])
-    assert list(found) == [1]
-    assert await client.details("alex", []) == {}
+def test_an_older_manager_with_no_list_fields_gives_plain_rows(data, monkeypatch) -> None:
+    old = {k: v for k, v in item().items() if k not in ("lede", "next_step", "outputs_count")}
+    _with(monkeypatch, FakeManager({"/v1/assignments?state=in_progress": {"items": [old]}}))
+    html = _main(_get("/assignments").text)
+    assert 'href="/assignments/7">Clean up the docs</a>' in html
+    assert "a-row-line" not in html
 
 
 def test_text_after_the_lede_goes_under_what_was_done(data, monkeypatch) -> None:
@@ -1217,3 +1262,19 @@ def test_a_comment_when_the_manager_is_down_or_not_configured(data, monkeypatch)
     response = _client().post("/assignments/7/comments", data=form, auth=ALEX)
     assert response.status_code == 400
     assert "did not answer" in response.text
+
+
+def test_the_turns_tile_reads_turns_from_the_manager_first(data, monkeypatch) -> None:
+    html, _ = _page_of(monkeypatch, done(report_fixture("full"), turns=120))
+    assert "<b>120</b><span>turns</span>" in html
+    assert "<b>86</b><span>turns</span>" not in html
+    # Without turns from the manager, the Cost section of the report gives them.
+    html, _ = _page_of(monkeypatch, done(report_fixture("full")))
+    assert "<b>86</b><span>turns</span>" in html
+
+
+def test_a_page_in_progress_shows_the_turns_of_the_manager(data, monkeypatch) -> None:
+    html, _ = _page_of(monkeypatch, detail(turns=14))
+    assert "<b>14</b><span>turns</span>" in html
+    html, _ = _page_of(monkeypatch, detail())
+    assert "<span>turns</span>" not in html

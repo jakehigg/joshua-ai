@@ -885,14 +885,15 @@ viewer writes nothing else here.
 
 Three pills at the top give the states: `In progress`, `Queued`, and
 `Completed`. With no pill chosen, the page shows the assignments in progress,
-or the completed ones when none is in progress. Each row gives the title, the
+or the completed ones when none is in progress, never the queued ones. When
+the assignments container does not answer, no pill is selected. Each row gives the title, the
 status, the time it started (or was made), the model, and the total tokens. A
 row with an open question has a `question` mark. A time such as `2h ago` gives
 the full time in the instance `timezone` when you hold the pointer on it. The
 newest assignment is first. Under the title, a row also gives the first
 sentence of the report when there is one, else the next step of the plan, and
-the number of outputs. The page reads these for the first 25 rows that are
-not queued, for 3 seconds at most. A row that is late shows no such line.
+the number of outputs. The list of the manager gives these, so the page makes
+one call.
 
 Click a title to open the assignment as a document.
 
@@ -900,8 +901,8 @@ While the assignment is in progress, or when it has no report, the plan is
 the page:
 
 1. The title, the status, the saved assignment it came from (if any), the
-   time, and a row of numbers: the tokens, the working time, the model, and
-   the outputs.
+   time, and a row of numbers: the tokens, the working time, the turns, the
+   model, and the outputs.
 2. A notice when the assignment waits: the open question, or the stop at the
    subscription limits.
 3. The progress now: a bar from the check boxes of the plan ("4 of 9

@@ -49,7 +49,6 @@ The functions here build data and HTML only. The routes live in ``viewer``.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import re
@@ -83,13 +82,6 @@ TIMEOUT_S = 5.0
 
 # The most rows that the list page asks for.
 LIST_LIMIT = 100
-
-# The list API gives no plan and no report, so the list page reads the
-# detail of its first rows for the line under each title: at most this many
-# rows, this many reads at a time, and this many seconds in all.
-ROW_LINES = 25
-ROW_READS = 5
-ROW_BUDGET_S = 3.0
 
 # The seconds between two loads of a page of an assignment in progress.
 REFRESH_S = 20
@@ -155,7 +147,12 @@ class Item(_Model):
     started_at: str | None = None
     finished_at: str | None = None
     working_s: int = 0
+    # None from a manager that does not give it.
+    turns: int | None = None
     usage: Usage = Field(default_factory=Usage)
+    outputs_count: int = 0
+    lede: str | None = None
+    next_step: str | None = None
     open_question: str | None = None
     asked_at: str | None = None
     stopped_at_limits: dict[str, Any] | None = None
@@ -327,33 +324,6 @@ class AssignmentsClient:
         """One assignment of ``person``."""
         return await self._read(Detail, f"{LIST_PATH}/{assignment_id}", {"person": person})
 
-    async def details(self, person: str, ids: list[int]) -> dict[int, Detail]:
-        """The details of ``ids`` for the line under each row of the list.
-
-        The reads share one client, run at most :data:`ROW_READS` at a time,
-        and stop after :data:`ROW_BUDGET_S` in all, so a slow manager delays
-        the list page only that long. A read that fails or is late is left
-        out, and its row shows no line."""
-        found: dict[int, Detail] = {}
-        if not ids:
-            return found
-        gate = asyncio.Semaphore(ROW_READS)
-        async with self._client() as client:
-
-            async def one(assignment_id: int) -> None:
-                async with gate:
-                    path = f"{LIST_PATH}/{assignment_id}"
-                    result = await self._read(Detail, path, {"person": person}, client)
-                if isinstance(result, Detail):
-                    found[assignment_id] = result
-
-            tasks = [asyncio.create_task(one(assignment_id)) for assignment_id in ids]
-            _, late = await asyncio.wait(tasks, timeout=ROW_BUDGET_S)
-            for task in late:
-                task.cancel()
-            await asyncio.gather(*late, return_exceptions=True)
-        return found
-
     async def _write(self, method: str, path: str, person: str, body: Any = None) -> Written | None:
         """Send one comment write. None when the manager did not answer."""
         params = {"person": person}
@@ -518,35 +488,26 @@ def _no_answer() -> str:
     )
 
 
-def row_ids(items: list[Item]) -> list[int]:
-    """The rows of the list whose detail gives a line: the first
-    :data:`ROW_LINES` that are not queued. A queued one has no plan."""
-    return [item.id for item in items if item.state != "queued"][:ROW_LINES]
-
-
-def row_line(detail: Detail) -> str:
+def row_line(item: Item) -> str:
     """The line under the title of a row, as Markdown: the lede of the report,
-    else the next step of the plan, else ""."""
-    if detail.report:
-        report = rp.parse(detail.report)
-        if report.structured and report.lede:
-            return report.lede
-    step = rp.plan_progress(detail.plan).next_step
+    else the next step of the plan, else "". The manager gives both."""
+    if item.lede and item.lede.strip():
+        return item.lede.strip()
+    step = (item.next_step or "").strip()
     return f"Next: {step}" if step else ""
 
 
-def item_row(item: Item, *, tz: tzinfo, now: datetime, detail: Detail | None = None) -> str:
-    """One row: the title as a link, the status, when, the model, the tokens.
-
-    With ``detail``, the row also has the lede of the report or the next step
-    of the plan under the title, and the number of outputs."""
+def item_row(item: Item, *, tz: tzinfo, now: datetime) -> str:
+    """One row: the title as a link, the lede of the report or the next step
+    of the plan, the status, when, the model, the tokens, and the number of
+    outputs."""
     question = (
         '<span class="j-badge warn plain" title="The assignment asks a question">question</span>'
         if item.open_question
         else ""
     )
-    line = row_line(detail) if detail is not None else ""
-    outputs = len(detail.outputs) if detail is not None else 0
+    line = row_line(item)
+    outputs = item.outputs_count
     sub = _sub(
         [
             _when(item, tz=tz, now=now),
@@ -565,19 +526,13 @@ def item_row(item: Item, *, tz: tzinfo, now: datetime, detail: Detail | None = N
     )
 
 
-def _rows(
-    items: list[Item],
-    *,
-    tz: tzinfo,
-    now: datetime,
-    details: Mapping[int, Detail] | None = None,
-) -> str:
-    known = details or {}
-    rows = "".join(item_row(i, tz=tz, now=now, detail=known.get(i.id)) for i in items)
+def _rows(items: list[Item], *, tz: tzinfo, now: datetime) -> str:
+    rows = "".join(item_row(i, tz=tz, now=now) for i in items)
     return f'<ul class="j-list a-list">{rows}</ul>'
 
 
-def _pills(current: str) -> str:
+def _pills(current: str | None) -> str:
+    """The pills of the states. ``current`` None selects none."""
     links = []
     for key, label in STATES:
         if key == current:
@@ -598,23 +553,22 @@ def _pills(current: str) -> str:
 def list_html(
     body: ItemList | None,
     *,
-    state: str,
+    state: str | None,
     configured: bool,
     tz: tzinfo,
     now: datetime,
-    details: Mapping[int, Detail] | None = None,
 ) -> str:
     """The body of ``/assignments``. ``body`` None means the manager did not
-    answer. ``details`` gives the line under the title of a row."""
-    head = f'<h1 class="j-doc-title">assignments</h1>{_pills(state)}'
+    answer. ``state`` None selects no pill."""
+    head = f'<h1 class="j-doc-title">Assignments</h1>{_pills(state)}'
     if not configured:
         return head + _not_configured()
     if body is None:
         return head + _no_answer()
     if not body.items:
-        label = dict(STATES)[state].lower()
+        label = dict(STATES).get(state or "", "here").lower()
         return f'{head}<p class="j-empty">No assignment is {escape(label)}.</p>'
-    return head + _rows(body.items, tz=tz, now=now, details=details)
+    return head + _rows(body.items, tz=tz, now=now)
 
 
 def _limits_text(stop: Mapping[str, Any], *, tz: tzinfo, now: datetime) -> str:
@@ -1262,7 +1216,16 @@ def _error(item: Detail) -> str:
 
 
 def _crumbs() -> str:
-    return '<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
+    return '<nav class="j-crumbs"><a href="/assignments">Assignments</a></nav>'
+
+
+def _turns(item: Detail, report: rp.Report) -> int | None:
+    """The turns: ``turns`` of the manager, else the turns that the Cost
+    section of the report gives, else None."""
+    if item.turns is not None:
+        return item.turns
+    cost = report.get(rp.COST)
+    return rp.turns(cost.body if cost else None)
 
 
 def _report_page(
@@ -1275,7 +1238,7 @@ def _report_page(
 ) -> str:
     """A completed assignment with a report: the report is the page."""
     cards = output_cards(item.outputs, report)
-    turns = rp.turns(report.get(rp.COST).body if report.get(rp.COST) else None)
+    turns = _turns(item, report)
     decisions = len(_decision_items(report.get(rp.DECISIONS)))
     tiles = _hero_tiles(item, turns=turns, outputs=len(cards), decisions=decisions)
     progress = rp.plan_progress(item.plan)
@@ -1315,7 +1278,7 @@ def _plain_report_page(
             item,
             lede="",
             generated=False,
-            tiles=_hero_tiles(item, turns=None, outputs=len(cards), decisions=None),
+            tiles=_hero_tiles(item, turns=item.turns, outputs=len(cards), decisions=None),
             tz=tz,
             now=now,
         ),
@@ -1352,7 +1315,7 @@ def _progress_page(
             item,
             lede="",
             generated=False,
-            tiles=_hero_tiles(item, turns=None, outputs=len(cards) or None, decisions=None),
+            tiles=_hero_tiles(item, turns=item.turns, outputs=len(cards) or None, decisions=None),
             tz=tz,
             now=now,
         ),
@@ -1433,12 +1396,12 @@ def saved_row(saved: SavedItem, *, tz: tzinfo, now: datetime) -> str:
 
 
 def _saved_head(extra: str = "") -> str:
-    return f'<nav class="j-crumbs"><a href="/assignments">assignments</a>{extra}</nav>'
+    return f'<nav class="j-crumbs"><a href="/assignments">Assignments</a>{extra}</nav>'
 
 
 def saved_list_html(body: SavedList | None, *, configured: bool, tz: tzinfo, now: datetime) -> str:
     """The body of ``/assignments/saved``."""
-    head = _saved_head() + '<h1 class="j-doc-title">saved assignments</h1>'
+    head = _saved_head() + '<h1 class="j-doc-title">Saved assignments</h1>'
     if not configured:
         return head + _not_configured()
     if body is None:
@@ -1457,7 +1420,7 @@ def saved_detail_html(
 ) -> str:
     """The body of ``/assignments/saved/{id}``: the definition open, then the runs.
     With ``forms``, each line of the definition has a form for a comment."""
-    head = _saved_head(' <span aria-hidden="true">/</span> <a href="/assignments/saved">saved</a>')
+    head = _saved_head(' <span aria-hidden="true">/</span> <a href="/assignments/saved">Saved</a>')
     title = f'<p class="a-lead">{escape(saved.title)}</p>' if saved.title else ""
     updated = time_html(saved.updated_at, tz=tz, now=now)
     meta = _sub(
@@ -1483,7 +1446,7 @@ def message_html(title: str, body: str) -> str:
     """A page body with a title and one message, for a manager that is not
     configured or did not answer. ``body`` is HTML."""
     return (
-        f'<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
+        f'<nav class="j-crumbs"><a href="/assignments">Assignments</a></nav>'
         f'<h1 class="j-doc-title">{escape(title)}</h1>{body}'
     )
 

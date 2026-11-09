@@ -798,40 +798,36 @@ def _clock() -> tuple[tzinfo, datetime]:
 async def assignments_list(request: Request, person: Person) -> Response:
     """The assignments of the person who signed in, one state at a time.
     With no ``state``, the page shows those in progress when there is one,
-    else the completed ones. The page answers 200 also when the manager is
-    not configured or does not answer, and says so."""
+    else the completed ones, and never the queued ones. The page answers 200
+    also when the manager is not configured or does not answer, and says so;
+    then no pill is selected."""
     client = assignments_mod.from_env(os.environ)
     tz, now = _clock()
     state = assignments_mod.parse_state(request.query_params.get("state"))
     body = None
-    if client is not None:
-        if state is None:
-            body = await client.list(person.id, "in_progress")
-            state = "in_progress"
-            if body is not None and not body.items:
-                body = await client.list(person.id, "completed")
-                state = "completed"
-        else:
-            body = await client.list(person.id, state)
-    details: dict[int, assignments_mod.Detail] = {}
-    if client is not None and body is not None:
-        details = await client.details(person.id, assignments_mod.row_ids(body.items))
+    if client is None:
+        state = None
+    elif state is None:
+        body = await client.list(person.id, "in_progress")
+        state = "in_progress" if body is not None else None
+        if body is not None and not body.items:
+            body = await client.list(person.id, "completed")
+            state = "completed" if body is not None else None
+    else:
+        body = await client.list(person.id, state)
+        if body is None:
+            state = None
     html = assignments_mod.list_html(
-        body,
-        state=state or "in_progress",
-        configured=client is not None,
-        tz=tz,
-        now=now,
-        details=details,
+        body, state=state, configured=client is not None, tz=tz, now=now
     )
-    return _page("assignments", html, section="assignments")
+    return _page("Assignments", html, section="assignments")
 
 
 async def assignment_page(request: Request, person: Person) -> Response:
     """One assignment of the person who signed in, as a document. A row of
     another person is 404, as the manager answers."""
     client = assignments_mod.from_env(os.environ)
-    title = f"assignment {request.path_params['id']}"
+    title = f"Assignment {request.path_params['id']}"
     if client is None:
         html = assignments_mod.unavailable_html(title, configured=False)
         return _page(title, html, section="assignments")
@@ -857,13 +853,13 @@ async def saved_list(request: Request, person: Person) -> Response:
     body = await client.saved(person.id) if client is not None else None
     tz, now = _clock()
     html = assignments_mod.saved_list_html(body, configured=client is not None, tz=tz, now=now)
-    return _page("saved assignments", html, section="assignments")
+    return _page("Saved assignments", html, section="assignments")
 
 
 async def saved_page(request: Request, person: Person) -> Response:
     """One saved assignment of the person who signed in, with its runs."""
     client = assignments_mod.from_env(os.environ)
-    title = "saved assignment"
+    title = "Saved assignment"
     if client is None:
         html = assignments_mod.unavailable_html(title, configured=False)
         return _page(title, html, section="assignments")
@@ -932,11 +928,11 @@ async def _comment_write(request: Request, person: Person, kind: str) -> Respons
     if written is None or not written.ok:
         reason = written.error if written is not None else "the manager did not answer"
         body = assignments_mod.message_html(
-            "comment not stored",
+            "Comment not stored",
             f'<p class="j-error">{escape(reason or "The manager refused the comment.")}</p>'
             f'<p><a href="{escape(base)}">Back</a></p>',
         )
-        return _page("comment not stored", body, status=400, section="assignments")
+        return _page("Comment not stored", body, status=400, section="assignments")
     logger.info({"message": "viewer comment", "kind": kind, "delete": comment_id is not None})
     return RedirectResponse(f"{base}#{anchor}", status_code=303)
 
