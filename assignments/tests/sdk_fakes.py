@@ -88,7 +88,8 @@ def call(name: str, **args: Any) -> tuple[str, str, dict[str, Any]]:
 
 
 REPORT = (
-    "# Audit the gitops repo\n## What was asked\nAudit it.\n## What was done\nRead it.\n"
+    "# Audit the gitops repo\nThe audit is done.\n## Highlights\n- **2 issues** Filed.\n"
+    "## What was asked\nAudit it.\n## What was done\nRead it.\n"
     "## Outputs\nNone.\n## Decisions for you\nNone.\n## Follow-ups\nNone."
 )
 

@@ -39,13 +39,14 @@ def stub_report(row: dict[str, Any]) -> str:
     """The report of the stub runner, in the shape of the system prompt, with no cost."""
     spec = row.get("spec") or {}
     body = {
+        "Highlights": "- **No model call** The stub runner changed nothing.",
         "What was asked": str(spec.get("goal") or "").strip() or "No goal.",
         "What was done": STUB_SUMMARY,
         "Outputs": "None.",
         "Decisions for you": "None.",
         "Follow-ups": "None.",
     }
-    parts = [f"# {assignment_title(spec)}"]
+    parts = [f"# {assignment_title(spec)}", "This is a test report of the stub runner."]
     parts += [f"## {name}\n\n{body[name]}" for name in report.SECTIONS]
     return "\n\n".join(parts)
 

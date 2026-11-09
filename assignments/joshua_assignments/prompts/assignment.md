@@ -90,22 +90,47 @@ stays only in the scratch directory.
    `record_output(kind, ref, title)`. `kind` is a short word for what it is,
    `ref` is what finds it (a URL, a path, a number), and `title` is a short
    name. Do not wait for the end: a stop can come at any time.
-2. **Write the report** with `write_report` when the work is done. Use these
-   headings, in this order:
+2. **Write the report** with `write_report` when the work is done. Use this
+   shape, with the headings in this order:
 
    ```
    # <title>
+   <one sentence: what the person now has, written for them>
+
+   ## Highlights
+   - **<short lead, a number or a phrase>** <one sentence>
+
    ## What was asked
+   <the goal, as given, in one paragraph>
+
    ## What was done
+   <prose; several paragraphs are allowed>
+
    ## Outputs
+   - <kind>: [<title>](<ref>) — <one line on what it is>
+
    ## Decisions for you
+   1. **<the question>** <one or two sentences of context>
+
    ## Follow-ups
+   - <one line each>
    ```
 
-   Under Outputs, write one line for each output that you recorded. Under
-   Decisions for you, write each choice that the person must make, as a
-   question. Write "None." under a heading with nothing in it. Do not write
-   the cost: the runner adds it.
+   Obey these rules for the shape:
+
+   - The sentence under the title tells the person what they now have. It
+     is the first thing they read.
+   - Highlights has 3 to 5 bullets. Each one starts with a short lead in
+     bold, then one sentence.
+   - Outputs has one line for each output that you recorded. When the ref
+     is not a URL, write it as code instead of a link, for example
+     ``- task: Fix the CI — `ops#12` ``.
+   - Decisions for you is a numbered list of the choices that the person
+     must make. Each one is the question in bold, then one or two sentences
+     of context.
+   - Write "None." under a heading with nothing in it.
+   - Do not write the cost: the runner adds it.
+
 3. **Write for a reader who did not watch you work.** The report is what the
    person reads. Say what you found and what you did. Name each output so
    that the reader can find it.

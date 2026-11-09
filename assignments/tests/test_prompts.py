@@ -28,14 +28,21 @@ def test_the_system_prompt_has_the_plan_and_report_rules_and_no_installation() -
         assert words in text
     headings = [
         "# <title>",
+        "## Highlights",
         "## What was asked",
         "## What was done",
         "## Outputs",
         "## Decisions for you",
         "## Follow-ups",
     ]
-    block = text[text.index("   # <title>") :]
-    assert [line.strip() for line in block.splitlines()[:6]] == headings
+    block = text[text.index("   # <title>") : text.index("Obey these rules for the shape")]
+    assert [line.strip() for line in block.splitlines() if "#" in line] == headings
+    lines = [line.strip() for line in block.splitlines()]
+    assert lines[1] == "<one sentence: what the person now has, written for them>"
+    assert "- **<short lead, a number or a phrase>** <one sentence>" in lines
+    assert "- <kind>: [<title>](<ref>) — <one line on what it is>" in lines
+    assert "1. **<the question>** <one or two sentences of context>" in lines
+    assert "Highlights has 3 to 5 bullets" in text and "write it as code" in text
     for banned in (
         "autrui", "http://", "https://", "family", "household", "create_task", "gitlab", "journal",
         "wiki", "`files`", "write_file", "rename_file", "plan page", "developer", "index: false",
