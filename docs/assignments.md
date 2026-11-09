@@ -1,9 +1,188 @@
 # Assignments
 
-An assignment is a long job that runs for a member in the background: an
-audit of a repository, a clean-up of a wiki folder, a study that takes hours.
-Joshua starts it with a tool call and continues the conversation. The
-assignment reports back when it ends, or asks a question when it must stop.
+An assignment is a long job that Joshua runs in the background for one
+person: an audit of a repository, a clean-up of a wiki folder, a study that
+takes hours. Joshua starts it and continues the conversation. The assignment
+works alone, keeps a plan as it works, and writes a report when it ends.
+
+This page has two parts. The guide is for the person who uses assignments.
+The [reference](#reference) is for the operator: how the container works,
+and how to set it up. You can stop after the guide.
+
+## What an assignment is
+
+An assignment has four parts:
+
+- **The definition**: the brief, which Joshua writes from your words. The
+  worker sees nothing else of your chat. So the definition holds the goal,
+  what "done" means, where each result goes, and each limit that you gave.
+- **The plan**: the steps of the worker, with a tick on each step that is
+  done, and the next step. The worker keeps it current while it works.
+- **The outputs**: what the worker made, such as a document, a task, an
+  issue, or a wiki page.
+- **The report**: what you read at the end. It tells what was done, gives
+  the outputs, asks the decisions that only you can make, lists the
+  follow-ups, and gives the cost.
+
+An assignment has a budget. It stops when the use of your subscription
+reaches a ceiling, such as 70 percent of the 5-hour window. It also stops at
+a token cap, a number of turns, or a working time. The operator sets the
+defaults, and you can ask for other values in your own words.
+
+Joshua does a short job itself. Ask for an assignment when the job has many
+steps or takes hours.
+
+One assignment runs at a time, unless the operator allows more. There is no
+queue. When an assignment runs and you start another, Joshua tells you what
+runs, and starts yours when it ends.
+
+You see only your own assignments. A guest has no assignments.
+
+What an assignment makes for you to read and refine, such as a plan or a
+spec, is a document in your folder. See [documents.md](documents.md).
+
+## Use an assignment
+
+You talk to Joshua in your own words, in any channel. The words in quotes
+are examples.
+
+1. **Ask for a draft.** "Make an assignment to check the docs folder against
+   the code. Don't start it yet, I want to look first." Joshua writes the
+   definition and keeps it as a draft. A draft does not run. Joshua tells
+   you its number, such as 14, and where to read it: `/assignments/14` in
+   the viewer. When the request does not say where the results go, Joshua
+   asks you one question first.
+2. **Review it.** Open the draft in the viewer. Click the `+` beside a field
+   or a paragraph, and write what to change: "use opus here", "delete this
+   line", "only the last month". Then tell Joshua: "I left comments on draft
+   14." Joshua changes the draft and resolves each comment.
+3. **Say go.** "Start assignment 14." The draft runs with the same number,
+   so what you read is what runs. To skip the review, say "Run an assignment
+   that ...", and it starts at once.
+4. **Watch it.** "How is assignment 14 going?" Joshua tells you what is done
+   and what comes next. Or open its page: the plan ticks while you watch.
+5. **Answer its questions.** When the worker must stop and ask, Joshua
+   answers it from memory or from the internet when it can. Joshua asks you
+   only for a preference, a permission, or something only you know. Answer
+   in the chat. When the worker needs a repository or a file that it does
+   not have, it asks Joshua for it, and continues when it gets it.
+6. **Read the report.** When the assignment ends, Joshua tells you the
+   outputs, the decisions, the follow-ups, and the cost. The full report is
+   on the page of the assignment.
+7. **Answer the decisions on the page.** Each decision of the report has a
+   text box. Write your answer and click `Send to Joshua`. Joshua gets the
+   answers of two minutes as one message. It applies each answer to the
+   document or the tasks that it concerns, then resolves it with a line that
+   names what changed. The decision card shows that line.
+8. **Comment on the result.** Click the `+` of a block of the report or of
+   the plan, and write a remark. It goes to Joshua as an answer does. To
+   change a deliverable document, open it from its card, comment on it, and
+   tell Joshua: "I left comments on the plan." A comment on a document does
+   not reach Joshua alone.
+9. **Submit it again.** When the documents are as you want them, say "submit
+   it again" or "re-run it". Joshua starts a re-run: a new run of the same
+   assignment, with the same definition and your words as a note for the
+   run. The new run has its own number and names the run that it repeats
+   (from #131). When the goal tells the worker to read a plan document
+   first, the re-run works from the plan as you changed it.
+10. **Keep a job that repeats.** "Keep this one as docs-cleanup." Joshua
+    saves the definition with that name. Later, say "run docs-cleanup", or
+    "run docs-cleanup every Sunday" for a schedule. A saved assignment is
+    for a job that repeats. To hold a one-off job for review, ask for a
+    draft.
+
+More things to say:
+
+| You say | Joshua does |
+|---|---|
+| "What assignments do I have?" | lists them, the newest first |
+| "Stop assignment 14." | cancels it. The plan stays, and a report of what it did is on its page. |
+| "Give it two more hours." "Let it use 90% of the 5-hour window." | raises that cap. A ceiling goes up to the maximum that the operator set. |
+| "Continue now." after a stop at the budget | raises the ceiling, up to the maximum, and lets it continue. Without this, Joshua continues it after the window resets. |
+| "Run docs-cleanup with opus this time." | runs the saved assignment with that one change |
+| "Delete draft 14." "Bring back draft 14." | removes the draft from view, or brings it back |
+
+## The flow
+
+```
+     "Make an assignment to ... Let me look first."
+                         │
+                         ▼
+                  ┌─────────────┐  ◄── you comment on the definition;
+                  │    Draft    │      Joshua changes the draft
+                  └──────┬──────┘
+                         │ "Start assignment 14."
+                         ▼
+                  ┌─────────────┐  ◄── a question or a request: Joshua
+        ┌───────► │ In progress │      answers it, or asks you
+        │         └──────┬──────┘  ◄── a budget ceiling: it waits for the
+        │                │             reset, or you say "continue now"
+        │                │ the worker writes its report
+        │                ▼
+        │         ┌─────────────┐  ◄── you answer the decisions and comment
+        │         │  Completed  │      on the report; Joshua changes the
+        │         └──────┬──────┘      documents and the tasks
+        │                │
+        └────────────────┘
+          "Submit it again.": a re-run of the same assignment (from #131)
+```
+
+A `◄──` note is a loop: the assignment stays in the same state. "Run an
+assignment that ..." skips the draft and goes to In progress at once.
+
+In the viewer, these three states are the three pills: `Drafts`,
+`In progress`, and `Completed`. The chip on each assignment gives the
+detail, the [status](#the-statuses): `waiting` for an answer, or
+`budget_exceeded` at its token cap.
+
+## What the worker can and cannot do
+
+The worker is a model session in the `assignments` container. It works in a
+scratch directory of its own, which the container removes at the end.
+
+The worker can:
+
+- read, write, and run commands in its scratch directory;
+- clone the repositories of its definition, and each repository that Joshua
+  grants it later;
+- use the tools of the person, as Joshua does for that person, or fewer when
+  the definition names them;
+- write documents in the folder of the person;
+- stop and ask Joshua a question, or ask for a repository, a file, or
+  information that it does not have.
+
+The worker cannot:
+
+- push to a repository. A change to a repository goes through another tool
+  of the person, or becomes a follow-up;
+- search or read the web. It asks for a file, and Joshua gets it;
+- clone a repository that the operator does not allow;
+- start an assignment;
+- see your chat. The definition is all that it knows;
+- go past its budget. It stops at a ceiling and waits, or it ends at a cap.
+  Joshua or you decide what comes next.
+
+Its plan and its report stay in the assignments store. They are not in the
+wiki, so they do not come back in the memory of Joshua.
+
+## Where to look in the viewer
+
+The `Assignments` link in the menu of the viewer opens your assignments.
+[operations.md](operations.md#the-assignments-section) describes each page.
+
+| Page | Where | What it shows |
+|---|---|---|
+| The list | `/assignments` | the pills `Drafts`, `In progress`, and `Completed`. Each row has the title, the status, the time, the model, and the tokens. A `question` mark shows that one waits for an answer. |
+| A draft | `/assignments/<id>` | the definition, open, with a `+` on each field and each block of the goal, and the words to say: "Tell Joshua: start assignment N". |
+| In progress | `/assignments/<id>` | the plan with a bar ("4 of 9 steps"), the next step, the last checkpoint, and the outputs so far. A notice shows an open question or a stop at the budget. The page loads again every 20 seconds. |
+| Completed | `/assignments/<id>` | the report. At the top: the decisions that wait for you, and the outputs as cards, the documents first. Then the highlights, the decisions with a text box each, what was asked, what was done, the follow-ups, and the cost. The plan, the progress, and the definition are folded at the end. |
+| Saved | `/assignments/saved` | your saved assignments, each with its runs |
+| A document | `/documents/<owner>/<slug>` | a deliverable. The `Open` link of its output card goes there. See [documents.md](documents.md#the-documents-section-of-the-viewer). |
+
+The viewer changes nothing by itself. It stores your comments and your
+answers, and Joshua does the rest.
+
+# Reference
 
 Assignments run in a fourth container, `assignments`. It is optional and off
 by default.
