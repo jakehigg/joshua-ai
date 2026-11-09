@@ -1010,6 +1010,63 @@ assignments are not configured. When the assignments container does not
 answer, the page says so and shows nothing old. `GET /readyz` on the viewer
 reports `assignments`.
 
+### The documents section
+
+`/documents` in the viewer shows the documents of the member who signed in
+and the shared documents. A document is a plan, a report, a spec, a note, or
+an artifact that Joshua keeps in `/data/documents/<person>/` or
+`/data/documents/shared/`. The `Documents` link in the menu opens it. A guest
+has no `Documents` link, and each documents page is 404 for a guest. A member
+never sees the folder of another member.
+
+The pills select a status: `Active` (the default), `Drafts`, `Final`, and
+`Archived`. The chips under them select a kind: `plan`, `report`, `spec`,
+`artifact`, `note`, or each other kind that a document has. Each row gives
+the title, the summary (or the first paragraph), the kind, the owner (`yours`
+or `shared`), the time of the last change, the count of open comments, and
+the status. With no `/data/documents` folder, the page says that there are no
+documents yet, and the viewer does not create the folder.
+
+A document opens at `/documents/<owner>/<slug>`:
+
+- A Markdown document shows in blocks, as the goal of an assignment shows.
+  When it has the headings of the report of an assignment (`Highlights`,
+  `What was asked`, `What was done`, `Outputs`, `Decisions for you`,
+  `Follow-ups`), it shows as that report does: the lede, the highlights as
+  cards, the decisions as numbered cards, the outputs as cards, the prose,
+  and the follow-ups. The assignments pages and the documents pages use the
+  same renderer.
+- An HTML document shows in a frame with `sandbox` and `srcdoc`. The frame
+  cannot reach the viewer, its sign-in, or a form of the viewer. Scripts do
+  not run, unless the frontmatter of the document has `scripts: true`: then
+  the sandbox allows scripts and nothing more. The frame also gets the
+  content policy of the viewer, so the policy still blocks a `<style>`
+  element, a `style` attribute, and a script inside the document.
+- The `Source` fold gives each line of the file, frontmatter included, with
+  its number and a `+`.
+- The `Versions` fold lists the commits of the file in the git repository of
+  `/data/documents`, newest first. Click a version to read it at
+  `?rev=<sha>`. An old version is read-only and has no comments.
+
+To comment on a document, use the `+` of a block, a card, a heading, or a line
+of `Source`, as on a definition (see
+[Comments on a definition](#comments-on-a-definition)). The `+` of the head
+of the page names the `title` line. The viewer appends the comment to the
+comments file beside the document, `<slug>.comments.jsonl`, with you as its
+`author`, and commits it with the author Joshua and the message
+`viewer: comment documents/<owner>/<slug>.md`. A comment names one line of
+the file, from 1, frontmatter included. `Delete` removes your own open
+comment from the file, with one more commit. You cannot delete a comment of
+another person or a resolved comment. Tell Joshua that you left comments:
+Joshua reads them, changes the document, and resolves each one. The form has
+the same CSRF token and `Origin` check as each other form of the viewer.
+
+When `/data/documents` is not a git repository yet, the viewer stores the
+comment and makes no commit.
+
+On the page of an assignment, an output of kind `document` whose ref is a
+documents path, such as `documents/alex/party-plan.md`, links to its page.
+
 ## Where the data is
 
 | Docker volume | Holds | `make nuke` deletes it |
