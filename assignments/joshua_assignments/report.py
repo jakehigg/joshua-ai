@@ -17,6 +17,7 @@ from typing import Any
 from joshua_shared.log import get_logger
 
 from joshua_assignments.budget import duration_text, limits_stop_text
+from joshua_assignments.digest import demote_headings
 from joshua_assignments.spec import assignment_title
 from joshua_assignments.store import USAGE_FIELDS, Store
 
@@ -160,7 +161,8 @@ def generated(
     """The report that the runner writes when the worker wrote none. With no cost.
 
     It has the headings of a worker report. Its second line starts with
-    ``GENERATED``, so ``is_generated`` knows it.
+    ``GENERATED``, so ``is_generated`` knows it. The plan goes under What was
+    done with each of its headings two levels deeper.
     """
     spec = row.get("spec") or {}
     status = str(row.get("status") or "unknown")
@@ -176,7 +178,8 @@ def generated(
         when = (checkpoint or {}).get("at")
         stamp = f" ({_time_text(when)})" if isinstance(when, datetime) else ""
         done_text.append(f"The last checkpoint{stamp}: {' '.join(str(note).split())}")
-    done_text.append(plan or "No plan was written.")
+    # Two levels down, so a heading of the plan cannot stand for a section.
+    done_text.append(demote_headings(plan) if plan else "No plan was written.")
     question = (row.get("open_question") or "").strip()
     decisions = (
         f"1. **{' '.join(question.split())}** The assignment waits for your answer."
