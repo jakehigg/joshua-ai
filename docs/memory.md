@@ -4,6 +4,34 @@ Joshua remembers each person through Markdown files on the data volume. The
 in-core RAG indexes those files and injects the relevant parts into each turn.
 This page covers how long-term memory is written, and how Joshua finds it again.
 
+## Documents
+
+Joshua keeps four kinds of text, and each one has its own place:
+
+| Surface | What it holds | Where |
+|---|---|---|
+| wiki | what Joshua knows: reference that will still be true next month | `wiki/` |
+| journal | what happened | `wiki/journal/` |
+| knowledge | what a person gave Joshua to read | an MCP server of its own, when you add one |
+| documents | what Joshua works on or has made: a plan, a report, a spec, a meal plan, an artifact | `documents/` |
+
+A document belongs to a member (or to `documents/shared/`), changes many
+times, and has a status: `draft`, `active`, `final`, or `archived`. Each
+write is one version in the git repository of `documents/`. The index never
+holds the body of a document, so a long plan does not come back in every
+turn that touches its subject. Joshua reads a document with `read_document`
+when it needs it.
+
+The wiki does not take a document. `write_file` refuses a page whose
+frontmatter says `kind: plan`, `report`, `spec`, `artifact`, or `draft`, or
+`status: draft`. When a finished document holds something durable, such as a
+recipe out of a meal plan, Joshua writes that part to the wiki with
+`promote_document`, and the document is archived. The skill page
+`prompts/builtin/skills/documents.md` tells Joshua when to use which, and
+goes only to a member session that holds the `documents` server.
+[config.md](config.md#the-documents-mcp) has the tools, the access rules,
+and the frontmatter.
+
 ## How Joshua finds what it wrote
 
 Joshua does not read every file on each turn. It searches them.

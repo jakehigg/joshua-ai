@@ -174,6 +174,25 @@ The gateway refuses a snapshot when the tool filter hides the tool, when
 declares the tool with `destructiveHint: true` and not `readOnlyHint: true`.
 Mark the listing tool `read` in `tools.class`, so that its class is clear.
 
+## The builtin servers
+
+Two servers run inside the gateway and need no package: `files`, for the
+wiki and the attachments, and `documents`, for the plans, reports, and other
+documents of the members. Turn each one on with one entry:
+
+```yaml
+mcp:
+  files:
+    kind: builtin
+    allow: all
+  documents:
+    kind: builtin
+    allow: all
+```
+
+`documents` gives its tools to a member only, whatever `allow` says. See
+[config.md](config.md#the-documents-mcp).
+
 ## What this mechanism does not run
 
 **Playwright, and anything that needs a browser.** `@playwright/mcp` starts a

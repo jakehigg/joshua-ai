@@ -228,6 +228,19 @@ The files MCP keeps one rule and dropped another:
   It stays. A member reads an attachment and does not write one, because
   `channels` owns that path.
 
+### Documents
+
+The `documents` MCP is the one place where the person decides a path. A
+member reads and writes `documents/<own id>/` and `documents/shared/`, and
+never the folder of another member. The person and the role come from the
+headers that the gateway trusts, never from a tool argument. A guest, and a
+request with no role, gets an empty tool list and a refused call. Every path
+is checked against `documents/<owner>/<slug>.md` or `.html`, so `..`, a
+subfolder, a hidden entry, the comments file, and a symlink out of the root
+are refused before any file operation. The server alone sets `author`,
+`created`, `updated`, and `promoted_to`. The tools add no comment: a comment
+comes from the person in the viewer, and Joshua only resolves one.
+
 ## Secrets
 
 Secrets live in `.env` and nowhere else. `joshua.yaml` refers to them as

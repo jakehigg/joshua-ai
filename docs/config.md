@@ -907,6 +907,100 @@ search. `list_files` adds `original_name` for an attachment when a
 There is no `delete_file`. Deletion is a human action through the viewer or a
 shell.
 
+`write_file` refuses a page whose frontmatter has `kind` `plan`, `report`,
+`spec`, `artifact`, or `draft`, or `status: draft`, with the message "a plan
+or a draft is a document: use write_document". Such a page is a document. The
+check is on the whole text that would be on disk, so an `append` that makes a
+draft is refused too. See [The documents MCP](#the-documents-mcp).
+
+### The documents MCP
+
+`documents` is a builtin. It holds what Joshua works on or makes for a member:
+a plan, a report, a spec, an artifact, a note. Turn it on as `files` is:
+
+```yaml
+mcp:
+  documents:
+    kind: builtin
+    allow: all
+```
+
+There is no other key. The root is `/data/documents/`, on the data volume
+that exists. The server makes it, and its git repository, on the first write.
+
+| Folder | Who reads and writes it |
+|---|---|
+| `documents/<person id>/` | that member |
+| `documents/shared/` | every member |
+| `documents/.trash/<UTC timestamp>/` | nobody through a tool |
+
+Members only. A member never reaches the folder of another member. A guest,
+and a request with no role, sees an empty tool list, and a call is refused.
+A group chat with the member role reaches `documents/shared/` only. A person
+whose id is `shared` has no own folder: `shared` is always the shared folder.
+
+A tool path is `documents/<owner>/<slug>.md`, or `.html` for an HTML artifact.
+`slug` matches `^[a-z0-9][a-z0-9-]{0,79}$`. One slug holds one document, so
+`x.md` and `x.html` cannot both exist. A path under `wiki/` is refused: a
+document never lands in the wiki.
+
+Each document starts with YAML frontmatter:
+
+| Key | Values | Set by |
+|---|---|---|
+| `title` | text, required on create | the caller |
+| `kind` | `plan`, `report`, `spec`, `artifact`, `note` (default `note`) | the caller |
+| `status` | `draft`, `active`, `final`, `archived` (default `draft`) | the caller |
+| `format` | `markdown` or `html`, from the file name | the server |
+| `tags` | a list of words | the caller |
+| `summary` | one line; else the first paragraph is used | the caller |
+| `author` | the person id of the first write | the server |
+| `created`, `updated` | ISO date-time, UTC | the server |
+| `promoted_to` | a wiki path | `promote_document` |
+
+A caller cannot set `author`, `created`, `updated`, or `promoted_to`, and a
+`body` that holds its own frontmatter is refused. On a replace, the fields
+that the call gives change, and the others stay.
+
+Each write is one commit in the documents repository, by Joshua, with the
+message `<tool>: <owner>/<file>`. An optional `message` goes into the commit
+body. The versions of a document are its `git log`. The documents repository
+does not depend on `wiki.git`. A failed commit is a warning and never fails
+the write.
+
+Tools:
+
+- `list_documents(owner, kind, status, tag, include_archived)`: the own and
+  the shared documents, newest first, without the archived ones unless
+  `include_archived` or `status: archived`. An item has `path`, `title`,
+  `kind`, `status`, `tags`, `summary`, `author`, `updated`, `assignment`,
+  and `open_comments`.
+- `read_document(path)`: the frontmatter, the body, and `open_comments`.
+- `write_document(path, body, title, kind, status, tags, summary, format,
+  message)`: create or replace. At most 256 KB.
+- `set_document_status(path, status)`.
+- `search_documents(query, include_archived)`: a case-insensitive substring
+  match on the title, the tags, the summary, and the body. It gives `path`,
+  `title`, `kind`, `status`, and a snippet.
+- `promote_document(path, wiki_path, markdown, message)`: writes `markdown`
+  as the wiki page `wiki_path` through the same code as `write_file` (so the
+  same rules apply, and a page that is there is replaced), then sets the
+  document to `status: archived` with `promoted_to: <wiki_path>`. That is two
+  commits, one in each repository. A refused page leaves the document as it
+  was.
+- `trash_document(path)`: moves the document and its comments file to
+  `documents/.trash/<UTC timestamp>/<owner>/`.
+- `document_comments(path, include_resolved)` and
+  `resolve_document_comment(path, id, resolution)`.
+
+The comments of `<slug>.md` are in `<slug>.comments.jsonl` beside it, one
+JSON object per line: `id`, `line_no`, `line_text`, `body`, `author`,
+`created_at`, `resolved_at`, and `resolution`. `line_no` counts from 1 at the
+first line of the body, after the closing `---` of the frontmatter.
+`document_comments` adds `line_now`, the line at `line_no` now, and `stale`,
+which is true when `line_now` is not `line_text`. `resolution` is one line of
+at most 300 characters.
+
 ### Per-person identities
 
 `identities` runs one upstream connection per person, each started with that
