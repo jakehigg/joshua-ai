@@ -201,7 +201,7 @@ services:
   # it with `docker compose --profile assignments up -d`. Set
   # `assignments.enabled: true` in joshua.yaml first, and add the container as
   # an `mcp:` server: docs/assignments.md has the steps. It is not published on
-  # the host: only the gateway calls it.
+  # the host: the gateway calls /mcp, and the viewer calls the read API.
   #
   # It holds no model credential and no MCP credential. It gets the
   # database (the schema `assignments` in the same Postgres), its own fleet
@@ -227,6 +227,10 @@ services:
       ASSIGNMENTS_TOKENS: ${ASSIGNMENTS_TOKENS:-}
       # A bearer that names no person and may only read.
       ADDON_TOKEN: ${ASSIGNMENTS_ADDON_TOKEN:-}
+      # The viewer's own fleet token, the same value the viewer holds. The
+      # manager checks it on the read API (assignments.read_callers). It is
+      # never a bearer of /mcp.
+      JOSHUA_TOKEN_VIEWER: ${JOSHUA_TOKEN_VIEWER:-}
     # The read token of each git host, under the name that
     # assignments.platforms.<host>.token_env gives. Only the manager reads it;
     # a session clones through the manager and never sees it.

@@ -793,7 +793,8 @@ async def test_the_plan_and_the_outputs_reach_a_generated_report(tmp_path, chann
     row = h.row(started["id"])
     assert row["status"] == "waiting"
     assert "The plan below shows the progress." in row["report"]
-    assert "# Audit\n## Plan\n1. [ ] **Next:** clone." in row["report"]
+    # The plan sits under What was done with its headings two levels deeper.
+    assert "### Audit\n#### Plan\n1. [ ] **Next:** clone." in row["report"]
     assert "- **0 of 1 steps** are ticked in the plan." in row["report"]
     assert "## Outputs\n\n- issue: Old CI — `ops#3`" in row["report"]
     assert "plan written. Next: clone" in row["report"]

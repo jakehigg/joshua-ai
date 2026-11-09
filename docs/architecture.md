@@ -98,8 +98,8 @@ callers, the database URL, and the read token of each git host you name. The
 manager of the container puts a git token on each clone through a listener on
 `127.0.0.1`, and refuses a push, so a session never holds a git token. It keeps its rows in the schema `assignments`
 of the shared Postgres. It mounts `/data` read-only. On Kubernetes, a network
-policy lets only the gateway reach it, and lets it reach only gateway,
-channels, core, the database, DNS, and the git hosts you name.
+policy lets only the gateway and the viewer reach it, and lets it reach only
+gateway, channels, core, the database, DNS, and the git hosts you name.
 
 Each assignment runs one Claude Agent SDK session in a scratch directory, in
 slices. Before each slice, the container reads core's `GET /v1/limits`, and

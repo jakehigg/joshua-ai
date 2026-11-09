@@ -1068,6 +1068,11 @@ class Assignments(_Model):
     repos: list[str] = []
     platforms: dict[str, AssignmentPlatform] = {}
     people: dict[str, AssignmentPerson] = {}
+    # The fleet identities that may call the read API of the manager
+    # (``GET /v1/assignments``, ``GET /v1/saved``). Each one needs a
+    # ``JOSHUA_TOKEN_<NAME>`` in the environment of the container. An empty
+    # list turns the read API off.
+    read_callers: list[str] = ["viewer"]
 
     @model_validator(mode="before")
     @classmethod
@@ -1086,10 +1091,20 @@ class Assignments(_Model):
         # strictyaml reads a key with no value as an empty string.
         return {} if value in (None, "") else value
 
-    @field_validator("repos", mode="before")
+    @field_validator("repos", "read_callers", mode="before")
     @classmethod
     def _empty_list(cls, value: Any) -> Any:
         return [] if value in (None, "") else value
+
+    @field_validator("read_callers")
+    @classmethod
+    def _check_read_callers(cls, value: list[str]) -> list[str]:
+        callers = _callers(value)
+        if "assignments" in callers:
+            raise ValueError(
+                "read_callers cannot name assignments: that is the token of this container"
+            )
+        return callers
 
     @field_validator("default_working_time", "keep_failed_work")
     @classmethod

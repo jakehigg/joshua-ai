@@ -331,7 +331,12 @@ under the name that its `token_env` gives. Add the same name to
 `secrets.assignments.keys`. The manager puts the token on each clone of a
 session, and the session never sees it.
 
-The network policy lets only the gateway reach the pod, and lets the pod reach
+When the viewer is on, add `JOSHUA_TOKEN_VIEWER` to the same Secret, with the
+value of the viewer Secret. The manager checks it on its read API, so the
+viewer can show each person their assignments.
+
+The network policy lets only the gateway reach the pod, and the viewer too
+when `viewer.enabled` is true. It lets the pod reach
 only gateway, channels, core, the database, DNS, and the git hosts. A network
 policy matches addresses, not names, so give the address range of each git
 host in `assignments.networkPolicy.gitHosts.cidrs`. Set

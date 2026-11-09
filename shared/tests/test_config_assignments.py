@@ -226,3 +226,25 @@ def test_stall_slices_is_at_least_one(value: str) -> None:
 
 def test_stall_slices_one_is_valid() -> None:
     assert parse("assignments:\n  stall_slices: 1\n").assignments.stall_slices == 1
+
+
+def test_read_callers_default_to_the_viewer() -> None:
+    cfg = config.parse(BASE, {}, source="test.yaml")
+    assert cfg.assignments.read_callers == ["viewer"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("assignments:\n  read_callers:\n    - Viewer\n    - laptop\n", ["viewer", "laptop"]),
+        ("assignments:\n  read_callers:\n", []),
+    ],
+)
+def test_read_callers_are_lower_case_and_may_be_empty(text: str, expected: list[str]) -> None:
+    cfg = config.parse(BASE + text, {}, source="test.yaml")
+    assert cfg.assignments.read_callers == expected
+
+
+def test_read_callers_cannot_name_the_container_itself() -> None:
+    with pytest.raises(config.ConfigError, match="read_callers cannot name assignments"):
+        config.parse(BASE + "assignments:\n  read_callers:\n    - assignments\n", {}, source="t")

@@ -270,3 +270,25 @@ async def test_saved_assignments_their_runs_and_a_delete(store) -> None:
     assert await store.delete_saved("alex", "docs") is True
     assert await store.get_saved(first["id"]) is None
     assert (await store.get(run_a["id"]))["saved_id"] is None
+
+
+async def test_the_checkpoints_newest_first_and_the_runs_of_a_saved_assignment(store) -> None:
+    row = await create(store)
+    for n in range(3):
+        await store.add_checkpoint(row["id"], f"step {n}")
+    notes = [c["note"] for c in await store.checkpoints(row["id"], 2)]
+    assert notes == ["step 2", "step 1"]
+    assert await store.checkpoints(9999, 5) == []
+    saved = await store.put_saved("alex", "docs", {"goal": "g"})
+    runs = [
+        await store.create(
+            person_id="alex",
+            conversation_id=None,
+            spec={"goal": "g"},
+            model="m",
+            saved_id=saved["id"],
+        )
+        for _ in range(3)
+    ]
+    ids = [r["id"] for r in await store.recent("alex", 2, saved_id=saved["id"])]
+    assert ids == [runs[2]["id"], runs[1]["id"]]

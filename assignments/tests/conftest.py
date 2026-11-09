@@ -26,6 +26,8 @@ MIA = "mia-token"
 SAM = "sam-token"
 ADDON = "addon-token"
 CHANNELS_TOKEN = "assignments-fleet-token"
+VIEWER = "viewer-fleet-token"
+LAPTOP = "laptop-fleet-token"
 
 CONFIG_TEXT = """
 name: Home
@@ -69,6 +71,7 @@ def make_settings(**overrides: Any) -> Settings:
         "fleet_token": CHANNELS_TOKEN,
         "core_url": "http://core:8000",
         "gateway_url": "http://gateway:8000",
+        "read_tokens": {"viewer": VIEWER, "laptop": LAPTOP},
     }
     fields.update(overrides)
     return Settings(**fields)

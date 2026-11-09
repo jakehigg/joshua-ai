@@ -470,15 +470,25 @@ identity gets `403` on an MCP route. A group id that is not in `groups` is
 
 ## assignments
 
-Port 8000 in the container. Compose does not publish it. Only the gateway
-calls it, for a person. The container is off unless `assignments.enabled` is
+Port 8000 in the container. Compose does not publish it. The gateway calls
+`/mcp` for a person. The viewer calls the read API. The container is off unless `assignments.enabled` is
 true and its profile runs. [assignments.md](assignments.md) has the tools.
 
 | Route | Callers | Request | Reply |
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok", "database", "channels", "people", "queued", "running", "waiting", "paused_limits"}`: booleans and counts only. `503` when the database does not answer. |
-| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the nine tools. `401` for a missing or wrong bearer. |
+| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the nine tools. `401` for a missing or wrong bearer, and for a fleet token. |
+| `GET /v1/assignments?person=&state=&limit=` | `assignments.read_callers` (default `viewer`) | none | `{"items": [item, ...]}`, the newest first. Each item has the counts, the state, `lede`, and `next_step`. `limit` 1 to 200, default 50. |
+| `GET /v1/assignments/{id}?person=` | the same | none | one assignment: item plus spec, plan, report, outputs, checkpoints (newest first, at most 200), summary, follow-ups, answer, error |
+| `GET /v1/saved?person=` | the same | none | `{"items": [saved_item, ...]}`, the newest first |
+| `GET /v1/saved/{id}?person=` | the same | none | one saved assignment plus `runs_list` (newest first, at most 50) |
+
+The read API takes only the fleet token of an identity in
+`assignments.read_callers`, compared with its `JOSHUA_TOKEN_<NAME>`. A
+missing or wrong bearer is `401`. `person` is required (`400`). A row of
+another person is `404`. [assignments.md](assignments.md#the-read-api) has
+the shapes.
 
 The git proxy is internal. It listens on `127.0.0.1` on a free port, in the
 manager process, and no other container can reach it. Only the git of a

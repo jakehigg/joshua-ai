@@ -189,3 +189,24 @@ async def test_finalize_never_raises(caplog) -> None:
     with caplog.at_level("WARNING", logger="joshua_assignments.report"):
         await report.finalize(store, 1, FIXED_NOW, "UTC")
     assert "the report was not written" in caplog.text and "db.example" not in caplog.text
+
+
+def test_a_heading_of_the_plan_cannot_take_the_place_of_a_section() -> None:
+    plan = "# Plan\n## Outputs\n- [ ] one\n## Decisions\n```\n## kept in code\n```\n###### deep"
+    text = report.generated({"status": "failed", "plan": plan}, None, FIXED_NOW, "UTC")
+    # A line in a fenced code block is not a heading, so it stays as it is.
+    headings = [
+        line for line in text.splitlines() if line.startswith("## ") and line != "## kept in code"
+    ]
+    assert headings == [
+        "## Highlights",
+        "## What was asked",
+        "## What was done",
+        "## Outputs",
+        "## Decisions for you",
+        "## Follow-ups",
+    ]
+    done = text.split("## What was done\n\n", 1)[1].split("\n\n## Outputs", 1)[0]
+    assert "### Plan\n#### Outputs\n- [ ] one\n#### Decisions" in done
+    assert "```\n## kept in code\n```" in done
+    assert done.endswith("###### deep")

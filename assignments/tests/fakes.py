@@ -16,7 +16,7 @@ class FakeStore:
     def __init__(self, clock: Callable[[], datetime] = lambda: FIXED_NOW) -> None:
         self.clock = clock
         self.rows: dict[int, dict[str, Any]] = {}
-        self.checkpoints: list[dict[str, Any]] = []
+        self.checkpoint_rows: list[dict[str, Any]] = []
         self.slices: list[dict[str, Any]] = []
         self.saved: dict[int, dict[str, Any]] = {}
         self._next_saved = 1
@@ -87,6 +87,7 @@ class FakeStore:
         limit: int,
         status: str | None = None,
         statuses: Collection[str] | None = None,
+        saved_id: int | None = None,
     ) -> list[dict[str, Any]]:
         rows = [
             row
@@ -94,6 +95,7 @@ class FakeStore:
             if (person_id is None or row["person_id"] == person_id)
             and (status is None or row["status"] == status)
             and (statuses is None or row["status"] in statuses)
+            and (saved_id is None or row["saved_id"] == saved_id)
         ]
         return copy.deepcopy(rows[:limit])
 
@@ -106,11 +108,17 @@ class FakeStore:
         return copy.deepcopy(row)
 
     async def add_checkpoint(self, assignment_id: int, note: str) -> None:
-        self.checkpoints.append({"assignment_id": assignment_id, "at": self.clock(), "note": note})
+        self.checkpoint_rows.append(
+            {"assignment_id": assignment_id, "at": self.clock(), "note": note}
+        )
 
     async def last_checkpoint(self, assignment_id: int) -> dict[str, Any] | None:
-        mine = [c for c in self.checkpoints if c["assignment_id"] == assignment_id]
+        mine = [c for c in self.checkpoint_rows if c["assignment_id"] == assignment_id]
         return {"at": mine[-1]["at"], "note": mine[-1]["note"]} if mine else None
+
+    async def checkpoints(self, assignment_id: int, limit: int) -> list[dict[str, Any]]:
+        mine = [c for c in self.checkpoint_rows if c["assignment_id"] == assignment_id]
+        return [{"at": c["at"], "note": c["note"]} for c in reversed(mine)][:limit]
 
     async def write_plan(self, assignment_id: int, markdown: str) -> None:
         row = self.rows.get(assignment_id)

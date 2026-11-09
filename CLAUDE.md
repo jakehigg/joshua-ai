@@ -97,7 +97,8 @@ that is not on the route's allowlist gets 403. There is no other bearer path.
 
 Identities: `channels`, `core`, `gateway`, plus `laptop` and `ci` for
 operators, and `viewer` and `mcp`, which call core's search by meaning. The
-`viewer` also reads core's usage by day. `assignments` is the assignments
+`viewer` also reads core's usage by day, and the assignments of a person from
+the assignments container. `assignments` is the assignments
 container: core's model forwarder and usage write, the gateway MCP routes for
 a person, and channels events.
 `make init-env` mints the tokens into `.env`. Each of the three containers gets
@@ -156,6 +157,11 @@ Route allowlists, by default:
   read tools. These are not fleet tokens. The container's own fleet token,
   `JOSHUA_TOKEN_ASSIGNMENTS`, sends its events to channels `POST /v1/events`.
   `docs/assignments.md` has the design.
+- assignments `GET /v1/assignments`, `GET /v1/assignments/{id}`,
+  `GET /v1/saved`, `GET /v1/saved/{id}`: `assignments.read_callers` (default
+  `viewer`), with the fleet token of the caller. `person` names the person
+  (400 when missing); a row of another person is 404. A fleet token is never
+  a bearer of `/mcp`.
 
 `docs/contracts.md` has every route and body.
 

@@ -129,13 +129,19 @@ def test_the_assignment_server_needs_the_four_tools() -> None:
 
 def test_the_session_env_hides_the_container_secrets() -> None:
     env = session.session_env(
-        {"PATH": "/bin", "DATABASE_URL": "postgresql://u:pw@db/x", "ADDON_TOKEN": "a"},
+        {
+            "PATH": "/bin",
+            "DATABASE_URL": "postgresql://u:pw@db/x",
+            "ADDON_TOKEN": "a",
+            "JOSHUA_TOKEN_VIEWER": "v",
+        },
         core_url="http://core:8000/",
         token="fleet",
         home=Path("/work/1/.home"),
         config_dir=Path("/work/1/.home/.claude"),
     )
     assert env["DATABASE_URL"] == "" and env["ADDON_TOKEN"] == ""
+    assert env["JOSHUA_TOKEN_VIEWER"] == ""
     assert "PATH" not in env
     assert env["ANTHROPIC_BASE_URL"] == "http://core:8000/v1/model"
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "fleet"
