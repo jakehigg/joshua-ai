@@ -152,6 +152,13 @@ class SavedRef(_Model):
     name: str
 
 
+class OpenRequest(_Model):
+    # repo, file, or info (a question).
+    kind: str = ""
+    ref: str = ""
+    reason: str = ""
+
+
 class Item(_Model):
     id: int
     title: str
@@ -169,6 +176,7 @@ class Item(_Model):
     lede: str | None = None
     next_step: str | None = None
     open_question: str | None = None
+    open_request: OpenRequest | None = None
     asked_at: str | None = None
     stopped_at_limits: dict[str, Any] | None = None
     saved: SavedRef | None = None
@@ -611,7 +619,27 @@ def _limits_text(stop: Mapping[str, Any], *, tz: tzinfo, now: datetime) -> str:
     return text
 
 
+# The heading of the notice of a request, for each kind but a question.
+REQUEST_HEADINGS = {"repo": "requests a repository", "file": "requests a file"}
+
+
+def _request_notice(request: OpenRequest, when: str) -> str:
+    reason = (
+        f'<p class="a-text">Reason: {escape(request.reason)}</p>' if request.reason.strip() else ""
+    )
+    return (
+        '<aside class="a-notice warn" role="note">'
+        f"<strong>The assignment {REQUEST_HEADINGS[request.kind]}{when}</strong>"
+        f'<p class="a-text"><code>{escape(request.ref)}</code></p>{reason}'
+        '<p class="j-muted">Joshua grants it, provides it, or refuses it.</p></aside>'
+    )
+
+
 def _notice(item: Detail, *, tz: tzinfo, now: datetime) -> str:
+    request = item.open_request
+    if request is not None and request.kind in REQUEST_HEADINGS:
+        asked = time_html(item.asked_at, tz=tz, now=now)
+        return _request_notice(request, f" {asked}" if asked else "")
     if item.open_question:
         asked = time_html(item.asked_at, tz=tz, now=now)
         when = f" {asked}" if asked else ""
