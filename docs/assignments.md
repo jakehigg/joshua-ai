@@ -23,9 +23,10 @@ container holds those, and no secret that core holds:
   the token to send events to channels, to read and write usage on core, to
   send the model calls of a session through core, and to reach the MCP
   servers of a person through the gateway.
-- The gateway is its only caller. On Kubernetes, a network policy lets it
-  reach only gateway, channels, core, the database, DNS, and the git hosts
-  you name.
+- The gateway calls `/mcp`. The viewer calls the [read API](#the-read-api)
+  with its own fleet token. On Kubernetes, a network policy lets only these
+  two reach it, and lets it reach only gateway, channels, core, the
+  database, DNS, and the git hosts you name.
 - It mounts `/data` read-only and writes nothing there.
 
 ## The tools
@@ -68,7 +69,7 @@ reasons are `disabled`, `invalid_spec`, `unknown_model`, `invalid_repo`,
 - `ADDON_TOKEN` names no person. It may use `assignment_status` and
   `list_assignments` for every assignment. Every other tool gives it `403`.
 - A missing or wrong bearer gets `401` on every route except `/healthz` and
-  `/readyz`.
+  `/readyz`. A fleet token is never a bearer of `/mcp`.
 
 An assignment has no `assignments` tool, so an assignment cannot start an
 assignment.
@@ -484,7 +485,10 @@ worker wrote no report, the runner writes one with the same headings:
   steps**" from the check boxes of the plan, when the plan has some;
 - What was asked: the goal;
 - What was done: "The plan below shows the progress.", the last
-  checkpoint, and the plan as it is;
+  checkpoint, and the plan. Each heading of the plan goes two levels down
+  (`#` becomes `###`, at most `######`), so a plan heading such as
+  `## Outputs` cannot take the place of a section of the report. A line in
+  a fenced code block stays as it is;
 - Outputs: the recorded list;
 - Decisions for you: the open question, when there is one, else "None.";
 - Follow-ups: "None.";
@@ -675,6 +679,83 @@ does not start without them and `JOSHUA_TOKEN_ASSIGNMENTS`.
 The container is not published on the host. With `assignments.enabled: false`
 it exits at start and its log says why. On Kubernetes, see the chart
 [README](../charts/joshua/README.md#assignments).
+
+## The read API
+
+The viewer shows a person their assignments. It reads them from four JSON
+routes beside `/mcp`. The routes only read: every other method gets `405`.
+
+```
+GET /v1/assignments?person=<id>&state=<queued|in_progress|completed>&limit=<1..200>
+GET /v1/assignments/{id}?person=<id>
+GET /v1/saved?person=<id>
+GET /v1/saved/{id}?person=<id>
+```
+
+Who may call:
+
+- The caller sends its own fleet token: `Authorization: Bearer <token>`.
+  The container compares it with the `JOSHUA_TOKEN_<NAME>` of each identity
+  in `assignments.read_callers` (default `viewer`), from its own
+  environment. A missing or wrong bearer is `401`, and so is a bearer of
+  `/mcp`. An empty `read_callers` turns the routes off.
+- The caller names the person in `person`, as the gateway names the person
+  to core. The container trusts the caller for this. A missing or bad
+  `person` is `400`.
+- A row of another person is `404`, the same as a row that does not exist.
+  A list holds only the rows of that person.
+- No answer holds a token or a bearer.
+
+The shapes:
+
+```
+item = {
+  "id": int, "title": str, "status": str, "state": str, "model": str,
+  "created_at": iso, "started_at": iso|null, "finished_at": iso|null,
+  "working_s": int, "turns": int,
+  "usage": {"input": int, "output": int, "cache_read": int, "cache_write": int, "total": int},
+  "outputs_count": int, "lede": str|null, "next_step": str|null,
+  "open_question": str|null, "asked_at": iso|null,
+  "stopped_at_limits": object|null,
+  "saved": {"id": int, "name": str}|null
+}
+list   = {"items": [item, ...]}
+detail = item + {
+  "spec": object, "plan": str|null, "plan_at": iso|null,
+  "report": str|null, "report_at": iso|null,
+  "outputs": [{"kind", "ref", "title", "at"}],
+  "checkpoints": [{"at": iso, "note": str}],
+  "summary": str|null, "follow_ups": list|null, "answer": str|null, "error": str|null
+}
+saved_item   = {"id", "name", "title", "spec", "created_at", "updated_at", "runs": int,
+                "last_run": {"id", "status", "finished_at"}|null}
+saved_list   = {"items": [saved_item, ...]}
+saved_detail = saved_item + {"runs_list": [item, ...]}
+```
+
+- `GET /v1/assignments` gives a `list`, the newest first. `state` filters,
+  and a bad value is `400`. `limit` is 1 to 200 (default 50). A value out
+  of the range becomes the nearest end, and a value that is not a number is
+  `400`.
+- `GET /v1/assignments/{id}` gives a `detail`. `checkpoints` are the newest
+  first, at most 200.
+- `GET /v1/saved` gives a `saved_list`, the newest first.
+- `GET /v1/saved/{id}` gives a `saved_detail`. `runs_list` holds the runs,
+  the newest first, at most 50.
+- `model` is the key of `assignments.models` that the spec names. `total` is
+  the sum of the four counts. `outputs_count` is the number of recorded
+  outputs.
+- `lede` is the first paragraph under the H1 of the report, on one line, at
+  most 500 characters, or null.
+- `next_step` comes from the plan: the first unticked `[ ]` line that holds
+  `**Next:**`, else the first unticked line, with no check box and no mark,
+  at most 300 characters, or null. A list thus needs no detail call.
+
+To set it up with compose, do nothing more: compose gives the container the
+`JOSHUA_TOKEN_VIEWER` of `.env`, the same value that the viewer holds. On
+Kubernetes, add `JOSHUA_TOKEN_VIEWER` to the Secret of `secrets.assignments`
+with the value of the viewer Secret. The chart lets the viewer pod reach the
+container on port 8000 when `viewer.enabled` is true.
 
 ## The skill page
 
