@@ -6,6 +6,18 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The assignments container has a read API for the viewer.**
+  `GET /v1/assignments`, `GET /v1/assignments/{id}`, `GET /v1/saved`, and
+  `GET /v1/saved/{id}` give a person's assignments and saved assignments as
+  JSON. They take the fleet token of a caller in the new key
+  `assignments.read_callers` (default `viewer`). Compose gives the container
+  `JOSHUA_TOKEN_VIEWER`. On Kubernetes, add `JOSHUA_TOKEN_VIEWER` to the
+  assignments Secret, with the value of the viewer Secret; the chart lets
+  the viewer pod reach the container. See
+  [assignments.md](assignments.md#the-read-api).
+- A report that the runner writes at a stop puts each heading of the plan
+  two levels down, so a heading of the plan does not look like a section of
+  the report.
 - **Saved assignments.** Joshua can save the spec of a job that recurs
   under a short name with `save_assignment`, and start it again with
   `start_assignment(saved="<name>")`. A `spec` beside `saved` changes the
