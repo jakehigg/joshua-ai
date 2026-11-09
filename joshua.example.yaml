@@ -118,6 +118,11 @@ memory:
     allowed_callers:
       - viewer                 # the web viewer
       - mcp                    # the joshua-mcp addon
+  # The documents source: one row per document in documents/, with the
+  # title, the kind, the status, and the summary, never the body. An archived
+  # document and an html document are not indexed. False removes the rows.
+  documents:
+    enabled: true
   embed_model: BAAI/bge-small-en-v1.5
   # In-core RAG over the data volume. `files` is the kernel source and always
   # runs; other adapters are optional. An adapter with no options takes an empty
