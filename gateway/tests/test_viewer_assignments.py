@@ -6,6 +6,9 @@ needed. The answers follow the read API contract of the manager.
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import hashlib
 import textwrap
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -279,7 +282,7 @@ def test_the_default_is_in_progress_when_one_exists(data, monkeypatch) -> None:
     html = _main(_get("/assignments").text)
     assert '<span class="j-chip on" aria-current="true">In progress</span>' in html
     assert 'href="/assignments/7">Clean up the docs</a>' in html
-    assert len(manager.requests) == 1
+    assert [r.url.path for r in manager.requests] == ["/v1/assignments", "/v1/assignments/7"]
 
 
 def test_the_default_is_completed_when_nothing_is_in_progress(data, monkeypatch) -> None:
@@ -296,7 +299,8 @@ def test_the_default_is_completed_when_nothing_is_in_progress(data, monkeypatch)
     html = _main(_get("/assignments").text)
     assert '<span class="j-chip on" aria-current="true">Completed</span>' in html
     assert "Old job" in html
-    assert [r.url.params["state"] for r in manager.requests] == ["in_progress", "completed"]
+    states = [r.url.params.get("state") for r in manager.requests]
+    assert states == ["in_progress", "completed", None]
 
 
 @pytest.mark.parametrize("state", ["queued", "in_progress", "completed"])
@@ -350,7 +354,7 @@ def test_a_hostile_title_and_model_are_escaped(data, monkeypatch) -> None:
 # -- the detail page ---------------------------------------------------------
 
 
-def test_the_detail_page_is_a_document(data, monkeypatch) -> None:
+def test_the_detail_page_in_progress_is_a_document(data, monkeypatch) -> None:
     body = detail(
         saved={"id": 3, "name": "docs-cleanup"},
         report="# Clean up the docs\n\n## What was done\n\nFixed **two** links.\n",
@@ -373,20 +377,26 @@ def test_the_detail_page_is_a_document(data, monkeypatch) -> None:
     assert "<script" not in response.text
     assert '<h1 class="j-doc-title">Clean up the docs</h1>' in html
     assert 'href="/assignments/saved/3">saved: docs-cleanup</a>' in html
-    assert f"{am.exact(12345)} tokens" in html and "1h 20m working" in html
+    assert "<b>12k</b><span>tokens</span>" in html
+    assert f"{am.exact(12345)} tokens: input 10" in html
+    assert "<b>1h 20m</b><span>working time</span>" in html
     order = [
+        '<section class="a-now"',
         "<h2>Plan</h2>",
-        "<h2>Report</h2>",
+        "<h2>Outputs so far</h2>",
         "<h2>Progress</h2>",
+        '<span class="a-fold-title">Report</span>',
         "<summary>Definition</summary>",
     ]
     places = [html.index(mark) for mark in order]
     assert places == sorted(places)
-    # The plan and the report are Markdown.
-    assert "<li>[x] read the pages</li>" in html
+    # The plan is Markdown, with each task box drawn.
+    assert '<li class="a-task done"><span class="a-box" role="img" aria-label="done">' in html
+    assert '<li class="a-task"><span class="a-box" role="img" aria-label="to do">' in html
+    # The report so far is folded, as Markdown.
     assert "<strong>two</strong>" in html
     # The progress is newest first.
-    assert html.index("fixed two links") < html.index("read the pages</p>")
+    assert html.index("fixed two links</p>") < html.index("read the pages</p>")
     # The definition is YAML in a closed details element.
     assert '<details class="a-def"><summary>' in html
     assert "goal: Clean up the docs." in html
@@ -394,32 +404,60 @@ def test_the_detail_page_is_a_document(data, monkeypatch) -> None:
     assert "<h2>Error</h2>" not in html
 
 
+def test_the_progress_now_has_the_bar_the_next_step_and_the_last_checkpoint(
+    data, monkeypatch
+) -> None:
+    plan = "# Plan\n\n- [x] read\n- [x] list\n- [ ] fix\n- [ ] **Next:** check *images*\n"
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": detail(plan=plan)}))
+    html = _main(_get("/assignments/7").text)
+    now = html[html.index('<section class="a-now"') :]
+    now = now[: now.index("</section>")]
+    assert '<span class="a-steps"><b>2</b> of 4 steps</span>' in now
+    assert '<rect class="fill" width="50" height="6" rx="3"/>' in now
+    assert "check <em>images</em>" in now
+    assert "fixed two links" in now and ">5m ago</time>" in now
+
+
+def test_a_plan_with_no_boxes_has_no_bar(data, monkeypatch) -> None:
+    body = detail(plan="# Plan\n\n1. Read.\n2. Fix.\n", checkpoints=[])
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    html = _main(_get("/assignments/7").text)
+    assert "a-steps" not in html and '<svg class="a-meter' not in html
+    assert '<section class="a-now"' not in html
+    assert "<li>Read.</li>" in html
+
+
 def test_the_outputs_link_a_url_and_show_other_refs_as_code(data, monkeypatch) -> None:
     body = detail(
-        report="Done.",
         outputs=[
             {"kind": "issue", "ref": "https://git.example.com/i/1", "title": "Issue 1", "at": None},
             {"kind": "page", "ref": "homelab/notes.md", "title": "Notes", "at": None},
             {"kind": "x", "ref": "javascript:alert(1)", "title": "Bad", "at": None},
+            {"kind": "y", "ref": "https://", "title": "", "at": None},
         ],
     )
     _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
     html = _main(_get("/assignments/7").text)
     assert (
-        '<li><span class="a-kind">issue</span>: '
-        '<a href="https://git.example.com/i/1" rel="noreferrer">Issue 1</a></li>'
+        '<a class="a-out-title" href="https://git.example.com/i/1" rel="noreferrer">Issue 1</a>'
+        '<span class="a-out-ref">git.example.com</span>'
     ) in html
-    assert '<li><span class="a-kind">page</span>: Notes <code>homelab/notes.md</code></li>' in html
+    assert (
+        '<span class="a-out-title">Notes</span><code class="a-out-ref">homelab/notes.md</code>'
+    ) in html
     assert 'href="javascript:' not in html
-    assert "<code>javascript:alert(1)</code>" in html
+    assert '<code class="a-out-ref">javascript:alert(1)</code>' in html
+    assert '<code class="a-out-title">https://</code>' in html
+    assert 'href="https://"' not in html
 
 
 def test_outputs_show_also_with_no_report(data, monkeypatch) -> None:
     body = detail(outputs=[{"kind": "task", "ref": "12", "title": "", "at": None}])
     _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
     html = _main(_get("/assignments/7").text)
-    assert "No report yet." in html
-    assert '<span class="a-kind">task</span>: <code>12</code>' in html
+    assert "<h2>Outputs so far</h2>" in html
+    assert '<code class="a-out-title">12</code>' in html
+    assert "<b>1</b><span>output</span>" in html
 
 
 def test_the_page_refreshes_only_while_in_progress(data, monkeypatch) -> None:
@@ -601,3 +639,338 @@ def test_parse_state() -> None:
     assert am.parse_state("queued") == "queued"
     assert am.parse_state(None) is None
     assert am.parse_state("running") is None
+
+
+# -- the report as the page ---------------------------------------------------
+
+REPORTS = Path(__file__).parent / "fixtures" / "reports"
+
+FULL_OUTPUTS = [
+    {
+        "kind": "merge request",
+        "ref": "https://git.example.com/docs/-/merge_requests/4",
+        "title": "Fix 42 dead links",
+        "at": None,
+    },
+    {
+        "kind": "merge request",
+        "ref": "https://git.example.com/docs/-/merge_requests/5",
+        "title": "Rename the setup pages",
+        "at": None,
+    },
+    {"kind": "task", "ref": "tasks#12", "title": "Rewrite the backup page", "at": None},
+    {"kind": "page", "ref": "homelab/docs-audit.md", "title": "Docs audit", "at": None},
+    {"kind": "snapshot", "ref": "snap-1", "title": "", "at": None},
+]
+
+
+def done(report: str, **fields: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "status": "done",
+        "state": "completed",
+        "finished_at": _iso(timedelta(minutes=12)),
+        "report": report,
+        "report_at": _iso(timedelta(minutes=12)),
+    }
+    return detail(**(base | fields))
+
+
+def report_fixture(name: str) -> str:
+    return (REPORTS / f"{name}.md").read_text()
+
+
+def _page_of(monkeypatch, body: dict[str, Any]) -> tuple[str, httpx.Response]:
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    response = _get("/assignments/7")
+    assert response.status_code == 200
+    return _main(response.text), response
+
+
+def _between(html: str, start: str, end: str) -> str:
+    part = html[html.index(start) :]
+    return part[: part.index(end)]
+
+
+def test_a_full_report_is_the_page(data, monkeypatch) -> None:
+    html, response = _page_of(monkeypatch, done(report_fixture("full"), outputs=FULL_OUTPUTS))
+    assert "<table" not in html
+    assert 'http-equiv="refresh"' not in response.text
+    order = [
+        '<header class="a-hero">',
+        '<section class="a-highlights"',
+        "<h2>Decisions for you</h2>",
+        "<h2>Outputs</h2>",
+        "<h2>What was asked</h2>",
+        "<h2>What was done</h2>",
+        "<h2>Follow-ups</h2>",
+        '<footer class="a-foot">',
+        '<span class="a-fold-title">Plan</span>',
+        '<span class="a-fold-title">Progress</span>',
+        "<summary>Definition</summary>",
+    ]
+    places = [html.index(mark) for mark in order]
+    assert places == sorted(places)
+    # The hero: the state, the title, the lede, and the numbers.
+    hero = _between(html, '<header class="a-hero">', "</header>")
+    assert '<span class="j-badge ok">done</span>' in hero
+    assert "ended <time" in hero
+    assert '<p class="a-lede">Your wiki has no dead links now' in hero
+    for tile in (
+        "<b>12k</b><span>tokens</span>",
+        "<b>1h 20m</b><span>working time</span>",
+        "<b>86</b><span>turns</span>",
+        "<b>sonnet</b><span>model</span>",
+        "<b>5</b><span>outputs</span>",
+        "<b>2</b><span>decisions</span>",
+    ):
+        assert tile in hero, tile
+    # The highlights are cards with the lead large.
+    assert html.count('<li class="a-hl">') == 4
+    assert '<strong class="a-hl-lead">42 dead links fixed</strong>' in html
+    assert '<p class="a-hl-text">across 18 pages, in one merge request.</p>' in html
+    assert "<h2>Highlights</h2>" not in html
+    # The decisions: numbered, with a count, a way to answer, and a copy button.
+    decide = _between(html, "<h2>Decisions for you</h2>", "</section>")
+    assert '<span class="a-count">2 decisions</span>' in decide
+    assert '<p class="a-q">Delete the old install page?</p>' in decide
+    assert decide.count("Tell Joshua your answer.") == 2
+    assert 'data-copy="Assignment 7, decision 2: Keep the redirects for a year?" hidden>' in decide
+    # The outputs: grouped by kind, a note from the report by ref.
+    outputs = _between(html, "<h2>Outputs</h2>", "</section>")
+    assert '<span class="a-count">5 outputs</span>' in outputs
+    assert outputs.count('<div class="a-group">') == 4
+    assert 'merge request <span class="j-count">2</span>' in outputs
+    assert '<p class="a-out-note">every link fix, one commit a page</p>' in outputs
+    assert '<p class="a-out-note">the full list of what I checked</p>' in outputs
+    assert '<code class="a-out-title">snap-1</code>' in outputs
+    # What was asked is a short quote, open.
+    assert '<blockquote class="j-prose a-quote"><p>Clean up the docs: fix' in html
+    # The follow-ups are a static checklist.
+    assert html.count('<li><span class="a-box" aria-hidden="true"></span>') == 2
+    # The cost at the foot has the full numbers.
+    foot = _between(html, '<footer class="a-foot">', "</footer>")
+    assert f"<b>{am.exact(12345)}</b><span>tokens in all</span>" in foot
+    assert "<b>40</b><span>cache write</span>" in foot
+    assert "<b>86</b><span>turns</span>" in foot
+    # The plan folds with its bar in the summary.
+    plan = _between(html, '<span class="a-fold-title">Plan</span>', "</summary>")
+    assert '<svg class="a-meter mini"' in plan and "1 of 2 steps" in plan
+    assert '<details class="a-fold" open' not in html
+    # The one script copies the decisions, and the policy allows it by hash.
+    assert html.count("<script>") == 1
+    assert f"<script>{am.COPY_SCRIPT}</script>" in html
+    digest = hashlib.sha256(am.COPY_SCRIPT.encode()).digest()
+    assert am.COPY_SCRIPT_HASH == "sha256-" + base64.b64encode(digest).decode()
+    assert f"script-src '{am.COPY_SCRIPT_HASH}'" in response.headers["content-security-policy"]
+
+
+def test_a_report_with_no_highlights_skips_the_cards(data, monkeypatch) -> None:
+    outputs = [
+        {
+            "kind": "issue",
+            "ref": "https://git.example.com/ops/-/issues/1",
+            "title": "Pin the web image",
+            "at": None,
+        }
+    ]
+    html, _ = _page_of(monkeypatch, done(report_fixture("no_highlights"), outputs=outputs))
+    assert "a-highlights" not in html
+    # "None." gives no section and no script.
+    assert "<h2>Decisions for you</h2>" not in html
+    assert "<h2>Follow-ups</h2>" not in html
+    assert "<script" not in html
+    assert "<b>0</b><span>decisions</span>" in html
+    assert "<b>22</b><span>turns</span>" in html
+    # The recorded outputs are the cards; a line that names no recorded ref is no card.
+    assert '<span class="a-count">1 output</span>' in html
+    assert "Pin the worker image" not in html
+    assert '<p class="a-out-note">the web chart</p>' in html
+    # An unknown heading goes under What was done.
+    done_part = _between(html, "<h2>What was done</h2>", "</section>")
+    assert "<p>I read each chart.</p>" in done_part
+    assert "<h2>Notes</h2>" in done_part and "read the tags twice" in done_part
+
+
+def test_a_report_with_none_of_the_headings_is_plain_markdown(data, monkeypatch) -> None:
+    outputs = [{"kind": "page", "ref": "docs/x.md", "title": "X", "at": None}]
+    html, _ = _page_of(monkeypatch, done(report_fixture("plain"), outputs=outputs))
+    assert '<header class="a-hero">' in html
+    assert "a-lede" not in html
+    report = _between(html, "<h2>Report</h2>", "</section>")
+    assert "<p>I looked at the docs. Everything is fine.</p>" in report
+    assert "<li>one page needs a picture</li>" in report
+    assert "## Highlights" in report
+    assert "a-highlights" not in html
+    assert "<h2>Outputs</h2>" in html
+    assert '<span class="a-fold-title">Plan</span>' in html
+
+
+def test_a_generated_stop_report_is_the_page(data, monkeypatch) -> None:
+    body = done(
+        report_fixture("generated"),
+        status="failed",
+        error="http_500",
+        outputs=[],
+        plan="# Plan\n\n- [x] Clone.\n- [x] List.\n- [ ] **Next:** Read.\n- [ ] File.\n",
+    )
+    html, _ = _page_of(monkeypatch, body)
+    assert '<p class="a-lede generated">Generated by the runner at failed' in html
+    assert '<strong class="a-hl-lead">Stopped at failed</strong>' in html
+    assert '<strong class="a-hl-lead">2 of 4 steps</strong>' in html
+    assert 'data-copy="Assignment 7, decision 1: Which project gets the issues?"' in html
+    # With no recorded output, the lines of the section are the cards.
+    outputs = _between(html, "<h2>Outputs</h2>", "</section>")
+    assert '<span class="a-out-title">First</span><code class="a-out-ref">ops#1</code>' in outputs
+    assert '<code class="a-out-title">notes/charts.txt</code>' in outputs
+    assert "<b>9</b><span>turns</span>" in html
+    assert '<span class="j-badge bad">failed</span>' in html
+    assert html.index("<summary>Definition</summary>") < html.index("<h2>Error</h2>")
+
+
+def test_an_unknown_kind_gets_the_other_icon() -> None:
+    assert am.kind_icon("snapshot") == "other"
+    assert am.kind_icon("") == "other"
+    assert am.kind_icon("summary") == "other"
+    assert am.kind_icon("MR") == "merge request"
+    assert am.kind_icon("GitHub pull request") == "merge request"
+    assert am.kind_icon("Wiki page") == "page"
+    assert am.kind_icon("journal entry") == "journal"
+    assert am.kind_icon("bug") == "issue"
+    assert am.kind_icon("attachment") == "file"
+    assert am.kind_icon("todo") == "task"
+    other = am.output_card(am.Card("snapshot", "s-1", ""))
+    assert am._KIND_ICONS["other"] in other
+
+
+def test_a_card_with_only_a_note() -> None:
+    card = am.output_card(am.Card("", "", "", "a *line* with no kind"))
+    assert '<div class="a-out-main"><p class="a-out-note">a <em>line</em> with no kind</p>' in card
+
+
+def test_a_long_ask_is_folded(data, monkeypatch) -> None:
+    goal = "\n".join(f"Line {n} of the goal." for n in range(8))
+    report = f"# T\n\nLede.\n\n## What was asked\n\n{goal}\n\n## What was done\n\nx\n"
+    html, _ = _page_of(monkeypatch, done(report))
+    assert '<details class="a-fold"><summary><span class="a-fold-title">What was asked' in html
+    assert '<span class="a-fold-hint">Line 0 of the goal. Line 1' in html
+    assert "<h2>What was asked</h2>" not in html
+
+
+def test_sections_with_text_and_no_items(data, monkeypatch) -> None:
+    report = (
+        "# T\n\nLede.\n\n## Highlights\n\nIt went well.\n\n"
+        "## Decisions for you\n\nPick a name for the folder.\n\n"
+        "## Follow-ups\n\nAsk the team.\n"
+    )
+    html, _ = _page_of(monkeypatch, done(report))
+    assert '<section class="a-highlights" aria-label="Highlights"><div class="j-prose">' in html
+    decide = _between(html, "<h2>Decisions for you</h2>", "</section>")
+    assert "<p>Pick a name for the folder.</p>" in decide and "a-count" not in decide
+    assert "<p>Ask the team.</p>" in _between(html, "<h2>Follow-ups</h2>", "</section>")
+    assert "<script" not in html
+    assert "<h2>What was done</h2>" not in html
+
+
+def test_a_highlight_with_no_lead_is_plain_text(data, monkeypatch) -> None:
+    report = "# T\n\n## Highlights\n\n- **Lead** text\n- no lead here\n"
+    html, _ = _page_of(monkeypatch, done(report, plan=None, checkpoints=[]))
+    assert '<li class="a-hl"><p class="a-hl-text">no lead here</p></li>' in html
+    assert '<strong class="a-hl-lead">Lead</strong>' in html
+    assert "a-lede" not in html
+    assert '<span class="a-fold-title">Plan</span>' not in html
+    assert '<span class="a-fold-title">Progress</span>' not in html
+
+
+def test_a_hostile_report_is_escaped(data, monkeypatch) -> None:
+    report = (
+        '# <script>x</script>\n\n<img src=x onerror="a()"> lede\n\n'
+        "## Highlights\n\n- **<u>1</u>** <script>alert(1)</script>\n\n"
+        "## Decisions for you\n\n"
+        '1. **Pick "a" <b>?</b>** [x](javascript:alert(2))\n\n'
+        "## Outputs\n\n- issue: [t](javascript:alert(3)) — <i>note</i>\n"
+    )
+    outputs = [{"kind": "<k>", "ref": 'https://example.com/"><x', "title": "<t>", "at": None}]
+    html, _ = _page_of(monkeypatch, done(report, outputs=outputs))
+    without_script = html.replace(f"<script>{am.COPY_SCRIPT}</script>", "")
+    assert "<script" not in without_script
+    assert "<img" not in html and "<u>" not in html and "<i>note" not in html
+    assert 'href="javascript:' not in html
+    assert 'data-copy="Assignment 7, decision 1: Pick &quot;a&quot; &lt;b&gt;?&lt;/b&gt;"' in html
+    assert 'href="https://example.com/&quot;&gt;&lt;x"' in html
+    assert "&lt;k&gt;" in html and "&lt;t&gt;" in html
+
+
+def test_a_completed_assignment_with_no_report_shows_its_plan(data, monkeypatch) -> None:
+    html, _ = _page_of(monkeypatch, detail(status="cancelled", state="completed"))
+    assert "<h2>Plan</h2>" in html
+    assert "a-lede" not in html
+
+
+# -- the line under a row ------------------------------------------------------
+
+
+def test_a_row_has_the_lede_or_the_next_step_and_the_outputs(data, monkeypatch) -> None:
+    rows = [
+        item(id=1, title="Finished", status="done", state="completed"),
+        item(id=2, title="Running", status="failed", state="completed"),
+        item(id=3, title="Missing", status="done", state="completed"),
+    ]
+    manager = _with(
+        monkeypatch,
+        FakeManager(
+            {
+                "/v1/assignments?state=completed": {"items": rows},
+                "/v1/assignments/1": done(report_fixture("full"), id=1, outputs=FULL_OUTPUTS),
+                "/v1/assignments/2": detail(
+                    id=2, plan="- [x] a\n- [ ] **Next:** `fix` it", report="No headings."
+                ),
+                "/v1/assignments/3": 503,
+            }
+        ),
+    )
+    html = _main(_get("/assignments", state="completed").text)
+    assert "<table" not in html
+    first = _between(html, 'href="/assignments/1"', "</li>")
+    assert '<span class="a-row-line">Your wiki has no dead links now' in first
+    assert "5 outputs" in first
+    second = _between(html, 'href="/assignments/2"', "</li>")
+    assert '<span class="a-row-line">Next: <code>fix</code> it</span>' in second
+    assert "output" not in second
+    third = _between(html, 'href="/assignments/3"', "</li>")
+    assert "a-row-line" not in third
+    assert {r.url.params["person"] for r in manager.requests} == {"alex"}
+
+
+def test_a_queued_row_reads_no_detail(data, monkeypatch) -> None:
+    manager = _with(
+        monkeypatch,
+        FakeManager({"/v1/assignments?state=queued": {"items": [item(state="queued")]}}),
+    )
+    _get("/assignments", state="queued")
+    assert [r.url.path for r in manager.requests] == ["/v1/assignments"]
+
+
+def test_row_ids_take_the_first_rows_only() -> None:
+    items = [am.Item.model_validate(item(id=n)) for n in range(am.ROW_LINES + 5)]
+    assert am.row_ids(items) == list(range(am.ROW_LINES))
+
+
+async def test_details_leave_out_a_late_read(monkeypatch) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/2"):
+            await asyncio.sleep(5)
+        return httpx.Response(200, json=detail(id=int(request.url.path.rsplit("/", 1)[1])))
+
+    monkeypatch.setattr(am, "ROW_BUDGET_S", 0.2)
+    client = am.AssignmentsClient("http://assignments", "t", transport=httpx.MockTransport(handler))
+    found = await client.details("alex", [1, 2])
+    assert list(found) == [1]
+    assert await client.details("alex", []) == {}
+
+
+def test_text_after_the_lede_goes_under_what_was_done(data, monkeypatch) -> None:
+    report = "# T\n\nThe lede.\n\nA second paragraph.\n\n## What was done\n\nWork.\n"
+    html, _ = _page_of(monkeypatch, done(report))
+    done_part = _between(html, "<h2>What was done</h2>", "</section>")
+    assert done_part.index("<p>Work.</p>") < done_part.index("<p>A second paragraph.</p>")
+    assert '<p class="a-lede">The lede.</p>' in html
