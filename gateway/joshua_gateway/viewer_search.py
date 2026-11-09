@@ -4,7 +4,10 @@ Core owns the index and the embedding model, so the viewer sends the query to
 core's ``POST /v1/memory/search`` with its own fleet token and shows the
 passages that come back. The search is in the shared scope and names no
 person. Core returns only wiki pages, journal entries, and profiles, which any
-reader of the wiki can already open.
+reader of the wiki can already open. For a member, a second search names the
+person and the ``documents`` source: core returns the documents of that person
+and the shared ones, by title and summary, and each one links to
+``/documents/<owner>/<slug>``.
 
 The viewer needs ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER``. With either one
 missing, :func:`from_env` returns None and the viewer searches by words only.
@@ -16,6 +19,7 @@ The functions here build data and HTML only. The route lives in ``viewer``.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from html import escape
 from urllib.parse import quote
@@ -38,6 +42,8 @@ MEANING_MAX_RESULTS = 10
 SNIPPET_CHARS = 280
 
 _WIKI_PREFIX = "wiki/"
+_DOCUMENTS_PREFIX = "documents/"
+_DOCUMENT_KIND = "document"
 
 
 class CoreSearch:
@@ -50,12 +56,36 @@ class CoreSearch:
         self._token = token
         self._transport = transport
 
-    async def search(self, query: str, limit: int = MEANING_MAX_RESULTS) -> SearchResponse | None:
-        """Return core's answer, or None when core cannot answer."""
+    async def search(
+        self, query: str, limit: int = MEANING_MAX_RESULTS, *, person: str | None = None
+    ) -> SearchResponse | None:
+        """Return core's answer, or None when core cannot answer.
+
+        With ``person``, the answer also holds the documents of that person and
+        the shared ones, in order of score. A failed search of documents leaves
+        them out."""
         try:
             body = SearchRequest(query=query, limit=limit).model_dump()
+            documents = (
+                SearchRequest(
+                    query=query, limit=limit, source="documents", person=person
+                ).model_dump()
+                if person is not None
+                else None
+            )
         except ValidationError:
             return None
+        if documents is None:
+            return await self._post(body)
+        files, docs = await asyncio.gather(self._post(body), self._post(documents))
+        if files is None:
+            return None
+        if docs is None:
+            return files
+        merged = sorted([*files.results, *docs.results], key=lambda hit: -hit.score)
+        return SearchResponse(results=merged[:limit])
+
+    async def _post(self, body: dict[str, object]) -> SearchResponse | None:
         try:
             async with FleetClient(
                 self._base_url, self._token, TIMEOUT_S, transport=self._transport
@@ -84,9 +114,17 @@ def from_env(env: Mapping[str, str]) -> CoreSearch | None:
 
 
 def viewer_url(path: str) -> str | None:
-    """The viewer URL of a data-relative path, or None for a path outside the
-    wiki, which the viewer does not link."""
-    if not path.startswith(_WIKI_PREFIX) or ".." in path.split("/"):
+    """The viewer URL of a data-relative path, or None for a path the viewer
+    does not link. A wiki page is ``/wiki/<path>``; a document
+    ``documents/<owner>/<slug>.md`` is ``/documents/<owner>/<slug>``."""
+    parts = path.split("/")
+    if ".." in parts:
+        return None
+    if path.startswith(_DOCUMENTS_PREFIX):
+        if len(parts) < 3 or not path.endswith(".md") or "" in parts:
+            return None
+        return "/documents/" + quote(path[len(_DOCUMENTS_PREFIX) : -len(".md")])
+    if not path.startswith(_WIKI_PREFIX):
         return None
     return "/wiki/" + quote(path[len(_WIKI_PREFIX) :])
 
@@ -126,6 +164,11 @@ def meaning_html(response: SearchResponse | None) -> str:
         if url is None:
             continue
         label = hit.title or hit.path
+        if hit.kind == _DOCUMENT_KIND:
+            # The heading of a document hit is its kind and status.
+            meta = f"document · {hit.heading}" if hit.heading else "document"
+            hits.append((url, label, meta, _snippet(hit.text)))
+            continue
         if hit.heading and hit.heading != hit.title:
             label = f"{label} › {hit.heading}"
         meta = hit.kind if hit.date is None else f"{hit.kind} · {hit.date}"
