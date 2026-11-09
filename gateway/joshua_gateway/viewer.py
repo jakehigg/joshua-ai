@@ -798,9 +798,9 @@ def _clock() -> tuple[tzinfo, datetime]:
 async def assignments_list(request: Request, person: Person) -> Response:
     """The assignments of the person who signed in, one state at a time.
     With no ``state``, the page shows those in progress when there is one,
-    else the completed ones, and never the queued ones. The page answers 200
-    also when the manager is not configured or does not answer, and says so;
-    then no pill is selected."""
+    else the drafts when there is one, else the completed ones. The page
+    answers 200 also when the manager is not configured or does not answer,
+    and says so; then no pill is selected."""
     client = assignments_mod.from_env(os.environ)
     tz, now = _clock()
     state = assignments_mod.parse_state(request.query_params.get("state"))
@@ -808,11 +808,13 @@ async def assignments_list(request: Request, person: Person) -> Response:
     if client is None:
         state = None
     elif state is None:
-        body = await client.list(person.id, "in_progress")
-        state = "in_progress" if body is not None else None
-        if body is not None and not body.items:
-            body = await client.list(person.id, "completed")
-            state = "completed" if body is not None else None
+        for state in ("in_progress", "draft", "completed"):
+            body = await client.list(person.id, state)
+            if body is None:
+                state = None
+                break
+            if body.items:
+                break
     else:
         body = await client.list(person.id, state)
         if body is None:
