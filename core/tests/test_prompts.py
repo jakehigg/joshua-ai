@@ -304,6 +304,21 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "give the part that matters",
         "Ask the person only when the request needs their permission",
         "`[IGNORE]`",
+        "### Which assignment the person means",
+        '"Start draft N", "start assignment N", "go on N", or "dispatch it"',
+        "call `start_assignment(id=N)`",
+        "Never compose a new spec for work that\n  has a draft.",
+        "`start_assignment(saved=...)`",
+        "`drafts_open`",
+        "name the drafts to the person",
+        "`new: true`",
+        "`running` gives its\n  id and title",
+        "`retry_after_s`",
+        "Never start a copy.",
+        "Never delete a draft unless the person asks.",
+        "`restore_assignment(id)`",
+        "use `update_assignment` on the draft",
+        "quote its `hint` to the person",
     ):
         assert words in page, words
     lowered = page.lower()
