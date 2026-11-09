@@ -273,7 +273,7 @@ async def test_the_saved_list_and_detail(app, store) -> None:
     await manager.save("mia", "docs", spec())
     runs = [await ended(manager, "alex", saved="docs") for _ in range(3)]
     await manager.draft("alex", saved="docs")
-    await ended(manager, "alex", spec())
+    await ended(manager, "alex", spec(), new=True)
     listed = (await call(app, "/v1/saved", person="alex")).json()["items"]
     assert [s["name"] for s in listed] == ["docs", "never-run"]
     assert all(set(s) == SAVED_KEYS for s in listed)

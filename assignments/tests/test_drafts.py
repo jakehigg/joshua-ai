@@ -37,7 +37,7 @@ async def test_a_draft_takes_no_slot(channels) -> None:
     manager = make_manager(delay=None)
     await manager.draft("alex", spec())
     await manager.draft("alex", spec())
-    assert (await manager.start("alex", spec()))["status"] == "running"
+    assert (await manager.start("alex", spec(), new=True))["status"] == "running"
 
 
 @pytest.mark.parametrize(
@@ -104,7 +104,7 @@ async def test_update_and_delete_refuse_a_run(channels, status) -> None:
     assert manager.store.rows[drafted["id"]]["spec"]["title"] == "Audit the gitops repo"
 
 
-async def test_delete_removes_a_draft_and_its_comments(channels) -> None:
+async def test_delete_hides_a_draft_and_restore_brings_it_back(channels) -> None:
     manager = make_manager()
     drafted = await manager.draft("alex", spec())
     row = manager.store.rows[drafted["id"]]
@@ -118,7 +118,22 @@ async def test_delete_removes_a_draft_and_its_comments(channels) -> None:
     )
     deleted = await manager.delete_draft(row)
     assert deleted["status"] == "deleted"
-    assert manager.store.rows == {} and manager.store.comment_rows == {}
+    assert f"restore_assignment({drafted['id']})" in deleted["message"]
+    # The row and its comment stay; the row is in no list and in no count.
+    assert manager.store.rows[drafted["id"]]["deleted_at"] == FIXED_NOW
+    assert len(manager.store.comment_rows) == 1
+    assert (await manager.recent("alex", 10, None))["assignments"] == []
+    assert (await manager.recent("alex", 10, None, "draft"))["assignments"] == []
+    assert await manager.store.counts() == {}
+    hidden = manager.store.rows[drafted["id"]]
+    assert (await manager.delete_draft(hidden))["reason"] == "not_a_draft"
+    restored = await manager.restore(hidden)
+    assert restored["status"] == "draft" and restored["id"] == drafted["id"]
+    assert f"start_assignment(id={drafted['id']})" in restored["message"]
+    assert manager.store.rows[drafted["id"]]["deleted_at"] is None
+    listed = (await manager.recent("alex", 10, None, "draft"))["assignments"]
+    assert [a["id"] for a in listed] == [drafted["id"]]
+    assert (await manager.restore(manager.store.rows[drafted["id"]]))["reason"] == ("not_deleted")
 
 
 async def test_start_by_id_runs_a_draft(channels) -> None:
@@ -177,13 +192,13 @@ async def test_every_form_of_start_is_refused_while_busy(channels) -> None:
     manager = make_manager(delay=None)
     await manager.save("alex", "docs", spec())
     drafted = await manager.draft("alex", spec())
-    running = await manager.start("alex", spec())
+    running = await manager.start("alex", spec(), new=True)
     for refused in (
-        await manager.start("alex", spec()),
+        await manager.start("alex", spec(), new=True),
         await manager.start("alex", saved="docs"),
         await manager.start("alex", draft=manager.store.rows[drafted["id"]]),
     ):
-        assert refused["reason"] == "busy" and refused["running"] == running["id"]
+        assert refused["reason"] == "busy" and refused["running"]["id"] == running["id"]
     assert manager.store.rows[drafted["id"]]["status"] == "draft"
     assert sorted(manager.store.rows) == [drafted["id"], running["id"]]
 
@@ -195,7 +210,11 @@ async def test_an_answer_while_busy_is_refused_and_not_stored(channels) -> None:
     await manager.store.update(parked["id"], status="waiting", open_question="Which?")
     running = await manager.start("alex", spec())
     refused = await manager.answer(manager.store.rows[parked["id"]], "ops")
-    assert refused["reason"] == "busy" and refused["running"] == running["id"]
+    assert refused["reason"] == "busy" and refused["running"]["id"] == running["id"]
+    assert refused["hint"] == (
+        f"Assignment {running['id']} is still running; give the answer to assignment "
+        f"{parked['id']} again when it ends."
+    )
     row = manager.store.rows[parked["id"]]
     assert row["status"] == "waiting" and row["answer"] is None
     assert row["open_question"] == "Which?"
@@ -208,7 +227,7 @@ async def test_an_extension_while_busy_is_refused_and_changes_nothing(channels) 
     await manager.store.update(ended["id"], status="budget_exceeded", finished_at=FIXED_NOW)
     running = await manager.start("alex", spec())
     refused = await manager.extend(manager.store.rows[ended["id"]], tokens=50)
-    assert refused["reason"] == "busy" and refused["running"] == running["id"]
+    assert refused["reason"] == "busy" and refused["running"]["id"] == running["id"]
     row = manager.store.rows[ended["id"]]
     assert row["status"] == "budget_exceeded" and row["spec"]["budget"]["tokens"] == 10
     await manager.cancel(manager.store.rows[running["id"]])
@@ -221,7 +240,7 @@ async def test_a_restart_resumes_only_the_running_rows(channels) -> None:
     store = FakeStore()
     first = make_manager(delay=None, store=store)
     drafted = await first.draft("alex", spec())
-    running = await first.start("alex", spec())
+    running = await first.start("alex", spec(), new=True)
     second = make_manager(delay=None, store=store)
     seen: list[int] = []
 
@@ -294,7 +313,8 @@ async def test_a_busy_start_over_mcp_names_the_running_id(holding_app, store) ->
         first = payload(await session.call_tool("start_assignment", {"spec": spec()}))
         refused = payload(await session.call_tool("start_assignment", {"spec": spec()}))
     assert refused["status"] == "rejected" and refused["reason"] == "busy"
-    assert refused["running"] == first["id"]
+    assert refused["running"] == {"id": first["id"], "title": "Audit the gitops repo"}
+    assert refused["hint"].startswith(f"Assignment {first['id']} is still running")
     assert list(store.rows) == [first["id"]]
 
 

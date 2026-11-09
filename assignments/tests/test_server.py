@@ -165,6 +165,7 @@ PERSON_TOOLS = [
     ("draft_assignment", {"spec": spec()}),
     ("update_assignment", {"id": 1, "spec": spec()}),
     ("delete_assignment", {"id": 1}),
+    ("restore_assignment", {"id": 1}),
     ("answer_assignment", {"id": 1, "text": "x"}),
     ("grant_repo", {"id": 1, "repo": "gitlab.example.net/infra/screen"}),
     ("provide_file", {"id": 1, "name": "manual.md", "content": "x"}),

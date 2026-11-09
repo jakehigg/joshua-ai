@@ -10,7 +10,9 @@ a person. The ``ADDON_TOKEN`` bearer names no person: it may use
 ``assignment_status`` and ``list_assignments`` for every assignment, and
 every other tool, also each comment tool, gives it "403 forbidden". A
 person must be a member, and sees only their own
-assignments: another person's assignment is "404 not found".
+assignments: another person's assignment is "404 not found". A deleted draft
+is "404 not found" too, except to ``restore_assignment``, and to
+``start_assignment``, which refuses it as ``deleted`` with a hint.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from joshua_assignments.manager import Manager, rejected
+from joshua_assignments.manager import Manager, rejected, with_hint
 from joshua_assignments.read_api import READ_PREFIX, ReadApi, read_caller
 from joshua_assignments.settings import Caller, Settings
 from joshua_assignments.store import Store
@@ -91,10 +93,16 @@ def _person(ctx: Context) -> str:
     return caller.person
 
 
-async def _own(caller: Caller, assignment_id: int) -> dict[str, Any]:
-    """The assignment, when the caller may see it. Another person's is "not found"."""
+async def _own(caller: Caller, assignment_id: int, *, deleted: bool = False) -> dict[str, Any]:
+    """The assignment, when the caller may see it. Another person's is "not found".
+
+    A deleted draft is "not found" too, unless ``deleted`` is true."""
     row = await get_manager().store.get(int(assignment_id))
-    if row is None or (caller.person is not None and row["person_id"] != caller.person):
+    if (
+        row is None
+        or (caller.person is not None and row["person_id"] != caller.person)
+        or (row.get("deleted_at") is not None and not deleted)
+    ):
         raise ToolError(f"404 not found: no assignment {assignment_id}")
     return row
 
@@ -108,15 +116,22 @@ async def start_assignment(
     spec: dict[str, Any] | None = None,
     id: int | None = None,
     saved: str | None = None,
+    new: bool = False,
 ) -> dict:
-    """Start a long job now, in the background. Returns id, status, and title at once.
+    """To start a draft, pass its id. Pass spec only for a new job that no draft
+    covers. Pass saved to run a saved assignment.
 
-    Give one of: spec, a new assignment; id, a draft to start; saved, the
-    name of a saved assignment. With saved, a spec beside it replaces only
-    the top-level fields that it gives, for this run (such as
-    {"model": "opus"}). There is no queue: while every slot is taken, the
-    start is refused with reason busy, and running is the id of your
-    running assignment. Nothing is stored then.
+    Give exactly one of id, spec, or saved. A started draft keeps its id. It
+    runs now, in the background, and the reply gives id, status, and title.
+    With saved, a spec beside it replaces only the top-level fields that it
+    gives, for this run (such as {"model": "opus"}). A spec alone is refused
+    as drafts_open while the person has drafts, and the refusal lists them;
+    pass new: true only for a job that none of them covers.
+
+    A refusal has reason, message, and hint: tell the person the hint. There
+    is no queue: while the slot is taken, the start is refused as busy, with
+    running (id and title) and retry_after_s, and nothing is stored. Do not
+    start a copy; start this one when the running one ends.
 
     spec is the whole brief; the assignment sees nothing else of the chat:
     goal (required): what to do, what done means, and where each result goes.
@@ -137,10 +152,10 @@ async def start_assignment(
     conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
     if id is not None:
         if spec is not None or saved is not None:
-            return rejected("invalid_arguments", "give one of spec, id, or saved")
-        row = await _own(Caller(person=person), id)
+            return with_hint(rejected("invalid_arguments", "give one of spec, id, or saved"))
+        row = await _own(Caller(person=person), id, deleted=True)
         return await get_manager().start(person, draft=row)
-    return await get_manager().start(person, spec, conversation, saved=saved)
+    return await get_manager().start(person, spec, conversation, saved=saved, new=new)
 
 
 @mcp.tool()
@@ -173,9 +188,20 @@ async def update_assignment(id: int, spec: dict[str, Any], ctx: Context) -> dict
 
 @mcp.tool()
 async def delete_assignment(id: int, ctx: Context) -> dict:
-    """Delete a draft and its comments. A run is never deleted (not_a_draft)."""
+    """Removes a draft from view; the person can ask for it back.
+
+    Call it only when the person asks to delete the draft. The draft and its
+    comments stay, and restore_assignment(id) brings it back. A run is never
+    deleted (not_a_draft)."""
     person = _person(ctx)
     return await get_manager().delete_draft(await _own(Caller(person=person), id))
+
+
+@mcp.tool()
+async def restore_assignment(id: int, ctx: Context) -> dict:
+    """Bring back a draft that delete_assignment removed. It is a draft again, with its comments."""
+    person = _person(ctx)
+    return await get_manager().restore(await _own(Caller(person=person), id, deleted=True))
 
 
 @mcp.tool()
@@ -312,7 +338,9 @@ async def provide_file(id: int, name: str, content: str, ctx: Context) -> dict:
 
 @mcp.tool()
 async def cancel_assignment(id: int, ctx: Context) -> dict:
-    """Stop an assignment. The runner writes its report; the plan and the report stay."""
+    """Stop an assignment. It returns when the slot is free, so a start can follow at once.
+
+    The runner writes its report; the plan and the report stay."""
     person = _person(ctx)
     return await get_manager().cancel(await _own(Caller(person=person), id))
 
