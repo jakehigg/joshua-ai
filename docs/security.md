@@ -302,6 +302,28 @@ session holds the fleet token of the container until per-assignment tokens
 exist. [assignments.md](assignments.md#what-a-session-can-see) has the
 details.
 
+### A request of a worker widens nothing past the config
+
+A worker can ask Joshua for a repository or a file with
+`request_resource`. The request is data from a worker, and Joshua decides.
+
+- `grant_repo` checks the repository against `assignments.repos`, as
+  `start_assignment` checks the repositories of a spec. A repository outside
+  that allowlist is refused, and nothing changes. The git proxy checks the
+  allowlist again at each clone, so a granted repository never goes past it.
+  The per-person gateway policy does not change, and the proxy stays
+  clone-only: a push is refused.
+- `provide_file` writes text to `inbox/` in the scratch directory, and only
+  there. The manager writes it while the assignment is parked and no session
+  runs. It follows no symbolic link: the scratch directory, `inbox/`, and the
+  file are each opened with `O_NOFOLLOW`. The name is a plain file name, and
+  the caps (2 MiB for one file, 20 MiB and 50 files for one assignment) hold.
+  Nothing executes the file, and the prompt tells the worker that it is data.
+- The viewer shows a request escaped, and it has no control that grants.
+
+[assignments.md](assignments.md#requests-for-a-repository-or-a-file) has
+the details.
+
 ## Package MCP servers
 
 A `stdio` entry with a `package` field is another author's code, installed by
