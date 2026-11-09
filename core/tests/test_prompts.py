@@ -223,10 +223,15 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "`internet` tool",
         "schedule_task",
         'answer_assignment(N, "continue")',
-        "read its plan page",
+        "call `assignment_status`",
+        "the report",
+        "### Saved assignments",
         "Always give the cost",
     ):
         assert words in page, words
     lowered = page.lower()
     for banned in ("gitlab", "github", "audit", "journal", "kubernetes", "http://", "https://"):
+        assert banned not in lowered, banned
+    # The plan and the report live in the assignments store, not in the wiki.
+    for banned in ("read_file", "write_file", "wiki", "page_path", "plan page", "developer"):
         assert banned not in lowered, banned
