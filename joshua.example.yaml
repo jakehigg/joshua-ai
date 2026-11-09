@@ -311,9 +311,13 @@ viewer:                         # a read-only web viewer for the wiki and a
   #
   # On a trusted private network, a household can skip sign-in entirely: a
   # request with no password then gets full access, read and write, the same
-  # as a member. Add `users` above to bring restrictions back. Uncomment to
-  # turn it on:
+  # as a member. Add `users` above to bring restrictions back. `true` serves
+  # such a request as a synthetic "anonymous" identity, which has no profile,
+  # no attachments, and no assignments. A person id serves it as that member,
+  # as if they signed in; the id must name a member in `people`, not a guest.
+  # Uncomment one to turn it on:
   # anonymous: true
+  # anonymous: alex
 
 usage:
   # Core's GET /v1/usage: the tokens of each day, for the chat, the nightly

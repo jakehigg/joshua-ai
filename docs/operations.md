@@ -792,7 +792,10 @@ viewer:
 ```
 
 A request with no `Authorization` header now gets full access: it reads and
-also writes, the same as a signed-in member, with no password. A member who
+also writes, the same as a signed-in member, with no password. To give the
+open viewer an owner, set `anonymous` to the id of a member, such as
+`anonymous: alex`. A request with no password is then served as that
+member, with their profile, attachments, and assignments. A member who
 still wants to sign in by password can, exactly as before. To add
 restrictions back, set `viewer.users` and list who may sign in; a household
 that wants read-only for everyone else keeps `anonymous` off and gives each

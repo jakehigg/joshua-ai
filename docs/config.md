@@ -1058,12 +1058,22 @@ keeps working.
 
 The role, member or guest, comes from `people`. It is never set in `viewer`.
 
-- `viewer.anonymous`: `false` by default. `true` opens the viewer: a request
-  with no `Authorization` header gets full access, read and write, the same
-  as a member, with no password. A request that carries credentials is still
-  checked against `viewer.users`, so a member can sign in by password too.
-  `viewer.users` is how a household adds restrictions back on top of an open
-  viewer.
+- `viewer.anonymous`: `false` by default. It takes `false`, `true`, or a
+  person id.
+  - `true` opens the viewer: a request with no `Authorization` header gets
+    full access, read and write, the same as a member, with no password. The
+    identity is `anonymous`. It is not a person, so the home page has no
+    profile and no attachments, and the assignments section is empty.
+  - A person id, such as `alex`, opens the viewer as that member. A request
+    with no `Authorization` header is served exactly as if that member
+    signed in: the profile link, the attachments, the assignments, the saved
+    assignments, and each write as that member. The id must name a member in
+    `people`. A guest or an unknown id stops the config load with an error
+    that names `viewer.anonymous`.
+
+  In both forms, a request that carries credentials is still checked against
+  `viewer.users`, so a member can sign in by password too. `viewer.users` is
+  how a household adds restrictions back on top of an open viewer.
 
 ## usage
 
