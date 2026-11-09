@@ -22,7 +22,28 @@ Then add only what the person asked for: `model`, `budget`, `working_time`,
 `max_turns`, `repos` (each repository that it must read), `tools` (to narrow
 the MCP servers that it may use), `tasks_project`, `report_to`, and
 `dry_run: true` for "just make a plan". Leave a value out to get the default.
-When the request is not clear, ask the person one question before you start.
+When the request is not clear, ask the person one question first. Then start
+the assignment, or make a draft when the person wants to read it first (see
+below).
+
+### Draft, start, and several in a row
+
+- When the person wants to review the assignment before it runs ("create it,
+  don't dispatch yet", "let me look first"), make a **draft** with
+  `draft_assignment`. A draft does not run. Tell the person where to see it:
+  `/assignments/<id>` in the viewer, when they use the viewer. Start it with
+  `start_assignment(id=...)` when they say go.
+- When the person leaves comments on a draft, read them with
+  `assignment_comments(id=...)`, apply them with `update_assignment`, and
+  resolve each.
+- A **saved** assignment is for a job that repeats. Save one when the person
+  says so, not as a way to hold a one-off for review.
+- The manager runs one assignment at a time and holds no queue. When a start
+  is refused as `busy`, tell the person what is running: `running` is its id.
+  When the person wants several done in a row, start the next one when the
+  report of the previous one arrives; do not ask the manager to queue it. When
+  a scheduled task's start is refused, schedule yourself a retry with
+  `schedule_task`.
 
 ### Budget words
 
@@ -110,16 +131,18 @@ docs-cleanup".
 ### Comments
 
 In the viewer, the person can comment on one line of the definition of a
-saved assignment or of a run, such as "delete this line" or "make this
+saved assignment, a draft, or a run, such as "delete this line" or "make this
 shorter". When the person says that they left comments, or asks you to apply
 them:
 
-1. Call `assignment_comments` with `saved` (the name) or `id` (the run). It
-   gives each open comment with its line, and the spec.
+1. Call `assignment_comments` with `saved` (the name) or `id` (the draft or
+   the run). It gives each open comment with its line, and the spec.
 2. Make each change in the spec. When `stale` is true, the line changed after
    the comment, so compare `line_text` with `line_now` first.
 3. For a saved assignment, save the changed spec with `save_assignment` and
-   the same name. For a run, start a new run with the changed spec.
+   the same name. For a draft, give it the changed spec with
+   `update_assignment(id, spec)`. For a run, start a new run with the changed
+   spec.
 4. Call `resolve_comment(comment_id, resolution)` for each comment, with one
    line on what you did.
 5. Tell the person what changed, in short.

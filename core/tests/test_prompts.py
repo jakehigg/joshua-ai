@@ -235,9 +235,23 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "resolve_comment(comment_id, resolution)",
         "`stale`",
         "only the person who signed in",
+        "### Draft, start, and several in a row",
+        "draft_assignment",
+        "start_assignment(id=...)",
+        "assignment_comments(id=...)",
+        "update_assignment",
+        "not as a way to hold a one-off for review",
+        "holds no queue",
+        "`busy`",
+        "start the next one when the\n  report of the previous one arrives",
+        "do not ask the manager to queue it",
+        "schedule yourself a retry with\n  `schedule_task`",
     ):
         assert words in page, words
     lowered = page.lower()
+    # There is no queue: nothing waits for a slot.
+    for banned in ("queued", "in the queue", "waits for a slot"):
+        assert banned not in lowered, banned
     for banned in ("gitlab", "github", "audit", "journal", "kubernetes", "http://", "https://"):
         assert banned not in lowered, banned
     # The plan and the report live in the assignments store, not in the wiki.
