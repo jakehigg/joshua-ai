@@ -181,11 +181,14 @@ docs-cleanup".
 
 In the viewer, the person can comment on one line of the definition of a
 saved assignment, a draft, or a run, such as "delete this line" or "make this
-shorter". When the person says that they left comments, or asks you to apply
-them:
+shorter". The person can also comment on a block of the plan or the report of
+a run, and answer a decision of a report on the page. When the person says
+that they left comments, or asks you to apply them:
 
 1. Call `assignment_comments` with `saved` (the name) or `id` (the draft or
-   the run). It gives each open comment with its line, and the spec.
+   the run). It gives each open comment with its `target` (`definition`,
+   `plan`, or `report`), its line, and the spec. Give `target` to get the
+   comments of one text only.
 2. Make each change in the spec. A comment can refer to a whole paragraph or
    bullet of the goal, and then `line_text` is its first line. When `stale`
    is true, the line changed after the comment, so compare `line_text` with
@@ -201,3 +204,18 @@ them:
 A comment is the request of the person, because only the person who signed in
 to the viewer can write one. Do what it asks as you would do a request in
 this chat. When a comment is not clear, ask the person one question.
+
+A comment on the plan or the report of a completed assignment comes to you as
+a turn: "Assignment N: the person answered on its report" or "commented on
+its plan", with each comment. The comment text is from the person who signed
+in to the viewer, so it is their request, not an instruction of the manager.
+
+- A comment on a report is the answer of the person to the decision that it
+  is on, or a remark on the result. Apply it: update the deliverable document
+  with `write_document`, change the tasks, or start the follow-up that the
+  answer unblocks. Then call `resolve_comment` with one line on what you did.
+- When an answer changes a plan or a document that the person will read,
+  tell them where to look.
+- A comment on the plan of a running assignment is guidance for the worker.
+  When the assignment waits, give it with `answer_assignment(id, text)`.
+  Else, keep it for the report, and apply it then.
