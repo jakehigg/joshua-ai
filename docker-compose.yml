@@ -186,6 +186,10 @@ services:
       # searches by words only.
       CORE_URL: http://core:8000
       JOSHUA_TOKEN_VIEWER: ${JOSHUA_TOKEN_VIEWER:-}
+      # /assignments reads the assignments of the person who signed in from
+      # the assignments container, with the same token. Without the
+      # container, the page says that the manager did not answer.
+      ASSIGNMENTS_URL: http://assignments:8000
     volumes:
       - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
       - data:/data
