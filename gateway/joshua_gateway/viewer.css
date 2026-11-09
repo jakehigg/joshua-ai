@@ -539,7 +539,7 @@ ol.a-timeline li:first-child::before { border-color: var(--j-accent); }
 details.a-def { border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); }
 details.a-def > summary { cursor: pointer; display: flex; align-items: center; gap: 12px; padding: 10px 12px; font-weight: 600; }
 details.a-def[open] > summary { border-bottom: 1px solid var(--j-line-soft); }
-details.a-def pre, pre.a-error {
+details.a-def > pre, pre.a-error {
   margin: 0;
   padding: 10px 12px;
   font: 12.5px/1.55 var(--j-mono);
@@ -548,7 +548,7 @@ details.a-def pre, pre.a-error {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-details.a-def pre { border-radius: 0 0 var(--j-radius-sm) var(--j-radius-sm); }
+details.a-def > pre { border-radius: 0 0 var(--j-radius-sm) var(--j-radius-sm); }
 pre.a-error { color: var(--j-bad); border: 1px solid var(--j-bad-soft); border-radius: var(--j-radius-sm); }
 
 /* the definition with line numbers: one row a line, a quiet "+" in the
@@ -600,10 +600,51 @@ ul.a-resolved-list { list-style: none; margin: 0; padding: 0 12px 8px; }
 .a-comment.resolved p { margin: 0 0 4px; overflow-wrap: anywhere; }
 .a-resolution { color: var(--j-muted); }
 
+/* the definition as a document: the fields as properties, then the goal in
+   blocks; each unit has its "+" in a gutter at the left */
+.a-doc { display: flex; flex-direction: column; gap: 12px; padding: 10px 12px 12px 4px; min-width: 0; }
+.a-props { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.a-unit { position: relative; min-width: 0; padding: 3px 6px 3px 32px; overflow-wrap: anywhere; border-radius: var(--j-radius-sm); }
+.a-unit:target, .a-unit:has(> .a-anchor:target), .a-unit.has-comments { background: var(--j-accent-soft); }
+.a-unit > details.a-add > summary { left: 8px; top: 3px; }
+.a-unit:hover > details.a-add > summary { opacity: 1; }
+.a-unit-body { min-width: 0; }
+.a-unit-body > :first-child { margin-top: 0; }
+.a-unit-body > :last-child { margin-bottom: 0; }
+.a-prop > .a-unit-body { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 2px 12px; align-items: baseline; }
+.a-prop-key { color: var(--j-muted); font-size: var(--j-text-sm); }
+.a-prop-value { min-width: 0; }
+.a-prop-text { white-space: pre-wrap; }
+.a-prop code.a-code { font: 12.5px/1.6 var(--j-mono); }
+.a-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.a-tag { padding: 0 7px; font: 12.5px/1.6 var(--j-mono); background: var(--j-surface-2); border-radius: 4px; overflow-wrap: anywhere; }
+.a-goal { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--j-line-soft); }
+.a-goal > .a-unit.li { margin-top: -4px; }
+.a-goal > .a-unit.h { margin-top: 6px; }
+details.a-source { border-top: 1px solid var(--j-line-soft); }
+details.a-source > summary { cursor: pointer; padding: 8px 12px; color: var(--j-muted); font-size: var(--j-text-sm); }
+details.a-source ol.a-lines { border-radius: 0; }
+
+/* a block of Markdown: a list item is one block, in its own list */
+.a-block.li > ul, .a-block.li > ol { margin: 0; }
+.a-block.li li > p:last-child { margin-bottom: 0; }
+.a-blocks > .a-block.li + .a-block:not(.li) { margin-top: 12px; }
+.a-block.d1 { margin-left: 22px; }
+.a-block.d2 { margin-left: 44px; }
+.a-block.d3 { margin-left: 66px; }
+.a-block.d4 { margin-left: 88px; }
+.a-block.d5 { margin-left: 110px; }
+
 @media (max-width: 560px) {
   li.a-line { padding-left: 52px; }
   .a-ln { width: 26px; }
   details.a-add > summary { left: 30px; opacity: 0.6; }
+  .a-unit { padding-left: 28px; }
+  .a-unit > details.a-add > summary { left: 4px; }
+  .a-prop > .a-unit-body { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .a-block.d1 { margin-left: 14px; }
+  .a-block.d2 { margin-left: 28px; }
+  .a-block.d3, .a-block.d4, .a-block.d5 { margin-left: 42px; }
   .a-row { flex-direction: column; gap: 6px; }
   .a-row .a-chips { max-width: none; justify-content: flex-start; }
   .a-hero { padding: 18px 14px 14px; }

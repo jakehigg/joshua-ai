@@ -11,6 +11,7 @@ import hashlib
 import json
 import textwrap
 from datetime import UTC, datetime, timedelta
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -1106,7 +1107,14 @@ def _client() -> TestClient:
     return TestClient(viewer.build_app(), follow_redirects=False)
 
 
-def test_the_definition_has_numbered_lines_and_a_form_per_line(data, monkeypatch) -> None:
+def _unit(html: str, line: int) -> str:
+    """The HTML of the unit of the definition whose first line is ``line``."""
+    start = html.index(f'id="L{line}">')
+    ends = [i for i in (html.find(m, start) for m in ('<div class="a-unit ', "a-source")) if i > 0]
+    return html[start : min(ends, default=len(html))]
+
+
+def test_the_definition_is_a_document_with_a_form_per_unit(data, monkeypatch) -> None:
     body = detail(
         definition=DEFINITION,
         comments=[
@@ -1129,21 +1137,32 @@ def test_the_definition_has_numbered_lines_and_a_form_per_line(data, monkeypatch
     # Open comments open the definition, with the count at the top.
     assert '<details class="a-def" open id="definition"><summary>Definition' in html
     assert "3 comments for Joshua" in html
-    # One row per line, each with its number, its text, and a "+".
+    # The fields are properties, each a unit at its line; the goal is prose.
+    assert '<div class="a-unit a-prop has-comments" id="L1">' in html
+    assert '<span class="a-prop-key">title</span>' in html
+    assert '<span class="a-prop-text">Clean up the docs</span>' in html
+    assert '<div class="a-unit a-prop has-comments" id="L4">' in html
+    assert '<div class="a-unit a-goal-head" id="L2">' in html
+    assert '<div class="a-unit a-block p d0" id="L3"><div class="a-unit-body">' in html
+    assert "<p>Clean up the docs.</p>" in html
+    # Four units and four lines of the source: each has a "+".
+    assert html.count('<details class="a-add">') == 8
+    assert 'action="/assignments/7/comments"' in html
+    # The source gives each line with its number, its text, and a "+".
+    source = html[html.index('<details class="a-source">') :]
     for n, line in enumerate(DEFINITION.split("\n"), start=1):
         assert f'id="L{n}"' in html
-        assert f'<input type="hidden" name="line_text" value="{line}">' in html
-        assert f'<a class="a-ln" href="#L{n}">{n}</a>' in html
-        assert f'<input type="hidden" name="line_no" value="{n}">' in html
-    assert '<code class="a-code">  Clean up the docs.</code>' in html
-    assert html.count('<details class="a-add">') == 4
-    assert 'action="/assignments/7/comments"' in html
+        assert f'<a class="a-ln" href="#S{n}">{n}</a>' in source
+        assert f'<input type="hidden" name="line_no" value="{n}">' in source
+        assert f'<input type="hidden" name="line_text" value="{line}">' in source
+    assert '<code class="a-code">  Clean up the docs.</code>' in source
+    assert '<li class="a-line has-comments" id="S4">' in source
     # The body of a comment is text: escaped, never markup.
     assert "<script>alert(1)" not in html
     assert "Use opus &lt;script&gt;alert(1)&lt;/script&gt;" in html
-    # The open comment is under its line, with a Delete form.
-    line4 = html[html.index('id="L4"') : html.index("</li>", html.index('id="C11"'))]
-    assert 'id="C11"' in line4
+    # The open comment is under its field, with a Delete form, and shows once.
+    assert 'id="C11"' in _unit(html, 4)
+    assert html.count('id="C11"') == 1
     assert 'action="/assignments/7/comments/11/delete"' in html
     # A stale comment says so and shows the line it was on.
     stale = html[html.index('id="C12"') :]
@@ -1354,7 +1373,8 @@ def test_a_draft_page_is_the_definition_open_for_comments(data, monkeypatch) -> 
     assert 'href="/assignments/saved/3">saved: docs-cleanup</a>' in html
     assert "1 comment for Joshua" in html
     assert '<details class="a-def" open id="definition">' in html
-    assert html.count('<details class="a-add">') == len(DEFINITION.split("\n"))
+    # One "+" a unit (title, goal, the paragraph of the goal, model) and a line.
+    assert html.count('<details class="a-add">') == 4 + len(DEFINITION.split("\n"))
     assert 'action="/assignments/9/comments"' in html
     assert 'action="/assignments/9/comments/11/delete"' in html
     # A draft never ran: no plan, no report, no progress, no stat row.
@@ -1390,3 +1410,207 @@ def test_a_comment_on_a_draft_goes_to_the_manager(data, monkeypatch) -> None:
     [sent] = [r for r in manager.requests if r.method == "POST"]
     assert sent.url.path == "/v1/assignments/9/comments"
     assert sent.url.params["person"] == "alex"
+
+
+# -- the definition as a document ---------------------------------------------
+
+# The definition that the manager renders for {"title": "Clean up the docs",
+# "goal": <the goal below>, "model": "sonnet", "budget": {"turns": 40},
+# "repos": ["example/docs"], "dry_run": False}.
+FULL_DEFINITION = (
+    "title: Clean up the docs\ngoal: |-\n  # Clean up\n\n  Read each page\n"
+    "  and fix the links.\n\n  - flat one\n  - parent\n    - nested one\n"
+    "    - nested two\n  - last\n\n  1. first\n  2. second\n\n  > a quote\n\n"
+    "  ```sh\n  make test\n  ```\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n"
+    "model: sonnet\nbudget:\n  turns: 40\nrepos:\n  - example/docs\ndry_run: false"
+)
+
+
+def _form_of(unit: str) -> tuple[str, str]:
+    """The ``line_no`` and the ``line_text`` that the form of a unit posts."""
+    no = unit[unit.index('name="line_no" value="') + 22 :]
+    text = unit[unit.index('name="line_text" value="') + 24 :]
+    return no[: no.index('"')], text[: text.index('"')]
+
+
+def _draft_html(monkeypatch, definition: str, comments: list[Any] | None = None) -> str:
+    body = draft_detail(definition=definition, comments=comments or [])
+    _with(monkeypatch, FakeManager({"/v1/assignments/9": body}))
+    return _main(_get("/assignments/9").text)
+
+
+def test_each_block_of_the_goal_has_its_own_plus_at_its_first_line(data, monkeypatch) -> None:
+    html = _draft_html(monkeypatch, FULL_DEFINITION)
+    doc = html[: html.index('<details class="a-source">')]
+    lines = FULL_DEFINITION.split("\n")
+    expected = {
+        2: "a-goal-head",
+        3: "a-block h d0",
+        5: "a-block p d0",
+        8: "a-block li d0",
+        9: "a-block li d0",
+        10: "a-block li d1",
+        11: "a-block li d1",
+        12: "a-block li d0",
+        14: "a-block li d0",
+        15: "a-block li d0",
+        17: "a-block quote d0",
+        19: "a-block code d0",
+        23: "a-block table d0",
+    }
+    for line, css in expected.items():
+        assert f'<div class="a-unit {css}" id="L{line}">' in doc, line
+        assert _form_of(_unit(doc, line)) == (str(line), escape(lines[line - 1]))
+    # The nested item is a block of its own: one comment, one bullet.
+    assert _form_of(_unit(doc, 10)) == ("10", "    - nested one")
+    assert "<li>nested one</li>" in _unit(doc, 10) and "nested two" not in _unit(doc, 10)
+    assert "<h1>Clean up</h1>" in doc and '<ol start="2">' in doc and "<table>" in doc
+    # Every line of the text has one anchor, so the page can open at any line.
+    for n in range(1, len(lines) + 1):
+        assert doc.count(f'id="L{n}"') == 1, n
+    # Six fields and thirteen units of the goal, then one "+" a line in the source.
+    assert html.count('<details class="a-add">') == 5 + 13 + len(lines)
+
+
+def test_the_property_rows_anchor_to_the_first_line_of_their_field(data, monkeypatch) -> None:
+    html = _draft_html(monkeypatch, FULL_DEFINITION)
+    doc = html[: html.index('<details class="a-source">')]
+    props = doc[: doc.index('<div class="a-goal')]
+    # The fields come first, in the order of the text; the goal is not one.
+    order = [props.index(f'id="L{n}"') for n in (1, 26, 27, 29, 31)]
+    assert order == sorted(order) and ">goal<" not in props
+    assert _form_of(_unit(doc, 1)) == ("1", "title: Clean up the docs")
+    assert _form_of(_unit(doc, 26)) == ("26", "model: sonnet")
+    assert _form_of(_unit(doc, 27)) == ("27", "budget:")
+    assert '<span class="a-anchor" id="L28"></span>' in _unit(doc, 27)
+    assert '<span class="a-tag">turns: 40</span>' in _unit(doc, 27)
+    assert '<span class="a-tag">example/docs</span>' in _unit(doc, 29)
+    assert '<span class="a-prop-key">dry run</span>' in _unit(doc, 31)
+    assert '<span class="a-prop-text">no</span>' in _unit(doc, 31)
+
+
+def test_a_comment_inside_a_block_shows_under_it_with_its_line(data, monkeypatch) -> None:
+    comments = [
+        comment(id=21, line_no=6, line_text="  and fix the links.", body="Which links?"),
+        comment(id=22, line_no=5, line_text="  Read each page", body="All of them?"),
+        comment(id=23, line_no=28, line_text="  turns: 40", body="More turns."),
+        comment(id=24, line_no=21, line_text="  make it", stale=True, body="Old"),
+    ]
+    html = _draft_html(monkeypatch, FULL_DEFINITION, comments)
+    paragraph = _unit(html, 5)
+    assert 'class="a-unit a-block p d0 has-comments"' in html
+    assert 'id="C21"' in paragraph and 'id="C22"' in paragraph
+    # A comment on a later line of the block quotes that line.
+    c21 = paragraph[paragraph.index('id="C21"') :]
+    assert '<span class="j-faint">Line 6:</span> <code>  and fix the links.</code>' in c21
+    c22 = paragraph[paragraph.index('id="C22"') : paragraph.index('id="C21"')]
+    assert "Line 5:" not in c22
+    assert 'id="C23"' in _unit(html, 27) and "Line 28:" in _unit(html, 27)
+    # A stale comment in a code block has the mark and the old line.
+    code = _unit(html, 19)
+    assert 'id="C24"' in code and "line changed" in code and "make it" in code
+    for cid in (21, 22, 23, 24):
+        assert html.count(f'id="C{cid}"') == 1
+
+
+def test_the_source_shows_every_line_with_its_plus(data, monkeypatch) -> None:
+    html = _draft_html(monkeypatch, FULL_DEFINITION)
+    source = html[html.index('<details class="a-source"><summary>Source</summary>') :]
+    lines = FULL_DEFINITION.split("\n")
+    assert source.count('<li class="a-line') == len(lines)
+    for n, line in enumerate(lines, start=1):
+        row = source[source.index(f'id="S{n}"') :]
+        row = row[: row.index("</li>")]
+        assert f'<code class="a-code">{escape(line)}</code>' in row
+        assert _form_of(row) == (str(n), escape(line))
+
+
+def test_a_definition_with_no_goal_is_only_properties(data, monkeypatch) -> None:
+    html = _draft_html(monkeypatch, "model: opus\ntools:\n  - a\n  - b")
+    assert '<div class="a-goal' not in html
+    assert '<div class="a-unit a-prop" id="L1">' in html
+    assert '<div class="a-unit a-prop" id="L2"><span class="a-anchor" id="L3"></span>' in html
+    assert '<span class="a-tag">a</span><span class="a-tag">b</span>' in html
+
+
+def test_an_empty_definition_says_so(data, monkeypatch) -> None:
+    html = _draft_html(monkeypatch, "")
+    assert "The definition is empty." in html
+    assert '<details class="a-source"><summary>Source</summary><ol class="a-lines"></ol>' in html
+
+
+def test_odd_values_of_a_definition(data, monkeypatch) -> None:
+    text = (
+        'goal: ""\nnotes: null\nmeta: {}\nlist: []\nbad: [x\nmax_turns: 40\n'
+        'repos:\n  - null\n  - {"a": 1}'
+    )
+    html = _draft_html(monkeypatch, text)
+    # A goal that is not a block scalar is a field.
+    assert '<span class="a-prop-key">goal</span>' in _unit(html, 1)
+    for line in (1, 2, 3, 4):
+        assert '<span class="j-faint">none</span>' in _unit(html, line), line
+    assert '<code class="a-code">bad: [x</code>' in _unit(html, 5)
+    assert '<span class="a-prop-key">max turns</span>' in _unit(html, 6)
+    assert '<span class="a-tag">none</span><span class="a-tag">{&quot;a&quot;: 1}</span>' in html
+
+
+def test_a_hostile_definition_is_escaped(data, monkeypatch) -> None:
+    text = (
+        'title: "<img src=x onerror=alert(1)>"\ngoal: |-\n  <script>alert(1)</script>\n\n'
+        '  [x](javascript:alert(1))\nrepos:\n  - "<b>repo</b>"\n"<i>key</i>": 1'
+    )
+    html = _draft_html(monkeypatch, text)
+    for bad in ("<script>alert", "<img src=x", "<b>repo", "<i>key", 'href="javascript:'):
+        assert bad not in html, bad
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "&lt;img src=x onerror=alert(1)&gt;" in html
+
+
+def test_the_plan_and_the_report_are_blocks_with_no_plus(data, monkeypatch) -> None:
+    plan = "# Plan\n\n- [x] read the pages\n  - [ ] a sub step\n- [ ] fix the links\n\nA note."
+    body = detail(plan=plan, report="Some text.\n\n- one\n- two", definition=DEFINITION)
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    html = _main(_get("/assignments/7").text)
+    section = html[html.index("<h2>Plan</h2>") : html.index("</section>", html.index("<h2>Plan"))]
+    assert '<article class="j-prose a-blocks">' in section
+    assert '<div class="a-block h d0"><h1>Plan</h1>' in section
+    assert '<div class="a-block li d0"><ul>\n<li class="a-task done">' in section
+    assert '<div class="a-block li d1"><ul>\n<li class="a-task">' in section
+    assert '<div class="a-block p d0"><p>A note.</p>' in section
+    report = html[html.index('<span class="a-fold-title">Report</span>') :]
+    report = report[: report.index("</details>")]
+    assert '<div class="a-block li d0"><ul>\n<li>one</li>' in report
+    for part in (section, report):
+        assert "a-add" not in part and "a-unit" not in part and 'id="L' not in part
+
+
+def test_a_plain_report_and_what_was_done_are_blocks(data, monkeypatch) -> None:
+    body = detail(status="done", state="completed", report="Just text.\n\n- a")
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    html = _main(_get("/assignments/7").text)
+    assert '<article class="j-prose a-blocks"><div class="a-block p d0"><p>Just text.</p>' in html
+    body = detail(status="done", state="completed", report="# T\n\n## What was done\n\nDid it.")
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    html = _main(_get("/assignments/7").text)
+    done = html[html.index("<h2>What was done</h2>") :]
+    assert '<article class="j-prose a-blocks"><div class="a-block p d0"><p>Did it.</p>' in done
+
+
+def test_the_definition_fits_a_phone() -> None:
+    """No part of the definition is wider than a phone: the property rows go to
+    one column, the text wraps, and a code block or a table scrolls in its own
+    box."""
+    css = (Path(viewer.__file__).parent / "viewer.css").read_text()
+    ui = (Path(viewer.__file__).parent / "ui" / "joshua-ui.css").read_text()
+    phone = css[css.index("@media (max-width: 560px)") :]
+    phone = phone[: phone.index("\n}\n")]
+    assert ".a-prop > .a-unit-body { grid-template-columns: minmax(0, 1fr);" in phone
+    assert ".a-unit > details.a-add > summary { left: 4px; }" in phone
+    assert "details.a-add > summary { left: 30px; opacity: 0.6; }" in phone
+    rule = css[css.index(".a-unit {") :]
+    rule = rule[: rule.index("}")]
+    assert "min-width: 0" in rule and "overflow-wrap: anywhere" in rule
+    assert "minmax(0, 1fr)" in css[css.index(".a-prop > .a-unit-body {") :][:200]
+    assert ".a-tags { display: flex; flex-wrap: wrap;" in css
+    assert "overflow-x: auto" in ui[ui.index(".j-prose pre {") :][:300]
+    assert "overflow-x: auto" in ui[ui.index(".j-prose table {") :][:200]
