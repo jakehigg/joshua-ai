@@ -32,8 +32,11 @@ ITEM_KEYS = {
     "asked_at",
     "stopped_at_limits",
     "saved",
+    "parent_id",
 }
 DETAIL_KEYS = ITEM_KEYS | {
+    "rerun_of",
+    "lineage",
     "spec",
     "plan",
     "plan_at",

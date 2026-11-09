@@ -41,6 +41,11 @@ A saved assignment is a spec with a name and no run. ``start`` with
 replaces the top-level fields that it gives. The run keeps the id of the
 saved assignment.
 
+A re-run (``start`` with ``rerun``) is a new run with the spec of a run that
+ended, and ``parent_id`` names that run. A ``note`` of the person goes at
+the start of the goal and in ``rerun_note`` of the spec. The runs that share
+a root are the lineage of an assignment.
+
 A rejected call returns ``{"status": "rejected", "reason", "message"}``. The
 reason is a fixed word. A refusal of ``start`` also has ``hint``, one
 sentence that Joshua can tell the person, and where it applies
@@ -65,6 +70,8 @@ from joshua_assignments import budget, inbox, notify, prompts, report
 from joshua_assignments import definition as definition_mod
 from joshua_assignments.comments import (
     CommentRefused,
+    NothingApplied,
+    applied_refs,
     comment_view,
     line_now,
     resolution_text,
@@ -122,6 +129,9 @@ LIMITS_RETRY_S = 600
 COMMENT_BATCH_S = 120.0
 # What a refusal of ``busy`` calls a run of another person.
 OTHER_RUN = "another person's assignment"
+# The longest note of a re-run, and how the goal of the re-run starts with it.
+MAX_RERUN_NOTE = 2000
+RERUN_NOTE_LEAD = "Note from the person for this run: "
 
 # The ``hint`` of a refusal of ``start`` that does not give its own.
 START_HINTS = {
@@ -179,7 +189,24 @@ def summary_view(row: dict[str, Any], names: Mapping[int, str] | None = None) ->
         "created_at": _iso(row.get("created_at")),
         "finished_at": _iso(row.get("finished_at")),
         "saved": saved_ref(row, names or {}),
+        "parent_id": row.get("parent_id"),
     }
+
+
+def rerun_spec(spec: Mapping[str, Any], note: str | None) -> dict[str, Any]:
+    """The spec of a re-run: ``spec`` with no ``rerun_note``, and its goal with
+    the note of the earlier re-run taken off and ``note`` put at the start."""
+    out = dict(spec)
+    old = out.pop("rerun_note", None)
+    goal = str(out.get("goal") or "")
+    if old:
+        lead = f"{RERUN_NOTE_LEAD}{old}\n\n"
+        if goal.startswith(lead):
+            goal = goal[len(lead) :]
+    if note:
+        goal = f"{RERUN_NOTE_LEAD}{note}\n\n{goal}"
+    out["goal"] = goal
+    return out
 
 
 def saved_view(row: dict[str, Any]) -> dict[str, Any]:
@@ -204,16 +231,25 @@ def full_view(
     row: dict[str, Any],
     checkpoint: dict[str, Any] | None,
     names: Mapping[int, str] | None = None,
+    parent: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The whole state of an assignment, for ``assignment_status``.
 
     ``next_step`` comes from the latest checkpoint note: the text after
     ``Next:``, else the whole note. ``plan`` is the plan of the worker, and
     ``report`` is the report, with ``outputs`` the recorded outputs.
+    ``rerun_of`` is ``{"id", "title"}`` of ``parent``, the run that this run
+    is a re-run of, or None.
     """
     spec = row.get("spec") or {}
     return {
         **summary_view(row, names),
+        "rerun_of": (
+            {"id": int(parent["id"]), "title": assignment_title(parent.get("spec"))}
+            if parent is not None
+            else None
+        ),
+        "rerun_note": spec.get("rerun_note"),
         "goal": spec.get("goal"),
         "model_id": row.get("model"),
         "budget": spec.get("budget"),
@@ -554,20 +590,113 @@ class Manager:
         saved: str | None = None,
         draft: dict[str, Any] | None = None,
         new: bool = False,
+        rerun: Any = None,
+        note: Any = None,
     ) -> dict[str, Any]:
         """Start an assignment now: the draft ``draft`` (a row of ``person``), a
-        new one from the saved assignment ``saved``, or a new one from
-        ``raw_spec``.
+        new one from the saved assignment ``saved``, a re-run of the run
+        ``rerun`` (an id), or a new one from ``raw_spec``.
 
         With ``saved``, ``raw_spec`` is optional and replaces the top-level
         fields of the stored spec that it gives. A ``raw_spec`` alone is
         refused as ``drafts_open`` while the person has a draft, unless
-        ``new`` is true. When every slot is taken, the start is refused with
-        ``busy`` and nothing is stored. Every refusal has a ``hint``.
+        ``new`` is true. ``note`` goes only with ``rerun``. When every slot is
+        taken, the start is refused with ``busy`` and nothing is stored.
+        Every refusal has a ``hint``.
         """
+        if rerun is not None or note is not None:
+            if raw_spec is not None or saved is not None or draft is not None or rerun is None:
+                return with_hint(
+                    rejected("invalid_arguments", "note goes only with rerun, and alone")
+                )
+            return with_hint(await self._start_rerun(person, rerun, note, conversation_id))
         return with_hint(
             await self._start(person, raw_spec, conversation_id, saved, draft, new=new)
         )
+
+    async def _start_rerun(
+        self, person: str, raw_id: Any, raw_note: Any, conversation_id: str | None
+    ) -> dict[str, Any]:
+        """Start a new run with the spec of the run ``raw_id`` of ``person``.
+
+        The new row has ``parent_id``, the saved assignment of that run, and
+        its spec with ``note`` at the start of the goal."""
+        if not self.section.enabled:
+            return rejected("disabled", "assignments.enabled is false in joshua.yaml")
+        if isinstance(raw_id, bool) or not isinstance(raw_id, int):
+            return rejected("invalid_arguments", "rerun is the id of an assignment")
+        note = raw_note.strip() if isinstance(raw_note, str) else None
+        if raw_note is not None and not isinstance(raw_note, str):
+            return rejected("invalid_arguments", "note is text")
+        if note is not None and len(note) > MAX_RERUN_NOTE:
+            return rejected("invalid_arguments", f"note is at most {MAX_RERUN_NOTE} characters")
+        parent = await self.store.get(raw_id)
+        if parent is None or parent["person_id"] != person or parent.get("deleted_at"):
+            return rejected(
+                "not_found",
+                f"there is no assignment {raw_id}",
+                hint=f"There is no assignment {raw_id}; list_assignments gives the ids of "
+                "the assignments of the person.",
+            )
+        if parent["status"] == DRAFT:
+            return rejected(
+                "is_a_draft",
+                f"assignment {raw_id} is a draft; only a run that ended takes a re-run",
+                hint=f"Assignment {raw_id} is a draft and has not run; start it with "
+                f"start_assignment(id={raw_id}).",
+            )
+        if state(parent["status"]) != "completed":
+            return rejected(
+                "not_ended",
+                f"assignment {raw_id} is {parent['status']}; only a run that ended takes a re-run",
+                hint=f"Assignment {raw_id} is still {parent['status']}; re-run it when it has "
+                "ended, or answer or cancel it first.",
+            )
+        checked = self._check(rerun_spec(parent.get("spec") or {}, note or None))
+        if isinstance(checked, dict):
+            return checked
+        _, resolved = checked
+        if note:
+            resolved.spec["rerun_note"] = note
+        refused = await self._refuse_unknown_limits(resolved.spec)
+        if refused is not None:
+            return refused
+        if conversation_id:
+            conversation_id = conversation_id[:MAX_CONVERSATION_ID]
+        async with self._slot_lock:
+            busy = await self._busy(person)
+            if busy is not None:
+                return busy
+            row = await self.store.create(
+                person_id=person,
+                conversation_id=conversation_id or None,
+                spec=resolved.spec,
+                model=resolved.model_id,
+                saved_id=parent.get("saved_id"),
+                parent_id=int(parent["id"]),
+            )
+            logger.info(
+                {
+                    "message": "re-run stored",
+                    "assignment_id": row["id"],
+                    "parent_id": parent["id"],
+                    "person": person,
+                    "note": bool(note),
+                }
+            )
+            current = await self._run(row, None)
+        names = await self._names([current])
+        reply = self._reply(
+            current,
+            resolved.spec,
+            resolved.notes,
+            saved_ref(current, names),
+            f"Assignment {row['id']} is {current['status']}. It is a re-run of "
+            f"assignment {parent['id']}.",
+        )
+        reply["parent_id"] = int(parent["id"])
+        reply["rerun_of"] = {"id": int(parent["id"]), "title": assignment_title(parent["spec"])}
+        return reply
 
     async def _start(
         self,
@@ -956,8 +1085,8 @@ class Manager:
         if "report" in targets:
             hows.append(
                 "A comment on the report is the answer of the person to the decision on its "
-                "line, or a remark on the result: apply it to the deliverable, the tasks, or "
-                "the follow-up that it unblocks."
+                "line, or a remark on the result: apply it to the document it concerns with "
+                "write_document, or to the tasks it names. Do not start an assignment for it."
             )
         if "plan" in targets:
             if source.get("status") == "waiting":
@@ -971,14 +1100,22 @@ class Manager:
                     "assignment waits or ends."
                 )
             else:
-                hows.append("Apply each comment on the plan to the result.")
-        hows.append("Then call resolve_comment(comment_id, resolution) for each.")
+                hows.append(
+                    "Apply each comment on the plan to the document or the tasks it concerns."
+                )
+        hows.append(
+            "Then call resolve_comment(comment_id, resolution, applied) for each, with "
+            "applied the references of what you changed."
+        )
         return " ".join(hows)
 
     async def resolve_comment(
-        self, person: str, comment_id: Any, resolution: Any
+        self, person: str, comment_id: Any, resolution: Any, applied: Any = None
     ) -> dict[str, Any]:
-        """Mark one open comment of ``person`` resolved, with one line on what was done."""
+        """Mark one open comment of ``person`` resolved, with one line on what
+        was done and ``applied``, the references of what changed.
+
+        A resolution with no reference is refused as ``nothing_applied``."""
         if isinstance(comment_id, bool) or not isinstance(comment_id, int):
             return rejected("invalid_arguments", "comment_id is a number")
         try:
@@ -990,14 +1127,32 @@ class Manager:
             return rejected("not_found", f"there is no comment {comment_id}")
         if current.get("resolved_at") is not None:
             return rejected("resolved", f"comment {comment_id} is already resolved")
-        row = await self.store.resolve_comment(person, comment_id, text)
+        try:
+            refs = applied_refs(applied)
+        except NothingApplied as exc:
+            return rejected(
+                "nothing_applied",
+                str(exc),
+                hint="Make the change first, then resolve the comment with what you changed.",
+            )
+        except CommentRefused as exc:
+            return rejected("invalid_arguments", str(exc))
+        row = await self.store.resolve_comment(person, comment_id, text, refs)
         if row is None:
             return rejected("resolved", f"comment {comment_id} is already resolved")
-        logger.info({"message": "comment resolved", "comment_id": comment_id, "person": person})
+        logger.info(
+            {
+                "message": "comment resolved",
+                "comment_id": comment_id,
+                "person": person,
+                "applied": len(refs),
+            }
+        )
         return {
             "id": comment_id,
             "status": "resolved",
             "resolution": text,
+            "applied": refs,
             "message": f"Comment {comment_id} is resolved.",
         }
 
@@ -1026,7 +1181,12 @@ class Manager:
 
     async def status(self, row: dict[str, Any]) -> dict[str, Any]:
         checkpoint = await self.store.last_checkpoint(row["id"])
-        return full_view(row, checkpoint, await self._names([row]))
+        parent = None
+        if row.get("parent_id") is not None:
+            parent = await self.store.get(int(row["parent_id"]))
+            if parent is not None and parent["person_id"] != row["person_id"]:
+                parent = None
+        return full_view(row, checkpoint, await self._names([row]), parent)
 
     async def recent(
         self, person: str | None, limit: int, status: str | None, state: str | None = None

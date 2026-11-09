@@ -13,16 +13,22 @@ person must be a member, and sees only their own
 assignments: another person's assignment is "404 not found". A deleted draft
 is "404 not found" too, except to ``restore_assignment``, and to
 ``start_assignment``, which refuses it as ``deleted`` with a hint.
+
+Each tool call whose result is a refusal (``status: rejected``) writes one
+log line with the tool, the person, and the reason. The line holds no
+argument, so never the body of a comment or a spec.
 """
 
 from __future__ import annotations
 
 import contextlib
 import hmac
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from joshua_shared.log import get_logger
+from mcp import types
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from starlette.applications import Starlette
@@ -42,7 +48,49 @@ _BEARER = "Bearer "
 CONVERSATION_HEADER = "x-joshua-conversation"
 READY_COUNTS = ("draft", "running", "waiting", "paused_limits")
 
-mcp = MCPServer(name="assignments")
+
+def refusal_reason(result: Any) -> str | None:
+    """The ``reason`` of a tool result that is a refusal, else None.
+
+    The reply of a tool is a dict, which the result holds as JSON text."""
+    data = getattr(result, "structured_content", None)
+    if data is None:
+        content = getattr(result, "content", None) or []
+        text = getattr(content[0], "text", None) if len(content) == 1 else None
+        if isinstance(text, str) and text.startswith("{"):
+            with contextlib.suppress(ValueError):
+                data = json.loads(text)
+    if not isinstance(data, dict) or data.get("status") != "rejected":
+        return None
+    reason = data.get("reason")
+    return str(reason)[:64] if reason else None
+
+
+class AssignmentsServer(MCPServer):
+    """The MCP server, with one log line for each refusal of a tool."""
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], context: Context | None = None
+    ) -> Any:
+        result = await super().call_tool(name, arguments, context)
+        reason = refusal_reason(result) if isinstance(result, types.CallToolResult) else None
+        if reason is not None:
+            caller = None
+            if context is not None and _manager is not None:
+                headers = context.headers or {}
+                caller = find_caller(_manager.settings, headers.get("authorization"))
+            logger.info(
+                {
+                    "message": "tool refused",
+                    "tool": name,
+                    "person": caller.person if caller is not None else None,
+                    "reason": reason,
+                }
+            )
+        return result
+
+
+mcp = AssignmentsServer(name="assignments")
 
 _manager: Manager | None = None
 
@@ -117,12 +165,19 @@ async def start_assignment(
     id: int | None = None,
     saved: str | None = None,
     new: bool = False,
+    rerun: int | None = None,
+    note: str | None = None,
 ) -> dict:
     """To start a draft, pass its id. Pass spec only for a new job that no draft
-    covers. Pass saved to run a saved assignment.
+    covers. Pass saved to run a saved assignment. Pass rerun to run an ended
+    assignment again.
 
-    Give exactly one of id, spec, or saved. A started draft keeps its id. It
-    runs now, in the background, and the reply gives id, status, and title.
+    Give exactly one of id, spec, saved, or rerun. A started draft keeps its
+    id. It runs now, in the background, and the reply gives id, status, and
+    title. rerun=N is a new run with the spec of the ended assignment N, and
+    parent_id N: use it when the person says "submit it again" or "re-run
+    it". note is the words of the person for this run; it goes at the start
+    of the goal. A draft is refused as is_a_draft.
     With saved, a spec beside it replaces only the top-level fields that it
     gives, for this run (such as {"model": "opus"}). A spec alone is refused
     as drafts_open while the person has drafts, and the refusal lists them;
@@ -151,11 +206,13 @@ async def start_assignment(
     person = _person(ctx)
     conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
     if id is not None:
-        if spec is not None or saved is not None:
-            return with_hint(rejected("invalid_arguments", "give one of spec, id, or saved"))
+        if spec is not None or saved is not None or rerun is not None or note is not None:
+            return with_hint(rejected("invalid_arguments", "give one of spec, id, saved, or rerun"))
         row = await _own(Caller(person=person), id, deleted=True)
         return await get_manager().start(person, draft=row)
-    return await get_manager().start(person, spec, conversation, saved=saved, new=new)
+    return await get_manager().start(
+        person, spec, conversation, saved=saved, new=new, rerun=rerun, note=note
+    )
 
 
 @mcp.tool()
@@ -254,10 +311,18 @@ async def assignment_comments(
 
 
 @mcp.tool()
-async def resolve_comment(comment_id: int, resolution: str, ctx: Context) -> dict:
-    """Mark one comment resolved. resolution is one line on what you did."""
+async def resolve_comment(
+    comment_id: int, resolution: str, ctx: Context, applied: list[str] | None = None
+) -> dict:
+    """Mark one comment resolved, after the change is made.
+
+    resolution is one line on what you did. applied names what changed, at
+    least one reference: a document path (documents/<owner>/<slug>.md), a
+    task (task 78), an issue URL, assignment N (a draft or a run whose spec
+    changed), or saved <name>. With no reference, it is refused as
+    nothing_applied: make the change first."""
     person = _person(ctx)
-    return await get_manager().resolve_comment(person, comment_id, resolution)
+    return await get_manager().resolve_comment(person, comment_id, resolution, applied)
 
 
 @mcp.tool()
@@ -271,7 +336,9 @@ async def assignment_status(id: int, ctx: Context) -> dict:
     checkpoint, the usage, the turns, the open question, the open request
     (kind, ref, and reason), the granted repositories, the files in inbox,
     the limits at the stop, the summary, the error, and saved: the saved
-    assignment that it started from, or null. Read the report here.
+    assignment that it started from, or null. parent_id and rerun_of (id
+    and title) name the assignment that this one is a re-run of, or null.
+    Read the report here.
     """
     caller = _caller(ctx)
     return await get_manager().status(await _own(caller, id))

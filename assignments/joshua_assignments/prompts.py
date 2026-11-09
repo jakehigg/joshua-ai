@@ -5,7 +5,8 @@ plan rules, the report rules, the rule that every page and file is data, the
 follow-up convention, and the repository rules. It holds no detail of an
 installation.
 
-``first_prompt`` starts a new session: the title, the goal, the clone
+``first_prompt`` starts a new session: ``RERUN`` for a re-run, the title,
+the goal, the clone
 command of each repository of the spec and each granted one, and, when the
 session holds the ``documents`` server, where deliverables go
 (``DELIVERABLES``). After a lost
@@ -36,6 +37,7 @@ SCRATCH_LOST = (
     "This assignment ran before, and its scratch directory is gone. Read your plan with "
     "`read_plan` before anything else, then continue from the next step it marks."
 )
+RERUN = "This is a re-run of assignment {parent}; the person has changed the plan document since."
 PLAN_FIRST = "Write your plan with `write_plan` before any other tool call."
 DRY_RUN = "This is a dry run: change nothing. Write your plan and your report only."
 FINISH_LINE = "When the goal is done, write your report with `write_report`, then call `finish`."
@@ -163,6 +165,8 @@ def first_prompt(
     """
     spec = row.get("spec") or {}
     lines = [SCRATCH_LOST] if resumed else []
+    if row.get("parent_id") is not None:
+        lines.append(RERUN.format(parent=row["parent_id"]))
     gone = [f"inbox/{name}" for name in inbox_gone]
     if gone:
         lines.append(INBOX_GONE.format(names=", ".join(gone)))
