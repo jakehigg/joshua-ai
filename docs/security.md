@@ -96,7 +96,11 @@ Every route has an allowlist of fleet identities. The list is in
   compares the bearer with the tokens of that list only, so a bearer of
   `/mcp` gets `401` there, and a fleet token gets `401` on `/mcp`. The
   caller names the person. A row of another person is `404`, and no answer
-  holds a token. A test proves each refusal.
+  holds a token. The only write is a comment on a definition, written as
+  that person on their own row. Only its author deletes it, while it is
+  open. A comment body is text from a person: the viewer escapes it, and
+  Joshua takes it as the request of the person who signed in. A test proves
+  each refusal.
 
 `/healthz` and `/readyz` are open. They return booleans and counts, never a
 name, a path, or a token. The core route `GET /v1/limits` is open too. It

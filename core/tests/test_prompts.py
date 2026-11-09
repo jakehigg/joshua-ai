@@ -230,6 +230,11 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         'start_assignment(saved="docs-cleanup")',
         "does not run on a clock",
         "Always give the cost",
+        "### Comments",
+        "assignment_comments",
+        "resolve_comment(comment_id, resolution)",
+        "`stale`",
+        "only the person who signed in",
     ):
         assert words in page, words
     lowered = page.lower()
