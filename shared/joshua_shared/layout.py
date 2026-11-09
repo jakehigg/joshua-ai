@@ -86,12 +86,6 @@ SHARED_PROFILE_NAME = "everyone"
 DOCUMENTS = "documents"
 DOCUMENTS_SHARED = "shared"
 DOCUMENTS_TRASH = ".trash"
-# The file name of a document is `<slug><suffix>`, one suffix per format.
-DOCUMENT_SUFFIXES = {".md": "markdown", ".html": "html"}
-# The comments of `<slug>.md` are in `<slug>.comments.jsonl`.
-DOCUMENT_COMMENTS_SUFFIX = ".comments.jsonl"
-DOCUMENT_SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{0,79}\Z"
-_DOCUMENT_SLUG_RE = re.compile(DOCUMENT_SLUG_PATTERN)
 
 _PERSON_ID_RE = PERSON_ID_RE
 _JOURNAL_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
@@ -204,24 +198,6 @@ def documents_owner_dir(owner: str, root: Path | str | None = None) -> Path:
     if owner == DOCUMENTS_SHARED:
         return documents_root(root) / DOCUMENTS_SHARED
     return documents_root(root) / safe_segment(owner)
-
-
-def document_path(
-    owner: str, slug: str, suffix: str = ".md", root: Path | str | None = None
-) -> Path:
-    """`<data>/documents/<owner>/<slug><suffix>`. Raises `ValueError` for a bad
-    owner, a bad slug (`^[a-z0-9][a-z0-9-]{0,79}$`), or a suffix that is not
-    `.md` or `.html`."""
-    if not _DOCUMENT_SLUG_RE.match(slug):
-        raise ValueError(f"invalid document slug: {slug!r}")
-    if suffix not in DOCUMENT_SUFFIXES:
-        raise ValueError(f"a document ends in {' or '.join(DOCUMENT_SUFFIXES)}")
-    return documents_owner_dir(owner, root) / f"{slug}{suffix}"
-
-
-def document_comments_path(document: Path) -> Path:
-    """The comments file of `document`: `<slug>.comments.jsonl` beside it."""
-    return document.with_name(f"{document.stem}{DOCUMENT_COMMENTS_SUFFIX}")
 
 
 def documents_trash_dir(stamp: str, root: Path | str | None = None) -> Path:

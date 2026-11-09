@@ -33,7 +33,7 @@ ALEX = {"X-Joshua-Person": "alex", "X-Joshua-Role": "member"}
 MIA = {"X-Joshua-Person": "mia", "X-Joshua-Role": "member"}
 
 INSTANT = datetime(2026, 8, 27, 18, 32, 10, tzinfo=UTC)
-STAMP = "2026-08-27T18:32:10Z"
+STAMP = "2026-08-27T18:32:10+00:00"
 
 
 @pytest.fixture(autouse=True)
@@ -162,7 +162,7 @@ async def test_a_caller_cannot_forge_the_server_fields(gateway, data_root, monke
     fm = meta["frontmatter"]
     assert fm["author"] == "alex"
     assert fm["created"] == STAMP
-    assert fm["updated"] == "2026-08-28T09:00:00Z"
+    assert fm["updated"] == "2026-08-28T09:00:00+00:00"
     assert "promoted_to" not in fm
     assert meta["body"] == "two\n"
     assert sneaky.is_error is True and "frontmatter" in sneaky.content[0].text
@@ -398,7 +398,6 @@ TRAVERSALS = [
     "documents/alex/x.comments.jsonl",
     "documents/alex/.hidden.md",
     "documents/.trash/x.md",
-    "documents/alex/Upper.md",
     "people/alex/x.md",
     "documents\\alex\\x.md",
     "",
@@ -800,6 +799,46 @@ async def test_comments_read_stale_and_resolve(gateway, data_root):
     assert empty.is_error is True
 
 
+async def test_a_comment_on_line_0_is_the_document_as_a_whole(gateway, data_root):
+    app = gateway(both_yaml())
+    async with lifespan(app):
+        await call(
+            app, "write_document", {"path": "documents/alex/p.md", "body": "x\n", "title": "Party"}
+        )
+        comments_file = docs(data_root) / "alex" / "p.comments.jsonl"
+        rows = [_comment(1, 0, "title: Party"), _comment(2, 0, "title: Old")]
+        comments_file.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        listed = as_json(await call(app, "document_comments", {"path": "documents/alex/p.md"}))
+        # A change of the frontmatter moves no comment.
+        await call(
+            app,
+            "write_document",
+            {"path": "documents/alex/p.md", "body": "x\n", "tags": ["a", "b", "c"]},
+        )
+        after = as_json(await call(app, "document_comments", {"path": "documents/alex/p.md"}))
+    assert [c["stale"] for c in listed["comments"]] == [False, True]
+    assert listed["comments"][0]["line_now"] == "title: Party"
+    assert [c["stale"] for c in after["comments"]] == [False, True]
+
+
+@needs_git
+async def test_a_resolve_creates_the_repository_and_commits(gateway, data_root):
+    folder = docs(data_root) / "alex"
+    folder.mkdir(parents=True)
+    (folder / "p.md").write_text("---\ntitle: P\n---\nline\n")
+    (folder / "p.comments.jsonl").write_text(json.dumps(_comment(1, 1, "line")) + "\n")
+    app = gateway(both_yaml())
+    async with lifespan(app):
+        res = await call(
+            app,
+            "resolve_document_comment",
+            {"path": "documents/alex/p.md", "id": 1, "resolution": "ok"},
+        )
+    assert res.is_error is False
+    assert (docs(data_root) / ".git").is_dir()
+    assert git_log(docs(data_root)).splitlines() == ["resolve_document_comment: alex/p.md|Joshua"]
+
+
 async def test_a_document_with_no_comments_has_none(gateway, data_root):
     app = gateway(both_yaml())
     async with lifespan(app):
@@ -835,25 +874,14 @@ async def test_an_unknown_tool_is_refused(gateway, data_root):
 # -- store units --------------------------------------------------------------
 
 
-def test_split_and_join_round_trip():
-    meta = {"title": "T", "kind": "plan", "extra": 1, "summary": None}
-    text = store.join(meta, "body\n")
-    assert text == "---\ntitle: T\nkind: plan\nextra: 1\n---\nbody\n"
-    assert store.split(text) == ({"title": "T", "kind": "plan", "extra": 1}, "body\n")
-    assert store.split("no frontmatter") == ({}, "no frontmatter")
-    assert store.split("---\ntitle: x\n---") == ({"title": "x"}, "")
-    assert store.split("---\nopen only\n") == ({}, "---\nopen only\n")
-    assert store.split("---\n- a\n---\nb") == ({}, "---\n- a\n---\nb")
-    assert store.split("---\n: [\n---\nb")[0] == {}
-    assert store.split("---\ncreated: 2026-08-27\n---\n")[0] == {"created": "2026-08-27"}
-
-
-def test_the_summary_falls_back_to_the_first_paragraph():
-    body = "# Title\n\n---\n\nFirst  real\nparagraph.\n\nSecond.\n"
-    assert store.summary_of({}, body) == "First real paragraph."
-    assert store.summary_of({"summary": " Given "}, body) == "Given"
-    assert store.summary_of({"format": "html"}, "<p>x</p>") == ""
-    assert store.first_paragraph("# only a heading\n") == ""
+def test_join_writes_the_known_keys_first():
+    meta = {"extra": 1, "title": "T", "kind": "plan", "summary": None}
+    assert store.join(meta, "body\n") == "---\ntitle: T\nkind: plan\nextra: 1\n---\nbody\n"
+    assert store.plain({"a": [datetime(2026, 1, 2, tzinfo=UTC)]}) == {
+        "a": ["2026-01-02T00:00:00+00:00"]
+    }
+    assert store.has_frontmatter("---\nx: 1\n---\nb") is True
+    assert store.has_frontmatter("---\nno close") is False
 
 
 def test_the_field_checks():
@@ -865,8 +893,15 @@ def test_the_field_checks():
         store.one_line("", "x", 5, required=True)
     assert store.tags_of(["a", " a ", "", "b"]) == ["a", "b"]
     with pytest.raises(store.DocumentError):
-        store.tags_of(["x"] * 0 + [str(i) for i in range(21)])
+        store.tags_of([str(i) for i in range(21)])
     with pytest.raises(store.DocumentError):
         store.tags_of(["x" * 41])
-    assert store.line_at(["a"], True) is None
-    assert store.read_comments(Path("/nonexistent/x.jsonl")) == []
+
+
+def test_a_resolution_keeps_every_other_line(tmp_path):
+    path = tmp_path / "p.comments.jsonl"
+    path.write_text('{"id": 1, "body": "a"}\nnot json\n{"id": 2, "body": "b"}\n')
+    store.set_resolution(path, 2, "done", STAMP)
+    lines = path.read_text().split("\n")
+    assert lines[0] == '{"id": 1, "body": "a"}' and lines[1] == "not json"
+    assert json.loads(lines[2])["resolution"] == "done"

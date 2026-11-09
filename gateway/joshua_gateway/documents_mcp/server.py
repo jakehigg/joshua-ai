@@ -38,6 +38,7 @@ from joshua_shared import layout
 from joshua_shared.log import get_logger
 from mcp.server.lowlevel import Server
 
+from joshua_gateway import viewer_docstore as docstore
 from joshua_gateway.documents_mcp import store
 from joshua_gateway.documents_mcp.store import DocumentError
 from joshua_gateway.files_mcp.boundary import BoundaryError, check_boundary
@@ -64,7 +65,7 @@ def _now() -> datetime:
 
 
 def _stamp(moment: datetime) -> str:
-    return moment.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return moment.astimezone(UTC).isoformat(timespec="seconds")
 
 
 _PATH = {"type": "string", "description": "documents/<owner>/<slug>.md or .html"}
@@ -99,7 +100,7 @@ TOOLS = [
         name="write_document",
         description=(
             "Create or replace one document at documents/<owner>/<slug>.md (or .html "
-            "for an HTML artifact). slug is lower case letters, digits, and hyphens. "
+            "for an HTML artifact). Use a short slug of lower case words and hyphens. "
             "body is the text without frontmatter. A new document needs a title. On a "
             "replace, the fields you give change and the others stay. kind is plan, "
             "report, spec, artifact, or note (default note); status is draft, active, "
@@ -179,8 +180,9 @@ TOOLS = [
         name="document_comments",
         description=(
             "Read the comments a person left on a document. Each comment names a line "
-            "of the body (line_no, line_text); stale is true when that line changed "
-            "after the comment. Open comments only, unless include_resolved."
+            "of the body (line_no from 1, line_text), or line_no 0 for the document as "
+            "a whole; line_now is that line now, and stale is true when it changed after "
+            "the comment. Open comments only, unless include_resolved."
         ),
         input_schema={
             "type": "object",
@@ -236,11 +238,17 @@ class Request:
 
 @dataclass(frozen=True)
 class Doc:
-    """One resolved document path."""
+    """One resolved document path, whether the file exists or not."""
 
     owner: str
+    slug: str
+    ext: str
     abs_path: Path
-    rel: str  # the path in the documents repository: <owner>/<slug>.<ext>
+
+    @property
+    def rel(self) -> str:
+        """The path in the documents repository: ``<owner>/<slug>.<ext>``."""
+        return f"{self.owner}/{self.slug}.{self.ext}"
 
     @property
     def path(self) -> str:
@@ -248,11 +256,7 @@ class Doc:
 
     @property
     def fmt(self) -> str:
-        return layout.DOCUMENT_SUFFIXES[self.abs_path.suffix]
-
-    @property
-    def comments_file(self) -> Path:
-        return layout.document_comments_path(self.abs_path)
+        return "html" if self.ext == "html" else "markdown"
 
 
 def _role_from_config(person: str) -> str | None:
@@ -306,42 +310,48 @@ def build_documents_server(
 
 
 def _resolve(req: Request, path: Any) -> Doc:
-    """Resolve a tool path to a document this request may reach.
+    """Resolve a tool path to a document path that this request may reach.
 
-    Raises ``DocumentError`` for a path that is not ``documents/<owner>/<slug>``
-    with ``.md`` or ``.html``, for a folder of another member, and for a path
-    that a symlink takes out of the documents root. A message never holds an
-    absolute path.
+    The names follow the rules of ``viewer_docstore``, the one reader of the
+    documents. Raises ``DocumentError`` for a path that is not
+    ``documents/<owner>/<slug>.md`` or ``.html``, for a folder of another
+    member, and for a path that a symlink takes out of the documents root. A
+    message never holds an absolute path.
     """
     raw = str(path or "").strip()
     if not raw or "\x00" in raw or "\\" in raw or raw.startswith("/"):
         raise DocumentError(_PATH_HINT)
     parts = PurePosixPath(raw).parts
-    if len(parts) != 3 or parts[0] != layout.DOCUMENTS or ".." in parts:
+    if len(parts) != 3 or parts[0] != layout.DOCUMENTS:
         raise DocumentError(_PATH_HINT)
     owner, name = parts[1], parts[2]
-    suffix = PurePosixPath(name).suffix
-    slug = name[: -len(suffix)] if suffix else name
-    try:
-        abs_path = layout.document_path(owner, slug, suffix, root=req.root_dir)
-    except ValueError as exc:
-        raise DocumentError(f"{_PATH_HINT}; slug is lower case letters, digits, hyphens") from exc
+    slug, dot, ext = name.rpartition(".")
+    if not dot or ext not in docstore.FORMATS or not docstore.valid_owner(owner):
+        raise DocumentError(_PATH_HINT)
+    if not docstore.valid_slug(slug):
+        raise DocumentError(f"{_PATH_HINT}; slug is letters, digits, '.', '_', and '-'")
     if owner not in req.owners():
         raise DocumentError(_NOT_YOURS)
-
+    folder = layout.documents_owner_dir(owner, req.root_dir)
+    abs_path = folder / name
     base = Path(os.path.realpath(layout.documents_root(req.root_dir)))
     real = Path(os.path.realpath(abs_path))
-    if not real.is_relative_to(base):
+    if not real.is_relative_to(base) or folder.is_symlink() or abs_path.is_symlink():
         raise DocumentError("path escapes documents")
-    return Doc(owner=owner, abs_path=abs_path, rel=f"{owner}/{name}")
+    return Doc(owner=owner, slug=slug, ext=ext, abs_path=abs_path)
 
 
-def _existing(req: Request, path: Any) -> tuple[Doc, dict[str, Any], str]:
+def _existing(req: Request, path: Any) -> tuple[Doc, docstore.Document]:
     doc = _resolve(req, path)
-    if not doc.abs_path.is_file():
+    found = docstore.find(layout.documents_root(req.root_dir), doc.owner, doc.slug, req.owners())
+    if found is None or found.ext != doc.ext:
         raise DocumentError("document not found")
-    meta, body = store.split(doc.abs_path.read_text(encoding="utf-8"))
-    return doc, meta, body
+    return doc, found
+
+
+def _meta(found: docstore.Document) -> dict[str, Any]:
+    """The frontmatter of ``found`` with each date and time as ISO text."""
+    return {str(key): store.plain(value) for key, value in found.front.items()}
 
 
 # -- git ----------------------------------------------------------------------
@@ -384,37 +394,23 @@ def _save(req: Request, doc: Doc, meta: dict[str, Any], body: str) -> int:
 # -- handlers -----------------------------------------------------------------
 
 
-def _item(doc_path: str, meta: dict[str, Any], body: str, comments_file: Path) -> dict[str, Any]:
+def _item(found: docstore.Document) -> dict[str, Any]:
     return {
-        "path": doc_path,
-        "title": meta.get("title", ""),
-        "kind": meta.get("kind", "note"),
-        "status": meta.get("status", "draft"),
-        "tags": meta.get("tags") or [],
-        "summary": store.summary_of(meta, body),
-        "author": meta.get("author"),
-        "updated": meta.get("updated"),
-        "assignment": meta.get("assignment"),
-        "open_comments": store.open_count(comments_file),
+        "path": found.tool_path,
+        "title": found.title,
+        "kind": found.kind,
+        "status": found.status,
+        "tags": found.tags,
+        "summary": found.summary,
+        "author": found.author or None,
+        "updated": found.updated,
+        "assignment": found.assignment or None,
+        "open_comments": docstore.open_count(found),
     }
 
 
-def _documents(req: Request, owners: list[str]) -> Iterable[tuple[str, Path, dict, str]]:
-    """Every document in the folders ``owners``: (path, file, meta, body)."""
-    for owner in owners:
-        folder = layout.documents_owner_dir(owner, req.root_dir)
-        if not folder.is_dir():
-            continue
-        for item in sorted(folder.iterdir()):
-            if item.name.startswith(".") or not item.is_file():
-                continue
-            if item.suffix not in layout.DOCUMENT_SUFFIXES:
-                continue
-            try:
-                meta, body = store.split(item.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError):
-                continue
-            yield f"{layout.DOCUMENTS}/{owner}/{item.name}", item, meta, body
+def _documents(req: Request, owners: list[str]) -> list[docstore.Document]:
+    return docstore.list_documents(layout.documents_root(req.root_dir), owners)
 
 
 def _list_documents(req: Request, args: dict[str, Any]) -> list[dict[str, Any]]:
@@ -431,27 +427,26 @@ def _list_documents(req: Request, args: dict[str, Any]) -> list[dict[str, Any]]:
     include_archived = bool(args.get("include_archived")) or status == "archived"
 
     items = []
-    for path, item, meta, body in _documents(req, owners):
-        if kind and meta.get("kind", "note") != kind:
+    for found in _documents(req, owners):
+        if kind and found.kind != kind:
             continue
-        if status and meta.get("status", "draft") != status:
+        if status and found.status != status:
             continue
-        if not include_archived and meta.get("status") == "archived":
+        if not include_archived and found.status == "archived":
             continue
-        if tag and tag not in (meta.get("tags") or []):
+        if tag and tag not in found.tags:
             continue
-        items.append(_item(path, meta, body, layout.document_comments_path(item)))
-    items.sort(key=lambda entry: str(entry["updated"] or ""), reverse=True)
+        items.append(_item(found))
     return items
 
 
 def _read_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
-    doc, meta, body = _existing(req, args.get("path"))
+    doc, found = _existing(req, args.get("path"))
     return {
         "path": doc.path,
-        "frontmatter": meta,
-        "body": body,
-        "open_comments": store.open_count(doc.comments_file),
+        "frontmatter": _meta(found),
+        "body": found.body,
+        "open_comments": docstore.open_count(found),
     }
 
 
@@ -467,9 +462,9 @@ def _write_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
     fmt = store.choice(args.get("format"), "format", store.FORMATS)
     if fmt is not None and fmt != doc.fmt:
         raise DocumentError(f"format {fmt} does not match the file name {doc.abs_path.name}")
-    for other in layout.DOCUMENT_SUFFIXES:
-        sibling = doc.abs_path.with_suffix(other)
-        if other != doc.abs_path.suffix and sibling.exists():
+    for other in docstore.FORMATS:
+        sibling = doc.abs_path.with_name(f"{doc.slug}.{other}")
+        if other != doc.ext and sibling.exists():
             raise DocumentError(
                 f"documents/{doc.owner}/{sibling.name} exists: one slug, one document"
             )
@@ -479,7 +474,8 @@ def _write_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
         meta: dict[str, Any] = {"kind": "note", "status": "draft", "tags": []}
         title = store.one_line(args.get("title"), "title", store.MAX_TITLE, required=True)
     else:
-        meta, _ = store.split(doc.abs_path.read_text(encoding="utf-8"))
+        _, found = _existing(req, path)
+        meta = _meta(found)
         title = store.one_line(args.get("title"), "title", store.MAX_TITLE)
 
     updates = {
@@ -502,8 +498,8 @@ def _write_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
         "path": doc.path,
         "created": created,
         "bytes": size,
-        "kind": meta["kind"],
-        "status": meta["status"],
+        "kind": meta.get("kind", "note"),
+        "status": meta.get("status", "draft"),
     }
 
 
@@ -511,10 +507,11 @@ def _set_document_status(req: Request, args: dict[str, Any]) -> dict[str, Any]:
     status = store.choice(args.get("status"), "status", store.STATUSES)
     if status is None:
         raise DocumentError(f"status is one of {', '.join(store.STATUSES)}")
-    doc, meta, body = _existing(req, args.get("path"))
+    doc, found = _existing(req, args.get("path"))
+    meta = _meta(found)
     meta["status"] = status
     meta["updated"] = _stamp(_now())
-    _save(req, doc, meta, body)
+    _save(req, doc, meta, found.body)
     _commit(req.root_dir, [doc.abs_path], f"set_document_status: {doc.rel}")
     return {"path": doc.path, "status": status}
 
@@ -525,24 +522,24 @@ def _search_documents(req: Request, args: dict[str, Any]) -> list[dict[str, Any]
         raise DocumentError("query is the words to find")
     include_archived = bool(args.get("include_archived"))
     hits = []
-    for path, _, meta, body in _documents(req, req.owners()):
-        if not include_archived and meta.get("status") == "archived":
+    for found in _documents(req, req.owners()):
+        if not include_archived and found.status == "archived":
             continue
-        title = str(meta.get("title") or "")
-        fields = [title, " ".join(meta.get("tags") or []), str(meta.get("summary") or "")]
+        summary = " ".join(str(found.front.get("summary") or "").split())
+        fields = [found.title, " ".join(found.tags), summary]
         snippet = next((text for text in fields if query in text.lower()), None)
         if snippet is None:
             snippet = next(
-                (line.strip() for line in body.splitlines() if query in line.lower()), None
+                (line.strip() for line in found.body_lines if query in line.lower()), None
             )
         if snippet is None:
             continue
         hits.append(
             {
-                "path": path,
-                "title": title,
-                "kind": meta.get("kind", "note"),
-                "status": meta.get("status", "draft"),
+                "path": found.tool_path,
+                "title": found.title,
+                "kind": found.kind,
+                "status": found.status,
                 "snippet": snippet[:200],
             }
         )
@@ -560,7 +557,7 @@ def _promote_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
     """
     from joshua_gateway.files_mcp.server import FilesError, write_wiki_page
 
-    doc, meta, body = _existing(req, args.get("path"))
+    doc, found = _existing(req, args.get("path"))
     wiki_path = str(args.get("wiki_path") or "").strip()
     if not wiki_path.startswith("wiki/"):
         raise DocumentError("wiki_path is a page under wiki/, such as wiki/recipes/soup.md")
@@ -575,10 +572,11 @@ def _promote_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
     except FilesError as exc:
         raise DocumentError(exc.message) from exc
 
+    meta = _meta(found)
     meta["status"] = "archived"
     meta["promoted_to"] = wiki_path
     meta["updated"] = _stamp(_now())
-    _save(req, doc, meta, body)
+    _save(req, doc, meta, found.body)
     _commit(req.root_dir, [doc.abs_path], f"promote_document: {doc.rel}", args.get("message"))
     return {
         "path": doc.path,
@@ -589,13 +587,14 @@ def _promote_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _trash_document(req: Request, args: dict[str, Any]) -> dict[str, Any]:
-    doc, _, _ = _existing(req, args.get("path"))
+    doc, found = _existing(req, args.get("path"))
     stamp = _now().astimezone(UTC).strftime(_TRASH_STAMP)
     folder = layout.documents_trash_dir(stamp, req.root_dir) / doc.owner
     folder.mkdir(parents=True, exist_ok=True)
+    comments_file = docstore.comments_path(found)
     moved = [doc.abs_path]
-    if doc.comments_file.exists():
-        moved.append(doc.comments_file)
+    if comments_file.exists():
+        moved.append(comments_file)
     for source in moved:
         os.replace(source, _free(folder / source.name))
     _ensure_root(req.root_dir)
@@ -617,44 +616,53 @@ def _free(target: Path) -> Path:
     return target.parent / f"{stem}-{counter}{rest}"
 
 
+def _comment_view(comment: docstore.DocComment, found: docstore.Document) -> dict[str, Any]:
+    return {
+        "id": comment.id,
+        "line_no": comment.line_no,
+        "line_text": comment.line_text,
+        "line_now": found.line(comment.line_no),
+        "body": comment.body,
+        "author": comment.author or None,
+        "created_at": comment.created_at,
+        "resolved_at": comment.resolved_at,
+        "resolution": comment.resolution,
+        "stale": comment.stale,
+    }
+
+
 def _document_comments(req: Request, args: dict[str, Any]) -> dict[str, Any]:
-    doc, _, body = _existing(req, args.get("path"))
+    doc, found = _existing(req, args.get("path"))
     include_resolved = bool(args.get("include_resolved"))
-    rows = store.read_comments(doc.comments_file)
-    views = [
-        store.comment_view(row, body) for row in rows if include_resolved or store.is_open(row)
-    ]
-    open_views = [view for view in views if not view["resolved_at"]]
+    comments = docstore.read_comments(found)
+    shown = [c for c in comments if include_resolved or c.resolved_at is None]
+    still_open = [c for c in comments if c.resolved_at is None]
     return {
         "path": doc.path,
-        "comments": views,
-        "open": sum(1 for row in rows if store.is_open(row)),
-        "stale": sum(1 for view in open_views if view["stale"]),
+        "comments": [_comment_view(c, found) for c in shown],
+        "open": len(still_open),
+        "stale": sum(1 for c in still_open if c.stale),
     }
 
 
 def _resolve_document_comment(req: Request, args: dict[str, Any]) -> dict[str, Any]:
-    doc, _, _ = _existing(req, args.get("path"))
+    doc, found = _existing(req, args.get("path"))
     resolution = store.one_line(
         args.get("resolution"), "resolution", store.MAX_RESOLUTION, required=True
     )
-    wanted = args.get("id")
-    rows = store.read_comments(doc.comments_file)
-    row = next((row for row in rows if str(row.get("id")) == str(wanted)), None)
-    if row is None:
+    wanted = str(args.get("id"))
+    comments = docstore.read_comments(found)
+    comment = next((c for c in comments if str(c.id) == wanted), None)
+    if comment is None:
         raise DocumentError(f"no comment {wanted} on this document")
-    if not store.is_open(row):
+    if comment.resolved_at is not None:
         raise DocumentError(f"comment {wanted} is resolved already")
-    row["resolved_at"] = _stamp(_now())
-    row["resolution"] = resolution
-    store.write_comments(doc.comments_file, rows)
+    comments_file = docstore.comments_path(found)
+    store.set_resolution(comments_file, comment.id, resolution, _stamp(_now()))
     _ensure_root(req.root_dir)
-    _commit(req.root_dir, [doc.comments_file], f"resolve_document_comment: {doc.rel}")
-    return {
-        "path": doc.path,
-        "id": row.get("id"),
-        "open": sum(1 for item in rows if store.is_open(item)),
-    }
+    _commit(req.root_dir, [comments_file], f"resolve_document_comment: {doc.rel}")
+    still_open = sum(1 for c in comments if c.resolved_at is None) - 1
+    return {"path": doc.path, "id": comment.id, "open": still_open}
 
 
 _HANDLERS: dict[str, Callable[[Request, dict[str, Any]], Any]] = {

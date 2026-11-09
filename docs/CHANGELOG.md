@@ -17,7 +17,10 @@ with the images and the packaged chart, are at
   `read_document`, `write_document`, `set_document_status`,
   `search_documents`, `promote_document`, `trash_document`,
   `document_comments`, and `resolve_document_comment`. Comments are in
-  `<slug>.comments.jsonl` beside the document. Members only: a member never
+  `<slug>.comments.jsonl` beside the document. A comment names a line of the
+  body, from 1, so a change of the frontmatter never moves it; line 0 is the
+  document as a whole. The viewer now numbers the lines of a document the
+  same way. Members only: a member never
   reaches the folder of another member, and a guest gets no tools.
   `write_file` now refuses a wiki page whose frontmatter has `kind` `plan`,
   `report`, `spec`, `artifact`, or `draft`, or `status: draft`. A member

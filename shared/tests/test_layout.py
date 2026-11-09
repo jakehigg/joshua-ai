@@ -730,30 +730,10 @@ def test_the_documents_root_is_beside_the_wiki(tmp_path: Path) -> None:
     assert layout.documents_owner_dir("shared", tmp_path) == tmp_path / "documents" / "shared"
 
 
-def test_a_document_path_has_a_slug_and_a_format_suffix(tmp_path: Path) -> None:
-    md = layout.document_path("alex", "meal-plan", root=tmp_path)
-    assert md == tmp_path / "documents" / "alex" / "meal-plan.md"
-    html = layout.document_path("shared", "mockup", ".html", root=tmp_path)
-    assert html == tmp_path / "documents" / "shared" / "mockup.html"
-    assert layout.document_comments_path(md) == md.with_name("meal-plan.comments.jsonl")
-    assert layout.document_comments_path(html) == html.with_name("mockup.comments.jsonl")
-
-
-@pytest.mark.parametrize("slug", ["", "../x", "a/b", "Upper", ".hidden", "x.y", "-x", "a" * 81])
-def test_a_bad_document_slug_is_refused(tmp_path: Path, slug: str) -> None:
-    with pytest.raises(ValueError):
-        layout.document_path("alex", slug, root=tmp_path)
-
-
 @pytest.mark.parametrize("owner", ["..", "a/b", "", "Alex"])
 def test_a_bad_document_owner_is_refused(tmp_path: Path, owner: str) -> None:
     with pytest.raises(ValueError):
         layout.documents_owner_dir(owner, tmp_path)
-
-
-def test_a_document_suffix_is_md_or_html(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
-        layout.document_path("alex", "x", ".txt", root=tmp_path)
 
 
 def test_the_documents_trash_takes_a_stamp(tmp_path: Path) -> None:

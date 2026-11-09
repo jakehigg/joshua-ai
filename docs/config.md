@@ -940,7 +940,8 @@ A group chat with the member role reaches `documents/shared/` only. A person
 whose id is `shared` has no own folder: `shared` is always the shared folder.
 
 A tool path is `documents/<owner>/<slug>.md`, or `.html` for an HTML artifact.
-`slug` matches `^[a-z0-9][a-z0-9-]{0,79}$`. One slug holds one document, so
+`slug` is letters, digits, `.`, `_`, and `-`, at most 128 characters, and
+starts with a letter or a digit. One slug holds one document, so
 `x.md` and `x.html` cannot both exist. A path under `wiki/` is refused: a
 document never lands in the wiki.
 
@@ -995,10 +996,15 @@ Tools:
 
 The comments of `<slug>.md` are in `<slug>.comments.jsonl` beside it, one
 JSON object per line: `id`, `line_no`, `line_text`, `body`, `author`,
-`created_at`, `resolved_at`, and `resolution`. `line_no` counts from 1 at the
-first line of the body, after the closing `---` of the frontmatter.
-`document_comments` adds `line_now`, the line at `line_no` now, and `stale`,
-which is true when `line_now` is not `line_text`. `resolution` is one line of
+`created_at`, `resolved_at`, and `resolution`. `id` is an integer, the
+largest one in the file plus 1. `line_no` counts from 1 at the first line of
+the body, after the closing `---` of the frontmatter, so a change of the
+frontmatter never moves a comment. `line_no` 0 is the document as a whole,
+and its `line_text` is the `title:` line. `document_comments` adds
+`line_now`, the line at `line_no` now (the `title:` line for 0), and `stale`,
+which is true when `line_now` is not `line_text`. The viewer writes a new
+comment and the server writes the resolution. Each write is one commit, and
+only the server makes the repository. `resolution` is one line of
 at most 300 characters.
 
 ### Per-person identities
