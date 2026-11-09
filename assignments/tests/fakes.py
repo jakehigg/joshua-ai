@@ -241,6 +241,7 @@ class FakeStore:
             "created_at": self.clock(),
             "resolved_at": None,
             "resolution": None,
+            "sent_at": None,
         }
         self._next_comment += 1
         self.comment_rows[row["id"]] = row
@@ -294,6 +295,22 @@ class FakeStore:
             ):
                 out[row["saved_id"]] = out.get(row["saved_id"], 0) + 1
         return out
+
+    async def unsent_comments(self, assignment_id: int | None = None) -> list[dict[str, Any]]:
+        return [
+            copy.deepcopy(row)
+            for _, row in sorted(self.comment_rows.items())
+            if row["assignment_id"] is not None
+            and row["target"] in ("plan", "report")
+            and row["sent_at"] is None
+            and row["resolved_at"] is None
+            and (assignment_id is None or row["assignment_id"] == assignment_id)
+        ]
+
+    async def mark_comments_sent(self, comment_ids: Collection[int]) -> None:
+        for comment_id in comment_ids:
+            if comment_id in self.comment_rows:
+                self.comment_rows[comment_id]["sent_at"] = self.clock()
 
     async def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}

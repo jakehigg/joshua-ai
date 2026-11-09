@@ -232,23 +232,25 @@ async def delete_saved_assignment(name: str, ctx: Context) -> dict:
 
 @mcp.tool()
 async def assignment_comments(
-    ctx: Context, saved: str | None = None, id: int | None = None
+    ctx: Context, saved: str | None = None, id: int | None = None, target: str | None = None
 ) -> dict:
-    """The open comments of the person on a definition, each with its line.
+    """The open comments of the person on an assignment, each with its target and its line.
 
-    Give saved (the name of a saved assignment) or id (a run), not both. A
-    comment is a request of the person on one line: line_no and line_text
-    say which line it was, line_now what the line is now, and stale is true
-    when the line changed. The answer also has the spec. Apply a comment on
-    a saved assignment with save_assignment, one on a draft with
-    update_assignment, and one on a run by starting a new run with the
-    changed spec. Then call resolve_comment for each.
+    Give saved (the name of a saved assignment) or id (a draft or a run), not
+    both. target is definition, plan, or report, or none for all; a saved
+    assignment has only a definition. A comment is a request of the person
+    on one line: line_no and line_text say which line it was, line_now what
+    the line is now, and stale is true when the line changed. The answer also
+    has the spec. Apply a comment on a definition with save_assignment (saved),
+    update_assignment (a draft), or a new run with the changed spec. A comment
+    on a report is the answer of the person to the decision on its line:
+    apply it to the result. Then call resolve_comment for each.
     """
     person = _person(ctx)
     if (saved is None) == (id is None):
         return rejected("invalid_arguments", "give saved (a name) or id, not both")
     row = await _own(Caller(person=person), id) if id is not None else None
-    return await get_manager().open_comments(person, saved=saved, row=row)
+    return await get_manager().open_comments(person, saved=saved, row=row, target=target)
 
 
 @mcp.tool()

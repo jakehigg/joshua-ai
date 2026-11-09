@@ -319,6 +319,15 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "`restore_assignment(id)`",
         "use `update_assignment` on the draft",
         "quote its `hint` to the person",
+        "the person answered on its report",
+        "A comment on a report is the answer of the person to the decision",
+        "update the deliverable document\n  with `write_document`",
+        "start the follow-up that the\n  answer unblocks",
+        "tell them where to look",
+        "A comment on the plan of a running assignment is guidance for the worker.",
+        "give it with `answer_assignment(id, text)`",
+        "keep it for the report",
+        "its `target` (`definition`,\n   `plan`, or `report`)",
     ):
         assert words in page, words
     lowered = page.lower()

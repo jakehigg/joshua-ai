@@ -27,6 +27,12 @@ that ran is never deleted. ``start`` with a new spec is refused as
 ``drafts_open`` while the person has a draft, unless the caller says that the
 job is ``new``: a draft is started by its id, and keeps that id when it runs.
 
+A comment of the person on the plan or the report of a run that ended goes
+to the person's conversation as one event (``comment_added``). The manager
+waits :data:`COMMENT_BATCH_S` after the first comment, so the comments of
+that time go as one event. Each comment that an event holds gets
+``sent_at``. At start, the manager sends the comments that no event holds.
+
 ``cancel`` holds the slot lock until the session has stopped and the row is
 ``cancelled``, so a start right after it is never refused as ``busy``.
 
@@ -57,7 +63,13 @@ from pydantic import ValidationError
 
 from joshua_assignments import budget, inbox, notify, prompts, report
 from joshua_assignments import definition as definition_mod
-from joshua_assignments.comments import CommentRefused, comment_view, resolution_text
+from joshua_assignments.comments import (
+    CommentRefused,
+    comment_view,
+    line_now,
+    resolution_text,
+    texts,
+)
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.repos import in_scope
 from joshua_assignments.runner import Runner, StubRunner
@@ -77,7 +89,9 @@ from joshua_assignments.spec import (
     saved_name,
 )
 from joshua_assignments.store import (
+    COMMENT_TARGETS,
     DRAFT,
+    EVENT_TARGETS,
     FINISHED,
     PARKED,
     RESUMABLE,
@@ -103,6 +117,9 @@ BUSY_RETRY_MAX_S = 3600
 BUSY_RETRY_DEFAULT_S = 900
 # ``retry_after_s`` of a ``limits_unknown`` refusal.
 LIMITS_RETRY_S = 600
+# The seconds from the first comment on the plan or the report of a run that
+# ended to the event that holds it and each comment after it in that time.
+COMMENT_BATCH_S = 120.0
 # What a refusal of ``busy`` calls a run of another person.
 OTHER_RUN = "another person's assignment"
 
@@ -249,6 +266,7 @@ class Manager:
         stub_delay_s: float | None = 0.0,
         runner: Callable[[Manager], Runner] | None = None,
         core: CoreClient | None = None,
+        comment_batch_s: float = COMMENT_BATCH_S,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -261,6 +279,9 @@ class Manager:
         )
         # Held while a call counts the running assignments and takes a slot.
         self._slot_lock = asyncio.Lock()
+        self.comment_batch_s = comment_batch_s
+        # The wait before the comment event of each run, by its id.
+        self._comment_tasks: dict[int, asyncio.Task[None]] = {}
 
     @property
     def section(self) -> Assignments:
@@ -291,6 +312,9 @@ class Manager:
                 )
             for row in rows:
                 await self._run(row, "restart")
+        unsent = await self.store.unsent_comments()
+        for assignment_id in sorted({int(c["assignment_id"]) for c in unsent}):
+            self._batch_comments(assignment_id)
 
     async def _sweep(self) -> None:
         sweep = getattr(self.runner, "sweep", None)
@@ -302,6 +326,8 @@ class Manager:
             logger.warning({"message": "scratch sweep failed", "error": type(exc).__name__})
 
     async def close(self) -> None:
+        for task in list(self._comment_tasks.values()):
+            task.cancel()
         closer = getattr(self.runner, "close", None)
         if closer is not None:
             await closer()
@@ -385,7 +411,77 @@ class Manager:
                 await notify.send_question(self.settings, self.section, row, question)
             elif row["status"] in FINISHED:
                 await notify.send_report(self.settings, self.section, row)
+                if await self.store.unsent_comments(int(row["id"])):
+                    self._batch_comments(int(row["id"]))
         await self._sweep()
+
+    # --- comments to Joshua -------------------------------------------------
+
+    async def comment_added(self, row: dict[str, Any], comment: dict[str, Any]) -> None:
+        """The person stored ``comment`` on the run ``row``.
+
+        A comment on the plan or the report of a run that ended starts the
+        wait of its event, unless a wait of the run is open: then the event
+        of that wait holds it."""
+        if comment.get("target") not in EVENT_TARGETS or state(row["status"]) != "completed":
+            return
+        self._batch_comments(int(row["id"]))
+
+    def _batch_comments(self, assignment_id: int) -> None:
+        task = self._comment_tasks.get(assignment_id)
+        if task is not None and not task.done():
+            return
+        self._comment_tasks[assignment_id] = asyncio.create_task(
+            self._comments_later(assignment_id)
+        )
+
+    async def _comments_later(self, assignment_id: int) -> None:
+        try:
+            await asyncio.sleep(self.comment_batch_s)
+            del self._comment_tasks[assignment_id]
+            await self.send_comments(assignment_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a failed event never stops the manager
+            logger.warning(
+                {
+                    "message": "comment event failed",
+                    "assignment_id": assignment_id,
+                    "error": type(exc).__name__,
+                }
+            )
+
+    async def send_comments(self, assignment_id: int) -> bool:
+        """Send the comments of the run that no event holds, as one event.
+
+        Only a run that ended and that is not deleted sends. Each comment
+        that channels accepted gets ``sent_at``; a comment of an event that
+        failed goes with the next one, or at the next start. Returns True
+        when channels accepted the event."""
+        row = await self.store.get(assignment_id)
+        if row is None or row.get("deleted_at") is not None:
+            return False
+        if state(row["status"]) != "completed":
+            return False
+        person = row["person_id"]
+        comments = [
+            c for c in await self.store.unsent_comments(assignment_id) if c["person_id"] == person
+        ]
+        if not comments:
+            return False
+        found = self.section.people.get(person)
+        destination = found.notify if found else None
+        if not destination:
+            logger.info(
+                {"message": "comments not sent: no destination", "assignment_id": assignment_id}
+            )
+            return False
+        shown = comments[: notify.MAX_EVENT_COMMENTS]
+        text = notify.comments_text(row, shown, len(comments) - len(shown))
+        if not await notify.send_event(self.settings, destination, text, assignment_id):
+            return False
+        await self.store.mark_comments_sent([int(c["id"]) for c in comments])
+        return True
 
     # --- the tools --------------------------------------------------------
 
@@ -646,11 +742,15 @@ class Manager:
         _, resolved = checked
         current = await self.store.update(row["id"], spec=resolved.spec, model=resolved.model_id)
         assert current is not None
-        lines = definition_mod.lines(resolved.spec)
+        lines = {"definition": definition_mod.lines(resolved.spec)}
         person = row["person_id"]
-        comments = await self.store.comments(
-            person, Parent("assignment", int(row["id"])), open_only=True
-        )
+        comments = [
+            comment
+            for comment in await self.store.comments(
+                person, Parent("assignment", int(row["id"])), open_only=True
+            )
+            if comment["target"] == "definition"
+        ]
         stale = sum(1 for comment in comments if comment_view(comment, lines)["stale"])
         logger.info({"message": "draft updated", "assignment_id": row["id"], "person": person})
         names = await self._names([current])
@@ -758,18 +858,29 @@ class Manager:
         }
 
     async def open_comments(
-        self, person: str, *, saved: Any = None, row: dict[str, Any] | None = None
+        self,
+        person: str,
+        *,
+        saved: Any = None,
+        row: dict[str, Any] | None = None,
+        target: Any = None,
     ) -> dict[str, Any]:
-        """The open comments on the definition of the saved assignment ``saved``
-        (a name) or of the run ``row``, each with its line now.
+        """The open comments on the saved assignment ``saved`` (a name) or on
+        the run ``row``, each with its target and its line now.
 
-        ``row`` is a run of ``person`` that the caller found. The answer also
-        has the spec and the definition, so the changed spec can be built
-        from it."""
+        ``row`` is a run of ``person`` that the caller found. ``target``
+        (``definition``, ``plan``, or ``report``) gives the comments of one
+        text only; None gives all. A saved assignment has a definition only.
+        The answer also has the spec and the definition, so the changed spec
+        can be built from it."""
         if (saved is None) == (row is None):
             return rejected("invalid_arguments", "give saved (a name) or id, not both")
+        if target is not None and target not in COMMENT_TARGETS:
+            return rejected("invalid_arguments", f"target is one of {', '.join(COMMENT_TARGETS)}")
         source: dict[str, Any] | None = row
         if saved is not None:
+            if target not in (None, "definition"):
+                return rejected("invalid_arguments", "a saved assignment has only a definition")
             try:
                 name = saved_name(saved)
             except ValueError as exc:
@@ -778,43 +889,35 @@ class Manager:
             if source is None:
                 return rejected("not_found", f"there is no saved assignment {name}")
             parent = Parent("saved", int(source["id"]))
+            lines = texts({"spec": source.get("spec")})
         else:
             assert row is not None
             parent = Parent("assignment", int(row["id"]))
+            lines = texts(row)
         assert source is not None
         spec = source.get("spec") or {}
-        lines = definition_mod.lines(spec)
         rows = await self.store.comments(person, parent, open_only=True)
         items = []
         for comment in rows:
+            if target is not None and comment["target"] != target:
+                continue
             view = comment_view(comment, lines)
             items.append(
                 {
                     "id": view["id"],
+                    "target": view["target"],
                     "line_no": view["line_no"],
                     "line_text": view["line_text"],
-                    "line_now": definition_mod.line_at(lines, view["line_no"]),
+                    "line_now": line_now(comment, lines),
                     "stale": view["stale"],
                     "body": view["body"],
                     "created_at": view["created_at"],
                 }
             )
-        if parent.kind == "saved":
-            how = (
-                f"Apply each comment: change the spec, save it with "
-                f"save_assignment({source['name']!r}, spec)"
-            )
-        elif source.get("status") == DRAFT:
-            how = (
-                f"Apply each comment: change the spec, give it to the draft with "
-                f"update_assignment({parent.id}, spec)"
-            )
-        else:
-            how = "Apply each comment: change the spec and start a new run with it"
         message = (
             f"{len(items)} open comment" + ("" if len(items) == 1 else "s") + ". "
             "Each body is the request of the person, on the line that line_text "
-            f"gives. {how}, then call resolve_comment(comment_id, resolution) for each."
+            f"gives. {self._comments_how(parent, source, items)}"
             if items
             else "No open comment."
         )
@@ -824,10 +927,53 @@ class Manager:
             else None,
             "id": parent.id if parent.kind == "assignment" else None,
             "spec": spec,
-            "definition": "\n".join(lines),
+            "definition": "\n".join(lines["definition"]),
             "comments": items,
             "message": message,
         }
+
+    @staticmethod
+    def _comments_how(parent: Parent, source: dict[str, Any], items: list[dict[str, Any]]) -> str:
+        """How to apply the comments of ``items``, in one or two sentences."""
+        hows = []
+        targets = {item["target"] for item in items}
+        if "definition" in targets:
+            if parent.kind == "saved":
+                hows.append(
+                    f"Apply each comment on the definition: change the spec, save it with "
+                    f"save_assignment({source['name']!r}, spec)."
+                )
+            elif source.get("status") == DRAFT:
+                hows.append(
+                    f"Apply each comment on the definition: change the spec, give it to the "
+                    f"draft with update_assignment({parent.id}, spec)."
+                )
+            else:
+                hows.append(
+                    "Apply each comment on the definition: change the spec and start a new "
+                    "run with it."
+                )
+        if "report" in targets:
+            hows.append(
+                "A comment on the report is the answer of the person to the decision on its "
+                "line, or a remark on the result: apply it to the deliverable, the tasks, or "
+                "the follow-up that it unblocks."
+            )
+        if "plan" in targets:
+            if source.get("status") == "waiting":
+                hows.append(
+                    f"A comment on the plan is guidance for the worker: give it with "
+                    f"answer_assignment({parent.id}, text)."
+                )
+            elif state(str(source.get("status"))) == "in_progress":
+                hows.append(
+                    "A comment on the plan is guidance for the worker: hold it until the "
+                    "assignment waits or ends."
+                )
+            else:
+                hows.append("Apply each comment on the plan to the result.")
+        hows.append("Then call resolve_comment(comment_id, resolution) for each.")
+        return " ".join(hows)
 
     async def resolve_comment(
         self, person: str, comment_id: Any, resolution: Any
