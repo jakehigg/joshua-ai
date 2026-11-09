@@ -487,3 +487,43 @@ async def test_the_request_the_grants_and_the_inbox_are_stored(store) -> None:
     await store.close()
     await store.open()
     assert (await store.get(row["id"]))["inbox"] is None
+
+
+async def test_the_lineage_of_a_run_and_its_reruns(store) -> None:
+    root = await create(store)
+    second = await store.create(
+        person_id="alex",
+        conversation_id=None,
+        spec={"goal": "Audit"},
+        model="m",
+        status="running",
+        parent_id=root["id"],
+    )
+    third = await store.create(
+        person_id="alex",
+        conversation_id=None,
+        spec={"goal": "Audit"},
+        model="m",
+        status="running",
+        parent_id=second["id"],
+    )
+    other = await create(store)
+    assert second["parent_id"] == root["id"] and root["parent_id"] is None
+    expected = [root["id"], second["id"], third["id"]]
+    for one in (root, second, third):
+        rows = await store.lineage(one["id"])
+        assert [row["id"] for row in rows] == expected
+        assert rows[0]["spec"] == root["spec"] and rows[1]["parent_id"] == root["id"]
+    assert [row["id"] for row in await store.lineage(other["id"])] == [other["id"]]
+    assert await store.lineage(999999) == []
+
+
+async def test_a_resolution_stores_applied(store) -> None:
+    run = await create(store)
+    parent = Parent("assignment", run["id"])
+    made = await store.add_comment(
+        "alex", parent, target="definition", line_no=1, line_text="x", body="Shorter."
+    )
+    assert made["applied"] is None
+    resolved = await store.resolve_comment("alex", made["id"], "Done.", ["task 78"])
+    assert resolved["applied"] == ["task 78"]
