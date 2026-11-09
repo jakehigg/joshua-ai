@@ -1,5 +1,5 @@
-# Values that render the assignments container, its Service, and its network
-# policy. They name no real deployment.
+# Values that render the assignments container, its Service, its network
+# policy, and the viewer that reads it. They name no real deployment.
 config: |
   name: Test House
   timezone: UTC
@@ -24,3 +24,6 @@ assignments:
     database:
       cidrs:
         - 198.51.100.0/24
+# The viewer reads the assignments, so it gets ASSIGNMENTS_URL.
+viewer:
+  enabled: true

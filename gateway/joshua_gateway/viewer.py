@@ -9,7 +9,10 @@ things, when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set: ``/search`` asks
 core to search by meaning (``viewer_search``), and ``/usage`` shows the tokens
 of each group by day (``viewer_usage``) under the subscription limits
 (``viewer_limits``). The limits need ``CORE_URL`` only, because core's
-``GET /v1/limits`` has no bearer. The viewer reads the data volume
+``GET /v1/limits`` has no bearer. ``/assignments`` shows the assignments of
+the person who signed in, read from the assignments manager when
+``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set
+(``viewer_assignments``). The viewer reads the data volume
 through the same resolver as the files MCP (``files_mcp.paths``), so the two
 never drift on who reads what.
 
@@ -64,6 +67,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+from joshua_gateway import viewer_assignments as assignments_mod
 from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
 from joshua_gateway import viewer_limits as limits_mod
@@ -328,6 +332,14 @@ _SECTIONS = (
         '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     ),
     ("usage", "Usage", "/usage", '<path d="M4 20V11M10 20V4M16 20v-8M21 20H3"/>'),
+    (
+        "assignments",
+        "Assignments",
+        "/assignments",
+        '<path d="M9 4h6v3H9z"/>'
+        '<path d="M9 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3"/>'
+        '<path d="m9 14 2 2 4-4"/>',
+    ),
 )
 _SECTION_LABEL = {key: label for key, label, _, _ in _SECTIONS} | {"links": "Links", "me": "You"}
 _SEARCH_ICON = _SECTIONS[2][3]
@@ -396,10 +408,13 @@ def _page(
     nav: bool = True,
     section: str = "",
     query: str = "",
+    head: str = "",
 ) -> HTMLResponse:
     """A full page. ``section`` is the key of the current section in the
-    navigation (``wiki``, ``journal``, ``search``, ``usage``), or "" for the
-    home page. ``nav`` False gives the bare content with no navigation."""
+    navigation (``wiki``, ``journal``, ``search``, ``usage``,
+    ``assignments``), or "" for the home page. ``nav`` False gives the bare
+    content with no navigation. ``head`` is more HTML for the ``<head>``,
+    such as a ``<meta>`` refresh."""
     main = (
         _shell(body, section=section, query=query)
         if nav
@@ -409,7 +424,7 @@ def _page(
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width, initial-scale=1">'
         '<meta name="theme-color" content="#080d17">'
-        f"<title>{escape(title)}</title>"
+        f"<title>{escape(title)}</title>{head}"
         '<link rel=icon type="image/png" href="/ui/favicon-32.png">'
         '<link rel=apple-touch-icon href="/ui/apple-touch-icon.png">'
         '<link rel=stylesheet href="/ui/joshua-ui.css">'
@@ -756,6 +771,88 @@ async def usage(request: Request, person: Person) -> Response:
 
 async def _none() -> None:
     return None
+
+
+def _clock() -> tuple[tzinfo, datetime]:
+    tz = limits_mod.zone(config.load().timezone)
+    return tz, _now(tz)
+
+
+async def assignments_list(request: Request, person: Person) -> Response:
+    """The assignments of the person who signed in, one state at a time.
+    With no ``state``, the page shows those in progress when there is one,
+    else the completed ones. The page answers 200 also when the manager is
+    not configured or does not answer, and says so."""
+    client = assignments_mod.from_env(os.environ)
+    tz, now = _clock()
+    state = assignments_mod.parse_state(request.query_params.get("state"))
+    body = None
+    if client is not None:
+        if state is None:
+            body = await client.list(person.id, "in_progress")
+            state = "in_progress"
+            if body is not None and not body.items:
+                body = await client.list(person.id, "completed")
+                state = "completed"
+        else:
+            body = await client.list(person.id, state)
+    html = assignments_mod.list_html(
+        body, state=state or "in_progress", configured=client is not None, tz=tz, now=now
+    )
+    return _page("assignments", html, section="assignments")
+
+
+async def assignment_page(request: Request, person: Person) -> Response:
+    """One assignment of the person who signed in, as a document. A row of
+    another person is 404, as the manager answers."""
+    client = assignments_mod.from_env(os.environ)
+    title = f"assignment {request.path_params['id']}"
+    if client is None:
+        html = assignments_mod.unavailable_html(title, configured=False)
+        return _page(title, html, section="assignments")
+    item = await client.detail(person.id, request.path_params["id"])
+    if item is assignments_mod.NOT_FOUND:
+        return _not_found()
+    if not isinstance(item, assignments_mod.Detail):
+        html = assignments_mod.unavailable_html(title, configured=True)
+        return _page(title, html, section="assignments")
+    tz, now = _clock()
+    return _page(
+        item.title,
+        assignments_mod.detail_html(item, tz=tz, now=now),
+        section="assignments",
+        head=assignments_mod.refresh_meta(item),
+    )
+
+
+async def saved_list(request: Request, person: Person) -> Response:
+    """The saved assignments of the person who signed in."""
+    client = assignments_mod.from_env(os.environ)
+    body = await client.saved(person.id) if client is not None else None
+    tz, now = _clock()
+    html = assignments_mod.saved_list_html(body, configured=client is not None, tz=tz, now=now)
+    return _page("saved assignments", html, section="assignments")
+
+
+async def saved_page(request: Request, person: Person) -> Response:
+    """One saved assignment of the person who signed in, with its runs."""
+    client = assignments_mod.from_env(os.environ)
+    title = "saved assignment"
+    if client is None:
+        html = assignments_mod.unavailable_html(title, configured=False)
+        return _page(title, html, section="assignments")
+    saved = await client.saved_detail(person.id, request.path_params["id"])
+    if saved is assignments_mod.NOT_FOUND:
+        return _not_found()
+    if not isinstance(saved, assignments_mod.SavedDetail):
+        html = assignments_mod.unavailable_html(title, configured=True)
+        return _page(title, html, section="assignments")
+    tz, now = _clock()
+    return _page(
+        saved.name,
+        assignments_mod.saved_detail_html(saved, tz=tz, now=now),
+        section="assignments",
+    )
 
 
 def _now(tz: tzinfo) -> datetime:
@@ -1167,6 +1264,7 @@ async def readyz(request: Request) -> JSONResponse:
             "anonymous": cfg.viewer.anonymous,
             "data": data_root().is_dir(),
             "core_search": search_mod.from_env(os.environ) is not None,
+            "assignments": assignments_mod.from_env(os.environ) is not None,
         }
     )
 
@@ -1213,6 +1311,10 @@ def build_app() -> Starlette:
             Route("/attachments/{path:path}", _require_auth(attachments)),
             Route("/search", _require_auth(search)),
             Route("/usage", _require_auth(usage)),
+            Route("/assignments", _require_auth(assignments_list)),
+            Route("/assignments/saved", _require_auth(saved_list)),
+            Route("/assignments/saved/{id:int}", _require_auth(saved_page)),
+            Route("/assignments/{id:int}", _require_auth(assignment_page)),
             Route("/delete", _require_auth(delete), methods=["POST"]),
         ],
     )

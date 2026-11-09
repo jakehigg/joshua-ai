@@ -229,10 +229,14 @@ with a second entrypoint. It is off by default. A person signs in with HTTP
 basic and reads the wiki, their own profile, their own journal, their own
 attachments, and the shared profile. A member can move a wiki page to the
 trash. The viewer holds one fleet token, `JOSHUA_TOKEN_VIEWER`, and no
-upstream credential. It reads the volume, and calls core only to search by
-meaning and to read the usage by day. Put the same `JOSHUA_TOKEN_VIEWER` value
-in the viewer Secret and in the core Secret. Without it, the viewer searches by
-words only and the usage page says that it is not configured.
+upstream credential. It reads the volume, calls core to search by meaning
+and to read the usage by day, and calls the assignments container to read the
+assignments of the person who signed in. Put the same `JOSHUA_TOKEN_VIEWER`
+value in the viewer Secret and in the core Secret. Without it, the viewer
+searches by words only and the usage page says that it is not configured.
+When `assignments.enabled` is true, the chart sets `ASSIGNMENTS_URL` on the
+viewer to `http://joshua-assignments:8000`. The assignments container must
+then also hold the viewer's `JOSHUA_TOKEN_VIEWER`.
 
 Two switches turn it on, and both are needed:
 
