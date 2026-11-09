@@ -7,7 +7,7 @@ from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from typing import Any
 
-from joshua_assignments.store import USAGE_FIELDS, check_fields, output_record
+from joshua_assignments.store import USAGE_FIELDS, Parent, check_fields, output_record
 
 FIXED_NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
 
@@ -20,6 +20,8 @@ class FakeStore:
         self.slices: list[dict[str, Any]] = []
         self.saved: dict[int, dict[str, Any]] = {}
         self._next_saved = 1
+        self.comment_rows: dict[int, dict[str, Any]] = {}
+        self._next_comment = 1
         self.opened = False
         self.closed = False
         self.healthy = True
@@ -200,11 +202,89 @@ class FakeStore:
                 for row in self.rows.values():
                     if row["saved_id"] == saved_id:
                         row["saved_id"] = None
+                for cid in [c for c, r in self.comment_rows.items() if r["saved_id"] == saved_id]:
+                    del self.comment_rows[cid]
                 return True
         return False
 
     async def saved_names(self, saved_ids: Collection[int]) -> dict[int, str]:
         return {i: self.saved[i]["name"] for i in saved_ids if i in self.saved}
+
+    async def add_comment(
+        self,
+        person_id: str,
+        parent: Parent,
+        *,
+        target: str,
+        line_no: int,
+        line_text: str,
+        body: str,
+    ) -> dict[str, Any]:
+        row = {
+            "id": self._next_comment,
+            "person_id": person_id,
+            "saved_id": parent.id if parent.kind == "saved" else None,
+            "assignment_id": parent.id if parent.kind == "assignment" else None,
+            "target": target,
+            "line_no": line_no,
+            "line_text": line_text,
+            "body": body,
+            "created_at": self.clock(),
+            "resolved_at": None,
+            "resolution": None,
+        }
+        self._next_comment += 1
+        self.comment_rows[row["id"]] = row
+        return copy.deepcopy(row)
+
+    async def comments(
+        self, person_id: str, parent: Parent, *, open_only: bool = False
+    ) -> list[dict[str, Any]]:
+        return [
+            copy.deepcopy(row)
+            for _, row in sorted(self.comment_rows.items())
+            if row["person_id"] == person_id
+            and row[parent.column] == parent.id
+            and not (open_only and row["resolved_at"] is not None)
+        ]
+
+    async def get_comment(self, person_id: str, comment_id: int) -> dict[str, Any] | None:
+        row = self.comment_rows.get(comment_id)
+        return copy.deepcopy(row) if row and row["person_id"] == person_id else None
+
+    async def delete_comment(self, person_id: str, parent: Parent, comment_id: int) -> bool:
+        row = self.comment_rows.get(comment_id)
+        if (
+            row is None
+            or row["person_id"] != person_id
+            or row[parent.column] != parent.id
+            or row["resolved_at"] is not None
+        ):
+            return False
+        del self.comment_rows[comment_id]
+        return True
+
+    async def resolve_comment(
+        self, person_id: str, comment_id: int, resolution: str
+    ) -> dict[str, Any] | None:
+        row = self.comment_rows.get(comment_id)
+        if row is None or row["person_id"] != person_id or row["resolved_at"] is not None:
+            return None
+        row.update(resolved_at=self.clock(), resolution=resolution)
+        return copy.deepcopy(row)
+
+    async def open_comment_counts(
+        self, person_id: str, saved_ids: Collection[int]
+    ) -> dict[int, int]:
+        out: dict[int, int] = {}
+        for row in self.comment_rows.values():
+            if (
+                row["person_id"] == person_id
+                and row["saved_id"] in saved_ids
+                and row["resolved_at"] is None
+            ):
+                out[row["saved_id"]] = out.get(row["saved_id"], 0) + 1
+        return out
 
     async def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
