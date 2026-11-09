@@ -1,6 +1,7 @@
 """Offline tests for `viewer.anonymous`: a request with no credentials gets
-full access as a synthetic "anonymous" identity, so a private network needs
-no sign-in. Same fixture shape as `test_viewer.py`."""
+full access as a synthetic "anonymous" identity, or as the member that the key
+names, so a private network needs no sign-in. Same fixture shape as
+`test_viewer.py`."""
 
 from __future__ import annotations
 
@@ -9,8 +10,10 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import httpx
 import pytest
 from joshua_gateway import viewer
+from joshua_gateway import viewer_assignments as am
 from joshua_shared import config, wikigit
 from starlette.testclient import TestClient
 
@@ -31,6 +34,24 @@ CONFIG_ANON = textwrap.dedent("""\
       users:
         alex: ${VIEWER_PW_ALEX:-}
     """)
+
+CONFIG_MEMBER = textwrap.dedent("""\
+    name: Test
+    timezone: America/New_York
+    people:
+      - id: alex
+        name: Alex
+      - id: sam
+        name: Sam
+    viewer:
+      enabled: true
+      anonymous: alex
+      users:
+        sam: ${VIEWER_PW_SAM:-}
+    """)
+
+SAM_PW = "sam-secret"
+SAM = ("sam", SAM_PW)
 
 CONFIG_NO_ANON = textwrap.dedent("""\
     name: Test
@@ -67,6 +88,7 @@ def _client(monkeypatch, tmp_path, config_text: str) -> TestClient:
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX_PW)
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM_PW)
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)
@@ -76,6 +98,12 @@ def _client(monkeypatch, tmp_path, config_text: str) -> TestClient:
 @pytest.fixture
 def anon_client(monkeypatch, tmp_path) -> TestClient:
     return _client(monkeypatch, tmp_path, CONFIG_ANON)
+
+
+@pytest.fixture
+def member_client(monkeypatch, tmp_path) -> TestClient:
+    _write(tmp_path / "data/people/alex/attachments/2026/09/receipt.txt", "paid\n")
+    return _client(monkeypatch, tmp_path, CONFIG_MEMBER)
 
 
 @pytest.fixture
@@ -211,3 +239,74 @@ def test_no_credentials_still_gets_401_when_anonymous_is_unset(no_anon_client):
     response = no_anon_client.get("/wiki/pizza.md")
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"].startswith("Basic")
+
+
+# -- with anonymous naming a member, no credentials is that member -----------
+
+
+def test_readyz_says_open_and_names_no_person(member_client):
+    body = member_client.get("/readyz").json()
+    assert body["anonymous"] is True
+    assert "alex" not in str(body)
+
+
+def test_no_credentials_home_page_is_the_members_page(member_client):
+    home = member_client.get("/me")
+    assert home.status_code == 200
+    assert "<h1" in home.text and "Alex</h1>" in home.text
+    assert 'href="/wiki/people/alex.md"' in home.text
+    assert "/attachments/2026/09/receipt.txt" in home.text
+
+
+def test_no_credentials_reads_the_members_attachments(member_client):
+    response = member_client.get("/attachments/2026/09/receipt.txt")
+    assert response.status_code == 200
+    assert "paid" in response.text
+
+
+def test_no_credentials_writes_as_the_member(member_client, tmp_path):
+    """The CSRF token is bound to the member, so the write is the member's."""
+    wrong = viewer._csrf_token("anonymous", "wiki/pizza.md")
+    response = member_client.post(
+        "/save",
+        data={"path": "pizza.md", "csrf": wrong, "body": "# Pizza\n\nNo.\n"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+    token = viewer._csrf_token("alex", "wiki/pizza.md")
+    response = member_client.post(
+        "/save",
+        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nAlex.\n"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert (tmp_path / "data/wiki/pizza.md").read_text() == "# Pizza\n\nAlex.\n"
+
+
+def test_no_credentials_reads_the_members_assignments(member_client, monkeypatch):
+    people: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        people.append(request.url.params.get("person"))
+        if request.url.path.endswith("/saved"):
+            return httpx.Response(200, json={"items": []})
+        return httpx.Response(200, json={"items": [], "counts": {}})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        am,
+        "from_env",
+        lambda env: am.AssignmentsClient("http://assignments", "token", transport=transport),
+    )
+    assert member_client.get("/assignments").status_code == 200
+    assert member_client.get("/assignments/saved").status_code == 200
+    assert people and set(people) == {"alex"}
+
+
+def test_credentials_on_a_member_viewer_are_still_checked(member_client):
+    assert member_client.get("/wiki/pizza.md", auth=("sam", "wrong")).status_code == 401
+    # alex is not in viewer.users, so alex cannot sign in by password.
+    assert member_client.get("/wiki/pizza.md", auth=ALEX).status_code == 401
+    home = member_client.get("/me", auth=SAM)
+    assert home.status_code == 200
+    assert 'href="/wiki/people/sam.md"' in home.text

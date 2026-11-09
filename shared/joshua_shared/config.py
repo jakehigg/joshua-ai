@@ -1148,6 +1148,11 @@ class Assignments(_Model):
         return parse_duration(self.keep_failed_work)
 
 
+# The words pydantic reads as a boolean.
+_TRUE_WORDS = frozenset({"1", "on", "t", "true", "y", "yes"})
+_FALSE_WORDS = frozenset({"0", "off", "f", "false", "n", "no"})
+
+
 class Viewer(_Model):
     # The read-only web viewer. ``users`` maps a person id to a password
     # reference: a ``$2`` bcrypt hash, or a literal password, normally injected
@@ -1158,10 +1163,27 @@ class Viewer(_Model):
     users: dict[str, str] = {}
     # ``true`` opens the viewer: a request with no ``Authorization`` header
     # gets full access, read and write, as a synthetic "anonymous" identity,
-    # so a private network needs no sign-in. ``false`` (the default) keeps
-    # sign-in required, as today. A request that carries credentials is still
-    # checked against ``users``, so a member can sign in by password too.
-    anonymous: bool = False
+    # so a private network needs no sign-in. A person id opens the viewer as
+    # that member, as if they signed in. The id must name a member in
+    # ``people`` (checked in ``JoshuaConfig._check_viewer``). ``false`` (the
+    # default) keeps sign-in required. A request that carries credentials is
+    # still checked against ``users``, so a member can sign in by password too.
+    anonymous: bool | str = False
+
+    @field_validator("anonymous", mode="before")
+    @classmethod
+    def _check_anonymous(cls, value: Any) -> Any:
+        # YAML gives every value as text, so a boolean word is a boolean and any
+        # other text is a person id. ``${VAR:-}`` expands to an empty string when
+        # the variable is not set, so an empty value means "not set".
+        if not isinstance(value, str):
+            return value
+        word = value.strip().lower()
+        if word in _TRUE_WORDS:
+            return True
+        if word in _FALSE_WORDS or word == "":
+            return False
+        return value
 
 
 def _check_base_url(value: str | None) -> str | None:
@@ -1461,6 +1483,15 @@ class JoshuaConfig(_Model):
         for pid in self.viewer.users:
             if pid not in person_ids:
                 raise ValueError(f"viewer.users: unknown person id '{pid}'")
+        anonymous = self.viewer.anonymous
+        if isinstance(anonymous, str):
+            person = self.person(anonymous)
+            if person is None:
+                raise ValueError(f"viewer.anonymous: unknown person id '{anonymous}'")
+            if person.role != "member":
+                raise ValueError(
+                    f"viewer.anonymous: '{anonymous}' is a {person.role}; it must name a member"
+                )
         return self
 
     @model_validator(mode="after")

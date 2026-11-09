@@ -79,9 +79,27 @@ def test_viewer_anonymous_false_passes() -> None:
     assert cfg.viewer.anonymous is False
 
 
-def test_viewer_anonymous_a_string_fails() -> None:
+def test_viewer_anonymous_a_member_id_passes() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: alex\n"
+    cfg = config.parse(text, ENV, source="test.yaml")
+    assert cfg.viewer.anonymous == "alex"
+
+
+def test_viewer_anonymous_an_empty_value_is_false() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: ${VIEWER_ANON:-}\n"
+    cfg = config.parse(text, ENV, source="test.yaml")
+    assert cfg.viewer.anonymous is False
+
+
+def test_viewer_anonymous_an_unknown_id_fails() -> None:
     text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: member\n"
-    with pytest.raises(config.ConfigError, match="anonymous"):
+    with pytest.raises(config.ConfigError, match="viewer.anonymous: unknown person id 'member'"):
+        config.parse(text, ENV, source="test.yaml")
+
+
+def test_viewer_anonymous_a_guest_fails() -> None:
+    text = GOOD + "\nviewer:\n  enabled: true\n  anonymous: mia\n"
+    with pytest.raises(config.ConfigError, match="viewer.anonymous: 'mia' is a guest"):
         config.parse(text, ENV, source="test.yaml")
 
 

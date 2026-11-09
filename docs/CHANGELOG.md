@@ -6,6 +6,12 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **An open viewer can belong to a member.** `viewer.anonymous` now also
+  takes a person id. A request with no password is then served as that
+  member, as if they signed in: their profile, attachments, assignments, and
+  saved assignments. The id must name a member in `people`; a guest or an
+  unknown id stops the config load. `true` keeps the synthetic `anonymous`
+  identity. See [config.md](config.md#viewer).
 - **The assignments container has a read API for the viewer.**
   `GET /v1/assignments`, `GET /v1/assignments/{id}`, `GET /v1/saved`, and
   `GET /v1/saved/{id}` give a person's assignments and saved assignments as
