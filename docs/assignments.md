@@ -73,7 +73,7 @@ are examples.
    text box. Write your answer and click `Send to Joshua`. Joshua gets the
    answers of two minutes as one message. It applies each answer to the
    document or the tasks that it concerns, then resolves it with a line that
-   names what changed. The decision card shows that line.
+   names what changed (from #131). The decision card shows that line.
 8. **Comment on the result.** Click the `+` of a block of the report or of
    the plan, and write a remark. It goes to Joshua as an answer does. To
    change a deliverable document, open it from its card, comment on it, and
