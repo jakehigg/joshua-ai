@@ -12,7 +12,9 @@ of each group by day (``viewer_usage``) under the subscription limits
 ``GET /v1/limits`` has no bearer. ``/assignments`` shows the assignments of
 the person who signed in, read from the assignments manager when
 ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set
-(``viewer_assignments``). The viewer reads the data volume
+(``viewer_assignments``). ``/documents`` shows the documents of the member
+who signed in and the shared ones, read from ``/data/documents``
+(``viewer_documents``); a guest has no such section. The viewer reads the data volume
 through the same resolver as the files MCP (``files_mcp.paths``), so the two
 never drift on who reads what.
 
@@ -21,7 +23,9 @@ agent never gets: a delete, which moves a wiki page to the trash under
 ``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
 text and people. A guest reads. A person can also comment on a line of the
 definition of their own assignment: the viewer sends the comment to the
-assignments manager as that person, and writes nothing itself.
+assignments manager as that person, and writes nothing itself. A member can
+comment on a line of a document of their own or a shared one: the viewer
+writes the comment to the comments file of the document and commits it.
 
 ``viewer.anonymous`` opens the viewer: a request with no ``Authorization``
 header gets full access, read and write, as a synthetic "anonymous" identity,
@@ -46,6 +50,7 @@ import os
 import secrets
 import sys
 from collections.abc import Iterator
+from contextvars import ContextVar
 from datetime import UTC, date, datetime, tzinfo
 from functools import cache
 from html import escape
@@ -71,6 +76,9 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Route
 
 from joshua_gateway import viewer_assignments as assignments_mod
+from joshua_gateway import viewer_comments as comments_mod
+from joshua_gateway import viewer_docstore as docstore
+from joshua_gateway import viewer_documents as documents_mod
 from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
 from joshua_gateway import viewer_limits as limits_mod
@@ -253,6 +261,10 @@ def _unauthorized() -> Response:
     )
 
 
+# The person of the request that is served now, for the navigation.
+_REQUEST_PERSON: ContextVar[Person | None] = ContextVar("viewer_person", default=None)
+
+
 def _require_auth(handler: Any) -> Any:
     """Wrap a handler so it runs only for a signed-in person, else returns 401."""
 
@@ -260,7 +272,11 @@ def _require_auth(handler: Any) -> Any:
         person = _authenticate(request)
         if person is None:
             return _unauthorized()
-        return await handler(request, person)
+        token = _REQUEST_PERSON.set(person)
+        try:
+            return await handler(request, person)
+        finally:
+            _REQUEST_PERSON.reset(token)
 
     return wrapper
 
@@ -358,7 +374,16 @@ _SECTIONS = (
         '<path d="M9 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3"/>'
         '<path d="m9 14 2 2 4-4"/>',
     ),
+    (
+        "documents",
+        "Documents",
+        "/documents",
+        '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
+        '<path d="M14 3v5h5M9 13h6M9 17h6"/>',
+    ),
 )
+# The sections that a guest does not get.
+_MEMBER_SECTIONS = frozenset({"documents"})
 _SECTION_LABEL = {key: label for key, label, _, _ in _SECTIONS} | {"links": "Links", "me": "You"}
 _SEARCH_ICON = _SECTIONS[2][3]
 _ME_ICON = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'
@@ -372,18 +397,26 @@ def _current(key: str, section: str) -> str:
     return ' aria-current="page"' if key == section else ""
 
 
+def _sections() -> list[tuple[str, str, str, str]]:
+    """The sections of the person of this request: a guest gets no Documents."""
+    person = _REQUEST_PERSON.get()
+    member = person is not None and person.role == "member"
+    return [s for s in _SECTIONS if member or s[0] not in _MEMBER_SECTIONS]
+
+
 def _shell(body: str, *, section: str, query: str) -> str:
     """The page shell: the sidebar on a wide screen; the app bar and the tabs
     on a phone. ``section`` marks the current item. The search field is in the
     app bar, so it shows on every screen."""
+    sections = _sections()
     items = "".join(
         f'<a class="j-nav-item" href="{url}"{_current(key, section)}>{_icon(icon)}{label}</a>'
-        for key, label, url, icon in _SECTIONS
+        for key, label, url, icon in sections
     )
     tabs = (
         "".join(
             f'<a class="j-tab" href="{url}"{_current(key, section)}>{label}</a>'
-            for key, label, url, _ in _SECTIONS
+            for key, label, url, _ in sections
         )
         + f'<a class="j-tab" href="/links"{_current("links", section)}>Links</a>'
     )
@@ -430,7 +463,7 @@ def _page(
 ) -> HTMLResponse:
     """A full page. ``section`` is the key of the current section in the
     navigation (``wiki``, ``journal``, ``search``, ``usage``,
-    ``assignments``), or "" for the home page. ``nav`` False gives the bare
+    ``assignments``, ``documents``), or "" for the home page. ``nav`` False gives the bare
     content with no navigation. ``head`` is more HTML for the ``<head>``,
     such as a ``<meta>`` refresh."""
     main = (
@@ -887,9 +920,9 @@ def _comment_base(kind: str, parent_id: int) -> str:
     return f"/assignments/saved/{parent_id}" if kind == "saved" else f"/assignments/{parent_id}"
 
 
-def _comment_forms(person: Person, kind: str, parent_id: int) -> assignments_mod.CommentForms:
+def _comment_forms(person: Person, kind: str, parent_id: int) -> comments_mod.CommentForms:
     base = _comment_base(kind, parent_id)
-    return assignments_mod.CommentForms(
+    return comments_mod.CommentForms(
         action=f"{base}/comments", csrf=_csrf_token(person.id, f"comments:{base}")
     )
 
@@ -947,6 +980,134 @@ async def comment_on_assignment(request: Request, person: Person) -> Response:
 
 async def comment_on_saved(request: Request, person: Person) -> Response:
     return await _comment_write(request, person, "saved")
+
+
+# -- documents --------------------------------------------------------------
+#
+# A member reads their own documents and the shared ones; a guest gets none.
+# The one write is a comment in the comments file of a document, with the
+# same CSRF token and origin check as every other form.
+
+
+async def documents_list(request: Request, person: Person) -> Response:
+    """The documents of the person who signed in and the shared ones, one
+    status at a time. With no documents folder, the page says so and
+    creates nothing."""
+    if person.role != "member":
+        return _not_found()
+    status = documents_mod.parse_status(request.query_params.get("status"))
+    kind = documents_mod.parse_kind(request.query_params.get("kind"))
+    base = docstore.root()
+    docs = None
+    counts: dict[str, int] = {}
+    if base.is_dir():
+        docs = docstore.list_documents(base, docstore.owners(person.id))
+        counts = {d.tool_path: docstore.open_count(d) for d in docs if d.status == status}
+    tz, now = _clock()
+    html = documents_mod.list_html(
+        docs, status=status, kind=kind, person_id=person.id, comments=counts, tz=tz, now=now
+    )
+    return _page("documents", html, section="documents")
+
+
+def _document(request: Request, person: Person) -> docstore.Document | None:
+    """The document of the URL, when the person may read it."""
+    if person.role != "member":
+        return None
+    base = docstore.root()
+    if not base.is_dir():
+        return None
+    owner = request.path_params["owner"]
+    slug = request.path_params["slug"]
+    return docstore.find(base, owner, slug, docstore.owners(person.id))
+
+
+def _document_forms(person: Person, doc: docstore.Document) -> comments_mod.CommentForms:
+    base = doc.url
+    return comments_mod.CommentForms(
+        action=f"{base}/comments", csrf=_csrf_token(person.id, f"comments:{base}")
+    )
+
+
+async def document_page(request: Request, person: Person) -> Response:
+    """One document. ``?rev=<sha>`` shows an older version, read-only. A
+    document of another member is 404, as is one that is not there."""
+    doc = _document(request, person)
+    if doc is None:
+        return _not_found()
+    base = docstore.root()
+    versions = docstore.versions(base, doc)
+    version = None
+    shown = doc
+    rev = request.query_params.get("rev")
+    if rev:
+        found = docstore.at_version(base, doc, rev)
+        if found is None:
+            return _not_found()
+        version, shown = found
+    tz, now = _clock()
+    html = documents_mod.document_html(
+        shown,
+        person_id=person.id,
+        comments=docstore.read_comments(doc) if version is None else [],
+        forms=_document_forms(person, doc) if version is None else None,
+        versions=versions,
+        version=version,
+        tz=tz,
+        now=now,
+    )
+    return _page(shown.title, html, section="documents")
+
+
+def _comment_refused(doc: docstore.Document, reason: str) -> Response:
+    body = documents_mod.message_html(
+        "comment not stored",
+        f'<p class="j-error">{escape(reason)}</p><p><a href="{escape(doc.url)}">Back</a></p>',
+    )
+    return _page("comment not stored", body, status=400, section="documents")
+
+
+async def document_comment(request: Request, person: Person) -> Response:
+    """Add a comment of the person to a document, or delete their own open
+    comment, then go back to the line. One commit for each write."""
+    doc = _document(request, person)
+    if doc is None:
+        return _not_found()
+    form = await request.form()
+    token = str(form.get("csrf", ""))
+    if not _csrf_valid(person.id, f"comments:{doc.url}", token) or not _origin_ok(request):
+        return _forbidden()
+    base = docstore.root()
+    comment_id = request.path_params.get("cid")
+    if comment_id is not None:
+        if not docstore.delete_comment(base, doc, author=person.id, comment_id=comment_id):
+            return _not_found()
+        logger.info({"message": "viewer comment", "kind": "document", "delete": True})
+        return RedirectResponse(doc.url, status_code=303)
+    body = str(form.get("body", "")).strip()
+    try:
+        line_no = int(str(form.get("line_no", "")))
+    except ValueError:
+        line_no = 0
+    lines = doc.lines
+    if not 1 <= line_no <= len(lines):
+        return _comment_refused(doc, "The line is not in the document.")
+    if not body:
+        return _comment_refused(doc, "The comment is empty.")
+    if len(body) > comments_mod.MAX_COMMENT:
+        return _comment_refused(doc, f"The comment exceeds {comments_mod.MAX_COMMENT} characters.")
+    line_text = str(form.get("line_text", "")) or lines[line_no - 1]
+    docstore.add_comment(
+        base,
+        doc,
+        author=person.id,
+        line_no=line_no,
+        line_text=line_text,
+        body=body,
+        now=_now(UTC),
+    )
+    logger.info({"message": "viewer comment", "kind": "document", "delete": False})
+    return RedirectResponse(f"{doc.url}#L{line_no}", status_code=303)
 
 
 def _now(tz: tzinfo) -> datetime:
@@ -1369,8 +1530,8 @@ class SecurityHeaders(BaseHTTPMiddleware):
     ``default-src 'none'`` blocks every sub-resource; the page loads its
     stylesheets from ``'self'`` and its images from ``'self'`` (attachments,
     the logo and the icons). The only script that runs is the copy script of
-    an assignment page, allowed by its hash: no other script, inline or from
-    a file, runs.
+    a report, allowed by its hash: no other script, inline or from a file,
+    runs. The ``srcdoc`` frame of an HTML document gets this same policy.
     """
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
@@ -1430,6 +1591,18 @@ def build_app() -> Starlette:
             Route(
                 "/assignments/saved/{id:int}/comments/{cid:int}/delete",
                 _require_auth(comment_on_saved),
+                methods=["POST"],
+            ),
+            Route("/documents", _require_auth(documents_list)),
+            Route("/documents/{owner}/{slug}", _require_auth(document_page)),
+            Route(
+                "/documents/{owner}/{slug}/comments",
+                _require_auth(document_comment),
+                methods=["POST"],
+            ),
+            Route(
+                "/documents/{owner}/{slug}/comments/{cid}/delete",
+                _require_auth(document_comment),
                 methods=["POST"],
             ),
             Route("/delete", _require_auth(delete), methods=["POST"]),

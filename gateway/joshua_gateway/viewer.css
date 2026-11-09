@@ -635,6 +635,35 @@ details.a-source ol.a-lines { border-radius: 0; }
 .a-block.d4 { margin-left: 88px; }
 .a-block.d5 { margin-left: 110px; }
 
+/* the documents: the list, the "+" of a card, a heading, and the head, the
+   frame of an HTML document, and the versions */
+.d-kinds { margin: -4px 0 16px; }
+.j-chip.sm { padding: 2px 10px; font-size: 12px; }
+.d-kind { font-size: 12px; }
+.a-card-unit { position: relative; flex-wrap: wrap; }
+.a-card-unit > details.a-add > summary { left: 4px; top: 4px; }
+.a-card-unit:hover > details.a-add > summary { opacity: 1; }
+.a-card-unit > details.a-add[open], .a-card-unit > .a-comment { flex-basis: 100%; min-width: 0; }
+.a-card-unit.has-comments { border-color: var(--j-accent); }
+ul.a-checklist > li.a-card-unit { padding-left: 24px; }
+.a-head { position: relative; flex-wrap: wrap; }
+.a-head > details.a-add > summary { position: static; opacity: 0.4; }
+.a-head:hover > details.a-add > summary { opacity: 1; }
+.a-head > details.a-add[open] { flex-basis: 100%; }
+.d-unit { position: relative; }
+.d-unit > details.a-add > summary { left: 6px; top: 8px; }
+.d-unit:hover > details.a-add > summary { opacity: 1; }
+.d-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.d-body > .a-unit.li { margin-top: -4px; }
+.d-body > .a-unit.h { margin-top: 6px; }
+.d-artifact { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+iframe.d-frame {
+  display: block; width: 100%; max-width: 100%; min-height: 70vh;
+  border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); background: #fff;
+}
+ol.d-versions { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+ol.d-versions a[aria-current] { font-weight: 700; }
+
 @media (max-width: 560px) {
   li.a-line { padding-left: 52px; }
   .a-ln { width: 26px; }
@@ -653,4 +682,5 @@ details.a-source ol.a-lines { border-radius: 0; }
   .a-stats { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
   .a-hl-lead { font-size: 22px; }
   .a-decision { gap: 10px; padding: 14px 12px 10px; }
+  iframe.d-frame { min-height: 60vh; }
 }

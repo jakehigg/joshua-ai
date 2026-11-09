@@ -213,10 +213,7 @@ def _card(
         return f'<li class="{css}">{body}</li>' if css else f"<li>{body}</li>"
     anchors, plus, cards = gutter.mark(lines[0], lines[1], what)
     cls = f"{css} a-card-unit".strip() + (" has-comments" if cards else "")
-    return (
-        f'<li class="{cls}" id="{gutter.unit_id(lines[0])}">{anchors}'
-        f"{body}{plus}{cards}</li>"
-    )
+    return f'<li class="{cls}" id="{gutter.unit_id(lines[0])}">{anchors}{body}{plus}{cards}</li>'
 
 
 def highlights_html(part: rp.Section | None, gutter: Gutter | None = None) -> str:
@@ -485,9 +482,7 @@ def done_html(report: rp.Report, gutter: Gutter | None = None) -> str:
         else:
             parts.append(f'<div class="a-block h d0">{heading}</div>')
         if extra.body:
-            parts.append(
-                blocks_html(extra.body, start=extra.start, gutter=gutter, draw_boxes=True)
-            )
+            parts.append(blocks_html(extra.body, start=extra.start, gutter=gutter, draw_boxes=True))
     if not parts:
         return ""
     return section(

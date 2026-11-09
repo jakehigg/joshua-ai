@@ -93,8 +93,7 @@ def time_html(text: str | None, *, tz: tzinfo, now: datetime) -> str:
     full = f"{local:%Y-%m-%d %H:%M} {local.tzname() or ''}".strip()
     label = ago((now - when).total_seconds())
     return (
-        f'<time datetime="{escape(when.isoformat())}" title="{escape(full)}">'
-        f"{escape(label)}</time>"
+        f'<time datetime="{escape(when.isoformat())}" title="{escape(full)}">{escape(label)}</time>'
     )
 
 

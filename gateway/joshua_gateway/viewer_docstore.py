@@ -510,9 +510,7 @@ def _git(base: Path, args: list[str]) -> str | None:
 
 def versions(base: Path, doc: Document) -> list[Version]:
     """The commits that changed the file of ``doc``, the newest first."""
-    out = _git(
-        base, ["log", f"-n{MAX_VERSIONS}", "--format=%H%x1f%aI%x1f%s", "--", doc.rel]
-    )
+    out = _git(base, ["log", f"-n{MAX_VERSIONS}", "--format=%H%x1f%aI%x1f%s", "--", doc.rel])
     found = []
     for line in (out or "").splitlines():
         parts = line.split("\x1f")
