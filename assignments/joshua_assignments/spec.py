@@ -152,6 +152,21 @@ def clamp(name: str, value: int, maximum: int, notes: list[str]) -> int:
     return value
 
 
+def check_repo(raw: Any, section: Assignments) -> str:
+    """``raw`` as ``host/group/name`` when ``assignments.repos`` allows it.
+
+    Raises SpecRefused ``invalid_repo`` or ``repo_not_allowed``. A repository
+    of a spec and a repository that Joshua grants later both pass here.
+    """
+    try:
+        repo = normalize_repo(raw if isinstance(raw, str) else "")
+    except RepoError as exc:
+        raise SpecRefused("invalid_repo", str(exc)) from None
+    if not repo_allowed(repo, section.repos):
+        raise SpecRefused("repo_not_allowed", f"the repository {repo} is not in assignments.repos")
+    return repo
+
+
 def resolve(spec: AssignmentSpec, section: Assignments) -> Resolved:
     """Fill, clamp, and check ``spec``. Raises SpecRefused for a value the section refuses."""
     notes: list[str] = []
@@ -161,14 +176,7 @@ def resolve(spec: AssignmentSpec, section: Assignments) -> Resolved:
         raise SpecRefused("unknown_model", f"the model {model!r} is not known; use one of {known}")
     repos: list[str] = []
     for raw in spec.repos:
-        try:
-            repo = normalize_repo(raw)
-        except RepoError as exc:
-            raise SpecRefused("invalid_repo", str(exc)) from None
-        if not repo_allowed(repo, section.repos):
-            raise SpecRefused(
-                "repo_not_allowed", f"the repository {repo} is not in assignments.repos"
-            )
+        repo = check_repo(raw, section)
         if repo not in repos:
             repos.append(repo)
     limits = section.limits

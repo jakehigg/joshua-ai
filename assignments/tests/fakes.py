@@ -66,6 +66,7 @@ class FakeStore:
             "working_s": 0,
             "stopped_at_limits": None,
             "open_question": None,
+            "open_request": None,
             "asked_at": None,
             "answer": None,
             "summary": None,
@@ -77,6 +78,8 @@ class FakeStore:
             "report_at": None,
             "outputs": None,
             "saved_id": saved_id,
+            "granted_repos": None,
+            "inbox": None,
         }
         self.rows[assignment_id] = row
         return copy.deepcopy(row)

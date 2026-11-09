@@ -60,7 +60,13 @@ RUN_STATUSES = tuple(status for status in STATUSES if status != DRAFT)
 STATES = ("draft", "in_progress", "completed")
 IN_PROGRESS = frozenset({"running", *PARKED})
 USAGE_FIELDS = ("input", "output", "cache_read", "cache_write")
-JSON_FIELDS = frozenset({"spec", "stopped_at_limits", "follow_ups", "outputs"})
+JSON_FIELDS = frozenset(
+    {"spec", "stopped_at_limits", "follow_ups", "outputs", "open_request", "granted_repos", "inbox"}
+)
+# The kinds of a request of a worker: ``request_resource(kind, ref, reason)``,
+# each with the word that a person reads.
+REQUEST_KINDS = ("repo", "file", "info")
+REQUEST_LABELS = {"repo": "repository", "file": "file", "info": "question"}
 # The caps of one output. ``add_output`` cuts each field to its cap.
 MAX_OUTPUT_KIND = 40
 MAX_OUTPUT_REF = 500
@@ -83,11 +89,14 @@ UPDATABLE = frozenset(
         "working_s",
         "stopped_at_limits",
         "open_question",
+        "open_request",
         "asked_at",
         "answer",
         "summary",
         "follow_ups",
         "error",
+        "granted_repos",
+        "inbox",
     }
 )
 
@@ -131,6 +140,12 @@ ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS plan_at TIMESTAMPTZ;
 ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS report TEXT;
 ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS report_at TIMESTAMPTZ;
 ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS outputs JSONB;
+-- The open request of a worker, {"kind", "ref", "reason"}, beside its text in
+-- open_question; the repositories that Joshua granted, a list; and the files
+-- that Joshua put in inbox/ of the scratch, a list of {"name", "bytes", "at"}.
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS open_request JSONB;
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS granted_repos JSONB;
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS inbox JSONB;
 CREATE INDEX IF NOT EXISTS idx_assignment_person
     ON assignments.assignment (person_id, id DESC);
 
@@ -373,6 +388,14 @@ def state(status: str) -> str:
 def statuses_of(state_name: str) -> tuple[str, ...]:
     """The statuses of one state, in the order of ``STATUSES``."""
     return tuple(status for status in STATUSES if state(status) == state_name)
+
+
+def request_question(kind: str, ref: str, reason: str) -> str:
+    """The text of a request in ``open_question``. A question (``info``) is its own text."""
+    reason_line = f"\nReason: {reason}" if reason else ""
+    if kind == "info":
+        return f"{ref}{reason_line}"
+    return f"Requests a {REQUEST_LABELS[kind]}: {ref}{reason_line}"
 
 
 def output_record(kind: str, ref: str, title: str) -> tuple[str, str, str]:
