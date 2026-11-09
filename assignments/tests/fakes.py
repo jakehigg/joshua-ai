@@ -18,6 +18,8 @@ class FakeStore:
         self.rows: dict[int, dict[str, Any]] = {}
         self.checkpoints: list[dict[str, Any]] = []
         self.slices: list[dict[str, Any]] = []
+        self.saved: dict[int, dict[str, Any]] = {}
+        self._next_saved = 1
         self.opened = False
         self.closed = False
         self.healthy = True
@@ -39,6 +41,7 @@ class FakeStore:
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
+        saved_id: int | None = None,
     ) -> dict[str, Any]:
         assignment_id = self._next
         self._next += 1
@@ -69,6 +72,7 @@ class FakeStore:
             "report": None,
             "report_at": None,
             "outputs": None,
+            "saved_id": saved_id,
         }
         self.rows[assignment_id] = row
         return copy.deepcopy(row)
@@ -130,6 +134,69 @@ class FakeStore:
         row = self.rows.get(assignment_id)
         if row is not None:
             row.update(report=markdown, report_at=self.clock())
+
+    def _with_runs(self, saved: dict[str, Any]) -> dict[str, Any]:
+        runs = [
+            r
+            for r in self.rows.values()
+            if r["saved_id"] == saved["id"] and r["person_id"] == saved["person_id"]
+        ]
+        last = max(runs, key=lambda r: r["id"], default=None)
+        return copy.deepcopy(
+            {
+                **saved,
+                "runs": len(runs),
+                "last_run": (
+                    {"id": last["id"], "status": last["status"], "finished_at": last["finished_at"]}
+                    if last
+                    else None
+                ),
+            }
+        )
+
+    async def put_saved(self, person_id: str, name: str, spec: dict[str, Any]) -> dict[str, Any]:
+        for saved in self.saved.values():
+            if saved["person_id"] == person_id and saved["name"] == name:
+                saved.update(spec=copy.deepcopy(spec), updated_at=self.clock())
+                return {**copy.deepcopy(saved), "created": False}
+        saved = {
+            "id": self._next_saved,
+            "person_id": person_id,
+            "name": name,
+            "spec": copy.deepcopy(spec),
+            "created_at": self.clock(),
+            "updated_at": self.clock(),
+        }
+        self._next_saved += 1
+        self.saved[saved["id"]] = saved
+        return {**copy.deepcopy(saved), "created": True}
+
+    async def find_saved(self, person_id: str, name: str) -> dict[str, Any] | None:
+        for saved in self.saved.values():
+            if saved["person_id"] == person_id and saved["name"] == name:
+                return self._with_runs(saved)
+        return None
+
+    async def get_saved(self, saved_id: int) -> dict[str, Any] | None:
+        saved = self.saved.get(saved_id)
+        return self._with_runs(saved) if saved else None
+
+    async def list_saved(self, person_id: str) -> list[dict[str, Any]]:
+        mine = [s for s in self.saved.values() if s["person_id"] == person_id]
+        return [self._with_runs(s) for s in sorted(mine, key=lambda s: s["id"], reverse=True)]
+
+    async def delete_saved(self, person_id: str, name: str) -> bool:
+        for saved_id, saved in list(self.saved.items()):
+            if saved["person_id"] == person_id and saved["name"] == name:
+                del self.saved[saved_id]
+                for row in self.rows.values():
+                    if row["saved_id"] == saved_id:
+                        row["saved_id"] = None
+                return True
+        return False
+
+    async def saved_names(self, saved_ids: Collection[int]) -> dict[int, str]:
+        return {i: self.saved[i]["name"] for i in saved_ids if i in self.saved}
 
     async def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}

@@ -231,3 +231,42 @@ async def test_the_new_columns_are_added_to_an_older_table(store) -> None:
     await store.open()
     await store.write_report(row["id"], "# R")
     assert (await store.get(row["id"]))["report"] == "# R"
+
+
+async def test_saved_assignments_their_runs_and_a_delete(store) -> None:
+    first = await store.put_saved("alex", "docs", {"goal": "Clean"})
+    again = await store.put_saved("alex", "docs", {"goal": "Clean the docs"})
+    other = await store.put_saved("mia", "docs", {"goal": "Mia"})
+    assert first["created"] is True and again["created"] is False
+    assert again["id"] == first["id"] != other["id"]
+    assert again["updated_at"] >= first["updated_at"]
+    found = await store.find_saved("alex", "docs")
+    assert found["spec"] == {"goal": "Clean the docs"}
+    assert (found["runs"], found["last_run"]) == (0, None)
+    assert await store.find_saved("alex", "nothing") is None
+
+    run_a = await store.create(
+        person_id="alex", conversation_id=None, spec={"goal": "g"}, model="m", saved_id=first["id"]
+    )
+    run_b = await store.create(
+        person_id="alex", conversation_id=None, spec={"goal": "g"}, model="m", saved_id=first["id"]
+    )
+    await store.update(run_b["id"], status="done", finished_at=NOW)
+    # A run of another person never counts, even with the same saved id.
+    await store.create(
+        person_id="mia", conversation_id=None, spec={"goal": "g"}, model="m", saved_id=first["id"]
+    )
+    got = await store.get_saved(first["id"])
+    assert got["runs"] == 2
+    assert got["last_run"] == {"id": run_b["id"], "status": "done", "finished_at": NOW}
+    assert [s["name"] for s in await store.list_saved("alex")] == ["docs"]
+    assert await store.saved_names([first["id"], other["id"], 9999]) == {
+        first["id"]: "docs",
+        other["id"]: "docs",
+    }
+    assert await store.saved_names([]) == {}
+
+    assert await store.delete_saved("mia", "nothing") is False
+    assert await store.delete_saved("alex", "docs") is True
+    assert await store.get_saved(first["id"]) is None
+    assert (await store.get(run_a["id"]))["saved_id"] is None
