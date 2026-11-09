@@ -6,6 +6,12 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- The viewer has a fifth section, **Assignments**, at `/assignments`. A
+  person reads their own assignments there: the state, the plan, the report
+  and its outputs, the progress, and the definition. The saved assignments
+  are at `/assignments/saved`. The viewer needs `ASSIGNMENTS_URL`: compose
+  sets it, and the chart sets it when `assignments.enabled` is true.
+
 ## 0.2.0 - 2026-11-08
 
 Joshua can now run long jobs for a member in the background: the new

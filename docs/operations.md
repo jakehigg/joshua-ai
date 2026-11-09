@@ -872,6 +872,49 @@ curl -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" \
   "http://127.0.0.1:8081/admin/usage?days=7"
 ```
 
+### The assignments section
+
+`/assignments` in the viewer shows the assignments of the person who signed
+in, and no other person's. The `Assignments` link in the menu opens it. The
+section is read-only: to change an assignment, tell Joshua.
+
+Three pills at the top give the states: `In progress`, `Queued`, and
+`Completed`. With no pill chosen, the page shows the assignments in progress,
+or the completed ones when none is in progress. Each row gives the title, the
+status, the time it started (or was made), the model, and the total tokens. A
+row with an open question has a `question` mark. A time such as `2h ago` gives
+the full time in the instance `timezone` when you hold the pointer on it. The
+newest assignment is first.
+
+Click a title to open the assignment as a document:
+
+1. The title, the status, the saved assignment it came from (if any), and
+   one line with the tokens, the working time, and the model.
+2. A notice when the assignment waits: the open question, or the stop at the
+   subscription limits.
+3. **Plan**: the plan of the worker, as a wiki page shows it.
+4. **Report**: the report, when there is one, and under it the recorded
+   outputs. An output whose reference is a web address is a link. Any other
+   reference shows as code.
+5. **Progress**: the checkpoints, newest first.
+6. **Definition**: the spec of the assignment as YAML. Click it to open it.
+7. The error, when the assignment failed.
+
+While the assignment is in progress, the page loads again every 20 seconds,
+so you see the plan change as the worker ticks its steps.
+
+The `Saved` link beside the pills opens `/assignments/saved`: the saved
+assignments, each with its name, its title, the number of runs, and the last
+run. A saved assignment opens with its definition and its runs.
+
+The section needs `ASSIGNMENTS_URL` and `JOSHUA_TOKEN_VIEWER` on the viewer,
+and the assignments container must hold the same `JOSHUA_TOKEN_VIEWER`. Compose
+sets `ASSIGNMENTS_URL` to `http://assignments:8000`. The chart sets it when
+`assignments.enabled` is true. Without the two values, the page says that
+assignments are not configured. When the assignments container does not
+answer, the page says so and shows nothing old. `GET /readyz` on the viewer
+reports `assignments`.
+
 ## Where the data is
 
 | Docker volume | Holds | `make nuke` deletes it |
