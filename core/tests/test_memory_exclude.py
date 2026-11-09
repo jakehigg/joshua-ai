@@ -176,7 +176,7 @@ def test_the_recall_server_gets_the_config_folders(monkeypatch: pytest.MonkeyPat
     seen: dict[str, Any] = {}
     monkeypatch.setattr(recall, "build_recall_server", lambda deps, **kw: seen.update(kw))
     manager = SimpleNamespace(register_builtin=lambda name, factory: factory(None))
-    recall.register(manager, SearchStore([]), SimpleNamespace(memory=Memory()))  # type: ignore[arg-type]
+    recall.register(manager, SearchStore([]), SimpleNamespace(memory=Memory(), people=[]))  # type: ignore[arg-type]
     assert seen["exclude_folders"] == ["assignments"]
 
 
@@ -233,7 +233,7 @@ def test_the_injection_provider_gets_the_config_folders(monkeypatch: pytest.Monk
     monkeypatch.setattr(injection, "kb_context", fake_context)
     providers: list[Any] = []
     manager = SimpleNamespace(add_context_provider=providers.append)
-    settings = SimpleNamespace(memory=Memory(), timezone="UTC")
+    settings = SimpleNamespace(memory=Memory(), timezone="UTC", people=[])
     injection.register(manager, SearchStore([]), settings, AuditRepo())  # type: ignore[arg-type]
     asyncio.run(providers[0](SimpleNamespace()))
     assert seen["exclude_folders"] == ["assignments"]

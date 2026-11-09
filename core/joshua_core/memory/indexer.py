@@ -22,7 +22,8 @@ restarts.
 
 The startup pass makes every deploy self-heal (a first-boot empty index is just
 the degenerate diff where everything is new). The interval loop keeps the
-``files`` source fresh; other adapters run on their own schedule.
+``files`` and ``documents`` sources fresh; other adapters run on their own
+schedule.
 """
 
 from __future__ import annotations
@@ -47,7 +48,8 @@ from joshua_core.memory.skills import (
     skill_slug,
 )
 from joshua_core.memory.sources import Document, Source
-from joshua_core.memory.store import MemoryStore
+from joshua_core.memory.sources.documents import DOCUMENTS_SOURCE, pointer_heading
+from joshua_core.memory.store import DOCUMENT_KIND, MemoryStore
 
 logger = get_logger("memory.indexer")
 
@@ -180,6 +182,8 @@ class Indexer:
         self._skills.replace(parsed)
 
     async def _index_document(self, doc: Document) -> int:
+        if doc.source == DOCUMENTS_SOURCE:
+            return await self._index_pointer(doc)
         if doc.source == "files" and is_skill_path(doc.uri):
             rows = await self._index_skill(doc)
             if rows is not None:
@@ -207,6 +211,28 @@ class Indexer:
             file_mtime=doc.updated_at,
             doc_date=doc.doc_date,
             chunks=embedded,
+        )
+
+    async def _index_pointer(self, doc: Document) -> int:
+        """Index a document as one ``kind='document'`` row: the title, the kind
+        and the status (the heading), and the summary (the text). The source
+        gives no more of the body, so none of it reaches the index."""
+        heading = pointer_heading(doc.frontmatter["kind"], doc.frontmatter["status"])
+        embed_text = "\n".join(part for part in (doc.title, heading, doc.text) if part)
+        vec = await asyncio.to_thread(embed_module.embed, embed_text, self._embed_model)
+        if vec is None:
+            raise RuntimeError("embedding unavailable (fastembed not loaded?)")
+        return await self._store.kb_replace_item(
+            source=doc.source,
+            person_id=doc.person_id,
+            path=doc.uri,
+            kind=DOCUMENT_KIND,
+            title=doc.title,
+            provenance=doc.provenance,
+            file_sha256=doc.rev,
+            file_mtime=doc.updated_at,
+            doc_date=doc.doc_date,
+            chunks=[(heading, doc.text, vec)],
         )
 
     async def _index_skill(self, doc: Document) -> int | None:

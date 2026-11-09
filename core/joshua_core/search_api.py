@@ -14,6 +14,14 @@ skill rows are never returned, and neither is a page in a folder of
 row again after the database filter, so a new kind in the indexer does not
 widen what the route returns.
 
+``source: documents`` searches the ``documents`` source in place of the
+wiki: one row per document, with the title, the kind, the status, and the
+summary, never the body. Such a search names ``person`` (400 when it is
+missing), and returns the documents of that person and the shared ones. A
+person who is not a member, or ``memory.documents.enabled: false``, gets no
+results. The caller vouches for the person: the viewer sends the person who
+signed in.
+
 ``memory.search.allowed_callers`` names the fleet identities that may call.
 An empty list turns the route off, so every caller gets 403. The query is never
 logged.
@@ -32,7 +40,9 @@ from pydantic import ValidationError
 
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
-from joshua_core.memory.search import excluded_prefixes, is_excluded, search
+from joshua_core.memory.search import document_reader, excluded_prefixes, is_excluded, search
+from joshua_core.memory.sources.documents import DOCUMENTS_PREFIX, DOCUMENTS_SOURCE
+from joshua_core.memory.store import DOCUMENT_KIND
 
 logger = get_logger("search_api")
 
@@ -73,6 +83,16 @@ def _visible(chunk: KbChunk, kinds: tuple[str, ...], excluded: tuple[str, ...] =
     )
 
 
+def _visible_document(chunk: KbChunk, reader: str) -> bool:
+    """True for a document row of ``reader`` or a shared one."""
+    return (
+        chunk.source == DOCUMENTS_SOURCE
+        and chunk.kind == DOCUMENT_KIND
+        and chunk.person_id in (None, reader)
+        and chunk.path.startswith(DOCUMENTS_PREFIX)
+    )
+
+
 def _hit(chunk: KbChunk) -> SearchHit:
     return SearchHit(
         path=chunk.path,
@@ -103,10 +123,42 @@ def build_search_router() -> APIRouter:
         query = body.query.strip()
         if not query:
             return JSONResponse(SearchResponse(results=[]).model_dump())
-        memory = request.app.state.ctx.settings.memory
+        settings = request.app.state.ctx.settings
+        memory = settings.memory
+        reader: str | None = None
+        if body.source == DOCUMENTS_SOURCE:
+            if body.person is None:
+                return JSONResponse(
+                    {"error": "a search of documents needs a person"}, status_code=400
+                )
+            reader = document_reader(settings.people, body.person)
+            if reader is None or not memory.documents.enabled:
+                return JSONResponse(SearchResponse(results=[]).model_dump())
         vec = await asyncio.to_thread(embed_module.embed, query, memory.embed_model)
         if vec is None:
             return JSONResponse({"error": "embedding unavailable"}, status_code=503)
+        if reader is not None:
+            chunks = await search(
+                request.app.state.ctx.memory,
+                reader,
+                vec,
+                k=body.limit,
+                min_sim=memory.min_sim,
+                sources=(DOCUMENTS_SOURCE,),
+                kinds=(DOCUMENT_KIND,),
+                per_doc_cap=1,
+                document_reader=reader,
+            )
+            hits = [_hit(c) for c in chunks if _visible_document(c, reader)]
+            logger.info(
+                {
+                    "message": "memory search",
+                    "caller": identity,
+                    "source": "documents",
+                    "results": len(hits),
+                }
+            )
+            return JSONResponse(SearchResponse(results=hits).model_dump())
         kinds = tuple(dict.fromkeys(body.kinds or SEARCH_KINDS))
         chunks = await search(
             request.app.state.ctx.memory,

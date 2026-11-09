@@ -104,7 +104,9 @@ async def test_group_turn_sees_shared_only() -> None:
 async def test_skill_rows_excluded_from_search_memory() -> None:
     store = FakeStore()
     results = await _run(_deps("alice"), store)
-    assert store.exclude_seen[0] == ("skill",)  # the exclude filter is forwarded
+    # The exclude filter is forwarded, and a turn with no member as reader
+    # excludes the documents too.
+    assert store.exclude_seen[0] == ("skill", "document")
     assert all("skills/" not in r["path"] for r in results)  # never a taught skill
 
 

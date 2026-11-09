@@ -15,6 +15,11 @@ never shown in full. It takes one slot of ``top_k`` and is one short line
 under a header that says to check the live tool before a change. The other
 chunks get the same decision as on a turn with no snapshot.
 
+A ``document`` chunk (the ``documents`` source) is never shown by its body.
+In both notes it is one line, ``document: <title> (<path>, <kind>, <status>)``,
+and the agent reads it with ``read_document``. Only a conversation of a
+member finds a document.
+
 Every decision writes one ``kb_event`` audit row. Retrieval never breaks a turn:
 an unavailable embedding model or a failed search skips the note and logs a
 warning. The provider is registered on the manager's context-provider hook.
@@ -34,10 +39,11 @@ from joshua_shared.log import get_logger
 
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
-from joshua_core.memory.search import search
+from joshua_core.memory.search import document_reader, search
 from joshua_core.memory.skills import SKILL_KIND
+from joshua_core.memory.sources.documents import document_pointer
 from joshua_core.memory.sources.snapshots import item_body, shown, snapshot_labels
-from joshua_core.memory.store import SNAPSHOT_KIND, MemoryStore
+from joshua_core.memory.store import DOCUMENT_KIND, SNAPSHOT_KIND, MemoryStore
 from joshua_core.store.repo import Repo
 
 logger = get_logger("engine.injection")
@@ -108,14 +114,23 @@ def plan_injection(ranked: Sequence[KbChunk], *, inject_sim: float, top_k: int) 
 def _full_note(chunks: Sequence[KbChunk], max_chars: int) -> str:
     blocks = []
     for chunk in chunks:
+        if chunk.kind == DOCUMENT_KIND:
+            blocks.append(f"{document_pointer(chunk)}, open with read_document")
+            continue
         label = chunk.title or chunk.path
         blocks.append(f"{label} (read_file: {chunk.path})\n{(chunk.text or '')[:max_chars]}")
     return FULL_HEADER + "\n\n" + "\n\n".join(blocks)
 
 
 def _hint_note(chunks: Sequence[KbChunk]) -> str:
-    files = ", ".join(f"{c.path} ({c.title})" if c.title else c.path for c in chunks)
+    files = ", ".join(_hint_item(c) for c in chunks)
     return HINT_HEADER.format(files=files)
+
+
+def _hint_item(chunk: KbChunk) -> str:
+    if chunk.kind == DOCUMENT_KIND:
+        return f"{document_pointer(chunk)}, open with read_document"
+    return f"{chunk.path} ({chunk.title})" if chunk.title else chunk.path
 
 
 def _snapshot_line(chunk: KbChunk, labels: dict[str, str]) -> str:
@@ -173,11 +188,14 @@ async def kb_context(
     per_doc_cap: int,
     timezone: str = "UTC",
     exclude_folders: Sequence[str] = (),
+    people: Sequence[Any] = (),
 ) -> str | None:
     """Build the per-turn injection note for one ``TurnCtx``, or None.
 
     A snapshot line shows the time of the latest good fetch in ``timezone``,
     read once for the turn; a snapshot chunk with no good fetch is dropped.
+    A document shows only when the person of the conversation is a member of
+    ``people``.
 
     A message shorter than :data:`MIN_QUERY_CHARS`, an unavailable embedding
     model, or a failed retrieval returns None with no audit row (the turn
@@ -212,6 +230,11 @@ async def kb_context(
             recency_half_life_days=recency_half_life_days,
             per_doc_cap=per_doc_cap,
             exclude_folders=exclude_folders,
+            document_reader=(
+                document_reader(people, ctx.conversation.person_id)
+                if getattr(ctx, "role", "guest") == "member"
+                else None
+            ),
         )
     except Exception as exc:  # noqa: BLE001 — retrieval must never break a turn
         logger.warning({"message": "kb inject skipped: retrieval failed", "error": str(exc)})
@@ -288,6 +311,7 @@ def register(manager: Any, store: MemoryStore, settings: JoshuaConfig, repo: Rep
             per_doc_cap=memory.per_doc_cap,
             timezone=getattr(settings, "timezone", "UTC"),
             exclude_folders=memory.exclude_folders,
+            people=settings.people,
         )
 
     manager.add_context_provider(provider)
