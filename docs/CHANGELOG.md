@@ -6,6 +6,20 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Assignments: an answer changes the document, and a re-run keeps its
+  lineage.** The event for a comment on a report or a plan now tells Joshua
+  to apply it to the document or the tasks, not to start an assignment for
+  it, and to resolve it only after the change. `resolve_comment` takes
+  `applied`: the document paths, tasks, or issue URLs that changed. A
+  resolution with none is refused as `nothing_applied`. The viewer shows
+  them under the resolution. `start_assignment(rerun=N, note)` starts a new
+  run with the spec of the ended assignment N and the note of the person at
+  the start of the goal. `assignment_status` and the read API give
+  `parent_id` and `rerun_of`, and the viewer shows "run k of assignment N"
+  and a fold with each run. The store columns `assignment.parent_id` and
+  `comment.applied` are new. The manager and the gateway log each refused
+  tool call with its reason, and never an argument. See
+  [assignments.md](assignments.md#re-runs).
 - **Docs: a guide for assignments, and one for documents.**
   [assignments.md](assignments.md) now opens with a guide for the person:
   what an assignment is, what to say to Joshua at each step, the flow from

@@ -193,7 +193,7 @@ On the page of the assignment, the output card of a document has an `Open`
 link to its page. There you read it, comment on it, and tell Joshua what to
 change. When the goal of the assignment tells the worker to read that
 document first, a re-run of the assignment works from the document as you
-changed it (from #131). See [use an assignment](assignments.md#use-an-assignment).
+changed it. See [use an assignment](assignments.md#use-an-assignment).
 
 The plan and the report of the assignment itself are not documents. They
 stay in the assignments store and show on the page of the assignment.
