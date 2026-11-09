@@ -137,8 +137,10 @@ them:
 
 1. Call `assignment_comments` with `saved` (the name) or `id` (the draft or
    the run). It gives each open comment with its line, and the spec.
-2. Make each change in the spec. When `stale` is true, the line changed after
-   the comment, so compare `line_text` with `line_now` first.
+2. Make each change in the spec. A comment can refer to a whole paragraph or
+   bullet of the goal, and then `line_text` is its first line. When `stale`
+   is true, the line changed after the comment, so compare `line_text` with
+   `line_now` first.
 3. For a saved assignment, save the changed spec with `save_assignment` and
    the same name. For a draft, give it the changed spec with
    `update_assignment(id, spec)`. For a run, start a new run with the changed

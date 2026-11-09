@@ -853,6 +853,12 @@ everywhere. The keys come in a fixed order (`title`, `goal`, `model`,
 `report_to`, `dry_run`, then any other key in alphabetical order). `goal` is
 a block scalar, one line of the goal to one line of YAML.
 
+The viewer shows the definition as a document: each field as a row, and the
+goal as Markdown in blocks (a paragraph, a heading, a list item, a quote, a
+code block, or a table). A comment on a row or a block names its first line
+of the YAML, so `line_text` can be the first line of a whole paragraph or
+bullet.
+
 - `GET .../comments` gives `{"items": [comment, ...]}`, the oldest first.
 - `POST .../comments` takes `{"line_no", "line_text", "body"}` and gives the
   new `comment` with `201`. `line_no` is a line of the definition now (from

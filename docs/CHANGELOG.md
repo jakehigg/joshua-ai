@@ -6,6 +6,16 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A definition reads as a document.** In the viewer, the definition of a
+  saved assignment, a draft, or a run shows its fields as a short list of
+  properties and its goal as Markdown, as a wiki page shows it. Each field
+  and each block of the goal (a paragraph, a heading, a list item, a quote,
+  a code block, or a table) has its own `+` for a comment, and a comment
+  shows under the block that holds its line. The `Source` fold under it
+  gives each line of the YAML with its number and its `+`. A comment still
+  names one line, so Joshua reads it as before. The plan and the report on
+  the page of a run show in the same blocks, with no `+`. See
+  [operations.md](operations.md#comments-on-a-definition).
 - **Drafts instead of a queue.** The assignments container holds no queue
   now. `start_assignment` starts an assignment at once, or it is refused
   with the reason `busy` and the id of your running assignment; nothing

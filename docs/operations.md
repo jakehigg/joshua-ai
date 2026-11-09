@@ -901,8 +901,9 @@ Click a title to open the assignment as a document.
 A draft has not run, so its page is its definition. The page gives the
 title, the status, the saved assignment it came from (if any), the count of
 open comments, and the line "Tell Joshua to start it, or leave comments
-first." Under it is the **Definition**, open, with a `+` on each line for a
-comment. A draft has no plan, no report, and no progress.
+first." Under it is the **Definition**, open, with a `+` on each field and
+each block of the goal for a comment. A draft has no plan, no report, and no
+progress.
 
 While the assignment is in progress, or when it has no report, the plan is
 the page:
@@ -916,12 +917,14 @@ the page:
    steps"), the next step, and the last checkpoint with its age. A plan with
    no check boxes has no bar.
 4. **Plan**: the plan of the worker, as a wiki page shows it, with each check
-   box drawn as a box.
+   box drawn as a box. Each paragraph, heading, and list item is a block of
+   its own, as in the definition, but with no `+`.
 5. **Outputs so far**: the recorded outputs as cards.
 6. **Progress**: the checkpoints, newest first.
-7. **Report**, when there is one, and **Definition**, the spec as YAML with
-   a number on each line. Click one to open it. The definition opens by
-   itself when it has an open comment.
+7. **Report**, when there is one, and **Definition**, the spec as a
+   document (see [comments on a definition](#comments-on-a-definition)).
+   Click one to open it. The definition opens by itself when it has an open
+   comment.
 8. The error, when the assignment failed.
 
 While the assignment is in progress, the page loads again every 20 seconds,
@@ -964,19 +967,33 @@ open comments shows the count, such as `2 comments for Joshua`.
 #### Comments on a definition
 
 You do not edit a definition in the viewer. You tell Joshua what to change,
-line by line:
+part by part.
+
+The definition shows as a document. At the top, each field (the title, the
+model, the budget, the working time, the repositories, the tools, and the
+others) is one row of a list of properties. Under it, the goal shows as
+Markdown, as a wiki page shows it, cut into blocks: each paragraph, heading,
+list item, quote, code block, and table is one block. A list item in a
+nested list is a block too, so you can comment on one bullet. Each row and
+each block has a `+` at its left. The `Source` fold at the end gives the
+definition as YAML, with a number and a `+` on each line, for a comment on
+one exact line.
 
 1. Open the definition of a saved assignment, a draft, or a run.
-2. Hold the pointer on a line, and click the `+` beside its number.
+2. Hold the pointer on a field or a block, and click its `+`. On a phone,
+   the `+` always shows.
 3. Write what to change, such as "delete this line" or "use opus here", and
-   click `Comment`. The page opens again at that line.
+   click `Comment`. The page opens again at that part.
 4. Tell Joshua that you left comments. Joshua reads them with
    `assignment_comments`, saves the changed spec (gives it to the draft, or
    starts a new run with it), and resolves each comment with one line on what
    it did.
 
-An open comment shows under its line, with its age and a `Delete` button.
-Only the open comments that you wrote have the button. When the line changed
+A comment names one line of the YAML: the first line of the field or the
+block, or the line that you chose in `Source`. An open comment shows under
+the field or the block that holds its line, with its age and a `Delete`
+button. When its line is not the first line of the block, the comment also
+shows that line. Only the open comments that you wrote have the button. When the line changed
 after you wrote the comment, the comment has a `line changed` mark and shows
 the line as it was. A resolved comment moves to the `resolved` group under
 the definition, with the line from Joshua. The head of the definition gives
