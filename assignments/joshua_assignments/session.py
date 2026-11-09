@@ -96,7 +96,7 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
         {"type": "object", "properties": {}},
     ),
     "record_output": (
-        "Record one output the moment you create it: a kind (such as issue, page, or "
+        "Record one output the moment you create it: a kind (such as document, issue, or "
         "merge request), a ref (such as a URL, a path, or a number), and a short title. "
         "Returns the number of outputs.",
         {

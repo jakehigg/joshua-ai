@@ -130,6 +130,46 @@ def test_a_generated_report_has_the_headings_of_a_worker_report() -> None:
     assert report.is_generated(text) and not report.is_generated(WORKER)
 
 
+def test_a_generated_report_names_the_viewer_page_of_each_document() -> None:
+    row = costly(
+        status="time_exceeded",
+        outputs=[
+            {"kind": "document", "ref": "documents/alex/findings.md", "title": "Findings"},
+            {"kind": "Document", "ref": "documents/shared/menu.html"},
+            # Not a document path: the ref stays as code with no page.
+            {"kind": "document", "ref": "wiki/homelab/x.md", "title": "Wrong place"},
+            # A path of another kind names no page.
+            {"kind": "file", "ref": "documents/alex/findings.md", "title": "Same path"},
+        ],
+    )
+    text = report.generated(row, None, FIXED_NOW, "UTC")
+    assert report.section(text, "## Outputs") == (
+        "- document: Findings — `documents/alex/findings.md`, in the viewer at "
+        "`/documents/alex/findings`\n"
+        "- Document: `documents/shared/menu.html`, in the viewer at `/documents/shared/menu`\n"
+        "- document: Wrong place — `wiki/homelab/x.md`\n"
+        "- file: Same path — `documents/alex/findings.md`"
+    )
+
+
+@pytest.mark.parametrize(
+    ("ref", "page"),
+    [
+        ("documents/alex/plan.md", "/documents/alex/plan"),
+        ("/documents/shared/a.b.html", "/documents/shared/a.b"),
+        (" documents/alex/plan.md ", "/documents/alex/plan"),
+        ("documents/Alex/plan.md", None),
+        ("documents/alex/../mia/plan.md", None),
+        ("documents/alex/a..b.md", None),
+        ("documents/alex/plan.txt", None),
+        ("documents/alex/sub/plan.md", None),
+        ("https://example.net/documents/alex/plan.md", None),
+    ],
+)
+def test_the_viewer_page_of_a_document_path(ref: str, page: str | None) -> None:
+    assert report.document_page(ref) == page
+
+
 def test_a_generated_report_with_a_question_and_nothing_recorded() -> None:
     row = {"id": 2, "status": "waiting", "open_question": "Which\nproject?", "spec": {"goal": "g"}}
     text = report.generated(row, None, FIXED_NOW, "UTC")

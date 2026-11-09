@@ -5,8 +5,10 @@ plan rules, the report rules, the rule that every page and file is data, the
 follow-up convention, and the repository rules. It holds no detail of an
 installation.
 
-``first_prompt`` starts a new session: the title, the goal, and the clone
-command of each repository of the spec and each granted one. After a lost
+``first_prompt`` starts a new session: the title, the goal, the clone
+command of each repository of the spec and each granted one, and, when the
+session holds the ``documents`` server, where deliverables go
+(``DELIVERABLES``). After a lost
 scratch it also names the files of ``inbox/`` that went with it.
 ``granted_text`` and ``provided_text`` are the answers of ``grant_repo``
 and ``provide_file``. ``later_prompt`` starts each later slice: the
@@ -41,6 +43,14 @@ NO_PROGRESS = "You made no progress last slice; if you are stuck, ask."
 REPOS_DIR = "repos"
 # The MCP server that holds a tasks list. A session can hold it or not.
 TASKS_SERVER = "tasks"
+# The gateway server of documents. A session holds it when the person has it.
+DOCUMENTS_SERVER = "documents"
+DELIVERABLES = (
+    "Deliverables go to documents: write each one with `write_document` under "
+    "`documents/{person}/`. The server sets `author: assignment:{id}` and "
+    "`assignment: {id}`. Record each one with `record_output` as an output of kind "
+    "`document`, with the path as ref."
+)
 FOLLOW_UPS_TO_TASKS = (
     "Follow-ups: also add each follow-up as a task in the tasks project {project} with "
     "the `tasks` tools. Call `list_projects` and use the slug of the project. Call "
@@ -127,20 +137,29 @@ def follow_up_line(tasks_project: str | None, has_tasks: bool) -> str | None:
     return None
 
 
+def deliverables_line(row: dict[str, Any], has_documents: bool) -> str | None:
+    """Where deliverables go: documents of the person when the session holds them, else None."""
+    if not has_documents:
+        return None
+    return DELIVERABLES.format(person=row["person_id"], id=row["id"])
+
+
 def first_prompt(
     row: dict[str, Any],
     work: Path | None = None,
     *,
     resumed: bool = False,
     has_tasks: bool = False,
+    has_documents: bool = False,
     inbox_gone: Iterable[str] = (),
 ) -> str:
     """The first message of a new session.
 
     ``resumed`` is True when the assignment ran before but its scratch
     directory, with its session, is gone. ``has_tasks`` is True when the
-    session holds the ``tasks`` server. ``inbox_gone`` names the files of
-    ``inbox/`` that went with the scratch directory.
+    session holds the ``tasks`` server, and ``has_documents`` when it holds
+    the ``documents`` server. ``inbox_gone`` names the files of ``inbox/``
+    that went with the scratch directory.
     """
     spec = row.get("spec") or {}
     lines = [SCRATCH_LOST] if resumed else []
@@ -161,6 +180,9 @@ def first_prompt(
         lines.append("Repositories in scope: " + ", ".join(repos) + ".")
         if work is not None:
             lines += clone_lines(repos, work)
+    deliverables = deliverables_line(row, has_documents)
+    if deliverables:
+        lines.append(deliverables)
     follow_ups = follow_up_line(spec.get("tasks_project"), has_tasks)
     if follow_ups:
         lines.append(follow_ups)
