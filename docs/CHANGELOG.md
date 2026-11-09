@@ -6,6 +6,15 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Comments on a definition.** In the viewer, click the `+` beside a line of
+  the definition of a saved assignment or a run, and write what to change.
+  Joshua reads the comments with the new tool `assignment_comments`, changes
+  the spec, and resolves each one with `resolve_comment`. The definition
+  shows its lines with numbers, the open comments under their lines, a
+  `line changed` mark when a line changed, and the resolved comments in a
+  group. The assignments container stores the comments in the new table
+  `assignments.comment`, and the read API gets the comment routes. See
+  [assignments.md](assignments.md#comments-on-a-definition).
 - **An open viewer can belong to a member.** `viewer.anonymous` now also
   takes a person id. A request with no password is then served as that
   member, as if they signed in: their profile, attachments, assignments, and

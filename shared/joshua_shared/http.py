@@ -1,7 +1,7 @@
 """Outbound HTTP client that carries this container's fleet identity token.
 
 ``FleetClient`` wraps ``httpx.AsyncClient`` and adds ``Authorization: Bearer
-<token>`` to every request. ``post_json`` and ``get_json`` retry on connection
+<token>`` to every request. ``post_json``, ``get_json``, and ``delete`` retry on connection
 errors only — never on a 4xx or 5xx response — with exponential backoff, up to
 three attempts. Each request logs its ``status`` and ``duration_ms``.
 """
@@ -72,6 +72,10 @@ class FleetClient:
     async def get_json(self, url: str, **kwargs: Any) -> httpx.Response:
         """GET a URL and return the response."""
         return await self._request("GET", url, **kwargs)
+
+    async def delete(self, url: str, **kwargs: Any) -> httpx.Response:
+        """DELETE a URL and return the response."""
+        return await self._request("DELETE", url, **kwargs)
 
     def stream(
         self, method: str, url: str, **kwargs: Any

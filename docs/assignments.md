@@ -32,7 +32,7 @@ container holds those, and no secret that core holds:
 ## The tools
 
 The container serves MCP at `http://assignments:8000/mcp`. The gateway calls
-it for a person, with that person's bearer. Joshua gets nine tools:
+it for a person, with that person's bearer. Joshua gets eleven tools:
 
 | Tool | What it does |
 |---|---|
@@ -45,6 +45,8 @@ it for a person, with that person's bearer. Joshua gets nine tools:
 | `save_assignment(name, spec)` | Checks the spec as `start_assignment` does, and stores it as the saved assignment `name` of the person. A saved assignment with the same name gets the new spec. Returns the id, the name, and the notes. |
 | `list_saved_assignments()` | The person's saved assignments, the newest first, each with its name, title, `runs`, and `last_run` (`id`, `status`, `finished_at`, or null). |
 | `delete_saved_assignment(name)` | Deletes one saved assignment. Its runs stay. |
+| `assignment_comments(saved, id)` | The open comments of the person on the definition of the saved assignment `saved` (a name) or of the run `id`. Each has `id`, `line_no`, `line_text`, `line_now`, `stale`, `body`, and `created_at`. The answer also has the spec and the `definition`. See [comments on a definition](#comments-on-a-definition). |
+| `resolve_comment(comment_id, resolution)` | Marks one open comment of the person resolved, with one line (at most 300 characters) on what was done. |
 
 The state is what a person sees. The status is the detail:
 
@@ -58,7 +60,7 @@ A rejected call returns `{"status": "rejected", "reason", "message"}`. The
 reasons are `disabled`, `invalid_spec`, `unknown_model`, `invalid_repo`,
 `repo_not_allowed`, `limits_unknown`, `invalid_status`, `invalid_state`,
 `invalid_arguments`,
-`not_waiting`, `finished`, `not_raised`, and `not_found`.
+`not_waiting`, `finished`, `not_raised`, `not_found`, and `resolved`.
 
 ### Who may call
 
@@ -67,7 +69,8 @@ reasons are `disabled`, `invalid_spec`, `unknown_model`, `invalid_repo`,
 - A person sees only their own assignments. Another person's assignment is
   `404 not found`, the same as an id that does not exist.
 - `ADDON_TOKEN` names no person. It may use `assignment_status` and
-  `list_assignments` for every assignment. Every other tool gives it `403`.
+  `list_assignments` for every assignment. Every other tool, also each
+  comment tool, gives it `403`.
 - A missing or wrong bearer gets `401` on every route except `/healthz` and
   `/readyz`. A fleet token is never a bearer of `/mcp`.
 
@@ -417,6 +420,9 @@ An assignment has four parts, and all four are in the store:
 - **The report**: the document that the person and Joshua read when the
   assignment stops, in Markdown.
 
+A person can comment on a line of the definition in the viewer (see
+[comments on a definition](#comments-on-a-definition)).
+
 `assignment_status` gives all four. None of them is in the wiki, so the
 memory index never holds them. The scratch directory is not an output: the
 container removes it.
@@ -629,13 +635,17 @@ the destination, never the text or a token.
 
 The container keeps its rows in the shared Postgres, in the schema
 `assignments`, apart from the tables of core. It makes the schema at start:
-the tables `assignment`, `checkpoint`, `slice`, and `saved`. A row of
+the tables `assignment`, `checkpoint`, `slice`, `saved`, and `comment`. A row of
 `saved` holds the person, the name, and the spec of a saved assignment. The
 column `saved_id` of `assignment` names the saved assignment of a run, and
 becomes null when that saved assignment is deleted. The row of an assignment
 holds the plan, the report, and the outputs (`plan`, `plan_at`, `report`,
 `report_at`, `outputs`). The column `page_path` stays for the rows of an
-earlier release, and nothing writes it. The schema is additive only. `make backup` dumps the whole database, so a backup holds it.
+earlier release, and nothing writes it. A row of `comment` holds one comment
+of a person on a line of a definition: `saved_id` or `assignment_id` (one of
+the two, never both), `target` (`definition`), `line_no`, `line_text`,
+`body`, `created_at`, `resolved_at`, and `resolution`. The comments of a
+saved assignment or a run go when it is deleted. The schema is additive only. `make backup` dumps the whole database, so a backup holds it.
 
 Each store operation takes its own connection from a pool, so the manager can
 serve the gateway and the runner at the same time. An operation that starts
@@ -682,14 +692,21 @@ it exits at start and its log says why. On Kubernetes, see the chart
 
 ## The read API
 
-The viewer shows a person their assignments. It reads them from four JSON
-routes beside `/mcp`. The routes only read: every other method gets `405`.
+The viewer shows a person their assignments. It reads them from JSON routes
+beside `/mcp`. The only writes are the comments on a definition. Any other
+method gets `405`.
 
 ```
-GET /v1/assignments?person=<id>&state=<queued|in_progress|completed>&limit=<1..200>
-GET /v1/assignments/{id}?person=<id>
-GET /v1/saved?person=<id>
-GET /v1/saved/{id}?person=<id>
+GET    /v1/assignments?person=<id>&state=<queued|in_progress|completed>&limit=<1..200>
+GET    /v1/assignments/{id}?person=<id>
+GET    /v1/saved?person=<id>
+GET    /v1/saved/{id}?person=<id>
+GET    /v1/assignments/{id}/comments?person=<id>
+POST   /v1/assignments/{id}/comments?person=<id>
+DELETE /v1/assignments/{id}/comments/{comment_id}?person=<id>
+GET    /v1/saved/{id}/comments?person=<id>
+POST   /v1/saved/{id}/comments?person=<id>
+DELETE /v1/saved/{id}/comments/{comment_id}?person=<id>
 ```
 
 Who may call:
@@ -721,16 +738,21 @@ item = {
 }
 list   = {"items": [item, ...]}
 detail = item + {
-  "spec": object, "plan": str|null, "plan_at": iso|null,
+  "spec": object, "definition": str, "comments": [comment, ...], "open_comments": int,
+  "plan": str|null, "plan_at": iso|null,
   "report": str|null, "report_at": iso|null,
   "outputs": [{"kind", "ref", "title", "at"}],
   "checkpoints": [{"at": iso, "note": str}],
   "summary": str|null, "follow_ups": list|null, "answer": str|null, "error": str|null
 }
 saved_item   = {"id", "name", "title", "spec", "created_at", "updated_at", "runs": int,
-                "last_run": {"id", "status", "finished_at"}|null}
+                "last_run": {"id", "status", "finished_at"}|null, "open_comments": int}
 saved_list   = {"items": [saved_item, ...]}
-saved_detail = saved_item + {"runs_list": [item, ...]}
+saved_detail = saved_item + {"runs_list": [item, ...], "definition": str,
+                             "comments": [comment, ...]}
+comment      = {"id": int, "target": "definition", "line_no": int, "line_text": str,
+                "body": str, "created_at": iso, "resolved_at": iso|null,
+                "resolution": str|null, "stale": bool}
 ```
 
 - `GET /v1/assignments` gives a `list`, the newest first. `state` filters,
@@ -750,6 +772,39 @@ saved_detail = saved_item + {"runs_list": [item, ...]}
 - `next_step` comes from the plan: the first unticked `[ ]` line that holds
   `**Next:**`, else the first unticked line, with no check box and no mark,
   at most 300 characters, or null. A list thus needs no detail call.
+- `definition` is the spec as YAML text. The line numbers of the comments
+  count its lines. `comments` holds every comment of the person on it, the
+  oldest first, and `open_comments` counts the comments that are not
+  resolved.
+
+### Comments on a definition
+
+A person comments on one line of the definition of a saved assignment or of
+a run, in the viewer. Joshua reads the comments, changes the spec, and
+resolves them. Only Joshua changes a definition.
+
+The definition is the spec as YAML from one function of the container, which
+the read API and the tools both use, so a line number means the same line
+everywhere. The keys come in a fixed order (`title`, `goal`, `model`,
+`budget`, `max_turns`, `working_time`, `repos`, `tools`, `tasks_project`,
+`report_to`, `dry_run`, then any other key in alphabetical order). `goal` is
+a block scalar, one line of the goal to one line of YAML.
+
+- `GET .../comments` gives `{"items": [comment, ...]}`, the oldest first.
+- `POST .../comments` takes `{"line_no", "line_text", "body"}` and gives the
+  new `comment` with `201`. `line_no` is a line of the definition now (from
+  1). `line_text` is the line as the person saw it. `body` is 1 to 2000
+  characters. A bad value is `400`. A definition holds at most 200 open
+  comments; one more is `409`.
+- `DELETE .../comments/{comment_id}` deletes an open comment and gives
+  `204`. A resolved comment stays (`409`).
+- The comment is written as the person that `person` names, on a row of that
+  person only. A row or a comment of another person is `404`, the same as
+  one that does not exist. So only the author deletes a comment.
+- `stale` is true when the line at `line_no` of the definition now is not
+  `line_text`: the definition changed after the comment.
+- A body is text from a person. The container stores it as it is, and the
+  viewer escapes it.
 
 To set it up with compose, do nothing more: compose gives the container the
 `JOSHUA_TOKEN_VIEWER` of `.env`, the same value that the viewer holds. On
@@ -789,7 +844,12 @@ assignments tools, `internet`, and `schedule_task`. The page tells Joshua:
   line;
 - when the person wants a job to be repeatable, to save it with
   `save_assignment` and start it by name. A schedule is a scheduled task
-  whose prompt starts the saved assignment.
+  whose prompt starts the saved assignment;
+- when the person left comments on a definition, to read them with
+  `assignment_comments`, to save the changed spec (or start a new run with
+  it), to resolve each with `resolve_comment` and one line, and to tell the
+  person in short. A comment is the request of the person, because only the
+  person who signed in to the viewer can write one.
 
 ## Configuration
 

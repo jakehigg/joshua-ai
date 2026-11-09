@@ -18,8 +18,9 @@ from __future__ import annotations
 import asyncio
 import functools
 from collections.abc import Awaitable, Callable, Collection, Coroutine
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Concatenate, Protocol
+from typing import Any, Concatenate, Literal, Protocol
 
 from joshua_shared.log import get_logger
 from psycopg.rows import dict_row
@@ -60,6 +61,10 @@ JSON_FIELDS = frozenset({"spec", "stopped_at_limits", "follow_ups", "outputs"})
 MAX_OUTPUT_KIND = 40
 MAX_OUTPUT_REF = 500
 MAX_OUTPUT_TITLE = 200
+# The targets of a comment, and the caps of one comment.
+COMMENT_TARGETS = ("definition",)
+MAX_COMMENT_BODY = 2000
+MAX_COMMENT_RESOLUTION = 300
 # The columns ``update`` may set.
 UPDATABLE = frozenset(
     {
@@ -142,6 +147,28 @@ CREATE INDEX IF NOT EXISTS idx_assignment_saved
 CREATE INDEX IF NOT EXISTS idx_assignment_status
     ON assignments.assignment (status, id);
 
+-- A comment of a person on one line of a definition: of a saved assignment
+-- or of a run, never both. ``line_text`` is the line as it was, so a reader
+-- can see when the line changed. Joshua resolves a comment with one line.
+CREATE TABLE IF NOT EXISTS assignments.comment (
+    id            BIGSERIAL PRIMARY KEY,
+    person_id     TEXT NOT NULL,
+    saved_id      BIGINT REFERENCES assignments.saved(id) ON DELETE CASCADE,
+    assignment_id BIGINT REFERENCES assignments.assignment(id) ON DELETE CASCADE,
+    target        TEXT NOT NULL,
+    line_no       INT NOT NULL,
+    line_text     TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at   TIMESTAMPTZ,
+    resolution    TEXT,
+    CONSTRAINT comment_one_parent CHECK ((saved_id IS NULL) <> (assignment_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_comment_saved
+    ON assignments.comment (saved_id, id) WHERE saved_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_comment_assignment
+    ON assignments.comment (assignment_id, id) WHERE assignment_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS assignments.checkpoint (
     id            BIGSERIAL PRIMARY KEY,
     assignment_id BIGINT NOT NULL REFERENCES assignments.assignment(id) ON DELETE CASCADE,
@@ -203,6 +230,18 @@ def saved_row(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+@dataclass(frozen=True)
+class Parent:
+    """What a comment belongs to: a saved assignment or a run, by its id."""
+
+    kind: Literal["saved", "assignment"]
+    id: int
+
+    @property
+    def column(self) -> str:
+        return "saved_id" if self.kind == "saved" else "assignment_id"
+
+
 class Store(Protocol):
     """What the manager needs from a store. Each row is a dict of its columns."""
 
@@ -262,6 +301,33 @@ class Store(Protocol):
     async def delete_saved(self, person_id: str, name: str) -> bool: ...
 
     async def saved_names(self, saved_ids: Collection[int]) -> dict[int, str]: ...
+
+    async def add_comment(
+        self,
+        person_id: str,
+        parent: Parent,
+        *,
+        target: str,
+        line_no: int,
+        line_text: str,
+        body: str,
+    ) -> dict[str, Any]: ...
+
+    async def comments(
+        self, person_id: str, parent: Parent, *, open_only: bool = False
+    ) -> list[dict[str, Any]]: ...
+
+    async def get_comment(self, person_id: str, comment_id: int) -> dict[str, Any] | None: ...
+
+    async def delete_comment(self, person_id: str, parent: Parent, comment_id: int) -> bool: ...
+
+    async def resolve_comment(
+        self, person_id: str, comment_id: int, resolution: str
+    ) -> dict[str, Any] | None: ...
+
+    async def open_comment_counts(
+        self, person_id: str, saved_ids: Collection[int]
+    ) -> dict[int, int]: ...
 
     async def counts(self) -> dict[str, int]: ...
 
@@ -620,6 +686,97 @@ class PgStore:
             )
             rows = await cur.fetchall()
         return {int(row["id"]): row["name"] for row in rows}
+
+    @shielded
+    async def add_comment(
+        self,
+        person_id: str,
+        parent: Parent,
+        *,
+        target: str,
+        line_no: int,
+        line_text: str,
+        body: str,
+    ) -> dict[str, Any]:
+        """Store one comment of the person on a line of the definition of ``parent``."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                f"INSERT INTO assignments.comment (person_id, {parent.column}, target, "
+                "line_no, line_text, body) VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+                (person_id, parent.id, target, line_no, line_text, body),
+            )
+            row = await cur.fetchone()
+        assert row is not None
+        return dict(row)
+
+    @shielded
+    async def comments(
+        self, person_id: str, parent: Parent, *, open_only: bool = False
+    ) -> list[dict[str, Any]]:
+        """The comments of the person on ``parent``, the oldest first."""
+        where = " AND resolved_at IS NULL" if open_only else ""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                f"SELECT * FROM assignments.comment WHERE person_id = %s "
+                f"AND {parent.column} = %s{where} ORDER BY id",
+                (person_id, parent.id),
+            )
+            rows = await cur.fetchall()
+        return [dict(row) for row in rows]
+
+    @shielded
+    async def get_comment(self, person_id: str, comment_id: int) -> dict[str, Any] | None:
+        """One comment of the person, or None. A comment of another person is None."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM assignments.comment WHERE id = %s AND person_id = %s",
+                (comment_id, person_id),
+            )
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    @shielded
+    async def delete_comment(self, person_id: str, parent: Parent, comment_id: int) -> bool:
+        """Delete one open comment of the person on ``parent``. False when there is none."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                f"DELETE FROM assignments.comment WHERE id = %s AND person_id = %s "
+                f"AND {parent.column} = %s AND resolved_at IS NULL RETURNING id",
+                (comment_id, person_id, parent.id),
+            )
+            row = await cur.fetchone()
+        return row is not None
+
+    @shielded
+    async def resolve_comment(
+        self, person_id: str, comment_id: int, resolution: str
+    ) -> dict[str, Any] | None:
+        """Mark one open comment of the person resolved. None when there is none."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "UPDATE assignments.comment SET resolved_at = now(), resolution = %s "
+                "WHERE id = %s AND person_id = %s AND resolved_at IS NULL RETURNING *",
+                (resolution, comment_id, person_id),
+            )
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    @shielded
+    async def open_comment_counts(
+        self, person_id: str, saved_ids: Collection[int]
+    ) -> dict[int, int]:
+        """The number of open comments of the person on each saved assignment that has one."""
+        if not saved_ids:
+            return {}
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "SELECT saved_id, count(*) AS n FROM assignments.comment "
+                "WHERE person_id = %s AND saved_id = ANY(%s) AND resolved_at IS NULL "
+                "GROUP BY saved_id",
+                (person_id, list(saved_ids)),
+            )
+            rows = await cur.fetchall()
+        return {int(row["saved_id"]): int(row["n"]) for row in rows}
 
     @shielded
     async def counts(self) -> dict[str, int]:

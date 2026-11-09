@@ -8,8 +8,8 @@ fleet token of a caller in ``assignments.read_callers``. Every other path
 takes only a bearer of ``/mcp``. A bearer from ``ASSIGNMENTS_TOKENS`` names
 a person. The ``ADDON_TOKEN`` bearer names no person: it may use
 ``assignment_status`` and ``list_assignments`` for every assignment, and
-every other tool gives it
-"403 forbidden". A person must be a member, and sees only their own
+every other tool, also each comment tool, gives it "403 forbidden". A
+person must be a member, and sees only their own
 assignments: another person's assignment is "404 not found".
 """
 
@@ -28,7 +28,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from joshua_assignments.manager import Manager
+from joshua_assignments.manager import Manager, rejected
 from joshua_assignments.read_api import READ_PREFIX, ReadApi, read_caller
 from joshua_assignments.settings import Caller, Settings
 from joshua_assignments.store import Store
@@ -156,6 +156,33 @@ async def delete_saved_assignment(name: str, ctx: Context) -> dict:
     """Delete one saved assignment. Its runs stay."""
     person = _person(ctx)
     return await get_manager().delete_saved(person, name)
+
+
+@mcp.tool()
+async def assignment_comments(
+    ctx: Context, saved: str | None = None, id: int | None = None
+) -> dict:
+    """The open comments of the person on a definition, each with its line.
+
+    Give saved (the name of a saved assignment) or id (a run), not both. A
+    comment is a request of the person on one line: line_no and line_text
+    say which line it was, line_now what the line is now, and stale is true
+    when the line changed. The answer also has the spec. Apply a comment on
+    a saved assignment with save_assignment, and one on a run by starting a
+    new run with the changed spec. Then call resolve_comment for each.
+    """
+    person = _person(ctx)
+    if (saved is None) == (id is None):
+        return rejected("invalid_arguments", "give saved (a name) or id, not both")
+    row = await _own(Caller(person=person), id) if id is not None else None
+    return await get_manager().open_comments(person, saved=saved, row=row)
+
+
+@mcp.tool()
+async def resolve_comment(comment_id: int, resolution: str, ctx: Context) -> dict:
+    """Mark one comment resolved. resolution is one line on what you did."""
+    person = _person(ctx)
+    return await get_manager().resolve_comment(person, comment_id, resolution)
 
 
 @mcp.tool()
@@ -312,6 +339,19 @@ mcp.custom_route(f"{READ_PREFIX}assignments/{{assignment_id:int}}", methods=["GE
 )
 mcp.custom_route(f"{READ_PREFIX}saved", methods=["GET"])(_read_route("saved_list"))
 mcp.custom_route(f"{READ_PREFIX}saved/{{saved_id:int}}", methods=["GET"])(_read_route("saved"))
+mcp.custom_route(
+    f"{READ_PREFIX}assignments/{{assignment_id:int}}/comments", methods=["GET", "POST"]
+)(_read_route("assignment_comments"))
+mcp.custom_route(
+    f"{READ_PREFIX}assignments/{{assignment_id:int}}/comments/{{comment_id:int}}",
+    methods=["DELETE"],
+)(_read_route("assignment_comment"))
+mcp.custom_route(f"{READ_PREFIX}saved/{{saved_id:int}}/comments", methods=["GET", "POST"])(
+    _read_route("saved_comments")
+)
+mcp.custom_route(
+    f"{READ_PREFIX}saved/{{saved_id:int}}/comments/{{comment_id:int}}", methods=["DELETE"]
+)(_read_route("saved_comment"))
 
 
 def build_app(

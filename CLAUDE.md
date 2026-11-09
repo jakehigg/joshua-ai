@@ -158,10 +158,13 @@ Route allowlists, by default:
   `JOSHUA_TOKEN_ASSIGNMENTS`, sends its events to channels `POST /v1/events`.
   `docs/assignments.md` has the design.
 - assignments `GET /v1/assignments`, `GET /v1/assignments/{id}`,
-  `GET /v1/saved`, `GET /v1/saved/{id}`: `assignments.read_callers` (default
+  `GET /v1/saved`, `GET /v1/saved/{id}`, and the comment routes
+  (`GET`, `POST .../comments`, `DELETE .../comments/{comment_id}` under an
+  assignment or a saved one): `assignments.read_callers` (default
   `viewer`), with the fleet token of the caller. `person` names the person
-  (400 when missing); a row of another person is 404. A fleet token is never
-  a bearer of `/mcp`.
+  (400 when missing); a row or a comment of another person is 404. A comment
+  is written as that person, and only its author deletes it. A fleet token is
+  never a bearer of `/mcp`.
 
 `docs/contracts.md` has every route and body.
 

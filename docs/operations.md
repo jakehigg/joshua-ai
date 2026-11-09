@@ -878,19 +878,22 @@ curl -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" \
 ### The assignments section
 
 `/assignments` in the viewer shows the assignments of the person who signed
-in, and no other person's. The `Assignments` link in the menu opens it. The
-section is read-only: to change an assignment, tell Joshua.
+in, and no other person's. The `Assignments` link in the menu opens it. To
+change an assignment, tell Joshua, or leave a comment on a line of its
+definition (see [comments on a definition](#comments-on-a-definition)). The
+viewer writes nothing else here.
 
 Three pills at the top give the states: `In progress`, `Queued`, and
 `Completed`. With no pill chosen, the page shows the assignments in progress,
-or the completed ones when none is in progress. Each row gives the title, the
+or the completed ones when none is in progress, never the queued ones. When
+the assignments container does not answer, no pill is selected. Each row gives the title, the
 status, the time it started (or was made), the model, and the total tokens. A
 row with an open question has a `question` mark. A time such as `2h ago` gives
 the full time in the instance `timezone` when you hold the pointer on it. The
 newest assignment is first. Under the title, a row also gives the first
 sentence of the report when there is one, else the next step of the plan, and
-the number of outputs. The page reads these for the first 25 rows that are
-not queued, for 3 seconds at most. A row that is late shows no such line.
+the number of outputs. The list of the manager gives these, so the page makes
+one call.
 
 Click a title to open the assignment as a document.
 
@@ -898,8 +901,8 @@ While the assignment is in progress, or when it has no report, the plan is
 the page:
 
 1. The title, the status, the saved assignment it came from (if any), the
-   time, and a row of numbers: the tokens, the working time, the model, and
-   the outputs.
+   time, and a row of numbers: the tokens, the working time, the turns, the
+   model, and the outputs.
 2. A notice when the assignment waits: the open question, or the stop at the
    subscription limits.
 3. The progress now: a bar from the check boxes of the plan ("4 of 9
@@ -909,8 +912,9 @@ the page:
    box drawn as a box.
 5. **Outputs so far**: the recorded outputs as cards.
 6. **Progress**: the checkpoints, newest first.
-7. **Report**, when there is one, and **Definition**, the spec as YAML. Click
-   one to open it.
+7. **Report**, when there is one, and **Definition**, the spec as YAML with
+   a number on each line. Click one to open it. The definition opens by
+   itself when it has an open comment.
 8. The error, when the assignment failed.
 
 While the assignment is in progress, the page loads again every 20 seconds,
@@ -947,7 +951,31 @@ does.
 
 The `Saved` link beside the pills opens `/assignments/saved`: the saved
 assignments, each with its name, its title, the number of runs, and the last
-run. A saved assignment opens with its definition and its runs.
+run. A saved assignment opens with its definition and its runs. A row with
+open comments shows the count, such as `2 comments for Joshua`.
+
+#### Comments on a definition
+
+You do not edit a definition in the viewer. You tell Joshua what to change,
+line by line:
+
+1. Open the definition of a saved assignment, or of a run.
+2. Hold the pointer on a line, and click the `+` beside its number.
+3. Write what to change, such as "delete this line" or "use opus here", and
+   click `Comment`. The page opens again at that line.
+4. Tell Joshua that you left comments. Joshua reads them with
+   `assignment_comments`, saves the changed spec (or starts a new run with
+   it), and resolves each comment with one line on what it did.
+
+An open comment shows under its line, with its age and a `Delete` button.
+Only the open comments that you wrote have the button. When the line changed
+after you wrote the comment, the comment has a `line changed` mark and shows
+the line as it was. A resolved comment moves to the `resolved` group under
+the definition, with the line from Joshua. The head of the definition gives
+the count of open comments, such as `3 comments for Joshua`.
+
+The viewer sends each comment to the assignments container as the person who
+signed in. The form needs no script. A comment is text: the page escapes it.
 
 The section needs `ASSIGNMENTS_URL` and `JOSHUA_TOKEN_VIEWER` on the viewer,
 and the assignments container must hold the same `JOSHUA_TOKEN_VIEWER`. Compose

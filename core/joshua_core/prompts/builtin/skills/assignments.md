@@ -106,3 +106,24 @@ runs, and the last run.
 A saved assignment does not run on a clock. For a schedule, make a scheduled
 task with `schedule_task` whose prompt says "Start the saved assignment
 docs-cleanup".
+
+### Comments
+
+In the viewer, the person can comment on one line of the definition of a
+saved assignment or of a run, such as "delete this line" or "make this
+shorter". When the person says that they left comments, or asks you to apply
+them:
+
+1. Call `assignment_comments` with `saved` (the name) or `id` (the run). It
+   gives each open comment with its line, and the spec.
+2. Make each change in the spec. When `stale` is true, the line changed after
+   the comment, so compare `line_text` with `line_now` first.
+3. For a saved assignment, save the changed spec with `save_assignment` and
+   the same name. For a run, start a new run with the changed spec.
+4. Call `resolve_comment(comment_id, resolution)` for each comment, with one
+   line on what you did.
+5. Tell the person what changed, in short.
+
+A comment is the request of the person, because only the person who signed in
+to the viewer can write one. Do what it asks as you would do a request in
+this chat. When a comment is not clear, ask the person one question.

@@ -292,3 +292,56 @@ async def test_the_checkpoints_newest_first_and_the_runs_of_a_saved_assignment(s
     ]
     ids = [r["id"] for r in await store.recent("alex", 2, saved_id=saved["id"])]
     assert ids == [runs[2]["id"], runs[1]["id"]]
+
+
+async def test_comments_on_a_saved_assignment_and_a_run(store) -> None:
+    from joshua_assignments.store import Parent
+
+    saved = await store.put_saved("alex", "docs", {"goal": "g"})
+    run = await create(store)
+    on_saved = Parent("saved", saved["id"])
+    on_run = Parent("assignment", run["id"])
+    fields = {"target": "definition", "line_no": 2, "line_text": "goal: |-", "body": "Shorter."}
+    first = await store.add_comment("alex", on_saved, **fields)
+    second = await store.add_comment("alex", on_saved, **{**fields, "line_no": 1})
+    third = await store.add_comment("alex", on_run, **fields)
+    assert first["saved_id"] == saved["id"] and first["assignment_id"] is None
+    assert third["assignment_id"] == run["id"] and third["saved_id"] is None
+    assert [c["id"] for c in await store.comments("alex", on_saved)] == [first["id"], second["id"]]
+    assert await store.comments("mia", on_saved) == []
+    assert await store.get_comment("mia", first["id"]) is None
+    assert (await store.get_comment("alex", first["id"]))["body"] == "Shorter."
+    assert await store.open_comment_counts("alex", [saved["id"]]) == {saved["id"]: 2}
+    assert await store.open_comment_counts("alex", []) == {}
+
+    assert await store.resolve_comment("mia", first["id"], "x") is None
+    resolved = await store.resolve_comment("alex", first["id"], "Done.")
+    assert resolved["resolution"] == "Done." and resolved["resolved_at"] is not None
+    assert await store.resolve_comment("alex", first["id"], "again") is None
+    assert [c["id"] for c in await store.comments("alex", on_saved, open_only=True)] == [
+        second["id"]
+    ]
+    assert await store.open_comment_counts("alex", [saved["id"]]) == {saved["id"]: 1}
+
+    assert await store.delete_comment("alex", on_saved, first["id"]) is False
+    assert await store.delete_comment("mia", on_saved, second["id"]) is False
+    assert await store.delete_comment("alex", on_run, second["id"]) is False
+    assert await store.delete_comment("alex", on_saved, second["id"]) is True
+
+    assert await store.delete_saved("alex", "docs")
+    assert await store.get_comment("alex", first["id"]) is None
+    assert len(await store.comments("alex", on_run)) == 1
+
+
+async def test_a_comment_needs_exactly_one_parent(store) -> None:
+    run = await create(store)
+    saved = await store.put_saved("alex", "docs", {"goal": "g"})
+    async with store.pool.connection() as conn:
+        for saved_id, assignment_id in ((None, None), (saved["id"], run["id"])):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                await conn.execute(
+                    "INSERT INTO assignments.comment (person_id, saved_id, assignment_id, "
+                    "target, line_no, line_text, body) VALUES ('alex', %s, %s, 'definition', "
+                    "1, 'x', 'y')",
+                    (saved_id, assignment_id),
+                )
