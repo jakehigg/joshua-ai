@@ -99,8 +99,14 @@ async def _own(caller: Caller, assignment_id: int) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def start_assignment(spec: dict[str, Any], ctx: Context) -> dict:
+async def start_assignment(
+    ctx: Context, spec: dict[str, Any] | None = None, saved: str | None = None
+) -> dict:
     """Start a long job that runs in the background. Returns id, status, and title at once.
+
+    Give spec, or saved: the name of a saved assignment. With saved, a spec
+    beside it replaces only the top-level fields that it gives, for this run
+    (such as {"model": "opus"}).
 
     spec is the whole brief; the assignment sees nothing else of the chat:
     goal (required): what to do, what done means, and where each result goes.
@@ -119,7 +125,33 @@ async def start_assignment(spec: dict[str, Any], ctx: Context) -> dict:
     """
     person = _person(ctx)
     conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
-    return await get_manager().start(person, spec, conversation)
+    return await get_manager().start(person, spec, conversation, saved=saved)
+
+
+@mcp.tool()
+async def save_assignment(name: str, spec: dict[str, Any], ctx: Context) -> dict:
+    """Save a spec with a name, to start it again later by name. Returns id, name, and notes.
+
+    name is 2 to 60 lower case letters, digits, and hyphens, such as
+    docs-cleanup. The spec is checked as start_assignment checks it. A saved
+    assignment with the same name gets the new spec. Nothing runs now.
+    """
+    person = _person(ctx)
+    return await get_manager().save(person, name, spec)
+
+
+@mcp.tool()
+async def list_saved_assignments(ctx: Context) -> dict:
+    """The person's saved assignments, each with its name, title, runs, and last_run."""
+    person = _person(ctx)
+    return await get_manager().list_saved(person)
+
+
+@mcp.tool()
+async def delete_saved_assignment(name: str, ctx: Context) -> dict:
+    """Delete one saved assignment. Its runs stay."""
+    person = _person(ctx)
+    return await get_manager().delete_saved(person, name)
 
 
 @mcp.tool()
@@ -131,7 +163,8 @@ async def assignment_status(id: int, ctx: Context) -> dict:
     in_progress, or completed. The result also has the title, the plan of
     the worker, the report and report_at, the recorded outputs, the last
     checkpoint, the usage, the turns, the open question, the limits at the
-    stop, the summary, and the error. Read the report here.
+    stop, the summary, the error, and saved: the saved assignment that it
+    started from, or null. Read the report here.
     """
     caller = _caller(ctx)
     return await get_manager().status(await _own(caller, id))
@@ -141,7 +174,7 @@ async def assignment_status(id: int, ctx: Context) -> dict:
 async def list_assignments(
     ctx: Context, limit: int = 10, status: str | None = None, state: str | None = None
 ) -> dict:
-    """The person's assignments, the newest first, each with its title and state.
+    """The person's assignments, the newest first, each with its title, state, and saved.
 
     limit is 1 to 100. status filters by status. state filters by state:
     queued, in_progress, or completed.
