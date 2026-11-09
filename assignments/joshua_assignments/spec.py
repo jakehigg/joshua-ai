@@ -29,6 +29,9 @@ MAX_TITLE = 120
 # A title that ``title_of`` makes from the goal is at most this long.
 TITLE_CHARS = 80
 _MCP_NAME_RE = re.compile(MCP_NAME_PATTERN)
+# The name of a saved assignment: lower case letters, digits, and hyphens,
+# 2 to 60 characters, unique for a person.
+SAVED_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,59}\Z")
 
 
 class SpecRefused(Exception):
@@ -100,6 +103,17 @@ class AssignmentSpec(_Spec):
             if not _MCP_NAME_RE.match(name):
                 raise ValueError("each tool is the name of an MCP server, such as gitlab")
         return value
+
+
+def saved_name(raw: Any) -> str:
+    """``raw`` as the name of a saved assignment, in lower case. Raises ValueError."""
+    name = raw.strip().lower() if isinstance(raw, str) else ""
+    if not SAVED_NAME_RE.match(name):
+        raise ValueError(
+            "the name of a saved assignment is 2 to 60 lower case letters, digits, "
+            "and hyphens, such as docs-cleanup"
+        )
+    return name
 
 
 def check_duration(value: str) -> int:

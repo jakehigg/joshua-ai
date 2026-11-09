@@ -226,6 +226,9 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "call `assignment_status`",
         "the report",
         "### Saved assignments",
+        "save_assignment",
+        'start_assignment(saved="docs-cleanup")',
+        "does not run on a clock",
         "Always give the cost",
     ):
         assert words in page, words

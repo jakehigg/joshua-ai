@@ -1,4 +1,4 @@
-"""The manager: the rules behind the six tools.
+"""The manager: the rules behind the tools.
 
 The manager validates a spec, stores the assignment, and starts it when a
 slot is free. ``assignments.max_concurrent`` counts ``running`` assignments
@@ -13,6 +13,11 @@ are under the ceilings. ``extend_assignment`` starts a ``budget_exceeded`` or
 goes back to the queue and resumes its session with a note that the
 container restarted.
 
+A saved assignment is a spec with a name and no run. ``start`` with
+``saved`` takes the stored spec as the base, and a ``spec`` beside it
+replaces the top-level fields that it gives. The run keeps the id of the
+saved assignment.
+
 A rejected call returns ``{"status": "rejected", "reason", "message"}``. The
 reason is a fixed word.
 """
@@ -20,7 +25,7 @@ reason is a fixed word.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,12 +42,14 @@ from joshua_assignments.spec import (
     MAX_GOAL_CHARS,
     MAX_TURNS,
     AssignmentSpec,
+    Resolved,
     SpecRefused,
     assignment_title,
     check_duration,
     clamp,
     first_error,
     resolve,
+    saved_name,
 )
 from joshua_assignments.store import (
     FINISHED,
@@ -70,8 +77,16 @@ def _iso(value: Any) -> Any:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
-def summary_view(row: dict[str, Any]) -> dict[str, Any]:
-    """The short view of an assignment, for a list."""
+def saved_ref(row: dict[str, Any], names: Mapping[int, str]) -> dict[str, Any] | None:
+    """``{"id", "name"}`` of the saved assignment that the run started from, or None."""
+    saved_id = row.get("saved_id")
+    if saved_id is None or saved_id not in names:
+        return None
+    return {"id": int(saved_id), "name": names[saved_id]}
+
+
+def summary_view(row: dict[str, Any], names: Mapping[int, str] | None = None) -> dict[str, Any]:
+    """The short view of an assignment, for a list. ``names`` names the saved assignments."""
     spec = row.get("spec") or {}
     goal = str(spec.get("goal") or "")
     return {
@@ -84,10 +99,33 @@ def summary_view(row: dict[str, Any]) -> dict[str, Any]:
         "model": spec.get("model"),
         "created_at": _iso(row.get("created_at")),
         "finished_at": _iso(row.get("finished_at")),
+        "saved": saved_ref(row, names or {}),
     }
 
 
-def full_view(row: dict[str, Any], checkpoint: dict[str, Any] | None) -> dict[str, Any]:
+def saved_view(row: dict[str, Any]) -> dict[str, Any]:
+    """A saved assignment, for ``list_saved_assignments``."""
+    last = row.get("last_run")
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "title": assignment_title(row.get("spec")),
+        "runs": int(row.get("runs") or 0),
+        "last_run": (
+            {"id": last["id"], "status": last["status"], "finished_at": _iso(last["finished_at"])}
+            if last
+            else None
+        ),
+        "created_at": _iso(row.get("created_at")),
+        "updated_at": _iso(row.get("updated_at")),
+    }
+
+
+def full_view(
+    row: dict[str, Any],
+    checkpoint: dict[str, Any] | None,
+    names: Mapping[int, str] | None = None,
+) -> dict[str, Any]:
     """The whole state of an assignment, for ``assignment_status``.
 
     ``next_step`` comes from the latest checkpoint note: the text after
@@ -96,7 +134,7 @@ def full_view(row: dict[str, Any], checkpoint: dict[str, Any] | None) -> dict[st
     """
     spec = row.get("spec") or {}
     return {
-        **summary_view(row),
+        **summary_view(row, names),
         "goal": spec.get("goal"),
         "model_id": row.get("model"),
         "budget": spec.get("budget"),
@@ -247,9 +285,8 @@ class Manager:
 
     # --- the tools --------------------------------------------------------
 
-    async def start(
-        self, person: str, raw_spec: Any, conversation_id: str | None = None
-    ) -> dict[str, Any]:
+    def _check(self, raw_spec: Any) -> tuple[AssignmentSpec, Resolved] | dict[str, Any]:
+        """The checked spec and its resolved form, or the rejection."""
         section = self.section
         if not section.enabled:
             return rejected("disabled", "assignments.enabled is false in joshua.yaml")
@@ -260,9 +297,42 @@ class Manager:
         except ValidationError as exc:
             return rejected("invalid_spec", first_error(exc))
         try:
-            resolved = resolve(spec, section)
+            return spec, resolve(spec, section)
         except SpecRefused as exc:
             return rejected(exc.reason, exc.message)
+
+    async def start(
+        self,
+        person: str,
+        raw_spec: Any = None,
+        conversation_id: str | None = None,
+        saved: str | None = None,
+    ) -> dict[str, Any]:
+        """Start an assignment from ``raw_spec``, or from the saved assignment ``saved``.
+
+        With ``saved``, ``raw_spec`` is optional and replaces the top-level
+        fields of the stored spec that it gives.
+        """
+        if not self.section.enabled:
+            return rejected("disabled", "assignments.enabled is false in joshua.yaml")
+        source: dict[str, Any] | None = None
+        if saved is not None:
+            if raw_spec is not None and not isinstance(raw_spec, dict):
+                return rejected("invalid_spec", "spec must be an object")
+            try:
+                name = saved_name(saved)
+            except ValueError as exc:
+                return rejected("invalid_arguments", str(exc))
+            source = await self.store.find_saved(person, name)
+            if source is None:
+                return rejected("not_found", f"there is no saved assignment {name}")
+            raw_spec = {**source["spec"], **(raw_spec or {})}
+        elif raw_spec is None:
+            return rejected("invalid_arguments", "give spec, or the name of a saved assignment")
+        checked = self._check(raw_spec)
+        if isinstance(checked, dict):
+            return checked
+        _, resolved = checked
         refused = await self._refuse_unknown_limits(resolved.spec)
         if refused is not None:
             return refused
@@ -273,6 +343,7 @@ class Manager:
             conversation_id=conversation_id or None,
             spec=resolved.spec,
             model=resolved.model_id,
+            saved_id=source["id"] if source else None,
         )
         logger.info(
             {
@@ -281,11 +352,17 @@ class Manager:
                 "person": person,
                 "model": resolved.spec["model"],
                 "clamped": len(resolved.notes),
+                "saved_id": source["id"] if source else None,
             }
         )
         await self.dispatch()
         current = await self.store.get(row["id"]) or row
         message = f"Assignment {row['id']} is {current['status']}."
+        if source:
+            message = (
+                f"Assignment {row['id']} is {current['status']}. It started from the "
+                f"saved assignment {source['name']}."
+            )
         if resolved.notes:
             message += " " + "; ".join(resolved.notes) + "."
         return {
@@ -297,8 +374,71 @@ class Manager:
             "max_turns": resolved.spec["max_turns"],
             "working_time": resolved.spec["working_time"],
             "notes": resolved.notes,
+            "saved": {"id": source["id"], "name": source["name"]} if source else None,
             "message": message,
         }
+
+    async def save(self, person: str, raw_name: Any, raw_spec: Any) -> dict[str, Any]:
+        """Check ``raw_spec`` as ``start`` does, then store it as the saved assignment ``name``.
+
+        A saved assignment of the person with the same name gets the new spec.
+        The store keeps the spec as given, so a default that changes later
+        applies at the next run.
+        """
+        try:
+            name = saved_name(raw_name)
+        except ValueError as exc:
+            return rejected("invalid_arguments", str(exc))
+        checked = self._check(raw_spec)
+        if isinstance(checked, dict):
+            return checked
+        spec, resolved = checked
+        given = spec.model_dump(mode="json", exclude_unset=True)
+        row = await self.store.put_saved(person, name, given)
+        logger.info(
+            {
+                "message": "saved assignment stored",
+                "saved_id": row["id"],
+                "person": person,
+                "created": bool(row.get("created")),
+            }
+        )
+        verb = "is saved" if row.get("created") else "has a new spec"
+        message = (
+            f"The saved assignment {name} {verb}. Start it with start_assignment(saved={name!r})."
+        )
+        if resolved.notes:
+            message += " At a run, " + "; ".join(resolved.notes) + "."
+        return {
+            "id": row["id"],
+            "name": name,
+            "title": assignment_title(given),
+            "notes": resolved.notes,
+            "message": message,
+        }
+
+    async def list_saved(self, person: str) -> dict[str, Any]:
+        rows = await self.store.list_saved(person)
+        return {"saved": [saved_view(row) for row in rows]}
+
+    async def delete_saved(self, person: str, raw_name: Any) -> dict[str, Any]:
+        try:
+            name = saved_name(raw_name)
+        except ValueError as exc:
+            return rejected("invalid_arguments", str(exc))
+        if not await self.store.delete_saved(person, name):
+            return rejected("not_found", f"there is no saved assignment {name}")
+        logger.info({"message": "saved assignment deleted", "person": person})
+        return {
+            "name": name,
+            "status": "deleted",
+            "message": f"The saved assignment {name} is deleted. Its runs stay.",
+        }
+
+    async def _names(self, rows: list[dict[str, Any]]) -> dict[int, str]:
+        """The names of the saved assignments that ``rows`` started from."""
+        ids = {int(row["saved_id"]) for row in rows if row.get("saved_id") is not None}
+        return await self.store.saved_names(ids)
 
     async def _refuse_unknown_limits(self, spec: dict[str, Any]) -> dict[str, Any] | None:
         """The refusal of ``when_unknown: refuse`` for a spec with no token cap, or None."""
@@ -317,7 +457,7 @@ class Manager:
 
     async def status(self, row: dict[str, Any]) -> dict[str, Any]:
         checkpoint = await self.store.last_checkpoint(row["id"])
-        return full_view(row, checkpoint)
+        return full_view(row, checkpoint, await self._names([row]))
 
     async def recent(
         self, person: str | None, limit: int, status: str | None, state: str | None = None
@@ -329,7 +469,8 @@ class Manager:
         limit = max(1, min(int(limit), MAX_LIST))
         statuses = statuses_of(state) if state is not None else None
         rows = await self.store.recent(person, limit, status, statuses)
-        return {"assignments": [summary_view(row) for row in rows]}
+        names = await self._names(rows)
+        return {"assignments": [summary_view(row, names) for row in rows]}
 
     async def answer(self, row: dict[str, Any], text: str) -> dict[str, Any]:
         text = (text or "").strip()

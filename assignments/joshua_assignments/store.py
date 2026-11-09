@@ -123,6 +123,22 @@ ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS report_at TIMESTAMPT
 ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS outputs JSONB;
 CREATE INDEX IF NOT EXISTS idx_assignment_person
     ON assignments.assignment (person_id, id DESC);
+
+-- A saved assignment: a spec with a name and no run, started by name.
+CREATE TABLE IF NOT EXISTS assignments.saved (
+    id          BIGSERIAL PRIMARY KEY,
+    person_id   TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    spec        JSONB NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (person_id, name)
+);
+-- The saved assignment that a run started from, or NULL.
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS saved_id BIGINT
+    REFERENCES assignments.saved(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_assignment_saved
+    ON assignments.assignment (saved_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_assignment_status
     ON assignments.assignment (status, id);
 
@@ -153,6 +169,40 @@ CREATE TABLE IF NOT EXISTS assignments.slice (
 """
 
 
+# A saved assignment with the count of its runs and its newest run. A run
+# counts only when it belongs to the person of the saved assignment.
+SAVED_SELECT = """
+SELECT s.*, COALESCE(r.runs, 0) AS runs,
+       l.id AS last_run_id, l.status AS last_run_status, l.finished_at AS last_run_finished_at
+FROM assignments.saved s
+LEFT JOIN LATERAL (
+    SELECT count(*) AS runs FROM assignments.assignment a
+    WHERE a.saved_id = s.id AND a.person_id = s.person_id
+) r ON true
+LEFT JOIN LATERAL (
+    SELECT a.id, a.status, a.finished_at FROM assignments.assignment a
+    WHERE a.saved_id = s.id AND a.person_id = s.person_id
+    ORDER BY a.id DESC LIMIT 1
+) l ON true
+WHERE {where}
+ORDER BY s.id DESC
+"""
+
+
+def saved_row(row: dict[str, Any]) -> dict[str, Any]:
+    """A row of ``SAVED_SELECT`` with ``runs`` an int and ``last_run`` a dict or None."""
+    last_id = row.pop("last_run_id", None)
+    last_status = row.pop("last_run_status", None)
+    last_finished = row.pop("last_run_finished_at", None)
+    row["runs"] = int(row.get("runs") or 0)
+    row["last_run"] = (
+        {"id": int(last_id), "status": last_status, "finished_at": last_finished}
+        if last_id is not None
+        else None
+    )
+    return row
+
+
 class Store(Protocol):
     """What the manager needs from a store. Each row is a dict of its columns."""
 
@@ -169,6 +219,7 @@ class Store(Protocol):
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
+        saved_id: int | None = None,
     ) -> dict[str, Any]: ...
 
     async def get(self, assignment_id: int) -> dict[str, Any] | None: ...
@@ -194,6 +245,20 @@ class Store(Protocol):
     async def add_output(self, assignment_id: int, kind: str, ref: str, title: str) -> int: ...
 
     async def write_report(self, assignment_id: int, markdown: str) -> None: ...
+
+    async def put_saved(
+        self, person_id: str, name: str, spec: dict[str, Any]
+    ) -> dict[str, Any]: ...
+
+    async def find_saved(self, person_id: str, name: str) -> dict[str, Any] | None: ...
+
+    async def get_saved(self, saved_id: int) -> dict[str, Any] | None: ...
+
+    async def list_saved(self, person_id: str) -> list[dict[str, Any]]: ...
+
+    async def delete_saved(self, person_id: str, name: str) -> bool: ...
+
+    async def saved_names(self, saved_ids: Collection[int]) -> dict[int, str]: ...
 
     async def counts(self) -> dict[str, int]: ...
 
@@ -338,12 +403,14 @@ class PgStore:
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
+        saved_id: int | None = None,
     ) -> dict[str, Any]:
         async with self._pool().connection() as conn:
             cur = await conn.execute(
-                "INSERT INTO assignments.assignment (person_id, conversation_id, spec, model) "
-                "VALUES (%s, %s, %s, %s) RETURNING *",
-                (person_id, conversation_id, Jsonb(spec), model),
+                "INSERT INTO assignments.assignment "
+                "(person_id, conversation_id, spec, model, saved_id) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING *",
+                (person_id, conversation_id, Jsonb(spec), model, saved_id),
             )
             created = await cur.fetchone()
         assert created is not None
@@ -466,6 +533,74 @@ class PgStore:
                 "UPDATE assignments.assignment SET report = %s, report_at = now() WHERE id = %s",
                 (markdown, assignment_id),
             )
+
+    @shielded
+    async def put_saved(self, person_id: str, name: str, spec: dict[str, Any]) -> dict[str, Any]:
+        """Create the saved assignment ``name`` of the person, or replace its spec.
+
+        The row has ``created``: True for a new saved assignment, False for a
+        replaced one.
+        """
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "INSERT INTO assignments.saved (person_id, name, spec) VALUES (%s, %s, %s) "
+                "ON CONFLICT (person_id, name) DO UPDATE "
+                "SET spec = EXCLUDED.spec, updated_at = now() "
+                "RETURNING *, (xmax = 0) AS created",
+                (person_id, name, Jsonb(spec)),
+            )
+            row = await cur.fetchone()
+        assert row is not None
+        return dict(row)
+
+    @shielded
+    async def find_saved(self, person_id: str, name: str) -> dict[str, Any] | None:
+        """The saved assignment ``name`` of the person, with its runs, or None."""
+        return await self._one_saved("s.person_id = %s AND s.name = %s", (person_id, name))
+
+    @shielded
+    async def get_saved(self, saved_id: int) -> dict[str, Any] | None:
+        """One saved assignment, with its runs, or None."""
+        return await self._one_saved("s.id = %s", (saved_id,))
+
+    async def _one_saved(self, where: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
+        rows = await self._saved_rows(where, params)
+        return rows[0] if rows else None
+
+    async def _saved_rows(self, where: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(SAVED_SELECT.format(where=where), params)
+            rows = await cur.fetchall()
+        return [saved_row(dict(row)) for row in rows]
+
+    @shielded
+    async def list_saved(self, person_id: str) -> list[dict[str, Any]]:
+        """The saved assignments of the person, the newest first, each with its runs."""
+        return await self._saved_rows("s.person_id = %s", (person_id,))
+
+    @shielded
+    async def delete_saved(self, person_id: str, name: str) -> bool:
+        """Delete one saved assignment. Its runs stay, with no saved assignment."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "DELETE FROM assignments.saved WHERE person_id = %s AND name = %s RETURNING id",
+                (person_id, name),
+            )
+            row = await cur.fetchone()
+        return row is not None
+
+    @shielded
+    async def saved_names(self, saved_ids: Collection[int]) -> dict[int, str]:
+        """The name of each saved assignment in ``saved_ids`` that exists."""
+        if not saved_ids:
+            return {}
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "SELECT id, name FROM assignments.saved WHERE id = ANY(%s)",
+                (list(saved_ids),),
+            )
+            rows = await cur.fetchall()
+        return {int(row["id"]): row["name"] for row in rows}
 
     @shielded
     async def counts(self) -> dict[str, int]:

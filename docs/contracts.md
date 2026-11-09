@@ -478,7 +478,7 @@ true and its profile runs. [assignments.md](assignments.md) has the tools.
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok", "database", "channels", "people", "queued", "running", "waiting", "paused_limits"}`: booleans and counts only. `503` when the database does not answer. |
-| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the six tools. `401` for a missing or wrong bearer. |
+| `ANY /mcp` | a bearer in `ASSIGNMENTS_TOKENS` or `ADDON_TOKEN` | MCP over streamable HTTP | the nine tools. `401` for a missing or wrong bearer. |
 
 The git proxy is internal. It listens on `127.0.0.1` on a free port, in the
 manager process, and no other container can reach it. Only the git of a

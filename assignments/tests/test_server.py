@@ -159,6 +159,9 @@ PERSON_TOOLS = [
     ("answer_assignment", {"id": 1, "text": "x"}),
     ("cancel_assignment", {"id": 1}),
     ("extend_assignment", {"id": 1, "tokens": 5}),
+    ("save_assignment", {"name": "docs-cleanup", "spec": spec()}),
+    ("list_saved_assignments", {}),
+    ("delete_saved_assignment", {"name": "docs-cleanup"}),
 ]
 READ_TOOLS = {"assignment_status", "list_assignments"}
 
@@ -169,6 +172,7 @@ async def test_the_addon_token_cannot_use_a_person_tool(app, store, tool: str, a
         result = await session.call_tool(tool, args)
     assert error(result).endswith("403 forbidden: this tool needs a person")
     assert store.rows == {}
+    assert store.saved == {}
 
 
 async def test_every_person_tool_is_in_the_negative_test() -> None:
@@ -264,3 +268,47 @@ def test_get_manager_before_build_app_fails() -> None:
     server._manager = None
     with pytest.raises(RuntimeError):
         get_manager()
+
+
+async def test_saved_assignments_over_mcp(app, store) -> None:
+    async with mcp_sessions(app, ALEX, MIA) as (alex, mia):
+        saved = payload(
+            await alex.call_tool(
+                "save_assignment", {"name": "docs-cleanup", "spec": spec(title="Docs")}
+            )
+        )
+        started = payload(
+            await alex.call_tool(
+                "start_assignment", {"saved": "docs-cleanup", "spec": {"model": "opus"}}
+            )
+        )
+        await settle()
+        status = payload(await alex.call_tool("assignment_status", {"id": started["id"]}))
+        listed = payload(await alex.call_tool("list_assignments", {}))
+        mine = payload(await alex.call_tool("list_saved_assignments", {}))
+        theirs = payload(await mia.call_tool("list_saved_assignments", {}))
+        refused = payload(await mia.call_tool("start_assignment", {"saved": "docs-cleanup"}))
+        gone = {"name": "docs-cleanup"}
+        not_theirs = payload(await mia.call_tool("delete_saved_assignment", gone))
+        deleted = payload(await alex.call_tool("delete_saved_assignment", gone))
+    ref = {"id": saved["id"], "name": "docs-cleanup"}
+    assert started["saved"] == ref
+    assert "saved assignment docs-cleanup" in started["message"]
+    assert store.rows[started["id"]]["spec"]["model"] == "opus"
+    assert status["saved"] == ref
+    assert listed["assignments"][0]["saved"] == ref
+    [one] = mine["saved"]
+    assert (one["name"], one["title"], one["runs"]) == ("docs-cleanup", "Docs", 1)
+    assert one["last_run"]["id"] == started["id"]
+    assert theirs == {"saved": []}
+    assert refused["reason"] == "not_found"
+    assert not_theirs["reason"] == "not_found"
+    assert deleted["status"] == "deleted"
+    assert store.saved == {}
+
+
+async def test_start_assignment_needs_a_spec_or_a_saved_name(app, store) -> None:
+    async with mcp_session(app) as session:
+        result = payload(await session.call_tool("start_assignment", {}))
+    assert result["reason"] == "invalid_arguments"
+    assert store.rows == {}
