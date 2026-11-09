@@ -12,7 +12,9 @@ and call-log path applies to it. Only this module, ``upstream.py``, and
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -37,6 +39,16 @@ from joshua_gateway.observability import group_ctx, person_ctx
 log = get_logger("gateway.proxy")
 
 OnCall = Callable[[str, float, str, str | None], None]
+# ``(tool, reason)`` of a tool result that is a refusal.
+OnRefusal = Callable[[str, str], None]
+
+# A reason of a refusal is a fixed word, such as ``busy``. Any other text in
+# ``reason`` is logged as :data:`OTHER_REASON`, so a log line never holds text
+# of an upstream.
+_REASON_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
+OTHER_REASON = "other"
+# The longest text result that the refusal check reads as JSON.
+_REFUSAL_TEXT_MAX = 64 * 1024
 
 # The only variables a stdio child inherits from the gateway. It never sees a
 # fleet token, another entry's credential, or the database URL: the child's
@@ -189,11 +201,35 @@ def _tool_error(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
 
 
+def refusal_reason(res: Any) -> str | None:
+    """The ``reason`` of a tool result that is a refusal in the house style
+    (``{"status": "rejected", "reason": ...}``), else None.
+
+    The result holds the reply as structured content, or as one text block of
+    JSON. A reason that is not a fixed word is :data:`OTHER_REASON`."""
+    data = getattr(res, "structured_content", None)
+    if data is None:
+        content = getattr(res, "content", None) or []
+        text = getattr(content[0], "text", None) if len(content) == 1 else None
+        if isinstance(text, str) and text.startswith("{") and len(text) <= _REFUSAL_TEXT_MAX:
+            try:
+                data = json.loads(text)
+            except ValueError:
+                return None
+    if not isinstance(data, dict) or data.get("status") != "rejected":
+        return None
+    reason = data.get("reason")
+    if reason is None:
+        return None
+    return reason if isinstance(reason, str) and _REASON_RE.match(reason) else OTHER_REASON
+
+
 def build_upstream_server(
     name: str,
     link: UpstreamLink,
     caps: Any,
     on_call: OnCall | None = None,
+    on_refusal: OnRefusal | None = None,
 ) -> Server:
     """Build a low-level ``Server`` that forwards to the live session of ``link``.
 
@@ -208,7 +244,8 @@ def build_upstream_server(
     JSON-RPC error, so the client keeps the server and the model reads the
     message. ``on_call`` is invoked once per tool call with ``(tool,
     duration_ms, status, error)`` for the call log; status is ``"success"``,
-    ``"error"`` or ``"denied"``.
+    ``"error"`` or ``"denied"``. ``on_refusal`` is invoked with ``(tool,
+    reason)`` for a result that is a refusal (:func:`refusal_reason`).
     """
 
     async def forward(fn: Callable[[ClientSession], Awaitable[Any]]) -> Any:
@@ -253,6 +290,10 @@ def build_upstream_server(
         if on_call is not None:
             status = "error" if res.is_error else "success"
             on_call(tool, duration_ms, status, "tool error" if res.is_error else None)
+        if on_refusal is not None:
+            reason = refusal_reason(res)
+            if reason is not None:
+                on_refusal(tool, reason)
         return res
 
     async def on_list_resources(ctx, params):

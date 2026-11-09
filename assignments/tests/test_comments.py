@@ -80,6 +80,7 @@ async def test_a_comment_round_trip(app, parents, kind) -> None:
         "created_at",
         "resolved_at",
         "resolution",
+        "applied",
         "stale",
     }
     assert body["body"] == "Make this <b>shorter</b>."
@@ -294,10 +295,16 @@ async def test_assignment_comments_and_resolve_comment(app, store, parents) -> N
         assert "request of the person" in got["message"]
         done = payload(
             await session.call_tool(
-                "resolve_comment", {"comment_id": first["id"], "resolution": "Renamed\nit."}
+                "resolve_comment",
+                {
+                    "comment_id": first["id"],
+                    "resolution": "Renamed\nit.",
+                    "applied": ["saved docs"],
+                },
             )
         )
         assert done["status"] == "resolved" and done["resolution"] == "Renamed it."
+        assert done["applied"] == ["saved docs"]
         again = payload(
             await session.call_tool(
                 "resolve_comment", {"comment_id": first["id"], "resolution": "x"}
@@ -347,7 +354,7 @@ async def test_the_tools_do_not_reach_the_comments_of_another_person(app, store,
 async def test_a_bad_resolution_is_refused(app, store, parents, resolution) -> None:
     base, lines = parents["saved"]
     cid = (await post(app, base, 1, lines[0])).json()["id"]
-    got = await get_manager().resolve_comment("alex", cid, resolution)
+    got = await get_manager().resolve_comment("alex", cid, resolution, ["task 1"])
     assert got["reason"] == "invalid_arguments"
     assert (await get_manager().resolve_comment("alex", "1", "x"))["reason"] == "invalid_arguments"
     assert store.comment_rows[cid]["resolved_at"] is None

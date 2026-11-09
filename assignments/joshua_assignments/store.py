@@ -63,6 +63,8 @@ USAGE_FIELDS = ("input", "output", "cache_read", "cache_write")
 JSON_FIELDS = frozenset(
     {"spec", "stopped_at_limits", "follow_ups", "outputs", "open_request", "granted_repos", "inbox"}
 )
+# The most runs that ``lineage`` gives.
+MAX_LINEAGE = 50
 # The kinds of a request of a worker: ``request_resource(kind, ref, reason)``,
 # each with the word that a person reads.
 REQUEST_KINDS = ("repo", "file", "info")
@@ -78,6 +80,9 @@ COMMENT_TARGETS = ("definition", "plan", "report")
 EVENT_TARGETS = ("plan", "report")
 MAX_COMMENT_BODY = 2000
 MAX_COMMENT_RESOLUTION = 300
+# The most references in ``applied`` of one resolution, and the longest one.
+MAX_APPLIED = 20
+MAX_APPLIED_REF = 500
 # The columns ``update`` may set.
 UPDATABLE = frozenset(
     {
@@ -155,6 +160,12 @@ ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS inbox JSONB;
 ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_assignment_person
     ON assignments.assignment (person_id, id DESC);
+-- The run that this run is a re-run of (``start_assignment(rerun=N)``), or
+-- NULL. The runs that share a root are the lineage of an assignment.
+ALTER TABLE assignments.assignment ADD COLUMN IF NOT EXISTS parent_id BIGINT
+    REFERENCES assignments.assignment(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_assignment_parent
+    ON assignments.assignment (parent_id) WHERE parent_id IS NOT NULL;
 
 -- A saved assignment: a spec with a name and no run, started by name.
 CREATE TABLE IF NOT EXISTS assignments.saved (
@@ -198,6 +209,9 @@ CREATE TABLE IF NOT EXISTS assignments.comment (
 -- ``sent_at``: when the manager sent the comment to Joshua as an event. Only a
 -- comment on the plan or the report of an ended run is sent.
 ALTER TABLE assignments.comment ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
+-- ``applied``: what the resolution changed, a list of references (a document
+-- path, ``task N``, an issue URL, ``assignment N``, or ``saved <name>``).
+ALTER TABLE assignments.comment ADD COLUMN IF NOT EXISTS applied JSONB;
 CREATE INDEX IF NOT EXISTS idx_comment_saved
     ON assignments.comment (saved_id, id) WHERE saved_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_comment_assignment
@@ -295,9 +309,12 @@ class Store(Protocol):
         model: str,
         status: str = DRAFT,
         saved_id: int | None = None,
+        parent_id: int | None = None,
     ) -> dict[str, Any]: ...
 
     async def get(self, assignment_id: int) -> dict[str, Any] | None: ...
+
+    async def lineage(self, assignment_id: int) -> list[dict[str, Any]]: ...
 
     async def recent(
         self,
@@ -362,7 +379,11 @@ class Store(Protocol):
     async def delete_comment(self, person_id: str, parent: Parent, comment_id: int) -> bool: ...
 
     async def resolve_comment(
-        self, person_id: str, comment_id: int, resolution: str
+        self,
+        person_id: str,
+        comment_id: int,
+        resolution: str,
+        applied: list[str] | None = None,
     ) -> dict[str, Any] | None: ...
 
     async def open_comment_counts(
@@ -524,14 +545,15 @@ class PgStore:
         model: str,
         status: str = DRAFT,
         saved_id: int | None = None,
+        parent_id: int | None = None,
     ) -> dict[str, Any]:
         check_fields({"status": status})
         async with self._pool().connection() as conn:
             cur = await conn.execute(
                 "INSERT INTO assignments.assignment "
-                "(person_id, conversation_id, spec, model, status, saved_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-                (person_id, conversation_id, Jsonb(spec), model, status, saved_id),
+                "(person_id, conversation_id, spec, model, status, saved_id, parent_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
+                (person_id, conversation_id, Jsonb(spec), model, status, saved_id, parent_id),
             )
             created = await cur.fetchone()
         assert created is not None
@@ -545,6 +567,33 @@ class PgStore:
             )
             row = await cur.fetchone()
         return dict(row) if row else None
+
+    @shielded
+    async def lineage(self, assignment_id: int) -> list[dict[str, Any]]:
+        """The runs that share a root with ``assignment_id``, the oldest first.
+
+        The root is the first run up the ``parent_id`` chain that has no
+        parent. Each row has ``id``, ``person_id``, ``parent_id``, ``spec``,
+        ``status``, ``created_at``, ``finished_at``, and ``deleted_at``. At
+        most :data:`MAX_LINEAGE` rows; none for an id that does not exist."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "WITH RECURSIVE up AS ("
+                " SELECT id, parent_id FROM assignments.assignment WHERE id = %s"
+                " UNION ALL SELECT a.id, a.parent_id FROM assignments.assignment a"
+                " JOIN up ON a.id = up.parent_id"
+                "), down AS ("
+                " SELECT a.id FROM assignments.assignment a"
+                " WHERE a.id = (SELECT id FROM up WHERE parent_id IS NULL LIMIT 1)"
+                " UNION ALL SELECT a.id FROM assignments.assignment a"
+                " JOIN down ON a.parent_id = down.id"
+                ") SELECT a.id, a.person_id, a.parent_id, a.spec, a.status, a.created_at,"
+                " a.finished_at, a.deleted_at FROM assignments.assignment a"
+                " WHERE a.id IN (SELECT id FROM down) ORDER BY a.id LIMIT %s",
+                (assignment_id, MAX_LINEAGE),
+            )
+            rows = await cur.fetchall()
+        return [dict(row) for row in rows]
 
     @shielded
     async def recent(
@@ -831,14 +880,25 @@ class PgStore:
 
     @shielded
     async def resolve_comment(
-        self, person_id: str, comment_id: int, resolution: str
+        self,
+        person_id: str,
+        comment_id: int,
+        resolution: str,
+        applied: list[str] | None = None,
     ) -> dict[str, Any] | None:
-        """Mark one open comment of the person resolved. None when there is none."""
+        """Mark one open comment of the person resolved, with what the
+        resolution changed (``applied``). None when there is none."""
         async with self._pool().connection() as conn:
             cur = await conn.execute(
-                "UPDATE assignments.comment SET resolved_at = now(), resolution = %s "
-                "WHERE id = %s AND person_id = %s AND resolved_at IS NULL RETURNING *",
-                (resolution, comment_id, person_id),
+                "UPDATE assignments.comment SET resolved_at = now(), resolution = %s, "
+                "applied = %s WHERE id = %s AND person_id = %s AND resolved_at IS NULL "
+                "RETURNING *",
+                (
+                    resolution,
+                    Jsonb(applied) if applied is not None else None,
+                    comment_id,
+                    person_id,
+                ),
             )
             row = await cur.fetchone()
         return dict(row) if row else None

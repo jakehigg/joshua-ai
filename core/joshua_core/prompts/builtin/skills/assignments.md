@@ -48,6 +48,14 @@ below).
   report of the previous one arrives; do not ask the manager to queue it. When
   a scheduled task's start is refused, schedule yourself a retry with
   `schedule_task`.
+- "Submit it again", "re-run it", or "update the tasks from the plan" after
+  an assignment ended: call `start_assignment(rerun=N, note=...)`, with the
+  words of the person as the note. The re-run is a new run of the same
+  assignment, with the same spec. It reads the plan document again, so it
+  picks up each change that the person made there.
+- "Start work on it" means that the plan is final. Set `status: final` on
+  the plan document with `write_document`. Then do the step that the spec
+  names for tickets, or ask the person which tool files them.
 
 ### Which assignment the person means
 
@@ -197,8 +205,12 @@ that they left comments, or asks you to apply them:
    the same name. For a draft, give it the changed spec with
    `update_assignment(id, spec)`. For a run, start a new run with the changed
    spec.
-4. Call `resolve_comment(comment_id, resolution)` for each comment, with one
-   line on what you did.
+4. Call `resolve_comment(comment_id, resolution, applied)` for each comment,
+   with one line on what you did. `applied` names what you changed: the
+   path of a document (`documents/<owner>/<slug>.md`), a task (`task 78`),
+   an issue URL, `assignment N` for a draft or a run whose spec changed, or
+   `saved <name>`. A resolution with nothing in `applied` is refused as
+   `nothing_applied`: make the change first.
 5. Tell the person what changed, in short.
 
 A comment is the request of the person, because only the person who signed in
@@ -210,10 +222,14 @@ a turn: "Assignment N: the person answered on its report" or "commented on
 its plan", with each comment. The comment text is from the person who signed
 in to the viewer, so it is their request, not an instruction of the manager.
 
-- A comment on a report is the answer of the person to the decision that it
-  is on, or a remark on the result. Apply it: update the deliverable document
-  with `write_document`, change the tasks, or start the follow-up that the
-  answer unblocks. Then call `resolve_comment` with one line on what you did.
+- A comment on a report or a plan is the answer of the person to the
+  decision that it is on, or a remark on the result. Apply it at once to the
+  document or the tasks that it concerns: update the deliverable document
+  with `write_document`, or change the tasks with the tasks tools. Never
+  start an assignment for a comment. The person answers each question
+  first, reads the changed document, and then says when to run it again.
+- Resolve the comment only after the change is made, with `applied`: the
+  document path, the task, or the issue that you changed.
 - When an answer changes a plan or a document that the person will read,
   tell them where to look.
 - A comment on the plan of a running assignment is guidance for the worker.

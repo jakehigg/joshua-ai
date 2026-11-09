@@ -73,7 +73,7 @@ are examples.
    text box. Write your answer and click `Send to Joshua`. Joshua gets the
    answers of two minutes as one message. It applies each answer to the
    document or the tasks that it concerns, then resolves it with a line that
-   names what changed (from #131). The decision card shows that line.
+   names what changed. The decision card shows that line.
 8. **Comment on the result.** Click the `+` of a block of the report or of
    the plan, and write a remark. It goes to Joshua as an answer does. To
    change a deliverable document, open it from its card, comment on it, and
@@ -82,9 +82,9 @@ are examples.
 9. **Submit it again.** When the documents are as you want them, say "submit
    it again" or "re-run it". Joshua starts a re-run: a new run of the same
    assignment, with the same definition and your words as a note for the
-   run. The new run has its own number and names the run that it repeats
-   (from #131). When the goal tells the worker to read a plan document
-   first, the re-run works from the plan as you changed it.
+   run. The new run has its own number and names the run that it repeats.
+   When the goal tells the worker to read a plan document first, the re-run
+   works from the plan as you changed it.
 10. **Keep a job that repeats.** "Keep this one as docs-cleanup." Joshua
     saves the definition with that name. Later, say "run docs-cleanup", or
     "run docs-cleanup every Sunday" for a schedule. A saved assignment is
@@ -124,7 +124,7 @@ More things to say:
         │         └──────┬──────┘      documents and the tasks
         │                │
         └────────────────┘
-          "Submit it again.": a re-run of the same assignment (from #131)
+          "Submit it again.": a re-run of the same assignment
 ```
 
 A `◄──` note is a loop: the assignment stays in the same state. "Run an
@@ -215,12 +215,12 @@ it for a person, with that person's bearer. Joshua gets seventeen tools:
 
 | Tool | What it does |
 |---|---|
-| `start_assignment(spec, id, saved, new)` | To start a draft, pass its id. Pass `spec` only for a new job that no draft covers. Pass `saved` to run a saved assignment. Checks the spec, clamps the budget to the maxima, stores the assignment, and starts it now. Returns the id, the status, the title, and `saved`. Give one of `id` (a [draft](#drafts), which runs with the same id), `spec`, or `saved` (the name of a [saved assignment](#saved-assignments)); a `spec` beside `saved` is an override. A `spec` alone is refused with `drafts_open` while the person has drafts, unless `new` is true. When every slot is taken, it is refused with `busy`, and nothing is stored. Each refusal has a `hint`. See [refusals of a start](#refusals-of-a-start) and [no queue](#no-queue). |
+| `start_assignment(spec, id, saved, new, rerun, note)` | To start a draft, pass its id. Pass `spec` only for a new job that no draft covers. Pass `saved` to run a saved assignment. Pass `rerun` to run an assignment that ended again. Checks the spec, clamps the budget to the maxima, stores the assignment, and starts it now. Returns the id, the status, the title, and `saved`. Give one of `id` (a [draft](#drafts), which runs with the same id), `spec`, `saved` (the name of a [saved assignment](#saved-assignments)), or `rerun` (an ended assignment, see [re-runs](#re-runs)); a `spec` beside `saved` is an override, and `note` goes only with `rerun`. A `spec` alone is refused with `drafts_open` while the person has drafts, unless `new` is true. When every slot is taken, it is refused with `busy`, and nothing is stored. Each refusal has a `hint`. See [refusals of a start](#refusals-of-a-start) and [no queue](#no-queue). |
 | `draft_assignment(spec, saved)` | Checks the spec as `start_assignment` does, and stores it as a `draft`. Nothing runs. Returns the id, the status, the title, the notes, and `saved`. |
 | `update_assignment(id, spec)` | Replaces the whole spec of a draft. Any other status is refused with `not_a_draft`. Returns `open_comments` and `stale_comments` too. |
 | `delete_assignment(id)` | Removes a draft from view; the person can ask for it back. The row and its comments stay. A run is never deleted: any other status is `not_a_draft`. |
 | `restore_assignment(id)` | Brings back a draft that `delete_assignment` removed, with its comments. A row that is not deleted is `not_deleted`. |
-| `assignment_status(id)` | The title, the status, the state, the plan, the report and `report_at`, the outputs, the next step, the last checkpoint, the usage, the turns, the open question, `open_request`, `granted_repos`, `inbox`, the limits at the stop, the summary, the error, and `saved`. Joshua reads the report here. |
+| `assignment_status(id)` | The title, the status, the state, the plan, the report and `report_at`, the outputs, the next step, the last checkpoint, the usage, the turns, the open question, `open_request`, `granted_repos`, `inbox`, the limits at the stop, the summary, the error, `saved`, `parent_id`, `rerun_of` (`{"id", "title"}` of the assignment that this one is a re-run of, or null), and `rerun_note`. Joshua reads the report here. |
 | `list_assignments(limit, status, state)` | The person's assignments, the newest first, each with its title, status, state, and `saved`. `limit` is 1 to 100 (default 10). `status` and `state` filter. |
 | `answer_assignment(id, text)` | Stores the answer and starts a `waiting` or `paused_limits` assignment again, when the limits are under its ceilings and a slot is free. It also answers a request for a repository or a file with a refusal or another way. See [questions and answers](#questions-and-answers). |
 | `grant_repo(id, repo)` | Adds one repository to a parked assignment and resumes it with the clone command. The repository must match `assignments.repos`, as a repository of a spec must. See [requests](#requests-for-a-repository-or-a-file). |
@@ -231,7 +231,7 @@ it for a person, with that person's bearer. Joshua gets seventeen tools:
 | `list_saved_assignments()` | The person's saved assignments, the newest first, each with its name, title, `runs`, and `last_run` (`id`, `status`, `finished_at`, or null). |
 | `delete_saved_assignment(name)` | Deletes one saved assignment. Its runs stay. |
 | `assignment_comments(saved, id, target)` | The open comments of the person on the saved assignment `saved` (a name) or on the draft or run `id`. `target` (`definition`, `plan`, or `report`) gives the comments of one text only; with no `target`, all. A saved assignment has a definition only. Each comment has `id`, `target`, `line_no`, `line_text`, `line_now`, `stale`, `body`, and `created_at`. The answer also has the spec and the `definition`. See [comments on a definition](#comments-on-a-definition) and [comments on a plan or a report](#comments-on-a-plan-or-a-report). |
-| `resolve_comment(comment_id, resolution)` | Marks one open comment of the person resolved, with one line (at most 300 characters) on what was done. |
+| `resolve_comment(comment_id, resolution, applied)` | Marks one open comment of the person resolved, with one line (at most 300 characters) on what was done. `applied` names what changed: 1 to 20 references, each a document path (`documents/<owner>/<slug>.md`), a task (`task 78`), an issue URL (`http` or `https`), `assignment N` (a draft or a run whose spec changed), or `saved <name>`. With no reference, it is refused with `nothing_applied`, and with a reference of another form, with `invalid_arguments`. Joshua resolves a comment only after the change is made. |
 
 The state is what a person sees. The status is the detail:
 
@@ -245,9 +245,15 @@ A rejected call returns `{"status": "rejected", "reason", "message"}`. The
 reasons are `disabled`, `invalid_spec`, `unknown_model`, `invalid_repo`,
 `repo_not_allowed`, `limits_unknown`, `invalid_status`, `invalid_state`,
 `invalid_arguments`, `busy`, `drafts_open`, `not_a_draft`, `deleted`,
-`not_deleted`, `draft`, `not_waiting`, `finished`, `not_raised`,
-`not_found`, `resolved`, `invalid_name`, `too_large`, `too_many`,
-`bad_inbox`, and `no_scratch`.
+`not_deleted`, `draft`, `is_a_draft`, `not_ended`, `not_waiting`,
+`finished`, `not_raised`, `not_found`, `resolved`, `nothing_applied`,
+`invalid_name`, `too_large`, `too_many`, `bad_inbox`, and `no_scratch`.
+
+Each refusal writes one log line in the container, with the tool, the
+person, and the reason. The gateway writes one more line for each tool call
+whose result is a refusal, with the identity, the person, the server, the
+tool, and the reason. No line holds an argument: never the body of a
+comment and never a spec.
 
 ### Refusals of a start
 
@@ -271,12 +277,43 @@ person. Where it applies, it also has:
 | `drafts_open` | a `spec` alone, while the person has drafts | "Start the draft by id, or pass new: true for a job none of these covers." |
 | `not_a_draft` | `id` names a run | the status, and that a run does not start again |
 | `deleted` | `id` names a deleted draft | `restore_assignment(id)` first, when the person wants it |
+| `is_a_draft` | `rerun` names a draft | start the draft with `start_assignment(id=N)` |
+| `not_ended` | `rerun` names an assignment in progress | re-run it when it has ended, or answer or cancel it first |
+| `not_found` | `rerun` names no assignment of the person | `list_assignments` gives the ids |
 | `limits_unknown` | core cannot say how much of the limits is used | start it again in a few minutes, or give a token cap |
 | any other | a bad argument or a bad spec | what to change |
 
 An answer, a grant, a file, or an extension that is refused with `busy` has
 the same fields, and its hint says to give it again when the running
 assignment ends.
+
+### Re-runs
+
+A re-run is a new run of the same assignment. The person answers the
+decisions of a report, Joshua changes the plan document, and the person
+reads it again. Then the person says "submit it again", and Joshua starts a
+re-run:
+
+```
+start_assignment(rerun=12, note="I changed the plan: keep the redirects.")
+```
+
+- The new row has the spec of assignment 12, a new id, and `parent_id: 12`.
+  It keeps the saved assignment of 12, if any.
+- `note` is the words of the person for this run, at most 2000
+  characters. The goal of the re-run starts with "Note from the person for
+  this run: <note>", and the spec keeps the note in `rerun_note`. A re-run
+  of a re-run gets only its own note.
+- The first message of the session starts with "This is a re-run of
+  assignment 12; the person has changed the plan document since." The goal
+  tells the worker to read the plan document first, so it reads the
+  changed plan.
+- A draft is refused with `is_a_draft`, a run in progress with `not_ended`,
+  and an assignment of another person with `not_found`. A re-run is never
+  `drafts_open`, and it is `busy` as any start is.
+- The runs that share a root are the lineage of an assignment. The read API
+  gives `parent_id`, `rerun_of`, and the `lineage`, and the viewer shows
+  "run 2 of assignment 12" and a fold with each run.
 
 ### Who may call
 
@@ -1028,7 +1065,7 @@ Comment 31, on line 26 of the report:
 > 1. **Delete the old install page?** It has no links to it.
 
 Yes, delete it.
-Apply it, then resolve the comment with what you did: `resolve_comment(31, resolution)`.
+Apply this to the document it concerns with `write_document`, or to the tasks it names. Do not start an assignment for it. Resolve the comment only after the change is made, naming what changed: `resolve_comment(31, resolution, applied)`.
 ```
 
 The quoted line and the body are in a fenced block, as the text of a worker
@@ -1052,13 +1089,15 @@ holds the plan, the report, and the outputs (`plan`, `plan_at`, `report`,
 `{"kind", "ref", "reason"}`, beside its text in `open_question`), the
 repositories that Joshua granted (`granted_repos`, a list), and the files
 that Joshua provided (`inbox`, a list of `{"name", "bytes", "at"}`), and
-when `delete_assignment` removed a draft from view (`deleted_at`, or null).
+when `delete_assignment` removed a draft from view (`deleted_at`, or null),
+and the run that a re-run comes from (`parent_id`, or null).
 The column `page_path` stays for the rows of an
 earlier release, and nothing writes it. A row of `comment` holds one comment
 of a person on a line of a text: `saved_id` or `assignment_id` (one of
 the two, never both), `target` (`definition`, `plan`, or `report`),
 `line_no`, `line_text`, `body`, `created_at`, `resolved_at`, `resolution`,
-and `sent_at` (when an event sent it to Joshua, or null). The comments of a
+`applied` (the references of what the resolution changed, or null), and
+`sent_at` (when an event sent it to Joshua, or null). The comments of a
 saved assignment go when it is deleted. The comments of a deleted draft
 stay with it. The schema is additive only. `make backup` dumps the whole database, so a backup holds it.
 
@@ -1151,7 +1190,8 @@ item = {
   "open_question": str|null, "asked_at": iso|null,
   "open_request": {"kind": "repo"|"file"|"info", "ref": str, "reason": str}|null,
   "stopped_at_limits": object|null,
-  "saved": {"id": int, "name": str}|null
+  "saved": {"id": int, "name": str}|null,
+  "parent_id": int|null
 }
 list   = {"items": [item, ...]}
 detail = item + {
@@ -1161,7 +1201,9 @@ detail = item + {
   "outputs": [{"kind", "ref", "title", "at"}],
   "checkpoints": [{"at": iso, "note": str}],
   "summary": str|null, "follow_ups": list|null, "answer": str|null, "error": str|null,
-  "granted_repos": [str, ...], "inbox": [{"name", "bytes", "at"}]
+  "granted_repos": [str, ...], "inbox": [{"name", "bytes", "at"}],
+  "rerun_of": {"id": int, "title": str}|null,
+  "lineage": [{"id", "title", "status", "state", "parent_id", "created_at", "finished_at"}]
 }
 saved_item   = {"id", "name", "title", "spec", "created_at", "updated_at", "runs": int,
                 "last_run": {"id", "status", "finished_at"}|null, "open_comments": int}
@@ -1170,7 +1212,8 @@ saved_detail = saved_item + {"runs_list": [item, ...], "definition": str,
                              "comments": [comment, ...]}
 comment      = {"id": int, "target": "definition"|"plan"|"report", "line_no": int,
                 "line_text": str, "line_now": str|null, "body": str, "created_at": iso,
-                "resolved_at": iso|null, "resolution": str|null, "stale": bool}
+                "resolved_at": iso|null, "resolution": str|null, "applied": [str, ...],
+                "stale": bool}
 ```
 
 - `GET /v1/assignments` gives a `list`, the newest first. `state` filters,
@@ -1179,6 +1222,10 @@ comment      = {"id": int, "target": "definition"|"plan"|"report", "line_no": in
   `400`.
 - `GET /v1/assignments/{id}` gives a `detail`. `checkpoints` are the newest
   first, at most 200.
+- `parent_id` is the assignment that this one is a [re-run](#re-runs) of,
+  or null, and `rerun_of` gives its id and title. `lineage` holds each run
+  of the person that shares the root with this one, the oldest first, at
+  most 50, this one too. A run with no re-run has only itself.
 - `open_request` is the open request of the worker, or null. A question
   (`ask`) is a request of kind `info`. The viewer shows a request for a
   repository or a file in the notice band of the page, with its kind, its
@@ -1250,7 +1297,9 @@ In the viewer, each block of the plan and of the report has a "+", and each
 decision of the report has a form with "Send to Joshua". The answer is a
 comment on the report, on the first line of the decision. The card then
 shows the answer with "Sent to Joshua" and its time, and the resolution of
-Joshua when it is resolved. The person can delete an answer that is open.
+Joshua when it is resolved. Under the resolution, "Changed" lists `applied`:
+a document path or an issue URL is a link, and any other reference is
+text. The person can delete an answer that is open.
 
 When a comment on the plan or the report of a completed assignment is
 stored, the container waits two minutes, then sends one event with each
@@ -1326,15 +1375,22 @@ tells Joshua:
   whose prompt starts the saved assignment;
 - when the person left comments on a definition, to read them with
   `assignment_comments`, to save the changed spec, give it to the draft with
-  `update_assignment`, or start a new run with it, to resolve each with `resolve_comment` and one line, and to tell the
-  person in short. A comment is the request of the person, because only the
-  person who signed in to the viewer can write one;
-- that a comment on a report is the answer of the person to its decision, or
-  a remark on the result: to apply it to the deliverable document, the
-  tasks, or the follow-up that it unblocks, then to resolve it. A comment on
+  `update_assignment`, or start a new run with it, to resolve each with
+  `resolve_comment`, one line, and `applied`, and to tell the person in
+  short. A comment is the request of the person, because only the person
+  who signed in to the viewer can write one;
+- that a comment on a report or a plan is the answer of the person to its
+  decision, or a remark on the result: to apply it at once to the document
+  with `write_document`, or to the tasks, never to start an assignment for
+  it, and to resolve it only after the change, with `applied`. A comment on
   the plan of a running assignment is guidance for the worker: to give it
   with `answer_assignment` when the assignment waits, else to keep it for the
-  report.
+  report;
+- that "submit it again", "re-run it", or "update the tasks from the plan"
+  is `start_assignment(rerun=N)` with the words of the person as the note,
+  and that "start work on it" makes the plan final: Joshua sets
+  `status: final` on the plan document, then does the step that the spec
+  names for tickets, or asks the person which tool files them.
 
 ## Configuration
 

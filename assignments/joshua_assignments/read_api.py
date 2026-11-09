@@ -21,6 +21,10 @@ names the person to core. A missing or bad ``person`` is 400. A row of
 another person is 404, the same as a row that does not exist, and so is a
 deleted draft, with its comments. A list holds only the rows of that person
 that are not deleted. No answer holds a token or a bearer.
+
+A re-run names its parent: ``parent_id`` in each item, and ``rerun_of``
+(``{"id", "title"}``) and ``lineage`` (each run that shares the root with it,
+the oldest first) in a detail.
 """
 
 from __future__ import annotations
@@ -100,6 +104,20 @@ def item(row: dict[str, Any], names: Mapping[int, str]) -> dict[str, Any]:
         "asked_at": _iso(row.get("asked_at")),
         "stopped_at_limits": row.get("stopped_at_limits"),
         "saved": saved_ref(row, names),
+        "parent_id": row.get("parent_id"),
+    }
+
+
+def lineage_item(row: Mapping[str, Any]) -> dict[str, Any]:
+    """One run of a lineage."""
+    return {
+        "id": int(row["id"]),
+        "title": assignment_title(row.get("spec")),
+        "status": row["status"],
+        "state": state(row["status"]),
+        "parent_id": row.get("parent_id"),
+        "created_at": _iso(row.get("created_at")),
+        "finished_at": _iso(row.get("finished_at")),
     }
 
 
@@ -122,11 +140,17 @@ def detail(
     names: Mapping[int, str],
     checkpoints: list[dict[str, Any]],
     comments: list[dict[str, Any]] | None = None,
+    lineage: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The whole view of one assignment. ``checkpoints`` are the newest first,
-    ``comments`` the oldest first."""
+    ``comments`` the oldest first. ``lineage`` holds the runs that share the
+    root with ``row``, the oldest first, as :func:`lineage_item` gives them."""
+    runs = lineage or []
+    parent = next((run for run in runs if run["id"] == row.get("parent_id")), None)
     return {
         **item(row, names),
+        "rerun_of": {"id": parent["id"], "title": parent["title"]} if parent else None,
+        "lineage": runs,
         **comments_part(row, comments or []),
         "spec": row.get("spec") or {},
         "plan": row.get("plan"),
@@ -223,7 +247,12 @@ class ReadApi:
             return _not_found()
         checkpoints = await store.checkpoints(row["id"], MAX_CHECKPOINTS)
         comments = await store.comments(person, Parent("assignment", int(row["id"])))
-        return JSONResponse(detail(row, await self._names([row]), checkpoints, comments))
+        lineage = [
+            lineage_item(run)
+            for run in await store.lineage(int(row["id"]))
+            if _visible(run, person)
+        ]
+        return JSONResponse(detail(row, await self._names([row]), checkpoints, comments, lineage))
 
     async def saved_list(self, request: Request) -> Response:
         person = _person(request)

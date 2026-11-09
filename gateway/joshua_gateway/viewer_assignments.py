@@ -64,6 +64,11 @@ The blocks and the showcase of a report are in ``viewer_showcase``, and the
 documents section uses the same two modules. The pages of this section have
 no script.
 
+A re-run is a run of the same assignment. When a run has a lineage (the runs
+that share its root), the hero says "run k of assignment N", with N the
+root, and a fold lists each run of the lineage. A resolved comment shows
+what Joshua changed (``applied``) under the resolution.
+
 The functions here build data and HTML only. The routes live in ``viewer``.
 """
 
@@ -164,6 +169,21 @@ class SavedRef(_Model):
     name: str
 
 
+class RunRef(_Model):
+    id: int
+    title: str = ""
+
+
+class LineageRun(_Model):
+    id: int
+    title: str = ""
+    status: str = ""
+    state: str = ""
+    parent_id: int | None = None
+    created_at: str | None = None
+    finished_at: str | None = None
+
+
 class OpenRequest(_Model):
     # repo, file, or info (a question).
     kind: str = ""
@@ -192,6 +212,7 @@ class Item(_Model):
     asked_at: str | None = None
     stopped_at_limits: dict[str, Any] | None = None
     saved: SavedRef | None = None
+    parent_id: int | None = None
 
 
 class Output(_Model):
@@ -216,6 +237,7 @@ class Comment(_Model):
     created_at: str | None = None
     resolved_at: str | None = None
     resolution: str | None = None
+    applied: list[str] = Field(default_factory=list)
     stale: bool = False
 
 
@@ -234,6 +256,8 @@ class Detail(Item):
     follow_ups: list[Any] | None = None
     answer: str | None = None
     error: str | None = None
+    rerun_of: RunRef | None = None
+    lineage: list[LineageRun] = Field(default_factory=list)
 
 
 class ItemList(_Model):
@@ -871,6 +895,53 @@ def _hero_tiles(
     return sc.tiles(tiles, label="Numbers")
 
 
+def run_number(item: Detail) -> tuple[int, int] | None:
+    """``(k, root)``: this run is run k of the lineage of the assignment
+    ``root``. None when the run has no other run in its lineage."""
+    ids = [run.id for run in item.lineage]
+    if len(ids) < 2 or item.id not in ids:
+        return None
+    return ids.index(item.id) + 1, ids[0]
+
+
+def run_chip(item: Detail) -> str:
+    """The chip "run k of assignment N" of a run in a lineage, else ""."""
+    found = run_number(item)
+    if found is None:
+        return ""
+    k, root = found
+    return f'<a class="j-chip a-run" href="#lineage">run {k} of assignment {root}</a>'
+
+
+def _lineage_fold(item: Detail, *, tz: tzinfo, now: datetime) -> str:
+    """Each run of the lineage, the oldest first, in a small fold. "" for a
+    run with no other run."""
+    if run_number(item) is None:
+        return ""
+    rows = []
+    for k, run in enumerate(item.lineage, start=1):
+        when = time_html(run.finished_at or run.created_at, tz=tz, now=now)
+        stamp = f'<span class="j-faint">{when}</span>' if when else ""
+        name = f"Run {k}: assignment {run.id}"
+        link = (
+            f'<b aria-current="page">{escape(name)} (this run)</b>'
+            if run.id == item.id
+            else f'<a href="/assignments/{run.id}">{escape(name)}</a>'
+        )
+        title = f'<span class="j-list-sub">{escape(run.title)}</span>' if run.title else ""
+        rows.append(
+            f'<li class="a-lineage-run">{link}{title}'
+            f'<span class="a-chips">{status_chip(run.status)}{stamp}</span></li>'
+        )
+    hint = f'<span class="a-fold-hint">{sc.count(len(item.lineage), "run")}</span>'
+    return sc.fold(
+        "Runs of this assignment",
+        f'<ol class="a-lineage">{"".join(rows)}</ol>',
+        hint=hint,
+        fid="lineage",
+    )
+
+
 def _hero(
     item: Detail, *, lede: str, generated: bool, tiles: str, tz: tzinfo, now: datetime
 ) -> str:
@@ -880,7 +951,7 @@ def _hero(
         f"saved: {escape(item.saved.name)}</a>"
         if item.saved
         else ""
-    )
+    ) + run_chip(item)
     when = _when(item, tz=tz, now=now)
     if item.finished_at:
         when = f"ended {time_html(item.finished_at, tz=tz, now=now)}"
@@ -1081,6 +1152,7 @@ def _report_page(
         _report_rest(full),
         _cost_footer(item, turns=turns),
         '<div class="a-folds">',
+        _lineage_fold(item, tz=tz, now=now),
         _plan_fold(item, progress, tz=tz, now=now, forms=forms),
         _progress_fold(item.checkpoints, tz=tz, now=now),
         _definition(item, open_=False, forms=forms, tz=tz, now=now),
@@ -1115,6 +1187,7 @@ def _plain_report_page(
         sc.section("Report", report, stamp=stamp),
         _report_rest(gutter),
         '<div class="a-folds">',
+        _lineage_fold(item, tz=tz, now=now),
         _plan_fold(item, progress, tz=tz, now=now, forms=forms),
         _progress_fold(item.checkpoints, tz=tz, now=now),
         _definition(item, open_=False, forms=forms, tz=tz, now=now),
@@ -1154,6 +1227,7 @@ def _progress_page(
         sc.outputs_html(cards, title="Outputs so far" if item.state != "completed" else "Outputs"),
         sc.section("Progress", _progress(item.checkpoints, tz=tz, now=now)),
         '<div class="a-folds">',
+        _lineage_fold(item, tz=tz, now=now),
         report,
         _definition(item, open_=False, forms=forms, tz=tz, now=now),
         "</div>",

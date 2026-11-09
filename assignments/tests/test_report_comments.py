@@ -179,8 +179,10 @@ async def test_comments_on_an_ended_run_go_to_joshua_as_one_event(
     assert "> 1. **Keep the redirects?** They cost nothing.\n\nKeep them.\n```" in text
     assert f"Comment {second['id']}, on line 3 of the plan:" in text
     assert text.endswith(
-        "Apply each one, then resolve each comment with what you did: "
-        "`resolve_comment(comment_id, resolution)`."
+        "Apply each one to the document it concerns with `write_document`, or to the tasks "
+        "it names. Do not start an assignment for it. Resolve each comment only after the "
+        "change is made, naming what changed: "
+        "`resolve_comment(comment_id, resolution, applied)`."
     )
     assert all(r["sent_at"] is not None for r in store.comment_rows.values())
     # A later comment starts a new batch and holds only itself.
@@ -192,8 +194,10 @@ async def test_comments_on_an_ended_run_go_to_joshua_as_one_event(
     last = channels.bodies[1]["text"]
     assert "Keep them." not in last
     assert last.endswith(
-        "Apply it, then resolve the comment with what you did: "
-        f"`resolve_comment({max(store.comment_rows)}, resolution)`."
+        "Apply this to the document it concerns with `write_document`, or to the tasks it "
+        "names. Do not start an assignment for it. Resolve the comment only after the change "
+        f"is made, naming what changed: `resolve_comment({max(store.comment_rows)}, "
+        "resolution, applied)`."
     )
 
 

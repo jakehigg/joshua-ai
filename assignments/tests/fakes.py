@@ -45,6 +45,7 @@ class FakeStore:
         model: str,
         status: str = "draft",
         saved_id: int | None = None,
+        parent_id: int | None = None,
     ) -> dict[str, Any]:
         check_fields({"status": status})
         assignment_id = self._next
@@ -78,6 +79,7 @@ class FakeStore:
             "report_at": None,
             "outputs": None,
             "saved_id": saved_id,
+            "parent_id": parent_id,
             "granted_repos": None,
             "inbox": None,
             "deleted_at": None,
@@ -88,6 +90,22 @@ class FakeStore:
     async def get(self, assignment_id: int) -> dict[str, Any] | None:
         row = self.rows.get(assignment_id)
         return copy.deepcopy(row) if row else None
+
+    async def lineage(self, assignment_id: int) -> list[dict[str, Any]]:
+        row = self.rows.get(assignment_id)
+        if row is None:
+            return []
+        while row["parent_id"] is not None and row["parent_id"] in self.rows:
+            row = self.rows[row["parent_id"]]
+        ids = {row["id"]}
+        for other in sorted(self.rows.values(), key=lambda r: r["id"]):
+            if other["parent_id"] in ids:
+                ids.add(other["id"])
+        keys = ("id", "person_id", "parent_id", "spec", "status", "created_at", "finished_at")
+        return [
+            {key: copy.deepcopy(self.rows[i][key]) for key in (*keys, "deleted_at")}
+            for i in sorted(ids)
+        ][:50]
 
     async def recent(
         self,
@@ -241,6 +259,7 @@ class FakeStore:
             "created_at": self.clock(),
             "resolved_at": None,
             "resolution": None,
+            "applied": None,
             "sent_at": None,
         }
         self._next_comment += 1
@@ -275,12 +294,16 @@ class FakeStore:
         return True
 
     async def resolve_comment(
-        self, person_id: str, comment_id: int, resolution: str
+        self,
+        person_id: str,
+        comment_id: int,
+        resolution: str,
+        applied: list[str] | None = None,
     ) -> dict[str, Any] | None:
         row = self.comment_rows.get(comment_id)
         if row is None or row["person_id"] != person_id or row["resolved_at"] is not None:
             return None
-        row.update(resolved_at=self.clock(), resolution=resolution)
+        row.update(resolved_at=self.clock(), resolution=resolution, applied=copy.deepcopy(applied))
         return copy.deepcopy(row)
 
     async def open_comment_counts(

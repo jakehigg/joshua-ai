@@ -17,13 +17,20 @@ every reader escapes it. Each function is pure.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlparse
+
+from joshua_shared.ids import PERSON_ID_RE
 
 from joshua_assignments import definition as definition_mod
 from joshua_assignments.definition import line_at
+from joshua_assignments.spec import SAVED_NAME_RE
 from joshua_assignments.store import (
     COMMENT_TARGETS,
+    MAX_APPLIED,
+    MAX_APPLIED_REF,
     MAX_COMMENT_BODY,
     MAX_COMMENT_RESOLUTION,
 )
@@ -37,6 +44,25 @@ MAX_LINE_TEXT = 20100
 
 class CommentRefused(ValueError):
     """A new comment or a resolution that is not valid. The text says why."""
+
+
+class NothingApplied(CommentRefused):
+    """A resolution with no reference of what it changed."""
+
+
+# The references that ``applied`` takes. A document path is
+# ``documents/<owner>/<slug>.md`` (or ``.html``); ``owner`` is a person id or
+# ``shared``.
+_DOCUMENT_RE = re.compile(
+    r"^/?documents/(?P<owner>[^/\s]+)/(?P<slug>[A-Za-z0-9][A-Za-z0-9._-]{0,127})\.(md|html)\Z"
+)
+_TASK_RE = re.compile(r"^task\s+#?(?P<n>[0-9]{1,9})\Z", re.IGNORECASE)
+_ASSIGNMENT_RE = re.compile(r"^assignment\s+#?(?P<n>[0-9]{1,18})\Z", re.IGNORECASE)
+_SAVED_RE = re.compile(r"^saved\s+(?P<name>\S+)\Z", re.IGNORECASE)
+APPLIED_KINDS = (
+    "a document path (documents/<owner>/<slug>.md), a task (task 78), an issue URL, "
+    "assignment N (a draft or a run whose spec changed), or saved <name>"
+)
 
 
 def _iso(value: Any) -> Any:
@@ -88,6 +114,7 @@ def comment_view(row: dict[str, Any], lines: Mapping[str, list[str]]) -> dict[st
         "created_at": _iso(row.get("created_at")),
         "resolved_at": _iso(row.get("resolved_at")),
         "resolution": row.get("resolution"),
+        "applied": list(row.get("applied") or []),
         "stale": now != row["line_text"],
     }
 
@@ -130,6 +157,63 @@ def new_comment(raw: Any, lines: Mapping[str, list[str]]) -> dict[str, Any]:
     if len(body) > MAX_COMMENT_BODY:
         raise CommentRefused(f"body is at most {MAX_COMMENT_BODY} characters")
     return {"target": target, "line_no": line_no, "line_text": line_text, "body": body}
+
+
+def applied_ref(raw: Any) -> str | None:
+    """``raw`` as one reference of ``applied``, in its plain form, or None.
+
+    ``task #78`` becomes ``task 78``, and a leading ``/`` of a document path
+    goes."""
+    text = raw.strip() if isinstance(raw, str) else ""
+    if not text or len(text) > MAX_APPLIED_REF:
+        return None
+    document = _DOCUMENT_RE.match(text)
+    if document is not None:
+        owner, slug = document.group("owner"), document.group("slug")
+        if (owner == "shared" or PERSON_ID_RE.match(owner)) and ".." not in slug:
+            return text.lstrip("/")
+        return None
+    for pattern, kind in ((_TASK_RE, "task"), (_ASSIGNMENT_RE, "assignment")):
+        found = pattern.match(text)
+        if found is not None:
+            return f"{kind} {int(found.group('n'))}"
+    saved = _SAVED_RE.match(text)
+    if saved is not None:
+        name = saved.group("name").lower()
+        return f"saved {name}" if SAVED_NAME_RE.match(name) else None
+    if any(c.isspace() for c in text):
+        return None
+    try:
+        parsed = urlparse(text)
+    except ValueError:
+        return None
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return text
+    return None
+
+
+def applied_refs(raw: Any) -> list[str]:
+    """``raw`` as the list of what a resolution changed. Raises CommentRefused.
+
+    ``raw`` is a list of 1 to :data:`MAX_APPLIED` references, each one of
+    :data:`APPLIED_KINDS`. An empty or missing list raises
+    :class:`NothingApplied`. A reference that comes two times is kept once."""
+    if raw is None or (isinstance(raw, list) and not raw):
+        raise NothingApplied(
+            f"applied names what you changed, at least one reference: {APPLIED_KINDS}"
+        )
+    if not isinstance(raw, list):
+        raise CommentRefused("applied is a list of references")
+    if len(raw) > MAX_APPLIED:
+        raise CommentRefused(f"applied holds at most {MAX_APPLIED} references")
+    out: list[str] = []
+    for item in raw:
+        ref = applied_ref(item)
+        if ref is None:
+            raise CommentRefused(f"each reference of applied is {APPLIED_KINDS}")
+        if ref not in out:
+            out.append(ref)
+    return out
 
 
 def resolution_text(raw: Any) -> str:

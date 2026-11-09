@@ -623,6 +623,10 @@ ul.a-resolved-list { list-style: none; margin: 0; padding: 0 12px 8px; }
 .a-comment.resolved { border-left-color: var(--j-ok); }
 .a-comment.resolved p { margin: 0 0 4px; overflow-wrap: anywhere; }
 .a-resolution { color: var(--j-muted); }
+.a-applied { color: var(--j-muted); font-size: var(--j-text-sm); overflow-wrap: anywhere; }
+.a-run { padding: 1px 9px; font-size: 12px; }
+.a-lineage { margin: 0; padding-left: 1.4em; }
+.a-lineage-run { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 4px 0; }
 
 /* the definition as a document: the fields as properties, then the goal in
    blocks; each unit has its "+" in a gutter at the left */

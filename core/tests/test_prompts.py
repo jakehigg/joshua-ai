@@ -280,7 +280,9 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "Always give the cost",
         "### Comments",
         "assignment_comments",
-        "resolve_comment(comment_id, resolution)",
+        "resolve_comment(comment_id, resolution, applied)",
+        "`nothing_applied`",
+        "`documents/<owner>/<slug>.md`",
         "`stale`",
         "only the person who signed in",
         "### Draft, start, and several in a row",
@@ -320,9 +322,17 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "use `update_assignment` on the draft",
         "quote its `hint` to the person",
         "the person answered on its report",
-        "A comment on a report is the answer of the person to the decision",
+        "A comment on a report or a plan is the answer of the person",
         "update the deliverable document\n  with `write_document`",
-        "start the follow-up that the\n  answer unblocks",
+        "change the tasks with the tasks tools",
+        "Never\n  start an assignment for a comment.",
+        "Resolve the comment only after the change is made, with `applied`",
+        '"Submit it again", "re-run it", or "update the tasks from the plan"',
+        "`start_assignment(rerun=N, note=...)`",
+        "the\n  words of the person as the note",
+        '"Start work on it" means that the plan is final.',
+        "Set `status: final` on\n  the plan document with `write_document`",
+        "ask the person which tool files them",
         "tell them where to look",
         "A comment on the plan of a running assignment is guidance for the worker.",
         "give it with `answer_assignment(id, text)`",
@@ -334,6 +344,8 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
     # There is no queue: nothing waits for a slot.
     for banned in ("queued", "in the queue", "waits for a slot"):
         assert banned not in lowered, banned
+    # A comment changes the document or the tasks; it never starts a run.
+    assert "start the follow-up" not in lowered
     for banned in ("gitlab", "github", "audit", "journal", "kubernetes", "http://", "https://"):
         assert banned not in lowered, banned
     # The plan and the report live in the assignments store, not in the wiki.
