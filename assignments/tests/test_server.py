@@ -162,6 +162,8 @@ PERSON_TOOLS = [
     ("save_assignment", {"name": "docs-cleanup", "spec": spec()}),
     ("list_saved_assignments", {}),
     ("delete_saved_assignment", {"name": "docs-cleanup"}),
+    ("assignment_comments", {"saved": "docs-cleanup"}),
+    ("resolve_comment", {"comment_id": 1, "resolution": "Done."}),
 ]
 READ_TOOLS = {"assignment_status", "list_assignments"}
 

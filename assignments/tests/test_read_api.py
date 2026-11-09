@@ -44,8 +44,21 @@ DETAIL_KEYS = ITEM_KEYS | {
     "follow_ups",
     "answer",
     "error",
+    "definition",
+    "comments",
+    "open_comments",
 }
-SAVED_KEYS = {"id", "name", "title", "spec", "created_at", "updated_at", "runs", "last_run"}
+SAVED_KEYS = {
+    "id",
+    "name",
+    "title",
+    "spec",
+    "created_at",
+    "updated_at",
+    "runs",
+    "last_run",
+    "open_comments",
+}
 
 
 async def call(app, path: str, token: str | None = VIEWER, **params) -> httpx.Response:
@@ -261,7 +274,7 @@ async def test_the_saved_list_and_detail(app, store) -> None:
     assert never["id"] == other["id"]
 
     body = (await call(app, f"/v1/saved/{saved['id']}", person="alex")).json()
-    assert set(body) == SAVED_KEYS | {"runs_list"}
+    assert set(body) == SAVED_KEYS | {"runs_list", "definition", "comments"}
     assert [r["id"] for r in body["runs_list"]] == [r["id"] for r in reversed(runs)]
     assert all(set(r) == ITEM_KEYS for r in body["runs_list"])
     assert body["runs_list"][0]["saved"] == {"id": saved["id"], "name": "docs"}

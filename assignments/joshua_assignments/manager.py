@@ -35,6 +35,8 @@ from joshua_shared.log import get_logger
 from pydantic import ValidationError
 
 from joshua_assignments import budget, notify, report
+from joshua_assignments import definition as definition_mod
+from joshua_assignments.comments import CommentRefused, comment_view, resolution_text
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.runner import Runner, StubRunner
 from joshua_assignments.settings import Settings
@@ -58,6 +60,7 @@ from joshua_assignments.store import (
     STATES,
     STATUSES,
     USAGE_FIELDS,
+    Parent,
     Store,
     state,
     statuses_of,
@@ -433,6 +436,99 @@ class Manager:
             "name": name,
             "status": "deleted",
             "message": f"The saved assignment {name} is deleted. Its runs stay.",
+        }
+
+    async def open_comments(
+        self, person: str, *, saved: Any = None, row: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """The open comments on the definition of the saved assignment ``saved``
+        (a name) or of the run ``row``, each with its line now.
+
+        ``row`` is a run of ``person`` that the caller found. The answer also
+        has the spec and the definition, so the changed spec can be built
+        from it."""
+        if (saved is None) == (row is None):
+            return rejected("invalid_arguments", "give saved (a name) or id, not both")
+        source: dict[str, Any] | None = row
+        if saved is not None:
+            try:
+                name = saved_name(saved)
+            except ValueError as exc:
+                return rejected("invalid_arguments", str(exc))
+            source = await self.store.find_saved(person, name)
+            if source is None:
+                return rejected("not_found", f"there is no saved assignment {name}")
+            parent = Parent("saved", int(source["id"]))
+        else:
+            assert row is not None
+            parent = Parent("assignment", int(row["id"]))
+        assert source is not None
+        spec = source.get("spec") or {}
+        lines = definition_mod.lines(spec)
+        rows = await self.store.comments(person, parent, open_only=True)
+        items = []
+        for comment in rows:
+            view = comment_view(comment, lines)
+            items.append(
+                {
+                    "id": view["id"],
+                    "line_no": view["line_no"],
+                    "line_text": view["line_text"],
+                    "line_now": definition_mod.line_at(lines, view["line_no"]),
+                    "stale": view["stale"],
+                    "body": view["body"],
+                    "created_at": view["created_at"],
+                }
+            )
+        if parent.kind == "saved":
+            how = (
+                f"Apply each comment: change the spec, save it with "
+                f"save_assignment({source['name']!r}, spec)"
+            )
+        else:
+            how = "Apply each comment: change the spec and start a new run with it"
+        message = (
+            f"{len(items)} open comment" + ("" if len(items) == 1 else "s") + ". "
+            "Each body is the request of the person, on the line that line_text "
+            f"gives. {how}, then call resolve_comment(comment_id, resolution) for each."
+            if items
+            else "No open comment."
+        )
+        return {
+            "saved": {"id": source["id"], "name": source["name"]}
+            if parent.kind == "saved"
+            else None,
+            "id": parent.id if parent.kind == "assignment" else None,
+            "spec": spec,
+            "definition": "\n".join(lines),
+            "comments": items,
+            "message": message,
+        }
+
+    async def resolve_comment(
+        self, person: str, comment_id: Any, resolution: Any
+    ) -> dict[str, Any]:
+        """Mark one open comment of ``person`` resolved, with one line on what was done."""
+        if isinstance(comment_id, bool) or not isinstance(comment_id, int):
+            return rejected("invalid_arguments", "comment_id is a number")
+        try:
+            text = resolution_text(resolution)
+        except CommentRefused as exc:
+            return rejected("invalid_arguments", str(exc))
+        current = await self.store.get_comment(person, comment_id)
+        if current is None:
+            return rejected("not_found", f"there is no comment {comment_id}")
+        if current.get("resolved_at") is not None:
+            return rejected("resolved", f"comment {comment_id} is already resolved")
+        row = await self.store.resolve_comment(person, comment_id, text)
+        if row is None:
+            return rejected("resolved", f"comment {comment_id} is already resolved")
+        logger.info({"message": "comment resolved", "comment_id": comment_id, "person": person})
+        return {
+            "id": comment_id,
+            "status": "resolved",
+            "resolution": text,
+            "message": f"Comment {comment_id} is resolved.",
         }
 
     async def _names(self, rows: list[dict[str, Any]]) -> dict[int, str]:
