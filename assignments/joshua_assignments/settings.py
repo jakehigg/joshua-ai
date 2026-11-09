@@ -10,6 +10,9 @@ secrets and the addresses:
   tools.
 - ``JOSHUA_TOKEN_ASSIGNMENTS``: the fleet token of this container. It goes
   to channels, to core, and to the gateway.
+- ``JOSHUA_TOKEN_<NAME>``: the fleet token of each caller of the read API,
+  such as ``JOSHUA_TOKEN_VIEWER``. Only a caller in
+  ``assignments.read_callers`` may use it. It is never a bearer of ``/mcp``.
 - ``CHANNELS_URL``: where the report and the question events go.
 - ``CORE_URL``: where the runner reads the limits, writes the usage, and
   sends the model calls of a session (core's model forwarder).
@@ -29,6 +32,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from joshua_shared.config import JoshuaConfig
+from joshua_shared.fleet_auth import load_fleet_tokens
 
 _PERSON_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
 
@@ -54,6 +58,14 @@ class Settings:
     fleet_token: str = field(default="", repr=False)
     core_url: str | None = None
     gateway_url: str | None = None
+    # Fleet identity to token, for the read API. It never holds the token of
+    # this container.
+    read_tokens: Mapping[str, str] = field(default_factory=dict, repr=False)
+
+    def read_tokens_of(self, callers: list[str]) -> dict[str, str]:
+        """The tokens of the identities in ``callers`` only."""
+        names = set(callers)
+        return {name: token for name, token in self.read_tokens.items() if name in names}
 
     @property
     def will_notify(self) -> bool:
@@ -132,6 +144,22 @@ def settings_from_env(cfg: JoshuaConfig, env: Mapping[str, str] | None = None) -
             raise SettingsError(f"{name} needs JOSHUA_TOKEN_ASSIGNMENTS")
         urls[name] = url
 
+    read_tokens = {
+        name: token.strip()
+        for name, token in load_fleet_tokens(env).items()
+        if name != "assignments" and token.strip()
+    }
+    for name, token in read_tokens.items():
+        if token in tokens:
+            raise SettingsError(
+                f"JOSHUA_TOKEN_{name.upper()}: it is the same as a bearer of ASSIGNMENTS_TOKENS "
+                "or ADDON_TOKEN"
+            )
+        if token == fleet_token:
+            raise SettingsError(
+                f"JOSHUA_TOKEN_{name.upper()}: it is the same as JOSHUA_TOKEN_ASSIGNMENTS"
+            )
+
     return Settings(
         database_url=database_url,
         tokens=tokens,
@@ -139,4 +167,5 @@ def settings_from_env(cfg: JoshuaConfig, env: Mapping[str, str] | None = None) -
         fleet_token=fleet_token,
         core_url=urls["CORE_URL"],
         gateway_url=urls["GATEWAY_URL"],
+        read_tokens=read_tokens,
     )

@@ -110,3 +110,30 @@ def test_the_environment_defaults_to_os_environ(monkeypatch) -> None:
     monkeypatch.delenv("JOSHUA_TOKEN_ASSIGNMENTS", raising=False)
     monkeypatch.delenv("ADDON_TOKEN", raising=False)
     assert settings_from_env(make_config()).people == ["alex"]
+
+
+def test_the_read_tokens_are_the_fleet_tokens_but_its_own() -> None:
+    settings = settings_from_env(
+        make_config(),
+        env(JOSHUA_TOKEN_ASSIGNMENTS="fleet", JOSHUA_TOKEN_VIEWER="view", JOSHUA_TOKEN_CI=""),
+    )
+    assert settings.read_tokens == {"viewer": "view"}
+    assert settings.read_tokens_of(["viewer", "laptop"]) == {"viewer": "view"}
+    assert settings.read_tokens_of([]) == {}
+    assert "view" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"JOSHUA_TOKEN_VIEWER": "a-token"}, "JOSHUA_TOKEN_VIEWER: it is the same as a bearer"),
+        (
+            {"JOSHUA_TOKEN_VIEWER": "fleet", "JOSHUA_TOKEN_ASSIGNMENTS": "fleet"},
+            "JOSHUA_TOKEN_VIEWER: it is the same as JOSHUA_TOKEN_ASSIGNMENTS",
+        ),
+    ],
+)
+def test_a_read_token_that_is_another_bearer_is_refused(changes, message) -> None:
+    with pytest.raises(SettingsError, match=message) as caught:
+        settings_from_env(make_config(), env(**changes))
+    assert "a-token" not in str(caught.value) and "fleet" not in str(caught.value)
