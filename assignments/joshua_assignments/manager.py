@@ -1,17 +1,22 @@
 """The manager: the rules behind the tools.
 
-The manager validates a spec, stores the assignment, and starts it when a
-slot is free. ``assignments.max_concurrent`` counts ``running`` assignments
-only, so a parked assignment holds no slot. When the runner stops an
-assignment, ``stopped`` sends the report or the question to channels and
-starts the next queued assignment.
+The manager validates a spec and stores the assignment. ``draft`` stores it
+as a ``draft``, which never runs until ``start`` starts it. ``start`` takes
+a slot at once, or refuses with the reason ``busy``: there is no queue, and
+nothing waits for a slot. ``assignments.max_concurrent`` counts ``running``
+assignments only, so a parked assignment holds no slot. When the runner
+stops an assignment, ``stopped`` sends the report or the question to
+channels. It starts nothing.
 
 A parked assignment (``waiting`` or ``paused_limits``) waits with no time
 limit. Only ``answer_assignment`` starts it again, and only when the limits
-are under the ceilings. ``extend_assignment`` starts a ``budget_exceeded`` or
-``time_exceeded`` assignment again. At start, each ``running`` assignment
-goes back to the queue and resumes its session with a note that the
-container restarted.
+are under the ceilings and a slot is free. ``extend_assignment`` starts a
+``budget_exceeded`` or ``time_exceeded`` assignment again when a slot is
+free. At start, each ``running`` assignment resumes its session with a note
+that the container restarted.
+
+A draft takes a new spec with ``update_draft`` and goes with
+``delete_draft``. A row that ran is never deleted.
 
 A saved assignment is a spec with a name and no run. ``start`` with
 ``saved`` takes the stored spec as the base, and a ``spec`` beside it
@@ -54,6 +59,7 @@ from joshua_assignments.spec import (
     saved_name,
 )
 from joshua_assignments.store import (
+    DRAFT,
     FINISHED,
     PARKED,
     RESUMABLE,
@@ -197,9 +203,8 @@ class Manager:
         self.runner: Runner = (
             runner(self) if runner is not None else StubRunner(self, delay_s=stub_delay_s)
         )
-        self._dispatch_lock = asyncio.Lock()
-        # Why a queued assignment that ran before resumes, when not for an answer.
-        self._resume_reason: dict[int, str] = {}
+        # Held while a call counts the running assignments and takes a slot.
+        self._slot_lock = asyncio.Lock()
 
     @property
     def section(self) -> Assignments:
@@ -213,18 +218,23 @@ class Manager:
     # --- start and stop ---------------------------------------------------
 
     async def open(self) -> None:
-        """Open the store, put each interrupted assignment back in the queue, and dispatch."""
+        """Open the store, then resume each assignment that ran when the container stopped."""
         await self.store.open()
-        requeued = await self.store.requeue_running()
-        if requeued:
-            logger.info({"message": "requeued after a restart", "assignment_ids": requeued})
-        for assignment_id in requeued:
-            self._resume_reason[assignment_id] = "restart"
         opener = getattr(self.runner, "open", None)
         if opener is not None:
             await opener()
         await self._sweep()
-        await self.dispatch()
+        async with self._slot_lock:
+            rows = await self.store.running()
+            if rows:
+                logger.info(
+                    {
+                        "message": "resumed after a restart",
+                        "assignment_ids": [r["id"] for r in rows],
+                    }
+                )
+            for row in rows:
+                await self._run(row, "restart")
 
     async def _sweep(self) -> None:
         sweep = getattr(self.runner, "sweep", None)
@@ -241,36 +251,55 @@ class Manager:
             await closer()
         await self.store.close()
 
-    async def dispatch(self) -> None:
-        """Start queued assignments while a slot is free."""
-        async with self._dispatch_lock:
-            while True:
-                counts = await self.store.counts()
-                if counts.get("running", 0) >= self.section.max_concurrent:
-                    return
-                row = await self.store.next_queued()
-                if row is None:
-                    return
-                fields: dict[str, Any] = {"status": "running"}
-                resume = row.get("started_at") is not None
-                if not resume:
-                    fields["started_at"] = self.clock()
-                row = await self.store.update(row["id"], **fields)
-                assert row is not None
-                logger.info(
-                    {"message": "assignment running", "assignment_id": row["id"], "resume": resume}
-                )
-                reason = self._resume_reason.pop(row["id"], None)
-                if resume:
-                    answer = row.get("answer") or ""
-                    await self.runner.resume(
-                        row, answer, reason="answer" if answer else (reason or "answer")
-                    )
-                else:
-                    await self.runner.start(row)
+    async def _busy(self, person: str) -> dict[str, Any] | None:
+        """The ``busy`` refusal when every slot is taken, else None.
+
+        ``running`` is the id of the newest running assignment of ``person``,
+        or None when only assignments of other people run. The caller holds
+        the slot lock."""
+        rows = await self.store.running()
+        maximum = self.section.max_concurrent
+        if len(rows) < maximum:
+            return None
+        mine = [int(row["id"]) for row in rows if row["person_id"] == person]
+        what = (
+            f"assignment {mine[-1]} is running"
+            if mine
+            else "an assignment of another person is running"
+        )
+        return rejected(
+            "busy",
+            f"{what}, and assignments.max_concurrent is {maximum}. There is no queue: "
+            "start it again when the running assignment ends",
+            running=mine[-1] if mine else None,
+        )
+
+    async def _run(self, row: dict[str, Any], reason: str | None, **fields: Any) -> dict[str, Any]:
+        """Set ``row`` running with ``fields`` and give it to the runner.
+
+        A row that never started gets ``started_at`` and a new session. A row
+        that ran before resumes its session: for its stored answer when it
+        has one, else for ``reason``. The caller holds the slot lock."""
+        resume = row.get("started_at") is not None
+        fields["status"] = "running"
+        if not resume:
+            fields["started_at"] = self.clock()
+        current = await self.store.update(row["id"], **fields)
+        assert current is not None
+        logger.info(
+            {"message": "assignment running", "assignment_id": current["id"], "resume": resume}
+        )
+        if resume:
+            answer = current.get("answer") or ""
+            await self.runner.resume(
+                current, answer, reason="answer" if answer else (reason or "answer")
+            )
+        else:
+            await self.runner.start(current)
+        return current
 
     async def stopped(self, assignment_id: int) -> None:
-        """The runner stopped an assignment: send its event, then start the next one."""
+        """The runner stopped an assignment: send its event. Nothing else starts."""
         row = await self.store.get(assignment_id)
         if row is not None:
             if row["status"] == "paused_limits" and row.get("stopped_at_limits"):
@@ -284,7 +313,6 @@ class Manager:
             elif row["status"] in FINISHED:
                 await notify.send_report(self.settings, self.section, row)
         await self._sweep()
-        await self.dispatch()
 
     # --- the tools --------------------------------------------------------
 
@@ -304,34 +332,76 @@ class Manager:
         except SpecRefused as exc:
             return rejected(exc.reason, exc.message)
 
+    async def _spec_of(
+        self, person: str, raw_spec: Any, saved: str | None
+    ) -> tuple[Any, dict[str, Any] | None] | dict[str, Any]:
+        """The raw spec and the saved assignment it comes from, or the rejection.
+
+        With ``saved``, the stored spec is the base, and ``raw_spec``, when
+        given, replaces the top-level fields that it gives."""
+        if saved is None:
+            if raw_spec is None:
+                return rejected("invalid_arguments", "give spec, or the name of a saved assignment")
+            return raw_spec, None
+        if raw_spec is not None and not isinstance(raw_spec, dict):
+            return rejected("invalid_spec", "spec must be an object")
+        try:
+            name = saved_name(saved)
+        except ValueError as exc:
+            return rejected("invalid_arguments", str(exc))
+        source = await self.store.find_saved(person, name)
+        if source is None:
+            return rejected("not_found", f"there is no saved assignment {name}")
+        return {**source["spec"], **(raw_spec or {})}, source
+
+    @staticmethod
+    def _reply(
+        row: dict[str, Any],
+        spec: dict[str, Any],
+        notes: list[str],
+        source: dict[str, Any] | None,
+        message: str,
+    ) -> dict[str, Any]:
+        if notes:
+            message += " " + "; ".join(notes) + "."
+        return {
+            "id": row["id"],
+            "status": row["status"],
+            "title": spec["title"],
+            "model": spec["model"],
+            "budget": spec["budget"],
+            "max_turns": spec["max_turns"],
+            "working_time": spec["working_time"],
+            "notes": notes,
+            "saved": {"id": source["id"], "name": source["name"]} if source else None,
+            "message": message,
+        }
+
     async def start(
         self,
         person: str,
         raw_spec: Any = None,
         conversation_id: str | None = None,
         saved: str | None = None,
+        draft: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Start an assignment from ``raw_spec``, or from the saved assignment ``saved``.
+        """Start an assignment now: a new one from ``raw_spec`` or from the saved
+        assignment ``saved``, or the draft ``draft`` (a row of ``person``).
 
         With ``saved``, ``raw_spec`` is optional and replaces the top-level
-        fields of the stored spec that it gives.
+        fields of the stored spec that it gives. When every slot is taken,
+        the start is refused with ``busy`` and nothing is stored.
         """
         if not self.section.enabled:
             return rejected("disabled", "assignments.enabled is false in joshua.yaml")
-        source: dict[str, Any] | None = None
-        if saved is not None:
-            if raw_spec is not None and not isinstance(raw_spec, dict):
-                return rejected("invalid_spec", "spec must be an object")
-            try:
-                name = saved_name(saved)
-            except ValueError as exc:
-                return rejected("invalid_arguments", str(exc))
-            source = await self.store.find_saved(person, name)
-            if source is None:
-                return rejected("not_found", f"there is no saved assignment {name}")
-            raw_spec = {**source["spec"], **(raw_spec or {})}
-        elif raw_spec is None:
-            return rejected("invalid_arguments", "give spec, or the name of a saved assignment")
+        if draft is not None:
+            if raw_spec is not None or saved is not None:
+                return rejected("invalid_arguments", "give one of spec, id, or saved")
+            return await self._start_draft(person, draft)
+        found = await self._spec_of(person, raw_spec, saved)
+        if isinstance(found, dict):
+            return found
+        raw_spec, source = found
         checked = self._check(raw_spec)
         if isinstance(checked, dict):
             return checked
@@ -341,44 +411,151 @@ class Manager:
             return refused
         if conversation_id:
             conversation_id = conversation_id[:MAX_CONVERSATION_ID]
+        async with self._slot_lock:
+            busy = await self._busy(person)
+            if busy is not None:
+                return busy
+            row = await self.store.create(
+                person_id=person,
+                conversation_id=conversation_id or None,
+                spec=resolved.spec,
+                model=resolved.model_id,
+                saved_id=source["id"] if source else None,
+            )
+            logger.info(
+                {
+                    "message": "assignment stored",
+                    "assignment_id": row["id"],
+                    "person": person,
+                    "model": resolved.spec["model"],
+                    "clamped": len(resolved.notes),
+                    "saved_id": source["id"] if source else None,
+                }
+            )
+            current = await self._run(row, None)
+        message = f"Assignment {row['id']} is {current['status']}."
+        if source:
+            message += f" It started from the saved assignment {source['name']}."
+        return self._reply(current, resolved.spec, resolved.notes, source, message)
+
+    async def _start_draft(self, person: str, row: dict[str, Any]) -> dict[str, Any]:
+        """Start the draft ``row``. Its spec is checked again, as the config can change."""
+        if row["status"] != DRAFT:
+            return self._not_a_draft(row)
+        checked = self._check(row.get("spec") or {})
+        if isinstance(checked, dict):
+            return checked
+        _, resolved = checked
+        refused = await self._refuse_unknown_limits(resolved.spec)
+        if refused is not None:
+            return refused
+        async with self._slot_lock:
+            busy = await self._busy(person)
+            if busy is not None:
+                return busy
+            current = await self.store.get(row["id"])
+            if current is None or current["status"] != DRAFT:
+                return self._not_a_draft(current or row)
+            current = await self._run(
+                current, "restart", spec=resolved.spec, model=resolved.model_id
+            )
+        names = await self._names([current])
+        source = saved_ref(current, names)
+        return self._reply(
+            current,
+            resolved.spec,
+            resolved.notes,
+            source,
+            f"Assignment {row['id']} is {current['status']}.",
+        )
+
+    @staticmethod
+    def _not_a_draft(row: dict[str, Any]) -> dict[str, Any]:
+        return rejected(
+            "not_a_draft",
+            f"assignment {row['id']} is {row['status']}; only a draft takes this call",
+        )
+
+    async def draft(
+        self,
+        person: str,
+        raw_spec: Any = None,
+        conversation_id: str | None = None,
+        saved: str | None = None,
+    ) -> dict[str, Any]:
+        """Check a spec as ``start`` does and store it as a draft. Nothing runs.
+
+        ``saved`` and ``raw_spec`` work as in ``start``."""
+        if not self.section.enabled:
+            return rejected("disabled", "assignments.enabled is false in joshua.yaml")
+        found = await self._spec_of(person, raw_spec, saved)
+        if isinstance(found, dict):
+            return found
+        raw_spec, source = found
+        checked = self._check(raw_spec)
+        if isinstance(checked, dict):
+            return checked
+        _, resolved = checked
+        if conversation_id:
+            conversation_id = conversation_id[:MAX_CONVERSATION_ID]
         row = await self.store.create(
             person_id=person,
             conversation_id=conversation_id or None,
             spec=resolved.spec,
             model=resolved.model_id,
+            status=DRAFT,
             saved_id=source["id"] if source else None,
         )
-        logger.info(
-            {
-                "message": "assignment stored",
-                "assignment_id": row["id"],
-                "person": person,
-                "model": resolved.spec["model"],
-                "clamped": len(resolved.notes),
-                "saved_id": source["id"] if source else None,
-            }
+        logger.info({"message": "draft stored", "assignment_id": row["id"], "person": person})
+        message = (
+            f"Assignment {row['id']} is a draft. Nothing runs until "
+            f"start_assignment(id={row['id']})."
         )
-        await self.dispatch()
-        current = await self.store.get(row["id"]) or row
-        message = f"Assignment {row['id']} is {current['status']}."
-        if source:
-            message = (
-                f"Assignment {row['id']} is {current['status']}. It started from the "
-                f"saved assignment {source['name']}."
+        return self._reply(row, resolved.spec, resolved.notes, source, message)
+
+    async def update_draft(self, row: dict[str, Any], raw_spec: Any) -> dict[str, Any]:
+        """Replace the spec of the draft ``row``. Any other status is refused."""
+        if not self.section.enabled:
+            return rejected("disabled", "assignments.enabled is false in joshua.yaml")
+        if row["status"] != DRAFT:
+            return self._not_a_draft(row)
+        checked = self._check(raw_spec)
+        if isinstance(checked, dict):
+            return checked
+        _, resolved = checked
+        current = await self.store.update(row["id"], spec=resolved.spec, model=resolved.model_id)
+        assert current is not None
+        lines = definition_mod.lines(resolved.spec)
+        person = row["person_id"]
+        comments = await self.store.comments(
+            person, Parent("assignment", int(row["id"])), open_only=True
+        )
+        stale = sum(1 for comment in comments if comment_view(comment, lines)["stale"])
+        logger.info({"message": "draft updated", "assignment_id": row["id"], "person": person})
+        names = await self._names([current])
+        message = f"Assignment {row['id']} has the new spec. It is still a draft."
+        if stale:
+            message += f" {stale} open comment" + (" is" if stale == 1 else "s are") + " stale."
+        reply = self._reply(
+            current, resolved.spec, resolved.notes, saved_ref(current, names), message
+        )
+        reply["open_comments"] = len(comments)
+        reply["stale_comments"] = stale
+        return reply
+
+    async def delete_draft(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Delete the draft ``row`` and its comments. A row that ran is never deleted."""
+        if row["status"] != DRAFT or not await self.store.delete_draft(int(row["id"])):
+            return rejected(
+                "not_a_draft",
+                f"assignment {row['id']} is {row['status']}; only a draft that never ran "
+                "is deleted, and a run stays",
             )
-        if resolved.notes:
-            message += " " + "; ".join(resolved.notes) + "."
+        logger.info({"message": "draft deleted", "assignment_id": row["id"]})
         return {
             "id": row["id"],
-            "status": current["status"],
-            "title": resolved.spec["title"],
-            "model": resolved.spec["model"],
-            "budget": resolved.spec["budget"],
-            "max_turns": resolved.spec["max_turns"],
-            "working_time": resolved.spec["working_time"],
-            "notes": resolved.notes,
-            "saved": {"id": source["id"], "name": source["name"]} if source else None,
-            "message": message,
+            "status": "deleted",
+            "message": f"The draft {row['id']} is deleted.",
         }
 
     async def save(self, person: str, raw_name: Any, raw_spec: Any) -> dict[str, Any]:
@@ -484,6 +661,11 @@ class Manager:
             how = (
                 f"Apply each comment: change the spec, save it with "
                 f"save_assignment({source['name']!r}, spec)"
+            )
+        elif source.get("status") == DRAFT:
+            how = (
+                f"Apply each comment: change the spec, give it to the draft with "
+                f"update_assignment({parent.id}, spec)"
             )
         else:
             how = "Apply each comment: change the spec and start a new run with it"
@@ -595,12 +777,21 @@ class Manager:
                 "The answer is stored. Answer again when the window resets, or raise the "
                 "ceiling with extend_assignment.",
             }
-        await self.store.update(
-            row["id"], answer=text, open_question=None, stopped_at_limits=None, status="queued"
-        )
+        async with self._slot_lock:
+            busy = await self._busy(row["person_id"])
+            if busy is not None:
+                busy["message"] = (
+                    f"assignment {row['id']} stays {row['status']} and the answer is not "
+                    f"stored: {busy['message']}"
+                )
+                return busy
+            current = await self.store.get(row["id"])
+            if current is None or current["status"] not in PARKED:
+                return rejected("not_waiting", f"assignment {row['id']} is not parked now")
+            current = await self._run(
+                current, "answer", answer=text, open_question=None, stopped_at_limits=None
+            )
         logger.info({"message": "assignment answered", "assignment_id": row["id"]})
-        await self.dispatch()
-        current = await self.store.get(row["id"]) or row
         return {
             "id": row["id"],
             "status": current["status"],
@@ -635,12 +826,17 @@ class Manager:
     async def cancel(self, row: dict[str, Any]) -> dict[str, Any]:
         if row["status"] in FINISHED:
             return rejected("finished", f"assignment {row['id']} has ended: {row['status']}")
+        if row["status"] == DRAFT and row.get("started_at") is None:
+            return rejected(
+                "draft",
+                f"assignment {row['id']} is a draft and never ran; delete it with "
+                f"delete_assignment({row['id']})",
+            )
         await self.runner.cancel(row)
         now = self.clock()
         await self.store.update(row["id"], status="cancelled", finished_at=now)
         await report.finalize(self.store, row["id"], now, self.load_config().timezone)
         logger.info({"message": "assignment cancelled", "assignment_id": row["id"]})
-        await self.dispatch()
         return {
             "id": row["id"],
             "status": "cancelled",
@@ -704,18 +900,20 @@ class Manager:
         spec["budget"] = budget
         resume = row["status"] in RESUMABLE
         if resume:
-            await self.store.update(
-                row["id"], spec=spec, status="queued", finished_at=None, error=None
-            )
-            self._resume_reason[row["id"]] = "extend"
+            async with self._slot_lock:
+                busy = await self._busy(row["person_id"])
+                if busy is not None:
+                    busy["message"] = (
+                        f"assignment {row['id']} keeps its caps and stays {row['status']}: "
+                        f"{busy['message']}"
+                    )
+                    return busy
+                current = await self._run(row, "extend", spec=spec, finished_at=None, error=None)
         else:
-            await self.store.update(row["id"], spec=spec)
+            current = await self.store.update(row["id"], spec=spec) or row
         logger.info(
             {"message": "assignment extended", "assignment_id": row["id"], "resume": resume}
         )
-        if resume:
-            await self.dispatch()
-        current = await self.store.get(row["id"]) or row
         message = f"Assignment {row['id']} has new caps."
         if resume:
             message += f" It continues its session: {current['status']}."

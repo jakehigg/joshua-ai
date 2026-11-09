@@ -38,7 +38,7 @@ logger = get_logger("joshua_assignments")
 OPEN_PATHS = frozenset({"/healthz", "/readyz"})
 _BEARER = "Bearer "
 CONVERSATION_HEADER = "x-joshua-conversation"
-READY_COUNTS = ("queued", "running", "waiting", "paused_limits")
+READY_COUNTS = ("draft", "running", "waiting", "paused_limits")
 
 mcp = MCPServer(name="assignments")
 
@@ -104,13 +104,19 @@ async def _own(caller: Caller, assignment_id: int) -> dict[str, Any]:
 
 @mcp.tool()
 async def start_assignment(
-    ctx: Context, spec: dict[str, Any] | None = None, saved: str | None = None
+    ctx: Context,
+    spec: dict[str, Any] | None = None,
+    id: int | None = None,
+    saved: str | None = None,
 ) -> dict:
-    """Start a long job that runs in the background. Returns id, status, and title at once.
+    """Start a long job now, in the background. Returns id, status, and title at once.
 
-    Give spec, or saved: the name of a saved assignment. With saved, a spec
-    beside it replaces only the top-level fields that it gives, for this run
-    (such as {"model": "opus"}).
+    Give one of: spec, a new assignment; id, a draft to start; saved, the
+    name of a saved assignment. With saved, a spec beside it replaces only
+    the top-level fields that it gives, for this run (such as
+    {"model": "opus"}). There is no queue: while every slot is taken, the
+    start is refused with reason busy, and running is the id of your
+    running assignment. Nothing is stored then.
 
     spec is the whole brief; the assignment sees nothing else of the chat:
     goal (required): what to do, what done means, and where each result goes.
@@ -129,7 +135,47 @@ async def start_assignment(
     """
     person = _person(ctx)
     conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
+    if id is not None:
+        if spec is not None or saved is not None:
+            return rejected("invalid_arguments", "give one of spec, id, or saved")
+        row = await _own(Caller(person=person), id)
+        return await get_manager().start(person, draft=row)
     return await get_manager().start(person, spec, conversation, saved=saved)
+
+
+@mcp.tool()
+async def draft_assignment(
+    ctx: Context, spec: dict[str, Any] | None = None, saved: str | None = None
+) -> dict:
+    """Store an assignment as a draft, for the person to read first. Nothing runs.
+
+    The spec is the same as for start_assignment, and it is checked the same
+    way. Give spec, or saved with an optional spec override. Returns id,
+    title, and notes. The person reads the draft in the viewer and can leave
+    comments on its lines. Start it with start_assignment(id=...).
+    """
+    person = _person(ctx)
+    conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
+    return await get_manager().draft(person, spec, conversation, saved=saved)
+
+
+@mcp.tool()
+async def update_assignment(id: int, spec: dict[str, Any], ctx: Context) -> dict:
+    """Replace the whole spec of a draft. Any other status is refused as not_a_draft.
+
+    The spec is checked as start_assignment checks it. A comment on a line
+    that changed becomes stale. The reply gives open_comments and
+    stale_comments.
+    """
+    person = _person(ctx)
+    return await get_manager().update_draft(await _own(Caller(person=person), id), spec)
+
+
+@mcp.tool()
+async def delete_assignment(id: int, ctx: Context) -> dict:
+    """Delete a draft and its comments. A run is never deleted (not_a_draft)."""
+    person = _person(ctx)
+    return await get_manager().delete_draft(await _own(Caller(person=person), id))
 
 
 @mcp.tool()
@@ -168,8 +214,9 @@ async def assignment_comments(
     comment is a request of the person on one line: line_no and line_text
     say which line it was, line_now what the line is now, and stale is true
     when the line changed. The answer also has the spec. Apply a comment on
-    a saved assignment with save_assignment, and one on a run by starting a
-    new run with the changed spec. Then call resolve_comment for each.
+    a saved assignment with save_assignment, one on a draft with
+    update_assignment, and one on a run by starting a new run with the
+    changed spec. Then call resolve_comment for each.
     """
     person = _person(ctx)
     if (saved is None) == (id is None):
@@ -189,8 +236,8 @@ async def resolve_comment(comment_id: int, resolution: str, ctx: Context) -> dic
 async def assignment_status(id: int, ctx: Context) -> dict:
     """The state of one assignment.
 
-    status is queued, running, waiting, paused_limits, done, failed,
-    cancelled, budget_exceeded, or time_exceeded. state is queued,
+    status is draft, running, waiting, paused_limits, done, failed,
+    cancelled, budget_exceeded, or time_exceeded. state is draft,
     in_progress, or completed. The result also has the title, the plan of
     the worker, the report and report_at, the recorded outputs, the last
     checkpoint, the usage, the turns, the open question, the limits at the
@@ -208,7 +255,7 @@ async def list_assignments(
     """The person's assignments, the newest first, each with its title, state, and saved.
 
     limit is 1 to 100. status filters by status. state filters by state:
-    queued, in_progress, or completed.
+    draft, in_progress, or completed.
     """
     caller = _caller(ctx)
     return await get_manager().recent(caller.person, limit, status, state)
@@ -222,7 +269,8 @@ async def answer_assignment(id: int, text: str, ctx: Context) -> dict:
     a limits stop, "continue" is enough. The manager reads the limits first:
     when a window is still at or over its ceiling, the assignment stays
     parked, the answer is stored, and the reply says when the window resets.
-    A parked assignment waits with no time limit.
+    While every slot is taken, it is refused as busy and the answer is not
+    stored. A parked assignment waits with no time limit.
     """
     person = _person(ctx)
     return await get_manager().answer(await _own(Caller(person=person), id), text)
@@ -249,8 +297,9 @@ async def extend_assignment(
 
     Each value must be more than the current one. A ceiling above the
     maximum in assignments.limits is clamped, and the reply says so. A
-    budget_exceeded or time_exceeded assignment continues its session; an
-    assignment that ended in another way is refused.
+    budget_exceeded or time_exceeded assignment continues its session, or is
+    refused as busy with no change while every slot is taken. An assignment
+    that ended in another way is refused.
     """
     person = _person(ctx)
     row = await _own(Caller(person=person), id)
@@ -359,7 +408,7 @@ def build_app(
 ) -> ASGIApp:
     """Build the ASGI app: the MCP routes plus the bearer check.
 
-    The app lifespan opens the store and starts the queued assignments.
+    The app lifespan opens the store and resumes the running assignments.
     ``host="0.0.0.0"`` turns off the loopback-only DNS-rebinding guard of the
     SDK: a caller reaches this container by its compose or cluster name,
     never by ``localhost``.

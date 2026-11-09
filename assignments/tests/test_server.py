@@ -56,7 +56,7 @@ async def test_readyz_is_open_and_gives_booleans_and_counts_only(app, store) -> 
         "database": True,
         "channels": True,
         "people": 3,
-        "queued": 0,
+        "draft": 0,
         "running": 0,
         "waiting": 0,
         "paused_limits": 0,
@@ -156,6 +156,9 @@ async def test_an_unknown_id_is_404(app) -> None:
 
 PERSON_TOOLS = [
     ("start_assignment", {"spec": spec()}),
+    ("draft_assignment", {"spec": spec()}),
+    ("update_assignment", {"id": 1, "spec": spec()}),
+    ("delete_assignment", {"id": 1}),
     ("answer_assignment", {"id": 1, "text": "x"}),
     ("cancel_assignment", {"id": 1}),
     ("extend_assignment", {"id": 1, "tokens": 5}),

@@ -68,7 +68,7 @@ async def call(app, path: str, token: str | None = VIEWER, **params) -> httpx.Re
         return await client.get(path, params=params, headers=headers)
 
 
-async def make(store, person: str = "alex", status: str = "queued", **fields) -> dict:
+async def make(store, person: str = "alex", status: str = "draft", **fields) -> dict:
     row = await store.create(
         person_id=person,
         conversation_id=None,
@@ -77,6 +77,14 @@ async def make(store, person: str = "alex", status: str = "queued", **fields) ->
     )
     store.rows[row["id"]].update(status=status, **fields)
     return store.rows[row["id"]]
+
+
+async def ended(manager, *args, **kwargs) -> dict:
+    """Start an assignment and end it at once, so the slot is free for the next one."""
+    started = await manager.start(*args, **kwargs)
+    await manager.runner.cancel({"id": started["id"]})
+    manager.store.rows[started["id"]]["status"] = "done"
+    return started
 
 
 PATHS = ["/v1/assignments", "/v1/assignments/1", "/v1/saved", "/v1/saved/1"]
@@ -171,13 +179,13 @@ async def test_the_list_gives_the_items_of_the_person_newest_first(app, store) -
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        ("queued", ["queued"]),
+        ("draft", ["draft"]),
         ("in_progress", ["paused_limits", "running"]),
         ("completed", ["failed"]),
     ],
 )
 async def test_the_state_filter(app, store, state, expected) -> None:
-    for status in ("running", "queued", "failed", "paused_limits"):
+    for status in ("running", "draft", "failed", "paused_limits"):
         await make(store, status=status)
     response = await call(app, "/v1/assignments", person="alex", state=state)
     assert [i["status"] for i in response.json()["items"]] == expected
@@ -260,8 +268,9 @@ async def test_the_saved_list_and_detail(app, store) -> None:
     other = await manager.save("alex", "never-run", spec(title="Never"))
     saved = await manager.save("alex", "docs", spec(title="Docs"))
     await manager.save("mia", "docs", spec())
-    runs = [await manager.start("alex", saved="docs") for _ in range(3)]
-    await manager.start("alex", spec())
+    runs = [await ended(manager, "alex", saved="docs") for _ in range(3)]
+    await manager.draft("alex", saved="docs")
+    await ended(manager, "alex", spec())
     listed = (await call(app, "/v1/saved", person="alex")).json()["items"]
     assert [s["name"] for s in listed] == ["docs", "never-run"]
     assert all(set(s) == SAVED_KEYS for s in listed)
@@ -286,7 +295,7 @@ async def test_the_runs_of_a_saved_assignment_are_capped(app, store, monkeypatch
     manager = get_manager()
     saved = await manager.save("alex", "docs", spec())
     for _ in range(4):
-        await manager.start("alex", saved="docs")
+        await ended(manager, "alex", saved="docs")
     monkeypatch.setattr(read_api, "MAX_RUNS", 2)
     body = (await call(app, f"/v1/saved/{saved['id']}", person="alex")).json()
     assert [r["id"] for r in body["runs_list"]] == [4, 3]

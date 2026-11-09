@@ -33,7 +33,7 @@ logger = get_logger("joshua_assignments.store")
 CLOSE_WAIT_S = 10.0
 
 STATUSES = (
-    "queued",
+    "draft",
     "running",
     "waiting",
     "paused_limits",
@@ -52,8 +52,12 @@ FINISHED = frozenset({"done", "failed", "cancelled", "budget_exceeded", "time_ex
 RESUMABLE = frozenset({"budget_exceeded", "time_exceeded"})
 # An ended assignment whose scratch stays for ``assignments.keep_failed_work``.
 KEEP_SCRATCH = frozenset({"failed", *RESUMABLE})
+# A stored assignment that has not run. Only ``start_assignment`` runs it.
+DRAFT = "draft"
+# Every status of a run: each one but ``draft``.
+RUN_STATUSES = tuple(status for status in STATUSES if status != DRAFT)
 # What a person sees: three states. ``state`` maps each status to one.
-STATES = ("queued", "in_progress", "completed")
+STATES = ("draft", "in_progress", "completed")
 IN_PROGRESS = frozenset({"running", *PARKED})
 USAGE_FIELDS = ("input", "output", "cache_read", "cache_write")
 JSON_FIELDS = frozenset({"spec", "stopped_at_limits", "follow_ups", "outputs"})
@@ -69,6 +73,7 @@ MAX_COMMENT_RESOLUTION = 300
 UPDATABLE = frozenset(
     {
         "spec",
+        "model",
         "status",
         "session_id",
         *USAGE_FIELDS,
@@ -94,10 +99,10 @@ CREATE TABLE IF NOT EXISTS assignments.assignment (
     person_id         TEXT NOT NULL,
     conversation_id   TEXT,
     spec              JSONB NOT NULL,
-    -- queued, running, waiting, paused_limits, done, failed, cancelled,
+    -- draft, running, waiting, paused_limits, done, failed, cancelled,
     -- budget_exceeded, time_exceeded. The code checks the value, so a new
-    -- status needs no change here.
-    status            TEXT NOT NULL DEFAULT 'queued',
+    -- status needs no change here. ``create`` always gives the status.
+    status            TEXT NOT NULL DEFAULT 'draft',
     model             TEXT NOT NULL,
     session_id        TEXT,
     -- No longer written. A row from an earlier release keeps its value.
@@ -146,6 +151,10 @@ CREATE INDEX IF NOT EXISTS idx_assignment_saved
     ON assignments.assignment (saved_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_assignment_status
     ON assignments.assignment (status, id);
+-- There is no queue. A row that waited in the queue of an earlier release
+-- is a draft: it runs only when it is started.
+ALTER TABLE assignments.assignment ALTER COLUMN status SET DEFAULT 'draft';
+UPDATE assignments.assignment SET status = 'draft' WHERE status = 'queued';
 
 -- A comment of a person on one line of a definition: of a saved assignment
 -- or of a run, never both. ``line_text`` is the line as it was, so a reader
@@ -197,18 +206,19 @@ CREATE TABLE IF NOT EXISTS assignments.slice (
 
 
 # A saved assignment with the count of its runs and its newest run. A run
-# counts only when it belongs to the person of the saved assignment.
+# counts only when it belongs to the person of the saved assignment. A draft
+# is not a run.
 SAVED_SELECT = """
 SELECT s.*, COALESCE(r.runs, 0) AS runs,
        l.id AS last_run_id, l.status AS last_run_status, l.finished_at AS last_run_finished_at
 FROM assignments.saved s
 LEFT JOIN LATERAL (
     SELECT count(*) AS runs FROM assignments.assignment a
-    WHERE a.saved_id = s.id AND a.person_id = s.person_id
+    WHERE a.saved_id = s.id AND a.person_id = s.person_id AND a.status <> 'draft'
 ) r ON true
 LEFT JOIN LATERAL (
     SELECT a.id, a.status, a.finished_at FROM assignments.assignment a
-    WHERE a.saved_id = s.id AND a.person_id = s.person_id
+    WHERE a.saved_id = s.id AND a.person_id = s.person_id AND a.status <> 'draft'
     ORDER BY a.id DESC LIMIT 1
 ) l ON true
 WHERE {where}
@@ -258,6 +268,7 @@ class Store(Protocol):
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
+        status: str = DRAFT,
         saved_id: int | None = None,
     ) -> dict[str, Any]: ...
 
@@ -273,6 +284,8 @@ class Store(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     async def update(self, assignment_id: int, **fields: Any) -> dict[str, Any] | None: ...
+
+    async def delete_draft(self, assignment_id: int) -> bool: ...
 
     async def add_checkpoint(self, assignment_id: int, note: str) -> None: ...
 
@@ -331,9 +344,7 @@ class Store(Protocol):
 
     async def counts(self) -> dict[str, int]: ...
 
-    async def next_queued(self) -> dict[str, Any] | None: ...
-
-    async def requeue_running(self) -> list[int]: ...
+    async def running(self) -> list[dict[str, Any]]: ...
 
     async def next_slice_n(self, assignment_id: int) -> int: ...
 
@@ -351,9 +362,9 @@ class Store(Protocol):
 
 
 def state(status: str) -> str:
-    """The state that a person sees for ``status``: queued, in_progress, or completed."""
-    if status == "queued":
-        return "queued"
+    """The state that a person sees for ``status``: draft, in_progress, or completed."""
+    if status == DRAFT:
+        return "draft"
     if status in IN_PROGRESS:
         return "in_progress"
     return "completed"
@@ -472,14 +483,16 @@ class PgStore:
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
+        status: str = DRAFT,
         saved_id: int | None = None,
     ) -> dict[str, Any]:
+        check_fields({"status": status})
         async with self._pool().connection() as conn:
             cur = await conn.execute(
                 "INSERT INTO assignments.assignment "
-                "(person_id, conversation_id, spec, model, saved_id) "
-                "VALUES (%s, %s, %s, %s, %s) RETURNING *",
-                (person_id, conversation_id, Jsonb(spec), model, saved_id),
+                "(person_id, conversation_id, spec, model, status, saved_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+                (person_id, conversation_id, Jsonb(spec), model, status, saved_id),
             )
             created = await cur.fetchone()
         assert created is not None
@@ -545,6 +558,20 @@ class PgStore:
             )
             row = await cur.fetchone()
         return dict(row) if row else None
+
+    @shielded
+    async def delete_draft(self, assignment_id: int) -> bool:
+        """Delete one draft that never ran. False when there is no such draft.
+
+        Its comments go with it. A row that ran is never deleted."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "DELETE FROM assignments.assignment WHERE id = %s AND status = 'draft' "
+                "AND started_at IS NULL RETURNING id",
+                (assignment_id,),
+            )
+            row = await cur.fetchone()
+        return row is not None
 
     @shielded
     async def add_checkpoint(self, assignment_id: int, note: str) -> None:
@@ -788,24 +815,14 @@ class PgStore:
         return {row["status"]: int(row["n"]) for row in rows}
 
     @shielded
-    async def next_queued(self) -> dict[str, Any] | None:
+    async def running(self) -> list[dict[str, Any]]:
+        """The ``running`` assignments, the oldest first."""
         async with self._pool().connection() as conn:
             cur = await conn.execute(
-                "SELECT * FROM assignments.assignment WHERE status = 'queued' ORDER BY id LIMIT 1"
-            )
-            row = await cur.fetchone()
-        return dict(row) if row else None
-
-    @shielded
-    async def requeue_running(self) -> list[int]:
-        """Put each ``running`` assignment back in the queue. Returns their ids."""
-        async with self._pool().connection() as conn:
-            cur = await conn.execute(
-                "UPDATE assignments.assignment SET status = 'queued' "
-                "WHERE status = 'running' RETURNING id"
+                "SELECT * FROM assignments.assignment WHERE status = 'running' ORDER BY id"
             )
             rows = await cur.fetchall()
-        return sorted(int(row["id"]) for row in rows)
+        return [dict(row) for row in rows]
 
     @shielded
     async def next_slice_n(self, assignment_id: int) -> int:

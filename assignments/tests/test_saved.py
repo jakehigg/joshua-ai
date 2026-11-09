@@ -67,8 +67,10 @@ async def test_list_gives_the_runs_and_the_last_run(channels) -> None:
     await manager.save("alex", "never-run", spec(title="Never"))
     saved = await manager.save("alex", "docs", spec(title="Docs"))
     first = await manager.start("alex", saved=saved["name"])
+    await manager.runner.idle()
     second = await manager.start("alex", saved="docs")
     await manager.runner.idle()
+    await manager.draft("alex", saved="docs")
     await manager.start("alex", spec())
     listed = (await manager.list_saved("alex"))["saved"]
     assert [s["name"] for s in listed] == ["docs", "never-run"]
@@ -82,7 +84,7 @@ async def test_list_gives_the_runs_and_the_last_run(channels) -> None:
 
 
 async def test_start_by_name_with_and_without_an_override(channels) -> None:
-    manager = make_manager(delay=None)
+    manager = make_manager("  max_concurrent: 2\n", delay=None)
     saved = await manager.save("alex", "docs", spec(title="Docs", max_turns=50))
     plain = await manager.start("alex", saved="docs")
     override = await manager.start("alex", {"model": "opus", "max_turns": 80}, saved="docs")
@@ -151,6 +153,7 @@ async def test_status_and_list_name_the_saved_assignment(channels) -> None:
     manager = make_manager()
     saved = await manager.save("alex", "docs", spec())
     started = await manager.start("alex", saved="docs")
+    await manager.runner.idle()
     plain = await manager.start("alex", spec())
     ref = {"id": saved["id"], "name": "docs"}
     status = await manager.status(await manager.store.get(started["id"]))

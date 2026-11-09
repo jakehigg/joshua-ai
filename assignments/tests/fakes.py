@@ -43,8 +43,10 @@ class FakeStore:
         conversation_id: str | None,
         spec: dict[str, Any],
         model: str,
+        status: str = "draft",
         saved_id: int | None = None,
     ) -> dict[str, Any]:
+        check_fields({"status": status})
         assignment_id = self._next
         self._next += 1
         row: dict[str, Any] = {
@@ -52,7 +54,7 @@ class FakeStore:
             "person_id": person_id,
             "conversation_id": conversation_id,
             "spec": copy.deepcopy(spec),
-            "status": "queued",
+            "status": status,
             "model": model,
             "session_id": None,
             "page_path": None,
@@ -149,7 +151,9 @@ class FakeStore:
         runs = [
             r
             for r in self.rows.values()
-            if r["saved_id"] == saved["id"] and r["person_id"] == saved["person_id"]
+            if r["saved_id"] == saved["id"]
+            and r["person_id"] == saved["person_id"]
+            and r["status"] != "draft"
         ]
         last = max(runs, key=lambda r: r["id"], default=None)
         return copy.deepcopy(
@@ -292,17 +296,18 @@ class FakeStore:
             out[row["status"]] = out.get(row["status"], 0) + 1
         return out
 
-    async def next_queued(self) -> dict[str, Any] | None:
-        queued = [r for r in self.rows.values() if r["status"] == "queued"]
-        return copy.deepcopy(min(queued, key=lambda r: r["id"])) if queued else None
+    async def running(self) -> list[dict[str, Any]]:
+        rows = [r for r in self.rows.values() if r["status"] == "running"]
+        return copy.deepcopy(sorted(rows, key=lambda r: r["id"]))
 
-    async def requeue_running(self) -> list[int]:
-        ids = []
-        for row in self.rows.values():
-            if row["status"] == "running":
-                row["status"] = "queued"
-                ids.append(row["id"])
-        return sorted(ids)
+    async def delete_draft(self, assignment_id: int) -> bool:
+        row = self.rows.get(assignment_id)
+        if row is None or row["status"] != "draft" or row["started_at"] is not None:
+            return False
+        del self.rows[assignment_id]
+        for cid in [c for c, r in self.comment_rows.items() if r["assignment_id"] == assignment_id]:
+            del self.comment_rows[cid]
+        return True
 
     async def next_slice_n(self, assignment_id: int) -> int:
         mine = [s["n"] for s in self.slices if s["assignment_id"] == assignment_id]

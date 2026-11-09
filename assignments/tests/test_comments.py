@@ -25,12 +25,13 @@ async def saved(person: str = "alex", name: str = "docs", **fields) -> dict:
     return await get_manager().save(person, name, spec(title="Docs", **fields))
 
 
-async def run(store, person: str = "alex") -> dict:
+async def run(store, person: str = "alex", status: str = "done") -> dict:
     return await store.create(
         person_id=person,
         conversation_id=None,
         spec={"goal": "Clean up the docs.", "model": "sonnet"},
         model="claude-sonnet-5",
+        status=status,
     )
 
 
