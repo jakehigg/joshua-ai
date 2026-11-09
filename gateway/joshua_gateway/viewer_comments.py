@@ -26,6 +26,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, tzinfo
 from html import escape
 from typing import Any, Protocol
+from urllib.parse import urlparse
+
+from joshua_gateway.viewer_docstore import document_url
 
 # The longest comment, in characters.
 MAX_COMMENT = 2000
@@ -200,6 +203,31 @@ def _where(comment: Comment) -> str:
     return "The document" if n == 0 else f"Line {n}"
 
 
+def _ref_html(ref: str) -> str:
+    """One reference of ``applied``: a link for a document path or an ``http``
+    or ``https`` URL with a host, else plain text."""
+    page = document_url(ref)
+    if page is not None:
+        return f'<a href="{escape(page)}">{escape(ref)}</a>'
+    try:
+        parsed = urlparse(ref)
+    except ValueError:
+        parsed = None
+    if parsed is not None and parsed.scheme in ("http", "https") and parsed.netloc:
+        return f'<a href="{escape(ref)}" rel="noreferrer">{escape(ref)}</a>'
+    return f"<span>{escape(ref)}</span>"
+
+
+def applied_html(comment: Any) -> str:
+    """What the resolution of ``comment`` changed, its ``applied``, as a line
+    under the resolution. "" when it names nothing."""
+    refs = [str(ref) for ref in (getattr(comment, "applied", None) or []) if str(ref).strip()]
+    if not refs:
+        return ""
+    links = ", ".join(_ref_html(ref) for ref in refs)
+    return f'<p class="a-applied"><span class="j-label">Changed</span> {links}</p>'
+
+
 def resolved_html(comments: Sequence[Comment], *, tz: tzinfo, now: datetime) -> str:
     """The resolved comments, folded, each with the resolution of Joshua."""
     if not comments:
@@ -210,7 +238,8 @@ def resolved_html(comments: Sequence[Comment], *, tz: tzinfo, now: datetime) -> 
         f'<p class="a-comment-body">{escape(c.body)}</p>'
         f'<p class="a-resolution"><span class="j-label">Joshua</span> '
         f"{escape(c.resolution or '')}"
-        f' <span class="j-faint">{time_html(c.resolved_at, tz=tz, now=now)}</span></p></li>'
+        f' <span class="j-faint">{time_html(c.resolved_at, tz=tz, now=now)}</span></p>'
+        f"{applied_html(c)}</li>"
         for c in comments
     )
     return (

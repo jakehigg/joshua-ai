@@ -1872,3 +1872,109 @@ def test_the_lead_band_and_the_answers_fit_a_phone() -> None:
         ".a-answer p { margin: 0 0 4px; overflow-wrap: anywhere; }",
     ):
         assert rule in css, rule
+
+
+# -- the review loop: what a resolution changed, and the runs of a lineage ---
+
+
+def test_a_resolution_shows_what_it_changed(data, monkeypatch) -> None:
+    comments = [
+        comment(
+            id=22,
+            target="report",
+            line_no=DECISION_2,
+            line_text="2. **Keep the redirects for a year?** They make the sidebar longer.",
+            body="Yes.",
+            resolved_at=_iso(timedelta(minutes=1)),
+            resolution="Kept the redirects in the plan.",
+            applied=[
+                "documents/alex/docs-plan.md",
+                "task 78",
+                "https://example.com/group/docs/-/issues/3",
+                "javascript:alert(1)",
+                "<b>x</b>",
+            ],
+        ),
+        comment(
+            id=23,
+            line_no=4,
+            body="Use opus.",
+            resolved_at=_iso(timedelta(minutes=1)),
+            resolution="Changed the model.",
+            applied=["assignment 7"],
+        ),
+    ]
+    html, _ = _page_of(monkeypatch, answered(comments=comments))
+    second = _between(html, f'id="R{DECISION_2}"', "</li>")
+    changed = _between(second, '<p class="a-applied">', "</p>")
+    assert '<span class="j-label">Changed</span>' in changed
+    assert '<a href="/documents/alex/docs-plan">documents/alex/docs-plan.md</a>' in changed
+    assert "<span>task 78</span>" in changed
+    assert (
+        '<a href="https://example.com/group/docs/-/issues/3" rel="noreferrer">'
+        "https://example.com/group/docs/-/issues/3</a>"
+    ) in changed
+    # A reference that is not a place is text, escaped.
+    assert "<span>javascript:alert(1)</span>" in changed
+    assert "&lt;b&gt;x&lt;/b&gt;" in changed and "<b>x</b>" not in changed
+    resolved = html[html.index('<details class="a-resolved">') :]
+    assert "<span>assignment 7</span>" in resolved
+
+
+def test_a_resolution_with_nothing_applied_shows_no_changed_line(data, monkeypatch) -> None:
+    comments = [comment(id=24, resolved_at=_iso(timedelta(minutes=1)), resolution="Done.")]
+    html, _ = _page_of(monkeypatch, detail(definition=DEFINITION, comments=comments))
+    assert "a-applied" not in html
+
+
+def lineage(*ids: int) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": n,
+            "title": "Clean up the docs",
+            "status": "done",
+            "state": "completed",
+            "parent_id": ids[k - 1] if k else None,
+            "created_at": _iso(timedelta(days=3 - k)),
+            "finished_at": _iso(timedelta(days=2 - k)),
+        }
+        for k, n in enumerate(ids)
+    ]
+
+
+def test_a_rerun_says_which_run_it_is_and_lists_the_lineage(data, monkeypatch) -> None:
+    body = answered(
+        id=7,
+        parent_id=4,
+        rerun_of={"id": 4, "title": "Clean up the docs"},
+        lineage=lineage(4, 7, 9),
+    )
+    html, _ = _page_of(monkeypatch, body)
+    hero = _between(html, '<header class="a-hero">', "</header>")
+    assert '<a class="j-chip a-run" href="#lineage">run 2 of assignment 4</a>' in hero
+    fold = _between(html, '<details class="a-fold" id="lineage">', "</details>")
+    assert "Runs of this assignment" in fold and "3 runs" in fold
+    assert '<a href="/assignments/4">Run 1: assignment 4</a>' in fold
+    assert '<b aria-current="page">Run 2: assignment 7 (this run)</b>' in fold
+    assert '<a href="/assignments/9">Run 3: assignment 9</a>' in fold
+    assert fold.index("assignment 4") < fold.index("assignment 7") < fold.index("assignment 9")
+
+
+def test_the_root_of_a_lineage_is_run_1(data, monkeypatch) -> None:
+    html, _ = _page_of(monkeypatch, detail(id=4, lineage=lineage(4, 7)))
+    assert "run 1 of assignment 4" in html
+    assert 'id="lineage"' in html
+
+
+def test_a_run_with_no_rerun_has_no_lineage(data, monkeypatch) -> None:
+    html, _ = _page_of(monkeypatch, answered(lineage=lineage(7)))
+    assert "a-run" not in html and 'id="lineage"' not in html
+    old, _ = _page_of(monkeypatch, detail())
+    assert 'id="lineage"' not in old
+
+
+def test_a_hostile_title_in_the_lineage_is_escaped(data, monkeypatch) -> None:
+    runs = lineage(4, 7)
+    runs[0]["title"] = "<script>x</script>"
+    html, _ = _page_of(monkeypatch, detail(lineage=runs))
+    assert "<script>x" not in html and "&lt;script&gt;x&lt;/script&gt;" in html

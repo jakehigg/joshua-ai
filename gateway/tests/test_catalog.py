@@ -164,7 +164,12 @@ def test_reload_applies_new_filter_without_restarting_container(gateway, config_
         assert "echo" in resp.json()["reloaded"]
 
         inv = client.get("/admin/inventory", headers=bearer("laptop")).json()
-        assert sorted(inv["servers"]["echo"]["tools"]) == ["echo", "secret_tool", "whoami"]
+        assert sorted(inv["servers"]["echo"]["tools"]) == [
+            "echo",
+            "refuse",
+            "secret_tool",
+            "whoami",
+        ]
 
 
 def test_reload_starts_added_and_stops_removed(gateway, config_path):

@@ -43,7 +43,7 @@ from urllib.parse import urlparse
 from joshua_gateway import viewer_blocks as vb
 from joshua_gateway import viewer_docstore as ds
 from joshua_gateway import viewer_report as rp
-from joshua_gateway.viewer_comments import Comment, Gutter, time_html
+from joshua_gateway.viewer_comments import Comment, Gutter, applied_html, time_html
 
 # The wiki renderer: raw HTML is off, and markdown-it refuses a
 # ``javascript:`` link.
@@ -290,7 +290,7 @@ def _answer_html(gutter: Gutter, open_: list[Comment], done: list[Comment]) -> s
             f'<p class="a-answer-body">{escape(comment.body)}</p>'
             f'<p class="a-resolution"><span class="j-label">Joshua</span> '
             f"{escape(comment.resolution or '')}"
-            f' <span class="j-faint">{when}</span></p></div>'
+            f' <span class="j-faint">{when}</span></p>{applied_html(comment)}</div>'
         )
     for comment in open_:
         when = time_html(comment.created_at, tz=gutter.tz, now=gutter.now)

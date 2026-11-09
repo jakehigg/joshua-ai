@@ -1,14 +1,17 @@
 """A minimal stdio MCP server for the gateway tests.
 
-It exposes three tools: ``echo`` (returns its ``message``), ``secret_tool`` (the
-allowlist tests keep it out of ``tools/list`` and reject it at call time), and
+It exposes four tools: ``echo`` (returns its ``message``), ``secret_tool`` (the
+allowlist tests keep it out of ``tools/list`` and reject it at call time),
 ``whoami`` (returns the ``ECHO_IDENTITY`` env var, so the identities tests can see
-which per-person credential the instance was started with). Run it over stdio:
+which per-person credential the instance was started with), and ``refuse``
+(returns a refusal in the house style, ``{"status": "rejected", "reason",
+"message"}``, with the ``reason`` and the ``message`` it gets). Run it over stdio:
 ``python echo_server.py``.
 """
 
 from __future__ import annotations
 
+import json
 import os
 
 import anyio
@@ -36,6 +39,14 @@ TOOLS = [
         description="Return the ECHO_IDENTITY env var this server was started with.",
         input_schema={"type": "object", "properties": {}},
     ),
+    types.Tool(
+        name="refuse",
+        description="Return a refusal with the reason and the message it gets.",
+        input_schema={
+            "type": "object",
+            "properties": {"reason": {"type": "string"}, "message": {"type": "string"}},
+        },
+    ),
 ]
 
 
@@ -54,6 +65,12 @@ async def on_call_tool(ctx, params):
     if params.name == "whoami":
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=os.environ.get("ECHO_IDENTITY", ""))]
+        )
+    if params.name == "refuse":
+        args = params.arguments or {}
+        reply = {"status": "rejected", "reason": args.get("reason"), "message": args.get("message")}
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(reply))]
         )
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=f"unknown tool: {params.name}")],

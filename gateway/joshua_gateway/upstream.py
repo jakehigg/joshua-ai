@@ -356,6 +356,21 @@ class Upstream:
         CALLERS.record_call(identity)
         logger.info({"message": "tool call", **entry})
 
+    def _record_refusal(self, tool: str, reason: str) -> None:
+        """``on_refusal`` hook: one log line for a tool call whose result is a
+        refusal. It names the tool, the person, the server, and the reason,
+        never an argument or the text of the result."""
+        logger.info(
+            {
+                "message": "tool call refused",
+                "identity": identity_ctx.get(),
+                "person": person_ctx.get(),
+                "server": self.label,
+                "tool": tool,
+                "reason": reason,
+            }
+        )
+
     # -- supervisor ----------------------------------------------------------
 
     async def _ensure_installed(self) -> None:
@@ -452,7 +467,9 @@ class Upstream:
         )
         if self.mgr is not None and self._mgr_caps == key:
             return
-        server = build_upstream_server(self.name, self, caps, on_call=self._record_call)
+        server = build_upstream_server(
+            self.name, self, caps, on_call=self._record_call, on_refusal=self._record_refusal
+        )
         mgr = StreamableHTTPSessionManager(app=server, stateless=True, json_response=False)
         ready, stop = asyncio.Event(), asyncio.Event()
 
