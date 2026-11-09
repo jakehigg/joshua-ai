@@ -30,6 +30,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from joshua_assignments import definition as definition_mod
+from joshua_assignments import inbox
 from joshua_assignments.comments import (
     MAX_OPEN_COMMENTS,
     CommentRefused,
@@ -89,6 +90,7 @@ def item(row: dict[str, Any], names: Mapping[int, str]) -> dict[str, Any]:
         "lede": lede(row.get("report")),
         "next_step": next_step(row.get("plan")),
         "open_question": row.get("open_question"),
+        "open_request": row.get("open_request"),
         "asked_at": _iso(row.get("asked_at")),
         "stopped_at_limits": row.get("stopped_at_limits"),
         "saved": saved_ref(row, names),
@@ -130,6 +132,8 @@ def detail(
         "follow_ups": row.get("follow_ups"),
         "answer": row.get("answer"),
         "error": row.get("error"),
+        "granted_repos": row.get("granted_repos") or [],
+        "inbox": inbox.records(row.get("inbox")),
     }
 
 
