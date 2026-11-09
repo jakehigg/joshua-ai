@@ -3,9 +3,12 @@
 The container serves MCP at ``/mcp`` over streamable HTTP on port 8000.
 ``GET /healthz`` and ``GET /readyz`` are open and name no person. Every other
 route needs ``Authorization: Bearer <token>``; a missing or wrong token gets
-401. A bearer from ``ASSIGNMENTS_TOKENS`` names a person. The ``ADDON_TOKEN``
-bearer names no person: it may use ``assignment_status`` and
-``list_assignments`` for every assignment, and every other tool gives it
+401. A path under ``/v1/`` is the read API (``read_api``) and takes only the
+fleet token of a caller in ``assignments.read_callers``. Every other path
+takes only a bearer of ``/mcp``. A bearer from ``ASSIGNMENTS_TOKENS`` names
+a person. The ``ADDON_TOKEN`` bearer names no person: it may use
+``assignment_status`` and ``list_assignments`` for every assignment, and
+every other tool gives it
 "403 forbidden". A person must be a member, and sees only their own
 assignments: another person's assignment is "404 not found".
 """
@@ -14,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import hmac
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from joshua_shared.log import get_logger
@@ -26,6 +29,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from joshua_assignments.manager import Manager
+from joshua_assignments.read_api import READ_PREFIX, ReadApi, read_caller
 from joshua_assignments.settings import Caller, Settings
 from joshua_assignments.store import Store
 
@@ -237,11 +241,24 @@ async def extend_assignment(
 
 
 class BearerAuthMiddleware:
-    """Require a known bearer on every path except ``OPEN_PATHS``."""
+    """Require a known bearer on every path except ``OPEN_PATHS``.
 
-    def __init__(self, app: ASGIApp, settings: Settings) -> None:
+    A path under ``READ_PREFIX`` takes the fleet token of an identity that
+    ``read_callers`` gives now, and no other bearer. Every other path takes a
+    bearer of ``settings.tokens``, and no fleet token.
+    """
+
+    def __init__(
+        self, app: ASGIApp, settings: Settings, read_callers: Callable[[], list[str]]
+    ) -> None:
         self.app = app
         self.settings = settings
+        self.read_callers = read_callers
+
+    def _allowed(self, path: str, authorization: str) -> bool:
+        if path.startswith(READ_PREFIX):
+            return read_caller(self.settings, self.read_callers(), authorization) is not None
+        return find_caller(self.settings, authorization) is not None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["path"] in OPEN_PATHS:
@@ -249,7 +266,7 @@ class BearerAuthMiddleware:
             return
         headers = dict(scope["headers"])
         raw = headers.get(b"authorization", b"").decode("latin-1")
-        if find_caller(self.settings, raw) is None:
+        if not self._allowed(scope["path"], raw):
             logger.warning({"message": "rejected request: missing or wrong token"})
             response = JSONResponse({"error": "unauthorized"}, status_code=401)
             await response(scope, receive, send)
@@ -276,8 +293,25 @@ async def readyz(request: Request) -> Response:
     return JSONResponse(body, status_code=200 if database else 503)
 
 
+def _read_route(name: str) -> Callable[[Request], Awaitable[Response]]:
+    """A handler of the read API that uses the manager of ``build_app``."""
+
+    async def handler(request: Request) -> Response:
+        route: Callable[[Request], Awaitable[Response]] = getattr(ReadApi(get_manager()), name)
+        return await route(request)
+
+    handler.__name__ = f"read_{name}"
+    return handler
+
+
 mcp.custom_route("/healthz", methods=["GET"])(healthz)
 mcp.custom_route("/readyz", methods=["GET"])(readyz)
+mcp.custom_route(f"{READ_PREFIX}assignments", methods=["GET"])(_read_route("assignments"))
+mcp.custom_route(f"{READ_PREFIX}assignments/{{assignment_id:int}}", methods=["GET"])(
+    _read_route("assignment")
+)
+mcp.custom_route(f"{READ_PREFIX}saved", methods=["GET"])(_read_route("saved_list"))
+mcp.custom_route(f"{READ_PREFIX}saved/{{saved_id:int}}", methods=["GET"])(_read_route("saved"))
 
 
 def build_app(
@@ -313,4 +347,4 @@ def build_app(
             await manager.close()
 
     inner.router.lifespan_context = lifespan
-    return BearerAuthMiddleware(inner, settings)
+    return BearerAuthMiddleware(inner, settings, read_callers=lambda: manager.section.read_callers)
