@@ -231,11 +231,19 @@ def test_security_headers_on_every_response(client):
     # The one script the policy allows is the copy script, by its hash.
     assert response.headers["content-security-policy"] == (
         "default-src 'none'; img-src 'self'; style-src 'self'; "
-        f"script-src '{viewer.showcase_mod.COPY_SCRIPT_HASH}'"
+        f"script-src '{viewer.showcase_mod.COPY_SCRIPT_HASH}'; frame-ancestors 'self'"
     )
     assert "unsafe-inline" not in response.headers["content-security-policy"]
-    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["x-frame-options"] == "SAMEORIGIN"
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_only_the_same_origin_may_frame_the_viewer(client):
+    # The chat frames a document page of the viewer; no other origin can.
+    policy = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).headers["content-security-policy"]
+    assert "frame-ancestors 'self'" in policy
+    assert "frame-ancestors *" not in policy
+    assert "autrui.net" not in policy
 
 
 # -- the shared look ---------------------------------------------------------

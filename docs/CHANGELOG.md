@@ -6,6 +6,13 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A page of the viewer can frame a document page.** The content policy of
+  the viewer now has `frame-ancestors 'self'`, and the viewer sends
+  `X-Frame-Options: SAMEORIGIN`. So the chat shows a document in an artifact
+  panel, which is the document page of the viewer itself. Only the same
+  origin can frame the viewer: no other site can. An HTML document still
+  shows in a sandboxed frame with no access to the viewer. See
+  [security.md](security.md#the-headers-of-the-viewer).
 - **A terminal turn can carry a file.** `POST /v1/cli/turns/stream` now also
   takes `multipart/form-data` with `person`, `text`, and one `file` part for
   each file. Channels runs the same attachment pipeline every other channel

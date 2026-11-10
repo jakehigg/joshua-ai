@@ -241,6 +241,28 @@ are refused before any file operation. The server alone sets `author`,
 `created`, `updated`, and `promoted_to`. The tools add no comment: a comment
 comes from the person in the viewer, and Joshua only resolves one.
 
+### The headers of the viewer
+
+Every response of the viewer carries the same headers:
+
+- `Content-Security-Policy: default-src 'none'; img-src 'self'; style-src
+  'self'; script-src '<hash of the copy script>'; frame-ancestors 'self'`.
+  The page loads its stylesheets and its images from the viewer itself, and
+  the only script that runs is the copy script of a report, allowed by its
+  hash.
+- `X-Frame-Options: SAMEORIGIN`, for a browser that reads no
+  `frame-ancestors`.
+- `X-Content-Type-Options: nosniff`.
+
+`frame-ancestors 'self'` lets one page of the viewer frame another: the chat
+shows a document page in its artifact panel, so there is no second renderer
+and no second comment surface. The value is always `'self'`, never `*` and
+never a host, so no page off the origin can frame the viewer.
+
+An HTML document is different: it shows in a `sandbox` `srcdoc` frame with
+no `allow-same-origin`, so the document has an opaque origin and cannot
+reach the viewer, its sign-in, or a form of the viewer.
+
 ## Secrets
 
 Secrets live in `.env` and nowhere else. `joshua.yaml` refers to them as

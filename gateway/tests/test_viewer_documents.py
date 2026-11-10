@@ -620,8 +620,9 @@ def test_the_policy_is_the_same_on_a_document_page(docs) -> None:
     response = _get("/documents/alex/mockup")
     assert response.headers["content-security-policy"] == (
         f"default-src 'none'; img-src 'self'; style-src 'self'; script-src '{sc.COPY_SCRIPT_HASH}'"
+        "; frame-ancestors 'self'"
     )
-    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["x-frame-options"] == "SAMEORIGIN"
 
 
 def test_an_html_document_lists_as_html(docs) -> None:

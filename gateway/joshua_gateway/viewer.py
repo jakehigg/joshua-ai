@@ -1576,15 +1576,20 @@ class SecurityHeaders(BaseHTTPMiddleware):
     the logo and the icons). The only script that runs is the copy script of
     a report, allowed by its hash: no other script, inline or from a file,
     runs. The ``srcdoc`` frame of an HTML document gets this same policy.
+
+    ``frame-ancestors 'self'`` lets a page of the viewer, the chat and its
+    artifact panel, frame a document page of the same origin. No other
+    origin can frame the viewer: the value is always ``'self'``, never a
+    host and never ``*``.
     """
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; img-src 'self'; style-src 'self'; "
-            f"script-src '{showcase_mod.COPY_SCRIPT_HASH}'"
+            f"script-src '{showcase_mod.COPY_SCRIPT_HASH}'; frame-ancestors 'self'"
         )
-        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
 
