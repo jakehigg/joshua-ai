@@ -6,6 +6,13 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A document states what is true now (#136).** The documents skill page,
+  the assignments skill page, and the worker prompt tell Joshua and a worker
+  to write a plan, a spec, or a definition in the present tense, as fact,
+  with no "decision made" or "previously" section. The versions and the
+  comment resolutions hold what changed. See
+  [documents.md](documents.md#versions).
+
 ## 0.2.1 - 2026-11-09
 
 Joshua now keeps documents for each member: plans, reports, specs, artifacts,

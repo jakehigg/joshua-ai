@@ -41,6 +41,10 @@ You see only your own assignments. A guest has no assignments.
 What an assignment makes for you to read and refine, such as a plan or a
 spec, is a document in your folder. See [documents.md](documents.md).
 
+A definition, a plan, and a document state the current intent, not what
+changed since an earlier one: the versions and the comment resolutions hold
+the changes, and the Progress log of the plan is the one timeline.
+
 ## Use an assignment
 
 You talk to Joshua in your own words, in any channel. The words in quotes
