@@ -14,9 +14,11 @@ the person who signed in, read from the assignments manager when
 ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set
 (``viewer_assignments``). ``/documents`` shows the documents of the member
 who signed in and the shared ones, read from ``/data/documents``
-(``viewer_documents``); a guest has no such section. The viewer reads the data volume
-through the same resolver as the files MCP (``files_mcp.paths``), so the two
-never drift on who reads what.
+(``viewer_documents``); a guest has no such section. The navigation also holds
+a Chat item at ``/chat/<person id>`` for the person who signed in. The chat is
+another app on the same host, so the viewer only links to it. The viewer reads
+the data volume through the same resolver as the files MCP
+(``files_mcp.paths``), so the two never drift on who reads what.
 
 A member has two write actions, both human actions in a browser that the
 agent never gets: a delete, which moves a wiki page to the trash under
@@ -382,9 +384,14 @@ _SECTIONS = (
         '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
         '<path d="M14 3v5h5M9 13h6M9 17h6"/>',
     ),
+    ("chat", "Chat", "/chat", links_mod.ICONS["chat"]),
 )
 # The sections that a guest does not get.
 _MEMBER_SECTIONS = frozenset({"documents"})
+# The sections whose URL ends with the id of the person of the request. The
+# chat answers at ``/chat/<person id>``, so the item follows the identity of
+# the person who reads the viewer.
+_PERSON_SECTIONS = frozenset({"chat"})
 _SECTION_LABEL = {key: label for key, label, _, _ in _SECTIONS} | {"links": "Links", "me": "You"}
 _SEARCH_ICON = _SECTIONS[2][3]
 _ME_ICON = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'
@@ -399,10 +406,23 @@ def _current(key: str, section: str) -> str:
 
 
 def _sections() -> list[tuple[str, str, str, str]]:
-    """The sections of the person of this request: a guest gets no Documents."""
+    """The sections of the person of this request: a guest gets no Documents.
+
+    A section of ``_PERSON_SECTIONS`` gets the id of the person on its URL, and
+    a request with no person does not get it at all.
+    """
     person = _REQUEST_PERSON.get()
     member = person is not None and person.role == "member"
-    return [s for s in _SECTIONS if member or s[0] not in _MEMBER_SECTIONS]
+    sections: list[tuple[str, str, str, str]] = []
+    for key, label, url, icon in _SECTIONS:
+        if not member and key in _MEMBER_SECTIONS:
+            continue
+        if key in _PERSON_SECTIONS:
+            if person is None:
+                continue
+            url = f"{url}/{person.id}"
+        sections.append((key, label, url, icon))
+    return sections
 
 
 def _shell(body: str, *, section: str, query: str) -> str:
@@ -464,7 +484,7 @@ def _page(
 ) -> HTMLResponse:
     """A full page. ``section`` is the key of the current section in the
     navigation (``wiki``, ``journal``, ``search``, ``usage``,
-    ``assignments``, ``documents``), or "" for the home page. ``nav`` False gives the bare
+    ``assignments``, ``documents``, ``chat``), or "" for the home page. ``nav`` False gives the bare
     content with no navigation. ``head`` is more HTML for the ``<head>``,
     such as a ``<meta>`` refresh."""
     main = (

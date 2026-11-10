@@ -315,6 +315,28 @@ def test_the_current_section_is_marked(client):
     assert "<strong>You</strong>" in home
 
 
+def test_the_chat_entry_names_the_person_of_the_request(client):
+    for creds, person in ((("alex", ALEX_PW), "alex"), (MIA, "mia")):
+        html = client.get("/wiki/pizza.md", auth=creds).text
+        link = f'href="/chat/{person}"'
+        assert f'<a class="j-nav-item" {link}>' in html, person
+        assert f'<a class="j-tab" {link}>Chat</a>' in html, person
+        assert "/chat/jake" not in html, person
+
+
+def test_the_chat_section_is_marked_current(client):
+    person = config.load().person("alex")
+    token = viewer._REQUEST_PERSON.set(person)
+    try:
+        html = viewer._shell("", section="chat", query="")
+    finally:
+        viewer._REQUEST_PERSON.reset(token)
+    assert '<a class="j-nav-item" href="/chat/alex" aria-current="page">' in html
+    assert '<a class="j-tab" href="/chat/alex" aria-current="page">Chat</a>' in html
+    assert html.count('aria-current="page"') == 2
+    assert "<strong>Chat</strong>" in html
+
+
 def test_the_search_field_keeps_the_query(client):
     html = client.get("/search", params={"q": 'a "b"'}, auth=("alex", ALEX_PW)).text
     assert 'name="q" value="a &quot;b&quot;"' in html

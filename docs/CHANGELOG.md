@@ -6,6 +6,9 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A Chat entry in the viewer navigation.** The sidebar and the phone tabs
+  have a Chat item. It opens `/chat/<your id>`, the chat on the same host as
+  the viewer. The viewer only links to the chat; it serves no chat page.
 - **A chat client can read a conversation back (#54).** Core has a new route,
   `GET /v1/transcript`, for `channels` and `laptop`. It returns the messages
   of one conversation, oldest first, a page at a time. Channels has
