@@ -1125,6 +1125,36 @@ async def document_meta(request: Request, person: Person) -> Response:
     )
 
 
+async def document_artifact(request: Request, person: Person) -> Response:
+    """The body of an HTML document alone, for the frame of its page.
+    ``?rev=<sha>`` gives an older version.
+
+    The frame of the document page loads this address, so the document gets
+    its own content policy (``documents_mod.artifact_policy``): its styles
+    render, its scripts run only with ``scripts: true`` in its frontmatter,
+    and it reaches no network. The frame keeps its ``sandbox``, so the
+    document also has an opaque origin and no access to the viewer. The
+    sign-in and the owner rule are those of the page, so a document of
+    another member and one that is not there are both 404, as is a Markdown
+    document, which has no frame."""
+    doc = _document(request, person)
+    if doc is None or doc.format != "html":
+        return _not_found()
+    rev = request.query_params.get("rev")
+    if rev:
+        found = docstore.at_version(docstore.root(), doc, rev)
+        if found is None:
+            return _not_found()
+        doc = found[1]
+    return HTMLResponse(
+        doc.body,
+        headers={
+            **_NO_STORE,
+            "Content-Security-Policy": documents_mod.artifact_policy(doc.scripts),
+        },
+    )
+
+
 def _comment_refused(doc: docstore.Document, reason: str) -> Response:
     body = documents_mod.message_html(
         "comment not stored",
@@ -1597,19 +1627,25 @@ class SecurityHeaders(BaseHTTPMiddleware):
     stylesheets from ``'self'`` and its images from ``'self'`` (attachments,
     the logo and the icons). The only script that runs is the copy script of
     a report, allowed by its hash: no other script, inline or from a file,
-    runs. The ``srcdoc`` frame of an HTML document gets this same policy.
+    runs.
 
     ``frame-ancestors 'self'`` lets a page of the viewer, the chat and its
     artifact panel, frame a document page of the same origin. No other
     origin can frame the viewer: the value is always ``'self'``, never a
     host and never ``*``.
+
+    The artifact route of an HTML document sets its own policy, which is
+    stricter on the network and allows the styles of the document. A
+    response that carries a policy keeps it; every other response gets this
+    one.
     """
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = (
+        response.headers.setdefault(
+            "Content-Security-Policy",
             "default-src 'none'; img-src 'self'; style-src 'self'; "
-            f"script-src '{showcase_mod.COPY_SCRIPT_HASH}'; frame-ancestors 'self'"
+            f"script-src '{showcase_mod.COPY_SCRIPT_HASH}'; frame-ancestors 'self'",
         )
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -1670,6 +1706,7 @@ def build_app() -> Starlette:
             # document, so the two can never name the same file.
             Route("/documents/{owner}/{slug}.json", _require_auth(document_meta)),
             Route("/documents/{owner}/{slug}", _require_auth(document_page)),
+            Route("/documents/{owner}/{slug}/artifact", _require_auth(document_artifact)),
             Route(
                 "/documents/{owner}/{slug}/comments",
                 _require_auth(document_comment),

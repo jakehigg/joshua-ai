@@ -6,6 +6,18 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **An HTML artifact shows with its own styles (#123).** The viewer serves
+  the body of an HTML document from an address of its own,
+  `/documents/<owner>/<slug>/artifact`, and the frame of the document page
+  loads it. The address has a content policy of its own: the styles of the
+  document render, an image comes from the viewer, and the document reaches
+  no network, submits no form, and opens no frame. A script runs only with
+  `scripts: true` in the frontmatter. The frame keeps its `sandbox` and never
+  gets `allow-same-origin`, so the document still cannot reach the viewer or
+  your sign-in. The address has the sign-in and the owner rule of the page. A
+  Markdown document does not change. See
+  [documents.md](documents.md#artifacts) and
+  [security.md](security.md#the-headers-of-the-viewer).
 - **A small JSON address for the head of a document.**
   `GET /documents/<owner>/<slug>.json` in the viewer gives the title, the
   kind, the status, and the time of the last change of one document, and no

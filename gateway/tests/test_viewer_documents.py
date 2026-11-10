@@ -630,7 +630,7 @@ HTML_DOC = textwrap.dedent("""\
     kind: artifact
     status: active
     ---
-    <h1>Hi "there"</h1><script>parent.document.title='x'</script>
+    <style>h1 { color: red }</style><h1>Hi "there"</h1><script>parent.document.title='x'</script>
     """)
 
 
@@ -644,11 +644,10 @@ def test_an_html_document_is_in_a_sandbox_with_no_scripts(docs) -> None:
     frame = _frame(html)
     assert 'sandbox=""' in frame
     assert "allow-scripts" not in frame and "allow-same-origin" not in frame
-    assert "srcdoc=" in frame
-    assert "<script>" not in frame and "&lt;script&gt;" in frame
-    assert "&quot;there&quot;" in frame
-    # The frontmatter is not in the frame.
-    assert "title: Mockup" not in frame
+    # The frame loads the artifact route, so the body is not in the page.
+    assert 'src="/documents/alex/mockup/artifact"' in frame
+    assert "srcdoc=" not in frame
+    assert "<script>" not in frame and "&lt;script&gt;" not in frame
     assert "Scripts of this document do not run." in html
     assert '<details class="a-source"><summary>Source</summary>' in html
     assert "&lt;h1&gt;Hi" in html[html.index('class="a-source"') :]
@@ -662,6 +661,70 @@ def test_only_scripts_true_allows_scripts(docs, value, sandbox) -> None:
     frame = _frame(_get("/documents/alex/mockup").text)
     assert f'sandbox="{sandbox}"' in frame
     assert "allow-same-origin" not in frame
+
+
+# -- the artifact route -----------------------------------------------------
+
+
+def test_the_artifact_route_serves_the_body_with_its_own_policy(docs) -> None:
+    _write(docs / "alex/mockup.html", HTML_DOC)
+    response = _get("/documents/alex/mockup/artifact")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    # The body only: the frontmatter stays out of the frame.
+    assert "<style>h1 { color: red }</style>" in response.text
+    assert 'Hi "there"' in response.text
+    assert "title: Mockup" not in response.text
+    policy = response.headers["content-security-policy"]
+    assert policy == (
+        "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+        "form-action 'none'; frame-src 'none'; frame-ancestors 'self'; sandbox"
+    )
+    # Styles render, and nothing else loads: no script, no network, no form.
+    assert "script-src" not in policy
+    assert "connect-src" not in policy
+    assert "allow-same-origin" not in policy
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_the_artifact_policy_allows_a_script_only_with_scripts_true(docs) -> None:
+    _write(docs / "alex/mockup.html", HTML_DOC.replace("status: active", "scripts: true"))
+    policy = _get("/documents/alex/mockup/artifact").headers["content-security-policy"]
+    assert policy == (
+        "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+        "script-src 'unsafe-inline'; form-action 'none'; frame-src 'none'; "
+        "frame-ancestors 'self'; sandbox allow-scripts"
+    )
+    assert "connect-src" not in policy
+    assert "allow-same-origin" not in policy
+
+
+def test_the_artifact_route_has_the_rules_of_the_page(docs) -> None:
+    _write(docs / "alex/mockup.html", HTML_DOC)
+    _write(docs / "mia/private.html", HTML_DOC)
+    # A sign-in, the owner rule, a guest, and a document that is not there.
+    assert client().get("/documents/alex/mockup/artifact").status_code == 401
+    assert _get("/documents/mia/private/artifact").status_code == 404
+    assert _get("/documents/alex/mockup/artifact", auth=GUEST).status_code == 404
+    assert _get("/documents/alex/none/artifact").status_code == 404
+    # A Markdown document has no frame, so it has no artifact.
+    assert _get("/documents/alex/party/artifact").status_code == 404
+
+
+@NEEDS_GIT
+def test_the_artifact_route_serves_an_older_version(docs) -> None:
+    path = docs / "alex/mockup.html"
+    _write(path, HTML_DOC)
+    wikigit.commit(docs, [path], "write_document: mockup")
+    old = ds.versions(docs, ds.find(docs, "alex", "mockup", ["alex"]))[0].sha
+    _write(path, HTML_DOC.replace("Hi", "Hello"))
+    wikigit.commit(docs, [path], "write_document: mockup")
+    frame = _frame(_get("/documents/alex/mockup", rev=old).text)
+    assert f'src="/documents/alex/mockup/artifact?rev={old}"' in frame
+    assert "Hi" in _get("/documents/alex/mockup/artifact", rev=old).text
+    assert "Hello" in _get("/documents/alex/mockup/artifact").text
+    assert _get("/documents/alex/mockup/artifact", rev="0" * 40).status_code == 404
 
 
 def test_the_policy_is_the_same_on_a_document_page(docs) -> None:

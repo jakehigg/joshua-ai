@@ -1072,12 +1072,11 @@ A document opens at `/documents/<owner>/<slug>`:
   cards, the decisions as numbered cards, the outputs as cards, the prose,
   and the follow-ups. The assignments pages and the documents pages use the
   same renderer.
-- An HTML document shows in a frame with `sandbox` and `srcdoc`. The frame
+- An HTML document shows in a frame with `sandbox` that loads the artifact
+  address of the document, `/documents/<owner>/<slug>/artifact`. The frame
   cannot reach the viewer, its sign-in, or a form of the viewer. Scripts do
   not run, unless the frontmatter of the document has `scripts: true`: then
-  the sandbox allows scripts and nothing more. The frame also gets the
-  content policy of the viewer, so the policy still blocks a `<style>`
-  element, a `style` attribute, and a script inside the document.
+  the sandbox allows scripts and nothing more.
 - The `Source` fold gives the frontmatter first, with no number and no `+`,
   then each line of the body with its number and a `+`.
 - The `Versions` fold lists the commits of the file in the git repository of
@@ -1091,6 +1090,19 @@ renders nothing, it reads no git history, and it answers with
 panel is open. It has the sign-in and the owner rule of the page, so a
 document of another member and a document that is not there are both 404. A
 document slug never ends in `.json`, so this address cannot name a file.
+
+`/documents/<owner>/<slug>/artifact` gives the body of an HTML document
+alone, for the frame of the page. `?rev=<sha>` gives an older version. It has
+the sign-in and the owner rule of the page, so a document of another member,
+a document that is not there, and a Markdown document, which has no frame,
+are all 404. The address has a content policy of its own:
+`default-src 'none'; img-src 'self'; style-src 'unsafe-inline';
+form-action 'none'; frame-src 'none'; frame-ancestors 'self'; sandbox`, and
+`script-src 'unsafe-inline'` only with `scripts: true`. So a `<style>`
+element and a `style` attribute of the document render, and the document
+loads nothing from the network, submits no form, and opens no frame. The
+`sandbox` directive never has `allow-same-origin`, so the document has an
+opaque origin, also when a browser opens the address alone.
 
 To comment on a document, use the `+` of a block, a card, a heading, or a line
 of `Source`, as on a definition (see

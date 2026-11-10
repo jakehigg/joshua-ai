@@ -107,13 +107,12 @@ to read. It is Markdown or HTML.
   reach the viewer, your sign-in, or a form of the viewer. Scripts do not
   run unless the frontmatter has `scripts: true`.
 
-Today the frame also gets the content policy of the viewer. That policy
-blocks a `<style>` element, a `style` attribute, and each script in the
-document, also with `scripts: true`. So an HTML artifact shows with no
-styles. Issue #123 plans to serve the artifact from its own route with its
-own policy: styles and images in the document are allowed, scripts only
-with `scripts: true`, and no network. Until it merges, keep an artifact
-simple, or make it Markdown.
+The frame loads the artifact from an address of its own,
+`/documents/<owner>/<slug>/artifact`, which has a content policy of its own.
+So a `<style>` element and a `style` attribute of the artifact render, and an
+image comes from the viewer. The artifact reaches no network: it loads no
+font, no stylesheet, and no script from a file, and it sends no request. It
+submits no form and opens no frame. Write the styles in the file.
 
 ## Comments
 

@@ -16,10 +16,12 @@ gives the frontmatter with no "+" and each line of the body with its own
 "+", and the ``Versions`` fold lists the commits of the file.
 ``?rev=<sha>`` shows an older version, read-only.
 
-An HTML document shows in an ``<iframe>`` with ``sandbox`` and ``srcdoc``:
-the frame has an opaque origin, so it cannot read the viewer or its cookies,
-submit a form, or open a window. Scripts stay off unless the frontmatter
-says ``scripts: true``; then the sandbox allows scripts, and nothing more.
+An HTML document shows in an ``<iframe>`` with ``sandbox`` that loads
+``/documents/<owner>/<slug>/artifact``: the frame has an opaque origin, so it
+cannot read the viewer or its cookies, submit a form, or open a window. That
+route sends ``artifact_policy``, which allows the styles of the document and
+no network. Scripts stay off unless the frontmatter says ``scripts: true``;
+then the sandbox and the policy allow scripts, and nothing more.
 
 Every string from a file is untrusted and escaped. The functions here build
 HTML only. The routes live in ``viewer``, and the files in
@@ -59,6 +61,28 @@ _STATUS_CLASS = {"draft": "plain", "active": "accent", "final": "ok", "archived"
 # script in the frame could reach the viewer.
 SANDBOX = ""
 SANDBOX_SCRIPTS = "allow-scripts"
+
+
+def artifact_policy(scripts: bool) -> str:
+    """The content policy of ``/documents/<owner>/<slug>/artifact``.
+
+    ``default-src 'none'`` blocks every load, so the document reaches no
+    network: no fetch, no font, and no stylesheet of its own. Inline styles
+    are allowed, so a ``<style>`` element and a ``style`` attribute work.
+    Images come from the viewer only. ``form-action`` and ``frame-src``
+    block a form and a frame of the document. The ``sandbox`` directive adds
+    the sandbox of the frame to the response itself, never with
+    ``allow-same-origin``, so the document has an opaque origin also when a
+    browser opens the address alone. Scripts run only with ``scripts: true``,
+    and only from the document.
+    """
+    script_src = "script-src 'unsafe-inline'; " if scripts else ""
+    sandbox = "sandbox allow-scripts" if scripts else "sandbox"
+    return (
+        "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+        f"{script_src}form-action 'none'; frame-src 'none'; "
+        f"frame-ancestors 'self'; {sandbox}"
+    )
 
 
 def parse_status(raw: str | None) -> str:
@@ -257,9 +281,11 @@ def _versions(doc: ds.Document, versions: list[ds.Version], current: str | None)
     return sc.fold("Versions", f'<ol class="d-versions">{"".join(rows)}</ol>', hint=hint)
 
 
-def _frame(doc: ds.Document) -> str:
-    """The HTML of the document in a sandboxed frame, from ``srcdoc``."""
+def _frame(doc: ds.Document, rev: str = "") -> str:
+    """The document in a sandboxed frame of the artifact route. ``rev`` is the
+    commit of an older version, else ""."""
     sandbox = SANDBOX_SCRIPTS if doc.scripts else SANDBOX
+    src = f"{doc.url}/artifact" + (f"?{urlencode({'rev': rev})}" if rev else "")
     note = (
         "Scripts of this document run in a sandbox, apart from the viewer."
         if doc.scripts
@@ -267,7 +293,7 @@ def _frame(doc: ds.Document) -> str:
     )
     return (
         '<section class="d-artifact">'
-        f'<iframe class="d-frame" sandbox="{sandbox}" srcdoc="{escape(doc.body, quote=True)}" '
+        f'<iframe class="d-frame" sandbox="{sandbox}" src="{escape(src)}" '
         f'title="{escape(doc.title)}" referrerpolicy="no-referrer" loading="lazy"></iframe>'
         f'<p class="j-faint d-frame-note">{escape(note)}</p></section>'
     )
@@ -327,7 +353,7 @@ def document_html(
     head_last = 0
     title = True
     if doc.format == "html":
-        body = _frame(doc)
+        body = _frame(doc, version.sha if version is not None else "")
     else:
         report = rp.parse(doc.body)
         if report.structured:
