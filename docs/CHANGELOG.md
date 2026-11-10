@@ -6,6 +6,12 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A chat client can read a conversation back (#54).** Core has a new route,
+  `GET /v1/transcript`, for `channels` and `laptop`. It returns the messages
+  of one conversation, oldest first, a page at a time. Channels has
+  `GET /v1/cli/transcript?person=<id>` for the terminal conversation. Each
+  message carries only safe `meta` keys, such as the turn id and the tools
+  the turn used. An unknown conversation returns no messages.
 - **The worker and Joshua write in Simplified Technical English (#140).**
   The worker prompt and the documents skill page have the same section, "How
   you write": one idea in each sentence, the present tense and the active
