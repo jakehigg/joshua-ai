@@ -149,6 +149,10 @@ In the viewer, the `Versions` fold of a document lists its versions, the
 newest first. Click one to read the document as it was. An old version is
 read-only and takes no comment.
 
+So a document states what is true now, as fact, and does not tell how it
+got there: its versions and the resolutions of its comments hold what
+changed.
+
 ## Promote to the wiki
 
 A finished document can hold something that stays true: a recipe in a meal

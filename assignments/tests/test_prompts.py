@@ -65,6 +65,22 @@ def test_the_system_prompt_puts_a_long_text_in_a_document() -> None:
         assert words in text, words
 
 
+def test_the_system_prompt_says_a_document_and_the_plan_state_the_current_truth() -> None:
+    text = prompts.system_prompt()
+    for words in (
+        "Your plan states the current truth.",
+        "Plan, Decisions, and Open questions say\nwhat is true now.",
+        "Progress is the one place for a timeline.",
+        "A document that you write states what is true now, in the present tense, as\nfact.",
+        "It does not tell how it got there.",
+        '"decision made",\n"changed from", "previously", or "retired" section',
+        "the versions hold what changed",
+        "rewrite the document as the\ncurrent intent, not as a diff against the earlier one",
+        "state it as the current position in one sentence",
+    ):
+        assert words in text, words
+
+
 def test_the_first_prompt_says_where_deliverables_go_when_the_session_holds_documents() -> None:
     row = {"id": 12, "person_id": "alex", "spec": {"goal": "Write the trip plan."}}
     text = prompts.first_prompt(row, has_documents=True)

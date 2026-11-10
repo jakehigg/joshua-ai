@@ -241,6 +241,14 @@ def test_the_documents_skill_says_what_a_document_is_and_how_to_keep_it() -> Non
         "in one\nentry",
         "Never write a plan, a draft, or a report into the wiki.",
         "`trash_document`",
+        "### State what is true now",
+        "A document states what is true now, in the present tense, as fact.",
+        "not tell how it got there.",
+        '"decision made", "changed from",\n"previously", or "retired" section',
+        "the Versions\nfold of the viewer and the resolution of each comment hold what changed.",
+        "state it as the current position in one sentence",
+        "Rewrite each passage as fact. Do not add a note about the change.",
+        "The resolution records the change.",
     ):
         assert words in page, words
     lowered = page.lower()
@@ -338,6 +346,13 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         "give it with `answer_assignment(id, text)`",
         "keep it for the report",
         "its `target` (`definition`,\n   `plan`, or `report`)",
+        "Write a spec, a draft definition, and a plan document as the current intent,\n"
+        "not as a diff against an earlier one.",
+        "A document states what is true now, in\nthe present tense, as fact.",
+        "Its versions hold what changed.",
+        "Rewrite the passage as fact. Do not add a\n   note about the change: the resolution "
+        "records it.",
+        "Rewrite\n  the passage of the document as fact. The resolution records it.",
     ):
         assert words in page, words
     lowered = page.lower()
