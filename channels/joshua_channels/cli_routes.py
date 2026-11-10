@@ -3,6 +3,10 @@
 ``POST /v1/cli/turns/stream`` takes one message from a person at a shell, runs
 the same guard every channel runs, and streams core's reply back. The terminal
 is a channel, so an unknown person id is refused here and never reaches core.
+The body is JSON (``person``, ``text``) or ``multipart/form-data`` (``person``,
+``text``, and a repeated ``file``). A multipart turn writes every part into an
+inbox directory and hands it to the attachment pipeline, the same pipeline every
+other channel uses, so the turn carries stored paths and never bytes.
 
 ``GET /v1/cli/outbox`` returns what core sent to this person while they were
 away, and marks it read.
@@ -15,16 +19,23 @@ never logs a message.
 from __future__ import annotations
 
 import json
-from typing import Any
+import posixpath
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from joshua_shared.contracts import Chat, Handle, TurnEvent
+from joshua_shared.attachments import NO_CAPTION_TEXT
+from joshua_shared.contracts import Attachment, Chat, Handle, TurnEvent
 from joshua_shared.fleet_auth import authenticate, load_fleet_tokens
 from joshua_shared.log import get_logger
 
 from joshua_channels.adapters.cli import outbox_path
+from joshua_channels.attachments import SKIP_TOO_LARGE
 from joshua_channels.deliver import ChannelsContext
 
 logger = get_logger("channels.cli")
@@ -33,9 +44,163 @@ CHANNEL_TYPE = "cli"
 READ_SUFFIX = ".read"
 ACKING_SUFFIX = ".acking"
 
+# The form field names of a multipart turn.
+PERSON_FIELD = "person"
+TEXT_FIELD = "text"
+FILE_FIELD = "file"
+
+# One part is read in chunks of this size, so a part over the cap stops early.
+PART_CHUNK_BYTES = 256 * 1024
+
+# Characters allowed in an inbox filename. Everything else becomes ``_``.
+_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+
+
+@runtime_checkable
+class _Part(Protocol):
+    """One uploaded file part of a multipart body.
+
+    The form parser gives a ``str`` for a text field and an upload object for a
+    file part. This is the file part: a name the sender chose and the bytes.
+    """
+
+    filename: str | None
+
+    async def read(self, size: int = -1) -> bytes: ...
+
+
+@dataclass
+class _Submission:
+    """One parsed turn: the person, the text, and the files to ingest.
+
+    ``files`` holds ``(inbox filename, bytes)`` pairs. The JSON body carries no
+    file, so its list is always empty.
+    """
+
+    person_id: str
+    text: str
+    files: list[tuple[str, bytes]] = field(default_factory=list)
+
+    @property
+    def attachment_bytes(self) -> int:
+        """The size of the largest file, the number the guard takes."""
+        return max((len(data) for _, data in self.files), default=0)
+
 
 def _context(request: Request) -> ChannelsContext:
     return request.app.state.ctx
+
+
+def _is_multipart(request: Request) -> bool:
+    """True when the caller sent a form instead of JSON."""
+    content_type = request.headers.get("content-type", "")
+    return content_type.split(";")[0].strip().lower() == "multipart/form-data"
+
+
+def inbox_name(raw: str | None, index: int) -> str:
+    """Return a safe inbox filename for one uploaded part.
+
+    The sender's filename is kept, because the pipeline reports it back to the
+    agent as ``original_name``, but every directory part is stripped and every
+    unsafe character becomes ``_``, so a part named ``../../x.jpg`` cannot write
+    outside the inbox directory. A part with no usable name gets ``file-<index>``.
+    """
+    base = posixpath.basename(str(raw or "").replace("\\", "/")).strip()
+    name = _UNSAFE_CHARS.sub("_", base)[:96].strip("._")
+    return name or f"file-{index}"
+
+
+async def _read_part(part: _Part, *, max_bytes: int) -> bytes | None:
+    """Read one part, or None when it is over ``max_bytes``."""
+    buffer = bytearray()
+    while True:
+        chunk = await part.read(PART_CHUNK_BYTES)
+        if not chunk:
+            break
+        buffer.extend(chunk)
+        if len(buffer) > max_bytes:
+            return None
+    return bytes(buffer)
+
+
+def _field(form: Any, name: str) -> str:
+    """Return a text field of the form, or ``""`` when a part came instead."""
+    value = form.get(name)
+    return value if isinstance(value, str) else ""
+
+
+async def _read_json(request: Request) -> _Submission | None:
+    """Parse a JSON turn. Returns None for a body that is not an object."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 — a bad body is a 400, not a 500
+        body = None
+    if not isinstance(body, dict):
+        return None
+    return _Submission(
+        person_id=str(body.get("person") or "").strip(), text=str(body.get("text") or "")
+    )
+
+
+async def _read_multipart(request: Request, ctx: ChannelsContext) -> _Submission | None:
+    """Parse a multipart turn, reading every ``file`` part into memory.
+
+    A part over ``channels.limits.max_attachment_bytes`` is skipped and the turn
+    still goes through, as on every other channel.
+    """
+    try:
+        form = await request.form()
+    except Exception:  # noqa: BLE001 — a bad form is a 400, not a 500
+        return None
+    max_bytes = ctx.settings.channels.limits.max_attachment_bytes
+    try:
+        submission = _Submission(
+            person_id=_field(form, PERSON_FIELD).strip(), text=_field(form, TEXT_FIELD)
+        )
+        for index, part in enumerate(form.getlist(FILE_FIELD)):
+            if not isinstance(part, _Part):
+                continue
+            data = await _read_part(part, max_bytes=max_bytes)
+            if data is None:
+                logger.info(
+                    {
+                        "message": "cli attachment skipped",
+                        "reason": SKIP_TOO_LARGE,
+                        "name": inbox_name(part.filename, index),
+                    }
+                )
+                continue
+            taken = {held for held, _ in submission.files}
+            submission.files.append((_unique_name(part.filename, index, taken), data))
+    finally:
+        await form.close()
+    return submission
+
+
+def _unique_name(raw: str | None, index: int, taken: set[str]) -> str:
+    """Return the inbox filename of a part, kept apart from the parts before it."""
+    name = inbox_name(raw, index)
+    if name not in taken:
+        return name
+    stem, _, suffix = name.rpartition(".")
+    return f"{stem}-{index}.{suffix}" if stem else f"{name}-{index}"
+
+
+async def _land_files(
+    ctx: ChannelsContext, files: list[tuple[str, bytes]], person_id: str
+) -> list[Attachment]:
+    """Write every part into a fresh inbox directory, then run the pipeline.
+
+    The pipeline sniffs, normalizes, and stores each file under
+    ``people/<person_id>/attachments/YYYY/MM/``, skips what is not an image, a
+    PDF, or text, and deletes the inbox directory.
+    """
+    assert ctx.pipeline is not None
+    inbox = Path(ctx.data_dir) / "inbox" / f"cli-{uuid4()}"
+    inbox.mkdir(parents=True, exist_ok=True)
+    for name, data in files:
+        (inbox / name).write_bytes(data)
+    return await ctx.pipeline.process(inbox, person_id=person_id, group_id=None)
 
 
 def _allowed_callers(ctx: ChannelsContext) -> list[str]:
@@ -65,16 +230,16 @@ def build_cli_router() -> APIRouter:
         if denied is not None:
             return denied
 
-        try:
-            body = await request.json()
-        except Exception:  # noqa: BLE001 — a bad body is a 400, not a 500
-            body = None
-        if not isinstance(body, dict):
+        if _is_multipart(request):
+            submission = await _read_multipart(request, ctx)
+        else:
+            submission = await _read_json(request)
+        if submission is None:
             return JSONResponse({"reason": "bad_request"}, status_code=400)
 
-        person_id = str(body.get("person") or "").strip()
-        text = str(body.get("text") or "")
-        if not person_id or not text.strip():
+        person_id = submission.person_id
+        text = submission.text
+        if not person_id or not (text.strip() or submission.files):
             return JSONResponse({"reason": "bad_request"}, status_code=400)
 
         verdict = ctx.guard.check(
@@ -83,7 +248,7 @@ def build_cli_router() -> APIRouter:
             chat_id=person_id,
             chat_kind="dm",
             text_len=len(text),
-            attachment_bytes=0,
+            attachment_bytes=submission.attachment_bytes,
         )
         if not verdict.allowed:
             logger.warning(
@@ -91,14 +256,28 @@ def build_cli_router() -> APIRouter:
             )
             return JSONResponse({"reason": verdict.reason or "refused"}, status_code=403)
 
+        if submission.files and ctx.pipeline is None:
+            logger.warning(
+                {"message": "cli turn refused: no attachment pipeline", "person": person_id}
+            )
+            return JSONResponse({"reason": "pipeline_unavailable"}, status_code=503)
+
         if ctx.core_client is None:
             return JSONResponse({"reason": "core_unavailable"}, status_code=503)
+
+        attachments: list[Attachment] = []
+        if submission.files:
+            attachments = await _land_files(ctx, submission.files, person_id)
+        if submission.files and not text.strip():
+            # The file is the message. Core's describer gives the turn its words.
+            text = NO_CAPTION_TEXT
 
         event = TurnEvent(
             channel=f"{CHANNEL_TYPE}:{person_id}",
             chat=Chat(kind="dm", id=person_id),
             handle=Handle(type=CHANNEL_TYPE, id=person_id),
             text=text,
+            attachments=attachments,
         )
 
         async def stream():  # type: ignore[no-untyped-def]

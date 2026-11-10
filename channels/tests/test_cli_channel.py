@@ -1,4 +1,4 @@
-"""The terminal channel: guard, streaming, and the outbox.
+"""The terminal channel: guard, streaming, attachments, and the outbox.
 
 The terminal is a channel, so an unknown person is refused at channels and never
 reaches core. These tests run the real routes over ``ASGITransport``.
@@ -7,24 +7,35 @@ reaches core. These tests run the real routes over ``ASGITransport``.
 from __future__ import annotations
 
 import json
+import logging
+from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
 from joshua_channels.adapters.cli import CliAdapter, outbox_path
 from joshua_channels.app import build_app
-from joshua_channels.cli_routes import build_cli_router
+from joshua_channels.attachments import AttachmentPipeline
+from joshua_channels.cli_routes import build_cli_router, inbox_name
 from joshua_channels.core_client import CoreClient
 from joshua_channels.deliver import ChannelsContext
 from joshua_channels.guard import Guard
 from joshua_channels.registry import AdapterRegistry
 from joshua_shared import config as config_module
+from joshua_shared.attachments import NO_CAPTION_TEXT
 from joshua_shared.http import FleetClient
+from pdf_fixtures import pdf_with_text
+from PIL import Image
 
 LAPTOP_TOKEN = "laptop-tok"
 CORE_TOKEN = "core-tok"
 CHANNELS_TOKEN = "chan-tok"
+
+TIMEZONE = "America/New_York"
+CLOCK = datetime(2026, 8, 27, 15, 0, tzinfo=UTC)
 
 CONFIG = """
 name: Test House
@@ -59,9 +70,11 @@ def _tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JOSHUA_TOKEN_CORE", CORE_TOKEN)
 
 
-def _make(tmp_path: Path, *, core: Any = None) -> tuple[Any, Any]:
+def _make(
+    tmp_path: Path, *, core: Any = None, pipeline: Any = None, config: str = CONFIG
+) -> tuple[Any, Any]:
     core = core or FakeStreamCore()
-    settings = config_module.parse(CONFIG, env={}, source="<test>")
+    settings = config_module.parse(config, env={}, source="<test>")
     registry = AdapterRegistry()
     registry.register(CliAdapter(data_dir=tmp_path))
     context = ChannelsContext(
@@ -70,6 +83,7 @@ def _make(tmp_path: Path, *, core: Any = None) -> tuple[Any, Any]:
         data_dir=str(tmp_path),
         guard=Guard(settings, settings.channels.limits, config_provider=lambda: settings),
         core_client=core,
+        pipeline=pipeline,
     )
     return build_app(context), core
 
@@ -148,6 +162,196 @@ async def test_an_empty_message_is_a_bad_request(tmp_path: Path) -> None:
             headers=_bearer(LAPTOP_TOKEN),
         )
     assert response.status_code == 400
+
+
+# --- multipart and attachments ---------------------------------------------
+
+# Appended to CONFIG for the test of the attachment cap.
+SMALL_LIMIT = """
+channels:
+  limits:
+    max_attachment_bytes: 1000
+"""
+
+
+def _pipeline(tmp_path: Path) -> AttachmentPipeline:
+    """The real pipeline on a fixed clock, so the stored month is known."""
+    return AttachmentPipeline(data_dir=tmp_path, timezone=TIMEZONE, clock=lambda: CLOCK)
+
+
+def _month_prefix(person: str) -> str:
+    local = CLOCK.astimezone(ZoneInfo(TIMEZONE))
+    return f"people/{person}/attachments/{local:%Y/%m}/"
+
+
+def _jpeg() -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (40, 30), (200, 80, 20)).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+async def _post_parts(app: Any, files: list[Any], **fields: str) -> httpx.Response:
+    async with _client(app) as client:
+        return await client.post(
+            "/v1/cli/turns/stream", data=fields, files=files, headers=_bearer(LAPTOP_TOKEN)
+        )
+
+
+def _dict_records(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
+    return [r.msg for r in caplog.records if isinstance(r.msg, dict)]
+
+
+async def test_a_multipart_turn_carries_every_stored_file(tmp_path: Path) -> None:
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    response = await _post_parts(
+        app,
+        [
+            ("file", ("photo.jpg", _jpeg(), "image/jpeg")),
+            ("file", ("report.pdf", pdf_with_text(["the plan"]), "application/pdf")),
+        ],
+        person="alex",
+        text="look at these",
+    )
+    assert response.status_code == 200
+    event = core.events[0]
+    assert event.text == "look at these"
+    assert [a.original_name for a in event.attachments] == ["photo.jpg", "report.pdf"]
+    assert [a.mime for a in event.attachments] == ["image/jpeg", "application/pdf"]
+    for attachment in event.attachments:
+        assert attachment.path.startswith(_month_prefix("alex"))
+        assert (tmp_path / attachment.path).exists()
+    # The pipeline deletes the inbox directory it ingested.
+    assert list((tmp_path / "inbox").iterdir()) == []
+
+
+async def test_a_file_with_no_caption_gets_the_placeholder(tmp_path: Path) -> None:
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    response = await _post_parts(
+        app, [("file", ("photo.jpg", _jpeg(), "image/jpeg"))], person="alex"
+    )
+    assert response.status_code == 200
+    assert core.events[0].text == NO_CAPTION_TEXT
+    assert len(core.events[0].attachments) == 1
+
+
+async def test_a_zip_part_is_skipped_and_the_turn_goes_through(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    with caplog.at_level(logging.INFO, logger="channels.attachments"):
+        response = await _post_parts(
+            app,
+            [("file", ("payload.zip", b"PK\x03\x04and the rest", "application/zip"))],
+            person="alex",
+            text="unpack this",
+        )
+    assert response.status_code == 200
+    assert core.events[0].attachments == []
+    assert core.events[0].text == "unpack this"
+    skipped = [r for r in _dict_records(caplog) if r.get("reason") == "disallowed_type"]
+    assert skipped and skipped[0]["mime"] == "application/zip"
+
+
+async def test_a_part_over_the_cap_is_skipped(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path), config=CONFIG + SMALL_LIMIT)
+    with caplog.at_level(logging.INFO, logger="channels.cli"):
+        response = await _post_parts(
+            app,
+            [("file", ("notes.txt", b"n" * 2000, "text/plain"))],
+            person="alex",
+            text="my notes",
+        )
+    assert response.status_code == 200
+    assert core.events[0].attachments == []
+    assert [r["reason"] for r in _dict_records(caplog) if r.get("reason")] == ["too_large"]
+
+
+async def test_the_guard_gets_the_real_byte_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    guard = app.state.ctx.guard
+    seen: list[int] = []
+    check = guard.check
+
+    def record(**kwargs: Any) -> Any:
+        seen.append(kwargs["attachment_bytes"])
+        return check(**kwargs)
+
+    monkeypatch.setattr(guard, "check", record)
+    data = _jpeg()
+    response = await _post_parts(
+        app, [("file", ("photo.jpg", data, "image/jpeg"))], person="alex", text="this one"
+    )
+    assert response.status_code == 200
+    assert seen == [len(data)]
+
+
+async def test_a_multipart_turn_with_no_pipeline_is_503(tmp_path: Path) -> None:
+    app, core = _make(tmp_path)
+    response = await _post_parts(
+        app, [("file", ("photo.jpg", _jpeg(), "image/jpeg"))], person="alex", text="hello"
+    )
+    assert response.status_code == 503
+    assert response.json() == {"reason": "pipeline_unavailable"}
+    assert core.events == []
+
+
+async def test_an_unknown_person_with_a_file_stores_nothing(tmp_path: Path) -> None:
+    """The guard runs before the pipeline, so a refused turn writes no file."""
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    response = await _post_parts(
+        app, [("file", ("photo.jpg", _jpeg(), "image/jpeg"))], person="nobody", text="hello"
+    )
+    assert response.status_code == 403
+    assert core.events == []
+    assert not (tmp_path / "people").exists()
+
+
+async def test_a_multipart_turn_with_no_person_is_a_bad_request(tmp_path: Path) -> None:
+    app, _ = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    response = await _post_parts(
+        app, [("file", ("photo.jpg", _jpeg(), "image/jpeg"))], text="hello"
+    )
+    assert response.status_code == 400
+
+
+async def test_a_part_name_cannot_escape_the_inbox(tmp_path: Path) -> None:
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    response = await _post_parts(
+        app,
+        [("file", ("../../escape.txt", b"just some text", "text/plain"))],
+        person="alex",
+        text="where does this land",
+    )
+    assert response.status_code == 200
+    stored = core.events[0].attachments[0]
+    assert stored.path.startswith(_month_prefix("alex"))
+    assert not (tmp_path.parent / "escape.txt").exists()
+
+
+def test_inbox_name_keeps_the_name_and_strips_the_rest() -> None:
+    assert inbox_name("../../etc/notes.txt", 0) == "notes.txt"
+    assert inbox_name("my photo!.jpg", 1) == "my_photo_.jpg"
+    assert inbox_name(None, 2) == "file-2"
+
+
+async def test_the_json_turn_takes_no_file(tmp_path: Path) -> None:
+    """`make chat` and every other `cli` caller post JSON. It is unchanged."""
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    async with _client(app) as client:
+        response = await client.post(
+            "/v1/cli/turns/stream",
+            json={"person": "alex", "text": "hello"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert response.status_code == 200
+    assert core.events[0].text == "hello"
+    assert core.events[0].attachments == []
+    assert not (tmp_path / "inbox").exists()
+    assert not (tmp_path / "people" / "alex" / "attachments").exists()
 
 
 # --- outbound --------------------------------------------------------------

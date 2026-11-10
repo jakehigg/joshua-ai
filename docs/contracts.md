@@ -83,7 +83,7 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `GET /v1/channels/refusals?limit=` | `core` | | `200 {"refusals": [{"channel_type", "address", "chat_id", "reason", "at"}]}`. The handle and the channel, never a message body. |
 | `POST /v1/events` | `channels.webhooks.allowed_callers` | see `channels.md` | `202 {"accepted": true}`, `200 {"ignored": true}`, `400`, `404 unknown_channel`, `502`, `503 core_unavailable` |
 | `POST /webhook/imessage/{secret}` | none, the path secret | BlueBubbles payload | always `200`. A wrong secret gets `404`. |
-| `POST /v1/cli/turns/stream` | `channels.webhooks.allowed_callers` | `{"person": id, "text": str}` | SSE, or `400`, `403 {"reason": <guard reason>}`, `503 core_unavailable` |
+| `POST /v1/cli/turns/stream` | `channels.webhooks.allowed_callers` | `{"person": id, "text": str}`, or `multipart/form-data` (below) | SSE, or `400`, `403 {"reason": <guard reason>}`, `503 core_unavailable`, `503 pipeline_unavailable` |
 | `GET /v1/cli/outbox?person=&ack=true` | `channels.webhooks.allowed_callers` | | `{"messages": [{"ts", "text", "attachments"}]}`, `403 unknown_person` |
 | `GET /v1/cli/transcript?person=&limit=&before=` | `channels.webhooks.allowed_callers` | | core's `GET /v1/transcript` reply and status for `cli:<person>`, `400 bad_request`, `403 unknown_person`, `503 core_unavailable` |
 | `POST /v1/voice/chat/completions` | `channels.voice.allowed_callers` | OpenAI chat completions, plus `speaker` and `speaker_confidence` | SSE of `chat.completion.chunk`, or one `chat.completion` for `stream: false`. `400 bad_request`, `404 not_found` with no voice section, `503 core_unavailable` |
@@ -94,6 +94,32 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 
 An error reply from `channels` is `{"reason": "<code>"}`, with a `detail` field
 when there is more to say.
+
+### A terminal turn with a file
+
+`POST /v1/cli/turns/stream` also takes `multipart/form-data`, so a client can
+send a file with the message:
+
+| Field | Times | Meaning |
+|---|---|---|
+| `person` | one | the person id, as in the JSON body |
+| `text` | one | the message. It can be empty when the turn carries a file. |
+| `file` | zero or more | one file part, with its filename |
+
+Channels writes every part into `/data/inbox/cli-<uuid>/` and gives the
+directory to the attachment pipeline. The pipeline sniffs the type from the
+bytes, keeps an image, a PDF, or a text file, and stores it under
+`people/<person>/attachments/YYYY/MM/`. The turn carries one `Attachment` per
+stored file, so `core` gets paths and never bytes.
+
+The pipeline skips a part that is not an image, a PDF, or a text file, and the
+turn still goes through. It skips a part over
+`channels.limits.max_attachment_bytes` as well. A turn with a file and no text
+carries the same placeholder text as a file with no caption on any other
+channel.
+
+With no attachment pipeline, a turn with a file gets
+`503 pipeline_unavailable`. The JSON body takes no file.
 
 ## core
 

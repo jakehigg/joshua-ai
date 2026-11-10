@@ -6,6 +6,13 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A terminal turn can carry a file.** `POST /v1/cli/turns/stream` now also
+  takes `multipart/form-data` with `person`, `text`, and one `file` part for
+  each file. Channels runs the same attachment pipeline every other channel
+  runs: it reads the type from the bytes, stores an image, a PDF, or a text
+  file under `people/<id>/attachments/YYYY/MM/`, and skips any other type. The
+  turn carries the stored paths. A JSON body works as before, so `make chat`
+  does not change. See [channels.md](channels.md#the-terminal).
 - **A Chat entry in the viewer navigation.** The sidebar and the phone tabs
   have a Chat item. It opens `/chat/<your id>`, the chat on the same host as
   the viewer. The viewer only links to the chat; it serves no chat page.
