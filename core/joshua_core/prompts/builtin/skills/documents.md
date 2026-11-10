@@ -23,6 +23,15 @@ Anything the person will iterate on is a document. When in doubt, a document.
 - Find a document with `list_documents` or `search_documents`. Read it with
   `read_document` before you change it.
 
+### State what is true now
+
+A document states what is true now, in the present tense, as fact. It does
+not tell how it got there. Do not write a "decision made", "changed from",
+"previously", or "retired" section. Each write is a version: the Versions
+fold of the viewer and the resolution of each comment hold what changed.
+When a choice waits, state it as the current position in one sentence,
+without its history.
+
 ### Comments
 
 In the viewer, a person can comment on a line of a document. When the person
@@ -32,8 +41,9 @@ says that they left comments, or asks you to apply them:
    When `stale` is true, the line changed after the comment, so compare
    `line_text` with `line_now` first.
 2. Make the changes and write the document with `write_document`.
+   Rewrite each passage as fact. Do not add a note about the change.
 3. Call `resolve_document_comment(path, id, resolution)` for each comment,
-   with one line on what you did.
+   with one line on what you did. The resolution records the change.
 4. Tell the person what changed, in short.
 
 ### Promote the durable part

@@ -21,6 +21,10 @@ put everything that it needs in `goal`:
 - Each limit that the person gave, such as "do not change anything" or
   "only look at the last month".
 
+Write a spec, a draft definition, and a plan document as the current intent,
+not as a diff against an earlier one. A document states what is true now, in
+the present tense, as fact. Its versions hold what changed.
+
 Then add only what the person asked for: `model`, `budget`, `working_time`,
 `max_turns`, `repos` (each repository that it must read), `tools` (to narrow
 the MCP servers that it may use), `tasks_project`, `report_to`, and
@@ -197,10 +201,11 @@ that they left comments, or asks you to apply them:
    the run). It gives each open comment with its `target` (`definition`,
    `plan`, or `report`), its line, and the spec. Give `target` to get the
    comments of one text only.
-2. Make each change in the spec. A comment can refer to a whole paragraph or
-   bullet of the goal, and then `line_text` is its first line. When `stale`
-   is true, the line changed after the comment, so compare `line_text` with
-   `line_now` first.
+2. Make each change in the spec. Rewrite the passage as fact. Do not add a
+   note about the change: the resolution records it. A comment can refer to
+   a whole paragraph or bullet of the goal, and then `line_text` is its
+   first line. When `stale` is true, the line changed after the comment, so
+   compare `line_text` with `line_now` first.
 3. For a saved assignment, save the changed spec with `save_assignment` and
    the same name. For a draft, give it the changed spec with
    `update_assignment(id, spec)`. For a run, start a new run with the changed
@@ -225,7 +230,8 @@ in to the viewer, so it is their request, not an instruction of the manager.
 - A comment on a report or a plan is the answer of the person to the
   decision that it is on, or a remark on the result. Apply it at once to the
   document or the tasks that it concerns: update the deliverable document
-  with `write_document`, or change the tasks with the tasks tools. Never
+  with `write_document`, or change the tasks with the tasks tools. Rewrite
+  the passage of the document as fact. The resolution records it. Never
   start an assignment for a comment. The person answers each question
   first, reads the changed document, and then says when to run it again.
 - Resolve the comment only after the change is made, with `applied`: the
