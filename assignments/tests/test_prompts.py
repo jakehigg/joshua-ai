@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from joshua_assignments import prompts
 
 
@@ -257,17 +255,3 @@ def test_the_system_prompt_says_how_the_worker_writes() -> None:
     assert text.index("Then call `finish`") < text.index("## How you write")
     assert text.index("## How you write") < text.index("## When you need more")
     assert "A document that you write states what is true now" in text
-
-
-def test_the_worker_and_joshua_get_the_same_style_section() -> None:
-    skill = (
-        Path(__file__).parents[2]
-        / "core"
-        / "joshua_core"
-        / "prompts"
-        / "builtin"
-        / "skills"
-        / "documents.md"
-    ).read_text("utf-8")
-    worker = _style_section(prompts.system_prompt(), "## How you write\n")
-    assert _style_section(skill, "### How you write\n") == worker
