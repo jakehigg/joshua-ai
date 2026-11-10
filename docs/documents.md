@@ -153,6 +153,10 @@ So a document states what is true now, as fact, and does not tell how it
 got there: its versions and the resolutions of its comments hold what
 changed.
 
+Joshua writes a document in Simplified Technical English: one idea in each
+sentence, the present tense, names and numbers instead of adjectives, and a
+line that starts with "Not verified:" for what it did not check.
+
 ## Promote to the wiki
 
 A finished document can hold something that stays true: a recipe in a meal

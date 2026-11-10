@@ -6,6 +6,12 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The worker and Joshua write in Simplified Technical English (#140).**
+  The worker prompt and the documents skill page have the same section, "How
+  you write": one idea in each sentence, the present tense and the active
+  voice, names instead of adjectives, no hedges, and "Not verified:" for what
+  was not checked. The report shape and the plan shape do not change. See
+  [documents.md](documents.md#versions).
 - **A document states what is true now (#136).** The documents skill page,
   the assignments skill page, and the worker prompt tell Joshua and a worker
   to write a plan, a spec, or a definition in the present tense, as fact,

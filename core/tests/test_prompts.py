@@ -251,6 +251,22 @@ def test_the_documents_skill_says_what_a_document_is_and_how_to_keep_it() -> Non
         "The resolution records the change.",
     ):
         assert words in page, words
+    start = page.index("### How you write\n")
+    style = page[start : page.index("\n#", start + 1)]
+    for words in (
+        "Write each text that a person reads in this style",
+        "Simplified Technical English",
+        "Write one idea in each sentence, in about twenty words.",
+        "Use the present tense and the active voice. Say who does what.",
+        "Name the thing: the file and the line, the number, the path, the tool.",
+        'Do not write "note that" or\n  "it is worth".',
+        "Use a table only for numbers",
+        "A text of less\n  than five hundred words has no headings",
+        '"Not verified:"',
+        "Do not change a\n  term for style.",
+    ):
+        assert words in style, words
+    assert page.index("### State what is true now") < start < page.index("### Comments")
     lowered = page.lower()
     for banned in ("http://", "https://", "gitlab", "github", "kubernetes"):
         assert banned not in lowered, banned

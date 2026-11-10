@@ -45,6 +45,10 @@ A definition, a plan, and a document state the current intent, not what
 changed since an earlier one: the versions and the comment resolutions hold
 the changes, and the Progress log of the plan is the one timeline.
 
+The worker writes its plan, its report, and each document in Simplified
+Technical English, with the same rules as Joshua
+([documents.md](documents.md#versions)).
+
 ## Use an assignment
 
 You talk to Joshua in your own words, in any channel. The words in quotes
