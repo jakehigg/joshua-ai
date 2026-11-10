@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from joshua_assignments import prompts
 
 
@@ -220,3 +222,52 @@ def test_the_system_prompt_says_how_to_request_a_repository_or_a_file() -> None:
     ):
         assert words in section, words
     assert "`request_resource(kind, ref, reason)`" in text[: text.index("## Repositories")]
+
+
+STYLE_RULES = (
+    "Write each text that a person reads in this style: a plan, a report, and a\ndocument.",
+    "The rules come from Simplified Technical English.",
+    "They do not\nchange a shape that these instructions give.",
+    "Write one idea in each sentence, in about twenty words. Each sentence has\n  a verb.",
+    "Use the present tense and the active voice. Say who does what.",
+    "Name the thing: the file and the line, the number, the path, the tool.",
+    "not use an adjective where a fact fits.",
+    'Do not write history, hedges, or marketing. Do not write "note that" or\n  "it is worth".',
+    "Use a list for parallel items, with one or two sentences in each item.",
+    "prose for an argument. Use a table only for numbers, or for a comparison\n"
+    "  with the same columns in each row.",
+    "Give a heading to each section that a reader will jump to.",
+    "than five hundred words has no headings, but a shape keeps its headings.",
+    'write it on a line that starts with\n  "Not verified:". Do not use a softer sentence.',
+    "Use the same word for the same thing in all of the text. Do not change a\n  term for style.",
+)
+
+
+def _style_section(text: str, heading: str) -> str:
+    start = text.index(heading) + len(heading)
+    return text[start : text.index("\n#", start)].strip()
+
+
+def test_the_system_prompt_says_how_the_worker_writes() -> None:
+    text = prompts.system_prompt()
+    section = _style_section(text, "## How you write\n")
+    for words in STYLE_RULES:
+        assert words in section, words
+    # The section sits beside the report shape and the present-tense rule.
+    assert text.index("Then call `finish`") < text.index("## How you write")
+    assert text.index("## How you write") < text.index("## When you need more")
+    assert "A document that you write states what is true now" in text
+
+
+def test_the_worker_and_joshua_get_the_same_style_section() -> None:
+    skill = (
+        Path(__file__).parents[2]
+        / "core"
+        / "joshua_core"
+        / "prompts"
+        / "builtin"
+        / "skills"
+        / "documents.md"
+    ).read_text("utf-8")
+    worker = _style_section(prompts.system_prompt(), "## How you write\n")
+    assert _style_section(skill, "### How you write\n") == worker
