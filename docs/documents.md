@@ -73,7 +73,8 @@ Joshua keeps the status true as the document changes.
 
 A document is Markdown (`.md`) or HTML (`.html`). The name of the file gives
 the format. One slug holds one document, so `party.md` and `party.html`
-cannot both exist.
+cannot both exist. A slug never ends in `.comments` or in `.json`: the
+comments file and the frontmatter route of the viewer own those names.
 
 ### The frontmatter
 
@@ -184,6 +185,13 @@ link.
   An HTML document shows in its frame (see [artifacts](#artifacts)).
 - `Source` gives the frontmatter and each line of the body. `Versions` gives
   the history.
+- `/documents/<owner>/<slug>.json` gives the title, the kind, the status, and
+  the time of the last change, as JSON, and no part of the body. The chat
+  shows the title of an artifact card from it, and reads it again while the
+  panel is open to see a change that no turn made. It needs the same sign-in
+  as the page, a document of another member is 404, and the answer is never
+  cached. A slug never ends in `.json`, so this address always names the
+  frontmatter of `<slug>`.
 
 The viewer writes only your comments. Joshua makes every other change.
 [operations.md](operations.md#the-documents-section) has the details, and

@@ -6,6 +6,14 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A small JSON address for the head of a document.**
+  `GET /documents/<owner>/<slug>.json` in the viewer gives the title, the
+  kind, the status, and the time of the last change of one document, and no
+  part of the body. The chat shows the title of an artifact card from it, and
+  reads it again while the panel is open to see a change that no turn made.
+  It has the same sign-in and the same owner rule as the document page, and
+  the answer is never cached. A document slug now never ends in `.json`. See
+  [documents.md](documents.md#the-documents-section-of-the-viewer).
 - **A page of the viewer can frame a document page.** The content policy of
   the viewer now has `frame-ancestors 'self'`, and the viewer sends
   `X-Frame-Options: SAMEORIGIN`. So the chat shows a document in an artifact

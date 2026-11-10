@@ -537,6 +537,55 @@ def test_a_comment_with_no_repository_is_stored_with_no_commit(data) -> None:
     assert not (data / "documents/.git").exists()
 
 
+# -- the frontmatter as JSON ------------------------------------------------
+
+
+def test_the_json_of_a_document_gives_four_fields_and_no_body(docs) -> None:
+    response = _get("/documents/alex/party.json")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "title": "Party plan",
+        "kind": "plan",
+        "status": "active",
+        "updated": "2026-11-09T12:00:00+00:00",
+    }
+    assert "Food and music" not in response.text
+
+
+def test_the_json_needs_a_sign_in(docs) -> None:
+    assert client().get("/documents/alex/party.json").status_code == 401
+
+
+def test_the_json_of_a_document_that_is_not_there_is_404(docs) -> None:
+    response = _get("/documents/alex/nothing.json")
+    assert response.status_code == 404
+    assert response.json() == {"error": "not found"}
+
+
+def test_the_json_of_another_members_document_is_404(docs) -> None:
+    assert _get("/documents/mia/secret.json").status_code == 404
+    assert _get("/documents/mia/secret.json", auth=MIA).status_code == 200
+    assert _get("/documents/shared/meals.json").status_code == 200
+    assert _get("/documents/shared/meals.json", auth=GUEST).status_code == 404
+
+
+def test_the_json_route_leaves_the_page_route(docs) -> None:
+    page = _get("/documents/alex/party")
+    assert page.status_code == 200
+    assert "Food and music" in page.text
+
+
+def test_a_slug_that_ends_in_json_is_not_a_document(docs) -> None:
+    _write(docs / "alex/data.json.md", "---\ntitle: Data\nstatus: active\n---\nRows.\n")
+    assert ds.valid_slug("data.json") is False
+    # The address names the frontmatter of ``data``, which is not there.
+    assert _get("/documents/alex/data.json").status_code == 404
+    assert _get("/documents/alex/data.json.json").status_code == 404
+    assert "Data" not in _get("/documents").text
+
+
 # -- versions ---------------------------------------------------------------
 
 

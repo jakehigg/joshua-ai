@@ -133,6 +133,9 @@ _MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table
 # Which viewer route serves each root, for a search hit link.
 _ROUTE_PREFIX = {"wiki": "/wiki/", "shared": "/shared/"}
 
+# A JSON answer a client polls is never cached.
+_NO_STORE = {"Cache-Control": "no-store"}
+
 # The stylesheets and images the pages load. The shared Joshua stylesheet and
 # its images are in ``ui/``, and ``viewer.css`` holds what only the viewer
 # needs. Each is served from the package, behind the same sign-in as a page.
@@ -1103,6 +1106,25 @@ async def document_page(request: Request, person: Person) -> Response:
     return _page(shown.title, html, section="documents")
 
 
+async def document_meta(request: Request, person: Person) -> Response:
+    """The title, the kind, the status, and the ``updated`` time of one
+    document, as JSON. A document of another member is 404, as is one that is
+    not there.
+
+    The chat reads the title of an artifact card here, and polls ``updated``
+    to see a change that no turn made. The answer holds no part of the body,
+    renders nothing, and reads no git history, so a poll stays cheap. A slug
+    that ends in ``.json`` is not a document, so this URL always names the
+    frontmatter of ``<slug>``."""
+    doc = _document(request, person)
+    if doc is None:
+        return JSONResponse({"error": "not found"}, status_code=404, headers=_NO_STORE)
+    return JSONResponse(
+        {"title": doc.title, "kind": doc.kind, "status": doc.status, "updated": doc.updated},
+        headers=_NO_STORE,
+    )
+
+
 def _comment_refused(doc: docstore.Document, reason: str) -> Response:
     body = documents_mod.message_html(
         "comment not stored",
@@ -1643,6 +1665,10 @@ def build_app() -> Starlette:
                 methods=["POST"],
             ),
             Route("/documents", _require_auth(documents_list)),
+            # The JSON route comes first, so the page route does not take
+            # ``<slug>.json``. A slug that ends in ``.json`` is not a
+            # document, so the two can never name the same file.
+            Route("/documents/{owner}/{slug}.json", _require_auth(document_meta)),
             Route("/documents/{owner}/{slug}", _require_auth(document_page)),
             Route(
                 "/documents/{owner}/{slug}/comments",

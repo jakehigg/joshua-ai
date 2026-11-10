@@ -1084,6 +1084,14 @@ A document opens at `/documents/<owner>/<slug>`:
   `/data/documents`, newest first. Click a version to read it at
   `?rev=<sha>`. An old version is read-only and has no comments.
 
+`/documents/<owner>/<slug>.json` gives the same document as JSON, with four
+fields only: `title`, `kind`, `status`, and `updated`. It reads no body, it
+renders nothing, it reads no git history, and it answers with
+`Cache-Control: no-store`, so the chat can read it again while its artifact
+panel is open. It has the sign-in and the owner rule of the page, so a
+document of another member and a document that is not there are both 404. A
+document slug never ends in `.json`, so this address cannot name a file.
+
 To comment on a document, use the `+` of a block, a card, a heading, or a line
 of `Source`, as on a definition (see
 [Comments on a definition](#comments-on-a-definition)). The `+` of the head

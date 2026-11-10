@@ -941,7 +941,9 @@ whose id is `shared` has no own folder: `shared` is always the shared folder.
 
 A tool path is `documents/<owner>/<slug>.md`, or `.html` for an HTML artifact.
 `slug` is letters, digits, `.`, `_`, and `-`, at most 128 characters, and
-starts with a letter or a digit. One slug holds one document, so
+starts with a letter or a digit. A slug never ends in `.comments`, which
+names the comments file, or in `.json`, which names the frontmatter route of
+the viewer. One slug holds one document, so
 `x.md` and `x.html` cannot both exist. A path under `wiki/` is refused: a
 document never lands in the wiki.
 

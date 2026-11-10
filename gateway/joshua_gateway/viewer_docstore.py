@@ -54,6 +54,10 @@ DEFAULT_STATUS = "draft"
 
 # A slug is one file name with no extension: no dot at the start, no path.
 SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+# A slug never ends in one of these: ``<slug>.comments`` names the comments
+# file of a document, and ``<slug>.json`` names its frontmatter route in the
+# viewer.
+RESERVED_SUFFIXES = (".comments", ".json")
 _REF_RE = re.compile(r"^/?documents/(?P<owner>[^/]+)/(?P<slug>[^/]+)\.(?P<ext>md|html)\Z")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}\Z")
 _GIT_TIMEOUT_S = 10
@@ -78,7 +82,7 @@ def valid_owner(owner: str) -> bool:
 
 
 def valid_slug(slug: str) -> bool:
-    return bool(SLUG_RE.match(slug)) and ".." not in slug and not slug.endswith(".comments")
+    return bool(SLUG_RE.match(slug)) and ".." not in slug and not slug.endswith(RESERVED_SUFFIXES)
 
 
 def document_url(ref: str) -> str | None:
