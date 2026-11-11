@@ -8,6 +8,7 @@ import Journal from "./pages/Journal";
 import JournalDay from "./pages/JournalDay";
 import Me from "./pages/Me";
 import New from "./pages/New";
+import Search from "./pages/Search";
 import WikiFolder, { type WikiFolderData } from "./pages/WikiFolder";
 import WikiPage, { type WikiPageData } from "./pages/WikiPage";
 import Shell from "./shell/Shell";
@@ -88,6 +89,7 @@ export default function App() {
       <Route path="/attachments/*" element={<Content root="attachments" />} />
       <Route path="/journal" element={<Journal />} />
       <Route path="/journal/:year/:month/:day" element={<JournalDay />} />
+      <Route path="/search" element={<Search />} />
       <Route path="/edit/*" element={<Edit />} />
       <Route path="/new" element={<New />} />
       <Route path="/me" element={<Me />} />

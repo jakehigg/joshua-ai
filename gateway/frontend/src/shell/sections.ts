@@ -73,7 +73,7 @@ export const SECTIONS: readonly Section[] = [
     icon: SEARCH_ICON,
     memberOnly: false,
     personPath: false,
-    migrated: false,
+    migrated: true,
   },
   {
     key: "usage",

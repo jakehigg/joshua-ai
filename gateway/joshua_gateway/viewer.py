@@ -5,7 +5,7 @@ A person opens a browser, signs in with HTTP basic, and reads the one wiki
 attachments, and the shared attachments. ``/journal`` shows the journal as a
 feed, newest day first, because the wiki tree is the wrong shape for reading
 what happened. The agent never calls the viewer. The viewer calls core for two
-things, when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set: ``/search`` asks
+things, when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set: the search asks
 core to search by meaning (``viewer_search``), and ``/usage`` shows the tokens
 of each group by day (``viewer_usage``) under the subscription limits
 (``viewer_limits``). The limits need ``CORE_URL`` only, because core's
@@ -20,14 +20,15 @@ another app on the same host, so the viewer only links to it. The viewer reads
 the data volume through the same resolver as the files MCP
 (``files_mcp.paths``), so the two never drift on who reads what.
 
-The wiki, the shared attachments, a person's own attachments, the journal and
-the editor are the React app: ``/``, ``/wiki/…``, ``/shared/…``,
+The wiki, the shared attachments, a person's own attachments, the journal, the
+search and the editor are the React app: ``/``, ``/wiki/…``, ``/shared/…``,
 ``/attachments/…``, ``/journal``, ``/journal/<year>/<month>/<day>``,
-``/edit/…`` and ``/new`` are addresses of its router (``viewer_spa``), and it
-reads ``GET /api/v1/wiki`` for a page, a folder or a file,
-``GET /api/v1/files/<root>/<path>`` for the bytes,
-``GET /api/v1/journal`` for a month of the feed and
-``GET /api/v1/journal/<year>/<month>/<day>`` for a day, and
+``/search``, ``/edit/…`` and ``/new`` are addresses of its router
+(``viewer_spa``), and it reads ``GET /api/v1/wiki`` for a page, a folder or a
+file, ``GET /api/v1/files/<root>/<path>`` for the bytes,
+``GET /api/v1/journal`` for a month of the feed,
+``GET /api/v1/journal/<year>/<month>/<day>`` for a day,
+``GET /api/v1/search`` for both halves of the search, and
 ``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
 ``POST /api/v1/delete`` for a write (``viewer_api``).
 
@@ -98,7 +99,6 @@ from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_showcase as showcase_mod
 from joshua_gateway import viewer_usage as usage_mod
-from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import Root
 from joshua_gateway.files_mcp.server import _atomic_write, data_root
 from joshua_gateway.viewer_api.edit import _commit_write, _csrf_token, _csrf_valid, _origin_ok
@@ -114,10 +114,8 @@ REALM = "joshua viewer"
 VIEWER_PASSWORDS_ENV = "VIEWER_PASSWORDS"
 VIEWER_PW_PREFIX = "VIEWER_PW_"
 
-# The person's home page shows at most this many recent attachments; search
-# returns at most this many hits.
+# The person's home page shows at most this many recent attachments.
 HOME_ATTACHMENTS_MAX = 30
-SEARCH_MAX_RESULTS = 50
 
 # The metadata file a channels-stored attachment carries: ``<file>.meta.json``. Never
 # a piece of content on its own, so a listing hides it.
@@ -134,9 +132,6 @@ _ANONYMOUS_PERSON = Person(id=ANONYMOUS_PERSON_ID, name="Anonymous", role="membe
 # The commonmark preset has no tables; the table and strikethrough rules are
 # turned on, with no new dependency.
 _MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table", "strikethrough"])
-
-# Which viewer route serves each root, for a search hit link.
-_ROUTE_PREFIX = {"wiki": "/wiki/", "shared": "/shared/"}
 
 # A JSON answer a client polls is never cached.
 _NO_STORE = {"Cache-Control": "no-store"}
@@ -433,10 +428,11 @@ def _sections() -> list[tuple[str, str, str, str]]:
     return sections
 
 
-def _shell(body: str, *, section: str, query: str) -> str:
+def _shell(body: str, *, section: str) -> str:
     """The page shell: the sidebar on a wide screen; the app bar and the tabs
     on a phone. ``section`` marks the current item. The search field is in the
-    app bar, so it shows on every screen."""
+    app bar, so it shows on every screen; it loads ``/search``, which the
+    React app renders."""
     sections = _sections()
     items = "".join(
         f'<a class="j-nav-item" href="{url}"{_current(key, section)}>{_icon(icon)}{label}</a>'
@@ -471,8 +467,8 @@ def _shell(body: str, *, section: str, query: str) -> str:
         '<span class="j-spacer"></span>'
         '<form class="v-search" action="/search" method="get" role="search">'
         f'<label class="j-field">{_icon(_SEARCH_ICON)}'
-        f'<input type="search" name="q" value="{escape(query, quote=True)}" '
-        'placeholder="Search" aria-label="Search"></label></form>'
+        '<input type="search" name="q" placeholder="Search" aria-label="Search">'
+        "</label></form>"
         "</header>"
         f'<nav class="j-tabs mobile-only" aria-label="Sections">{tabs}</nav>'
         f'<main class="{content}">{body}</main>'
@@ -487,7 +483,6 @@ def _page(
     status: int = 200,
     nav: bool = True,
     section: str = "",
-    query: str = "",
     head: str = "",
 ) -> HTMLResponse:
     """A full page. ``section`` is the key of the current section in the
@@ -495,11 +490,7 @@ def _page(
     ``assignments``, ``documents``, ``chat``), or "" for the home page. ``nav`` False gives the bare
     content with no navigation. ``head`` is more HTML for the ``<head>``,
     such as a ``<meta>`` refresh."""
-    main = (
-        _shell(body, section=section, query=query)
-        if nav
-        else f'<main class="j-content">{body}</main>'
-    )
+    main = _shell(body, section=section) if nav else f'<main class="j-content">{body}</main>'
     html = (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width, initial-scale=1">'
@@ -564,38 +555,6 @@ def _list_attachments(root: Root) -> list[str]:
 
 
 # -- routes -----------------------------------------------------------------
-
-
-async def search(request: Request, person: Person) -> Response:
-    """Search by meaning through core, when core is configured, and by words.
-
-    The words section always shows, so the page still works when core is
-    down or not configured."""
-    query = (request.query_params.get("q") or "").strip()
-    if not query:
-        return _page(
-            "search",
-            '<h1 class="j-doc-title">search</h1><p class="j-empty">Enter a query.</p>',
-            section="search",
-        )
-    meaning = ""
-    core = search_mod.from_env(os.environ)
-    if core is not None:
-        reader = person.id if person.role == "member" else None
-        meaning = search_mod.meaning_html(await core.search(query, person=reader))
-    hits = _search(_roots_for(person), query)
-    if not hits:
-        words = f'<p class="j-empty">No match for {escape(query)}.</p>'
-    else:
-        words = search_mod.results_html([(url, label, "", snippet) for url, label, snippet in hits])
-    if meaning:
-        words = f'<section class="words"><h2>By words</h2>{words}</section>'
-    return _page(
-        "search",
-        f'<h1 class="j-doc-title">search</h1>{meaning}{words}',
-        section="search",
-        query=query,
-    )
 
 
 async def usage(request: Request, person: Person) -> Response:
@@ -986,38 +945,6 @@ def _now(tz: tzinfo) -> datetime:
     return datetime.now(tz)
 
 
-def _search(roots: dict[str, Root], query: str) -> list[tuple[str, str, str]]:
-    """Substring search over the markdown the person can read. One hit per file,
-    newest roots first. This is not semantic search."""
-    needle = query.lower()
-    hits: list[tuple[str, str, str]] = []
-    for name, root in roots.items():
-        if name == "attachments":
-            continue
-        for abs_path, rel in _iter_markdown(root):
-            text = _read_text(abs_path)
-            if text is None:
-                continue
-            for line in text.splitlines():
-                if needle in line.lower():
-                    label = _search_label(name, rel)
-                    if name == "wiki":
-                        label = wiki.page_title(text, wiki.stem_title(abs_path.stem))
-                    hits.append((_search_url(name, rel), label, line.strip()[:200]))
-                    break
-            if len(hits) >= SEARCH_MAX_RESULTS:
-                return hits
-    return hits
-
-
-def _search_url(root_name: str, rel: str) -> str:
-    return f"{_ROUTE_PREFIX[root_name]}{rel}"
-
-
-def _search_label(root_name: str, rel: str) -> str:
-    return f"{root_name}/{rel}"
-
-
 @cache
 def _package_file(*parts: str) -> bytes:
     """A file of this package, read once."""
@@ -1161,7 +1088,6 @@ def build_app() -> Starlette:
         Route("/ui/{name}", _require_auth(ui_file)),
         Route("/links", _require_auth(links_page)),
         Route("/links", _require_auth(links_save), methods=["POST"]),
-        Route("/search", _require_auth(search)),
         Route("/usage", _require_auth(usage)),
         Route("/assignments", _require_auth(assignments_list)),
         Route("/assignments/saved", _require_auth(saved_list)),

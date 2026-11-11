@@ -62,14 +62,12 @@ describe("the shell", () => {
     expect(screen.getByText("Your page")).toBeDefined();
   });
 
-  it("sends the search to the page of the server renderer", () => {
+  it("holds the search field of the app bar", () => {
     stubSession();
 
     shell();
 
-    const form = document.querySelector("form.v-search");
-    expect(form?.getAttribute("action")).toEqual("/search");
-    expect(form?.getAttribute("method")).toEqual("get");
+    expect(document.querySelector("header.j-appbar form.v-search")).not.toBeNull();
     expect(document.querySelector('form.v-search input[name="q"]')).not.toBeNull();
   });
 
@@ -77,6 +75,7 @@ describe("the shell", () => {
     expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual([
       "wiki",
       "journal",
+      "search",
     ]);
     stubSession();
 

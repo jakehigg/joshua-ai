@@ -82,18 +82,19 @@ def client(monkeypatch, tmp_path) -> TestClient:
 
 MIA = ("mia", MIA_PW)
 
-# The wiki, the shared files, the own attachments and the journal are the
-# React app, which reads these routes.
+# The wiki, the shared files, the own attachments, the journal and the search
+# are the React app, which reads these routes.
 PAGE_JSON = "/api/v1/wiki?path=wiki/pizza.md"
 SHARED_PNG = "/api/v1/files/shared/attachments/team.png"
 FEED_JSON = "/api/v1/journal"
+SEARCH_JSON = "/api/v1/search?q=Dough"
 
 
 # -- auth -------------------------------------------------------------------
 
 
 def test_every_route_needs_auth(client):
-    for path in (PAGE_JSON, SHARED_PNG, FEED_JSON, "/search"):
+    for path in (PAGE_JSON, SHARED_PNG, FEED_JSON, SEARCH_JSON):
         response = client.get(path)
         assert response.status_code == 401, path
         assert response.headers["WWW-Authenticate"].startswith("Basic")
@@ -183,7 +184,7 @@ def test_dot_entries_are_hidden_from_home_and_search(client, tmp_path):
     tree = client.get("/api/v1/wiki/tree", auth=("alex", ALEX_PW)).text
     assert "/wiki/.git" not in tree
     assert "/wiki/.obsidian" not in tree
-    hits = client.get("/search", params={"q": "Workspace"}, auth=("alex", ALEX_PW)).text
+    hits = client.get("/api/v1/search", params={"q": "Workspace"}, auth=("alex", ALEX_PW)).text
     assert "/wiki/.obsidian" not in hits
 
 
@@ -234,7 +235,7 @@ def test_image_attachment_renders_inline(client):
 
 
 def test_security_headers_on_every_response(client):
-    response = client.get("/search", auth=("alex", ALEX_PW))
+    response = client.get("/usage", auth=("alex", ALEX_PW))
     # The policy allows the bundle of the React app, from this origin, and the
     # copy script of a server-rendered report, by its hash. No inline script.
     assert response.headers["content-security-policy"] == (
@@ -249,7 +250,7 @@ def test_security_headers_on_every_response(client):
 
 def test_only_the_same_origin_may_frame_the_viewer(client):
     # The chat frames a document page of the viewer; no other origin can.
-    policy = client.get("/search", auth=("alex", ALEX_PW)).headers["content-security-policy"]
+    policy = client.get("/usage", auth=("alex", ALEX_PW)).headers["content-security-policy"]
     assert "frame-ancestors 'self'" in policy
     assert "frame-ancestors *" not in policy
     assert "autrui.net" not in policy
@@ -298,7 +299,7 @@ def test_the_viewer_stylesheet_uses_the_shared_tokens(client):
 
 
 def test_a_page_has_the_shared_shell(client):
-    html = client.get("/search", params={"q": "Dough"}, auth=("alex", ALEX_PW)).text
+    html = client.get("/links", auth=("alex", ALEX_PW)).text
     assert '<link rel=stylesheet href="/ui/joshua-ui.css">' in html
     assert html.index("/ui/joshua-ui.css") < html.index("/style.css")
     assert 'href="/ui/favicon-32.png"' in html
@@ -308,29 +309,25 @@ def test_a_page_has_the_shared_shell(client):
     assert '<aside class="j-sidebar">' in html and '<header class="j-appbar">' in html
     assert '<nav class="j-tabs mobile-only"' in html
     assert '<main class="j-content">' in html
-    # The search field is in the app bar, so a phone has it too.
+    # The search field is in the app bar, so a phone has it too. A page the
+    # server renders loads ``/search``, which the React app renders.
     appbar = html[html.index('<header class="j-appbar">') : html.index("</header>")]
     assert 'action="/search"' in appbar and 'name="q"' in appbar
 
 
 def test_the_current_section_is_marked(client):
-    pages = {
-        "/search?q=Dough": 'href="/search"',
-        "/usage": 'href="/usage"',
-    }
-    for path, link in pages.items():
-        html = client.get(path, auth=("alex", ALEX_PW)).text
-        assert f'class="j-nav-item" {link} aria-current="page"' in html, path
-        assert f'class="j-tab" {link} aria-current="page"' in html, path
-        assert html.count('aria-current="page"') == 2, path
+    html = client.get("/usage", auth=("alex", ALEX_PW)).text
+    assert 'class="j-nav-item" href="/usage" aria-current="page"' in html
+    assert 'class="j-tab" href="/usage" aria-current="page"' in html
+    assert html.count('aria-current="page"') == 2
     # Every server-rendered page still reaches the person's own page, which
     # the React app serves.
-    assert 'class="j-nav-item" href="/me"' in client.get("/usage", auth=("alex", ALEX_PW)).text
+    assert 'class="j-nav-item" href="/me"' in html
 
 
 def test_the_chat_entry_names_the_person_of_the_request(client):
     for creds, person in ((("alex", ALEX_PW), "alex"), (MIA, "mia")):
-        html = client.get("/search", auth=creds).text
+        html = client.get("/usage", auth=creds).text
         link = f'href="/chat/{person}"'
         assert f'<a class="j-nav-item" {link}>' in html, person
         assert f'<a class="j-tab" {link}>Chat</a>' in html, person
@@ -341,7 +338,7 @@ def test_the_chat_section_is_marked_current(client):
     person = config.load().person("alex")
     token = viewer._REQUEST_PERSON.set(person)
     try:
-        html = viewer._shell("", section="chat", query="")
+        html = viewer._shell("", section="chat")
     finally:
         viewer._REQUEST_PERSON.reset(token)
     assert '<a class="j-nav-item" href="/chat/alex" aria-current="page">' in html
@@ -350,17 +347,14 @@ def test_the_chat_section_is_marked_current(client):
     assert "<strong>Chat</strong>" in html
 
 
-def test_the_search_field_keeps_the_query(client):
-    html = client.get("/search", params={"q": 'a "b"'}, auth=("alex", ALEX_PW)).text
-    assert 'name="q" value="a &quot;b&quot;"' in html
-
-
 # -- search -----------------------------------------------------------------
 
 
 def test_search_finds_a_substring(client):
-    text = client.get("/search", params={"q": "Dough"}, auth=("alex", ALEX_PW)).text
-    assert "/wiki/pizza.md" in text
+    """The search is the React page, which reads this route
+    (``test_viewer_api_search``)."""
+    body = client.get(SEARCH_JSON, auth=("alex", ALEX_PW)).json()
+    assert "/wiki/pizza.md" in [hit["url"] for hit in body["words"]]
 
 
 # -- delete -----------------------------------------------------------------

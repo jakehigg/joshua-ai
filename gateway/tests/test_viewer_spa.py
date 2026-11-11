@@ -113,15 +113,16 @@ def test_with_anonymous_the_app_opens(monkeypatch, tmp_path) -> None:
 
 
 def test_every_explicit_route_still_wins(client) -> None:
-    assert client.get("/search", auth=ALEX).status_code == 200
+    assert client.get("/usage", auth=ALEX).status_code == 200
     assert client.get("/healthz").json() == {"ok": True}
     assert client.get("/api/v1/me", auth=ALEX).json()["person"]["id"] == "alex"
 
 
 def test_the_content_of_the_viewer_is_the_app(client) -> None:
-    """The wiki, the shared files, the own attachments, the journal and the
-    editor are the app, which reads them from ``GET /api/v1/wiki``,
-    ``GET /api/v1/journal`` and ``GET /api/v1/edit``."""
+    """The wiki, the shared files, the own attachments, the journal, the
+    search and the editor are the app, which reads them from
+    ``GET /api/v1/wiki``, ``GET /api/v1/journal``, ``GET /api/v1/search`` and
+    ``GET /api/v1/edit``."""
     for path in (
         "/",
         "/wiki/",
@@ -129,6 +130,7 @@ def test_the_content_of_the_viewer_is_the_app(client) -> None:
         "/attachments/2026/09/a.jpg",
         "/journal",
         "/journal/2026/09/04",
+        "/search",
         "/edit/Home.md",
         "/new",
     ):

@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 
 import { getJson, type Person } from "../api/client";
 import Icon from "./Icon";
-import { ME_ICON, SEARCH_ICON, SECTIONS, linkIcon, section as sectionOf } from "./sections";
+import SearchField from "./SearchField";
+import { ME_ICON, SECTIONS, linkIcon, section as sectionOf } from "./sections";
 
 /** One section of the navigation, as `GET /api/v1/session` sends it. */
 export interface SessionSection {
@@ -93,8 +94,8 @@ function iconOf(key: string): string {
 /**
  * The shell of every page: the sidebar on a wide screen, the app bar and the
  * tabs on a phone. `section` marks the current item. The search field is in
- * the app bar, so it shows on every screen; it posts to `/search`, which the
- * server renderer answers.
+ * the app bar, so it shows on every screen; it goes to `/search`, a page of
+ * this app. `query` is what the field holds, which the search page passes.
  */
 export default function Shell({
   section = "",
@@ -184,18 +185,7 @@ export default function Shell({
             <strong>{title(section)}</strong>
           </a>
           <span className="j-spacer"></span>
-          <form className="v-search" action="/search" method="get" role="search">
-            <label className="j-field">
-              <Icon paths={SEARCH_ICON} />
-              <input
-                type="search"
-                name="q"
-                defaultValue={query}
-                placeholder="Search"
-                aria-label="Search"
-              />
-            </label>
-          </form>
+          <SearchField query={query} />
         </header>
         <nav className="j-tabs mobile-only" aria-label="Sections">
           {sections.map((item) => (

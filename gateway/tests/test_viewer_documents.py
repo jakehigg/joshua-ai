@@ -169,12 +169,12 @@ def _git_log(base: Path) -> list[str]:
 
 
 def test_the_nav_has_documents_for_a_member(data) -> None:
-    html = _get("/search").text
+    html = _get("/usage").text
     assert 'href="/documents">' in html and ">Documents</a>" in html
 
 
 def test_a_guest_has_no_documents_section(docs) -> None:
-    html = _get("/search", auth=GUEST).text
+    html = _get("/usage", auth=GUEST).text
     assert 'href="/documents"' not in html
     assert _get("/documents", auth=GUEST).status_code == 404
     assert _get("/documents/shared/meals", auth=GUEST).status_code == 404

@@ -6,6 +6,14 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The search in the viewer is a React page.** The field in the app bar now
+  goes to `/search?q=<query>` inside the app, so no page loads, and a
+  bookmark of a search opens the same hits. The page keeps both halves: the
+  search by meaning through core first, then the search by words over the
+  Markdown you can read, at most 50 hits. With `CORE_URL` or
+  `JOSHUA_TOKEN_VIEWER` unset, or with a core that does not answer, the page
+  shows the words half alone. The app reads one JSON address with the sign-in
+  of a page: `GET /api/v1/search?q=<query>`.
 - **The journal in the viewer is a React page.** The feed of one month at
   `/journal` and one day at `/journal/<year>/<month>/<day>` are the app now.
   The feed opens the newest month that holds an entry, newest day first. The

@@ -119,7 +119,7 @@ def _fixed_today(monkeypatch) -> None:
 
 
 def test_the_nav_links_the_usage_page(data) -> None:
-    html = TestClient(viewer.build_app()).get("/search", auth=ALEX).text
+    html = TestClient(viewer.build_app()).get("/usage", auth=ALEX).text
     nav = html[html.index('<nav class="v-sections"') :]
     nav = nav[: nav.index("</nav>")]
     assert nav.index('href="/journal"') < nav.index('href="/usage"')
