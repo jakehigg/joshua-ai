@@ -130,12 +130,11 @@ def test_no_credentials_reads_the_journal(anon_client):
 
 def test_no_credentials_home_page_has_no_profile_link(anon_client):
     """There is no such person on disk, so the anonymous identity gets no
-    profile link and no personal files folder on the home page."""
-    home = anon_client.get("/me")
-    assert home.status_code == 200
-    assert "/wiki/people/" not in home.text
-    assert "profile" not in home.text
-    assert "attachments" not in home.text.lower()
+    profile link and no personal files folder on its own page."""
+    body = anon_client.get("/api/v1/me").json()
+    assert body["person"]["id"] == "anonymous"
+    assert body["profile_url"] is None
+    assert body["attachments"] == []
 
 
 # -- with anonymous:true, every write route works, same result as a member --
@@ -251,11 +250,12 @@ def test_readyz_says_open_and_names_no_person(member_client):
 
 
 def test_no_credentials_home_page_is_the_members_page(member_client):
-    home = member_client.get("/me")
-    assert home.status_code == 200
-    assert "<h1" in home.text and "Alex</h1>" in home.text
-    assert 'href="/wiki/people/alex.md"' in home.text
-    assert "/attachments/2026/09/receipt.txt" in home.text
+    body = member_client.get("/api/v1/me").json()
+    assert body["person"] == {"id": "alex", "name": "Alex", "role": "member"}
+    assert body["profile_url"] == "/wiki/people/alex.md"
+    assert {"path": "2026/09/receipt.txt", "url": "/attachments/2026/09/receipt.txt"} in body[
+        "attachments"
+    ]
 
 
 def test_no_credentials_reads_the_members_attachments(member_client):
@@ -307,6 +307,5 @@ def test_credentials_on_a_member_viewer_are_still_checked(member_client):
     assert member_client.get("/wiki/pizza.md", auth=("sam", "wrong")).status_code == 401
     # alex is not in viewer.users, so alex cannot sign in by password.
     assert member_client.get("/wiki/pizza.md", auth=ALEX).status_code == 401
-    home = member_client.get("/me", auth=SAM)
-    assert home.status_code == 200
-    assert 'href="/wiki/people/sam.md"' in home.text
+    body = member_client.get("/api/v1/me", auth=SAM).json()
+    assert body["profile_url"] == "/wiki/people/sam.md"

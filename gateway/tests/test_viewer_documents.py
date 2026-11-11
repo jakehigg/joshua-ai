@@ -731,8 +731,9 @@ def test_the_policy_is_the_same_on_a_document_page(docs) -> None:
     _write(docs / "alex/mockup.html", HTML_DOC)
     response = _get("/documents/alex/mockup")
     assert response.headers["content-security-policy"] == (
-        f"default-src 'none'; img-src 'self'; style-src 'self'; script-src '{sc.COPY_SCRIPT_HASH}'"
-        "; frame-ancestors 'self'"
+        "default-src 'none'; img-src 'self'; style-src 'self'; "
+        f"script-src 'self' '{sc.COPY_SCRIPT_HASH}'; connect-src 'self'; "
+        "frame-src 'self'; frame-ancestors 'self'"
     )
     assert response.headers["x-frame-options"] == "SAMEORIGIN"
 

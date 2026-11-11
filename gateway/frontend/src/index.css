@@ -1,0 +1,6 @@
+/* The two stylesheets of the viewer are the master copies: the shared Joshua
+   look, then what only the viewer needs. Neither is copied into this
+   workspace, and the app adds no class that is already in them. Anything the
+   app adds goes under these two imports. */
+@import "../../joshua_gateway/ui/joshua-ui.css";
+@import "../../joshua_gateway/viewer.css";

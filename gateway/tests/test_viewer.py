@@ -135,11 +135,14 @@ def test_member_and_guest_both_read_the_wiki(client):
         assert client.get("/wiki/pizza.md", auth=creds).status_code == 200
 
 
-def test_home_lists_profile_link_wiki_and_attachments(client):
-    text = client.get("/me", auth=("alex", ALEX_PW)).text
-    assert "/wiki/people/alex.md" in text
-    assert "/wiki/pizza.md" in text
-    assert "/attachments/2026/08/pic.png" in text
+def test_the_page_of_the_person_reads_its_json(client):
+    """``/me`` is a React page now: its profile link, its attachments and its
+    wiki tree come from the JSON routes."""
+    me = client.get("/api/v1/me", auth=("alex", ALEX_PW)).json()
+    assert me["profile_url"] == "/wiki/people/alex.md"
+    assert {"path": "2026/08/pic.png", "url": "/attachments/2026/08/pic.png"} in me["attachments"]
+    tree = client.get("/api/v1/wiki/tree", auth=("alex", ALEX_PW)).json()
+    assert "/wiki/pizza.md" in {child["url"] for child in tree["children"]}
 
 
 def test_home_has_no_blog_route(client):
@@ -175,9 +178,9 @@ def test_dot_entries_are_hidden_from_home_and_search(client, tmp_path):
     data = tmp_path / "data"
     _write(data / "wiki/.git/config", "not markdown\n")
     _write(data / "wiki/.obsidian/workspace.md", "# Workspace\n\nA note tool's own state.\n")
-    home = client.get("/me", auth=("alex", ALEX_PW)).text
-    assert "/wiki/.git" not in home
-    assert "/wiki/.obsidian" not in home
+    tree = client.get("/api/v1/wiki/tree", auth=("alex", ALEX_PW)).text
+    assert "/wiki/.git" not in tree
+    assert "/wiki/.obsidian" not in tree
     hits = client.get("/search", params={"q": "Workspace"}, auth=("alex", ALEX_PW)).text
     assert "/wiki/.obsidian" not in hits
 
@@ -228,10 +231,12 @@ def test_image_attachment_renders_inline(client):
 
 def test_security_headers_on_every_response(client):
     response = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW))
-    # The one script the policy allows is the copy script, by its hash.
+    # The policy allows the bundle of the React app, from this origin, and the
+    # copy script of a server-rendered report, by its hash. No inline script.
     assert response.headers["content-security-policy"] == (
         "default-src 'none'; img-src 'self'; style-src 'self'; "
-        f"script-src '{viewer.showcase_mod.COPY_SCRIPT_HASH}'; frame-ancestors 'self'"
+        f"script-src 'self' '{viewer.showcase_mod.COPY_SCRIPT_HASH}'; connect-src 'self'; "
+        "frame-src 'self'; frame-ancestors 'self'"
     )
     assert "unsafe-inline" not in response.headers["content-security-policy"]
     assert response.headers["x-frame-options"] == "SAMEORIGIN"
@@ -317,10 +322,9 @@ def test_the_current_section_is_marked(client):
         assert f'class="j-nav-item" {link} aria-current="page"' in html, path
         assert f'class="j-tab" {link} aria-current="page"' in html, path
         assert html.count('aria-current="page"') == 2, path
-    home = client.get("/me", auth=("alex", ALEX_PW)).text
-    assert 'class="j-nav-item" href="/me" aria-current="page"' in home
-    assert home.count('aria-current="page"') == 1
-    assert "<strong>You</strong>" in home
+    # Every server-rendered page still reaches the person's own page, which
+    # the React app serves.
+    assert 'class="j-nav-item" href="/me"' in client.get("/usage", auth=("alex", ALEX_PW)).text
 
 
 def test_the_chat_entry_names_the_person_of_the_request(client):

@@ -76,8 +76,9 @@ from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from starlette.routing import Route
+from starlette.routing import BaseRoute, Route
 
+from joshua_gateway import viewer_api
 from joshua_gateway import viewer_assignments as assignments_mod
 from joshua_gateway import viewer_comments as comments_mod
 from joshua_gateway import viewer_docstore as docstore
@@ -88,6 +89,7 @@ from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_showcase as showcase_mod
+from joshua_gateway import viewer_spa
 from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
@@ -631,13 +633,6 @@ def _list_attachments(root: Root) -> list[str]:
     return names
 
 
-def _section(title: str, links: list[tuple[str, str]]) -> str:
-    if not links:
-        return f'<h2 class="j-label">{escape(title)}</h2><p class="j-empty">nothing yet.</p>'
-    items = "".join(f'<li><a href="{escape(url)}">{escape(text)}</a></li>' for url, text in links)
-    return f'<h2 class="j-label">{escape(title)}</h2><ul class="tree">{items}</ul>'
-
-
 # -- delete -----------------------------------------------------------------
 
 
@@ -702,37 +697,6 @@ def _commit_trash(root: Root, abs_path: Path) -> None:
 async def root(request: Request, person: Person) -> Response:
     """``/`` opens the wiki."""
     return RedirectResponse("/wiki/", status_code=302)
-
-
-async def index(request: Request, person: Person) -> Response:
-    """``/me``: the person's own page, with their profile link, their recent
-    attachments and the wiki tree."""
-    roots = _roots_for(person)
-    anonymous = person.id == ANONYMOUS_PERSON_ID
-    body = [f'<h1 class="j-doc-title">{escape(person.name)}</h1>']
-    if anonymous:
-        body.append('<p class="j-meta"><a href="/journal">journal</a></p>')
-    else:
-        profile_url = f"/wiki/people/{person.id}.md"
-        body.append(
-            f'<p class="j-meta"><a href="{escape(profile_url, quote=True)}">profile</a> · '
-            '<a href="/journal">journal</a></p>'
-        )
-        # The anonymous identity has no attachments folder on disk: there is
-        # no such person, so the section has nothing to show and is omitted.
-        body.append(
-            _section(
-                "attachments",
-                [
-                    (f"/attachments/{rel}", rel)
-                    for rel in _list_attachments(roots["attachments"])[:HOME_ATTACHMENTS_MAX]
-                ],
-            )
-        )
-    tree = wiki.build_tree(roots["wiki"].base)
-    body.append('<h2 class="j-label">wiki</h2>')
-    body.append(wiki.tree_html(tree) if tree else '<p class="j-empty">nothing yet.</p>')
-    return _page(person.name, "".join(body), section="me")
 
 
 async def wiki_page(request: Request, person: Person) -> Response:
@@ -1624,10 +1588,10 @@ class SecurityHeaders(BaseHTTPMiddleware):
     """Add the fixed security headers to every response.
 
     ``default-src 'none'`` blocks every sub-resource; the page loads its
-    stylesheets from ``'self'`` and its images from ``'self'`` (attachments,
-    the logo and the icons). The only script that runs is the copy script of
-    a report, allowed by its hash: no other script, inline or from a file,
-    runs.
+    stylesheets, its images, its scripts and its data from ``'self'``. The
+    viewer serves a JavaScript bundle of its own, so ``script-src`` holds
+    ``'self'``, and the hash of the copy script of a server-rendered report
+    beside it. No inline script runs.
 
     ``frame-ancestors 'self'`` lets a page of the viewer, the chat and its
     artifact panel, frame a document page of the same origin. No other
@@ -1645,7 +1609,8 @@ class SecurityHeaders(BaseHTTPMiddleware):
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'none'; img-src 'self'; style-src 'self'; "
-            f"script-src '{showcase_mod.COPY_SCRIPT_HASH}'; frame-ancestors 'self'",
+            f"script-src 'self' '{showcase_mod.COPY_SCRIPT_HASH}'; connect-src 'self'; "
+            "frame-src 'self'; frame-ancestors 'self'",
         )
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -1653,73 +1618,82 @@ class SecurityHeaders(BaseHTTPMiddleware):
 
 
 def build_app() -> Starlette:
-    """Build the viewer app. Auth binds every route except the probes."""
-    return Starlette(
-        middleware=[Middleware(SecurityHeaders)],
-        routes=[
-            Route("/healthz", healthz),
-            Route("/readyz", readyz),
-            Route("/style.css", _require_auth(style)),
-            Route("/ui/{name}", _require_auth(ui_file)),
-            Route("/", _require_auth(root)),
-            Route("/me", _require_auth(index)),
-            Route("/links", _require_auth(links_page)),
-            Route("/links", _require_auth(links_save), methods=["POST"]),
-            Route("/wiki", _require_auth(wiki_root)),
-            Route("/journal", _require_auth(journal_feed)),
-            Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
-            Route("/edit/{path:path}", _require_auth(edit_page)),
-            Route("/new", _require_auth(new_page)),
-            Route("/save", _require_auth(save), methods=["POST"]),
-            Route("/wiki/{path:path}", _require_auth(wiki_page)),
-            Route("/shared/{path:path}", _require_auth(shared_page)),
-            Route("/attachments/{path:path}", _require_auth(attachments)),
-            Route("/search", _require_auth(search)),
-            Route("/usage", _require_auth(usage)),
-            Route("/assignments", _require_auth(assignments_list)),
-            Route("/assignments/saved", _require_auth(saved_list)),
-            Route("/assignments/saved/{id:int}", _require_auth(saved_page)),
-            Route("/assignments/{id:int}", _require_auth(assignment_page)),
-            Route(
-                "/assignments/{id:int}/comments",
-                _require_auth(comment_on_assignment),
-                methods=["POST"],
-            ),
-            Route(
-                "/assignments/{id:int}/comments/{cid:int}/delete",
-                _require_auth(comment_on_assignment),
-                methods=["POST"],
-            ),
-            Route(
-                "/assignments/saved/{id:int}/comments",
-                _require_auth(comment_on_saved),
-                methods=["POST"],
-            ),
-            Route(
-                "/assignments/saved/{id:int}/comments/{cid:int}/delete",
-                _require_auth(comment_on_saved),
-                methods=["POST"],
-            ),
-            Route("/documents", _require_auth(documents_list)),
-            # The JSON route comes first, so the page route does not take
-            # ``<slug>.json``. A slug that ends in ``.json`` is not a
-            # document, so the two can never name the same file.
-            Route("/documents/{owner}/{slug}.json", _require_auth(document_meta)),
-            Route("/documents/{owner}/{slug}", _require_auth(document_page)),
-            Route("/documents/{owner}/{slug}/artifact", _require_auth(document_artifact)),
-            Route(
-                "/documents/{owner}/{slug}/comments",
-                _require_auth(document_comment),
-                methods=["POST"],
-            ),
-            Route(
-                "/documents/{owner}/{slug}/comments/{cid}/delete",
-                _require_auth(document_comment),
-                methods=["POST"],
-            ),
-            Route("/delete", _require_auth(delete), methods=["POST"]),
-        ],
-    )
+    """Build the viewer app. Auth binds every route except the probes.
+
+    The JSON routes of ``viewer_api`` come after the probes, and the mount of
+    the React app is the last route, so every explicit route wins over it.
+    With no build in the image, there is no mount and every page is a
+    server-rendered one.
+    """
+    routes: list[BaseRoute] = [
+        Route("/healthz", healthz),
+        Route("/readyz", readyz),
+        *viewer_api.routes(),
+        Route("/style.css", _require_auth(style)),
+        Route("/ui/{name}", _require_auth(ui_file)),
+        Route("/", _require_auth(root)),
+        Route("/links", _require_auth(links_page)),
+        Route("/links", _require_auth(links_save), methods=["POST"]),
+        Route("/wiki", _require_auth(wiki_root)),
+        Route("/journal", _require_auth(journal_feed)),
+        Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
+        Route("/edit/{path:path}", _require_auth(edit_page)),
+        Route("/new", _require_auth(new_page)),
+        Route("/save", _require_auth(save), methods=["POST"]),
+        Route("/wiki/{path:path}", _require_auth(wiki_page)),
+        Route("/shared/{path:path}", _require_auth(shared_page)),
+        Route("/attachments/{path:path}", _require_auth(attachments)),
+        Route("/search", _require_auth(search)),
+        Route("/usage", _require_auth(usage)),
+        Route("/assignments", _require_auth(assignments_list)),
+        Route("/assignments/saved", _require_auth(saved_list)),
+        Route("/assignments/saved/{id:int}", _require_auth(saved_page)),
+        Route("/assignments/{id:int}", _require_auth(assignment_page)),
+        Route(
+            "/assignments/{id:int}/comments",
+            _require_auth(comment_on_assignment),
+            methods=["POST"],
+        ),
+        Route(
+            "/assignments/{id:int}/comments/{cid:int}/delete",
+            _require_auth(comment_on_assignment),
+            methods=["POST"],
+        ),
+        Route(
+            "/assignments/saved/{id:int}/comments",
+            _require_auth(comment_on_saved),
+            methods=["POST"],
+        ),
+        Route(
+            "/assignments/saved/{id:int}/comments/{cid:int}/delete",
+            _require_auth(comment_on_saved),
+            methods=["POST"],
+        ),
+        Route("/documents", _require_auth(documents_list)),
+        # The JSON route comes first, so the page route does not take
+        # ``<slug>.json``. A slug that ends in ``.json`` is not a
+        # document, so the two can never name the same file.
+        Route("/documents/{owner}/{slug}.json", _require_auth(document_meta)),
+        Route("/documents/{owner}/{slug}", _require_auth(document_page)),
+        Route("/documents/{owner}/{slug}/artifact", _require_auth(document_artifact)),
+        Route(
+            "/documents/{owner}/{slug}/comments",
+            _require_auth(document_comment),
+            methods=["POST"],
+        ),
+        Route(
+            "/documents/{owner}/{slug}/comments/{cid}/delete",
+            _require_auth(document_comment),
+            methods=["POST"],
+        ),
+        Route("/delete", _require_auth(delete), methods=["POST"]),
+    ]
+    spa = viewer_spa.mount()
+    if spa is None:
+        logger.info({"message": "no frontend build; the React pages are off"})
+    else:
+        routes.append(spa)
+    return Starlette(middleware=[Middleware(SecurityHeaders)], routes=routes)
 
 
 app = build_app()

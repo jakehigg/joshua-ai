@@ -3,9 +3,10 @@
 The wiki is a folder of Markdown files, and a folder can have an index page
 beside it: ``recipes.md`` next to ``recipes/`` is the page for that folder.
 ``Home.md`` is the index page of the root. This module reads that shape once
-per request and builds the pieces the viewer shows: a page title, the tree on
-the home page, the crumbs above a page, the folder page, and the list of the
-other pages in the same folder.
+per request and builds the pieces the viewer shows: a page title, the folder
+tree (``build_tree``, which the JSON route of the tree answers from too), the
+crumbs above a page, the folder page, and the list of the other pages in the
+same folder.
 
 Everything here reads. The routes and the auth live in ``viewer``.
 """
@@ -33,10 +34,6 @@ _SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 # The journal folder is a feed, not a tree: the home page links ``/journal``
 # in its place.
 JOURNAL_DIR = "journal"
-# The shipped docs are closed on the tree, because a person did not write them.
-CLOSED_DIRS = frozenset({"joshua-docs"})
-# A folder with more pages than this, counting its subfolders, starts closed.
-OPEN_MAX_PAGES = 12
 # The other-pages list on a page shows at most this many siblings.
 SIBLINGS_MAX = 40
 
@@ -227,32 +224,6 @@ def _fill(wiki: Path, directory: Path, folder: Folder) -> None:
         folder.folders.append(child)
 
 
-def tree_html(root: Folder, *, journal_pages: int | None = None) -> str:
-    """The tree for the home page: the front page, the journal as one link,
-    each folder as a collapsible block, then the loose pages of the root."""
-    items: list[str] = []
-    if root.index is not None:
-        items.append(
-            f'<li><a href="{root.index.url}">{escape(root.index.title)}</a>'
-            " <span class=count>the front page</span></li>"
-        )
-    for folder in root.folders:
-        if folder.name == JOURNAL_DIR:
-            count = folder.count() if journal_pages is None else journal_pages
-            items.append(
-                f'<li><a href="/journal">journal</a> <span class=count>{count} pages</span></li>'
-            )
-            continue
-        items.append(_folder_item(folder, depth=0))
-    if root.pages:
-        pages = "".join(_page_item(p) for p in root.pages)
-        items.append(
-            f"<li><details><summary>other pages <span class=count>{len(root.pages)}</span>"
-            f"</summary><ul>{pages}</ul></details></li>"
-        )
-    return f'<ul class="tree">{"".join(items)}</ul>'
-
-
 def _page_item(page: Page) -> str:
     return f'<li><a href="{page.url}">{escape(page.title)}</a></li>'
 
@@ -271,18 +242,6 @@ def _size(size: int) -> str:
     if size < 1024 * 1024:
         return f"{round(size / 1024)} KB"
     return f"{size / (1024 * 1024):.1f} MB"
-
-
-def _folder_item(folder: Folder, *, depth: int) -> str:
-    count = folder.count()
-    is_open = depth == 0 and folder.name not in CLOSED_DIRS and count <= OPEN_MAX_PAGES
-    inner = "".join(_folder_item(f, depth=depth + 1) for f in folder.folders)
-    inner += "".join(_page_item(p) for p in folder.pages)
-    return (
-        f"<li><details{' open' if is_open else ''}><summary>"
-        f'<a href="{folder.url}">{escape(folder.title)}</a> <span class=count>{count}</span>'
-        f"</summary><ul>{inner}</ul></details></li>"
-    )
 
 
 # -- crumbs and siblings ----------------------------------------------------

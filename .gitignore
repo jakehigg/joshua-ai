@@ -32,6 +32,9 @@ coverage.xml
 # Data volume
 /data/
 
+# The build of the viewer's React app. The Dockerfile builds it into the image.
+/gateway/joshua_gateway/static/
+
 # Tool artifacts
 *.db
 *.log

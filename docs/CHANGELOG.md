@@ -6,6 +6,16 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Your own page in the viewer is a React page.** The viewer now ships a
+  JavaScript app beside the pages it renders in Python, and `/me` is the
+  first page of it: your name, your profile, the journal, your recent
+  attachments, and the wiki tree, as before. The navigation reaches every
+  other section, which the server still renders. The app reads JSON
+  addresses under `/api/v1/`: `/api/v1/session`, `/api/v1/me`, and
+  `/api/v1/wiki/tree`, each with the sign-in of a page. The content policy of
+  the viewer now allows a script from the viewer itself (`script-src
+  'self'`); no inline script runs. See
+  [security.md](security.md#the-headers-of-the-viewer).
 - **An HTML artifact shows with its own styles (#123).** The viewer serves
   the body of an HTML document from an address of its own,
   `/documents/<owner>/<slug>/artifact`, and the frame of the document page

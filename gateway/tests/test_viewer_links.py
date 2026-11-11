@@ -81,12 +81,6 @@ def test_root_still_needs_a_sign_in(client):
     assert client.get("/", follow_redirects=False).status_code == 401
 
 
-def test_the_persons_own_page_moved_to_me(client):
-    html = client.get("/me", auth=ALEX).text
-    assert '<h1 class="j-doc-title">Alex</h1>' in html
-    assert 'href="/wiki/people/alex.md"' in html
-
-
 # -- checking a link ------------------------------------------------------------
 
 

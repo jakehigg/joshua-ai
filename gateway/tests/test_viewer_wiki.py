@@ -1,5 +1,5 @@
-"""Offline tests for the viewer's wiki navigation: titles, the tree on the
-home page, folder pages, crumbs, and the sibling list on a page."""
+"""Offline tests for the viewer's wiki navigation: titles, the folder tree,
+folder pages, crumbs, and the sibling list on a page."""
 
 from __future__ import annotations
 
@@ -110,25 +110,6 @@ def test_meta_line_drops_empty_values_and_shortens_a_timestamp():
     assert "tags" not in html
     assert "updated:</span> 2026-09-03" in html
     assert viewer_wiki.meta_html({}) == ""
-
-
-# -- home -------------------------------------------------------------------
-
-
-def test_home_shows_a_tree_with_titles_and_one_journal_link(client):
-    html = client.get("/me", auth=ALEX).text
-    assert '<a href="/wiki/recipes/">Recipes</a>' in html
-    assert '<a href="/wiki/recipes/ponzu-sauce.md">Ponzu Sauce</a>' in html
-    assert 'href="/journal"' in html
-    assert "2026-09-04.md" not in html  # the journal is a feed, not a tree
-    assert "other pages" in html and "Loose" in html
-    assert "workspace" not in html
-
-
-def test_shipped_docs_start_closed_and_a_small_folder_open(client):
-    html = client.get("/me", auth=ALEX).text
-    assert '<details open><summary><a href="/wiki/recipes/">' in html
-    assert '<details><summary><a href="/wiki/joshua-docs/">' in html
 
 
 # -- folder pages -----------------------------------------------------------

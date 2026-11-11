@@ -721,7 +721,12 @@ off by default. To turn it on:
 The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
 `http://127.0.0.1:8082/` and sign in with the person id and the password.
 The address opens the wiki. "Your page" in the menu, at `/me`, has the profile
-link and the recent attachments of the person who signed in.
+link and the recent attachments of the person who signed in. That page is a
+JavaScript app, which the gateway image carries beside the pages it renders in
+Python. It reads JSON addresses under `/api/v1/`, with the same sign-in as a
+page. An image with no build of the app logs `no frontend build; the React
+pages are off` at start, and `/me` answers 404; the rest of the viewer does
+not change.
 Nothing off the host reaches it: put a reverse proxy in front, for TLS, before
 you expose it.
 

@@ -1,0 +1,7 @@
+# The build context of every image is the repository root. These paths are
+# derived, and one of them is large: a local `npm install` in the frontend
+# workspace must never land in an image. The frontend stage of
+# gateway/Dockerfile installs the packages itself, from the lock file.
+gateway/frontend/node_modules
+gateway/frontend/dist
+gateway/joshua_gateway/static
