@@ -171,11 +171,12 @@ def test_a_bad_month_falls_back_to_the_newest_one(client) -> None:
 def test_the_person_filter_keeps_the_entries_naming_that_person(client) -> None:
     body = _feed(client, "?person=mia")
     assert body["person"] == "mia"
-    # The newest month with an entry of mia is August, not September.
-    assert body["month"] == "2026-08"
+    # The months and the default month are the ones of mia: the nightly page
+    # of 2026-09-04 names her, so September is the newest month she has.
+    assert body["month"] == "2026-09"
     assert body["available"] == ["2026-09", "2026-08"]
-    assert _titles(body) == ["pottery class"]
-    assert _titles(_feed(client, "?month=2026-09&person=mia")) == ["The day"]
+    assert _titles(body) == ["The day"]
+    assert _titles(_feed(client, "?month=2026-08&person=mia")) == ["pottery class"]
 
 
 def test_an_unknown_person_is_no_filter(client) -> None:

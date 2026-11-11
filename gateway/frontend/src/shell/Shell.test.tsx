@@ -18,11 +18,19 @@ const SESSION: Session = {
   timezone: "America/New_York",
 };
 
+/**
+ * The session, for every address the shell reads: `/session`, and `/links` of
+ * the links group of the sidebar. Each call gets a Response of its own,
+ * because a body is read once. With one shared Response, only the first
+ * reader gets the session, and the sidebar then draws no section.
+ */
 function stubSession(session: Session = SESSION) {
-  const mock = vi.fn().mockResolvedValue(
-    new Response(JSON.stringify(session), {
-      headers: { "Content-Type": "application/json" },
-    }),
+  const mock = vi.fn(() =>
+    Promise.resolve(
+      new Response(JSON.stringify(session), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    ),
   );
   vi.stubGlobal("fetch", mock);
   return mock;

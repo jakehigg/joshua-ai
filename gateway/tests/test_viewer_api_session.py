@@ -32,9 +32,9 @@ CONFIG = textwrap.dedent("""\
         mia: ${VIEWER_PW_MIA:-}
     """)
 
-CONFIG_ANON = CONFIG.replace(
-    "      enabled: true\n", "      enabled: true\n      anonymous: true\n"
-)
+# ``dedent`` already took the indent off, so the line of the viewer block
+# carries two spaces and the key goes in beside it.
+CONFIG_ANON = CONFIG.replace("  enabled: true\n", "  enabled: true\n  anonymous: true\n")
 
 
 def _data(monkeypatch, tmp_path: Path, text: str) -> Path:
