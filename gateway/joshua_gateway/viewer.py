@@ -21,16 +21,18 @@ the data volume through the same resolver as the files MCP
 (``files_mcp.paths``), so the two never drift on who reads what.
 
 The wiki, the shared attachments, a person's own attachments, the journal, the
-search, the usage and the editor are the React app: ``/``, ``/wiki/…``,
-``/shared/…``, ``/attachments/…``, ``/journal``,
-``/journal/<year>/<month>/<day>``, ``/search``, ``/usage``, ``/edit/…`` and
-``/new`` are addresses of its router (``viewer_spa``), and it reads
-``GET /api/v1/wiki`` for a page, a folder or a file,
+search, the usage, the links and the editor are the React app: ``/``,
+``/wiki/…``, ``/shared/…``, ``/attachments/…``, ``/journal``,
+``/journal/<year>/<month>/<day>``, ``/search``, ``/usage``, ``/links``,
+``/edit/…`` and ``/new`` are addresses of its router (``viewer_spa``), and it
+reads ``GET /api/v1/wiki`` for a page, a folder or a file,
 ``GET /api/v1/files/<root>/<path>`` for the bytes,
 ``GET /api/v1/journal`` for a month of the feed,
 ``GET /api/v1/journal/<year>/<month>/<day>`` for a day,
 ``GET /api/v1/search`` for both halves of the search,
-``GET /api/v1/usage`` for the limits and the tokens by day, and
+``GET /api/v1/usage`` for the limits and the tokens by day,
+``GET /api/v1/links`` for the links of the sidebar and of the page,
+``POST /api/v1/links`` for the list a member saves, and
 ``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
 ``POST /api/v1/delete`` for a write (``viewer_api``).
 
@@ -100,8 +102,8 @@ from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_showcase as showcase_mod
 from joshua_gateway.files_mcp.paths import Root
-from joshua_gateway.files_mcp.server import _atomic_write, data_root
-from joshua_gateway.viewer_api.edit import _commit_write, _csrf_token, _csrf_valid, _origin_ok
+from joshua_gateway.files_mcp.server import data_root
+from joshua_gateway.viewer_api.edit import _csrf_token, _csrf_valid, _origin_ok
 
 logger = get_logger("viewer")
 
@@ -939,58 +941,6 @@ async def ui_file(request: Request, person: Person) -> Response:
     return Response(_package_file(_UI_DIR, name), media_type=media_type)
 
 
-# -- links ----------------------------------------------------------------
-
-_LINKS_CSRF = "links"
-
-
-def _links_body(person: Person, links: list[links_mod.Link], *, error: str = "") -> str:
-    body = [
-        '<h1 class="j-doc-title">Links</h1>',
-        '<p class="j-muted">Links to the tools you use beside Joshua, such as its addons. '
-        "Each one opens in a new tab.</p>",
-        links_mod.list_html(links),
-    ]
-    if person.role == "member":
-        body.append('<h2 class="j-label">Edit links</h2>')
-        body.append(
-            links_mod.form_html(links, csrf=_csrf_token(person.id, _LINKS_CSRF), error=error)
-        )
-    return "".join(body)
-
-
-async def links_page(request: Request, person: Person) -> Response:
-    """The links. A member also gets the form that edits them."""
-    links = links_mod.load(wiki_dir(data_root()))
-    return _page("links", _links_body(person, links), section="links")
-
-
-async def links_save(request: Request, person: Person) -> Response:
-    """Replace the links with the rows of the form."""
-    if person.role != "member":
-        return _forbidden()
-    form = await request.form()
-    if not _csrf_valid(person.id, _LINKS_CSRF, str(form.get("csrf", ""))) or not _origin_ok(
-        request
-    ):
-        return _forbidden()
-    base = wiki_dir(data_root())
-    try:
-        links = links_mod.from_form(form)
-    except links_mod.LinkError as exc:
-        return _page(
-            "links",
-            _links_body(person, links_mod.load(base), error=str(exc)),
-            status=400,
-            section="links",
-        )
-    abs_path = links_mod.links_path(base)
-    _atomic_write(abs_path, links_mod.dump(links).encode())
-    _commit_write(_roots_for(person)["wiki"], abs_path, "links")
-    logger.info({"message": "viewer write", "root": "wiki", "what": "links", "links": len(links)})
-    return RedirectResponse("/links", status_code=303)
-
-
 async def healthz(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
@@ -1059,8 +1009,6 @@ def build_app() -> Starlette:
         *viewer_api.routes(),
         Route("/style.css", _require_auth(style)),
         Route("/ui/{name}", _require_auth(ui_file)),
-        Route("/links", _require_auth(links_page)),
-        Route("/links", _require_auth(links_save), methods=["POST"]),
         Route("/assignments", _require_auth(assignments_list)),
         Route("/assignments/saved", _require_auth(saved_list)),
         Route("/assignments/saved/{id:int}", _require_auth(saved_page)),

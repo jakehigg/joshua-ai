@@ -120,9 +120,10 @@ def test_every_explicit_route_still_wins(client) -> None:
 
 def test_the_content_of_the_viewer_is_the_app(client) -> None:
     """The wiki, the shared files, the own attachments, the journal, the
-    search, the usage and the editor are the app, which reads them from
-    ``GET /api/v1/wiki``, ``GET /api/v1/journal``, ``GET /api/v1/search``,
-    ``GET /api/v1/usage`` and ``GET /api/v1/edit``."""
+    search, the usage, the links and the editor are the app, which reads them
+    from ``GET /api/v1/wiki``, ``GET /api/v1/journal``,
+    ``GET /api/v1/search``, ``GET /api/v1/usage``, ``GET /api/v1/links`` and
+    ``GET /api/v1/edit``."""
     for path in (
         "/",
         "/wiki/",
@@ -132,6 +133,7 @@ def test_the_content_of_the_viewer_is_the_app(client) -> None:
         "/journal/2026/09/04",
         "/search",
         "/usage",
+        "/links",
         "/edit/Home.md",
         "/new",
     ):

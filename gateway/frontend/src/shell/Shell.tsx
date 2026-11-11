@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 
 import { getJson, type Person } from "../api/client";
 import Icon from "./Icon";
+import LinksNav from "./LinksNav";
 import SearchField from "./SearchField";
-import { ME_ICON, SECTIONS, linkIcon, section as sectionOf } from "./sections";
+import { LINKS_PATH, LINKS_SECTION, ME_ICON, SECTIONS, section as sectionOf } from "./sections";
 
 /** One section of the navigation, as `GET /api/v1/session` sends it. */
 export interface SessionSection {
@@ -13,20 +14,12 @@ export interface SessionSection {
   path: string;
 }
 
-/** One link of the sidebar, as `GET /api/v1/session` sends it. */
-export interface SessionLink {
-  title: string;
-  url: string;
-  icon: string;
-}
-
 /** The answer of `GET /api/v1/session`. */
 export interface Session {
   person: Person;
   anonymous: boolean;
   sections: SessionSection[];
   chat_url: string;
-  links: SessionLink[];
   timezone: string;
 }
 
@@ -41,7 +34,7 @@ function title(section: string): string {
   if (section === ME_SECTION) {
     return "You";
   }
-  if (section === "links") {
+  if (section === LINKS_SECTION) {
     return "Links";
   }
   return LABELS[section] ?? "Home";
@@ -126,7 +119,6 @@ export default function Shell({
   }, []);
 
   const sections = session?.sections ?? [];
-  const links = session?.links ?? [];
   return (
     <div className="j-shell has-sidebar">
       <aside className="j-sidebar">
@@ -148,28 +140,7 @@ export default function Shell({
             </NavItem>
           ))}
         </nav>
-        <div className="j-label">Links</div>
-        <nav className="v-sections v-links" aria-label="Links">
-          {links.map((link) => (
-            <a
-              className="j-nav-item"
-              key={link.url}
-              href={link.url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Icon paths={linkIcon(link.icon)} />
-              <span>{link.title}</span>
-            </a>
-          ))}
-          <a
-            className="j-nav-item sub v-links-edit"
-            href="/links"
-            aria-current={current("links", section)}
-          >
-            {links.length > 0 ? "Edit links" : "Add links"}
-          </a>
-        </nav>
+        <LinksNav section={section} />
         <nav className="v-sections v-you" aria-label="You">
           <Link className="j-nav-item" to="/me" aria-current={current(ME_SECTION, section)}>
             <Icon paths={ME_ICON} />
@@ -199,9 +170,9 @@ export default function Shell({
               {item.label}
             </NavItem>
           ))}
-          <a className="j-tab" href="/links" aria-current={current("links", section)}>
+          <Link className="j-tab" to={LINKS_PATH} aria-current={current(LINKS_SECTION, section)}>
             Links
-          </a>
+          </Link>
         </nav>
         <main className={section === "usage" ? "j-content wide" : "j-content"}>{children}</main>
       </div>

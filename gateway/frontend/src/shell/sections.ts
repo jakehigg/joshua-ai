@@ -118,6 +118,17 @@ export function section(key: string): Section | undefined {
   return SECTIONS.find((item) => item.key === key);
 }
 
+/**
+ * The key of the links group of the sidebar, and its address.
+ *
+ * The group is not a row of `SECTIONS`, because that table is the one in
+ * `viewer.py` and the server sends the sections of a person. The page is
+ * migrated: `/links` is a route of this app, so every item of the group is a
+ * router link.
+ */
+export const LINKS_SECTION = "links";
+export const LINKS_PATH = "/links";
+
 /** The name of the icon a link falls back to. */
 export const DEFAULT_LINK_ICON = "link";
 

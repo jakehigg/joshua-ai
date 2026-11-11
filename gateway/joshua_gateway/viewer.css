@@ -265,8 +265,6 @@ section.limits > .j-meta { margin-top: -6px; }
 .v-link-row legend { padding: 0 4px; }
 .v-icon-field .j-icon { color: var(--j-accent); }
 .v-icon-field select { appearance: none; -webkit-appearance: none; cursor: pointer; }
-.v-remove { display: flex; align-items: center; gap: 6px; color: var(--j-muted); font-size: var(--j-text-sm); white-space: nowrap; }
-.v-remove input { accent-color: var(--j-bad); }
 .v-hint { margin: 0; font-size: var(--j-text-sm); }
 @media (max-width: 640px) {
   .v-link-row { grid-template-columns: minmax(0, 1fr) auto; }

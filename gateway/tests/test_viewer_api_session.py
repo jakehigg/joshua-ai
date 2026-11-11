@@ -1,6 +1,6 @@
 """Offline tests for ``GET /api/v1/session``: the person who signed in, the
-sections of their navigation, the chat address, the links of the sidebar and
-the timezone. Same fixture shape as ``test_viewer.py``."""
+sections of their navigation, the chat address and the timezone. Same fixture
+shape as ``test_viewer.py``."""
 
 from __future__ import annotations
 
@@ -103,15 +103,13 @@ def test_the_anonymous_person_is_named_as_such(anon_client) -> None:
     assert "documents" in {item["key"] for item in body["sections"]}
 
 
-def test_the_links_of_the_sidebar_are_in_the_session(client, data) -> None:
+def test_the_links_of_the_sidebar_are_not_in_the_session(client, data) -> None:
+    """``GET /api/v1/links`` is the one source of the list."""
     (data / "wiki/.viewer").mkdir(parents=True)
     (data / "wiki/.viewer/links.yaml").write_text(
         "links:\n  - title: Pantry\n    url: https://pantry.example.test/\n    icon: box\n"
     )
-    body = client.get("/api/v1/session", auth=ALEX).json()
-    assert body["links"] == [
-        {"title": "Pantry", "url": "https://pantry.example.test/", "icon": "box"}
-    ]
+    assert "links" not in client.get("/api/v1/session", auth=ALEX).json()
 
 
 def test_the_session_is_json_and_never_cached(client) -> None:

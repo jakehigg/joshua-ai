@@ -1,22 +1,20 @@
 """``GET /api/v1/session``: who signed in, and the navigation of that person.
 
 The answer holds the person, the sections of the navigation, the chat
-address of the person, the links of the sidebar, and the timezone of the
-instance. The sections come from ``viewer._sections``, the same source as the
-server-rendered shell, so the member rule and the person rule stay in one
-place.
+address of the person, and the timezone of the instance. The sections come
+from ``viewer._sections``, the same source as the server-rendered shell, so
+the member rule and the person rule stay in one place.
+
+The links of the sidebar are not here: ``GET /api/v1/links`` is the one
+source of the list, and the sidebar reads it (``viewer_api.links``).
 """
 
 from __future__ import annotations
 
 from joshua_shared import config
 from joshua_shared.config import Person
-from joshua_shared.layout import wiki_root as wiki_dir
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-
-from joshua_gateway import viewer_links as links_mod
-from joshua_gateway.files_mcp.server import data_root
 
 
 def person_json(person: Person) -> dict[str, str]:
@@ -28,7 +26,6 @@ async def session(request: Request, person: Person) -> JSONResponse:
     """The session of the person who signed in."""
     from joshua_gateway import viewer  # ``viewer`` imports this package
 
-    links = links_mod.load(wiki_dir(data_root()))
     return JSONResponse(
         {
             "person": person_json(person),
@@ -38,7 +35,6 @@ async def session(request: Request, person: Person) -> JSONResponse:
                 for key, label, url, _ in viewer._sections()
             ],
             "chat_url": f"/chat/{person.id}",
-            "links": [{"title": link.title, "url": link.url, "icon": link.icon} for link in links],
             "timezone": config.load().timezone,
         },
         headers=viewer._NO_STORE,

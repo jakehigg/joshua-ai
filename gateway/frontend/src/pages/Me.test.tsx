@@ -11,7 +11,6 @@ const SESSION: Session = {
   anonymous: false,
   sections: [{ key: "wiki", label: "Wiki", path: "/wiki/" }],
   chat_url: "/chat/alex",
-  links: [],
   timezone: "America/New_York",
 };
 

@@ -6,6 +6,14 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The links in the viewer are a React page.** `/links` is the app now, and
+  the "Links" group of the sidebar shows on every page of the app. A member
+  adds a link, changes it, moves it, and removes it under "Edit links", then
+  saves the whole list with one commit on `wiki/.viewer/links.yaml`. A guest
+  sees the list and no editor. The app reads and writes one JSON address with
+  the sign-in of a page: `GET /api/v1/links` and `POST /api/v1/links`. That
+  address is the one source of the list, so `GET /api/v1/session` no longer
+  carries it.
 - **The usage in the viewer is a React page.** `/usage` is the app now: the
   two subscription meters, the stacked bar chart of the tokens of each day,
   and the four tables. The day range writes the address (`?days=90`), so a

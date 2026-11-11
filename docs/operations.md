@@ -742,10 +742,11 @@ people of an instance use beside Joshua, for example the pantry or the tasks
 page. Each link opens in a new tab. On a phone, the "Links" tab opens the
 list.
 
-A member keeps the list at `/links`. Each link has a title, a URL, and an icon
-from a small built-in set. A URL must start with `http://` or `https://`. Clear
-a row, or tick "remove", to delete a link. A guest sees the links but cannot
-change them. The list holds at most 30 links.
+A member keeps the list at `/links`, under "Edit links": one row per link,
+with a title, a URL, and an icon from a small built-in set. A URL must start
+with `http://` or `https://`. "Add a link" puts a row at the end, the arrows
+move a row, "remove" drops it, and "Save links" writes the whole list. A guest
+sees the links but cannot change them. The list holds at most 30 links.
 
 The viewer keeps the list in `wiki/.viewer/links.yaml`. The wiki tree, the
 search, and the index skip the file, because its directory name starts with a

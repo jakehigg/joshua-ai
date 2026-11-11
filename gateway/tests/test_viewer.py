@@ -299,7 +299,7 @@ def test_the_viewer_stylesheet_uses_the_shared_tokens(client):
 
 
 def test_a_page_has_the_shared_shell(client):
-    html = client.get("/links", auth=("alex", ALEX_PW)).text
+    html = client.get("/assignments", auth=("alex", ALEX_PW)).text
     assert '<link rel=stylesheet href="/ui/joshua-ui.css">' in html
     assert html.index("/ui/joshua-ui.css") < html.index("/style.css")
     assert 'href="/ui/favicon-32.png"' in html

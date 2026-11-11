@@ -6,6 +6,7 @@ import Edit from "./pages/Edit";
 import FileRedirect, { type WikiFileData } from "./pages/FileRedirect";
 import Journal from "./pages/Journal";
 import JournalDay from "./pages/JournalDay";
+import Links from "./pages/Links";
 import Me from "./pages/Me";
 import New from "./pages/New";
 import Search from "./pages/Search";
@@ -92,6 +93,7 @@ export default function App() {
       <Route path="/journal/:year/:month/:day" element={<JournalDay />} />
       <Route path="/search" element={<Search />} />
       <Route path="/usage" element={<Usage />} />
+      <Route path="/links" element={<Links />} />
       <Route path="/edit/*" element={<Edit />} />
       <Route path="/new" element={<New />} />
       <Route path="/me" element={<Me />} />

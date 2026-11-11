@@ -15,7 +15,6 @@ const SESSION: Session = {
     { key: "chat", label: "Chat", path: "/chat/alex" },
   ],
   chat_url: "/chat/alex",
-  links: [{ title: "Weather", url: "https://example.com/weather", icon: "cloud" }],
   timezone: "America/New_York",
 };
 
@@ -76,6 +75,7 @@ describe("the shell", () => {
       "wiki",
       "journal",
       "search",
+      "usage",
     ]);
     stubSession();
 
@@ -100,22 +100,16 @@ describe("the shell", () => {
     expect(usage?.getAttribute("aria-current")).toEqual("page");
   });
 
-  it("draws the links of the sidebar and the way to edit them", async () => {
+  it("holds the links group of the sidebar and the links tab of a phone", async () => {
     stubSession();
 
     shell();
 
-    const link = await screen.findByText("Weather");
-    expect(link.closest("a")?.getAttribute("href")).toEqual("https://example.com/weather");
-    expect(link.closest("a")?.getAttribute("rel")).toEqual("noopener noreferrer");
-    expect(screen.getByText("Edit links")).toBeDefined();
-  });
-
-  it("asks to add a link when there is none", async () => {
-    stubSession({ ...SESSION, links: [] });
-
-    shell();
-
+    expect(document.querySelector("nav.v-sections.v-links")).not.toBeNull();
+    const tab = [...document.querySelectorAll("nav.j-tabs a")].find(
+      (item) => item.textContent === "Links",
+    );
+    expect(tab?.getAttribute("href")).toEqual("/links");
     expect(await screen.findByText("Add links")).toBeDefined();
   });
 

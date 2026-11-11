@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_LINK_ICON,
+  LINKS_PATH,
+  LINKS_SECTION,
   LINK_ICONS,
   SECTIONS,
   linkIcon,
@@ -44,6 +46,11 @@ describe("the section table", () => {
       "search",
       "usage",
     ]);
+  });
+
+  it("keeps the links group out of the table, and names its page", () => {
+    expect(section(LINKS_SECTION)).toBeUndefined();
+    expect(LINKS_PATH).toEqual("/links");
   });
 
   it("finds one section by key, and nothing for a name that is not one", () => {
