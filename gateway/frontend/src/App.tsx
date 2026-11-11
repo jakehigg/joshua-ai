@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { ApiError, getJson } from "./api/client";
+import Edit from "./pages/Edit";
 import FileRedirect, { type WikiFileData } from "./pages/FileRedirect";
 import Me from "./pages/Me";
+import New from "./pages/New";
 import WikiFolder, { type WikiFolderData } from "./pages/WikiFolder";
 import WikiPage, { type WikiPageData } from "./pages/WikiPage";
 import Shell from "./shell/Shell";
@@ -82,6 +84,8 @@ export default function App() {
       <Route path="/wiki/*" element={<Content root="wiki" />} />
       <Route path="/shared/*" element={<Content root="shared" />} />
       <Route path="/attachments/*" element={<Content root="attachments" />} />
+      <Route path="/edit/*" element={<Edit />} />
+      <Route path="/new" element={<New />} />
       <Route path="/me" element={<Me />} />
     </Routes>
   );

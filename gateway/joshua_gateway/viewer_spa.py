@@ -13,9 +13,10 @@ path under ``api/`` is the JSON space of the viewer, which covers
 ``api/v1/…``; and ``chat`` is the separate chat app, which the cluster routes
 on its own path and docker compose does not serve at all.
 
-The content sections of the viewer (``CONTENT``) are the exception to the dot:
-a wiki page ends in ``.md`` and an attachment keeps the name it arrived with,
-so a path under one of them always reaches the app.
+The content sections of the viewer and the editor (``CONTENT``) are the
+exception to the dot: a wiki page ends in ``.md``, an attachment keeps the
+name it arrived with, and the address of the editor carries the path of the
+page it edits, so a path under one of them always reaches the app.
 
 A built asset carries a content hash in its name, so it is immutable;
 ``index.html`` is never cached, because a new build writes a new one.
@@ -45,8 +46,9 @@ INDEX = "index.html"
 NO_FALLBACK = frozenset({"api", "chat"})
 
 # The first segment of a path the app always claims, dot or no dot: the
-# content of the viewer, which the app reads from the JSON routes.
-CONTENT = frozenset({"wiki", "shared", "attachments"})
+# content of the viewer, which the app reads from the JSON routes, and the
+# editor of one page of it.
+CONTENT = frozenset({"wiki", "shared", "attachments", "edit"})
 
 # The cache headers: a hashed asset forever, the entry file never.
 _IMMUTABLE = "public, max-age=31536000, immutable"

@@ -7,18 +7,14 @@ root, with the viewer passwords set in the environment. The Starlette
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import textwrap
 from pathlib import Path
 
 import bcrypt
 import pytest
 from joshua_gateway import viewer
-from joshua_shared import config, wikigit
+from joshua_shared import config
 from starlette.testclient import TestClient
-
-_GIT_MISSING = shutil.which("git") is None
 
 ALEX_PW = "alex-secret"
 MIA_PW = "mia-secret"
@@ -370,90 +366,13 @@ def test_search_finds_a_substring(client):
 # -- delete -----------------------------------------------------------------
 
 
-def test_member_deletes_a_wiki_page(client, tmp_path):
-    path = "wiki/pizza.md"
-    token = viewer._csrf_token("alex", path)
-    response = client.post(
-        "/delete",
-        data={"path": path, "csrf": token},
-        auth=("alex", ALEX_PW),
-        follow_redirects=False,
-    )
-    assert response.status_code == 303
-    original = tmp_path / "data" / "wiki" / "pizza.md"
-    assert not original.exists()
-    trash = list((tmp_path / "data" / "wiki" / ".trash").rglob("pizza.md"))
-    assert len(trash) == 1
-    assert trash[0].read_text().startswith("# Pizza")
-
-
-@pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
-def test_delete_commits_the_removal(client, tmp_path):
-    wiki = tmp_path / "data" / "wiki"
-    wikigit.ensure_repo(wiki)
-    wikigit.commit(wiki, None, "start: sync the wiki")  # tracks pizza.md first
-    path = "wiki/pizza.md"
-    token = viewer._csrf_token("alex", path)
-    response = client.post(
-        "/delete",
-        data={"path": path, "csrf": token},
-        auth=("alex", ALEX_PW),
-        follow_redirects=False,
-    )
-    assert response.status_code == 303
-    log = subprocess.run(
-        ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True
-    ).stdout
-    assert "viewer: trash pizza.md" in log
-
-
-def test_guest_cannot_delete(client):
-    path = "wiki/pizza.md"
-    token = viewer._csrf_token("mia", path)
-    response = client.post("/delete", data={"path": path, "csrf": token}, auth=MIA)
-    assert response.status_code == 403
-
-
 def test_guest_gets_no_delete_token(client):
-    """The page of a guest carries no token, so it draws no delete control."""
+    """The page of a guest carries no token, so it draws no delete control.
+    The delete itself is ``POST /api/v1/delete`` (``test_viewer_api_edit``)."""
     guest = client.get(PAGE_JSON, auth=MIA).json()
     assert guest["can_edit"] is False and guest["delete_csrf"] == ""
     member = client.get(PAGE_JSON, auth=("alex", ALEX_PW)).json()
     assert member["can_edit"] is True and member["delete_csrf"] != ""
-
-
-def test_wrong_csrf_is_403(client):
-    response = client.post(
-        "/delete", data={"path": "wiki/pizza.md", "csrf": "bad"}, auth=("alex", ALEX_PW)
-    )
-    assert response.status_code == 403
-
-
-def test_missing_csrf_is_403(client):
-    response = client.post("/delete", data={"path": "wiki/pizza.md"}, auth=("alex", ALEX_PW))
-    assert response.status_code == 403
-
-
-def test_delete_outside_wiki_is_refused(client):
-    # An absolute path escapes every root; an attachment path is not under wiki.
-    for path in ("/etc/passwd", "people/alex/attachments/2026/08/pic.png"):
-        token = viewer._csrf_token("alex", path)
-        response = client.post(
-            "/delete", data={"path": path, "csrf": token}, auth=("alex", ALEX_PW)
-        )
-        assert response.status_code in (403, 404), path
-
-
-def test_bad_origin_is_403(client):
-    path = "wiki/pizza.md"
-    token = viewer._csrf_token("alex", path)
-    response = client.post(
-        "/delete",
-        data={"path": path, "csrf": token},
-        headers={"Origin": "http://evil.example"},
-        auth=("alex", ALEX_PW),
-    )
-    assert response.status_code == 403
 
 
 # -- probes -----------------------------------------------------------------

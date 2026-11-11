@@ -1,8 +1,11 @@
-import { Fragment, useEffect, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
+import { ApiError, postJson } from "../api/client";
 import Markdown, { wikiRewriter } from "../md/Markdown";
 import Shell from "../shell/Shell";
+import ErrorLine from "../ui/ErrorLine";
+import type { SaveAnswer } from "./Edit";
 
 /** One crumb above a page, or one neighbour of it. */
 export interface Hop {
@@ -103,20 +106,33 @@ function Siblings({ items, folder }: { items: Hop[]; folder: string }) {
 /**
  * The delete, for a member on the wiki.
  *
- * The form posts the page and its CSRF token to the server route
- * `POST /delete`, which moves the page to the trash of the wiki and answers
- * with a redirect. Task 132 adds `POST /api/v1/delete` and this form calls
- * it.
+ * The button asks first, then posts the page and its CSRF token to
+ * `POST /api/v1/delete`, which moves the page under `wiki/.trash/` and says
+ * where to go. It is never a hard delete.
  */
-function DeleteForm({ path, csrf }: { path: string; csrf: string }) {
+function Delete({ path, csrf }: { path: string; csrf: string }) {
+  const navigate = useNavigate();
+  const [error, setError] = useState<string>("");
+
+  async function remove(): Promise<void> {
+    if (!window.confirm("Move this page to the trash?")) {
+      return;
+    }
+    try {
+      const answer = await postJson<SaveAnswer>("/delete", { csrf, path });
+      navigate(answer.url);
+    } catch (exc: unknown) {
+      setError(exc instanceof ApiError ? exc.message : "the page did not move");
+    }
+  }
+
   return (
-    <form className="delete" action="/delete" method="post">
-      <input type="hidden" name="path" value={path} />
-      <input type="hidden" name="csrf" value={csrf} />
-      <button className="j-btn sm danger" type="submit">
+    <>
+      <button className="j-btn sm danger" type="button" onClick={remove}>
         move this page to trash
       </button>
-    </form>
+      {error !== "" && <ErrorLine text={error} />}
+    </>
   );
 }
 
@@ -152,7 +168,7 @@ export default function WikiPage({ page }: { page: WikiPageData }) {
           <a className="j-btn sm" href={page.edit_url}>
             edit this page
           </a>
-          <DeleteForm path={page.rel} csrf={page.delete_csrf} />
+          <Delete path={page.rel} csrf={page.delete_csrf} />
         </div>
       )}
     </Shell>

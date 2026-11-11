@@ -153,32 +153,31 @@ def test_no_credentials_sees_edit_and_new_links(anon_client):
 def test_no_credentials_can_edit(anon_client, tmp_path):
     token = viewer._csrf_token("anonymous", "wiki/pizza.md")
     response = anon_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged by anyone.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged by anyone.\n"},
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "url": "/wiki/pizza.md"}
     assert (tmp_path / "data/wiki/pizza.md").read_text() == "# Pizza\n\nChanged by anyone.\n"
 
 
 def test_no_credentials_can_create(anon_client, tmp_path):
     token = viewer._csrf_token("anonymous", "new:")
     response = anon_client.post(
-        "/save",
-        data={"folder": "", "name": "soup", "csrf": token, "body": "# Soup\n\nHot.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"folder": "", "name": "soup", "csrf": token, "body": "# Soup\n\nHot.\n"},
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "url": "/wiki/soup.md"}
     assert (tmp_path / "data/wiki/soup.md").read_text() == "# Soup\n\nHot.\n"
 
 
 def test_no_credentials_can_trash(anon_client, tmp_path):
     path = "wiki/pizza.md"
     token = viewer._csrf_token("anonymous", path)
-    response = anon_client.post(
-        "/delete", data={"path": path, "csrf": token}, follow_redirects=False
-    )
-    assert response.status_code == 303
+    response = anon_client.post("/api/v1/delete", json={"path": path, "csrf": token})
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "url": "/"}
     original = tmp_path / "data" / "wiki" / "pizza.md"
     assert not original.exists()
     trash = list((tmp_path / "data" / "wiki" / ".trash").rglob("pizza.md"))
@@ -197,9 +196,8 @@ def test_anonymous_write_goes_through_the_same_commit_path(anon_client, tmp_path
     wikigit.commit(wiki, None, "start: sync the wiki")
     token = viewer._csrf_token("anonymous", "wiki/pizza.md")
     anon_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged.\n"},
     )
     log = subprocess.run(
         ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True
@@ -225,12 +223,11 @@ def test_member_signs_in_and_writes_on_an_open_viewer(anon_client, tmp_path):
 
     token = viewer._csrf_token("alex", "wiki/pizza.md")
     response = anon_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged.\n"},
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged.\n"},
         auth=ALEX,
-        follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
     assert (tmp_path / "data/wiki/pizza.md").read_text() == "# Pizza\n\nChanged.\n"
 
 
@@ -271,18 +268,16 @@ def test_no_credentials_writes_as_the_member(member_client, tmp_path):
     """The CSRF token is bound to the member, so the write is the member's."""
     wrong = viewer._csrf_token("anonymous", "wiki/pizza.md")
     response = member_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": wrong, "body": "# Pizza\n\nNo.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": wrong, "body": "# Pizza\n\nNo.\n"},
     )
     assert response.status_code == 403
     token = viewer._csrf_token("alex", "wiki/pizza.md")
     response = member_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nAlex.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nAlex.\n"},
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
     assert (tmp_path / "data/wiki/pizza.md").read_text() == "# Pizza\n\nAlex.\n"
 
 

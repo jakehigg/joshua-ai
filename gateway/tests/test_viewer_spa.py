@@ -119,9 +119,16 @@ def test_every_explicit_route_still_wins(client) -> None:
 
 
 def test_the_content_of_the_viewer_is_the_app(client) -> None:
-    """The wiki, the shared files and the own attachments are the app, which
-    reads them from ``GET /api/v1/wiki``."""
-    for path in ("/", "/wiki/", "/wiki/Home.md", "/attachments/2026/09/a.jpg"):
+    """The wiki, the shared files, the own attachments and the editor are the
+    app, which reads them from ``GET /api/v1/wiki`` and ``GET /api/v1/edit``."""
+    for path in (
+        "/",
+        "/wiki/",
+        "/wiki/Home.md",
+        "/attachments/2026/09/a.jpg",
+        "/edit/Home.md",
+        "/new",
+    ):
         response = client.get(path, auth=ALEX)
         assert response.status_code == 200, path
         assert "id=root" in response.text, path
@@ -145,6 +152,7 @@ def test_which_path_falls_back_to_the_app() -> None:
     assert viewer_spa.falls_back("wiki/recipes/pizza.md") is True
     assert viewer_spa.falls_back("shared/attachments/team.png") is True
     assert viewer_spa.falls_back("attachments/2026/09/a.jpg") is True
+    assert viewer_spa.falls_back("edit/recipes/pizza.md") is True
     assert viewer_spa.falls_back("api/v1/session") is False
     assert viewer_spa.falls_back("chat/alex") is False
     assert viewer_spa.falls_back("logo-64.png") is False

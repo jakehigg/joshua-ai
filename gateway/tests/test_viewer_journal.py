@@ -247,32 +247,32 @@ def test_member_sees_edit_link_and_guest_does_not(client):
     assert 'href="/edit/' not in client.get("/journal", auth=MIA).text
 
 
-def test_edit_form_shows_body_and_people(client):
-    html = client.get("/edit/journal/2026/09/04/oatmeal-breakfast.md", auth=ALEX).text
-    assert 'value="alex"' in html
-    assert "with the good honey" in html
-    assert "# Oatmeal" not in html  # the title heading is not part of the text field
+def test_the_editor_of_an_entry_carries_the_text_and_the_people(client):
+    rel = "journal/2026/09/04/oatmeal-breakfast.md"
+    body = client.get("/api/v1/edit", params={"path": rel}, auth=ALEX).json()
+    assert body["kind"] == "journal" and body["people"] == ["alex"]
+    assert "with the good honey" in body["body"]
+    assert "# Oatmeal" not in body["body"]  # the title heading is not part of the text
 
 
 def test_guest_cannot_open_edit_or_save(client):
     rel = "journal/2026/09/04/oatmeal-breakfast.md"
-    assert client.get(f"/edit/{rel}", auth=MIA).status_code == 403
+    assert client.get("/api/v1/edit", params={"path": rel}, auth=MIA).status_code == 403
     token = viewer._csrf_token("mia", "wiki/" + rel)
-    response = client.post("/save", data={"path": rel, "csrf": token, "body": "x"}, auth=MIA)
-    assert response.status_code == 403
+    fields = {"path": rel, "csrf": token, "body": "x"}
+    assert client.post("/api/v1/save", json=fields, auth=MIA).status_code == 403
 
 
 def test_member_saves_text_and_people_and_keeps_the_rest(client, tmp_path):
     rel = "journal/2026/09/04/oatmeal-breakfast.md"
     token = viewer._csrf_token("alex", "wiki/" + rel)
     response = client.post(
-        "/save",
-        data={"path": rel, "csrf": token, "people": "alex, mia", "body": "Alex had porridge.\n"},
+        "/api/v1/save",
+        json={"path": rel, "csrf": token, "people": "alex, mia", "body": "Alex had porridge.\n"},
         auth=ALEX,
-        follow_redirects=False,
     )
-    assert response.status_code == 303
-    assert response.headers["location"] == "/journal/2026/09/04#oatmeal-breakfast"
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "url": "/journal/2026/09/04#oatmeal-breakfast"}
     text = (tmp_path / "data/wiki" / rel).read_text()
     assert text == (
         "---\ndate: 2026-09-04\npeople:\n- alex\n- mia\nsource: agent\n---\n\n"
@@ -284,10 +284,9 @@ def test_saving_a_day_page_keeps_it_a_day_page(client, tmp_path):
     rel = "journal/2026/09/04/2026-09-04.md"
     token = viewer._csrf_token("alex", "wiki/" + rel)
     client.post(
-        "/save",
-        data={"path": rel, "csrf": token, "people": "alex", "body": "Only the flights.\r\n"},
+        "/api/v1/save",
+        json={"path": rel, "csrf": token, "people": "alex", "body": "Only the flights.\r\n"},
         auth=ALEX,
-        follow_redirects=False,
     )
     text = (tmp_path / "data/wiki" / rel).read_text()
     assert (
@@ -301,8 +300,8 @@ def test_save_with_a_bad_person_id_is_400(client, tmp_path):
     token = viewer._csrf_token("alex", "wiki/" + rel)
     before = (tmp_path / "data/wiki" / rel).read_text()
     response = client.post(
-        "/save",
-        data={"path": rel, "csrf": token, "people": "Not A Person", "body": "x"},
+        "/api/v1/save",
+        json={"path": rel, "csrf": token, "people": "Not A Person", "body": "x"},
         auth=ALEX,
     )
     assert response.status_code == 400
@@ -316,10 +315,14 @@ def test_save_refuses_a_legacy_entry_a_hidden_one_and_a_bad_csrf(client, tmp_pat
         "journal/2026/09/04/.draft.md",
     ):
         token = viewer._csrf_token("alex", "wiki/" + rel)
-        response = client.post("/save", data={"path": rel, "csrf": token, "body": "x"}, auth=ALEX)
+        response = client.post(
+            "/api/v1/save", json={"path": rel, "csrf": token, "body": "x"}, auth=ALEX
+        )
         assert response.status_code in (403, 404), rel
     rel = "journal/2026/09/04/oatmeal-breakfast.md"
-    response = client.post("/save", data={"path": rel, "csrf": "bad", "body": "x"}, auth=ALEX)
+    response = client.post(
+        "/api/v1/save", json={"path": rel, "csrf": "bad", "body": "x"}, auth=ALEX
+    )
     assert response.status_code == 403
 
 
@@ -327,8 +330,8 @@ def test_save_with_a_bad_origin_is_403(client):
     rel = "journal/2026/09/04/oatmeal-breakfast.md"
     token = viewer._csrf_token("alex", "wiki/" + rel)
     response = client.post(
-        "/save",
-        data={"path": rel, "csrf": token, "body": "x"},
+        "/api/v1/save",
+        json={"path": rel, "csrf": token, "body": "x"},
         headers={"Origin": "http://evil.example"},
         auth=ALEX,
     )
@@ -336,7 +339,8 @@ def test_save_with_a_bad_origin_is_403(client):
 
 
 def test_edit_of_a_missing_entry_is_404(client):
-    assert client.get("/edit/journal/2026/09/04/nope.md", auth=ALEX).status_code == 404
+    params = {"path": "journal/2026/09/04/nope.md"}
+    assert client.get("/api/v1/edit", params=params, auth=ALEX).status_code == 404
 
 
 @pytest.mark.skipif(_GIT_MISSING, reason="git binary required")
@@ -347,10 +351,9 @@ def test_save_commits_the_edit(client, tmp_path):
     rel = "journal/2026/09/04/oatmeal-breakfast.md"
     token = viewer._csrf_token("alex", "wiki/" + rel)
     client.post(
-        "/save",
-        data={"path": rel, "csrf": token, "people": "alex", "body": "Porridge."},
+        "/api/v1/save",
+        json={"path": rel, "csrf": token, "people": "alex", "body": "Porridge."},
         auth=ALEX,
-        follow_redirects=False,
     )
     log = subprocess.run(
         ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True

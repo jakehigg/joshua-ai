@@ -6,6 +6,16 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The writes on the wiki are React pages.** The editor of a page, the
+  editor of a journal entry, the new page, and the trash are all the app now.
+  Edit a page, save it, and the page comes back with your change committed;
+  start a page in a folder from "new page in …"; the trash asks first and
+  moves the page under `wiki/.trash/`. The app writes through four JSON
+  addresses with the sign-in of a page: `GET /api/v1/edit?path=`,
+  `GET /api/v1/new?folder=`, `POST /api/v1/save`, and
+  `POST /api/v1/delete`. Each write keeps the checks it had: a member only, a
+  token of the person and the page, an origin of the host, the 256 KB cap, and
+  one commit of the wiki. A guest still reads.
 - **The wiki in the viewer is a React page.** A page, a folder, the front
   page at `/wiki/`, a file under `/shared/` and one of your own attachments
   are all the app now. A page shows the crumbs, the frontmatter, the

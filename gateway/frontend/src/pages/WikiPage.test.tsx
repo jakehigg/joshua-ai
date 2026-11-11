@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import WikiPage, { type WikiPageData } from "./WikiPage";
@@ -36,13 +36,31 @@ const PAGE: WikiPageData = {
   delete_csrf: "a-token",
 };
 
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function stubSession(): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(SESSION), { headers: { "Content-Type": "application/json" } }),
-    ),
-  );
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(SESSION)));
+}
+
+/**
+ * The session, and one answer of `POST /api/v1/delete`. The list it gives
+ * back holds the body of each delete the page posted.
+ */
+function stubDelete(answer: Response): unknown[] {
+  const sent: unknown[] = [];
+  vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
+    if (path === "/api/v1/delete") {
+      sent.push(JSON.parse(String(init?.body)));
+      return Promise.resolve(answer);
+    }
+    return Promise.resolve(json(SESSION));
+  });
+  return sent;
 }
 
 function show(page: WikiPageData) {
@@ -50,6 +68,18 @@ function show(page: WikiPageData) {
   return render(
     <MemoryRouter initialEntries={[`/${page.rel}`]}>
       <WikiPage page={page} />
+    </MemoryRouter>,
+  );
+}
+
+/** The page, with the address of the answer of the delete as a route. */
+function showWithHome(page: WikiPageData) {
+  return render(
+    <MemoryRouter initialEntries={[`/${page.rel}`]}>
+      <Routes>
+        <Route path="/" element={<p>the wiki index</p>} />
+        <Route path="/wiki/*" element={<WikiPage page={page} />} />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -80,14 +110,6 @@ describe("one page of the wiki", () => {
     expect(screen.getByText("edit this page").getAttribute("href")).toEqual(
       "/edit/recipes/pizza.md",
     );
-    const form = document.querySelector("form.delete");
-    // The delete still posts to the server route; task 132 adds the JSON one.
-    expect(form?.getAttribute("action")).toEqual("/delete");
-    expect(form?.getAttribute("method")).toEqual("post");
-    expect(form?.querySelector('input[name="path"]')?.getAttribute("value")).toEqual(
-      "wiki/recipes/pizza.md",
-    );
-    expect(form?.querySelector('input[name="csrf"]')?.getAttribute("value")).toEqual("a-token");
     expect(screen.getByText("move this page to trash")).toBeDefined();
   });
 
@@ -95,7 +117,44 @@ describe("one page of the wiki", () => {
     show({ ...PAGE, can_edit: false, edit_url: "/edit/recipes/pizza.md", delete_csrf: "" });
 
     expect(screen.queryByText("edit this page")).toBeNull();
-    expect(document.querySelector("form.delete")).toBeNull();
+    expect(screen.queryByText("move this page to trash")).toBeNull();
+  });
+
+  it("posts the page and its token to the delete, then goes where the answer says", async () => {
+    const sent = stubDelete(json({ ok: true, url: "/" }));
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+
+    showWithHome(PAGE);
+    fireEvent.click(screen.getByText("move this page to trash"));
+
+    expect(await screen.findByText("the wiki index")).toBeDefined();
+    expect(sent).toEqual([{ csrf: "a-token", path: "wiki/recipes/pizza.md" }]);
+  });
+
+  it("asks first, and posts nothing when the person says no", () => {
+    const sent = stubDelete(json({ ok: true, url: "/" }));
+    const asked = vi.fn().mockReturnValue(false);
+    vi.stubGlobal("confirm", asked);
+
+    showWithHome(PAGE);
+    fireEvent.click(screen.getByText("move this page to trash"));
+
+    expect(asked).toHaveBeenCalled();
+    expect(sent).toEqual([]);
+  });
+
+  it("keeps the page and says what the viewer said when the delete is refused", async () => {
+    stubDelete(json({ error: "forbidden" }, 403));
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+
+    showWithHome(PAGE);
+    fireEvent.click(screen.getByText("move this page to trash"));
+
+    const line = await screen.findByText("forbidden");
+    expect(line.className).toEqual("j-error");
+    await waitFor(() => {
+      expect(screen.queryByText("the wiki index")).toBeNull();
+    });
   });
 
   it("shows a file of another root with no navigation around it", () => {

@@ -37,10 +37,10 @@ from joshua_shared.config import Person
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_wiki as wiki_mod
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
 from joshua_gateway.files_mcp.server import IMAGE_MIME
+from joshua_gateway.viewer_api.edit import edit_url, new_url
 from joshua_gateway.viewer_api.files import file_url
 
 # The answer for a data volume with no wiki folder yet.
@@ -141,7 +141,7 @@ def page_json(root: Root, abs_path: Path, rel: str, person: Person, text: str) -
         "crumbs": crumbs,
         "siblings": siblings,
         "can_edit": can_edit,
-        "edit_url": edit.edit_url(under) if in_wiki else "",
+        "edit_url": edit_url(under) if in_wiki else "",
         "delete_csrf": viewer._csrf_token(person.id, rel) if can_edit else "",
     }
 
@@ -181,7 +181,7 @@ def folder_json(root: Root, rel: str, person: Person) -> dict[str, Any] | None:
         "pages": [{"title": page.title, "url": page.url} for page in folder.pages],
         "files": [{"name": f.name, "url": file_url(root.name, f.rel)} for f in folder.files],
         "can_create": person.role == "member",
-        "new_url": edit.new_url(folder.rel),
+        "new_url": new_url(folder.rel),
     }
 
 

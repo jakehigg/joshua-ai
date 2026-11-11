@@ -5,6 +5,9 @@ sits behind the sign-in of a page (``viewer._require_auth``), so a request
 with no credentials gets the same 401 as a page when ``viewer.anonymous`` is
 off. Each handler takes ``(request, person)``.
 
+A write route takes a JSON body, and the body carries the CSRF token of its
+scope. Every write also checks the ``Origin`` header (``viewer_api.edit``).
+
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
 
@@ -16,7 +19,7 @@ from __future__ import annotations
 
 from starlette.routing import Route
 
-from joshua_gateway.viewer_api import files, me, session, wiki
+from joshua_gateway.viewer_api import edit, files, me, session, wiki
 
 # Every JSON route of the viewer is under this prefix, from the first one.
 API_PREFIX = "/api/v1"
@@ -41,4 +44,8 @@ def routes() -> list[Route]:
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),
         Route(api_path("files/{root}/{path:path}"), _require_auth(files.file)),
+        Route(api_path("edit"), _require_auth(edit.edit_page)),
+        Route(api_path("new"), _require_auth(edit.new_page)),
+        Route(api_path("save"), _require_auth(edit.save), methods=["POST"]),
+        Route(api_path("delete"), _require_auth(edit.delete), methods=["POST"]),
     ]

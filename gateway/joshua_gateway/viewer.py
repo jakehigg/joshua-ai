@@ -20,16 +20,20 @@ another app on the same host, so the viewer only links to it. The viewer reads
 the data volume through the same resolver as the files MCP
 (``files_mcp.paths``), so the two never drift on who reads what.
 
-The wiki, the shared attachments and a person's own attachments are the React
-app: ``/``, ``/wiki/…``, ``/shared/…`` and ``/attachments/…`` are addresses of
-its router (``viewer_spa``), and it reads ``GET /api/v1/wiki`` for a page, a
-folder or a file, and ``GET /api/v1/files/<root>/<path>`` for the bytes
-(``viewer_api``).
+The wiki, the shared attachments, a person's own attachments and the editor
+are the React app: ``/``, ``/wiki/…``, ``/shared/…``, ``/attachments/…``,
+``/edit/…`` and ``/new`` are addresses of its router (``viewer_spa``), and it
+reads ``GET /api/v1/wiki`` for a page, a folder or a file,
+``GET /api/v1/files/<root>/<path>`` for the bytes, and
+``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
+``POST /api/v1/delete`` for a write (``viewer_api``).
 
-A member has two write actions, both human actions in a browser that the
-agent never gets: a delete, which moves a wiki page to the trash under
-``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
-text and people. A guest reads. A person can also comment on a line of the
+A member has three write actions, all human actions in a browser that the
+agent never gets: an edit of a wiki page or a journal entry, a new wiki page,
+and a delete, which moves a wiki page to the trash under ``wiki/.trash/`` and
+is never a hard delete. The editor is the React app (``/edit/…`` and
+``/new``), and it writes through the JSON routes of ``viewer_api.edit``, which
+hold the checks of every write. A guest reads. A person can also comment on a line of the
 definition, the plan, or the report of their own assignment, and answer a
 decision of its report: the viewer sends the comment to the assignments
 manager as that person, and writes nothing itself. A member can
@@ -53,10 +57,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import hashlib
 import hmac
 import os
-import secrets
 import sys
 from collections.abc import Iterator
 from contextvars import ContextVar
@@ -66,14 +68,13 @@ from html import escape
 from importlib import resources
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import bcrypt
 import uvicorn
 import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
-from joshua_shared.layout import is_hidden, journal_day_from_path, journal_root
+from joshua_shared.layout import is_hidden
 from joshua_shared.layout import wiki_root as wiki_dir
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from markdown_it import MarkdownIt
@@ -89,7 +90,6 @@ from joshua_gateway import viewer_assignments as assignments_mod
 from joshua_gateway import viewer_comments as comments_mod
 from joshua_gateway import viewer_docstore as docstore
 from joshua_gateway import viewer_documents as documents_mod
-from joshua_gateway import viewer_edit as edit
 from joshua_gateway import viewer_journal as journal
 from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_links as links_mod
@@ -97,14 +97,14 @@ from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_showcase as showcase_mod
 from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
-from joshua_gateway.files_mcp.paths import PathError, Root, resolve
-from joshua_gateway.files_mcp.server import MAX_BYTES, _atomic_write, data_root
+from joshua_gateway.files_mcp.paths import Root
+from joshua_gateway.files_mcp.server import _atomic_write, data_root
+from joshua_gateway.viewer_api.edit import _commit_write, _csrf_token, _csrf_valid, _origin_ok
 
 logger = get_logger("viewer")
 
-# The basic-auth realm and the trash timestamp format.
+# The basic-auth realm.
 REALM = "joshua viewer"
-_TRASH_STAMP = "%Y%m%dT%H%M%SZ"
 
 # Where a viewer password can come from, besides the entry in ``viewer.users``.
 # ``VIEWER_PASSWORDS`` carries every one of them in a single variable, so a
@@ -120,10 +120,6 @@ SEARCH_MAX_RESULTS = 50
 # The metadata file a channels-stored attachment carries: ``<file>.meta.json``. Never
 # a piece of content on its own, so a listing hides it.
 _META_SUFFIX = ".meta.json"
-
-# The per-process secret for the delete CSRF token. A fresh value each start is
-# fine; a form from an earlier process fails and the person reloads the page.
-_CSRF_SECRET = secrets.token_bytes(32)
 
 # The identity a request with no credentials gets when ``viewer.anonymous`` is
 # true. It is not in ``people``: it has full member access, but the home page
@@ -563,54 +559,6 @@ def _list_attachments(root: Root) -> list[str]:
     ]
     names.sort(reverse=True)
     return names
-
-
-# -- delete -----------------------------------------------------------------
-
-
-def _csrf_token(person_id: str, path: str) -> str:
-    message = f"{person_id}\n{path}".encode()
-    return hmac.new(_CSRF_SECRET, message, hashlib.sha256).hexdigest()
-
-
-def _csrf_valid(person_id: str, path: str, token: str) -> bool:
-    return bool(token) and hmac.compare_digest(_csrf_token(person_id, path), token)
-
-
-def _origin_ok(request: Request) -> bool:
-    """True when the request has no ``Origin`` header or it matches the host."""
-    origin = request.headers.get("origin")
-    if not origin:
-        return True
-    return urlparse(origin).netloc == request.headers.get("host", "")
-
-
-def _move_to_trash(root: Root, abs_path: Path) -> Path:
-    """Move a wiki file under ``wiki/.trash/<UTC timestamp>/`` and return the new
-    path. The timestamp directory keeps the original tree."""
-    under_wiki = abs_path.relative_to(root.base)
-    stamp = datetime.now(UTC).strftime(_TRASH_STAMP)
-    dest = root.base / ".trash" / stamp / under_wiki
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(abs_path, dest)
-    _commit_trash(root, abs_path)
-    return dest
-
-
-def _commit_trash(root: Root, abs_path: Path) -> None:
-    """Commit the delete ``_move_to_trash`` just made, when ``wiki.git`` is
-    enabled. ``.trash/`` is gitignored, so the commit records the removal
-    only, never the trashed copy. A failure here is a WARNING; the delete
-    already happened."""
-    try:
-        from joshua_shared import wikigit
-
-        if not wikigit.is_enabled(config.load()):
-            return
-        rel = abs_path.relative_to(root.base).as_posix()
-        wikigit.commit(root.base, [abs_path], f"viewer: trash {rel}")
-    except Exception as exc:  # noqa: BLE001 — a commit must never fail the delete
-        logger.warning({"message": "wiki commit failed", "error": str(exc)})
 
 
 # -- routes -----------------------------------------------------------------
@@ -1068,28 +1016,6 @@ def _search_label(root_name: str, rel: str) -> str:
     return f"{root_name}/{rel}"
 
 
-async def delete(request: Request, person: Person) -> Response:
-    if person.role != "member":
-        return _forbidden()
-    form = await request.form()
-    path = str(form.get("path", ""))
-    token = str(form.get("csrf", ""))
-    if not _csrf_valid(person.id, path, token) or not _origin_ok(request):
-        return _forbidden()
-    roots = _roots_for(person)
-    try:
-        root, abs_path = resolve(path, roots, write=False)
-    except PathError:
-        return _not_found()
-    if root.name != "wiki":
-        return _forbidden()
-    if not abs_path.is_file():
-        return _not_found()
-    _move_to_trash(root, abs_path)
-    logger.info({"message": "viewer delete", "root": "wiki"})
-    return RedirectResponse("/", status_code=303)
-
-
 # -- journal ----------------------------------------------------------------
 
 
@@ -1147,209 +1073,6 @@ async def journal_day(request: Request, person: Person) -> Response:
         can_edit=person.role == "member",
     )
     return _page(day.isoformat(), body, section="journal")
-
-
-# -- edit -------------------------------------------------------------------
-#
-# One editor for a wiki page and a journal entry. ``viewer_edit`` says how the
-# path decides the shape of the form and of the saved file. Every write here
-# goes through ``_edit_target`` and ``save``: the same member check, the same
-# resolver with ``write=True``, the same CSRF token and origin check, the same
-# atomic write and commit.
-
-
-def _edit_target(
-    person: Person, rel: str, *, create: bool
-) -> tuple[Root, Path, date | None] | Response:
-    """Resolve a wiki-relative path for a write, or the response that refuses
-    it. The third value is the journal day when the path is an entry under a
-    day folder. A path under the journal that is not such an entry, and a
-    new page anywhere under the journal, are refused: the journal has one
-    writer."""
-    if person.role != "member":
-        return _forbidden()
-    try:
-        root, abs_path = resolve("wiki/" + rel, _roots_for(person), write=True)
-    except PathError:
-        return _not_found()
-    if root.name != "wiki" or abs_path.suffix != ".md":
-        return _not_found()
-    day = journal_day_from_path(abs_path, data_root())
-    in_journal = (
-        abs_path == journal_root(data_root()) or journal_root(data_root()) in abs_path.parents
-    )
-    if create:
-        if in_journal:
-            return _forbidden()
-        if abs_path.exists():
-            return _page(
-                "exists",
-                '<h1 class="j-doc-title">exists</h1>'
-                '<p class="j-error">A page with that name is already there.</p>',
-                status=409,
-                section="wiki",
-            )
-    else:
-        if not abs_path.is_file():
-            return _not_found()
-        if in_journal and day is None:
-            return _not_found()
-    return root, abs_path, day
-
-
-def _under_wiki(root: Root, abs_path: Path) -> str:
-    return abs_path.relative_to(root.base).as_posix()
-
-
-async def edit_page(request: Request, person: Person) -> Response:
-    """The edit form for a wiki page or a journal entry."""
-    rel = request.path_params["path"]
-    target = _edit_target(person, rel, create=False)
-    if isinstance(target, Response):
-        return target
-    root, abs_path, day = target
-    text = _read_text(abs_path)
-    if text is None:
-        return _not_found()
-    csrf = _csrf_token(person.id, "wiki/" + rel)
-    if day is not None:
-        entry = journal.parse_entry(rel, day, text)
-        form = edit.form_html(
-            title=f"edit: {entry.title}",
-            subtitle=f"{day.strftime('%A %-d %B %Y')} · {entry.source} · {rel}",
-            csrf=csrf,
-            path=rel,
-            body=entry.body,
-            people=entry.people,
-            cancel_url=entry.day_url,
-        )
-        return _page(f"edit {entry.title}", form, section="journal")
-    front, body = edit.split_raw_frontmatter(text)
-    title = wiki.page_title(text, wiki.stem_title(abs_path.stem))
-    form = edit.form_html(
-        title=f"edit: {title}",
-        subtitle=rel,
-        csrf=csrf,
-        path=rel,
-        body=body,
-        kept_front=front,
-        cancel_url=f"/wiki/{rel}",
-    )
-    return _page(f"edit {title}", form, section="wiki")
-
-
-async def new_page(request: Request, person: Person) -> Response:
-    """The form for a new wiki page in a folder."""
-    if person.role != "member":
-        return _forbidden()
-    folder = (request.query_params.get("folder") or "").strip("/")
-    roots = _roots_for(person)
-    try:
-        _, abs_dir = resolve("wiki/" + folder if folder else "wiki", roots, write=False)
-    except PathError:
-        return _not_found()
-    if not abs_dir.is_dir():
-        return _not_found()
-    return _page("new page", _new_form(person, folder, name="", body="", error=""), section="wiki")
-
-
-def _new_form(person: Person, folder: str, *, name: str, body: str, error: str) -> str:
-    return edit.form_html(
-        title="new page",
-        subtitle=f"in {folder or 'the wiki'}",
-        csrf=_csrf_token(person.id, "new:" + folder),
-        folder=folder,
-        name=name,
-        body=body,
-        error=error,
-        cancel_url=f"/wiki/{folder}/" if folder else "/wiki/",
-    )
-
-
-async def save(request: Request, person: Person) -> Response:
-    """Write a page or an entry from the form. One path for both, and for a
-    new page: the CSRF token, the origin, the target, the composed text, the
-    size cap, the atomic write, the commit."""
-    if person.role != "member":
-        return _forbidden()
-    form = await request.form()
-    token = str(form.get("csrf", ""))
-    body = str(form.get("body", ""))
-    create = "folder" in form
-    if create:
-        folder = str(form.get("folder", "")).strip("/")
-        if not _csrf_valid(person.id, "new:" + folder, token) or not _origin_ok(request):
-            return _forbidden()
-        try:
-            rel = edit.new_page_rel(folder, str(form.get("name", "")))
-        except edit.EditError as exc:
-            return _page(
-                "new page",
-                _new_form(
-                    person, folder, name=str(form.get("name", "")), body=body, error=str(exc)
-                ),
-                status=400,
-                section="wiki",
-            )
-    else:
-        rel = str(form.get("path", ""))
-        if not _csrf_valid(person.id, "wiki/" + rel, token) or not _origin_ok(request):
-            return _forbidden()
-    target = _edit_target(person, rel, create=create)
-    if isinstance(target, Response):
-        return target
-    root, abs_path, day = target
-    try:
-        if create:
-            data = edit.compose_new(body)
-            after = f"/wiki/{rel}"
-            what = "new"
-        elif day is not None:
-            text = _read_text(abs_path)
-            if text is None:
-                return _not_found()
-            data = edit.compose_journal(text, rel, day, str(form.get("people", "")), body)
-            after = f"{journal.day_url(day)}#{abs_path.stem}"
-            what = "edit"
-        else:
-            text = _read_text(abs_path)
-            if text is None:
-                return _not_found()
-            data = edit.compose_wiki(text, body)
-            after = f"/wiki/{rel}"
-            what = "edit"
-    except edit.EditError as exc:
-        return _page(
-            "edit",
-            f'<h1 class="j-doc-title">edit</h1><p class="j-error">{escape(str(exc))}</p>',
-            status=400,
-            section="journal" if day is not None else "wiki",
-        )
-    raw = data.encode("utf-8")
-    if len(raw) > MAX_BYTES:
-        return _page(
-            "edit",
-            '<h1 class="j-doc-title">edit</h1><p class="j-error">The page exceeds 256 KB.</p>',
-            status=400,
-            section="journal" if day is not None else "wiki",
-        )
-    _atomic_write(abs_path, raw)
-    _commit_write(root, abs_path, what)
-    logger.info({"message": "viewer write", "root": "wiki", "what": what})
-    return RedirectResponse(after, status_code=303)
-
-
-def _commit_write(root: Root, abs_path: Path, what: str) -> None:
-    """Commit a write when ``wiki.git`` is on. A failure is a WARNING; the
-    write already happened."""
-    try:
-        from joshua_shared import wikigit
-
-        if not wikigit.is_enabled(config.load()):
-            return
-        wikigit.commit(root.base, [abs_path], f"viewer: {what} {_under_wiki(root, abs_path)}")
-    except Exception as exc:  # noqa: BLE001 — a commit must never fail the write
-        logger.warning({"message": "wiki commit failed", "error": str(exc)})
 
 
 @cache
@@ -1497,9 +1220,6 @@ def build_app() -> Starlette:
         Route("/links", _require_auth(links_save), methods=["POST"]),
         Route("/journal", _require_auth(journal_feed)),
         Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
-        Route("/edit/{path:path}", _require_auth(edit_page)),
-        Route("/new", _require_auth(new_page)),
-        Route("/save", _require_auth(save), methods=["POST"]),
         Route("/search", _require_auth(search)),
         Route("/usage", _require_auth(usage)),
         Route("/assignments", _require_auth(assignments_list)),
@@ -1543,7 +1263,6 @@ def build_app() -> Starlette:
             _require_auth(document_comment),
             methods=["POST"],
         ),
-        Route("/delete", _require_auth(delete), methods=["POST"]),
     ]
     spa = viewer_spa.mount()
     if spa is None:
