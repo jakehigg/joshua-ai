@@ -277,9 +277,7 @@ async def document(request: Request, person: Person) -> JSONResponse:
             "lines": shown.body_lines,
             "preamble": shown.lines[: shown.offset],
             "comments": [] if old else _comments(doc),
-            "versions": [
-                {"sha": v.sha, "when": v.when, "message": v.subject} for v in versions
-            ],
+            "versions": [{"sha": v.sha, "when": v.when, "message": v.subject} for v in versions],
             "version": None if version is None else {"sha": version.sha, "when": version.when},
             "csrf": None if old else _csrf_token(person.id, comments_scope(doc.url)),
         }

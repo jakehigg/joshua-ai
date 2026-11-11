@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -104,8 +104,11 @@ describe("the shell", () => {
     shell("usage");
 
     expect(document.querySelector("main.j-content.wide")).not.toBeNull();
-    const usage = (await screen.findAllByText("Usage"))[0];
-    expect(usage?.getAttribute("aria-current")).toEqual("page");
+    // The item of the sidebar, which the session draws. The app bar names the
+    // section too, and that title is no item of the navigation.
+    const sidebar = document.querySelector("aside.j-sidebar") as HTMLElement;
+    const usage = await within(sidebar).findByText("Usage");
+    expect(usage.getAttribute("aria-current")).toEqual("page");
   });
 
   it("holds the links group of the sidebar and the links tab of a phone", async () => {

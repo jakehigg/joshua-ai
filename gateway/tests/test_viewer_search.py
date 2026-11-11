@@ -103,6 +103,16 @@ async def test_documents_merge_by_score_and_a_failed_documents_call_is_left_out(
     assert response is not None and [h.path for h in response.results] == ["wiki/a.md"]
 
 
+async def test_a_file_both_searches_name_is_one_hit() -> None:
+    """Core can answer the same file for both sources, and a reader needs one
+    row for it: the hit with the higher score."""
+    core = FakeCore([{**_hit("wiki/a.md"), "score": 0.6}, {**_hit("wiki/a.md"), "score": 0.9}])
+    client = search_mod.CoreSearch("http://core", "t", transport=httpx.MockTransport(core.handler))
+    response = await client.search("x", person="alex")
+    assert response is not None
+    assert [(h.path, h.score) for h in response.results] == [("wiki/a.md", 0.9)]
+
+
 async def test_a_refused_search_is_none() -> None:
     core = FakeCore([], status=503)
     client = search_mod.CoreSearch("http://core", "t", transport=httpx.MockTransport(core.handler))

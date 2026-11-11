@@ -193,7 +193,7 @@ def test_an_entry_carries_its_day_its_people_and_its_text(client) -> None:
         "title": "Oatmeal for breakfast",
         "source": "agent",
         "people": [{"id": "alex", "name": "Alex"}],
-        "markdown": "Alex had oatmeal, with the good honey.\n",
+        "markdown": "Alex had oatmeal, with the good honey.",
         "edit_url": "/edit/journal/2026/09/04/oatmeal-breakfast.md",
     }
 

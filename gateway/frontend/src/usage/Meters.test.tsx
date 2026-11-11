@@ -20,13 +20,15 @@ const FIVE: LimitWindow = {
   reset: false,
 };
 
+// A window that reset, as the route sends it: its numbers are old, so the
+// route gives it no badge.
 const WEEKLY: LimitWindow = {
   name: "Weekly",
   pct_used: "92%",
   pct_left: "8%",
   fill: 92,
   level: "crit",
-  badge: "critical",
+  badge: "",
   reset_at: "2026-11-09T20:00:00-05:00",
   reset_text: "resets Mon 9 Nov, 8:00 pm",
   reset: true,
@@ -83,7 +85,7 @@ describe("the subscription meters", () => {
     expect(badge.className).toEqual("j-badge warn");
     expect(cards()).toEqual(["j-card limit warn"]);
 
-    meters({ ...LIMITS, windows: [{ ...WEEKLY, reset: false }] });
+    meters({ ...LIMITS, windows: [{ ...WEEKLY, reset: false, badge: "critical" }] });
 
     expect(screen.getByText("critical").className).toEqual("j-badge bad");
   });

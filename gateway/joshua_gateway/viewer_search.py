@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from urllib.parse import quote
 
 import httpx
-from joshua_shared.contracts import SearchRequest, SearchResponse
+from joshua_shared.contracts import SearchHit, SearchRequest, SearchResponse
 from joshua_shared.http import FleetClient
 from joshua_shared.log import get_logger
 from pydantic import ValidationError
@@ -43,6 +43,19 @@ _WIKI_PREFIX = "wiki/"
 _DOCUMENTS_PREFIX = "documents/"
 
 
+def _by_path(hits: list[SearchHit]) -> list[SearchHit]:
+    """One hit per file, in the order of ``hits``.
+
+    The two searches can both name a file, and a reader needs one row for it.
+    ``hits`` comes in order of score, so the best hit of a file is the one
+    that stays.
+    """
+    best: dict[str, SearchHit] = {}
+    for hit in hits:
+        best.setdefault(hit.path, hit)
+    return list(best.values())
+
+
 class CoreSearch:
     """Search the memory by meaning through core."""
 
@@ -59,8 +72,8 @@ class CoreSearch:
         """Return core's answer, or None when core cannot answer.
 
         With ``person``, the answer also holds the documents of that person and
-        the shared ones, in order of score. A failed search of documents leaves
-        them out."""
+        the shared ones, in order of score, one hit per file. A failed search of
+        documents leaves them out."""
         try:
             body = SearchRequest(query=query, limit=limit).model_dump()
             documents = (
@@ -80,7 +93,7 @@ class CoreSearch:
         if docs is None:
             return files
         merged = sorted([*files.results, *docs.results], key=lambda hit: -hit.score)
-        return SearchResponse(results=merged[:limit])
+        return SearchResponse(results=_by_path(merged)[:limit])
 
     async def _post(self, body: dict[str, object]) -> SearchResponse | None:
         try:

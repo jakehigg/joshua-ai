@@ -165,9 +165,7 @@ def _token(owner: str, slug: str, person: str = "alex") -> str:
 
 def _add(owner: str, slug: str, *, auth=ALEX, c: TestClient | None = None, **fields) -> Any:
     body = {"csrf": _token(owner, slug, auth[0]), **fields}
-    return (c or client()).post(
-        f"/api/v1/documents/{owner}/{slug}/comments", json=body, auth=auth
-    )
+    return (c or client()).post(f"/api/v1/documents/{owner}/{slug}/comments", json=body, auth=auth)
 
 
 def _remove(owner: str, slug: str, cid: str, *, auth=ALEX, c: TestClient | None = None) -> Any:
@@ -438,9 +436,7 @@ def test_every_route_needs_a_sign_in(docs) -> None:
 
 @NEEDS_GIT
 def test_a_comment_is_added_and_the_answer_carries_the_comments(docs) -> None:
-    response = _add(
-        "alex", "party", line_no=5, line_text="- Order the food", body="Pizza"
-    )
+    response = _add("alex", "party", line_no=5, line_text="- Order the food", body="Pizza")
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True and body["anchor"] == "L5"
@@ -491,9 +487,9 @@ def test_a_bad_comment_is_refused(docs, fields, error) -> None:
 def test_a_comment_needs_the_token_of_its_own_page(docs) -> None:
     c = client()
     fields = {"line_no": 5, "body": "x"}
-    assert c.post(
-        "/api/v1/documents/alex/party/comments", json=fields, auth=ALEX
-    ).status_code == 403
+    assert (
+        c.post("/api/v1/documents/alex/party/comments", json=fields, auth=ALEX).status_code == 403
+    )
     for token in ("stale", _token("shared", "meals"), _token("alex", "party", "mia")):
         response = c.post(
             "/api/v1/documents/alex/party/comments", json={"csrf": token, **fields}, auth=ALEX

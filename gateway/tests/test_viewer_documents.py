@@ -266,7 +266,6 @@ HTML_DOC = textwrap.dedent("""\
     """)
 
 
-
 def test_the_artifact_route_serves_the_body_with_its_own_policy(docs) -> None:
     _write(docs / "alex/mockup.html", HTML_DOC)
     response = _get("/documents/alex/mockup/artifact")
