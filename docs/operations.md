@@ -838,8 +838,8 @@ model. A group whose rows name a worker gets a table of its workers under the
 totals table. The "Each day" sections show only the groups with usage on that
 day.
 
-`?days=N` sets the window, today included: default 30, at most 366. The links
-above the chart give 7, 30, 90, and 366 days.
+`?days=N` sets the window, today included: default 30, at most 366. The
+buttons above the chart give 7, 30, 90, and 366 days.
 
 **Subscription limits.** Above the chart, the page shows one meter for each
 limit window of the Claude subscription: `5-hour` and `Weekly`. Each meter

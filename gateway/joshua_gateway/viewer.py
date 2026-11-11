@@ -6,8 +6,8 @@ attachments, and the shared attachments. ``/journal`` shows the journal as a
 feed, newest day first, because the wiki tree is the wrong shape for reading
 what happened. The agent never calls the viewer. The viewer calls core for two
 things, when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set: the search asks
-core to search by meaning (``viewer_search``), and ``/usage`` shows the tokens
-of each group by day (``viewer_usage``) under the subscription limits
+core to search by meaning (``viewer_search``), and the usage page shows the
+tokens of each group by day (``viewer_usage``) under the subscription limits
 (``viewer_limits``). The limits need ``CORE_URL`` only, because core's
 ``GET /v1/limits`` has no bearer. ``/assignments`` shows the assignments of
 the person who signed in, read from the assignments manager when
@@ -21,14 +21,16 @@ the data volume through the same resolver as the files MCP
 (``files_mcp.paths``), so the two never drift on who reads what.
 
 The wiki, the shared attachments, a person's own attachments, the journal, the
-search and the editor are the React app: ``/``, ``/wiki/…``, ``/shared/…``,
-``/attachments/…``, ``/journal``, ``/journal/<year>/<month>/<day>``,
-``/search``, ``/edit/…`` and ``/new`` are addresses of its router
-(``viewer_spa``), and it reads ``GET /api/v1/wiki`` for a page, a folder or a
-file, ``GET /api/v1/files/<root>/<path>`` for the bytes,
+search, the usage and the editor are the React app: ``/``, ``/wiki/…``,
+``/shared/…``, ``/attachments/…``, ``/journal``,
+``/journal/<year>/<month>/<day>``, ``/search``, ``/usage``, ``/edit/…`` and
+``/new`` are addresses of its router (``viewer_spa``), and it reads
+``GET /api/v1/wiki`` for a page, a folder or a file,
+``GET /api/v1/files/<root>/<path>`` for the bytes,
 ``GET /api/v1/journal`` for a month of the feed,
 ``GET /api/v1/journal/<year>/<month>/<day>`` for a day,
-``GET /api/v1/search`` for both halves of the search, and
+``GET /api/v1/search`` for both halves of the search,
+``GET /api/v1/usage`` for the limits and the tokens by day, and
 ``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
 ``POST /api/v1/delete`` for a write (``viewer_api``).
 
@@ -58,7 +60,6 @@ serves plain HTTP and binds every route behind basic auth except the probes.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import hmac
@@ -98,7 +99,6 @@ from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_showcase as showcase_mod
-from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway.files_mcp.paths import Root
 from joshua_gateway.files_mcp.server import _atomic_write, data_root
 from joshua_gateway.viewer_api.edit import _commit_write, _csrf_token, _csrf_valid, _origin_ok
@@ -449,7 +449,6 @@ def _shell(body: str, *, section: str) -> str:
         links_mod.load(wiki_dir(data_root())), current=section == "links"
     )
     here = _SECTION_LABEL.get(section, "Home")
-    content = "j-content wide" if section == "usage" else "j-content"
     return (
         '<div class="j-shell has-sidebar">'
         '<aside class="j-sidebar">'
@@ -471,7 +470,7 @@ def _shell(body: str, *, section: str) -> str:
         "</label></form>"
         "</header>"
         f'<nav class="j-tabs mobile-only" aria-label="Sections">{tabs}</nav>'
-        f'<main class="{content}">{body}</main>'
+        f'<main class="j-content">{body}</main>'
         "</div></div>"
     )
 
@@ -555,32 +554,6 @@ def _list_attachments(root: Root) -> list[str]:
 
 
 # -- routes -----------------------------------------------------------------
-
-
-async def usage(request: Request, person: Person) -> Response:
-    """The subscription limits and the tokens of each group by day, from core.
-    The two calls run at the same time. The page answers 200 also when core is
-    not configured or does not answer, and says so."""
-    days = usage_mod.parse_days(request.query_params.get("days"))
-    core = usage_mod.from_env(os.environ)
-    limits_core = limits_mod.from_env(os.environ)
-    body, limits = await asyncio.gather(
-        core.fetch(days) if core is not None else _none(),
-        limits_core.fetch() if limits_core is not None else _none(),
-    )
-    tz = limits_mod.zone(config.load().timezone)
-    section = limits_mod.section_html(
-        limits, configured=limits_core is not None, tz=tz, now=_now(tz)
-    )
-    return _page(
-        "usage",
-        usage_mod.page_html(body, days=days, configured=core is not None, limits=section),
-        section="usage",
-    )
-
-
-async def _none() -> None:
-    return None
 
 
 def _clock() -> tuple[tzinfo, datetime]:
@@ -1088,7 +1061,6 @@ def build_app() -> Starlette:
         Route("/ui/{name}", _require_auth(ui_file)),
         Route("/links", _require_auth(links_page)),
         Route("/links", _require_auth(links_save), methods=["POST"]),
-        Route("/usage", _require_auth(usage)),
         Route("/assignments", _require_auth(assignments_list)),
         Route("/assignments/saved", _require_auth(saved_list)),
         Route("/assignments/saved/{id:int}", _require_auth(saved_page)),

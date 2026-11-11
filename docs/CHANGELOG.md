@@ -6,6 +6,15 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The usage in the viewer is a React page.** `/usage` is the app now: the
+  two subscription meters, the stacked bar chart of the tokens of each day,
+  and the four tables. The day range writes the address (`?days=90`), so a
+  bookmark of a range opens the same window. With `CORE_URL` or
+  `JOSHUA_TOKEN_VIEWER` unset, or with a core that does not answer, the page
+  says which half is missing and shows the other one. The app reads one JSON
+  address with the sign-in of a page: `GET /api/v1/usage?days=<n>`, which
+  makes both calls to core at the same time and derives every number of a
+  meter.
 - **The search in the viewer is a React page.** The field in the app bar now
   goes to `/search?q=<query>` inside the app, so no page loads, and a
   bookmark of a search opens the same hits. The page keeps both halves: the

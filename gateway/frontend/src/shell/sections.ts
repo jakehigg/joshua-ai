@@ -82,7 +82,7 @@ export const SECTIONS: readonly Section[] = [
     icon: '<path d="M4 20V11M10 20V4M16 20v-8M21 20H3"/>',
     memberOnly: false,
     personPath: false,
-    migrated: false,
+    migrated: true,
   },
   {
     key: "assignments",

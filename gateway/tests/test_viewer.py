@@ -235,7 +235,7 @@ def test_image_attachment_renders_inline(client):
 
 
 def test_security_headers_on_every_response(client):
-    response = client.get("/usage", auth=("alex", ALEX_PW))
+    response = client.get("/assignments", auth=("alex", ALEX_PW))
     # The policy allows the bundle of the React app, from this origin, and the
     # copy script of a server-rendered report, by its hash. No inline script.
     assert response.headers["content-security-policy"] == (
@@ -250,7 +250,7 @@ def test_security_headers_on_every_response(client):
 
 def test_only_the_same_origin_may_frame_the_viewer(client):
     # The chat frames a document page of the viewer; no other origin can.
-    policy = client.get("/usage", auth=("alex", ALEX_PW)).headers["content-security-policy"]
+    policy = client.get("/assignments", auth=("alex", ALEX_PW)).headers["content-security-policy"]
     assert "frame-ancestors 'self'" in policy
     assert "frame-ancestors *" not in policy
     assert "autrui.net" not in policy
@@ -316,9 +316,9 @@ def test_a_page_has_the_shared_shell(client):
 
 
 def test_the_current_section_is_marked(client):
-    html = client.get("/usage", auth=("alex", ALEX_PW)).text
-    assert 'class="j-nav-item" href="/usage" aria-current="page"' in html
-    assert 'class="j-tab" href="/usage" aria-current="page"' in html
+    html = client.get("/assignments", auth=("alex", ALEX_PW)).text
+    assert 'class="j-nav-item" href="/assignments" aria-current="page"' in html
+    assert 'class="j-tab" href="/assignments" aria-current="page"' in html
     assert html.count('aria-current="page"') == 2
     # Every server-rendered page still reaches the person's own page, which
     # the React app serves.
@@ -327,7 +327,7 @@ def test_the_current_section_is_marked(client):
 
 def test_the_chat_entry_names_the_person_of_the_request(client):
     for creds, person in ((("alex", ALEX_PW), "alex"), (MIA, "mia")):
-        html = client.get("/usage", auth=creds).text
+        html = client.get("/assignments", auth=creds).text
         link = f'href="/chat/{person}"'
         assert f'<a class="j-nav-item" {link}>' in html, person
         assert f'<a class="j-tab" {link}>Chat</a>' in html, person
