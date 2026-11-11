@@ -100,7 +100,7 @@ export const SECTIONS: readonly Section[] = [
     icon: DOCUMENTS_ICON,
     memberOnly: true,
     personPath: false,
-    migrated: false,
+    migrated: true,
   },
   {
     key: "chat",

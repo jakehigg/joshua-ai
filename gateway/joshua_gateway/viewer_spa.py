@@ -15,8 +15,11 @@ on its own path and docker compose does not serve at all.
 
 The content sections of the viewer and the editor (``CONTENT``) are the
 exception to the dot: a wiki page ends in ``.md``, an attachment keeps the
-name it arrived with, and the address of the editor carries the path of the
-page it edits, so a path under one of them always reaches the app.
+name it arrived with, the slug of a document may hold a dot, and the address
+of the editor carries the path of the page it edits, so a path under one of
+them always reaches the app. The two routes of a document that the server
+answers itself (``<slug>.json`` and ``<slug>/artifact``) come before this
+mount, so they win.
 
 A built asset carries a content hash in its name, so it is immutable;
 ``index.html`` is never cached, because a new build writes a new one.
@@ -48,7 +51,7 @@ NO_FALLBACK = frozenset({"api", "chat"})
 # The first segment of a path the app always claims, dot or no dot: the
 # content of the viewer, which the app reads from the JSON routes, and the
 # editor of one page of it.
-CONTENT = frozenset({"wiki", "shared", "attachments", "edit"})
+CONTENT = frozenset({"wiki", "shared", "attachments", "edit", "documents"})
 
 # The cache headers: a hashed asset forever, the entry file never.
 _IMMUTABLE = "public, max-age=31536000, immutable"

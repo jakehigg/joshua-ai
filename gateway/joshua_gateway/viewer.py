@@ -14,17 +14,21 @@ the person who signed in, read from the assignments manager when
 ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set
 (``viewer_assignments``). ``/documents`` shows the documents of the member
 who signed in and the shared ones, read from ``/data/documents``
-(``viewer_documents``); a guest has no such section. The navigation also holds
+(``viewer_api.documents``); a guest has no such section. The two routes of a
+document that the chat calls stay here: ``<slug>.json`` for the head of an
+artifact card, and ``<slug>/artifact`` for the frame of an HTML document,
+which gets its own content policy (``viewer_documents.artifact_policy``). The navigation also holds
 a Chat item at ``/chat/<person id>`` for the person who signed in. The chat is
 another app on the same host, so the viewer only links to it. The viewer reads
 the data volume through the same resolver as the files MCP
 (``files_mcp.paths``), so the two never drift on who reads what.
 
 The wiki, the shared attachments, a person's own attachments, the journal, the
-search, the usage, the links and the editor are the React app: ``/``,
-``/wiki/…``, ``/shared/…``, ``/attachments/…``, ``/journal``,
+search, the usage, the links, the documents and the editor are the React app:
+``/``, ``/wiki/…``, ``/shared/…``, ``/attachments/…``, ``/journal``,
 ``/journal/<year>/<month>/<day>``, ``/search``, ``/usage``, ``/links``,
-``/edit/…`` and ``/new`` are addresses of its router (``viewer_spa``), and it
+``/documents``, ``/documents/<owner>/<slug>``, ``/edit/…`` and ``/new`` are
+addresses of its router (``viewer_spa``), and it
 reads ``GET /api/v1/wiki`` for a page, a folder or a file,
 ``GET /api/v1/files/<root>/<path>`` for the bytes,
 ``GET /api/v1/journal`` for a month of the feed,
@@ -32,8 +36,12 @@ reads ``GET /api/v1/wiki`` for a page, a folder or a file,
 ``GET /api/v1/search`` for both halves of the search,
 ``GET /api/v1/usage`` for the limits and the tokens by day,
 ``GET /api/v1/links`` for the links of the sidebar and of the page,
-``POST /api/v1/links`` for the list a member saves, and
-``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
+``POST /api/v1/links`` for the list a member saves,
+``GET /api/v1/documents`` for the list of the documents,
+``GET /api/v1/documents/<owner>/<slug>`` for one document, its blocks and its
+comments, ``POST /api/v1/documents/<owner>/<slug>/comments`` and
+``POST /api/v1/documents/<owner>/<slug>/comments/<id>/delete`` for a comment,
+and ``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
 ``POST /api/v1/delete`` for a write (``viewer_api``).
 
 A member has three write actions, all human actions in a browser that the
@@ -45,8 +53,9 @@ hold the checks of every write. A guest reads. A person can also comment on a li
 definition, the plan, or the report of their own assignment, and answer a
 decision of its report: the viewer sends the comment to the assignments
 manager as that person, and writes nothing itself. A member can
-comment on a line of a document of their own or a shared one: the viewer
-writes the comment to the comments file of the document and commits it.
+comment on a line of a document of their own or a shared one through
+``viewer_api.documents``: the viewer writes the comment to the comments file
+of the document and commits it.
 
 ``viewer.anonymous`` opens the viewer: a request with no ``Authorization``
 header gets full access, read and write, as a synthetic "anonymous" identity,
@@ -69,7 +78,7 @@ import os
 import sys
 from collections.abc import Iterator
 from contextvars import ContextVar
-from datetime import UTC, datetime, tzinfo
+from datetime import datetime, tzinfo
 from functools import cache
 from html import escape
 from importlib import resources
@@ -741,29 +750,10 @@ async def comment_on_saved(request: Request, person: Person) -> Response:
 # -- documents --------------------------------------------------------------
 #
 # A member reads their own documents and the shared ones; a guest gets none.
-# The one write is a comment in the comments file of a document, with the
-# same CSRF token and origin check as every other form.
-
-
-async def documents_list(request: Request, person: Person) -> Response:
-    """The documents of the person who signed in and the shared ones, one
-    status at a time. With no documents folder, the page says so and
-    creates nothing."""
-    if person.role != "member":
-        return _not_found()
-    status = documents_mod.parse_status(request.query_params.get("status"))
-    kind = documents_mod.parse_kind(request.query_params.get("kind"))
-    base = docstore.root()
-    docs = None
-    counts: dict[str, int] = {}
-    if base.is_dir():
-        docs = docstore.list_documents(base, docstore.owners(person.id))
-        counts = {d.tool_path: docstore.open_count(d) for d in docs if d.status == status}
-    tz, now = _clock()
-    html = documents_mod.list_html(
-        docs, status=status, kind=kind, person_id=person.id, comments=counts, tz=tz, now=now
-    )
-    return _page("documents", html, section="documents")
+# The list and the page are the React app, which reads the JSON routes of
+# ``viewer_api.documents``. Two routes stay here, because the chat calls
+# both: the frontmatter of a document, and the body of an HTML document for
+# the frame of its page.
 
 
 def _document(request: Request, person: Person) -> docstore.Document | None:
@@ -776,43 +766,6 @@ def _document(request: Request, person: Person) -> docstore.Document | None:
     owner = request.path_params["owner"]
     slug = request.path_params["slug"]
     return docstore.find(base, owner, slug, docstore.owners(person.id))
-
-
-def _document_forms(person: Person, doc: docstore.Document) -> comments_mod.CommentForms:
-    base = doc.url
-    return comments_mod.CommentForms(
-        action=f"{base}/comments", csrf=_csrf_token(person.id, f"comments:{base}")
-    )
-
-
-async def document_page(request: Request, person: Person) -> Response:
-    """One document. ``?rev=<sha>`` shows an older version, read-only. A
-    document of another member is 404, as is one that is not there."""
-    doc = _document(request, person)
-    if doc is None:
-        return _not_found()
-    base = docstore.root()
-    versions = docstore.versions(base, doc)
-    version = None
-    shown = doc
-    rev = request.query_params.get("rev")
-    if rev:
-        found = docstore.at_version(base, doc, rev)
-        if found is None:
-            return _not_found()
-        version, shown = found
-    tz, now = _clock()
-    html = documents_mod.document_html(
-        shown,
-        person_id=person.id,
-        comments=docstore.read_comments(doc) if version is None else [],
-        forms=_document_forms(person, doc) if version is None else None,
-        versions=versions,
-        version=version,
-        tz=tz,
-        now=now,
-    )
-    return _page(shown.title, html, section="documents")
 
 
 async def document_meta(request: Request, person: Person) -> Response:
@@ -862,57 +815,6 @@ async def document_artifact(request: Request, person: Person) -> Response:
             "Content-Security-Policy": documents_mod.artifact_policy(doc.scripts),
         },
     )
-
-
-def _comment_refused(doc: docstore.Document, reason: str) -> Response:
-    body = documents_mod.message_html(
-        "comment not stored",
-        f'<p class="j-error">{escape(reason)}</p><p><a href="{escape(doc.url)}">Back</a></p>',
-    )
-    return _page("comment not stored", body, status=400, section="documents")
-
-
-async def document_comment(request: Request, person: Person) -> Response:
-    """Add a comment of the person to a document, or delete their own open
-    comment, then go back to the line. One commit for each write."""
-    doc = _document(request, person)
-    if doc is None:
-        return _not_found()
-    form = await request.form()
-    token = str(form.get("csrf", ""))
-    if not _csrf_valid(person.id, f"comments:{doc.url}", token) or not _origin_ok(request):
-        return _forbidden()
-    base = docstore.root()
-    comment_id = request.path_params.get("cid")
-    if comment_id is not None:
-        if not docstore.delete_comment(base, doc, author=person.id, comment_id=comment_id):
-            return _not_found()
-        logger.info({"message": "viewer comment", "kind": "document", "delete": True})
-        return RedirectResponse(doc.url, status_code=303)
-    body = str(form.get("body", "")).strip()
-    try:
-        line_no = int(str(form.get("line_no", "")))
-    except ValueError:
-        line_no = -1
-    anchor = doc.line(line_no)
-    if anchor is None:
-        return _comment_refused(doc, "The line is not in the document.")
-    if not body:
-        return _comment_refused(doc, "The comment is empty.")
-    if len(body) > comments_mod.MAX_COMMENT:
-        return _comment_refused(doc, f"The comment exceeds {comments_mod.MAX_COMMENT} characters.")
-    line_text = str(form.get("line_text", "")) or anchor
-    docstore.add_comment(
-        base,
-        doc,
-        author=person.id,
-        line_no=line_no,
-        line_text=line_text,
-        body=body,
-        now=_now(UTC),
-    )
-    logger.info({"message": "viewer comment", "kind": "document", "delete": False})
-    return RedirectResponse(f"{doc.url}#L{line_no}", status_code=303)
 
 
 def _now(tz: tzinfo) -> datetime:
@@ -1033,23 +935,11 @@ def build_app() -> Starlette:
             _require_auth(comment_on_saved),
             methods=["POST"],
         ),
-        Route("/documents", _require_auth(documents_list)),
-        # The JSON route comes first, so the page route does not take
-        # ``<slug>.json``. A slug that ends in ``.json`` is not a
-        # document, so the two can never name the same file.
+        # The two routes of a document that the chat calls. The page itself
+        # is the React app, and a slug never ends in ``.json``, so these two
+        # and an address of the app can never name the same file.
         Route("/documents/{owner}/{slug}.json", _require_auth(document_meta)),
-        Route("/documents/{owner}/{slug}", _require_auth(document_page)),
         Route("/documents/{owner}/{slug}/artifact", _require_auth(document_artifact)),
-        Route(
-            "/documents/{owner}/{slug}/comments",
-            _require_auth(document_comment),
-            methods=["POST"],
-        ),
-        Route(
-            "/documents/{owner}/{slug}/comments/{cid}/delete",
-            _require_auth(document_comment),
-            methods=["POST"],
-        ),
     ]
     spa = viewer_spa.mount()
     if spa is None:

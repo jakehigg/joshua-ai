@@ -85,10 +85,33 @@ function iconOf(key: string): string {
 }
 
 /**
+ * True when this app runs in a frame of another app, or when the address
+ * carries `?embed=1`.
+ *
+ * The chat frames a document page in its artifact panel, so the page there
+ * is the document and nothing else. Reading `window.top` of a frame of
+ * another origin throws, and that is a frame too.
+ */
+export function embedded(): boolean {
+  if (new URLSearchParams(window.location.search).get("embed") === "1") {
+    return true;
+  }
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * The shell of every page: the sidebar on a wide screen, the app bar and the
  * tabs on a phone. `section` marks the current item. The search field is in
  * the app bar, so it shows on every screen; it goes to `/search`, a page of
  * this app. `query` is what the field holds, which the search page passes.
+ *
+ * In a frame there is no navigation at all: no sidebar, no app bar and no
+ * tabs, so the page of the frame is the content and the person navigates in
+ * the app that holds the frame.
  */
 export default function Shell({
   section = "",
@@ -100,8 +123,12 @@ export default function Shell({
   children: ReactNode;
 }) {
   const [session, setSession] = useState<Session | null>(null);
+  const frame = embedded();
 
   useEffect(() => {
+    if (frame) {
+      return;
+    }
     let live = true;
     getJson<Session>("/session")
       .then((answer) => {
@@ -116,7 +143,17 @@ export default function Shell({
     return () => {
       live = false;
     };
-  }, []);
+  }, [frame]);
+
+  if (frame) {
+    return (
+      <div className="j-shell">
+        <div className="j-main">
+          <main className="j-content">{children}</main>
+        </div>
+      </div>
+    );
+  }
 
   const sections = session?.sections ?? [];
   return (
