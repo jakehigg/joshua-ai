@@ -1,5 +1,5 @@
 """Offline tests for the viewer's links: the file, the form, the page and
-the navigation, and ``/`` opening the wiki."""
+the navigation."""
 
 from __future__ import annotations
 
@@ -66,19 +66,6 @@ def _seed(data: Path, text: str) -> None:
 def _post(client, fields: dict[str, str], auth=ALEX, csrf: str | None = None):
     token = csrf if csrf is not None else viewer._csrf_token(auth[0], "links")
     return client.post("/links", data={"csrf": token, **fields}, auth=auth, follow_redirects=False)
-
-
-# -- the root -----------------------------------------------------------------
-
-
-def test_root_opens_the_wiki(client):
-    response = client.get("/", auth=ALEX, follow_redirects=False)
-    assert response.status_code == 302
-    assert response.headers["location"] == "/wiki/"
-
-
-def test_root_still_needs_a_sign_in(client):
-    assert client.get("/", follow_redirects=False).status_code == 401
 
 
 # -- checking a link ------------------------------------------------------------
@@ -154,7 +141,7 @@ def test_a_missing_file_shows_no_links(tmp_path):
 
 def test_the_sidebar_shows_each_link_in_a_new_tab(client, data):
     _seed(data, f"links:\n  - title: Pantry\n    url: {PANTRY}\n    icon: box\n")
-    html = client.get("/wiki/", auth=ALEX).text
+    html = client.get("/journal", auth=ALEX).text
     nav = html[html.index('aria-label="Links"') :]
     nav = nav[: nav.index("</nav>")]
     assert f'href="{PANTRY}" target="_blank" rel="noopener noreferrer"' in nav
@@ -163,12 +150,12 @@ def test_the_sidebar_shows_each_link_in_a_new_tab(client, data):
 
 
 def test_with_no_links_the_sidebar_offers_to_add_them(client):
-    html = client.get("/wiki/", auth=ALEX).text
+    html = client.get("/journal", auth=ALEX).text
     assert 'href="/links">Add links</a>' in html
 
 
 def test_a_phone_gets_a_links_tab(client):
-    html = client.get("/wiki/", auth=ALEX).text
+    html = client.get("/journal", auth=ALEX).text
     assert '<a class="j-tab" href="/links">Links</a>' in html
 
 
@@ -271,5 +258,6 @@ def test_a_save_needs_the_token_and_the_same_origin(client, data):
 
 def test_the_links_file_is_hidden_from_the_wiki(client, data):
     _seed(data, f"links:\n  - title: Pantry\n    url: {PANTRY}\n")
-    assert ".viewer" not in client.get("/wiki/", auth=ALEX).text
-    assert client.get("/wiki/.viewer/links.yaml", auth=ALEX).status_code == 404
+    folder = client.get("/api/v1/wiki?path=wiki", auth=ALEX)
+    assert ".viewer" not in folder.text
+    assert client.get("/api/v1/files/wiki/.viewer/links.yaml", auth=ALEX).status_code == 404

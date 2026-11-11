@@ -121,13 +121,17 @@ def test_new_page_rel_adds_md_and_refuses_an_escape():
 
 
 def test_member_sees_edit_and_new_links_and_guest_does_not(client):
-    page = client.get("/wiki/recipes/ponzu-sauce.md", auth=ALEX).text
-    assert 'href="/edit/recipes/ponzu-sauce.md"' in page
-    assert 'href="/edit/' not in client.get("/wiki/recipes/ponzu-sauce.md", auth=MIA).text
-    folder = client.get("/wiki/recipes/", auth=ALEX).text
-    assert 'href="/new?folder=recipes"' in folder
-    assert 'href="/new' not in client.get("/wiki/recipes/", auth=MIA).text
-    assert 'href="/new"' in client.get("/wiki/", auth=ALEX).text
+    """The page and the folder are the React app, which gets the two
+    addresses, and the permission, from the JSON route."""
+    page = "/api/v1/wiki?path=wiki/recipes/ponzu-sauce.md"
+    member = client.get(page, auth=ALEX).json()
+    assert member["can_edit"] is True
+    assert member["edit_url"] == "/edit/recipes/ponzu-sauce.md"
+    assert client.get(page, auth=MIA).json()["can_edit"] is False
+    folder = client.get("/api/v1/wiki?path=wiki/recipes", auth=ALEX).json()
+    assert folder["can_create"] is True and folder["new_url"] == "/new?folder=recipes"
+    assert client.get("/api/v1/wiki?path=wiki/recipes", auth=MIA).json()["can_create"] is False
+    assert client.get("/api/v1/wiki?path=wiki", auth=ALEX).json()["new_url"] == "/new"
 
 
 def test_edit_form_shows_the_body_and_keeps_the_frontmatter_out_of_it(client):

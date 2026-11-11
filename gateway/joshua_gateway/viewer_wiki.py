@@ -1,23 +1,22 @@
-"""Navigation over the wiki: titles, the folder tree, breadcrumbs, folder pages.
+"""Navigation over the wiki: titles, the folder tree, crumbs, siblings.
 
 The wiki is a folder of Markdown files, and a folder can have an index page
 beside it: ``recipes.md`` next to ``recipes/`` is the page for that folder.
 ``Home.md`` is the index page of the root. This module reads that shape once
 per request and builds the pieces the viewer shows: a page title, the folder
-tree (``build_tree``, which the JSON route of the tree answers from too), the
-crumbs above a page, the folder page, and the list of the other pages in the
-same folder.
+tree (``build_tree``, which the JSON routes answer from), the crumbs above a
+page, the other pages in the same folder, and the frontmatter line of a page.
 
-Everything here reads. The routes and the auth live in ``viewer``.
+Everything here reads, and every answer is a plain value: the JSON routes of
+``viewer_api`` send it, and the React app draws it. The routes and the auth
+live in ``viewer``.
 """
 
 from __future__ import annotations
 
-import posixpath
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from html import escape
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -28,8 +27,6 @@ from joshua_shared.layout import is_hidden
 from joshua_gateway.viewer_journal import split_frontmatter
 
 _H1 = re.compile(r"^#\s+(.+?)\s*#*\s*$")
-_LINK_ATTR = re.compile(r'\b(href|src)="([^"]*)"')
-_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 # The journal folder is a feed, not a tree: the home page links ``/journal``
 # in its place.
@@ -109,37 +106,6 @@ def first_heading(body: str) -> tuple[str, str]:
             return match.group(1).strip(), rest
         break
     return "", body
-
-
-def index_links(html: str, index_rel: str) -> str:
-    """Resolve the relative links of an index page from the folder that holds it.
-
-    The folder page ``/wiki/recipes/`` shows the text of ``recipes.md``, which
-    is one folder up. A relative link in that text is relative to the file, as
-    everywhere in the wiki, but a browser resolves it from the URL of the
-    folder page. So each relative ``href`` and ``src`` becomes an absolute
-    ``/wiki/`` path here. A link with a scheme, an absolute path, or only a
-    fragment or a query does not change. A link that goes above the wiki does
-    not change either.
-    """
-    base = posixpath.dirname(index_rel)
-
-    def fix(match: re.Match[str]) -> str:
-        attr, target = match.group(1), match.group(2)
-        if not target or target.startswith(("/", "#", "?")) or _SCHEME.match(target):
-            return match.group(0)
-        end = min((i for i in (target.find("?"), target.find("#")) if i >= 0), default=len(target))
-        path, rest = target[:end], target[end:]
-        resolved = posixpath.normpath(posixpath.join(base, path))
-        if resolved == ".." or resolved.startswith("../"):
-            return match.group(0)
-        if resolved == ".":
-            resolved = ""
-        if path.endswith("/") and resolved:
-            resolved += "/"
-        return f'{attr}="/wiki/{resolved}{rest}"'
-
-    return _LINK_ATTR.sub(fix, html)
 
 
 def page_title(text: str, fallback: str) -> str:
@@ -224,102 +190,49 @@ def _fill(wiki: Path, directory: Path, folder: Folder) -> None:
         folder.folders.append(child)
 
 
-def _page_item(page: Page) -> str:
-    return f'<li><a href="{page.url}">{escape(page.title)}</a></li>'
-
-
-def _file_item(file: File) -> str:
-    return (
-        f'<li><a href="{file.url}">{escape(file.name)}</a>'
-        f" <span class=count>{_size(file.size)}</span></li>"
-    )
-
-
-def _size(size: int) -> str:
-    """A file size a person reads: `4 KB`, `1.2 MB`."""
-    if size < 1024:
-        return f"{size} B"
-    if size < 1024 * 1024:
-        return f"{round(size / 1024)} KB"
-    return f"{size / (1024 * 1024):.1f} MB"
-
-
 # -- crumbs and siblings ----------------------------------------------------
 
 
-def crumbs_html(wiki: Path, rel: str, *, leaf: str | None) -> str:
-    """``home › wiki › Recipes › Ponzu Sauce``. ``rel`` is the folder of the
-    page (or the folder page itself); ``leaf`` is the page title, or None on
-    a folder page where the folder is the last crumb."""
-    parts = ['<a href="/">home</a>', '<a href="/wiki/">wiki</a>']
+def crumbs(wiki: Path, rel: str, *, leaf: str | None) -> list[dict[str, str]]:
+    """``home › wiki › Recipes › Ponzu Sauce`` as ``{"title", "url"}`` values.
+
+    ``rel`` is the folder of the page (or the folder page itself); ``leaf`` is
+    the page title, or None on a folder page where the folder is the last
+    crumb. The last crumb is where the reader is, so its ``url`` is empty and
+    the app draws it as text.
+    """
+    items = [{"title": "home", "url": "/"}, {"title": "wiki", "url": "/wiki/"}]
     segments = [s for s in rel.split("/") if s]
     for index, segment in enumerate(segments):
         folder_rel = "/".join(segments[: index + 1])
         index_file = wiki / f"{folder_rel}.md"
         text = _read(index_file) if index_file.is_file() else None
         title = page_title(text, stem_title(segment)) if text else stem_title(segment)
-        if leaf is None and index == len(segments) - 1:
-            parts.append(f"<span>{escape(title)}</span>")
-        else:
-            parts.append(f'<a href="/wiki/{quote(folder_rel)}/">{escape(title)}</a>')
+        here = leaf is None and index == len(segments) - 1
+        items.append({"title": title, "url": "" if here else f"/wiki/{quote(folder_rel)}/"})
     if leaf is not None:
-        parts.append(f"<span>{escape(leaf)}</span>")
-    return '<p class="j-crumbs">' + " › ".join(parts) + "</p>"
+        items.append({"title": leaf, "url": ""})
+    return items
 
 
-def siblings_html(wiki: Path, rel: str) -> str:
+def siblings(wiki: Path, rel: str) -> list[dict[str, str]]:
     """The other pages in the folder of the page at ``rel``, and the folders
-    beside it, as one list at the foot of the page. Empty when there are none."""
+    beside it, as one list of ``{"title", "url"}`` values. The title of a
+    folder ends with ``/``, because the list holds both kinds. Empty when
+    there is no sibling."""
     folder_rel = str(Path(rel).parent.as_posix()) if "/" in rel else ""
     if folder_rel == ".":
         folder_rel = ""
     folder = build_tree(wiki, folder_rel)
     if folder is None:
-        return ""
+        return []
     items = [
-        f'<li><a href="{f.url}">{escape(f.title)}/</a></li>'
-        for f in folder.folders
-        if f.name != JOURNAL_DIR
+        {"title": f"{f.title}/", "url": f.url} for f in folder.folders if f.name != JOURNAL_DIR
     ]
-    items += [_page_item(p) for p in folder.pages if p.rel != rel]
+    items += [{"title": p.title, "url": p.url} for p in folder.pages if p.rel != rel]
     if folder.index is not None and folder.index.rel != rel and folder.rel:
-        items.insert(0, f'<li><a href="{folder.index.url}">{escape(folder.index.title)}</a></li>')
-    if not items:
-        return ""
-    items = items[:SIBLINGS_MAX]
-    return (
-        f'<section class="siblings"><h2 class="j-label">more in {escape(folder.title)}</h2>'
-        f'<ul class="links">{"".join(items)}</ul></section>'
-    )
-
-
-# -- the folder page --------------------------------------------------------
-
-
-def folder_html(folder: Folder, index_body_html: str) -> str:
-    """A folder page: the title, the index page's text if it has one, then the
-    subfolders and the pages."""
-    parts = [f'<h1 class="j-doc-title">{escape(folder.title)}</h1>']
-    if index_body_html:
-        parts.append(f'<article class="j-prose">{index_body_html}</article>')
-    subfolders = "".join(
-        f'<li><a href="{f.url}">{escape(f.title)}/</a> <span class=count>{f.count()}</span></li>'
-        for f in folder.folders
-        if f.name != JOURNAL_DIR or folder.rel
-    )
-    if any(f.name == JOURNAL_DIR for f in folder.folders) and not folder.rel:
-        subfolders = '<li><a href="/journal">journal</a></li>' + subfolders
-    pages = "".join(_page_item(p) for p in folder.pages)
-    files = "".join(_file_item(f) for f in folder.files)
-    if subfolders:
-        parts.append(f'<h2 class="j-label">folders</h2><ul class="tree">{subfolders}</ul>')
-    if pages:
-        parts.append(f'<h2 class="j-label">pages</h2><ul class="tree">{pages}</ul>')
-    if files:
-        parts.append(f'<h2 class="j-label">files</h2><ul class="tree">{files}</ul>')
-    if not subfolders and not pages and not files:
-        parts.append('<p class="j-empty">nothing here yet.</p>')
-    return "".join(parts)
+        items.insert(0, {"title": folder.index.title, "url": folder.index.url})
+    return items[:SIBLINGS_MAX]
 
 
 # -- the frontmatter line ---------------------------------------------------
@@ -340,16 +253,12 @@ def _short(value: Any) -> str:
     return text
 
 
-def meta_html(front: dict[str, Any]) -> str:
-    """One muted line of the frontmatter, ``key: value`` pairs. A key with an
-    empty value is left out. Empty frontmatter gives an empty string."""
-    pairs = []
-    for key, value in front.items():
-        if value in (None, "", [], {}):
-            continue
-        pairs.append(
-            f"<span><span class=k>{escape(str(key))}:</span> {escape(_short(value))}</span>"
-        )
-    if not pairs:
-        return ""
-    return '<p class="j-meta frontmatter">' + " · ".join(pairs) + "</p>"
+def meta_pairs(front: dict[str, Any]) -> dict[str, str]:
+    """The frontmatter of a page as text, for the one muted line above it.
+
+    Each value is the text a person reads: a timestamp keeps its day and a
+    list joins. A key with an empty value is left out, so empty frontmatter
+    gives an empty map. The order is the order of the page."""
+    return {
+        str(key): _short(value) for key, value in front.items() if value not in (None, "", [], {})
+    }

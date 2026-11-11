@@ -4,3 +4,9 @@
    app adds goes under these two imports. */
 @import "../../joshua_gateway/ui/joshua-ui.css";
 @import "../../joshua_gateway/viewer.css";
+
+/* A code block of a page, with the button that copies its text. The button
+   shows on hover and on focus, so it never covers the first line. */
+.v-code { position: relative; }
+.v-code-copy { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity 120ms; }
+.v-code:hover .v-code-copy, .v-code-copy:focus-visible { opacity: 1; }

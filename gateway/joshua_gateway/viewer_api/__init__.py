@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from starlette.routing import Route
 
-from joshua_gateway.viewer_api import me, session, wiki
+from joshua_gateway.viewer_api import files, me, session, wiki
 
 # Every JSON route of the viewer is under this prefix, from the first one.
 API_PREFIX = "/api/v1"
@@ -39,4 +39,6 @@ def routes() -> list[Route]:
         Route(api_path("session"), _require_auth(session.session)),
         Route(api_path("me"), _require_auth(me.me)),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
+        Route(api_path("wiki"), _require_auth(wiki.content)),
+        Route(api_path("files/{root}/{path:path}"), _require_auth(files.file)),
     ]

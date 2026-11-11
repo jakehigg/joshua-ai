@@ -37,8 +37,8 @@ describe("the section table", () => {
     expect(section("chat")?.path).toEqual("/chat");
   });
 
-  it("has no migrated section yet, so every section loads a page", () => {
-    expect(SECTIONS.every((item) => !item.migrated)).toBe(true);
+  it("keeps the wiki as the one migrated section; the rest load a page", () => {
+    expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual(["wiki"]);
   });
 
   it("finds one section by key, and nothing for a name that is not one", () => {

@@ -113,16 +113,24 @@ def test_with_anonymous_the_app_opens(monkeypatch, tmp_path) -> None:
 
 
 def test_every_explicit_route_still_wins(client) -> None:
-    assert client.get("/", auth=ALEX, follow_redirects=False).headers["location"] == "/wiki/"
-    assert "front door" in client.get("/wiki/", auth=ALEX).text
+    assert client.get("/journal", auth=ALEX).status_code == 200
     assert client.get("/healthz").json() == {"ok": True}
     assert client.get("/api/v1/me", auth=ALEX).json()["person"]["id"] == "alex"
+
+
+def test_the_content_of_the_viewer_is_the_app(client) -> None:
+    """The wiki, the shared files and the own attachments are the app, which
+    reads them from ``GET /api/v1/wiki``."""
+    for path in ("/", "/wiki/", "/wiki/Home.md", "/attachments/2026/09/a.jpg"):
+        response = client.get(path, auth=ALEX)
+        assert response.status_code == 200, path
+        assert "id=root" in response.text, path
 
 
 def test_with_no_build_there_is_no_mount(bare_client) -> None:
     assert viewer_spa.mount() is None
     assert bare_client.get("/me", auth=ALEX).status_code == 404
-    assert "front door" in bare_client.get("/wiki/", auth=ALEX).text
+    assert bare_client.get("/wiki/", auth=ALEX).status_code == 404
 
 
 def test_the_static_folder_is_in_the_package() -> None:
@@ -133,6 +141,10 @@ def test_the_static_folder_is_in_the_package() -> None:
 def test_which_path_falls_back_to_the_app() -> None:
     assert viewer_spa.falls_back("me") is True
     assert viewer_spa.falls_back("documents/alex/plan") is True
+    # The content of the viewer, where a name holds a dot.
+    assert viewer_spa.falls_back("wiki/recipes/pizza.md") is True
+    assert viewer_spa.falls_back("shared/attachments/team.png") is True
+    assert viewer_spa.falls_back("attachments/2026/09/a.jpg") is True
     assert viewer_spa.falls_back("api/v1/session") is False
     assert viewer_spa.falls_back("chat/alex") is False
     assert viewer_spa.falls_back("logo-64.png") is False

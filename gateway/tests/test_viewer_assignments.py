@@ -159,7 +159,7 @@ def _main(html: str) -> str:
 
 
 def test_the_nav_has_the_assignments_section(data) -> None:
-    html = _get("/").text
+    html = _get("/journal").text
     nav = html[html.index('<nav class="v-sections"') :]
     nav = nav[: nav.index("</nav>")]
     assert nav.index('href="/usage"') < nav.index('href="/assignments"')

@@ -20,6 +20,12 @@ another app on the same host, so the viewer only links to it. The viewer reads
 the data volume through the same resolver as the files MCP
 (``files_mcp.paths``), so the two never drift on who reads what.
 
+The wiki, the shared attachments and a person's own attachments are the React
+app: ``/``, ``/wiki/…``, ``/shared/…`` and ``/attachments/…`` are addresses of
+its router (``viewer_spa``), and it reads ``GET /api/v1/wiki`` for a page, a
+folder or a file, and ``GET /api/v1/files/<root>/<path>`` for the bytes
+(``viewer_api``).
+
 A member has two write actions, both human actions in a browser that the
 agent never gets: a delete, which moves a wiki page to the trash under
 ``wiki/.trash/`` and is never a hard delete, and an edit of a journal entry's
@@ -92,7 +98,7 @@ from joshua_gateway import viewer_showcase as showcase_mod
 from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
-from joshua_gateway.files_mcp.server import IMAGE_MIME, MAX_BYTES, _atomic_write, data_root
+from joshua_gateway.files_mcp.server import MAX_BYTES, _atomic_write, data_root
 
 logger = get_logger("viewer")
 
@@ -525,79 +531,6 @@ def _read_text(abs_path: Path) -> str | None:
         return None
 
 
-def _safe_filename(name: str) -> str:
-    return name.replace('"', "").replace("\\", "").replace("\r", "").replace("\n", "")
-
-
-def _serve(roots: dict[str, Root], rel: str, person: Person, *, allow_delete: bool) -> Response:
-    """Serve one file by its root-relative path.
-
-    An image renders inline; a markdown file renders as a page; any other type
-    downloads with ``Content-Disposition: attachment``. A path that escapes a
-    root, or a file that is not there, returns 404.
-    """
-    try:
-        root, abs_path = resolve(rel, roots, write=False)
-    except PathError:
-        return _not_found()
-    if not abs_path.is_file():
-        return _not_found()
-
-    mime = IMAGE_MIME.get(abs_path.suffix.lower())
-    if mime is not None:
-        return Response(abs_path.read_bytes(), media_type=mime)
-
-    if abs_path.suffix.lower() == ".md":
-        text = _read_text(abs_path)
-        if text is None:
-            return _download(abs_path)
-        front, body_md = _split_frontmatter(text)
-        title = rel
-        body = ""
-        under_wiki = abs_path.relative_to(root.base).as_posix() if root.name == "wiki" else ""
-        if root.name == "wiki":
-            # A wiki page gets its title, the crumbs above it, and the other
-            # pages of its folder below it.
-            title = wiki.page_title(text, wiki.stem_title(abs_path.stem))
-            folder_rel = under_wiki.rsplit("/", 1)[0] if "/" in under_wiki else ""
-            body += wiki.crumbs_html(root.base, folder_rel, leaf=title)
-        rendered = _MD.render(body_md)
-        if root.name == "wiki":
-            rendered = _wiki_attachment_links(rendered)
-        body += wiki.meta_html(front or {}) + f'<article class="j-prose">{rendered}</article>'
-        if root.name == "wiki":
-            body += wiki.siblings_html(root.base, under_wiki)
-        if allow_delete and root.name == "wiki" and person.role == "member":
-            body += (
-                f'<div class="v-actions">{edit.edit_link(under_wiki)}'
-                f"{_delete_form(person, rel)}</div>"
-            )
-        return _page(title, body, section="wiki" if root.name == "wiki" else "")
-
-    return _download(abs_path)
-
-
-def _wiki_attachment_links(html: str) -> str:
-    """Point a page's `/attachments/…` links at the wiki folder of this viewer.
-
-    A page stores the link the way a wiki frontend that serves the wiki at its
-    root reads it: `/attachments/YYYY/MM/name`. This viewer serves the wiki
-    under `/wiki/`, and `/attachments/` here is the person's own files, so the
-    link is rewritten as the page is rendered. The stored page is not changed.
-    """
-    return html.replace('src="/attachments/', 'src="/wiki/attachments/').replace(
-        'href="/attachments/', 'href="/wiki/attachments/'
-    )
-
-
-def _download(abs_path: Path) -> Response:
-    return Response(
-        abs_path.read_bytes(),
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_filename(abs_path.name)}"'},
-    )
-
-
 # -- listings ---------------------------------------------------------------
 
 
@@ -652,16 +585,6 @@ def _origin_ok(request: Request) -> bool:
     return urlparse(origin).netloc == request.headers.get("host", "")
 
 
-def _delete_form(person: Person, rel: str) -> str:
-    token = _csrf_token(person.id, rel)
-    return (
-        '<form class="delete" action="/delete" method="post">'
-        f'<input type="hidden" name="path" value="{escape(rel, quote=True)}">'
-        f'<input type="hidden" name="csrf" value="{escape(token, quote=True)}">'
-        '<button class="j-btn sm danger" type=submit>move this page to trash</button></form>'
-    )
-
-
 def _move_to_trash(root: Root, abs_path: Path) -> Path:
     """Move a wiki file under ``wiki/.trash/<UTC timestamp>/`` and return the new
     path. The timestamp directory keeps the original tree."""
@@ -691,67 +614,6 @@ def _commit_trash(root: Root, abs_path: Path) -> None:
 
 
 # -- routes -----------------------------------------------------------------
-
-
-async def root(request: Request, person: Person) -> Response:
-    """``/`` opens the wiki."""
-    return RedirectResponse("/wiki/", status_code=302)
-
-
-async def wiki_page(request: Request, person: Person) -> Response:
-    """A wiki page, or a folder page for a path that ends in ``/`` or names
-    a directory. ``/wiki/`` is the root folder: the front page and the tree."""
-    path = request.path_params["path"]
-    roots = _roots_for(person)
-    if path == "" or path.endswith("/"):
-        return _folder_page(roots, path.rstrip("/"), person)
-    rel = "wiki/" + path
-    try:
-        _, abs_path = resolve(rel, roots, write=False)
-    except PathError:
-        return _not_found()
-    if abs_path.is_dir():
-        return RedirectResponse(f"/wiki/{path}/", status_code=302)
-    return _serve(roots, rel, person, allow_delete=True)
-
-
-async def wiki_root(request: Request, person: Person) -> Response:
-    return RedirectResponse("/wiki/", status_code=302)
-
-
-def _folder_page(roots: dict[str, Root], rel: str, person: Person) -> Response:
-    """The page for one folder: its index page's text, then what is in it."""
-    try:
-        root, abs_path = resolve("wiki/" + rel if rel else "wiki", roots, write=False)
-    except PathError:
-        return _not_found()
-    if not abs_path.is_dir():
-        return _not_found()
-    folder = wiki.build_tree(root.base, rel)
-    if folder is None:
-        return _not_found()
-    index_html = ""
-    if folder.index is not None:
-        text = _read_text(root.base / folder.index.rel) or ""
-        _, body_md = _split_frontmatter(text)
-        _, body_md = wiki.first_heading(body_md)  # the folder title is the h1
-        index_html = wiki.index_links(_MD.render(body_md), folder.index.rel)
-        index_html = _wiki_attachment_links(index_html)
-    body = wiki.crumbs_html(root.base, rel, leaf=None) if rel else ""
-    body += wiki.folder_html(folder, index_html)
-    if person.role == "member":
-        body += f'<div class="v-actions">{edit.new_link(rel)}</div>'
-    return _page(folder.title, body, section="wiki")
-
-
-async def shared_page(request: Request, person: Person) -> Response:
-    rel = "shared/" + request.path_params["path"]
-    return _serve(_roots_for(person), rel, person, allow_delete=False)
-
-
-async def attachments(request: Request, person: Person) -> Response:
-    rel = "attachments/" + request.path_params["path"]
-    return _serve(_roots_for(person), rel, person, allow_delete=False)
 
 
 async def search(request: Request, person: Person) -> Response:
@@ -1621,8 +1483,9 @@ def build_app() -> Starlette:
 
     The JSON routes of ``viewer_api`` come after the probes, and the mount of
     the React app is the last route, so every explicit route wins over it.
-    With no build in the image, there is no mount and every page is a
-    server-rendered one.
+    The wiki, the attachments and ``/`` are routes of the app, so they are
+    not here: with no build in the image, they are 404 and the pages the
+    server still renders answer as always.
     """
     routes: list[BaseRoute] = [
         Route("/healthz", healthz),
@@ -1630,18 +1493,13 @@ def build_app() -> Starlette:
         *viewer_api.routes(),
         Route("/style.css", _require_auth(style)),
         Route("/ui/{name}", _require_auth(ui_file)),
-        Route("/", _require_auth(root)),
         Route("/links", _require_auth(links_page)),
         Route("/links", _require_auth(links_save), methods=["POST"]),
-        Route("/wiki", _require_auth(wiki_root)),
         Route("/journal", _require_auth(journal_feed)),
         Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
         Route("/edit/{path:path}", _require_auth(edit_page)),
         Route("/new", _require_auth(new_page)),
         Route("/save", _require_auth(save), methods=["POST"]),
-        Route("/wiki/{path:path}", _require_auth(wiki_page)),
-        Route("/shared/{path:path}", _require_auth(shared_page)),
-        Route("/attachments/{path:path}", _require_auth(attachments)),
         Route("/search", _require_auth(search)),
         Route("/usage", _require_auth(usage)),
         Route("/assignments", _require_auth(assignments_list)),

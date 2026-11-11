@@ -53,6 +53,9 @@ CONFIG_MEMBER = textwrap.dedent("""\
 SAM_PW = "sam-secret"
 SAM = ("sam", SAM_PW)
 
+# The wiki is the React app, which reads a page from this route.
+PAGE_JSON = "/api/v1/wiki?path=wiki/pizza.md"
+
 CONFIG_NO_ANON = textwrap.dedent("""\
     name: Test
     timezone: America/New_York
@@ -115,9 +118,9 @@ def no_anon_client(monkeypatch, tmp_path) -> TestClient:
 
 
 def test_no_credentials_reads_the_wiki(anon_client):
-    response = anon_client.get("/wiki/pizza.md")
+    response = anon_client.get(PAGE_JSON)
     assert response.status_code == 200
-    assert "Dough and sauce" in response.text
+    assert "Dough and sauce" in response.json()["markdown"]
 
 
 def test_no_credentials_reads_the_journal(anon_client):
@@ -141,10 +144,10 @@ def test_no_credentials_home_page_has_no_profile_link(anon_client):
 
 
 def test_no_credentials_sees_edit_and_new_links(anon_client):
-    page = anon_client.get("/wiki/pizza.md")
-    assert 'href="/edit/pizza.md"' in page.text
-    folder = anon_client.get("/wiki/")
-    assert 'href="/new"' in folder.text
+    page = anon_client.get(PAGE_JSON).json()
+    assert page["can_edit"] is True and page["edit_url"] == "/edit/pizza.md"
+    folder = anon_client.get("/api/v1/wiki?path=wiki").json()
+    assert folder["can_create"] is True and folder["new_url"] == "/new"
 
 
 def test_no_credentials_can_edit(anon_client, tmp_path):
@@ -208,7 +211,7 @@ def test_anonymous_write_goes_through_the_same_commit_path(anon_client, tmp_path
 
 
 def test_wrong_credentials_still_401_even_with_anonymous_true(anon_client):
-    response = anon_client.get("/wiki/pizza.md", auth=("alex", "wrong"))
+    response = anon_client.get(PAGE_JSON, auth=("alex", "wrong"))
     assert response.status_code == 401
 
 
@@ -216,9 +219,9 @@ def test_wrong_credentials_still_401_even_with_anonymous_true(anon_client):
 
 
 def test_member_signs_in_and_writes_on_an_open_viewer(anon_client, tmp_path):
-    response = anon_client.get("/wiki/pizza.md", auth=ALEX)
+    response = anon_client.get(PAGE_JSON, auth=ALEX)
     assert response.status_code == 200
-    assert 'href="/edit/pizza.md"' in response.text
+    assert response.json()["edit_url"] == "/edit/pizza.md"
 
     token = viewer._csrf_token("alex", "wiki/pizza.md")
     response = anon_client.post(
@@ -235,7 +238,7 @@ def test_member_signs_in_and_writes_on_an_open_viewer(anon_client, tmp_path):
 
 
 def test_no_credentials_still_gets_401_when_anonymous_is_unset(no_anon_client):
-    response = no_anon_client.get("/wiki/pizza.md")
+    response = no_anon_client.get(PAGE_JSON)
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"].startswith("Basic")
 
@@ -259,7 +262,7 @@ def test_no_credentials_home_page_is_the_members_page(member_client):
 
 
 def test_no_credentials_reads_the_members_attachments(member_client):
-    response = member_client.get("/attachments/2026/09/receipt.txt")
+    response = member_client.get("/api/v1/files/attachments/2026/09/receipt.txt")
     assert response.status_code == 200
     assert "paid" in response.text
 
@@ -304,8 +307,8 @@ def test_no_credentials_reads_the_members_assignments(member_client, monkeypatch
 
 
 def test_credentials_on_a_member_viewer_are_still_checked(member_client):
-    assert member_client.get("/wiki/pizza.md", auth=("sam", "wrong")).status_code == 401
+    assert member_client.get(PAGE_JSON, auth=("sam", "wrong")).status_code == 401
     # alex is not in viewer.users, so alex cannot sign in by password.
-    assert member_client.get("/wiki/pizza.md", auth=ALEX).status_code == 401
+    assert member_client.get(PAGE_JSON, auth=ALEX).status_code == 401
     body = member_client.get("/api/v1/me", auth=SAM).json()
     assert body["profile_url"] == "/wiki/people/sam.md"

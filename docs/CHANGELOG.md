@@ -6,6 +6,16 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The wiki in the viewer is a React page.** A page, a folder, the front
+  page at `/wiki/`, a file under `/shared/` and one of your own attachments
+  are all the app now. A page shows the crumbs, the frontmatter, the
+  Markdown, and the other pages of its folder, and a member still gets the
+  edit and the trash. The app reads one JSON address,
+  `GET /api/v1/wiki?path=<path>`, which answers a page, a folder, or a file,
+  and `GET /api/v1/files/<root>/<path>` delivers the bytes of a file: an
+  image shows inline, anything else downloads with its name. Every address
+  you have in a bookmark still opens the same thing, and a page you wrote
+  before does not change.
 - **Your own page in the viewer is a React page.** The viewer now ships a
   JavaScript app beside the pages it renders in Python, and `/me` is the
   first page of it: your name, your profile, the journal, your recent

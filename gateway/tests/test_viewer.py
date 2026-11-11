@@ -86,26 +86,31 @@ def client(monkeypatch, tmp_path) -> TestClient:
 
 MIA = ("mia", MIA_PW)
 
+# The wiki, the shared files and the own attachments are the React app, which
+# reads these two routes.
+PAGE_JSON = "/api/v1/wiki?path=wiki/pizza.md"
+SHARED_PNG = "/api/v1/files/shared/attachments/team.png"
+
 
 # -- auth -------------------------------------------------------------------
 
 
 def test_every_route_needs_auth(client):
-    for path in ("/", "/wiki/pizza.md", "/shared/attachments/team.png", "/search"):
+    for path in (PAGE_JSON, SHARED_PNG, "/search", "/journal"):
         response = client.get(path)
         assert response.status_code == 401, path
         assert response.headers["WWW-Authenticate"].startswith("Basic")
 
 
 def test_good_credential_reads_a_page(client):
-    response = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW))
+    response = client.get(PAGE_JSON, auth=("alex", ALEX_PW))
     assert response.status_code == 200
-    assert "Dough and sauce" in response.text
+    assert "Dough and sauce" in response.json()["markdown"]
 
 
 def test_bad_password_is_401(client):
-    assert client.get("/", auth=("alex", "wrong")).status_code == 401
-    assert client.get("/", auth=("nobody", "x")).status_code == 401
+    assert client.get("/journal", auth=("alex", "wrong")).status_code == 401
+    assert client.get("/journal", auth=("nobody", "x")).status_code == 401
 
 
 def test_bcrypt_hash_reference(monkeypatch, tmp_path):
@@ -123,8 +128,8 @@ def test_bcrypt_hash_reference(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)
     client = TestClient(viewer.build_app())
-    assert client.get("/", auth=("alex", "hunter2")).status_code == 200
-    assert client.get("/", auth=("alex", "nope")).status_code == 401
+    assert client.get("/journal", auth=("alex", "hunter2")).status_code == 200
+    assert client.get("/journal", auth=("alex", "nope")).status_code == 401
 
 
 # -- access -----------------------------------------------------------------
@@ -132,7 +137,7 @@ def test_bcrypt_hash_reference(monkeypatch, tmp_path):
 
 def test_member_and_guest_both_read_the_wiki(client):
     for creds in (("alex", ALEX_PW), MIA):
-        assert client.get("/wiki/pizza.md", auth=creds).status_code == 200
+        assert client.get(PAGE_JSON, auth=creds).status_code == 200
 
 
 def test_the_page_of_the_person_reads_its_json(client):
@@ -153,21 +158,21 @@ def test_home_has_no_blog_route(client):
 
 
 def test_shared_profile_lives_in_the_wiki(client):
-    text = client.get("/wiki/people/everyone.md", auth=("alex", ALEX_PW)).text
-    assert "Shared facts" in text
+    body = client.get("/api/v1/wiki?path=wiki/people/everyone.md", auth=("alex", ALEX_PW)).json()
+    assert "Shared facts" in body["markdown"]
 
 
 def test_shared_attachment_reads(client):
-    response = client.get("/shared/attachments/team.png", auth=("alex", ALEX_PW))
+    response = client.get(SHARED_PNG, auth=("alex", ALEX_PW))
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
 
 
 def test_a_guest_reads_another_persons_profile_in_the_wiki(client):
     """Profiles live in the shared wiki now: everyone reads every page."""
-    response = client.get("/wiki/people/alex.md", auth=MIA)
+    response = client.get("/api/v1/wiki?path=wiki/people/alex.md", auth=MIA)
     assert response.status_code == 200
-    assert "A member" in response.text
+    assert "A member" in response.json()["markdown"]
 
 
 # -- dot entries --------------------------------------------------------------
@@ -188,7 +193,7 @@ def test_dot_entries_are_hidden_from_home_and_search(client, tmp_path):
 def test_reading_a_dot_path_directly_is_404(client, tmp_path):
     data = tmp_path / "data"
     _write(data / "wiki/.git/config", "secret\n")
-    response = client.get("/wiki/.git/config", auth=("alex", ALEX_PW))
+    response = client.get("/api/v1/files/wiki/.git/config", auth=("alex", ALEX_PW))
     assert response.status_code == 404
 
 
@@ -196,41 +201,43 @@ def test_reading_a_dot_path_directly_is_404(client, tmp_path):
 
 
 def test_dotdot_escape_is_404(client):
-    response = client.get("/wiki/%2e%2e/%2e%2e/etc/hostname", auth=("alex", ALEX_PW))
+    response = client.get("/api/v1/files/wiki/%2e%2e/%2e%2e/etc/hostname", auth=("alex", ALEX_PW))
     assert response.status_code == 404
 
 
 def test_symlink_out_of_root_is_404(client, tmp_path):
     link = tmp_path / "data" / "wiki" / "evil.md"
     link.symlink_to("/etc/hostname")
-    response = client.get("/wiki/evil.md", auth=("alex", ALEX_PW))
+    response = client.get("/api/v1/wiki?path=wiki/evil.md", auth=("alex", ALEX_PW))
     assert response.status_code == 404
 
 
 # -- rendering --------------------------------------------------------------
 
 
-def test_raw_html_is_escaped(client):
-    text = client.get("/wiki/raw.md", auth=("alex", ALEX_PW)).text
-    assert "<script>alert(1)</script>" not in text
-    assert "&lt;script&gt;" in text
+def test_the_html_in_a_page_stays_text(client):
+    """The JSON route sends the body as Markdown, so the HTML in a page is
+    text. The app renders it with no raw-HTML plugin and sanitizes the
+    result, and no page of the viewer ever renders that HTML as markup."""
+    body = client.get("/api/v1/wiki?path=wiki/raw.md", auth=("alex", ALEX_PW))
+    assert body.headers["content-type"].startswith("application/json")
+    assert "<script>alert(1)</script>" in body.json()["markdown"]
 
 
-def test_frontmatter_shows_a_header(client):
-    text = client.get("/wiki/dated.md", auth=("alex", ALEX_PW)).text
-    assert "frontmatter" in text
-    assert "2026-08-20" in text
+def test_frontmatter_comes_as_pairs(client):
+    body = client.get("/api/v1/wiki?path=wiki/dated.md", auth=("alex", ALEX_PW)).json()
+    assert body["frontmatter"] == {"date": "2026-08-20", "author": "alex"}
 
 
 def test_image_attachment_renders_inline(client):
-    response = client.get("/attachments/2026/08/pic.png", auth=("alex", ALEX_PW))
+    response = client.get("/api/v1/files/attachments/2026/08/pic.png", auth=("alex", ALEX_PW))
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert "attachment" not in response.headers.get("content-disposition", "")
 
 
 def test_security_headers_on_every_response(client):
-    response = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW))
+    response = client.get("/journal", auth=("alex", ALEX_PW))
     # The policy allows the bundle of the React app, from this origin, and the
     # copy script of a server-rendered report, by its hash. No inline script.
     assert response.headers["content-security-policy"] == (
@@ -245,7 +252,7 @@ def test_security_headers_on_every_response(client):
 
 def test_only_the_same_origin_may_frame_the_viewer(client):
     # The chat frames a document page of the viewer; no other origin can.
-    policy = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).headers["content-security-policy"]
+    policy = client.get("/journal", auth=("alex", ALEX_PW)).headers["content-security-policy"]
     assert "frame-ancestors 'self'" in policy
     assert "frame-ancestors *" not in policy
     assert "autrui.net" not in policy
@@ -294,7 +301,7 @@ def test_the_viewer_stylesheet_uses_the_shared_tokens(client):
 
 
 def test_a_page_has_the_shared_shell(client):
-    html = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).text
+    html = client.get("/search", params={"q": "Dough"}, auth=("alex", ALEX_PW)).text
     assert '<link rel=stylesheet href="/ui/joshua-ui.css">' in html
     assert html.index("/ui/joshua-ui.css") < html.index("/style.css")
     assert 'href="/ui/favicon-32.png"' in html
@@ -304,7 +311,6 @@ def test_a_page_has_the_shared_shell(client):
     assert '<aside class="j-sidebar">' in html and '<header class="j-appbar">' in html
     assert '<nav class="j-tabs mobile-only"' in html
     assert '<main class="j-content">' in html
-    assert '<article class="j-prose">' in html
     # The search field is in the app bar, so a phone has it too.
     appbar = html[html.index('<header class="j-appbar">') : html.index("</header>")]
     assert 'action="/search"' in appbar and 'name="q"' in appbar
@@ -312,7 +318,6 @@ def test_a_page_has_the_shared_shell(client):
 
 def test_the_current_section_is_marked(client):
     pages = {
-        "/wiki/pizza.md": 'href="/wiki/"',
         "/journal": 'href="/journal"',
         "/search?q=Dough": 'href="/search"',
         "/usage": 'href="/usage"',
@@ -329,7 +334,7 @@ def test_the_current_section_is_marked(client):
 
 def test_the_chat_entry_names_the_person_of_the_request(client):
     for creds, person in ((("alex", ALEX_PW), "alex"), (MIA, "mia")):
-        html = client.get("/wiki/pizza.md", auth=creds).text
+        html = client.get("/journal", auth=creds).text
         link = f'href="/chat/{person}"'
         assert f'<a class="j-nav-item" {link}>' in html, person
         assert f'<a class="j-tab" {link}>Chat</a>' in html, person
@@ -352,11 +357,6 @@ def test_the_chat_section_is_marked_current(client):
 def test_the_search_field_keeps_the_query(client):
     html = client.get("/search", params={"q": 'a "b"'}, auth=("alex", ALEX_PW)).text
     assert 'name="q" value="a &quot;b&quot;"' in html
-
-
-def test_the_delete_button_is_a_danger_button(client):
-    html = client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).text
-    assert '<button class="j-btn sm danger" type=submit>move this page to trash</button>' in html
 
 
 # -- search -----------------------------------------------------------------
@@ -414,9 +414,12 @@ def test_guest_cannot_delete(client):
     assert response.status_code == 403
 
 
-def test_guest_sees_no_delete_control(client):
-    assert "move this page to trash" not in client.get("/wiki/pizza.md", auth=MIA).text
-    assert "move this page to trash" in client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).text
+def test_guest_gets_no_delete_token(client):
+    """The page of a guest carries no token, so it draws no delete control."""
+    guest = client.get(PAGE_JSON, auth=MIA).json()
+    assert guest["can_edit"] is False and guest["delete_csrf"] == ""
+    member = client.get(PAGE_JSON, auth=("alex", ALEX_PW)).json()
+    assert member["can_edit"] is True and member["delete_csrf"] != ""
 
 
 def test_wrong_csrf_is_403(client):
@@ -523,50 +526,50 @@ def env_client(monkeypatch, tmp_path):
 def test_one_variable_carries_every_password(env_client):
     """The compose file passed VIEWER_PW_ALEX, which named the example person."""
     client = env_client(passwords=f"alex={ALEX_PW},mia={MIA_PW}")
-    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
-    assert client.get("/wiki/pizza.md", auth=("mia", MIA_PW)).status_code == 200
+    assert client.get(PAGE_JSON, auth=("alex", ALEX_PW)).status_code == 200
+    assert client.get(PAGE_JSON, auth=("mia", MIA_PW)).status_code == 200
 
 
 def test_a_person_whose_id_is_not_the_example_id_signs_in(env_client):
     """No tracked file names a person, so a real install needs no edit to one."""
     client = env_client(passwords=f"mia={MIA_PW}")
-    assert client.get("/wiki/pizza.md", auth=("mia", MIA_PW)).status_code == 200
+    assert client.get(PAGE_JSON, auth=("mia", MIA_PW)).status_code == 200
 
 
 def test_a_bcrypt_hash_in_the_variable_works(env_client):
     hashed = bcrypt.hashpw(ALEX_PW.encode(), bcrypt.gensalt()).decode()
     client = env_client(passwords=f"alex={hashed}")
-    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
-    assert client.get("/wiki/pizza.md", auth=("alex", "wrong")).status_code == 401
+    assert client.get(PAGE_JSON, auth=("alex", ALEX_PW)).status_code == 200
+    assert client.get(PAGE_JSON, auth=("alex", "wrong")).status_code == 401
 
 
 def test_a_person_not_in_viewer_users_never_signs_in(env_client):
     """`viewer.users` is the authorization. The environment is only the secret."""
     client = env_client(passwords=f"nobody={ALEX_PW}")
-    assert client.get("/wiki/pizza.md", auth=("nobody", ALEX_PW)).status_code == 401
+    assert client.get(PAGE_JSON, auth=("nobody", ALEX_PW)).status_code == 401
 
 
 def test_an_empty_variable_signs_nobody_in(env_client):
     client = env_client(passwords="")
-    assert client.get("/wiki/pizza.md", auth=("alex", "")).status_code == 401
-    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 401
+    assert client.get(PAGE_JSON, auth=("alex", "")).status_code == 401
+    assert client.get(PAGE_JSON, auth=("alex", ALEX_PW)).status_code == 401
 
 
 def test_a_malformed_pair_is_ignored(env_client):
     client = env_client(passwords=f"nonsense,,alex={ALEX_PW},mia=")
-    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
-    assert client.get("/wiki/pizza.md", auth=("mia", "")).status_code == 401
+    assert client.get(PAGE_JSON, auth=("alex", ALEX_PW)).status_code == 200
+    assert client.get(PAGE_JSON, auth=("mia", "")).status_code == 401
 
 
 def test_the_per_person_variable_still_works(env_client):
     """An installation that injects VIEWER_PW_<ID> its own way keeps working."""
     client = env_client(pw_vars={"VIEWER_PW_ALEX": ALEX_PW})
-    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
+    assert client.get(PAGE_JSON, auth=("alex", ALEX_PW)).status_code == 200
 
 
 def test_the_config_entry_wins_over_the_environment(client):
     """The first fixture still resolves through ${VIEWER_PW_<ID>} in joshua.yaml."""
-    assert client.get("/wiki/pizza.md", auth=("alex", ALEX_PW)).status_code == 200
+    assert client.get(PAGE_JSON, auth=("alex", ALEX_PW)).status_code == 200
 
 
 def test_a_page_shows_a_wiki_attachment(client, tmp_path):
@@ -578,17 +581,18 @@ def test_a_page_shows_a_wiki_attachment(client, tmp_path):
     (folder / "plant.png").write_bytes(png)
     _write(data / "wiki/plants.md", "# Plants\n\n![plant](/attachments/2026/09/plant.png)\n")
 
-    rendered = client.get("/wiki/plants.md", auth=("alex", ALEX_PW))
-    assert rendered.status_code == 200
-    assert 'src="/wiki/attachments/2026/09/plant.png"' in rendered.text
+    page = client.get("/api/v1/wiki?path=wiki/plants.md", auth=("alex", ALEX_PW))
+    assert page.status_code == 200
+    # The stored link is never changed; the app points it at the file route.
+    assert "![plant](/attachments/2026/09/plant.png)" in page.json()["markdown"]
 
-    image = client.get("/wiki/attachments/2026/09/plant.png", auth=("alex", ALEX_PW))
+    image = client.get("/api/v1/files/wiki/attachments/2026/09/plant.png", auth=("alex", ALEX_PW))
     assert image.status_code == 200
     assert image.headers["content-type"] == "image/png"
 
 
 def test_one_person_still_reaches_their_own_files_at_attachments(client):
     """The rewrite changes a page's links only, never the viewer's own root."""
-    response = client.get("/attachments/2026/08/pic.png", auth=("alex", ALEX_PW))
+    response = client.get("/api/v1/files/attachments/2026/08/pic.png", auth=("alex", ALEX_PW))
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"

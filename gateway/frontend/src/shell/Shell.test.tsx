@@ -73,8 +73,8 @@ describe("the shell", () => {
     expect(document.querySelector('form.v-search input[name="q"]')).not.toBeNull();
   });
 
-  it("gives the section that is not migrated a plain link, which loads a page", async () => {
-    expect(SECTIONS.every((item) => !item.migrated)).toBe(true);
+  it("gives the migrated section a router link and the rest a plain link", async () => {
+    expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual(["wiki"]);
     stubSession();
 
     shell();
@@ -82,6 +82,8 @@ describe("the shell", () => {
     const wiki = (await screen.findAllByText("Wiki"))[0];
     expect(wiki?.tagName).toEqual("A");
     expect(wiki?.getAttribute("href")).toEqual("/wiki/");
+    const journal = screen.getAllByText("Journal")[0];
+    expect(journal?.getAttribute("href")).toEqual("/journal");
     const chat = screen.getAllByText("Chat")[0];
     expect(chat?.getAttribute("href")).toEqual("/chat/alex");
   });

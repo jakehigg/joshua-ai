@@ -13,6 +13,10 @@ path under ``api/`` is the JSON space of the viewer, which covers
 ``api/v1/…``; and ``chat`` is the separate chat app, which the cluster routes
 on its own path and docker compose does not serve at all.
 
+The content sections of the viewer (``CONTENT``) are the exception to the dot:
+a wiki page ends in ``.md`` and an attachment keeps the name it arrived with,
+so a path under one of them always reaches the app.
+
 A built asset carries a content hash in its name, so it is immutable;
 ``index.html`` is never cached, because a new build writes a new one.
 
@@ -40,6 +44,10 @@ INDEX = "index.html"
 # The first segment of a path the app never claims.
 NO_FALLBACK = frozenset({"api", "chat"})
 
+# The first segment of a path the app always claims, dot or no dot: the
+# content of the viewer, which the app reads from the JSON routes.
+CONTENT = frozenset({"wiki", "shared", "attachments"})
+
 # The cache headers: a hashed asset forever, the entry file never.
 _IMMUTABLE = "public, max-age=31536000, immutable"
 _NO_CACHE = "no-cache"
@@ -53,8 +61,11 @@ def static_dir() -> Path:
 def falls_back(path: str) -> bool:
     """True when an unknown path gets ``index.html``."""
     clean = path.strip("/")
-    if clean.split("/", 1)[0] in NO_FALLBACK:
+    first = clean.split("/", 1)[0]
+    if first in NO_FALLBACK:
         return False
+    if first in CONTENT:
+        return True
     return "." not in clean.rsplit("/", 1)[-1]
 
 

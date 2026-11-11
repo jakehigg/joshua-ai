@@ -1,35 +1,16 @@
 """Offline tests for the viewer's wiki navigation: titles, the folder tree,
-folder pages, crumbs, and the sibling list on a page."""
+the crumbs, the siblings of a page, and the frontmatter pairs.
+
+Every answer here is a plain value. The JSON routes that send it, and the
+three shapes they answer, are in ``test_viewer_api_wiki.py``.
+"""
 
 from __future__ import annotations
 
-import textwrap
 from pathlib import Path
 
-import pytest
-from joshua_gateway import viewer, viewer_wiki
-from joshua_shared import config
+from joshua_gateway import viewer_wiki
 from joshua_shared.attachments import AttachmentMeta, write_meta
-from starlette.testclient import TestClient
-
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
-
-CONFIG = textwrap.dedent("""\
-    name: Test
-    timezone: America/New_York
-    people:
-      - id: alex
-        name: Alex
-      - id: mia
-        name: Mia
-        role: guest
-    viewer:
-      enabled: true
-      users:
-        alex: ${VIEWER_PW_ALEX:-}
-        mia: ${VIEWER_PW_MIA:-}
-    """)
 
 
 def _write(path: Path, text: str) -> None:
@@ -54,20 +35,6 @@ def _tree(data: Path) -> None:
     _write(w / "journal/2026/09/04/2026-09-04.md", "---\ndate: 2026-09-04\n---\n\nA day.\n")
     _write(w / "joshua-docs/memory.md", "# Memory\n\nShipped.\n")
     _write(w / ".obsidian/workspace.md", "hidden\n")
-
-
-@pytest.fixture
-def client(monkeypatch, tmp_path) -> TestClient:
-    data = tmp_path / "data"
-    data.mkdir()
-    _tree(data)
-    cfg_path = tmp_path / "joshua.yaml"
-    cfg_path.write_text(CONFIG)
-    monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
-    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
-    return TestClient(viewer.build_app())
 
 
 # -- the model --------------------------------------------------------------
@@ -103,151 +70,49 @@ def test_subtree_at_a_folder(tmp_path):
     assert viewer_wiki.build_tree(tmp_path / "data" / "wiki", ".obsidian") is None
 
 
-def test_meta_line_drops_empty_values_and_shortens_a_timestamp():
-    html = viewer_wiki.meta_html(
+# -- the plain values a page shows -------------------------------------------
+
+
+def test_meta_pairs_drop_an_empty_value_and_shorten_a_timestamp():
+    pairs = viewer_wiki.meta_pairs(
         {"title": "Recipes", "tags": [], "updated": "2026-09-03T15:57:47.978Z"}
     )
-    assert "tags" not in html
-    assert "updated:</span> 2026-09-03" in html
-    assert viewer_wiki.meta_html({}) == ""
+    assert pairs == {"title": "Recipes", "updated": "2026-09-03"}
+    assert viewer_wiki.meta_pairs({}) == {}
 
 
-# -- folder pages -----------------------------------------------------------
+def test_crumbs_name_every_folder_above_a_page(tmp_path):
+    _tree(tmp_path / "data")
+    wiki = tmp_path / "data" / "wiki"
+    assert viewer_wiki.crumbs(wiki, "recipes/sauces", leaf="Aji Amarillo") == [
+        {"title": "home", "url": "/"},
+        {"title": "wiki", "url": "/wiki/"},
+        {"title": "Recipes", "url": "/wiki/recipes/"},  # the index page names it
+        {"title": "sauces", "url": "/wiki/recipes/sauces/"},
+        {"title": "Aji Amarillo", "url": ""},
+    ]
 
 
-def test_wiki_root_is_the_front_page_and_the_folders(client):
-    html = client.get("/wiki/", auth=ALEX).text
-    assert '<h1 class="j-doc-title">Home</h1>' in html
-    assert "The front door." in html
-    assert '<a href="/wiki/recipes/">Recipes/</a>' in html
-    assert '<a href="/journal">journal</a>' in html
+def test_the_last_crumb_of_a_folder_is_the_folder(tmp_path):
+    _tree(tmp_path / "data")
+    items = viewer_wiki.crumbs(tmp_path / "data" / "wiki", "recipes", leaf=None)
+    assert items[-1] == {"title": "Recipes", "url": ""}
 
 
-def test_wiki_without_slash_redirects(client):
-    response = client.get("/wiki", auth=ALEX, follow_redirects=False)
-    assert response.status_code == 302 and response.headers["location"] == "/wiki/"
+def test_siblings_are_the_other_pages_of_the_folder(tmp_path):
+    _tree(tmp_path / "data")
+    items = viewer_wiki.siblings(tmp_path / "data" / "wiki", "recipes/ponzu-sauce.md")
+    titles = [item["title"] for item in items]
+    assert "eggy ramen" in titles
+    assert "Ponzu Sauce" not in titles  # the page itself is not its own sibling
+    assert {"title": "sauces/", "url": "/wiki/recipes/sauces/"} in items
+    assert items[0] == {"title": "Recipes", "url": "/wiki/recipes.md"}  # the folder's own page
 
 
-def test_folder_page_renders_its_index_and_lists_its_pages(client):
-    html = client.get("/wiki/recipes/", auth=ALEX).text
-    assert '<h1 class="j-doc-title">Recipes</h1>' in html
-    assert html.count("<h1") == 1  # the index heading is not repeated
-    assert "What we cook." in html
-    assert '<a href="/wiki/recipes/sauces/">sauces/</a>' in html
-    assert '<a href="/wiki/recipes/ponzu-sauce.md">Ponzu Sauce</a>' in html
-    assert "› <span>Recipes</span>" in html
-
-
-def test_index_links_resolve_from_the_folder_of_the_index_page():
-    def link(target: str, index: str = "recipes.md") -> str:
-        return viewer_wiki.index_links(f'<a href="{target}">x</a>', index)
-
-    assert link("recipes/ponzu-sauce.md") == '<a href="/wiki/recipes/ponzu-sauce.md">x</a>'
-    assert link("./recipes/eggy-ramen.md#top") == '<a href="/wiki/recipes/eggy-ramen.md#top">x</a>'
-    assert link("recipes/my%20page.md?v=1") == '<a href="/wiki/recipes/my%20page.md?v=1">x</a>'
-    assert link("recipes/sauces/") == '<a href="/wiki/recipes/sauces/">x</a>'
-    assert (
-        link("ponzu-sauce.md", "recipes/sauces.md")
-        == '<a href="/wiki/recipes/ponzu-sauce.md">x</a>'
-    )
-    assert link("../garden.md", "recipes/sauces.md") == '<a href="/wiki/garden.md">x</a>'
-    assert link("recipes.md", "Home.md") == '<a href="/wiki/recipes.md">x</a>'
-    img = viewer_wiki.index_links('<img src="recipes/pic.png" alt="">', "recipes.md")
-    assert img == '<img src="/wiki/recipes/pic.png" alt="">'
-
-
-def test_index_links_leave_other_links_alone():
-    for target in (
-        "/wiki/recipes/ponzu-sauce.md",
-        "/attachments/2026/09/a.png",
-        "//example.com/x",
-        "https://example.com/x",
-        "mailto:alex@example.com",
-        "#section",
-        "?q=1",
-        "",
-        "../outside.md",
-    ):
-        html = f'<a href="{target}">x</a>'
-        assert viewer_wiki.index_links(html, "recipes.md") == html
-
-
-def test_folder_page_links_resolve_from_the_index_page(client, tmp_path):
-    w = tmp_path / "data" / "wiki"
-    _write(
-        w / "recipes.md",
-        "# Recipes\n\n[Ponzu](recipes/ponzu-sauce.md) [Aji](recipes/sauces/aji.md) "
-        "[Beds](garden/beds.md) [Web](https://example.com/) ![Pic](/attachments/2026/09/a.png)\n",
-    )
-    _write(w / "recipes/sauces.md", "# Sauces\n\n[Aji](sauces/aji.md) [Up](../recipes.md)\n")
-    _write(w / "Home.md", "# Home\n\n[Recipes](recipes.md)\n")
-
-    html = client.get("/wiki/recipes/", auth=ALEX).text
-    assert '<a href="/wiki/recipes/ponzu-sauce.md">Ponzu</a>' in html
-    assert '<a href="/wiki/recipes/sauces/aji.md">Aji</a>' in html
-    assert '<a href="/wiki/garden/beds.md">Beds</a>' in html
-    assert '<a href="https://example.com/">Web</a>' in html
-    assert 'src="/wiki/attachments/2026/09/a.png"' in html
-
-    html = client.get("/wiki/recipes/sauces/", auth=ALEX).text
-    assert '<a href="/wiki/recipes/sauces/aji.md">Aji</a>' in html
-    assert '<a href="/wiki/recipes.md">Up</a>' in html
-
-    html = client.get("/wiki/", auth=ALEX).text
-    assert '<a href="/wiki/recipes.md">Recipes</a>' in html
-
-    # The page itself keeps the link as written; the browser resolves it right.
-    html = client.get("/wiki/recipes.md", auth=ALEX).text
-    assert '<a href="recipes/ponzu-sauce.md">Ponzu</a>' in html
-
-
-def test_a_directory_path_without_slash_redirects_to_the_folder_page(client):
-    response = client.get("/wiki/recipes", auth=ALEX, follow_redirects=False)
-    assert response.status_code == 302 and response.headers["location"] == "/wiki/recipes/"
-
-
-def test_folder_without_an_index_page_still_lists(client):
-    html = client.get("/wiki/garden/", auth=ALEX).text
-    assert '<h1 class="j-doc-title">garden</h1>' in html and "Beds" in html
-
-
-def test_missing_and_hidden_folders_are_404(client):
-    assert client.get("/wiki/nope/", auth=ALEX).status_code == 404
-    assert client.get("/wiki/.obsidian/", auth=ALEX).status_code == 404
-
-
-def test_guest_reads_a_folder_page(client):
-    assert client.get("/wiki/recipes/", auth=MIA).status_code == 200
-
-
-# -- a page -----------------------------------------------------------------
-
-
-def test_a_page_has_crumbs_a_title_and_its_siblings(client):
-    html = client.get("/wiki/recipes/sauces/aji.md", auth=ALEX).text
-    assert "<title>Aji Amarillo</title>" in html
-    assert (
-        '<a href="/">home</a> › <a href="/wiki/">wiki</a> › '
-        '<a href="/wiki/recipes/">Recipes</a> › <a href="/wiki/recipes/sauces/">sauces</a> › '
-        "<span>Aji Amarillo</span>"
-    ) in html
-    html = client.get("/wiki/recipes/ponzu-sauce.md", auth=ALEX).text
-    assert "more in Recipes" in html
-    assert '<a href="/wiki/recipes/eggy-ramen.md">eggy ramen</a>' in html
-    assert 'href="/wiki/recipes/ponzu-sauce.md"' not in html.split("more in Recipes")[1]
-    assert '<a href="/wiki/recipes.md">Recipes</a>' in html  # the folder's own page
-
-
-def test_frontmatter_is_one_line_not_a_box(client):
-    html = client.get("/wiki/recipes.md", auth=ALEX).text
-    assert 'class="j-meta frontmatter"' in html
-    assert "wikijs" in html and "2026-09-03" in html
-    assert "tags:" not in html
-
-
-def test_search_shows_titles(client):
-    html = client.get("/search", params={"q": "Citrus"}, auth=ALEX).text
-    assert ">Ponzu Sauce</a>" in html
+def test_the_journal_is_no_sibling_of_a_page_at_the_root(tmp_path):
+    _tree(tmp_path / "data")
+    items = viewer_wiki.siblings(tmp_path / "data" / "wiki", "loose-page.md")
+    assert "journal/" not in [item["title"] for item in items]
 
 
 # ── the files the wiki keeps ─────────────────────────────────────────────────
@@ -266,11 +131,9 @@ def test_a_folder_lists_the_files_it_holds(tmp_path: Path) -> None:
     assert folder is not None
     assert [f.name for f in folder.files] == ["grocery-receipt-d7e122.jpg"]
     assert folder.pages == []
-    html = viewer_wiki.folder_html(folder, "")
-    assert "grocery-receipt-d7e122.jpg" in html
-    assert "2 KB" in html
+    assert folder.files[0].size == 2100
     # The metadata file is never shown: it is the record of the file, not a file.
-    assert "meta.json" not in html
+    assert "meta.json" not in [f.name for f in folder.files]
 
 
 def test_a_folder_of_pages_lists_no_files(tmp_path: Path) -> None:

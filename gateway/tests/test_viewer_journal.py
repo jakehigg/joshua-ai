@@ -212,9 +212,10 @@ def test_raw_html_in_an_entry_is_escaped(client, tmp_path):
     assert "&lt;script&gt;" in html
 
 
-def test_home_and_nav_link_to_the_journal(client):
-    assert 'href="/journal"' in client.get("/", auth=ALEX).text
-    assert 'href="/journal"' in client.get("/wiki/pizza.md", auth=ALEX).text
+def test_the_nav_of_a_page_and_of_the_app_links_to_the_journal(client):
+    assert 'href="/journal"' in client.get("/search", auth=ALEX).text
+    sections = client.get("/api/v1/session", auth=ALEX).json()["sections"]
+    assert "/journal" in [section["path"] for section in sections]
 
 
 # -- the day page -----------------------------------------------------------
@@ -357,13 +358,15 @@ def test_save_commits_the_edit(client, tmp_path):
     assert f"viewer: edit {rel}" in log
 
 
-def test_a_table_renders_in_an_entry_and_a_wiki_page(client, tmp_path):
+def test_a_table_renders_in_an_entry_and_reaches_a_wiki_page(client, tmp_path):
     table = "| reading | inches |\n|---|---|\n| morning | 0.8 |\n"
     _write(
         tmp_path / "data/wiki/journal/2026/09/04/rain.md",
         "---\ndate: 2026-09-04\npeople: [alex]\nsource: agent\n---\n\n" + table,
     )
     _write(tmp_path / "data/wiki/table.md", "# Table\n\n" + table)
-    for url in ("/journal", "/wiki/table.md"):
-        html = client.get(url, auth=ALEX).text
-        assert "<table>" in html and "<th>reading</th>" in html and "<td>0.8</td>" in html, url
+    html = client.get("/journal", auth=ALEX).text
+    assert "<table>" in html and "<th>reading</th>" in html and "<td>0.8</td>" in html
+    # A wiki page renders in the app, so the route sends the table as it is.
+    page = client.get("/api/v1/wiki?path=wiki/table.md", auth=ALEX).json()
+    assert page["markdown"] == "# Table\n\n" + table
