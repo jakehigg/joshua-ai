@@ -295,7 +295,7 @@ export function Unit({
 }) {
   const cards = gutter.cards.get(unit.first) ?? [];
   const classes = ["a-unit", className, cards.length > 0 ? "has-comments" : ""];
-  const anchors = [];
+  const anchors: ReactNode[] = [];
   for (let line = unit.first + 1; line <= unit.last; line += 1) {
     anchors.push(<span className="a-anchor" key={line} id={`L${line}`} />);
   }
@@ -303,7 +303,12 @@ export function Unit({
     <div className={classes.filter((part) => part !== "").join(" ")} id={`L${unit.first}`}>
       {anchors}
       <div className="a-unit-body">{children}</div>
-      <Plus gutter={gutter} line={unit.first} text={gutter.lines[unit.first - 1] ?? ""} what={what} />
+      <Plus
+        gutter={gutter}
+        line={unit.first}
+        text={gutter.lines[unit.first - 1] ?? ""}
+        what={what}
+      />
       <Cards gutter={gutter} unit={unit} />
     </div>
   );
@@ -374,7 +379,11 @@ export function SourceLines({
       {gutter.lines.map((line, index) => {
         const no = index + 1;
         return (
-          <li className={gutter.marked.has(no) ? "a-line has-comments" : "a-line"} id={`S${no}`} key={no}>
+          <li
+            className={gutter.marked.has(no) ? "a-line has-comments" : "a-line"}
+            id={`S${no}`}
+            key={no}
+          >
             <a className="a-ln" href={`#S${no}`}>
               {no}
             </a>

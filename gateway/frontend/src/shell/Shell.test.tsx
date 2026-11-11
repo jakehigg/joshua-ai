@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import Shell, { type Session } from "./Shell";
+import Shell, { embedded, type Session } from "./Shell";
 import { SECTIONS } from "./sections";
 
 const SESSION: Session = {
@@ -18,15 +18,22 @@ const SESSION: Session = {
   timezone: "America/New_York",
 };
 
-function stubSession(session: Session = SESSION): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(session), {
-        headers: { "Content-Type": "application/json" },
-      }),
-    ),
+function stubSession(session: Session = SESSION) {
+  const mock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(session), {
+      headers: { "Content-Type": "application/json" },
+    }),
   );
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
+
+/** A window: `inFrame` makes its `top` another window, as a frame has. */
+function view(search: string, inFrame: boolean): Window {
+  const fake: Record<string, unknown> = { location: { search } };
+  fake["self"] = fake;
+  fake["top"] = inFrame ? { location: { search: "" } } : fake;
+  return fake as unknown as Window;
 }
 
 function shell(section = "me") {
@@ -76,6 +83,7 @@ describe("the shell", () => {
       "journal",
       "search",
       "usage",
+      "documents",
     ]);
     stubSession();
 
@@ -111,6 +119,47 @@ describe("the shell", () => {
     );
     expect(tab?.getAttribute("href")).toEqual("/links");
     expect(await screen.findByText("Add links")).toBeDefined();
+  });
+
+  it("drops the navigation in a frame, and asks for no session", () => {
+    const fetchMock = stubSession();
+    window.history.replaceState({}, "", "/documents/alex/party?embed=1");
+
+    try {
+      shell("documents");
+
+      expect(screen.getByText("the body")).toBeDefined();
+      expect(document.querySelector("main.j-content")).not.toBeNull();
+      expect(document.querySelector(".j-shell.has-sidebar")).toBeNull();
+      expect(document.querySelector("aside.j-sidebar")).toBeNull();
+      expect(document.querySelector("header.j-appbar")).toBeNull();
+      expect(document.querySelector("nav.j-tabs")).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      window.history.replaceState({}, "", "/");
+    }
+  });
+
+  it("reads a frame of the chat, and ?embed=1, as embedded", () => {
+    const blocked = {
+      location: { search: "" },
+      get self(): unknown {
+        return blocked;
+      },
+      get top(): unknown {
+        throw new Error("another origin");
+      },
+    };
+
+    expect(embedded(view("", false))).toBe(false);
+    expect(embedded(view("?rev=abc", false))).toBe(false);
+    expect(embedded(view("", true))).toBe(true);
+    expect(embedded(view("?embed=1", false))).toBe(true);
+    // The chat frames the page of a document, which is of another origin for
+    // the frame when it reads `top`.
+    expect(embedded(blocked as unknown as Window)).toBe(true);
+    // The page of this app, which no frame holds.
+    expect(embedded()).toBe(false);
   });
 
   it("still shows the body when the session does not load", async () => {

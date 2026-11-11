@@ -119,7 +119,7 @@ submits no form and opens no frame. Write the styles in the file.
 You comment on a document in the viewer, part by part:
 
 1. Open the document.
-2. Click the `+` beside a paragraph, a heading, a list item, or a card.
+2. Click the `+` beside a paragraph, a heading, or a list item.
    The `+` at the head of the page is a comment on the whole document. The `Source` fold has a `+` on each line,
    for one exact line.
 3. Write what to change, such as "make this two days" or "remove the
@@ -178,10 +178,9 @@ link.
   `shared`), the time of the last change, the count of open comments, and
   the status.
 - A document opens at `/documents/<owner>/<slug>`. A Markdown document shows
-  in blocks. A document with the headings of an assignment report
-  (`Highlights`, `What was asked`, `What was done`, `Outputs`,
-  `Decisions for you`, `Follow-ups`) shows as that report does, with cards.
-  An HTML document shows in its frame (see [artifacts](#artifacts)).
+  in blocks: one block for each paragraph, heading, list item, quote, code
+  block, and table. An HTML document shows in its frame (see
+  [artifacts](#artifacts)).
 - `Source` gives the frontmatter and each line of the body. `Versions` gives
   the history.
 - `/documents/<owner>/<slug>.json` gives the title, the kind, the status, and

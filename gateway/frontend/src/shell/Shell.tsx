@@ -86,18 +86,18 @@ function iconOf(key: string): string {
 
 /**
  * True when this app runs in a frame of another app, or when the address
- * carries `?embed=1`.
+ * carries `?embed=1`. `view` is the window, which a test gives.
  *
  * The chat frames a document page in its artifact panel, so the page there
- * is the document and nothing else. Reading `window.top` of a frame of
- * another origin throws, and that is a frame too.
+ * is the document and nothing else. Reading `top` of a frame of another
+ * origin throws, and that is a frame too.
  */
-export function embedded(): boolean {
-  if (new URLSearchParams(window.location.search).get("embed") === "1") {
-    return true;
-  }
+export function embedded(view: Window = window): boolean {
   try {
-    return window.self !== window.top;
+    if (new URLSearchParams(view.location.search).get("embed") === "1") {
+      return true;
+    }
+    return view.self !== view.top;
   } catch {
     return true;
   }

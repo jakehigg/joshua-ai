@@ -1071,13 +1071,9 @@ documents yet, and the viewer does not create the folder.
 
 A document opens at `/documents/<owner>/<slug>`:
 
-- A Markdown document shows in blocks, as the goal of an assignment shows.
-  When it has the headings of the report of an assignment (`Highlights`,
-  `What was asked`, `What was done`, `Outputs`, `Decisions for you`,
-  `Follow-ups`), it shows as that report does: the lede, the highlights as
-  cards, the decisions as numbered cards, the outputs as cards, the prose,
-  and the follow-ups. The assignments pages and the documents pages use the
-  same renderer.
+- A Markdown document shows in blocks, as the goal of an assignment shows:
+  one block for each paragraph, heading, list item, quote, code block, and
+  table, and each block takes a comment on its first line.
 - An HTML document shows in a frame with `sandbox` that loads the artifact
   address of the document, `/documents/<owner>/<slug>/artifact`. The frame
   cannot reach the viewer, its sign-in, or a form of the viewer. Scripts do

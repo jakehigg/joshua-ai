@@ -6,6 +6,23 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The documents in the viewer are React pages.** The list at `/documents`
+  and one document at `/documents/<owner>/<slug>` are the app now. The status
+  tabs and the kind chips write the address (`?status=draft&kind=plan`), so a
+  bookmark of a list opens the same rows. A Markdown document shows in
+  blocks, each block takes a comment on its first line, the `Source` fold
+  takes a comment on one exact line, and the `Versions` fold opens an older
+  version at `?rev=<sha>`, which is read-only. An HTML document still shows in
+  its sandboxed frame. The app reads and writes JSON addresses with the
+  sign-in of a page: `GET /api/v1/documents`,
+  `GET /api/v1/documents/<owner>/<slug>`,
+  `POST /api/v1/documents/<owner>/<slug>/comments`, and
+  `POST /api/v1/documents/<owner>/<slug>/comments/<id>/delete`.
+  `/documents/<owner>/<slug>.json` and `/documents/<owner>/<slug>/artifact`
+  answer as before, because the chat calls both. In a frame, the app draws no
+  sidebar, no app bar and no tabs, so the artifact panel of the chat shows the
+  document alone. A document with the headings of an assignment report shows
+  in blocks for now.
 - **The links in the viewer are a React page.** `/links` is the app now, and
   the "Links" group of the sidebar shows on every page of the app. A member
   adds a link, changes it, moves it, and removes it under "Edit links", then

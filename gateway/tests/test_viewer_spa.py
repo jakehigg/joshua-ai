@@ -118,12 +118,21 @@ def test_every_explicit_route_still_wins(client) -> None:
     assert client.get("/api/v1/me", auth=ALEX).json()["person"]["id"] == "alex"
 
 
+def test_the_two_document_routes_of_the_chat_are_not_the_app(client) -> None:
+    """``<slug>.json`` and ``<slug>/artifact`` answer from the server, so a
+    document that is not there is 404 and never ``index.html``."""
+    for path in ("/documents/alex/party.json", "/documents/alex/party/artifact"):
+        response = client.get(path, auth=ALEX)
+        assert response.status_code == 404, path
+        assert "id=root" not in response.text, path
+
+
 def test_the_content_of_the_viewer_is_the_app(client) -> None:
     """The wiki, the shared files, the own attachments, the journal, the
-    search, the usage, the links and the editor are the app, which reads them
-    from ``GET /api/v1/wiki``, ``GET /api/v1/journal``,
-    ``GET /api/v1/search``, ``GET /api/v1/usage``, ``GET /api/v1/links`` and
-    ``GET /api/v1/edit``."""
+    search, the usage, the links, the documents and the editor are the app,
+    which reads them from ``GET /api/v1/wiki``, ``GET /api/v1/journal``,
+    ``GET /api/v1/search``, ``GET /api/v1/usage``, ``GET /api/v1/links``,
+    ``GET /api/v1/documents`` and ``GET /api/v1/edit``."""
     for path in (
         "/",
         "/wiki/",
@@ -134,6 +143,8 @@ def test_the_content_of_the_viewer_is_the_app(client) -> None:
         "/search",
         "/usage",
         "/links",
+        "/documents",
+        "/documents/alex/party",
         "/edit/Home.md",
         "/new",
     ):
@@ -157,6 +168,7 @@ def test_which_path_falls_back_to_the_app() -> None:
     assert viewer_spa.falls_back("me") is True
     assert viewer_spa.falls_back("documents/alex/plan") is True
     # The content of the viewer, where a name holds a dot.
+    assert viewer_spa.falls_back("documents/alex/plan.v2") is True
     assert viewer_spa.falls_back("wiki/recipes/pizza.md") is True
     assert viewer_spa.falls_back("shared/attachments/team.png") is True
     assert viewer_spa.falls_back("attachments/2026/09/a.jpg") is True

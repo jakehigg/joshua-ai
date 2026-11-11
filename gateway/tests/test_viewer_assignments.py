@@ -159,12 +159,12 @@ def _main(html: str) -> str:
 
 
 def test_the_nav_has_the_assignments_section(data) -> None:
-    html = _get("/documents").text
+    html = _get("/assignments").text
     nav = html[html.index('<nav class="v-sections"') :]
     nav = nav[: nav.index("</nav>")]
     assert nav.index('href="/usage"') < nav.index('href="/assignments"')
     assert '<svg class="j-icon"' in nav[nav.index('href="/assignments"') :]
-    assert '<a class="j-tab" href="/assignments">Assignments</a>' in html
+    assert 'class="j-tab" href="/assignments"' in html
 
 
 def test_the_current_section_is_marked(data) -> None:
