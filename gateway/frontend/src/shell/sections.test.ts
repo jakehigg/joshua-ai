@@ -37,8 +37,11 @@ describe("the section table", () => {
     expect(section("chat")?.path).toEqual("/chat");
   });
 
-  it("keeps the wiki as the one migrated section; the rest load a page", () => {
-    expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual(["wiki"]);
+  it("keeps the wiki and the journal as the migrated sections; the rest load a page", () => {
+    expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual([
+      "wiki",
+      "journal",
+    ]);
   });
 
   it("finds one section by key, and nothing for a name that is not one", () => {

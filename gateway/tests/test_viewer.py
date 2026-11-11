@@ -82,17 +82,18 @@ def client(monkeypatch, tmp_path) -> TestClient:
 
 MIA = ("mia", MIA_PW)
 
-# The wiki, the shared files and the own attachments are the React app, which
-# reads these two routes.
+# The wiki, the shared files, the own attachments and the journal are the
+# React app, which reads these routes.
 PAGE_JSON = "/api/v1/wiki?path=wiki/pizza.md"
 SHARED_PNG = "/api/v1/files/shared/attachments/team.png"
+FEED_JSON = "/api/v1/journal"
 
 
 # -- auth -------------------------------------------------------------------
 
 
 def test_every_route_needs_auth(client):
-    for path in (PAGE_JSON, SHARED_PNG, "/search", "/journal"):
+    for path in (PAGE_JSON, SHARED_PNG, FEED_JSON, "/search"):
         response = client.get(path)
         assert response.status_code == 401, path
         assert response.headers["WWW-Authenticate"].startswith("Basic")
@@ -105,8 +106,8 @@ def test_good_credential_reads_a_page(client):
 
 
 def test_bad_password_is_401(client):
-    assert client.get("/journal", auth=("alex", "wrong")).status_code == 401
-    assert client.get("/journal", auth=("nobody", "x")).status_code == 401
+    assert client.get(FEED_JSON, auth=("alex", "wrong")).status_code == 401
+    assert client.get(FEED_JSON, auth=("nobody", "x")).status_code == 401
 
 
 def test_bcrypt_hash_reference(monkeypatch, tmp_path):
@@ -124,8 +125,8 @@ def test_bcrypt_hash_reference(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)
     client = TestClient(viewer.build_app())
-    assert client.get("/journal", auth=("alex", "hunter2")).status_code == 200
-    assert client.get("/journal", auth=("alex", "nope")).status_code == 401
+    assert client.get(FEED_JSON, auth=("alex", "hunter2")).status_code == 200
+    assert client.get(FEED_JSON, auth=("alex", "nope")).status_code == 401
 
 
 # -- access -----------------------------------------------------------------
@@ -233,7 +234,7 @@ def test_image_attachment_renders_inline(client):
 
 
 def test_security_headers_on_every_response(client):
-    response = client.get("/journal", auth=("alex", ALEX_PW))
+    response = client.get("/search", auth=("alex", ALEX_PW))
     # The policy allows the bundle of the React app, from this origin, and the
     # copy script of a server-rendered report, by its hash. No inline script.
     assert response.headers["content-security-policy"] == (
@@ -248,7 +249,7 @@ def test_security_headers_on_every_response(client):
 
 def test_only_the_same_origin_may_frame_the_viewer(client):
     # The chat frames a document page of the viewer; no other origin can.
-    policy = client.get("/journal", auth=("alex", ALEX_PW)).headers["content-security-policy"]
+    policy = client.get("/search", auth=("alex", ALEX_PW)).headers["content-security-policy"]
     assert "frame-ancestors 'self'" in policy
     assert "frame-ancestors *" not in policy
     assert "autrui.net" not in policy
@@ -314,7 +315,6 @@ def test_a_page_has_the_shared_shell(client):
 
 def test_the_current_section_is_marked(client):
     pages = {
-        "/journal": 'href="/journal"',
         "/search?q=Dough": 'href="/search"',
         "/usage": 'href="/usage"',
     }
@@ -330,7 +330,7 @@ def test_the_current_section_is_marked(client):
 
 def test_the_chat_entry_names_the_person_of_the_request(client):
     for creds, person in ((("alex", ALEX_PW), "alex"), (MIA, "mia")):
-        html = client.get("/journal", auth=creds).text
+        html = client.get("/search", auth=creds).text
         link = f'href="/chat/{person}"'
         assert f'<a class="j-nav-item" {link}>' in html, person
         assert f'<a class="j-tab" {link}>Chat</a>' in html, person

@@ -124,11 +124,12 @@ def test_no_credentials_reads_the_wiki(anon_client):
 
 
 def test_no_credentials_reads_the_journal(anon_client):
-    response = anon_client.get("/journal")
-    assert response.status_code == 200
-    feed = anon_client.get("/journal/2026/09/04")
+    feed = anon_client.get("/api/v1/journal")
     assert feed.status_code == 200
-    assert "Oats" in feed.text
+    assert feed.json()["month"] == "2026-09"
+    day = anon_client.get("/api/v1/journal/2026/09/04")
+    assert day.status_code == 200
+    assert "Oats" in day.json()["entries"][0]["markdown"]
 
 
 def test_no_credentials_home_page_has_no_profile_link(anon_client):

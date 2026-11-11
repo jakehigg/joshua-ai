@@ -1,13 +1,14 @@
-"""The journal view of the viewer: a feed to read, and a form to correct.
+"""The journal of the viewer: the files, and how a month and a day select them.
 
 The wiki tree shows the journal as ``YYYY/MM/DD`` folders, which is the wrong
 shape for reading what happened. This module reads the same files under
-``wiki/journal/`` and shows them newest day first, one month at a time, with
-the people an entry names and whether the nightly run or the agent wrote it.
+``wiki/journal/`` and gives them newest day first, with the people an entry
+names and whether the nightly run or the agent wrote it.
 
-The functions here build data and HTML only. The routes, the auth, and the
-write live in ``viewer``. A member may edit the text and the people of an
-entry; the day, the source, and the file name never change from here.
+The functions here build data only. The JSON routes live in
+``viewer_api.journal`` and the React app renders them. A member may edit the
+text and the people of an entry (``viewer_api.edit``); the day, the source,
+and the file name never change from there.
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date
-from html import escape
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -23,12 +23,7 @@ from urllib.parse import quote
 import yaml
 from joshua_shared import layout
 from joshua_shared.layout import is_hidden
-from markdown_it import MarkdownIt
 
-# Raw HTML is disabled, so a ``<script>`` in an entry renders as text.
-# The commonmark preset has no tables; the table and strikethrough rules are
-# turned on, with no new dependency.
-_MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table", "strikethrough"])
 _H1 = re.compile(r"^#\s+(.+?)\s*#*\s*$")
 
 # The title of a nightly page that carries no heading of its own.
@@ -52,10 +47,6 @@ class Entry:
     body: str  # markdown, frontmatter removed, the title heading removed
     front: dict[str, Any]
     is_day_page: bool
-
-    @property
-    def wiki_url(self) -> str:
-        return "/wiki/" + quote(self.rel)
 
     @property
     def day_url(self) -> str:
@@ -87,13 +78,6 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
             body = "\n".join(lines[index + 1 :]).lstrip("\n")
             return (data if isinstance(data, dict) else {}), body
     return {}, text
-
-
-def render_frontmatter(front: dict[str, Any]) -> str:
-    """The ``---`` block for ``front``, in the same shape the gateway tool and
-    the nightly run write, so an edit changes only what the person changed."""
-    block = yaml.safe_dump(front, sort_keys=False, allow_unicode=True).strip()
-    return f"---\n{block}\n---\n\n"
 
 
 def _people(front: dict[str, Any]) -> tuple[str, ...]:
@@ -220,7 +204,7 @@ def days(entries: list[Entry]) -> list[date]:
     return seen
 
 
-# -- html -------------------------------------------------------------------
+# -- the addresses ----------------------------------------------------------
 
 
 def day_url(day: date) -> str:
@@ -234,141 +218,7 @@ def month_url(month: tuple[int, int], person_id: str | None = None) -> str:
     return url
 
 
-def _month_label(month: tuple[int, int]) -> str:
-    return date(month[0], month[1], 1).strftime("%B %Y")
-
-
-def _day_label(day: date) -> str:
-    return day.strftime("%A %-d %B %Y")
-
-
-def _chips(entry: Entry, names: dict[str, str]) -> str:
-    chips = "".join(
-        f'<a class="j-chip" href="/journal?person={quote(pid)}">{escape(names.get(pid, pid))}</a>'
-        for pid in entry.people
-    )
-    tone = "j-badge accent" if entry.source == SOURCE_NIGHTLY else "j-badge"
-    badge = f'<span class="{tone} {escape(entry.source)}">{escape(entry.source)}</span>'
-    return badge + chips
-
-
-def entry_html(entry: Entry, names: dict[str, str], *, can_edit: bool) -> str:
-    """One entry as an article: title, badge, people, the text, the actions."""
-    actions = [f'<a href="{entry.wiki_url}">page</a>']
-    if can_edit:
-        actions.append(f'<a href="{entry.edit_url}">edit</a>')
-    rendered = _MD.render(entry.body) if entry.body.strip() else '<p class="j-faint">(empty)</p>'
-    return (
-        f'<article class="j-entry" id="{escape(entry.slug, quote=True)}">'
-        '<header class="entry-head"><h3 class="j-entry-title">'
-        f'<a href="{entry.day_url}#{quote(entry.slug)}">{escape(entry.title)}</a></h3>'
-        f"{_chips(entry, names)}</header>"
-        f'<div class="j-prose">{rendered}</div>'
-        f'<footer class="j-meta">{" · ".join(actions)}</footer>'
-        "</article>"
-    )
-
-
-def _day_section(day: date, entries: list[Entry], names: dict[str, str], *, can_edit: bool) -> str:
-    articles = "".join(entry_html(e, names, can_edit=can_edit) for e in entries)
-    return (
-        f'<section class="day"><h2 class="j-label">'
-        f'<a href="{day_url(day)}">{escape(_day_label(day))}</a></h2>'
-        f"{articles}</section>"
-    )
-
-
-def _month_nav(
-    month: tuple[int, int], available: list[tuple[int, int]], person_id: str | None
-) -> str:
-    """Older and newer month links around the current month, from the months
-    that hold an entry. ``available`` is newest first."""
-    if month not in available:
-        available = sorted(set(available) | {month}, reverse=True)
-    index = available.index(month)
-    older = available[index + 1] if index + 1 < len(available) else None
-    newer = available[index - 1] if index > 0 else None
-    parts = []
-    if older:
-        parts.append(f'<a href="{month_url(older, person_id)}">← {escape(_month_label(older))}</a>')
-    parts.append(f"<strong>{escape(_month_label(month))}</strong>")
-    if newer:
-        parts.append(f'<a href="{month_url(newer, person_id)}">{escape(_month_label(newer))} →</a>')
-    return '<p class="pager">' + " · ".join(parts) + "</p>"
-
-
-def _people_filter(
-    people: list[tuple[str, str]], person_id: str | None, month: tuple[int, int]
-) -> str:
-    if not people:
-        return ""
-    items = [_filter_chip("everyone", month_url(month), on=not person_id)]
-    for pid, name in people:
-        items.append(_filter_chip(escape(name), month_url(month, pid), on=pid == person_id))
-    return '<div class="j-chips" role="group" aria-label="People">' + "".join(items) + "</div>"
-
-
-def _filter_chip(label: str, href: str, *, on: bool) -> str:
-    """A filter chip. ``label`` is HTML already escaped."""
-    if on:
-        return f'<a class="j-chip on" aria-current="true" href="{href}">{label}</a>'
-    return f'<a class="j-chip" href="{href}">{label}</a>'
-
-
-EMPTY_TEXT = (
-    "Nothing in the journal yet. Joshua writes an entry when something is worth "
-    "keeping, and a page for the day at the nightly run."
-)
-
-
-def feed_html(
-    entries: list[Entry],
-    *,
-    month: tuple[int, int],
-    available: list[tuple[int, int]],
-    people: list[tuple[str, str]],
-    person_id: str | None,
-    can_edit: bool,
-) -> str:
-    """The feed for one month: the month links, the people filter, then one
-    section per day. ``entries`` is the month's slice, already filtered."""
-    names = dict(people)
-    parts = ['<h1 class="j-doc-title">journal</h1>']
-    parts.append(_month_nav(month, available, person_id))
-    parts.append(_people_filter(people, person_id, month))
-    if not entries:
-        parts.append(f'<p class="j-empty">{escape(EMPTY_TEXT)}</p>')
-    for day in days(entries):
-        parts.append(_day_section(day, for_day(entries, day), names, can_edit=can_edit))
-    return "".join(parts)
-
-
-def day_html(
-    day: date,
-    entries: list[Entry],
-    *,
-    older: date | None,
-    newer: date | None,
-    people: list[tuple[str, str]],
-    can_edit: bool,
-) -> str:
-    """One day: the day links, then the day's entries."""
-    names = dict(people)
-    nav = []
-    if older:
-        nav.append(f'<a href="{day_url(older)}">← {escape(_day_label(older))}</a>')
-    month = (day.year, day.month)
-    nav.append(f'<a href="{month_url(month)}">{escape(_month_label(month))}</a>')
-    if newer:
-        nav.append(f'<a href="{day_url(newer)}">{escape(_day_label(newer))} →</a>')
-    parts = [
-        f'<h1 class="j-doc-title">{escape(_day_label(day))}</h1>',
-        '<p class="pager">' + " · ".join(nav) + "</p>",
-    ]
-    if not entries:
-        parts.append('<p class="j-empty">Nothing on this day.</p>')
-    parts.append("".join(entry_html(e, names, can_edit=can_edit) for e in entries))
-    return "".join(parts)
+# -- the write of an entry --------------------------------------------------
 
 
 def parse_people_field(value: str) -> tuple[str, ...]:

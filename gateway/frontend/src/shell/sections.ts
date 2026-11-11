@@ -64,7 +64,7 @@ export const SECTIONS: readonly Section[] = [
     icon: JOURNAL_ICON,
     memberOnly: false,
     personPath: false,
-    migrated: false,
+    migrated: true,
   },
   {
     key: "search",

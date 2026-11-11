@@ -18,6 +18,7 @@ builds text only.
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 import yaml
 
@@ -57,6 +58,13 @@ def normalize_body(body: str) -> str:
     return body.replace("\r\n", "\n").strip("\n") + "\n"
 
 
+def render_frontmatter(front: dict[str, Any]) -> str:
+    """The ``---`` block for ``front``, in the same shape the gateway tool and
+    the nightly run write, so an edit changes only what the person changed."""
+    block = yaml.safe_dump(front, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{block}\n---\n\n"
+
+
 def compose_wiki(text: str, body: str) -> str:
     """A wiki page after an edit: the file's own frontmatter, then the new
     body. A body that opens its own frontmatter block must parse."""
@@ -88,7 +96,7 @@ def compose_journal(text: str, rel: str, day: date, people_field: str, body: str
     entry = journal.parse_entry(rel, day, text)
     heading, _ = journal._first_heading(raw_body)
     lead = f"# {entry.title}\n\n" if heading and not entry.is_day_page else ""
-    return journal.render_frontmatter(front) + lead + normalize_body(body)
+    return render_frontmatter(front) + lead + normalize_body(body)
 
 
 def _check_frontmatter(body: str) -> None:

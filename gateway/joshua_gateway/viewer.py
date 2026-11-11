@@ -20,11 +20,14 @@ another app on the same host, so the viewer only links to it. The viewer reads
 the data volume through the same resolver as the files MCP
 (``files_mcp.paths``), so the two never drift on who reads what.
 
-The wiki, the shared attachments, a person's own attachments and the editor
-are the React app: ``/``, ``/wiki/…``, ``/shared/…``, ``/attachments/…``,
+The wiki, the shared attachments, a person's own attachments, the journal and
+the editor are the React app: ``/``, ``/wiki/…``, ``/shared/…``,
+``/attachments/…``, ``/journal``, ``/journal/<year>/<month>/<day>``,
 ``/edit/…`` and ``/new`` are addresses of its router (``viewer_spa``), and it
 reads ``GET /api/v1/wiki`` for a page, a folder or a file,
-``GET /api/v1/files/<root>/<path>`` for the bytes, and
+``GET /api/v1/files/<root>/<path>`` for the bytes,
+``GET /api/v1/journal`` for a month of the feed and
+``GET /api/v1/journal/<year>/<month>/<day>`` for a day, and
 ``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
 ``POST /api/v1/delete`` for a write (``viewer_api``).
 
@@ -62,7 +65,7 @@ import os
 import sys
 from collections.abc import Iterator
 from contextvars import ContextVar
-from datetime import UTC, date, datetime, tzinfo
+from datetime import UTC, datetime, tzinfo
 from functools import cache
 from html import escape
 from importlib import resources
@@ -90,7 +93,6 @@ from joshua_gateway import viewer_assignments as assignments_mod
 from joshua_gateway import viewer_comments as comments_mod
 from joshua_gateway import viewer_docstore as docstore
 from joshua_gateway import viewer_documents as documents_mod
-from joshua_gateway import viewer_journal as journal
 from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
@@ -1016,65 +1018,6 @@ def _search_label(root_name: str, rel: str) -> str:
     return f"{root_name}/{rel}"
 
 
-# -- journal ----------------------------------------------------------------
-
-
-def _people_list() -> list[tuple[str, str]]:
-    """``(id, name)`` for every person, for the filter and the chips."""
-    return [(p.id, p.name) for p in config.load().people]
-
-
-async def journal_feed(request: Request, person: Person) -> Response:
-    """The journal for one month, newest day first. ``month=YYYY-MM`` picks the
-    month; the default is the newest month with an entry. ``person=<id>``
-    keeps only the entries that name that person."""
-    entries = journal.load_entries(data_root())
-    person_id = (request.query_params.get("person") or "").strip() or None
-    if person_id is not None and person_id not in {pid for pid, _ in _people_list()}:
-        person_id = None
-    scoped = journal.for_person(entries, person_id)
-    available = journal.months(scoped)
-    month = journal.parse_month(request.query_params.get("month"))
-    if month is None:
-        today = datetime.now(UTC).date()
-        month = available[0] if available else (today.year, today.month)
-    body = journal.feed_html(
-        journal.for_month(scoped, month),
-        month=month,
-        available=available,
-        people=_people_list(),
-        person_id=person_id,
-        can_edit=person.role == "member",
-    )
-    return _page("journal", body, section="journal")
-
-
-async def journal_day(request: Request, person: Person) -> Response:
-    """One day of the journal, with the nearest older and newer day that
-    holds an entry."""
-    try:
-        day = date(
-            int(request.path_params["year"]),
-            int(request.path_params["month"]),
-            int(request.path_params["day"]),
-        )
-    except ValueError:
-        return _not_found()
-    entries = journal.load_entries(data_root())
-    all_days = journal.days(entries)  # newest first
-    older = next((d for d in all_days if d < day), None)
-    newer = next((d for d in reversed(all_days) if d > day), None)
-    body = journal.day_html(
-        day,
-        journal.for_day(entries, day),
-        older=older,
-        newer=newer,
-        people=_people_list(),
-        can_edit=person.role == "member",
-    )
-    return _page(day.isoformat(), body, section="journal")
-
-
 @cache
 def _package_file(*parts: str) -> bytes:
     """A file of this package, read once."""
@@ -1218,8 +1161,6 @@ def build_app() -> Starlette:
         Route("/ui/{name}", _require_auth(ui_file)),
         Route("/links", _require_auth(links_page)),
         Route("/links", _require_auth(links_save), methods=["POST"]),
-        Route("/journal", _require_auth(journal_feed)),
-        Route("/journal/{year:int}/{month:int}/{day:int}", _require_auth(journal_day)),
         Route("/search", _require_auth(search)),
         Route("/usage", _require_auth(usage)),
         Route("/assignments", _require_auth(assignments_list)),

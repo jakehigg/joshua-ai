@@ -6,6 +6,16 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The journal in the viewer is a React page.** The feed of one month at
+  `/journal` and one day at `/journal/<year>/<month>/<day>` are the app now.
+  The feed opens the newest month that holds an entry, newest day first. The
+  month picker and the person filter write the address (`?month=2026-11`,
+  `?person=alex`), so a bookmark of a month, of a person, or of both opens the
+  same thing. A day page links the day before and the day after that hold an
+  entry. A member still edits an entry from the entry, and lands back on the
+  day at that entry. The app reads two JSON addresses with the sign-in of a
+  page: `GET /api/v1/journal?month=&person=` and
+  `GET /api/v1/journal/<year>/<month>/<day>`.
 - **The writes on the wiki are React pages.** The editor of a page, the
   editor of a journal entry, the new page, and the trash are all the app now.
   Edit a page, save it, and the page comes back with your change committed;

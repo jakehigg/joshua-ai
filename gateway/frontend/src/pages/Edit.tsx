@@ -31,8 +31,8 @@ export interface SaveAnswer {
  *
  * The page reads the text from `GET /api/v1/edit`, posts the change to
  * `POST /api/v1/save` with the token of that answer, and goes where the
- * answer says: a wiki page is an address of this app, and the day of a
- * journal entry is a page of the server renderer.
+ * answer says: the wiki page itself, or the day of the journal entry at the
+ * fragment of the entry. Both are addresses of this app.
  */
 export default function Edit() {
   const rel = useParams()["*"] ?? "";
@@ -80,11 +80,7 @@ export default function Edit() {
         body,
         people,
       });
-      if (data.kind === "wiki") {
-        navigate(answer.url);
-      } else {
-        window.location.assign(answer.url);
-      }
+      navigate(answer.url);
     } catch (exc: unknown) {
       setBusy(false);
       setError(exc instanceof ApiError ? exc.message : "the page was not saved");

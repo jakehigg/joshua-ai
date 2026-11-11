@@ -1,8 +1,9 @@
-"""Offline tests for the viewer's journal feed, day page, and edit form.
+"""Offline tests for the journal's model and the edit of an entry.
 
-The feed reads ``wiki/journal/YYYY/MM/DD/*.md`` from a temp data root. The
+The model reads ``wiki/journal/YYYY/MM/DD/*.md`` from a temp data root. The
 same fixture shape as ``test_viewer.py``: a temp ``joshua.yaml``, passwords
-in the environment, the Starlette ``TestClient`` in-process.
+in the environment, the Starlette ``TestClient`` in-process. The JSON routes
+of the feed are in ``test_viewer_api_journal.py``.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from joshua_gateway import viewer, viewer_journal
+from joshua_gateway import viewer, viewer_edit, viewer_journal
 from joshua_shared import config, wikigit
 from starlette.testclient import TestClient
 
@@ -149,67 +150,18 @@ def test_a_legacy_person_key_names_the_person():
 def test_frontmatter_round_trips():
     front, body = viewer_journal.split_frontmatter(ENTRY)
     assert front["date"] == date(2026, 9, 4)
-    text = viewer_journal.render_frontmatter(front)
+    text = viewer_edit.render_frontmatter(front)
     assert text.startswith("---\ndate: 2026-09-04\npeople:\n- alex\nsource: agent\n---\n\n")
 
 
-# -- the feed ---------------------------------------------------------------
-
-
-def test_feed_needs_auth(client):
-    assert client.get("/journal").status_code == 401
-
-
-def test_feed_shows_the_newest_month_with_days_and_entries(client):
-    html = client.get("/journal", auth=ALEX).text
-    assert "September 2026" in html
-    assert "Friday 4 September 2026" in html
-    assert "Oatmeal for breakfast" in html
-    assert "flights to Lisbon" in html
-    assert 'class="j-badge accent nightly"' in html
-    assert "pottery" not in html  # August is another month
-    assert "← August 2026" in html
-
-
-def test_feed_month_query_picks_the_month(client):
-    html = client.get("/journal?month=2026-08", auth=ALEX).text
-    assert "pottery class" in html
-    assert "Oatmeal" not in html
-    assert "September 2026 →" in html
-
-
-def test_feed_person_filter_keeps_entries_naming_that_person(client):
-    html = client.get("/journal?person=mia", auth=ALEX).text
-    assert "flights to Lisbon" in html  # the day page names mia
-    assert "Oatmeal" not in html  # names alex only
-    assert 'class="j-chip on" aria-current="true"' in html
-
-
-def test_feed_unknown_person_filter_is_ignored(client):
-    html = client.get("/journal?person=nobody", auth=ALEX).text
-    assert "Oatmeal" in html
-
-
-def test_feed_empty_month_says_so(client):
-    html = client.get("/journal?month=2020-01", auth=ALEX).text
-    assert "Nothing in the journal yet" in html
-
-
-def test_empty_journal_is_a_page_not_an_error(client, tmp_path):
-    shutil.rmtree(tmp_path / "data" / "wiki" / "journal")
-    response = client.get("/journal", auth=ALEX)
-    assert response.status_code == 200
-    assert "Nothing in the journal yet" in response.text
-
-
-def test_raw_html_in_an_entry_is_escaped(client, tmp_path):
-    _write(
-        tmp_path / "data/wiki/journal/2026/09/04/raw.md",
-        "---\ndate: 2026-09-04\npeople: []\nsource: agent\n---\n\n<script>alert(1)</script>\n",
-    )
-    html = client.get("/journal", auth=ALEX).text
-    assert "<script>" not in html
-    assert "&lt;script&gt;" in html
+def test_the_days_of_a_month_and_the_addresses_of_the_feed(tmp_path):
+    data = tmp_path / "data"
+    _tree(data)
+    entries = viewer_journal.load_entries(data)
+    assert viewer_journal.days(entries) == [date(2026, 9, 4), date(2026, 8, 20)]
+    assert viewer_journal.day_url(date(2026, 9, 4)) == "/journal/2026/09/04"
+    assert viewer_journal.month_url((2026, 9)) == "/journal?month=2026-09"
+    assert viewer_journal.month_url((2026, 9), "mia") == "/journal?month=2026-09&person=mia"
 
 
 def test_the_nav_of_a_page_and_of_the_app_links_to_the_journal(client):
@@ -218,33 +170,7 @@ def test_the_nav_of_a_page_and_of_the_app_links_to_the_journal(client):
     assert "/journal" in [section["path"] for section in sections]
 
 
-# -- the day page -----------------------------------------------------------
-
-
-def test_day_page_shows_the_day_and_its_neighbours(client):
-    html = client.get("/journal/2026/09/04", auth=ALEX).text
-    assert "Friday 4 September 2026" in html
-    assert "Oatmeal for breakfast" in html
-    assert "← Thursday 20 August 2026" in html
-    assert "→" not in html  # nothing newer
-
-
-def test_day_page_for_an_empty_day(client):
-    html = client.get("/journal/2026/09/01", auth=ALEX).text
-    assert "Nothing on this day." in html
-    assert "Friday 4 September 2026 →" in html
-
-
-def test_day_page_with_a_bad_date_is_404(client):
-    assert client.get("/journal/2026/02/31", auth=ALEX).status_code == 404
-
-
 # -- edit -------------------------------------------------------------------
-
-
-def test_member_sees_edit_link_and_guest_does_not(client):
-    assert 'href="/edit/' in client.get("/journal", auth=ALEX).text
-    assert 'href="/edit/' not in client.get("/journal", auth=MIA).text
 
 
 def test_the_editor_of_an_entry_carries_the_text_and_the_people(client):
@@ -359,17 +285,3 @@ def test_save_commits_the_edit(client, tmp_path):
         ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True
     ).stdout
     assert f"viewer: edit {rel}" in log
-
-
-def test_a_table_renders_in_an_entry_and_reaches_a_wiki_page(client, tmp_path):
-    table = "| reading | inches |\n|---|---|\n| morning | 0.8 |\n"
-    _write(
-        tmp_path / "data/wiki/journal/2026/09/04/rain.md",
-        "---\ndate: 2026-09-04\npeople: [alex]\nsource: agent\n---\n\n" + table,
-    )
-    _write(tmp_path / "data/wiki/table.md", "# Table\n\n" + table)
-    html = client.get("/journal", auth=ALEX).text
-    assert "<table>" in html and "<th>reading</th>" in html and "<td>0.8</td>" in html
-    # A wiki page renders in the app, so the route sends the table as it is.
-    page = client.get("/api/v1/wiki?path=wiki/table.md", auth=ALEX).json()
-    assert page["markdown"] == "# Table\n\n" + table

@@ -73,8 +73,11 @@ describe("the shell", () => {
     expect(document.querySelector('form.v-search input[name="q"]')).not.toBeNull();
   });
 
-  it("gives the migrated section a router link and the rest a plain link", async () => {
-    expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual(["wiki"]);
+  it("gives a migrated section a router link and the rest a plain link", async () => {
+    expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual([
+      "wiki",
+      "journal",
+    ]);
     stubSession();
 
     shell();

@@ -4,6 +4,8 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { ApiError, getJson } from "./api/client";
 import Edit from "./pages/Edit";
 import FileRedirect, { type WikiFileData } from "./pages/FileRedirect";
+import Journal from "./pages/Journal";
+import JournalDay from "./pages/JournalDay";
 import Me from "./pages/Me";
 import New from "./pages/New";
 import WikiFolder, { type WikiFolderData } from "./pages/WikiFolder";
@@ -84,6 +86,8 @@ export default function App() {
       <Route path="/wiki/*" element={<Content root="wiki" />} />
       <Route path="/shared/*" element={<Content root="shared" />} />
       <Route path="/attachments/*" element={<Content root="attachments" />} />
+      <Route path="/journal" element={<Journal />} />
+      <Route path="/journal/:year/:month/:day" element={<JournalDay />} />
       <Route path="/edit/*" element={<Edit />} />
       <Route path="/new" element={<New />} />
       <Route path="/me" element={<Me />} />

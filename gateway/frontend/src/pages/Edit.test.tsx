@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -70,6 +70,7 @@ function show(rel: string) {
       <Routes>
         <Route path="/edit/*" element={<Edit />} />
         <Route path="/wiki/*" element={<p>the page again</p>} />
+        <Route path="/journal/:year/:month/:day" element={<p>the day again</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -129,12 +130,6 @@ describe("the editor of one page", () => {
 
   it("gives a journal entry the people field, and posts the people", async () => {
     const sent = stubRoutes(json(ENTRY), json({ ok: true, url: "/journal/2026/11/10#dinner" }));
-    const went: string[] = [];
-    vi.stubGlobal("location", {
-      assign: (url: string) => {
-        went.push(url);
-      },
-    });
 
     show("journal/2026/11/10/dinner.md");
 
@@ -153,10 +148,8 @@ describe("the editor of one page", () => {
         people: "alex",
       },
     ]);
-    // The day of an entry is a page of the server renderer, not of this app.
-    await waitFor(() => {
-      expect(went).toEqual(["/journal/2026/11/10#dinner"]);
-    });
+    // The day of an entry is a page of this app, at the entry's fragment.
+    expect(await screen.findByText("the day again")).toBeDefined();
   });
 
   it("keeps the editor and says what the viewer said when the save is refused", async () => {
