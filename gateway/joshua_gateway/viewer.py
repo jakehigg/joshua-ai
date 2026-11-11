@@ -78,7 +78,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import BaseRoute, Route
 
-from joshua_gateway import viewer_api
+from joshua_gateway import viewer_api, viewer_spa
 from joshua_gateway import viewer_assignments as assignments_mod
 from joshua_gateway import viewer_comments as comments_mod
 from joshua_gateway import viewer_docstore as docstore
@@ -89,7 +89,6 @@ from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway import viewer_showcase as showcase_mod
-from joshua_gateway import viewer_spa
 from joshua_gateway import viewer_usage as usage_mod
 from joshua_gateway import viewer_wiki as wiki
 from joshua_gateway.files_mcp.paths import PathError, Root, resolve
