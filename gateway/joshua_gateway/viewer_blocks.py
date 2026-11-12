@@ -38,6 +38,16 @@ MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table"
 # The deepest nested list item that gets its own indent.
 MAX_DEPTH = 5
 
+# What a block is called, so a comment on one says where it sits.
+BLOCK_NAMES = {
+    "p": "paragraph",
+    "h": "heading",
+    "li": "list item",
+    "quote": "quote",
+    "code": "code block",
+    "table": "table",
+}
+
 _LISTS = frozenset({"bullet_list_open", "ordered_list_open"})
 # The header of a block scalar: ``|``, an optional indent, an optional chomp.
 _BLOCK_HEADER = re.compile(r"^\|([1-9])?[-+]?\s*$")

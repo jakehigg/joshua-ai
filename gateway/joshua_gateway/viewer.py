@@ -12,9 +12,7 @@ tokens of each group by day (``viewer_usage``) under the subscription limits
 ``GET /v1/limits`` has no bearer. ``/assignments`` shows the assignments of
 the person who signed in, read from the assignments manager when
 ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set
-(``viewer_assignments``); ``/assignments/saved`` and
-``/assignments/saved/<id>`` are the last pages of that section the server
-still renders. ``/documents`` shows the documents of the member
+(``viewer_assignments``). ``/documents`` shows the documents of the member
 who signed in and the shared ones, read from ``/data/documents``
 (``viewer_api.documents``); a guest has no such section. The two routes of a
 document that the chat calls stay here: ``<slug>.json`` for the head of an
@@ -30,7 +28,8 @@ search, the usage, the links, the documents and the editor are the React app:
 ``/``, ``/wiki/…``, ``/shared/…``, ``/attachments/…``, ``/journal``,
 ``/journal/<year>/<month>/<day>``, ``/search``, ``/usage``, ``/links``,
 ``/documents``, ``/documents/<owner>/<slug>``, ``/assignments``,
-``/assignments/<id>``, ``/edit/…`` and ``/new`` are
+``/assignments/<id>``, ``/assignments/saved``,
+``/assignments/saved/<id>``, ``/edit/…`` and ``/new`` are
 addresses of its router (``viewer_spa``), and it
 reads ``GET /api/v1/wiki`` for a page, a folder or a file,
 ``GET /api/v1/files/<root>/<path>`` for the bytes,
@@ -46,9 +45,15 @@ comments, ``POST /api/v1/documents/<owner>/<slug>/comments`` and
 ``POST /api/v1/documents/<owner>/<slug>/comments/<id>/delete`` for a comment,
 ``GET /api/v1/assignments`` for the list of the assignments of one state,
 ``GET /api/v1/assignments/<id>`` for one assignment, its definition, its
-plan and its comments,
+plan, its report and its comments,
 ``POST /api/v1/assignments/<id>/comments`` and
 ``POST /api/v1/assignments/<id>/comments/<id>/delete`` for a comment on it,
+``GET /api/v1/assignments/saved`` for the saved assignments,
+``GET /api/v1/assignments/saved/<id>`` for one of them, its definition and
+its runs,
+``POST /api/v1/assignments/saved/<id>/comments`` and
+``POST /api/v1/assignments/saved/<id>/comments/<id>/delete`` for a comment on
+its definition,
 and ``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
 ``POST /api/v1/delete`` for a write (``viewer_api``).
 
@@ -99,28 +104,27 @@ import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
 from joshua_shared.layout import is_hidden
-from joshua_shared.layout import wiki_root as wiki_dir
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from markdown_it import MarkdownIt
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 
 from joshua_gateway import viewer_api, viewer_channels, viewer_spa
 from joshua_gateway import viewer_assignments as assignments_mod
-from joshua_gateway import viewer_comments as comments_mod
 from joshua_gateway import viewer_docstore as docstore
 from joshua_gateway import viewer_documents as documents_mod
 from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
-from joshua_gateway import viewer_showcase as showcase_mod
 from joshua_gateway.files_mcp.paths import Root
 from joshua_gateway.files_mcp.server import data_root
-from joshua_gateway.viewer_api.edit import _csrf_token, _csrf_valid, _origin_ok
+from joshua_gateway.viewer_api.edit import (
+    _csrf_token,  # noqa: F401 — the token of a scope, which the tests of a write mint
+)
 
 logger = get_logger("viewer")
 
@@ -414,17 +418,6 @@ _MEMBER_SECTIONS = frozenset({"documents"})
 # chat answers at ``/chat/<person id>``, so the item follows the identity of
 # the person who reads the viewer.
 _PERSON_SECTIONS = frozenset({"chat"})
-_SECTION_LABEL = {key: label for key, label, _, _ in _SECTIONS} | {"links": "Links", "me": "You"}
-_SEARCH_ICON = _SECTIONS[2][3]
-_ME_ICON = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'
-
-
-def _icon(paths: str) -> str:
-    return f'<svg class="j-icon" viewBox="0 0 24 24" aria-hidden="true">{paths}</svg>'
-
-
-def _current(key: str, section: str) -> str:
-    return ' aria-current="page"' if key == section else ""
 
 
 def _sections() -> list[tuple[str, str, str, str]]:
@@ -447,88 +440,28 @@ def _sections() -> list[tuple[str, str, str, str]]:
     return sections
 
 
-def _shell(body: str, *, section: str) -> str:
-    """The page shell: the sidebar on a wide screen; the app bar and the tabs
-    on a phone. ``section`` marks the current item. The search field is in the
-    app bar, so it shows on every screen; it loads ``/search``, which the
-    React app renders."""
-    sections = _sections()
-    items = "".join(
-        f'<a class="j-nav-item" href="{url}"{_current(key, section)}>{_icon(icon)}{label}</a>'
-        for key, label, url, icon in sections
-    )
-    tabs = (
-        "".join(
-            f'<a class="j-tab" href="{url}"{_current(key, section)}>{label}</a>'
-            for key, label, url, _ in sections
-        )
-        + f'<a class="j-tab" href="/links"{_current("links", section)}>Links</a>'
-    )
-    links_nav = links_mod.nav_html(
-        links_mod.load(wiki_dir(data_root())), current=section == "links"
-    )
-    here = _SECTION_LABEL.get(section, "Home")
-    return (
-        '<div class="j-shell has-sidebar">'
-        '<aside class="j-sidebar">'
-        '<a class="j-brand" href="/"><img class="j-logo" src="/ui/logo-64.png" alt="">Joshua</a>'
-        f'<nav class="v-sections" aria-label="Sections">{items}</nav>'
-        f"{links_nav}"
-        '<nav class="v-sections v-you" aria-label="You">'
-        f'<a class="j-nav-item" href="/me"{_current("me", section)}>{_icon(_ME_ICON)}Your page</a>'
-        "</nav>"
-        "</aside>"
-        '<div class="j-main">'
-        '<header class="j-appbar">'
-        '<img class="j-logo" src="/ui/logo-64.png" alt="">'
-        f'<a class="j-appbar-title" href="/"><small>Joshua</small><strong>{here}</strong></a>'
-        '<span class="j-spacer"></span>'
-        '<form class="v-search" action="/search" method="get" role="search">'
-        f'<label class="j-field">{_icon(_SEARCH_ICON)}'
-        '<input type="search" name="q" placeholder="Search" aria-label="Search">'
-        "</label></form>"
-        "</header>"
-        f'<nav class="j-tabs mobile-only" aria-label="Sections">{tabs}</nav>'
-        f'<main class="j-content">{body}</main>'
-        "</div></div>"
-    )
+def _page(title: str, body: str, *, status: int = 200) -> HTMLResponse:
+    """A bare page: the content, with no navigation of its own.
 
-
-def _page(
-    title: str,
-    body: str,
-    *,
-    status: int = 200,
-    nav: bool = True,
-    section: str = "",
-    head: str = "",
-) -> HTMLResponse:
-    """A full page. ``section`` is the key of the current section in the
-    navigation (``wiki``, ``journal``, ``search``, ``usage``,
-    ``assignments``, ``documents``, ``chat``), or "" for the home page. ``nav`` False gives the bare
-    content with no navigation. ``head`` is more HTML for the ``<head>``,
-    such as a ``<meta>`` refresh."""
-    main = _shell(body, section=section) if nav else f'<main class="j-content">{body}</main>'
+    Every section of the viewer is the React app, which draws its own shell.
+    What is left here is the 404 of a route the app does not claim.
+    """
     html = (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width, initial-scale=1">'
         '<meta name="theme-color" content="#080d17">'
-        f"<title>{escape(title)}</title>{head}"
+        f"<title>{escape(title)}</title>"
         '<link rel=icon type="image/png" href="/ui/favicon-32.png">'
         '<link rel=apple-touch-icon href="/ui/apple-touch-icon.png">'
         '<link rel=stylesheet href="/ui/joshua-ui.css">'
         '<link rel=stylesheet href="/style.css"></head><body>'
-        f"{main}</body></html>"
+        f'<main class="j-content">{body}</main></body></html>'
     )
     return HTMLResponse(html, status_code=status)
 
 
 def _not_found() -> HTMLResponse:
-    return _page("not found", '<h1 class="j-doc-title">not found</h1>', status=404, nav=False)
-
-
-def _forbidden() -> HTMLResponse:
-    return _page("forbidden", '<h1 class="j-doc-title">forbidden</h1>', status=403, nav=False)
+    return _page("not found", '<h1 class="j-doc-title">not found</h1>', status=404)
 
 
 def _read_text(abs_path: Path) -> str | None:
@@ -578,96 +511,6 @@ def _list_attachments(root: Root) -> list[str]:
 def _clock() -> tuple[tzinfo, datetime]:
     tz = limits_mod.zone(config.load().timezone)
     return tz, _now(tz)
-
-
-async def saved_list(request: Request, person: Person) -> Response:
-    """The saved assignments of the person who signed in."""
-    client = assignments_mod.from_env(os.environ)
-    body = await client.saved(person.id) if client is not None else None
-    tz, now = _clock()
-    html = assignments_mod.saved_list_html(body, configured=client is not None, tz=tz, now=now)
-    return _page("saved assignments", html, section="assignments")
-
-
-async def saved_page(request: Request, person: Person) -> Response:
-    """One saved assignment of the person who signed in, with its runs."""
-    client = assignments_mod.from_env(os.environ)
-    title = "saved assignment"
-    if client is None:
-        html = assignments_mod.saved_unavailable_html(title, configured=False)
-        return _page(title, html, section="assignments")
-    saved = await client.saved_detail(person.id, request.path_params["id"])
-    if saved is assignments_mod.NOT_FOUND:
-        return _not_found()
-    if not isinstance(saved, assignments_mod.SavedDetail):
-        html = assignments_mod.saved_unavailable_html(title, configured=True)
-        return _page(title, html, section="assignments")
-    tz, now = _clock()
-    forms = comments_mod.CommentForms(
-        action=f"/assignments/saved/{saved.id}/comments",
-        csrf=_csrf_token(person.id, saved_scope(saved.id)),
-    )
-    return _page(
-        saved.name,
-        assignments_mod.saved_detail_html(saved, tz=tz, now=now, forms=forms),
-        section="assignments",
-    )
-
-
-def saved_scope(saved_id: int) -> str:
-    """The CSRF scope of a comment on a saved assignment."""
-    return f"comments:/assignments/saved/{saved_id}"
-
-
-async def comment_on_saved(request: Request, person: Person) -> Response:
-    """Send one comment write of the person on a saved assignment to the
-    manager, then go back to the line.
-
-    The form carries the CSRF token of the saved assignment, and a cross-site
-    ``Origin`` is refused. A saved assignment has a definition only. The
-    manager writes the comment as the person who signed in, on their own row
-    only, and a row of another person is 404."""
-    client = assignments_mod.from_env(os.environ)
-    if client is None:
-        return _not_found()
-    saved_id = int(request.path_params["id"])
-    base = f"/assignments/saved/{saved_id}"
-    form = await request.form()
-    token = str(form.get("csrf", ""))
-    if not _csrf_valid(person.id, saved_scope(saved_id), token) or not _origin_ok(request):
-        return _forbidden()
-    comment_id = request.path_params.get("cid")
-    if comment_id is not None:
-        written = await client.delete_comment(person.id, "saved", saved_id, int(comment_id))
-        anchor = "definition"
-    else:
-        try:
-            line_no = int(str(form.get("line_no", "")))
-        except ValueError:
-            line_no = 0
-        written = await client.add_comment(
-            person.id,
-            "saved",
-            saved_id,
-            line_no=line_no,
-            line_text=str(form.get("line_text", "")),
-            body=str(form.get("body", "")),
-            target="definition",
-        )
-        anchor = f"L{line_no}"
-    if written is not None and written.status == 404:
-        return _not_found()
-    if written is None or not written.ok:
-        reason = written.error if written is not None else "the manager did not answer"
-        body = (
-            f'<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
-            f'<h1 class="j-doc-title">comment not stored</h1>'
-            f'<p class="j-error">{escape(reason or "The manager refused the comment.")}</p>'
-            f'<p><a href="{escape(base)}">Back</a></p>'
-        )
-        return _page("comment not stored", body, status=400, section="assignments")
-    logger.info({"message": "viewer comment", "kind": "saved", "delete": comment_id is not None})
-    return RedirectResponse(f"{base}#{anchor}", status_code=303)
 
 
 # -- documents --------------------------------------------------------------
@@ -796,8 +639,7 @@ class SecurityHeaders(BaseHTTPMiddleware):
     ``default-src 'none'`` blocks every sub-resource; the page loads its
     stylesheets, its images, its scripts and its data from ``'self'``. The
     viewer serves a JavaScript bundle of its own, so ``script-src`` holds
-    ``'self'``, and the hash of the copy script of a server-rendered report
-    beside it. No inline script runs.
+    ``'self'`` alone. No inline script runs, and no hash is allowed.
 
     ``frame-ancestors 'self'`` lets a page of the viewer, the chat and its
     artifact panel, frame a document page of the same origin. No other
@@ -815,7 +657,7 @@ class SecurityHeaders(BaseHTTPMiddleware):
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'none'; img-src 'self'; style-src 'self'; "
-            f"script-src 'self' '{showcase_mod.COPY_SCRIPT_HASH}'; connect-src 'self'; "
+            "script-src 'self'; connect-src 'self'; "
             "frame-src 'self'; frame-ancestors 'self'",
         )
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -838,18 +680,6 @@ def build_app() -> Starlette:
         *viewer_api.routes(),
         Route("/style.css", _require_auth(style)),
         Route("/ui/{name}", _require_auth(ui_file)),
-        Route("/assignments/saved", _require_auth(saved_list)),
-        Route("/assignments/saved/{id:int}", _require_auth(saved_page)),
-        Route(
-            "/assignments/saved/{id:int}/comments",
-            _require_auth(comment_on_saved),
-            methods=["POST"],
-        ),
-        Route(
-            "/assignments/saved/{id:int}/comments/{cid:int}/delete",
-            _require_auth(comment_on_saved),
-            methods=["POST"],
-        ),
         # The two routes of a document that the chat calls. The page itself
         # is the React app, and a slug never ends in ``.json``, so these two
         # and an address of the app can never name the same file.

@@ -21,7 +21,7 @@ from joshua_gateway import viewer
 from joshua_gateway import viewer_comments as vc
 from joshua_gateway import viewer_docstore as ds
 from joshua_gateway import viewer_documents as dm
-from joshua_gateway import viewer_showcase as sc
+from joshua_gateway.viewer_api import assignments as api
 from joshua_shared import config, wikigit
 from starlette.testclient import TestClient
 
@@ -146,17 +146,10 @@ def _get(path: str, auth=ALEX, **params):
     return client().get(path, params=params, auth=auth)
 
 
-# -- the nav and access -----------------------------------------------------
+# -- access -----------------------------------------------------------------
 
 
-def test_the_nav_has_documents_for_a_member(data) -> None:
-    html = _get("/assignments/saved").text
-    assert 'href="/documents">' in html and ">Documents</a>" in html
-
-
-def test_a_guest_has_no_documents_section(docs) -> None:
-    html = _get("/assignments/saved", auth=GUEST).text
-    assert 'href="/documents"' not in html
+def test_a_guest_reaches_no_document(docs) -> None:
     assert _get("/documents/shared/meals.json", auth=GUEST).status_code == 404
     assert _get("/documents/shared/meals/artifact", auth=GUEST).status_code == 404
 
@@ -330,12 +323,9 @@ def test_the_artifact_route_serves_an_older_version(docs) -> None:
 
 
 def test_an_output_of_kind_document_links_to_its_page() -> None:
-    card = sc.output_card(sc.Card("document", "documents/alex/party.md", "Party plan"))
-    assert '<a class="a-out-title" href="/documents/alex/party">Party plan</a>' in card
-    other = sc.output_card(sc.Card("document", "documents/../wiki/x.md", "Bad"))
-    assert "href=" not in other
-    page = sc.output_card(sc.Card("page", "documents/alex/party.md", "Not a document"))
-    assert "href=" not in page
+    assert api._output_url("document", "documents/alex/party.md") == "/documents/alex/party"
+    assert api._output_url("document", "documents/../wiki/x.md") is None
+    assert api._output_url("page", "documents/alex/party.md") is None
 
 
 @pytest.mark.parametrize(

@@ -3,8 +3,9 @@
 ``GET /api/v1/assignments`` lists the assignments of the person who signed
 in, one state at a time. ``GET /api/v1/assignments/{id}`` gives one
 assignment: its numbers, its definition as properties and blocks, its plan
-with the progress of its task boxes, and the comments on each text. The two
-comment routes write one comment and remove one.
+with the progress of its task boxes, its report as the showcase reads it, and
+the comments on each text. The two comment routes write one comment and
+remove one.
 
 A MockTransport stands in for the assignments manager, so no network is
 needed, and the clock is fixed. With ``ASSIGNMENTS_URL`` or
@@ -442,6 +443,112 @@ def test_a_report_comes_as_markdown_blocks_and_sections(data, monkeypatch) -> No
     assert part["structured"] is True
     assert part["sections"]["what was done"]["title"] == "What was done"
     assert [block["id"] for block in part["blocks"]] == ["R1", "R3", "R5", "R7"]
+
+
+REPORT = (
+    "# Clean up the docs\n"
+    "The docs read as one set now.\n\n"
+    "## Highlights\n"
+    "- **12 pages** read end to end\n"
+    "- **2 links** fixed\n\n"
+    "## What was asked\n"
+    "Read each page and fix the links.\n\n"
+    "## What was done\n"
+    "I read every page.\n\n"
+    "## Outputs\n"
+    "- merge request: [Fix the links](https://git.example.test/mr/4) — ready\n"
+    "- document: documents/alex/party.md — Party plan\n\n"
+    "## Decisions for you\n"
+    "- **Drop the old guide?** It repeats the new one.\n"
+    "- None.\n\n"
+    "## Follow-ups\n"
+    "- [ ] fix the images\n\n"
+    "## Notes\n"
+    "Nothing else.\n\n"
+    "## Cost\n"
+    "14 turns, 12k tokens.\n"
+)
+
+
+def test_the_showcase_of_a_report_keeps_the_line_of_every_card(data, monkeypatch) -> None:
+    """Each card of the showcase knows the line a comment anchors to: the
+    first line of a decision is where its answer is stored."""
+    body = detail(status="done", state="completed", report=REPORT, report_at=_iso(timedelta(0)))
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    part = _one().json()["report"]
+    lines = REPORT.split("\n")
+    assert part["structured"] is True and part["generated"] is False
+    assert part["lede"] == "The docs read as one set now."
+    assert part["first_section"] == 4 and part["turns"] == 14
+    assert part["updated"] == "just now"
+
+    high = part["sections"]["highlights"]
+    assert high["line"] == 4 and high["start"] == 5
+    assert [one["number"] for one in high["items"]] == [1, 2]
+    assert [one["lead"] for one in high["items"]] == ["12 pages", "2 links"]
+    assert [one["first_line"] for one in high["items"]] == [5, 6]
+    assert lines[4] == "- **12 pages** read end to end"
+
+    outputs = part["sections"]["outputs"]["outputs"]
+    assert [out["kind"] for out in outputs] == ["merge request", "document"]
+    assert [out["icon"] for out in outputs] == ["merge request", "page"]
+    assert outputs[0]["url"] == "https://git.example.test/mr/4"
+    assert outputs[0]["title"] == "Fix the links" and outputs[0]["note"] == "ready"
+    assert outputs[1]["url"] == "/documents/alex/party"
+
+    # A decision that says nothing is dropped, so the numbers follow the cards.
+    [decision] = part["sections"]["decisions for you"]["items"]
+    assert decision["number"] == 1 and decision["question"] == "Drop the old guide?"
+    assert decision["context"] == "It repeats the new one."
+    assert decision["copy"] == "Assignment 7, decision 1: Drop the old guide?"
+    assert lines[decision["first_line"] - 1].startswith("- **Drop the old guide?**")
+
+    follow_ups = part["sections"]["follow-ups"]["items"]
+    assert [one["text"] for one in follow_ups] == ["[ ] fix the images"]
+    assert part["sections"]["what was asked"]["body"] == "Read each page and fix the links."
+    # A heading the shape does not know keeps its own title and its lines.
+    [extra] = part["extra"]
+    assert extra["key"] == "" and extra["title"] == "Notes"
+    assert [block["id"] for block in extra["blocks"]] == [f"R{extra['start']}"]
+
+
+def test_a_report_with_no_heading_of_the_shape_is_plain(data, monkeypatch) -> None:
+    report = "Just a note.\n\nNothing was asked.\n"
+    body = detail(status="done", state="completed", report=report, report_at=None)
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    part = _one().json()["report"]
+    assert part["structured"] is False
+    assert part["sections"] == {} and part["extra"] == [] and part["preamble"] is None
+    # The page shows the blocks of the text instead.
+    assert [block["id"] for block in part["blocks"]] == ["R1", "R3"]
+    assert part["lines"] == report.split("\n")
+
+
+def test_is_url() -> None:
+    assert api.is_url("https://git.example.com/x")
+    assert api.is_url("http://example.com")
+    assert not api.is_url("javascript:alert(1)")
+    assert not api.is_url("https://")
+    assert not api.is_url("tasks#12")
+    assert not api.is_url("http://[bad")
+
+
+def test_the_icon_of_an_output_reads_the_words_of_its_kind() -> None:
+    assert api.kind_icon("merge request") == "merge request"
+    assert api.kind_icon("MR") == "merge request"
+    assert api.kind_icon("issue") == "issue"
+    assert api.kind_icon("journal entry") == "journal"
+    assert api.kind_icon("wiki page") == "page"
+    # A short word counts only as a whole word, so "summary" is no merge
+    # request, and an unknown kind has the plain icon.
+    assert api.kind_icon("summary") == "other"
+    assert api.kind_icon("") == "other"
+
+
+def test_a_report_of_nothing_but_space_is_none(data, monkeypatch) -> None:
+    body = detail(status="done", state="completed", report="   \n", report_at=None)
+    _with(monkeypatch, FakeManager({"/v1/assignments/7": body}))
+    assert _one().json()["report"] is None
 
 
 def test_a_draft_says_how_to_start_it_and_has_no_cost(data, monkeypatch) -> None:

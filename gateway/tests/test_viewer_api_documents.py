@@ -284,7 +284,7 @@ def test_a_markdown_document_gives_its_blocks_lines_and_token(docs) -> None:
     assert len(body["lines"]) == 7
     assert body["preamble"][0] == "---" and body["preamble"][1] == "title: Party plan"
     assert len(body["preamble"]) == 7
-    assert body["comments"] == [] and body["report"] is None
+    assert body["comments"] == [] and body["report"]["structured"] is False
     assert body["version"] is None
     assert body["csrf"] == _token("alex", "party")
 
@@ -314,15 +314,49 @@ def test_a_nested_list_item_keeps_its_marker_and_its_depth(docs) -> None:
 def test_the_sections_of_a_report_shaped_document_are_data(docs) -> None:
     body = _doc("alex", "cleanup").json()
     report = body["report"]
-    assert report is not None
+    assert report is not None and report["structured"] is True
     assert report["title"] == "Docs cleanup"
     assert report["lede"] == "The docs read as one set now."
-    keys = [part["key"] for part in report["sections"]]
-    assert "highlights" in keys and "what was done" in keys
-    first = next(part for part in report["sections"] if part["key"] == "highlights")
+    assert set(report["sections"]) == {"highlights", "what was done"}
+    first = report["sections"]["highlights"]
+    assert first["key"] == "highlights"
     assert "12 pages" in first["body"] and first["line"] > 0
+    # A card of the showcase sits on its own line of the body, so a comment
+    # anchors to it.
+    [one] = first["items"]
+    assert one["number"] == 1 and one["lead"] == "12 pages"
+    assert one["first_line"] == first["start"] == first["line"] + 1
+    assert [block["id"] for block in first["blocks"]] == [f"L{first['start']}"]
     # The page of this task renders the blocks, so they are there too.
     assert body["blocks"][0]["kind"] == "h"
+
+
+def test_a_document_with_no_report_headings_is_not_structured(docs) -> None:
+    report = _doc("alex", "party").json()["report"]
+    assert report["structured"] is False
+    assert report["sections"] == {} and report["extra"] == []
+    # With no section there is nothing to show as a showcase: the page falls
+    # back to the blocks of the body.
+    assert report["preamble"] is None and report["title"] == "Party plan"
+
+
+def test_a_decision_of_a_document_carries_the_text_to_copy(docs) -> None:
+    _write(
+        docs / "alex/choose.md",
+        "---\ntitle: Choose\nkind: report\nstatus: final\n---\n"
+        "# Choose\nOne thing is left.\n\n## Outputs\n"
+        "- document: documents/alex/party.md — Party plan\n"
+        "- merge request: https://git.example.test/mr/4 — The fix\n\n"
+        "## Decisions for you\n- **Pick a date** Saturday or Sunday?\n",
+    )
+    report = _doc("alex", "choose").json()["report"]
+    [decision] = report["sections"]["decisions for you"]["items"]
+    assert decision["question"] == "Pick a date" and decision["context"] == "Saturday or Sunday?"
+    assert decision["copy"] == "Document documents/alex/choose.md, decision 1: Pick a date"
+    outputs = report["sections"]["outputs"]["outputs"]
+    assert [out["icon"] for out in outputs] == ["page", "merge request"]
+    assert outputs[0]["url"] == "/documents/alex/party"
+    assert outputs[1]["url"] == "https://git.example.test/mr/4"
 
 
 def test_an_html_document_names_its_artifact_and_has_no_block(docs) -> None:

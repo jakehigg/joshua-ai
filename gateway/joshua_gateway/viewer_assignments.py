@@ -30,11 +30,10 @@ shows nothing old. A ``404`` returns :data:`NOT_FOUND`. Each page answers 200
 in these cases, except a detail page that the manager does not know, which is
 404.
 
-Every string from the manager is untrusted. The list and the detail of an
-assignment are JSON routes (``viewer_api.assignments``) that a React page
-reads, and every string a person sees there — the duration, the status label,
-the phrase of a start — is derived here. The saved assignments still render
-on the server, and that HTML escapes each string.
+Every string from the manager is untrusted. The assignments, the saved ones,
+and each detail are JSON routes (``viewer_api.assignments``) that a React
+page reads, and every string a person sees there — the duration, the status
+label, the phrase of a start — is derived here.
 
 A draft has not run. It has no plan, no report, and no progress, and it shows
 the words to say, "Tell Joshua: start assignment N" (:func:`start_phrase`),
@@ -44,8 +43,7 @@ A re-run is a run of the same assignment. When a run has a lineage (the runs
 that share its root), :func:`run_number` gives "run k of assignment N", with
 N the root.
 
-The functions here build data and HTML only. The routes live in ``viewer``
-and in ``viewer_api``.
+The functions here build data only. The routes live in ``viewer_api``.
 """
 
 from __future__ import annotations
@@ -54,7 +52,6 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
-from html import escape
 from typing import Any, Final
 
 import httpx
@@ -64,15 +61,8 @@ from joshua_shared.log import get_logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from joshua_gateway import viewer_blocks as vb
-from joshua_gateway import viewer_showcase as sc
-from joshua_gateway.viewer_comments import (
-    CommentForms,
-    Gutter,
-    comments_badge,
-    time_html,
-)
 from joshua_gateway.viewer_limits import when_text
-from joshua_gateway.viewer_usage import exact, short
+from joshua_gateway.viewer_usage import exact
 
 logger = get_logger("viewer.assignments")
 
@@ -100,18 +90,8 @@ _EMPTY = {
 }
 _STATE_KEYS = frozenset(key for key, _ in STATES)
 
-# The badge class of each status of the store. An unknown status is plain.
-_STATUS_CLASS = {
-    "draft": "plain",
-    "running": "accent",
-    "waiting": "warn",
-    "paused_limits": "warn",
-    "done": "ok",
-    "failed": "bad",
-    "cancelled": "plain",
-    "budget_exceeded": "bad",
-    "time_exceeded": "bad",
-}
+# The status of the store as a person reads it. Any other status is its own
+# words, with no underscore.
 _STATUS_LABEL = {
     "paused_limits": "paused at limits",
     "budget_exceeded": "over budget",
@@ -454,38 +434,6 @@ def status_label(status: str) -> str:
     return _STATUS_LABEL.get(status, status.replace("_", " "))
 
 
-def _status_chip(status: str) -> str:
-    """The badge of a status of the store."""
-    css = _STATUS_CLASS.get(status, "plain")
-    return f'<span class="j-badge {css}">{escape(status_label(status))}</span>'
-
-
-def _when(item: Item, *, tz: tzinfo, now: datetime) -> str:
-    if item.started_at:
-        return f"started {time_html(item.started_at, tz=tz, now=now)}"
-    if item.created_at:
-        return f"created {time_html(item.created_at, tz=tz, now=now)}"
-    return ""
-
-
-def _sub(parts: list[str]) -> str:
-    return " · ".join(part for part in parts if part)
-
-
-def _not_configured() -> str:
-    return (
-        '<p class="j-empty">Assignments are not configured. The viewer needs '
-        f"<code>{ASSIGNMENTS_URL_ENV}</code> and <code>{VIEWER_TOKEN_ENV}</code>.</p>"
-    )
-
-
-def _no_answer() -> str:
-    return (
-        '<p class="j-empty">The assignments manager did not answer. '
-        "The assignments are not available now.</p>"
-    )
-
-
 def summary_line(item: Item) -> str:
     """The line under the title of a row, as Markdown: the lede of the report,
     else the next step of the plan, else "". The manager gives both."""
@@ -493,46 +441,6 @@ def summary_line(item: Item) -> str:
         return item.lede.strip()
     step = (item.next_step or "").strip()
     return f"Next: {step}" if step else ""
-
-
-def _run_row(item: Item, *, tz: tzinfo, now: datetime) -> str:
-    """One row: the title as a link, the lede of the report or the next step
-    of the plan, the status, when, the model, the tokens, and the number of
-    outputs."""
-    question = (
-        '<span class="j-badge warn plain" title="The assignment asks a question">question</span>'
-        if item.open_question
-        else ""
-    )
-    line = summary_line(item)
-    outputs = item.outputs_count
-    tokens = (
-        f'<span title="{exact(item.usage.total)} tokens">{short(item.usage.total)} tokens</span>'
-        if item.state != "draft"
-        else ""
-    )
-    sub = _sub(
-        [
-            _when(item, tz=tz, now=now),
-            escape(item.model),
-            tokens,
-            sc.count(outputs, "output") if outputs else "",
-        ]
-    )
-    lede = f'<span class="a-row-line">{sc.inline(line)}</span>' if line else ""
-    if item.state == "draft":
-        lede += f'<span class="a-row-line j-muted">{escape(start_phrase(item.id))}</span>'
-    return (
-        '<li class="j-list-row a-row"><div class="j-list-main">'
-        f'<a class="j-list-title wrap" href="/assignments/{item.id}">{escape(item.title)}</a>'
-        f'{lede}<span class="j-list-sub">{sub}</span></div>'
-        f'<div class="a-chips">{question}{_status_chip(item.status)}</div></li>'
-    )
-
-
-def _rows(items: list[Item], *, tz: tzinfo, now: datetime) -> str:
-    rows = "".join(_run_row(i, tz=tz, now=now) for i in items)
-    return f'<ul class="j-list a-list">{rows}</ul>'
 
 
 def limits_text(stop: Mapping[str, Any], *, tz: tzinfo, now: datetime) -> str:
@@ -569,8 +477,7 @@ def spec_yaml(spec: Mapping[str, Any]) -> str:
 @dataclass(frozen=True)
 class Unit:
     """One commentable part of a definition: lines ``first`` to ``last`` (from
-    1) of the text, its value as data, its HTML, its CSS class, and what its
-    "+" names.
+    1) of the text, its value as data, and what its "+" names.
 
     ``kind`` is ``prop`` for a field, ``goal`` for the head of the goal, and
     the kind of the block (``p``, ``li``, ``code``, …) for a block of it.
@@ -578,8 +485,6 @@ class Unit:
 
     first: int
     last: int
-    body: str
-    css: str
     what: str
     kind: str = "prop"
     label: str = ""
@@ -603,11 +508,6 @@ def _tag_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def _tags(values: list[str]) -> str:
-    tags = "".join(f'<span class="a-tag">{escape(v)}</span>' for v in values)
-    return f'<span class="a-tags">{tags}</span>'
-
-
 def _prop_value(item: vb.Field) -> dict[str, Any]:
     """The value of a field of a definition, as data: ``text``, ``tags`` for a
     list or a mapping, ``none`` for an empty one, and ``code`` with the source
@@ -629,34 +529,15 @@ def _prop_value(item: vb.Field) -> dict[str, Any]:
     return {"kind": "text", "text": _tag_text(value)}
 
 
-def _prop_html(value: dict[str, Any]) -> str:
-    """The value of a field, as HTML."""
-    kind = value["kind"]
-    if kind == "code":
-        return f'<code class="a-code">{escape(value["text"])}</code>'
-    if kind == "tags":
-        return _tags(list(value["tags"]))
-    if kind == "none":
-        return '<span class="j-faint">none</span>'
-    return f'<span class="a-prop-text">{escape(value["text"])}</span>'
-
-
 def _prop(item: vb.Field) -> Unit:
     label = _label(item.key)
-    value = _prop_value(item)
-    body = (
-        f'<span class="a-prop-key">{escape(label)}</span>'
-        f'<span class="a-prop-value">{_prop_html(value)}</span>'
-    )
     return Unit(
         item.first,
         item.last,
-        body,
-        "a-prop",
         f"the field {label or 'here'}",
         kind="prop",
         label=label,
-        value=value,
+        value=_prop_value(item),
     )
 
 
@@ -674,17 +555,7 @@ def definition_units(text: str) -> tuple[list[Unit], list[Unit]]:
         parts = vb.blocks(found.markdown)
         lines = found.markdown.split("\n")
         head_last = found.header + parts[0].first - 1 if parts else found.last
-        goal.append(
-            Unit(
-                found.header,
-                head_last,
-                '<span class="a-prop-key">goal</span>',
-                "a-goal-head",
-                "the goal",
-                kind="goal",
-                label="goal",
-            )
-        )
+        goal.append(Unit(found.header, head_last, "the goal", kind="goal", label="goal"))
         for part in parts:
             first = found.header + part.first
             depth = min(part.depth, vb.MAX_DEPTH)
@@ -692,63 +563,13 @@ def definition_units(text: str) -> tuple[list[Unit], list[Unit]]:
                 Unit(
                     first,
                     found.header + part.last,
-                    part.html,
-                    f"a-block {part.kind} d{depth}",
-                    f"the {sc.BLOCK_NAMES.get(part.kind, 'block')} at line {first}",
+                    f"the {vb.BLOCK_NAMES.get(part.kind, 'block')} at line {first}",
                     kind=part.kind,
                     markdown=vb.block_markdown(lines, part),
                     depth=depth,
                 )
             )
     return props, goal
-
-
-def _definition(
-    item: Detail | SavedDetail,
-    *,
-    open_: bool,
-    forms: CommentForms | None,
-    tz: tzinfo,
-    now: datetime,
-) -> str:
-    """The definition in a ``<details>``, as a document: the fields as a list
-    of properties, then the goal as Markdown, one block a unit. Each unit has
-    the "+" of its first line and shows the open comments on any of its
-    lines. A ``Source`` fold under it gives each line with its number and its
-    "+". The resolved comments fold at the end.
-
-    Without the ``definition`` text of the manager (an older manager), the
-    spec shows as YAML with no line numbers and no form, because a line
-    number would not match the lines of the manager."""
-    comments = [c for c in item.comments if c.target == "definition"]
-    open_comments = [c for c in comments if c.resolved_at is None]
-    badge = comments_badge(len(open_comments))
-    opened = " open" if open_ or open_comments else ""
-    summary = f"<summary>Definition{' ' + badge if badge else ''}</summary>"
-    text = item.definition
-    if text is None:
-        return (
-            f'<details class="a-def"{opened} id="definition">{summary}'
-            f"<pre><code>{escape(spec_yaml(item.spec))}</code></pre></details>"
-        )
-    gutter = Gutter(text.split("\n") if text else [], comments, forms, tz, now)
-    props, goal = definition_units(text)
-
-    def units(part: list[Unit]) -> str:
-        return "".join(gutter.unit(u.first, u.last, u.body, u.css, u.what) for u in part)
-
-    doc = ""
-    if props:
-        doc += f'<div class="a-props">{units(props)}</div>'
-    if goal:
-        doc += f'<div class="a-goal j-prose">{units(goal)}</div>'
-    if not doc:
-        doc = '<p class="j-faint a-def-empty">The definition is empty.</p>'
-    return (
-        f'<details class="a-def"{opened} id="definition">{summary}'
-        f'<div class="a-doc">{doc}</div>{gutter.orphans()}{gutter.source()}'
-        f"{gutter.resolved()}</details>"
-    )
 
 
 # The texts of a run that take comments beside its definition, and the start
@@ -780,12 +601,6 @@ def run_number(item: Detail) -> tuple[int, int] | None:
     return ids.index(item.id) + 1, ids[0]
 
 
-def live(gutter: Gutter) -> Gutter | None:
-    """``gutter``, or None when it has no form and no comment: then the text
-    renders as plain blocks."""
-    return gutter if gutter.forms is not None or gutter.comments else None
-
-
 # The line on the page of a draft.
 DRAFT_LINE = "Tell Joshua to start it, or leave comments first."
 
@@ -793,81 +608,3 @@ DRAFT_LINE = "Tell Joshua to start it, or leave comments first."
 def start_phrase(assignment_id: int) -> str:
     """The words that make Joshua start exactly this draft."""
     return f"Tell Joshua: start assignment {int(assignment_id)}"
-
-
-def saved_row(saved: SavedItem, *, tz: tzinfo, now: datetime) -> str:
-    """One saved assignment: the name as a link, the title, the runs, the last run."""
-    runs = f"{saved.runs} run" + ("" if saved.runs == 1 else "s")
-    last = ""
-    chip = ""
-    if saved.last_run is not None:
-        ended = time_html(saved.last_run.finished_at, tz=tz, now=now)
-        last = f'<a href="/assignments/{saved.last_run.id}">last run</a>' + (
-            f" {ended}" if ended else ""
-        )
-        chip = _status_chip(saved.last_run.status)
-    title = f'<span class="j-list-sub">{escape(saved.title)}</span>' if saved.title else ""
-    return (
-        '<li class="j-list-row a-row"><div class="j-list-main">'
-        f'<a class="j-list-title wrap" href="/assignments/saved/{saved.id}">'
-        f"{escape(saved.name)}</a>{title}"
-        f'<span class="j-list-sub">{_sub([runs, last])}</span></div>'
-        f'<div class="a-chips">{comments_badge(saved.open_comments)}{chip}</div></li>'
-    )
-
-
-def saved_unavailable_html(title: str, *, configured: bool) -> str:
-    """The body of a saved page when the manager is not configured or did not
-    answer."""
-    return (
-        f'<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
-        f'<h1 class="j-doc-title">{escape(title)}</h1>'
-        f"{_no_answer() if configured else _not_configured()}"
-    )
-
-
-def _saved_head(extra: str = "") -> str:
-    return f'<nav class="j-crumbs"><a href="/assignments">assignments</a>{extra}</nav>'
-
-
-def saved_list_html(body: SavedList | None, *, configured: bool, tz: tzinfo, now: datetime) -> str:
-    """The body of ``/assignments/saved``."""
-    head = _saved_head() + '<h1 class="j-doc-title">saved assignments</h1>'
-    if not configured:
-        return head + _not_configured()
-    if body is None:
-        return head + _no_answer()
-    if not body.items:
-        return (
-            f'{head}<p class="j-empty">No saved assignment. Ask Joshua to save an '
-            "assignment by name to run it again.</p>"
-        )
-    rows = "".join(saved_row(saved, tz=tz, now=now) for saved in body.items)
-    return f'{head}<ul class="j-list a-list">{rows}</ul>'
-
-
-def saved_detail_html(
-    saved: SavedDetail, *, tz: tzinfo, now: datetime, forms: CommentForms | None = None
-) -> str:
-    """The body of ``/assignments/saved/{id}``: the definition open, then the runs.
-    With ``forms``, each line of the definition has a form for a comment."""
-    head = _saved_head(' <span aria-hidden="true">/</span> <a href="/assignments/saved">saved</a>')
-    title = f'<p class="a-lead">{escape(saved.title)}</p>' if saved.title else ""
-    updated = time_html(saved.updated_at, tz=tz, now=now)
-    meta = _sub(
-        [
-            f"{saved.runs} run" + ("" if saved.runs == 1 else "s"),
-            f"updated {updated}" if updated else "",
-        ]
-    )
-    runs = (
-        _rows(saved.runs_list, tz=tz, now=now)
-        if saved.runs_list
-        else '<p class="j-faint">No run yet.</p>'
-    )
-    return (
-        f'{head}<h1 class="j-doc-title">{escape(saved.name)}</h1>{title}'
-        f'<p class="j-meta">{meta}</p>'
-        f"{_definition(saved, open_=True, forms=forms, tz=tz, now=now)}"
-        f"{sc.section('Runs', runs)}"
-    )

@@ -22,9 +22,15 @@ its text is the ``title:`` line. The blocks keep the line numbers that
 ``viewer_blocks`` computes, because a comment anchors to a line, and each
 write of a comment is one commit of the documents repository.
 
-The answers hold data: the React app renders the blocks, the gutter and the
-list (``src/blocks/``, ``src/comments/``, ``src/pages/Documents.tsx`` and
-``src/pages/Document.tsx``). ``GET /documents/{owner}/{slug}.json`` and
+``report`` is the body as the showcase reads it
+(``viewer_api.assignments.report_json``): a document whose body has the
+headings of a report shows as that report, with the same cards as an
+assignment's.
+
+The answers hold data: the React app renders the blocks, the showcase, the
+gutter and the list (``src/blocks/``, ``src/showcase/``, ``src/comments/``,
+``src/pages/Documents.tsx`` and ``src/pages/Document.tsx``).
+``GET /documents/{owner}/{slug}.json`` and
 ``GET /documents/{owner}/{slug}/artifact`` stay in ``viewer``: the chat reads
 the first for the head of an artifact card and frames the second for an HTML
 document.
@@ -44,7 +50,7 @@ from joshua_gateway import viewer_blocks as vb
 from joshua_gateway import viewer_comments as comments_mod
 from joshua_gateway import viewer_docstore as docstore
 from joshua_gateway import viewer_documents as documents_mod
-from joshua_gateway import viewer_report as rp
+from joshua_gateway.viewer_api import assignments as assignments_api
 from joshua_gateway.viewer_api.edit import (
     NOT_JSON,
     _answer,
@@ -189,33 +195,19 @@ def _blocks(doc: docstore.Document) -> list[dict[str, Any]]:
     ]
 
 
-def _section(key: str, section: rp.Section) -> dict[str, Any]:
-    return {
-        "key": key,
-        "title": section.title,
-        "body": section.body,
-        "line": section.line,
-        "start": section.start,
-        "end": section.end,
-    }
-
-
 def _report(doc: docstore.Document) -> dict[str, Any] | None:
-    """The sections of a document that has the headings of a report, else None."""
+    """The body of the document as a showcase reads it, or None for an HTML
+    document, whose body renders in the frame of the artifact route.
+
+    A body with the headings of the report shape has ``structured`` true and
+    shows as the showcase of a report; any other body has it false, and the
+    page shows its blocks. The copy text of a decision names the document, so
+    a person pastes it into a conversation with Joshua."""
     if doc.format == "html":
         return None
-    report = rp.parse(doc.body)
-    if not report.structured:
-        return None
-    return {
-        "title": report.title,
-        "lede": report.lede,
-        "generated": report.generated,
-        "preamble_line": report.preamble_line,
-        "first_section": report.first_section,
-        "sections": [_section(key, part) for key, part in report.sections.items()],
-        "extra": [_section("", part) for part in report.extra],
-    }
+    return assignments_api.report_json(
+        doc.body, prefix="L", copy_prefix=f"Document {doc.tool_path}"
+    )
 
 
 async def document(request: Request, person: Person) -> JSONResponse:

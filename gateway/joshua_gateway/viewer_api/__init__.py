@@ -81,6 +81,19 @@ def routes() -> list[Route]:
             methods=["POST"],
         ),
         Route(api_path("assignments"), _require_auth(assignments.assignments)),
+        # The saved routes come first: ``saved`` is a name, not an id.
+        Route(api_path("assignments/saved"), _require_auth(assignments.saved)),
+        Route(api_path("assignments/saved/{id:int}"), _require_auth(assignments.saved_assignment)),
+        Route(
+            api_path("assignments/saved/{id:int}/comments"),
+            _require_auth(assignments.add_saved_comment),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("assignments/saved/{id:int}/comments/{cid:int}/delete"),
+            _require_auth(assignments.delete_saved_comment),
+            methods=["POST"],
+        ),
         Route(api_path("assignments/{id:int}"), _require_auth(assignments.assignment)),
         Route(
             api_path("assignments/{id:int}/comments"),

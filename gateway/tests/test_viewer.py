@@ -236,11 +236,11 @@ def test_image_attachment_renders_inline(client):
 
 def test_security_headers_on_every_response(client):
     response = client.get("/assignments", auth=("alex", ALEX_PW))
-    # The policy allows the bundle of the React app, from this origin, and the
-    # copy script of a server-rendered report, by its hash. No inline script.
+    # The policy allows the bundle of the React app, from this origin, and
+    # nothing else. No inline script, so no hash.
     assert response.headers["content-security-policy"] == (
         "default-src 'none'; img-src 'self'; style-src 'self'; "
-        f"script-src 'self' '{viewer.showcase_mod.COPY_SCRIPT_HASH}'; connect-src 'self'; "
+        "script-src 'self'; connect-src 'self'; "
         "frame-src 'self'; frame-ancestors 'self'"
     )
     assert "unsafe-inline" not in response.headers["content-security-policy"]
@@ -296,55 +296,6 @@ def test_the_viewer_stylesheet_uses_the_shared_tokens(client):
     css = client.get("/style.css", auth=("alex", ALEX_PW)).text
     assert "var(--j-" in css
     assert "prefers-color-scheme" not in css  # dark only, like the shared file
-
-
-def test_a_page_has_the_shared_shell(client):
-    html = client.get("/assignments/saved", auth=("alex", ALEX_PW)).text
-    assert '<link rel=stylesheet href="/ui/joshua-ui.css">' in html
-    assert html.index("/ui/joshua-ui.css") < html.index("/style.css")
-    assert 'href="/ui/favicon-32.png"' in html
-    assert 'href="/ui/apple-touch-icon.png"' in html
-    assert '<meta name="theme-color" content="#080d17">' in html
-    assert '<div class="j-shell has-sidebar">' in html
-    assert '<aside class="j-sidebar">' in html and '<header class="j-appbar">' in html
-    assert '<nav class="j-tabs mobile-only"' in html
-    assert '<main class="j-content">' in html
-    # The search field is in the app bar, so a phone has it too. A page the
-    # server renders loads ``/search``, which the React app renders.
-    appbar = html[html.index('<header class="j-appbar">') : html.index("</header>")]
-    assert 'action="/search"' in appbar and 'name="q"' in appbar
-
-
-def test_the_current_section_is_marked(client):
-    html = client.get("/assignments/saved", auth=("alex", ALEX_PW)).text
-    assert 'class="j-nav-item" href="/assignments" aria-current="page"' in html
-    assert 'class="j-tab" href="/assignments" aria-current="page"' in html
-    assert html.count('aria-current="page"') == 2
-    # Every server-rendered page still reaches the person's own page, which
-    # the React app serves.
-    assert 'class="j-nav-item" href="/me"' in html
-
-
-def test_the_chat_entry_names_the_person_of_the_request(client):
-    for creds, person in ((("alex", ALEX_PW), "alex"), (MIA, "mia")):
-        html = client.get("/assignments/saved", auth=creds).text
-        link = f'href="/chat/{person}"'
-        assert f'<a class="j-nav-item" {link}>' in html, person
-        assert f'<a class="j-tab" {link}>Chat</a>' in html, person
-        assert "/chat/jake" not in html, person
-
-
-def test_the_chat_section_is_marked_current(client):
-    person = config.load().person("alex")
-    token = viewer._REQUEST_PERSON.set(person)
-    try:
-        html = viewer._shell("", section="chat")
-    finally:
-        viewer._REQUEST_PERSON.reset(token)
-    assert '<a class="j-nav-item" href="/chat/alex" aria-current="page">' in html
-    assert '<a class="j-tab" href="/chat/alex" aria-current="page">Chat</a>' in html
-    assert html.count('aria-current="page"') == 2
-    assert "<strong>Chat</strong>" in html
 
 
 # -- search -----------------------------------------------------------------

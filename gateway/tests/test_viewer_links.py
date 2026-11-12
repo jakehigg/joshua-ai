@@ -1,5 +1,5 @@
-"""Offline tests for the viewer's links: the checks, the file, the rows of a
-write, and the links group of the server-rendered sidebar.
+"""Offline tests for the viewer's links: the checks, the file, and the rows of
+a write.
 
 ``test_viewer_api_links`` covers the JSON routes the page and the sidebar of
 the React app read."""
@@ -132,40 +132,6 @@ def test_a_broken_file_shows_no_links(text):
 
 def test_a_missing_file_shows_no_links(tmp_path):
     assert links.load(tmp_path) == []
-
-
-# -- the navigation -------------------------------------------------------------
-
-
-def test_the_sidebar_shows_each_link_in_a_new_tab(client, data):
-    _seed(data, f"links:\n  - title: Pantry\n    url: {PANTRY}\n    icon: box\n")
-    html = client.get("/assignments/saved", auth=ALEX).text
-    nav = html[html.index('aria-label="Links"') :]
-    nav = nav[: nav.index("</nav>")]
-    assert f'href="{PANTRY}" target="_blank" rel="noopener noreferrer"' in nav
-    assert "<span>Pantry</span>" in nav
-    assert 'href="/links">Edit links</a>' in nav
-
-
-def test_with_no_links_the_sidebar_offers_to_add_them(client):
-    html = client.get("/assignments/saved", auth=ALEX).text
-    assert 'href="/links">Add links</a>' in html
-
-
-def test_a_phone_gets_a_links_tab(client):
-    html = client.get("/assignments/saved", auth=ALEX).text
-    assert '<a class="j-tab" href="/links">Links</a>' in html
-
-
-def test_titles_and_urls_are_escaped_in_the_sidebar(client, data):
-    _seed(
-        data,
-        'links:\n  - title: "<b>x</b>"\n    url: "https://example.test/?a=1&b=\\"2\\""\n',
-    )
-    html = client.get("/assignments/saved", auth=ALEX).text
-    assert "<b>x</b>" not in html
-    assert "&lt;b&gt;x&lt;/b&gt;" in html
-    assert 'href="https://example.test/?a=1&amp;b=&quot;2&quot;"' in html
 
 
 # -- the rows of a write --------------------------------------------------------
