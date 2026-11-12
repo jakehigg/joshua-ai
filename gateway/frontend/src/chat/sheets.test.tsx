@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceItem } from "../api/workspaces";
@@ -34,7 +34,7 @@ function backend() {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://test").pathname;
-      if (path === "/api/v1/session") return json({ person: { id: "alex", name: "Alex", role: "member" }, sections: [] });
+      if (path === "/api/v1/session") return json({ person: { id: "alex", name: "Alex", role: "member" }, sections: [{ key: "wiki", label: "Wiki", path: "/wiki/" }] });
       if (path === "/api/v1/workspaces/solar") return json(WS);
       if (path === "/api/v1/workspaces") return json({ workspaces: [WS] });
       if (path === "/api/v1/workspaces/solar/items") return json({ items: ITEMS });
@@ -103,6 +103,20 @@ describe("sheets on the chat screen", () => {
 
     fireEvent.click(burger);
     fireEvent.click(screen.getByRole("link", { name: "Chat", hidden: true }));
+    expect(document.querySelector(".rail.open")).toBeNull();
+  });
+
+  it("has one toggle on a phone, and its drawer holds the workspaces and the app links", async () => {
+    await open();
+    expect(screen.queryByRole("button", { name: "Show the navigation" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show the workspaces", hidden: true }));
+    const rail = document.querySelector(".rail.open") as HTMLElement;
+    expect(within(rail).getByRole("link", { name: "Solar install", hidden: true })).toBeTruthy();
+    expect(within(rail).getByRole("button", { name: "+ New workspace", hidden: true })).toBeTruthy();
+    expect(await within(rail).findByRole("link", { name: "Wiki", hidden: true })).toBeTruthy();
+    expect(within(rail).getByRole("link", { name: "Your page", hidden: true })).toBeTruthy();
+    // A tap on an app link closes the drawer.
+    fireEvent.click(within(rail).getByRole("link", { name: "Wiki", hidden: true }));
     expect(document.querySelector(".rail.open")).toBeNull();
   });
 

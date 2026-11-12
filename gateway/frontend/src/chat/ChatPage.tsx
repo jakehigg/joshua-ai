@@ -23,10 +23,12 @@
 // the sheet. Escape closes the top sheet (the panel, then the items, then the
 // rail). While a sheet is open the page behind it does not scroll
 // (`sheet-open`, index.css). From 900px the rail is a column, and from 1100px
-// so is the item list, and the same state drives their close buttons.
+// so is the item list, and the same state drives their close buttons. The
+// rail also holds the app navigation links on a phone (Rail.tsx), so the chat
+// has one menu button there; a route change closes it.
 
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError, getJson } from "../api/client";
 import { getWorkspace, type Workspace } from "../api/workspaces";
 import Shell, { type Session } from "../shell/Shell";
@@ -77,6 +79,7 @@ interface ChatProps {
 
 function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [railOpen, setRailOpen] = useState(false);
   const [itemsOpen, setItemsOpen] = useState(false);
   const [itemsKey, setItemsKey] = useState(0);
@@ -127,6 +130,8 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
     }
     setItemsOpen(!itemsOpen);
   };
+  // A route change closes the rail, which holds the app links on a phone.
+  useEffect(() => setRailOpen(false), [pathname]);
   const sheetOpen = railOpen || itemsOpen || panelOpen;
   useEffect(() => {
     if (!sheetOpen) return undefined;

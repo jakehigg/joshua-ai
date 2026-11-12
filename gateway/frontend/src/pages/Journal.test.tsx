@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -119,7 +119,7 @@ describe("the journal of one month", () => {
       "September 2026",
     ]);
     // The filter of a person is a button; the chips of an entry are links.
-    const chips = screen.getAllByRole("button");
+    const chips = within(document.querySelector("main.j-content") as HTMLElement).getAllByRole("button");
     expect(chips.map((chip) => chip.textContent)).toEqual(["everyone", "Alex", "Mia"]);
     const titles = [...document.querySelectorAll("h3.j-entry-title")];
     expect(titles.map((title) => title.textContent)).toEqual(["The day", "Pottery class"]);

@@ -1,9 +1,13 @@
 // The left rail of the chat screen: Chat, the active workspaces, the paused
-// ones (folded), and "+ New workspace". On a phone it is a drawer with a close
+// ones (folded), and "+ New workspace". Under them it repeats the app
+// navigation links of the shell (AppNav), which the shell's own sidebar shows
+// only from 760px; so on a phone this drawer is the one menu of the chat.
+// On a phone it is a drawer with a close
 // button; the screen also closes it on a tap of the backdrop and on Escape.
 
 import { Link } from "react-router-dom";
 import type { Workspace } from "../api/workspaces";
+import AppNav, { useNav } from "../shell/AppNav";
 
 export function Rail({
   person,
@@ -23,6 +27,7 @@ export function Rail({
   onNavigate: () => void;
   onClose: () => void;
 }) {
+  const nav = useNav();
   const active = workspaces.filter((w) => w.status === "active");
   const paused = workspaces.filter((w) => w.status === "paused");
   const row = (w: Workspace) => (
@@ -66,6 +71,12 @@ export function Rail({
       <button type="button" className="rail-new" onClick={onNew}>
         + New workspace
       </button>
+      {nav && (
+        <div className="rail-appnav">
+          <h2 className="rail-label">Navigate</h2>
+          <AppNav sections={nav.sections} section={nav.section} onNavigate={onNavigate} />
+        </div>
+      )}
     </nav>
   );
 }

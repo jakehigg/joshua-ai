@@ -1011,3 +1011,69 @@ html, body { max-width: 100%; overflow-x: clip; }
     border-radius: 0;
   }
 }
+
+/* The app navigation as a drawer on a phone. From 760px the sidebar is a
+   column (the master stylesheet). Below that it is off-canvas on the left,
+   and the hamburger of the app bar slides it over the content, above a dimmed
+   backdrop. The rail of the chat repeats the same links on a phone, and
+   hides them where the sidebar shows. */
+.j-nav-toggle,
+.j-nav-close {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  background: var(--j-surface-2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.j-sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+html.j-lock,
+html.j-lock body { overflow: hidden; }
+.j-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgb(0 0 0 / 0.5);
+}
+@media (max-width: 759px) {
+  .j-shell.has-sidebar .j-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(18rem, 85vw);
+    overflow-y: auto;
+    padding: max(14px, env(safe-area-inset-top)) 10px 14px max(10px, env(safe-area-inset-left));
+    border-right: 1px solid var(--j-line-soft);
+    background: var(--j-bg);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .j-shell.has-sidebar .j-sidebar.open {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease;
+  }
+  .chat-screen .rail-appnav { display: flex; flex-direction: column; gap: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .j-shell.has-sidebar .j-sidebar,
+  .j-shell.has-sidebar .j-sidebar.open { transition: none; }
+}
+@media (min-width: 760px) {
+  .j-nav-toggle,
+  .j-nav-close,
+  .j-scrim,
+  .chat-screen .rail-appnav { display: none; }
+}
+@media (max-width: 759px) {
+  .chat-screen .rail-appnav { display: flex; }
+}
