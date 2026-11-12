@@ -7,6 +7,7 @@
 // person message that the backend refused.
 
 import type { HistoryMessage, HistoryPage } from "../api/client";
+import { isSilentReply } from "./silent";
 
 export type Role = "person" | "joshua" | "system";
 
@@ -53,6 +54,11 @@ export interface View {
 }
 
 export const EMPTY_VIEW: View = { messages: [], nextBefore: null };
+
+// A reply that says nothing is not a message of the conversation (silent.ts).
+function listed(rows: HistoryMessage[]): HistoryMessage[] {
+  return rows.filter((m) => !(m.role === "joshua" && m.status !== "failed" && isSilentReply(m.text)));
+}
 
 export function serverKey(id: number): string {
   return `s${id}`;
@@ -103,7 +109,7 @@ function unique(messages: ChatMessage[]): ChatMessage[] {
 // (an old row is at or after the oldest row of the new page); then the old
 // cursor stays too. The local messages that `keepLocal` names stay at the end.
 export function reconcile(view: View, page: HistoryPage): View {
-  const fresh = unique(page.messages.map(fromServer));
+  const fresh = unique(listed(page.messages).map(fromServer));
   const local = keepLocal(view.messages);
   if (fresh.length === 0 || page.nextBefore === null) {
     return { messages: [...fresh, ...local], nextBefore: page.nextBefore };
@@ -122,7 +128,7 @@ export function reconcile(view: View, page: HistoryPage): View {
 // is not added again.
 export function prependOlder(view: View, page: HistoryPage): View {
   const present = new Set(view.messages.map((m) => m.serverId).filter((id) => id !== undefined));
-  const older = unique(page.messages.map(fromServer)).filter(
+  const older = unique(listed(page.messages).map(fromServer)).filter(
     (m) => !present.has(m.serverId as number),
   );
   return { messages: [...older, ...view.messages], nextBefore: page.nextBefore };

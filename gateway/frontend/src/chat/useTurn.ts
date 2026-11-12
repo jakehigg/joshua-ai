@@ -18,6 +18,9 @@
 // (DocumentPanel.tsx): the refine loop inside one turn. The path comes from
 // the answer and not from the stream, because the `done` frame's `tools` is
 // a de-duped list of tool names and never says which document was written.
+// A reply that is only `[IGNORE]` (silent.ts) is not shown: its message is
+// removed when the turn is done, and while it streams, a text that is only a
+// start of the marker is held back, so "[IGN" never shows.
 // `workspace` is passed through to the turn body: the turn runs in that
 // workspace, and without it in the main thread.
 
@@ -25,6 +28,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { ApiError, ConnectionLost, postTurn } from "../api/client";
 import { parseArtifact } from "./ArtifactCard";
 import { ARTIFACT_INFO, splitFence } from "./blocks";
+import { isSilentReply, maybeSilentReply } from "./silent";
 import { appendMessage, newId, updateMessage, type ChatMessage } from "./store";
 
 type SetMessages = Dispatch<SetStateAction<ChatMessage[]>>;
@@ -77,6 +81,9 @@ export function useTurn(
       let completed = false;
       // The document the finished answer says it wrote, if it says one.
       let written: string | null = null;
+      // The streamed text so far, which the message shows unless it could
+      // still become the silent reply.
+      let streamed = "";
       const patch = (p: Partial<ChatMessage> | ((m: ChatMessage) => Partial<ChatMessage>)) =>
         setMessages((list) => updateMessage(list, replyId, p));
       try {
@@ -86,10 +93,15 @@ export function useTurn(
           (frame) => {
             switch (frame.type) {
               case "delta":
-                patch((m) => ({ text: m.text + frame.text }));
+                streamed += frame.text;
+                if (!maybeSilentReply(streamed)) patch({ text: streamed });
                 break;
               case "done":
                 completed = true;
+                if (isSilentReply(frame.text)) {
+                  setMessages((list) => list.filter((m) => m.id !== replyId));
+                  break;
+                }
                 patch({ text: frame.text, state: "ok", ...(frame.turnId ? { turnId: frame.turnId } : {}) });
                 written = writtenPath(frame.text);
                 break;

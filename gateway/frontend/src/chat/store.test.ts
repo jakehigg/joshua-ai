@@ -108,3 +108,25 @@ describe("history store", () => {
     expect(localStorage.length).toBe(0);
   });
 });
+
+describe("a silent reply in a history page", () => {
+  const page = (messages: HistoryMessage[], nextBefore: number | null = null): HistoryPage => ({ messages, nextBefore });
+  const row = (id: number, role: HistoryMessage["role"], text: string, status: HistoryMessage["status"] = "ok"): HistoryMessage => ({
+    id,
+    role,
+    text,
+    status,
+    at: "2026-11-12T10:00:00Z",
+  });
+
+  it("is not listed, in the newest page or an older one", () => {
+    const rows = [row(1, "person", "hi"), row(2, "joshua", " [IGNORE] \n"), row(3, "joshua", "hello")];
+    expect(reconcile(EMPTY_VIEW, page(rows)).messages.map((m) => m.text)).toEqual(["hi", "hello"]);
+    expect(prependOlder(EMPTY_VIEW, page(rows)).messages.map((m) => m.text)).toEqual(["hi", "hello"]);
+  });
+
+  it("keeps a person text of that word, and a failed row", () => {
+    const rows = [row(1, "person", "[IGNORE]"), row(2, "joshua", "[IGNORE]", "failed")];
+    expect(reconcile(EMPTY_VIEW, page(rows)).messages).toHaveLength(2);
+  });
+});

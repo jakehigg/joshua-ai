@@ -89,6 +89,47 @@ describe("useTurn", () => {
     expect(hook.result.current.turn.isRunning()).toBe(false);
   });
 
+  it("holds back a streamed start of [IGNORE], so it never flashes", async () => {
+    const s = stream([sse("delta", { text: "[IGN" }), sse("delta", { text: "ORE]" })], { hold: true });
+    fakeFetch(new Response(s.body, { status: 200 }));
+    const { hook } = setup();
+    act(() => {
+      hook.result.current.turn.send("event");
+    });
+    await waitFor(() => expect(hook.result.current.messages).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(hook.result.current.messages[1]).toMatchObject({ text: "", state: "pending" });
+    s.release();
+    await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+  });
+
+  it("shows no bubble for a reply that is only [IGNORE]", async () => {
+    const s = stream([
+      sse("delta", { text: "[IGN" }),
+      sse("delta", { text: "ORE]" }),
+      sse("done", { turn_id: "t1", text: " [IGNORE]\n", tools: [] }),
+    ]);
+    fakeFetch(new Response(s.body, { status: 200 }));
+    const { hook, onDone } = setup();
+    act(() => {
+      hook.result.current.turn.send("event");
+    });
+    await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    expect(hook.result.current.messages.map((m) => m.role)).toEqual(["person"]);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a streamed text that only starts like the marker once it goes on", async () => {
+    const s = stream([sse("delta", { text: "[IG" }), sse("delta", { text: " is a word" }), sse("done", { turn_id: "t1", text: "[IG is a word", tools: [] })]);
+    fakeFetch(new Response(s.body, { status: 200 }));
+    const { hook } = setup();
+    act(() => {
+      hook.result.current.turn.send("hi");
+    });
+    await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    expect(hook.result.current.messages[1]?.text).toBe("[IG is a word");
+  });
+
   // The `done` frame's `tools` is a de-duped list of tool names and never
   // says which document was written, so the path comes from the fence.
   it("gives the document path of the answer's artifact fence, once", async () => {

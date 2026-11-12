@@ -901,10 +901,18 @@ class Repo:
         ``[1, TRANSCRIPT_PAGE_MAX]``. The second value is the cursor for the
         page before this one: the smallest id in this page when older rows
         exist, else None.
+
+        A reply that says nothing (``out`` with a blank text or the silent
+        marker ``SILENT_REPLY``) is left out, as delivery drops it, so the
+        viewer never shows it. The row stays stored. A failed reply and an
+        event line stay: the viewer shows both.
         """
         limit = max(1, min(limit, TRANSCRIPT_PAGE_MAX))
-        clauses = ["conversation_id = %s"]
-        params: list[Any] = [conversation_id]
+        clauses = [
+            "conversation_id = %s",
+            "NOT (direction = 'out' AND btrim(content, %s) IN ('', %s))",
+        ]
+        params: list[Any] = [conversation_id, BLANK_CHARS, SILENT_REPLY]
         if before is not None:
             clauses.append("id < %s")
             params.append(before)
