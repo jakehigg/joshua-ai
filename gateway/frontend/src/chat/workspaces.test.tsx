@@ -358,3 +358,18 @@ describe("the routes", () => {
     expect((await screen.findByTestId("where")).textContent).toBe("/chat/w/trip");
   });
 });
+
+describe("the dialogs on a phone", () => {
+  it("has a growing goal field and a footer with the buttons outside the scrolling body", () => {
+    viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    render(<NewWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    const goal = screen.getByLabelText("Goal (optional)");
+    expect(goal.tagName).toBe("TEXTAREA");
+    expect(goal.className).toContain("grow");
+    const body = document.querySelector(".ws-body") as HTMLElement;
+    const footer = document.querySelector(".ws-actions") as HTMLElement;
+    expect(body.contains(goal)).toBe(true);
+    expect(body.contains(footer)).toBe(false);
+    expect(footer.contains(screen.getByRole("button", { name: "Create" }))).toBe(true);
+  });
+});

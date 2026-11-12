@@ -924,3 +924,90 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 @media (min-width: 1100px) {
   .chat-screen .scrim-items { display: none; }
 }
+
+/* Form controls, everywhere. Text is 16px, so iOS Safari does not zoom in on
+   focus. No fixed height: padding and line-height centre the text, so it is
+   never cut off, and 44px is a tap target. A control never grows wider than
+   its container. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+textarea,
+select {
+  box-sizing: border-box;
+  max-width: 100%;
+  font-size: 16px;
+  line-height: 1.4;
+  min-height: 44px;
+  padding-block: 10px;
+  touch-action: manipulation;
+}
+textarea { min-height: 0; resize: vertical; }
+textarea.grow { resize: none; overflow-y: hidden; field-sizing: content; min-height: 4.5em; }
+select { text-overflow: ellipsis; }
+.chat-screen select { appearance: auto; }
+.j-field.mono input,
+.j-field.mono textarea { font-size: 16px; }
+.j-field input,
+.j-field select { padding-block: 0; }
+.chat-screen .ws-dialog input:not([type="checkbox"]),
+.chat-screen .ws-dialog textarea,
+.chat-screen .ws-dialog select,
+.chat-screen .item-add input { width: 100%; padding: 10px 12px; }
+.chat-screen .composer-input { padding: 10px 12px; min-height: 44px; }
+button,
+.j-btn,
+summary,
+label.attach { touch-action: manipulation; }
+.chat-screen button { min-height: 44px; }
+.chat-screen .item-actions button { min-height: 36px; padding: 0 10px; }
+
+/* A focus ring that no overflow:hidden parent cuts off, and a pressed state. */
+:is(button, a, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--j-accent);
+  outline-offset: -2px;
+}
+.chat-screen button:active:not(:disabled),
+.j-btn:active:not(:disabled) { transform: scale(0.97); filter: brightness(0.9); }
+
+/* Nothing is wider than the phone. */
+html, body { max-width: 100%; overflow-x: clip; }
+.j-appbar { min-width: 0; }
+.v-search { flex: 0 1 220px; min-width: 0; }
+.v-search .j-field { min-width: 0; }
+.v-search input { width: 100%; min-width: 0; }
+.chat-screen .chat,
+.chat-screen .ws-dialog,
+.chat-screen .ws-server span { min-width: 0; }
+.chat-screen .ws-server span { overflow-wrap: anywhere; }
+.chat-screen .ws-actions { flex-wrap: wrap; }
+
+/* The dialogs: the fields scroll in the body, the buttons stay in a footer. */
+.chat-screen .ws-dialog { overflow: hidden; gap: 0; padding: 0; }
+.chat-screen .ws-dialog > h2 { flex: none; margin: 0; padding: 16px 16px 8px; }
+.chat-screen .ws-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 16px 16px;
+}
+.chat-screen .ws-dialog .ws-actions {
+  flex: none;
+  margin: 0;
+  padding: 10px 16px max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--j-line);
+  background: var(--j-bg);
+}
+@media (max-width: 899px) {
+  .chat-screen .ws-overlay { padding: 0; align-items: stretch; }
+  .chat-screen .ws-dialog {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+}

@@ -11,6 +11,7 @@ import {
   type Workspace,
   type WorkspaceStatus,
 } from "../api/workspaces";
+import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
 import { ServerChecklist } from "./ServerChecklist";
 
 const NOTIFY: [Notify, string][] = [
@@ -74,8 +75,9 @@ function EditDrawer({
 
   return (
     <div className="ws-overlay">
-      <form className="ws-dialog" role="dialog" aria-modal="true" aria-label="Edit workspace" onSubmit={submit}>
+      <form className="ws-dialog" role="dialog" aria-modal="true" aria-label="Edit workspace" onSubmit={submit} onFocus={scrollFieldIntoView}>
         <h2>Edit workspace</h2>
+        <div className="ws-body">
         <label className="j-field-label" htmlFor="ws-e-title">
           Title
         </label>
@@ -83,11 +85,11 @@ function EditDrawer({
         <label className="j-field-label" htmlFor="ws-e-goal">
           Goal
         </label>
-        <textarea id="ws-e-goal" rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
+        <GrowTextarea id="ws-e-goal" rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
         <label className="j-field-label" htmlFor="ws-e-notes">
           Notes
         </label>
-        <textarea id="ws-e-notes" rows={5} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <GrowTextarea id="ws-e-notes" rows={5} value={notes} onChange={(e) => setNotes(e.target.value)} />
         <label className="j-field-label" htmlFor="ws-e-model">
           Model
         </label>
@@ -115,6 +117,7 @@ function EditDrawer({
             {error}
           </p>
         )}
+        </div>
         <div className="ws-actions">
           {workspace.status === "active" ? (
             <button type="button" onClick={() => setStatus("paused")}>

@@ -1,8 +1,11 @@
 // The new workspace dialog: title, goal, model, and the servers. It creates
-// the workspace and hands it to onCreated, which opens it.
+// the workspace and hands it to onCreated, which opens it. On a phone it is a
+// full-height sheet: the fields scroll in `ws-body`, and Cancel and Create
+// stay in a footer above the keyboard (index.css).
 
 import { useEffect, useState, type FormEvent } from "react";
 import { createWorkspace, getOptions, type Options, type Workspace } from "../api/workspaces";
+import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
 import { ServerChecklist } from "./ServerChecklist";
 
 export function NewWorkspace({
@@ -50,8 +53,9 @@ export function NewWorkspace({
 
   return (
     <div className="ws-overlay">
-      <form className="ws-dialog" role="dialog" aria-modal="true" aria-label="New workspace" onSubmit={submit}>
+      <form className="ws-dialog" role="dialog" aria-modal="true" aria-label="New workspace" onSubmit={submit} onFocus={scrollFieldIntoView}>
         <h2>New workspace</h2>
+        <div className="ws-body">
         <label className="j-field-label" htmlFor="ws-title">
           Title
         </label>
@@ -59,7 +63,7 @@ export function NewWorkspace({
         <label className="j-field-label" htmlFor="ws-goal">
           Goal (optional)
         </label>
-        <textarea id="ws-goal" rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
+        <GrowTextarea id="ws-goal" rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
         <label className="j-field-label" htmlFor="ws-model">
           Model
         </label>
@@ -77,6 +81,7 @@ export function NewWorkspace({
             {error}
           </p>
         )}
+        </div>
         <div className="ws-actions">
           <button type="button" onClick={onClose}>
             Cancel
