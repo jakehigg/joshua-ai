@@ -689,7 +689,7 @@ ul.a-checklist > li.a-card-unit { padding-left: 24px; }
 .d-body > .a-unit.h { margin-top: 6px; }
 .d-artifact { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 iframe.d-frame {
-  display: block; width: 100%; min-height: 70vh;
+  display: block; width: 100%; max-width: 100%; min-height: 70vh;
   border: 0; background: #fff;
 }
 /* Measured: the frame is as tall as its document, and the box scales it. */
