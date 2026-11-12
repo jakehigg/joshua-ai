@@ -132,6 +132,13 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   };
   // A route change closes the rail, which holds the app links on a phone.
   useEffect(() => setRailOpen(false), [pathname]);
+  // The ☰ gets the focus back when the rail closes.
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const railWas = useRef(false);
+  useEffect(() => {
+    if (railWas.current && !railOpen) toggleRef.current?.focus();
+    railWas.current = railOpen;
+  }, [railOpen]);
   const sheetOpen = railOpen || itemsOpen || panelOpen;
   useEffect(() => {
     if (!sheetOpen) return undefined;
@@ -181,6 +188,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
           <header className="chat-header">
             <button
               type="button"
+              ref={toggleRef}
               className="rail-toggle"
               aria-label="Show the workspaces"
               aria-expanded={railOpen}

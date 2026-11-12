@@ -80,11 +80,18 @@ export default function AppNav({
   sections,
   section,
   onNavigate,
-}: NavState & { onNavigate?: () => void }) {
+  omit = [],
+}: NavState & {
+  onNavigate?: () => void;
+  /** Section keys not to draw: the rail of the chat has its own Chat entry. */
+  omit?: string[];
+}) {
   return (
     <>
       <nav className="v-sections" aria-label="Sections">
-        {sections.map((item) => (
+        {sections
+          .filter((item) => !omit.includes(item.key))
+          .map((item) => (
           <NavItem
             key={item.key}
             path={item.path}

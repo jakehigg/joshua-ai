@@ -76,13 +76,25 @@ describe("the shell", () => {
     expect(screen.getByText("Your page")).toBeDefined();
   });
 
-  it("holds the search field of the app bar", () => {
+  it("has no search field in the app bar", () => {
     stubSession();
 
     shell();
 
-    expect(document.querySelector("header.j-appbar form.v-search")).not.toBeNull();
-    expect(document.querySelector('form.v-search input[name="q"]')).not.toBeNull();
+    expect(document.querySelector("header.j-appbar")).not.toBeNull();
+    expect(document.querySelector("header.j-appbar form")).toBeNull();
+    expect(document.querySelector("header.j-appbar input")).toBeNull();
+    expect(document.querySelector('input[name="q"]')).toBeNull();
+  });
+
+  it("lights up only the current section", async () => {
+    stubSession();
+
+    shell("journal");
+
+    await screen.findAllByText("Journal");
+    const lit = [...document.querySelectorAll(".j-sidebar [aria-current]")].map((el) => el.textContent);
+    expect(lit).toEqual(["Journal"]);
   });
 
   it("gives a migrated section a router link", async () => {

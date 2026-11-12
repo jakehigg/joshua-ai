@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { ApiError, getJson } from "../api/client";
+import SearchField from "../shell/SearchField";
 import Shell from "../shell/Shell";
 import Empty from "../ui/Empty";
 import ErrorLine from "../ui/ErrorLine";
@@ -99,6 +100,7 @@ export default function Search() {
   if (query === "") {
     return (
       <Shell section="search">
+        <SearchField query={query} />
         <Page title="search">
           <Empty text={ASK_TEXT} />
         </Page>
@@ -107,14 +109,16 @@ export default function Search() {
   }
   if (error !== "") {
     return (
-      <Shell section="search" query={query}>
+      <Shell section="search">
+        <SearchField query={query} />
         <ErrorLine text={error} />
       </Shell>
     );
   }
   if (answer === null) {
     return (
-      <Shell section="search" query={query}>
+      <Shell section="search">
+        <SearchField query={query} />
         <Spinner label="Searching" />
       </Shell>
     );
@@ -126,7 +130,8 @@ export default function Search() {
       <Hits hits={answer.words} />
     );
   return (
-    <Shell section="search" query={query}>
+    <Shell section="search">
+      <SearchField query={query} />
       <Page title="search">
         {answer.meaning !== null && (
           <section className="meaning">

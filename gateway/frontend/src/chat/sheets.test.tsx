@@ -115,9 +115,29 @@ describe("sheets on the chat screen", () => {
     expect(within(rail).getByRole("button", { name: "+ New workspace", hidden: true })).toBeTruthy();
     expect(await within(rail).findByRole("link", { name: "Wiki", hidden: true })).toBeTruthy();
     expect(within(rail).getByRole("link", { name: "Your page", hidden: true })).toBeTruthy();
+    // Chat is the first entry of the rail, so the app links do not repeat it,
+    // and only the thread on screen is lit.
+    expect(within(rail).getAllByRole("link", { name: "Chat", hidden: true })).toHaveLength(1);
+    const lit = [...rail.querySelectorAll("[aria-current]")].map((el) => el.textContent);
+    expect(lit).toEqual(["Solar install"]);
+    // The drawer takes the focus on its close button, not on a link.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close the workspaces", hidden: true }));
     // A tap on an app link closes the drawer.
     fireEvent.click(within(rail).getByRole("link", { name: "Wiki", hidden: true }));
     expect(document.querySelector(".rail.open")).toBeNull();
+  });
+
+  it("has a single top bar on a phone: the menu, the title and the items button", async () => {
+    await open();
+    const header = document.querySelector(".chat-header") as HTMLElement;
+    expect(within(header).getByRole("button", { name: "Show the workspaces", hidden: true })).toBeTruthy();
+    expect(within(header).getByRole("heading", { name: "Solar install" })).toBeTruthy();
+    expect(within(header).getByRole("button", { name: "Items" })).toBeTruthy();
+    // The app bar is drawn, and hidden by CSS on a phone; it holds no menu
+    // button and no search of its own on this page.
+    expect(screen.queryByRole("button", { name: "Show the navigation" })).toBeNull();
+    expect(document.querySelector(".j-appbar input")).toBeNull();
+    expect(document.querySelector(".j-shell.fill")).not.toBeNull();
   });
 
   it("keeps one sheet open: the rail closes the items", async () => {

@@ -1,10 +1,12 @@
 // The left rail of the chat screen: Chat, the active workspaces, the paused
 // ones (folded), and "+ New workspace". Under them it repeats the app
-// navigation links of the shell (AppNav), which the shell's own sidebar shows
+// navigation links of the shell (AppNav), without Chat, which the first entry
+// of the rail already is, which the shell's own sidebar shows
 // only from 760px; so on a phone this drawer is the one menu of the chat.
 // On a phone it is a drawer with a close
 // button; the screen also closes it on a tap of the backdrop and on Escape.
 
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import type { Workspace } from "../api/workspaces";
 import AppNav, { useNav } from "../shell/AppNav";
@@ -28,6 +30,12 @@ export function Rail({
   onClose: () => void;
 }) {
   const nav = useNav();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  // The drawer takes the focus when it opens, on its close button, so no link
+  // looks selected.
+  useEffect(() => {
+    if (open) closeRef.current?.focus();
+  }, [open]);
   const active = workspaces.filter((w) => w.status === "active");
   const paused = workspaces.filter((w) => w.status === "paused");
   const row = (w: Workspace) => (
@@ -44,8 +52,11 @@ export function Rail({
   return (
     <nav className={open ? "rail open" : "rail"} aria-label="Chats and workspaces">
       <header className="rail-header">
-        <span className="rail-title">Joshua</span>
-        <button type="button" className="rail-close" onClick={onClose} aria-label="Close the workspaces">
+        <span className="rail-title">
+          <img className="j-logo" src="/logo-64.png" alt="" />
+          Joshua
+        </span>
+        <button type="button" ref={closeRef} className="rail-close" onClick={onClose} aria-label="Close the workspaces">
           ✕
         </button>
       </header>
@@ -74,7 +85,12 @@ export function Rail({
       {nav && (
         <div className="rail-appnav">
           <h2 className="rail-label">Navigate</h2>
-          <AppNav sections={nav.sections} section={nav.section} onNavigate={onNavigate} />
+          <AppNav
+            sections={nav.sections}
+            section={nav.section}
+            onNavigate={onNavigate}
+            omit={["chat"]}
+          />
         </div>
       )}
     </nav>

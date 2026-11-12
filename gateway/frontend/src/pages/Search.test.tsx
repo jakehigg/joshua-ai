@@ -124,7 +124,7 @@ describe("the search page", () => {
     expect(line.className).toEqual("j-error");
   });
 
-  it("holds the query in the field of the app bar", async () => {
+  it("holds the query in the field of the page, not the app bar", async () => {
     stubRoutes(json(ANSWER));
 
     page("/search?q=pizza");
@@ -132,5 +132,7 @@ describe("the search page", () => {
     await screen.findByText("Pizza");
     const field = document.querySelector('form.v-search input[name="q"]') as HTMLInputElement;
     expect(field.value).toEqual("pizza");
+    expect(document.querySelector("header.j-appbar form.v-search")).toBeNull();
+    expect(document.querySelector("main.j-content form.v-search")).not.toBeNull();
   });
 });

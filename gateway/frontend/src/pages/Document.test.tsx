@@ -130,6 +130,9 @@ describe("the head of a document", () => {
     page();
 
     expect(await screen.findByText("Party plan")).toBeDefined();
+    // The comment count arrives with a second call; wait for it, or a slow
+    // run reads the head before it is there.
+    await screen.findByText("1 comment for Joshua");
     const head = document.querySelector("header.d-hero") as HTMLElement;
     expect(head.id).toEqual("L0");
     expect(head.querySelector("h1")?.textContent).toEqual("Party plan");

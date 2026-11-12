@@ -780,14 +780,35 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 .chat-screen .items.open { display: flex; }
 .chat-screen .rail ul,
 .chat-screen .items ul { list-style: none; margin: 0; padding: 0; }
-.chat-screen .rail a {
-  display: block;
-  padding: 6px 8px;
-  border-radius: 8px;
-  color: inherit;
+.chat-screen .rail a:not(.j-nav-item) {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 7px 10px;
+  border-radius: var(--j-radius-sm);
+  color: var(--j-muted);
+  font-size: 14px;
   text-decoration: none;
 }
-.chat-screen .rail a[aria-current="page"] { background: var(--j-surface-2); font-weight: 600; }
+/* The current thread and the current app link look the same. */
+.chat-screen .rail a[aria-current="page"],
+.j-nav-item[aria-current="page"] {
+  color: var(--j-text);
+  background: var(--j-surface-2);
+  font-weight: 600;
+}
+.chat-screen .rail a:not(.j-nav-item):hover { color: var(--j-text); background: var(--j-surface); }
+.chat-screen .rail a[aria-current="page"]:hover { background: var(--j-surface-2); }
+.j-nav-item { min-height: 40px; }
+.j-nav-item .j-icon { flex: none; width: 18px; height: 18px; }
+/* A finger leaves no hover behind: only the current item is lit. */
+@media (hover: none) {
+  .j-nav-item:hover:not([aria-current]),
+  .chat-screen .rail a:not(.j-nav-item):hover:not([aria-current]) {
+    background: none;
+    color: var(--j-muted);
+  }
+}
 .chat-screen .rail-label {
   margin: 12px 0 4px;
   font-size: 0.75rem;
@@ -971,7 +992,6 @@ label.attach { touch-action: manipulation; }
 /* Nothing is wider than the phone. */
 html, body { max-width: 100%; overflow-x: clip; }
 .j-appbar { min-width: 0; }
-.v-search { flex: 0 1 220px; min-width: 0; }
 .v-search .j-field { min-width: 0; }
 .v-search input { width: 100%; min-width: 0; }
 .chat-screen .chat,
@@ -1076,4 +1096,33 @@ html.j-lock body { overflow: hidden; }
 }
 @media (max-width: 759px) {
   .chat-screen .rail-appnav { display: flex; }
+}
+
+/* One compact top bar on a phone. Other pages: hamburger, logo and title in
+   one row. The chat: its own header (hamburger, thread title, items button)
+   and no app bar. Both honour the top safe area. The sheets sit above the
+   bars. */
+.chat-screen .rail-title { display: flex; align-items: center; gap: 10px; }
+.chat-screen .rail-title .j-logo { width: 28px; height: 28px; border-radius: var(--j-radius-sm); }
+.v-search { width: 100%; max-width: 32rem; flex: none; }
+@media (max-width: 759px) {
+  .j-appbar { padding-block: calc(6px + env(safe-area-inset-top, 0px)) 6px; min-height: 48px; box-sizing: border-box; }
+  .j-appbar .j-appbar-title small { display: none; }
+  .j-shell.fill .j-appbar { display: none; }
+  .chat-screen .chat-header {
+    justify-content: flex-start;
+    min-height: 48px;
+    box-sizing: border-box;
+    padding-block: max(6px, env(safe-area-inset-top)) 6px;
+  }
+  .chat-screen .chat-header .title { flex: 1; }
+  .chat-screen .chat-header .title:not(.ws-title) .subtitle,
+  .chat-screen .chat-header .ws-goal { display: none; }
+  .chat-screen .ws-header-actions button { min-height: 40px; }
+}
+@media (max-width: 899px) {
+  .chat-screen .rail,
+  .chat-screen .items { z-index: 31; }
+  .chat-screen .scrim { z-index: 30; }
+  .chat-screen .doc-panel { z-index: 32; }
 }

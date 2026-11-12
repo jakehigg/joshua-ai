@@ -3,7 +3,6 @@ import { useLocation } from "react-router-dom";
 
 import { getJson, type Person } from "../api/client";
 import AppNav, { ME_SECTION, NavContext, type SessionSection } from "./AppNav";
-import SearchField from "./SearchField";
 import { LINKS_SECTION, SECTIONS } from "./sections";
 
 export { ME_SECTION, type SessionSection };
@@ -59,27 +58,29 @@ function contentClass(section: string): string {
 }
 
 /**
- * The shell of every page: the sidebar on a wide screen; on a phone the app bar
- * and the same navigation as a drawer on the left. The hamburger of the app
- * bar opens the drawer, over a dimmed backdrop. A tap on the backdrop, the ×,
- * Escape and any navigation close it; while it is open the page behind does
- * not scroll, focus goes into it, and comes back to the hamburger when it
- * closes. In the chat the hamburger is the chat's own (it opens the rail,
- * which holds the workspaces and these links), so there is one toggle there. `section` marks the current item. The search field is in
- * the app bar, so it shows on every screen; it goes to `/search`, a page of
- * this app. `query` is what the field holds, which the search page passes.
+ * The shell of every page: the sidebar on a wide screen; on a phone one
+ * compact app bar (hamburger, logo, page title) and the same navigation as a
+ * drawer on the left. The hamburger opens the drawer over a dimmed backdrop.
+ * A tap on the backdrop, the x, Escape and any navigation close it; while it
+ * is open the page behind does not scroll, focus goes into it, and comes back
+ * to the hamburger when it closes. `section` marks the current item.
  *
- * In a frame there is no navigation at all: no sidebar, no app bar and no
- * tabs, so the page of the frame is the content and the person navigates in
- * the app that holds the frame.
+ * There is no search field in the app bar: the Search link of the navigation
+ * opens the search page, which holds the field.
+ *
+ * The chat has its own compact top bar on a phone (the chat header, with the
+ * hamburger of its rail, which holds the workspaces and these same links), so
+ * the app bar is not drawn there below 760px, and there is one toggle.
+ *
+ * In a frame there is no navigation at all: no sidebar and no app bar, so the
+ * page of the frame is the content and the person navigates in the app that
+ * holds the frame.
  */
 export default function Shell({
   section = "",
-  query = "",
   children,
 }: {
   section?: string;
-  query?: string;
   children: ReactNode;
 }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -194,8 +195,6 @@ export default function Shell({
               <small>Joshua</small>
               <strong>{title(section)}</strong>
             </a>
-            <span className="j-spacer"></span>
-            <SearchField query={query} />
           </header>
           <main className={contentClass(section)}>{children}</main>
         </div>
