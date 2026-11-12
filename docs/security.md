@@ -265,9 +265,12 @@ shows a document page in its artifact panel, so there is no second renderer
 and no second comment surface. The value is always `'self'`, never `*` and
 never a host, so no page off the origin can frame the viewer.
 
-An HTML document is different. The page shows it in a `sandbox` frame with
-no `allow-same-origin`, so the document has an opaque origin and cannot
-reach the viewer, its sign-in, or a form of the viewer. The frame loads
+An HTML document is different. The page shows it in a `sandbox` frame. A
+document with `scripts: true` has an opaque origin (no `allow-same-origin`), so
+it cannot reach the viewer, its sign-in, or a form of the viewer. A document
+with no scripts has `allow-same-origin` and no `allow-scripts`: nothing in it
+can run, so the same origin only lets the page read the height and the width of
+the frame, to fit the frame to its content. The frame loads
 `/documents/<owner>/<slug>/artifact`, which serves the body of the document
 with its own policy:
 
@@ -282,10 +285,10 @@ with its own policy:
   form and opens no frame of its own.
 - `script-src 'unsafe-inline'` only when the frontmatter of the document says
   `scripts: true`. Without it, no script runs.
-- `sandbox`, and `sandbox allow-scripts` with `scripts: true`. The directive
-  repeats the sandbox of the frame on the response, so the document has an
-  opaque origin also when a browser opens the address alone. It never has
-  `allow-same-origin`.
+- `sandbox allow-same-origin` with no scripts, and `sandbox allow-scripts` with
+  `scripts: true`. The directive repeats the sandbox of the frame on the
+  response, so the document is sandboxed also when a browser opens the address
+  alone. A document that can run scripts never has `allow-same-origin`.
 
 The address has the sign-in, the owner rule, and the guest rule of the
 document page. The chat frames the document page itself, with no `sandbox` on

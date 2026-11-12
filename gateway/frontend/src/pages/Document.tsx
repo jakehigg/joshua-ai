@@ -20,8 +20,10 @@
  * highlighted on every page, as in the chat (index.css).
  *
  * An HTML document shows in an `<iframe sandbox>` that loads
- * `/documents/<owner>/<slug>/artifact`, a route of the server: the frame has
- * an opaque origin, and that route sends the content policy of the document.
+ * `/documents/<owner>/<slug>/artifact`, a route of the server that sends the
+ * content policy of the document. ArtifactFrame.tsx sizes the frame to its
+ * content and fits it to the width. The note on scripts is in the Details fold
+ * of the embed page, and the ⓘ of the bar on the full page.
  *
  * A document of another member and one that is not there are both 404, so
  * the page says what the viewer said.
@@ -47,6 +49,7 @@ import {
 import Shell, { embedded, type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Fold from "../ui/Fold";
+import { ArtifactFrame, scriptsNote } from "./ArtifactFrame";
 import Spinner from "../ui/Spinner";
 import { CommentsBadge, KindChip, StatusChip } from "./Documents";
 
@@ -180,23 +183,15 @@ function Props({ front }: { front: Record<string, unknown> }) {
 }
 
 /** An HTML document, in the sandboxed frame of the artifact route. */
-function Frame({ doc }: { doc: DocumentData }) {
-  const scripts = doc.frontmatter["scripts"] === true;
-  const note = scripts
-    ? "Scripts of this document run in a sandbox, apart from the viewer."
-    : "Scripts of this document do not run.";
+function Frame({ doc, info }: { doc: DocumentData; info: boolean }) {
   return (
-    <section className="d-artifact">
-      <iframe
-        className="d-frame"
-        sandbox={scripts ? "allow-scripts" : ""}
-        src={doc.artifact_url ?? ""}
-        title={doc.title}
-        referrerPolicy="no-referrer"
-        loading="lazy"
-      />
-      <p className="j-faint d-frame-note">{note}</p>
-    </section>
+    <ArtifactFrame
+      url={doc.url}
+      artifactUrl={doc.artifact_url ?? ""}
+      title={doc.title}
+      scripts={doc.frontmatter["scripts"] === true}
+      info={info}
+    />
   );
 }
 
@@ -361,7 +356,7 @@ export default function Document() {
     const rest = code === null ? [] : doc.blocks.filter((block) => block !== code);
     let body;
     if (doc.format === "html") {
-      body = <Frame doc={doc} />;
+      body = <Frame doc={doc} info={false} />;
     } else if (code !== null) {
       body = (
         <>
@@ -394,6 +389,9 @@ export default function Document() {
             title="Details"
             hint={gutter.open > 0 ? `${count(gutter.open, "open comment")}` : doc.status}
           >
+            {doc.format === "html" && (
+              <p className="j-faint d-frame-note">{scriptsNote(doc.frontmatter["scripts"] === true)}</p>
+            )}
             {head}
             {folds}
           </Fold>
@@ -409,7 +407,7 @@ export default function Document() {
       </nav>
       {head}
       <Older doc={doc} />
-      {doc.format === "html" ? <Frame doc={doc} /> : <Blocks blocks={doc.blocks} gutter={gutter} />}
+      {doc.format === "html" ? <Frame doc={doc} info /> : <Blocks blocks={doc.blocks} gutter={gutter} />}
       {folds}
     </Shell>
   );

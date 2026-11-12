@@ -278,12 +278,13 @@ def test_the_artifact_route_serves_the_body_with_its_own_policy(docs) -> None:
     policy = response.headers["content-security-policy"]
     assert policy == (
         "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
-        "form-action 'none'; frame-src 'none'; frame-ancestors 'self'; sandbox"
+        "form-action 'none'; frame-src 'none'; frame-ancestors 'self'; sandbox allow-same-origin"
     )
     # Styles render, and nothing else loads: no script, no network, no form.
+    # The same origin is only so the page can read the height of the frame.
     assert "script-src" not in policy
     assert "connect-src" not in policy
-    assert "allow-same-origin" not in policy
+    assert "allow-scripts" not in policy
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["cache-control"] == "no-store"
 

@@ -41,13 +41,19 @@ def artifact_policy(scripts: bool) -> str:
     are allowed, so a ``<style>`` element and a ``style`` attribute work.
     Images come from the viewer only. ``form-action`` and ``frame-src``
     block a form and a frame of the document. The ``sandbox`` directive adds
-    the sandbox of the frame to the response itself, never with
-    ``allow-same-origin``, so the document has an opaque origin also when a
-    browser opens the address alone. Scripts run only with ``scripts: true``,
-    and only from the document.
+    the sandbox of the frame to the response itself, so the document is
+    sandboxed also when a browser opens the address alone.
+
+    A document with no scripts gets ``allow-same-origin``: no script can run in
+    it (the sandbox has no ``allow-scripts``, and ``default-src 'none'`` blocks
+    one too), so the only thing the same origin gives is that the page of the
+    viewer can read the size of the frame and fit it to its content. A
+    document with ``scripts: true`` never gets ``allow-same-origin``: it has an
+    opaque origin, because its scripts must not reach the viewer. Scripts run
+    only with ``scripts: true``, and only from the document.
     """
     script_src = "script-src 'unsafe-inline'; " if scripts else ""
-    sandbox = "sandbox allow-scripts" if scripts else "sandbox"
+    sandbox = "sandbox allow-scripts" if scripts else "sandbox allow-same-origin"
     return (
         "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
         f"{script_src}form-action 'none'; frame-src 'none'; "

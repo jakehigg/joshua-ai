@@ -6,6 +6,14 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **An HTML document fits the phone.** The frame is as tall as its content, so
+  the panel is the only scroll, and a document wider than the panel (a 792 px
+  mockup on a phone) is scaled to the width. "Actual size" and "Fit width" switch
+  it, and the choice is kept for each document. The note on scripts moved into
+  the Details fold. A document with no scripts now has `sandbox
+  allow-same-origin` (no script can run in it) so the page can read its size; a
+  document with `scripts: true` still has an opaque origin.
+
 - **A turn survives the client that sent it.** A message that Joshua has
   accepted is finished even when the phone locks, the tab closes, or the
   signal drops. Core runs a streamed turn in a task of its own, `channels` and

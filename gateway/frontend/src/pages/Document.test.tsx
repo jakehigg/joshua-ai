@@ -275,10 +275,12 @@ describe("an HTML document", () => {
     await screen.findByText("Mockup");
     const frame = document.querySelector("iframe.d-frame") as HTMLIFrameElement;
     expect(frame.getAttribute("src")).toEqual("/documents/alex/mockup/artifact");
-    expect(frame.getAttribute("sandbox")).toEqual("");
+    expect(frame.getAttribute("sandbox")).toEqual("allow-same-origin");
     expect(frame.getAttribute("referrerpolicy")).toEqual("no-referrer");
     expect(frame.getAttribute("title")).toEqual("Mockup");
-    expect(screen.getByText("Scripts of this document do not run.")).toBeDefined();
+    // The note is the ⓘ of the bar, not a line of its own.
+    expect(screen.getByRole("img", { name: "Scripts of this document do not run." })).toBeDefined();
+    expect(document.querySelector(".d-frame-note")).toBeNull();
     expect(document.querySelector(".a-blocks")).toBeNull();
   });
 
@@ -294,7 +296,7 @@ describe("an HTML document", () => {
       "allow-scripts",
     );
     expect(
-      screen.getByText("Scripts of this document run in a sandbox, apart from the viewer."),
+      screen.getByRole("img", { name: "Scripts of this document run in a sandbox, apart from the viewer." }),
     ).toBeDefined();
   });
 });
@@ -373,6 +375,21 @@ describe("the embed mode", () => {
     const notes = screen.getByText("Notes").closest("details") as HTMLDetailsElement;
     expect(notes.open).toBe(false);
     expect(notes.textContent).toContain("Flash it once.");
+  });
+});
+
+describe("an HTML document in embed mode", () => {
+  it("keeps the note on scripts in the Details fold, not as a line under the frame", async () => {
+    stubDoc(json(HTML_DOC));
+    page("/documents/alex/mockup?embed=1");
+    await screen.findByText("Mockup");
+    const note = screen.getByText("Scripts of this document do not run.");
+    expect(note.closest("details")).not.toBeNull();
+    expect((note.closest("details") as HTMLDetailsElement).textContent).toContain("Details");
+    // The frame is a direct part of the page, with no note after it.
+    expect(document.querySelector(".d-artifact + .d-frame-note")).toBeNull();
+    expect(document.querySelector(".d-artifact .d-frame-note")).toBeNull();
+    expect(document.querySelector(".d-artifact .d-info")).toBeNull();
   });
 });
 
