@@ -40,6 +40,7 @@ import {
 import Card from "./Card";
 import DecisionCard, { span as decisionSpan } from "./DecisionCard";
 import OutputCard from "./OutputCard";
+import { count } from "./Tiles";
 
 /** A body that says nothing: blank, `None.`, `No decisions.`, `-`. The rule
  * of `viewer_report.is_none`. */
@@ -48,11 +49,6 @@ const NONE = /^(?:none(?: recorded| yet)?|nothing|n\/?a|no\b[^\n]{0,60}|-+)\.?$/
 export function isNone(text: string): boolean {
   const body = text.trim();
   return body === "" || NONE.test(body);
-}
-
-/** `3 decisions`, `1 decision`. */
-export function count(n: number, noun: string): string {
-  return `${String(n)} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 /** One section of the report, or null when it has no such heading. */

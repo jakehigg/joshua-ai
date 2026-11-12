@@ -3,7 +3,9 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Document, { type DocumentData } from "./Document";
+import type { ShowcaseData } from "../assignments/data";
 import type { DocComment } from "../comments/CommentCard";
+import { SEND } from "../showcase/DecisionCard";
 import type { Session } from "../shell/Shell";
 
 const SESSION: Session = {
@@ -400,5 +402,151 @@ describe("code on the document page", () => {
     await screen.findByText("Dining room panel");
     expect(document.querySelector("pre code.language-yaml .hljs-attr")).not.toBeNull();
     expect(document.querySelector(".j-crumbs")).not.toBeNull();
+  });
+});
+
+/** The body of a document that has the headings of a report. */
+const REPORT_LINES = [
+  "# Party plan",
+  "",
+  "Twenty people come on Saturday.",
+  "",
+  "## Highlights",
+  "",
+  "- **The tent is booked.** It holds twenty.",
+  "",
+  "## Decisions for you",
+  "",
+  "1. **Buy the big tent?** It costs 200.",
+];
+
+/** The report of that body, as `report_json` sends it. */
+const REPORT: ShowcaseData = {
+  structured: true,
+  title: "Party plan",
+  lede: "Twenty people come on Saturday.",
+  generated: false,
+  first_section: 5,
+  preamble: null,
+  turns: null,
+  extra: [],
+  sections: {
+    highlights: {
+      key: "highlights",
+      title: "Highlights",
+      body: "- **The tent is booked.** It holds twenty.",
+      line: 5,
+      start: 7,
+      end: 8,
+      empty: false,
+      items: [
+        {
+          number: 1,
+          text: "**The tent is booked.** It holds twenty.",
+          lead: "The tent is booked.",
+          body: "It holds twenty.",
+          line: 0,
+          first_line: 7,
+          last_line: 8,
+          question: "The tent is booked.",
+          context: "It holds twenty.",
+          copy: "",
+        },
+      ],
+      outputs: [],
+      rest: "",
+      blocks: [
+        {
+          id: "L7",
+          kind: "li",
+          depth: 0,
+          markdown: "- **The tent is booked.** It holds twenty.",
+          first_line: 7,
+          last_line: 7,
+        },
+      ],
+    },
+    "decisions for you": {
+      key: "decisions for you",
+      title: "Decisions for you",
+      body: "1. **Buy the big tent?** It costs 200.",
+      line: 9,
+      start: 11,
+      end: 12,
+      empty: false,
+      items: [
+        {
+          number: 1,
+          text: "**Buy the big tent?** It costs 200.",
+          lead: "Buy the big tent?",
+          body: "It costs 200.",
+          line: 0,
+          first_line: 11,
+          last_line: 12,
+          question: "Buy the big tent?",
+          context: "It costs 200.",
+          copy: "Document documents/alex/party.md, decision 1: Buy the big tent?",
+        },
+      ],
+      outputs: [],
+      rest: "",
+      blocks: [
+        {
+          id: "L11",
+          kind: "li",
+          depth: 0,
+          markdown: "1. **Buy the big tent?** It costs 200.",
+          first_line: 11,
+          last_line: 11,
+        },
+      ],
+    },
+  },
+};
+
+const REPORT_DOC: DocumentData = {
+  ...DOC,
+  kind: "report",
+  blocks: [
+    {
+      id: "L3",
+      kind: "p",
+      depth: 0,
+      markdown: "Twenty people come on Saturday.",
+      first_line: 3,
+      last_line: 3,
+    },
+  ],
+  lines: REPORT_LINES,
+  report: REPORT,
+  comments: [],
+};
+
+describe("a document whose body is a report", () => {
+  it("shows the showcase: the lede and the numbers in the head, the highlights as cards", async () => {
+    stubDoc(json(REPORT_DOC));
+
+    page();
+
+    expect(await screen.findByText("The tent is booked.")).toBeDefined();
+    const head = document.querySelector("header.d-hero") as HTMLElement;
+    expect(head.querySelector("h1")?.textContent).toEqual("Party plan");
+    expect(head.querySelector(".a-lede")?.textContent).toEqual("Twenty people come on Saturday.");
+    expect(head.querySelector(".j-stats")?.textContent).toEqual("1decision");
+    expect(document.querySelector(".a-cards.a-hls .a-hl")?.id).toEqual("L7");
+    expect(document.querySelector(".a-blocks.d-body")).toBeNull();
+  });
+
+  it("gives each decision a copy button, and no script of the page", async () => {
+    stubDoc(json(REPORT_DOC));
+
+    page();
+
+    const card = (await screen.findByText("Buy the big tent?")).closest("li") as HTMLElement;
+    expect(card.id).toEqual("L11");
+    expect(card.querySelector(".a-n")?.textContent).toEqual("1");
+    expect(card.querySelector("button.a-copy")?.textContent).toEqual("Copy");
+    expect(screen.queryByText(SEND)).toBeNull();
+    expect(document.querySelectorAll("script").length).toEqual(0);
   });
 });
