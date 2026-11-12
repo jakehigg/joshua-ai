@@ -230,17 +230,79 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 }
 
 
-/* A task prompt or an event: one quiet line, centered. */
+/* A task prompt or an event: one quiet line at the left, like a note in a
+   timeline. It opens to the text, which scrolls inside a box. */
 .chat-screen .msg-system {
-  align-items: center;
+  align-items: stretch;
 }
-.chat-screen .system-line {
-  margin: 0;
-  max-width: min(90%, 600px);
+.chat-screen .event-line {
+  min-width: 0;
   color: var(--j-muted);
   font-size: 0.8125rem;
-  text-align: center;
-  white-space: pre-wrap;
+}
+.chat-screen .event-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.chat-screen .event-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.chat-screen .event-head:hover { color: var(--j-text); }
+.chat-screen .event-icon { flex: none; }
+.chat-screen .event-title { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-screen .event-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--j-text);
+}
+.chat-screen .event-badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--j-accent);
+  color: var(--j-accent-ink);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.chat-screen .event-chip {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--j-line);
+  border-radius: 999px;
+  background: var(--j-surface-2);
+  color: var(--j-accent);
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+.chat-screen .event-body {
+  max-height: 40vh;
+  margin: 4px 0 0 4px;
+  padding: 8px 12px;
+  overflow: auto;
+  border-left: 2px solid var(--j-line);
+  color: var(--j-text);
+}
+.chat-screen .event-raw { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.75rem var(--j-mono); }
+.chat-screen .event-raw-toggle { min-height: 32px; margin-top: 6px; font-size: 0.75rem; }
+@media (max-width: 759px) {
+  /* The preview takes its own line, so the headline and badge stay readable. */
+  .chat-screen .event-head { flex-wrap: wrap; }
+  .chat-screen .event-preview { flex-basis: 100%; white-space: normal; }
 }
 
 

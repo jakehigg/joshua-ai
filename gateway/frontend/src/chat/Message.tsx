@@ -1,6 +1,9 @@
 // One message. The person's text is plain, in a bubble on the right. Joshua's
 // text is Markdown, full width, with no bubble. A system row (a task prompt
-// or an event) is one small, muted, centered line of plain text. A failed
+// or an event) is one small, muted line at the left (EventLine, events.ts):
+// an icon, the first sentence, a Question badge and its text for a question,
+// and a chip for each link. It opens to the full text as Markdown, without the
+// sentences that were written for Joshua, and Show raw gives the exact text. A failed
 // transcript row shows its text in the error style. The time lines belong to
 // the list (stamps.ts), not to a message.
 //
@@ -17,6 +20,7 @@ import type { ChatMessage } from "./store";
 import { ARTIFACT_INFO, SPEECH_INFO, splitFence } from "./blocks";
 import { ArtifactCard } from "./ArtifactCard";
 import { Markdown } from "./Markdown";
+import { cleanEvent, eventLinks, headline, isQuestion, questionPreview } from "./events";
 
 export const ELAPSED_FROM_S = 5;
 export const SLOW_FROM_S = 30;
@@ -50,6 +54,54 @@ interface Props {
   onRetry: (message: ChatMessage) => void;
 }
 
+function EventLine({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const [raw, setRaw] = useState(false);
+  const question = isQuestion(text);
+  const preview = question ? questionPreview(text) : "";
+  const links = eventLinks(text);
+  const cleaned = useMemo(() => cleanEvent(text), [text]);
+  return (
+    <div className="event-line">
+      <div className="event-row">
+        <button
+          type="button"
+          className="event-head"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span className="event-icon" aria-hidden="true">
+            {question ? "❓" : "🔔"}
+          </span>
+          {question && <span className="event-badge">Question</span>}
+          <span className="event-title">{headline(text) || "Event"}</span>
+          {preview && <span className="event-preview">{preview}</span>}
+        </button>
+        {links.map((link) => (
+          <a
+            key={link.href}
+            className="event-chip"
+            href={link.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={link.href}
+          >
+            {link.label}
+          </a>
+        ))}
+      </div>
+      {open && (
+        <div className="event-body">
+          {raw ? <pre className="event-raw">{text}</pre> : <Markdown text={cleaned} />}
+          <button type="button" className="event-raw-toggle" onClick={() => setRaw((r) => !r)}>
+            {raw ? "Show formatted" : "Show raw"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const Message = memo(function Message({ message, canRetry, onRetry }: Props) {
   const isPerson = message.role === "person";
   const pending = message.state === "pending";
@@ -62,7 +114,7 @@ export const Message = memo(function Message({ message, canRetry, onRetry }: Pro
   if (message.role === "system") {
     return (
       <article className="msg msg-system">
-        <p className="system-line">{message.text}</p>
+        <EventLine text={message.text} />
       </article>
     );
   }

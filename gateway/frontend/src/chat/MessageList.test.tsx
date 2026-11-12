@@ -16,14 +16,15 @@ function msg(serverId: number, extra: Partial<ChatMessage> = {}): ChatMessage {
 }
 
 describe("MessageList", () => {
-  it("renders a system row as one plain line, with no Markdown", () => {
+  it("renders a system row as one collapsed line, with no Markdown until it opens", () => {
     render(
       <MessageList messages={[msg(1, { role: "system", text: "**event** happened" })]} canRetry onRetry={() => undefined} />,
     );
     const line = screen.getByText("**event** happened");
-    expect(line.className).toBe("system-line");
+    expect(line.className).toBe("event-title");
     expect(line.closest("article")?.className).toContain("msg-system");
     expect(document.querySelector("strong")).toBeNull();
+    expect(document.querySelector(".event-body")).toBeNull();
   });
 
   it("keeps the scroll position when the page before is added", () => {

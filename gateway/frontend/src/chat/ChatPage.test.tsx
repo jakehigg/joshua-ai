@@ -96,7 +96,7 @@ describe("ChatPage history", () => {
     expect(await screen.findByText("hello")).toBeTruthy();
     expect(screen.getByText("hi").tagName).toBe("STRONG");
     const system = screen.getByText("Morning summary");
-    expect(system.className).toBe("system-line");
+    expect(system.className).toBe("event-title");
     expect(screen.getByText("[error] no answer").className).toContain("msg-error");
     expect(screen.queryByText("Loading…")).toBeNull();
     expect(screen.queryByRole("button", { name: "Load earlier" })).toBeNull();
