@@ -481,6 +481,7 @@ TRAVERSALS = [
     "documents/alex/sub/x.md",
     "documents/alex/x.txt",
     "documents/alex/x.comments.jsonl",
+    "documents/alex/x.json.md",
     "documents/alex/.hidden.md",
     "documents/.trash/x.md",
     "people/alex/x.md",

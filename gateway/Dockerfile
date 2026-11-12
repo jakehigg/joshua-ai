@@ -1,5 +1,19 @@
 # syntax=docker/dockerfile:1
 
+# Frontend stage: build the React app of the viewer. Only `dist/` goes into the
+# runtime image, so node stays in this stage.
+FROM node:22-alpine AS frontend
+WORKDIR /build
+COPY gateway/frontend/package.json gateway/frontend/package-lock.json ./
+RUN npm ci --no-fund --no-audit
+COPY gateway/frontend/ ./
+# The app imports the two stylesheets of the viewer, which are the master
+# copies and live beside the Python code. `src/index.css` names them
+# `../../joshua_gateway/...`, one level above the workspace, which is `/` here.
+COPY gateway/joshua_gateway/ui/joshua-ui.css /joshua_gateway/ui/
+COPY gateway/joshua_gateway/viewer.css /joshua_gateway/
+RUN npm run build
+
 # Build stage: resolve and install the member and its dependencies.
 FROM python:3.13-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /usr/local/bin/uv
@@ -53,6 +67,9 @@ WORKDIR /app
 COPY --from=builder --chown=1000:1000 /app/.venv /app/.venv
 COPY --from=builder --chown=1000:1000 /app/shared /app/shared
 COPY --from=builder --chown=1000:1000 /app/gateway /app/gateway
+# The React app of the viewer. The viewer mounts this folder, and with no
+# build in the image every page is a server-rendered one.
+COPY --from=frontend --chown=1000:1000 /build/dist/ /app/gateway/joshua_gateway/static/
 ENV PATH="/app/.venv/bin:$PATH"
 USER 1000
 EXPOSE 8000

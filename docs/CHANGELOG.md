@@ -6,6 +6,147 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The assignments in the viewer are React pages.** The list at
+  `/assignments` and one assignment at `/assignments/<id>` are the app now.
+  The state pills write the address (`?state=draft`), so a bookmark of a state
+  opens the same rows. An assignment shows its definition as a document: each
+  field of the specification is a property, the goal is blocks, and each part
+  takes a comment on its first line, with the `Source` fold for one exact
+  line. The plan shows its task boxes as a checklist with the steps that are
+  done and the next step. An assignment in progress reads itself again every
+  20 seconds and stops when it finishes. The report shows in blocks for now.
+  The app reads and writes JSON addresses with the sign-in of a page:
+  `GET /api/v1/assignments`, `GET /api/v1/assignments/<id>`,
+  `POST /api/v1/assignments/<id>/comments` and
+  `POST /api/v1/assignments/<id>/comments/<id>/delete`. The saved assignments
+  at `/assignments/saved` are the same pages as before. With
+  `ASSIGNMENTS_URL` or `JOSHUA_TOKEN_VIEWER` unset, both pages say that the
+  assignments manager is not configured and select no state.
+- **The documents in the viewer are React pages.** The list at `/documents`
+  and one document at `/documents/<owner>/<slug>` are the app now. The status
+  tabs and the kind chips write the address (`?status=draft&kind=plan`), so a
+  bookmark of a list opens the same rows. A Markdown document shows in
+  blocks, each block takes a comment on its first line, the `Source` fold
+  takes a comment on one exact line, and the `Versions` fold opens an older
+  version at `?rev=<sha>`, which is read-only. An HTML document still shows in
+  its sandboxed frame. The app reads and writes JSON addresses with the
+  sign-in of a page: `GET /api/v1/documents`,
+  `GET /api/v1/documents/<owner>/<slug>`,
+  `POST /api/v1/documents/<owner>/<slug>/comments`, and
+  `POST /api/v1/documents/<owner>/<slug>/comments/<id>/delete`.
+  `/documents/<owner>/<slug>.json` and `/documents/<owner>/<slug>/artifact`
+  answer as before, because the chat calls both. In a frame, the app draws no
+  sidebar, no app bar and no tabs, so the artifact panel of the chat shows the
+  document alone. A document with the headings of an assignment report shows
+  in blocks for now.
+- **The links in the viewer are a React page.** `/links` is the app now, and
+  the "Links" group of the sidebar shows on every page of the app. A member
+  adds a link, changes it, moves it, and removes it under "Edit links", then
+  saves the whole list with one commit on `wiki/.viewer/links.yaml`. A guest
+  sees the list and no editor. The app reads and writes one JSON address with
+  the sign-in of a page: `GET /api/v1/links` and `POST /api/v1/links`. That
+  address is the one source of the list, so `GET /api/v1/session` no longer
+  carries it.
+- **The usage in the viewer is a React page.** `/usage` is the app now: the
+  two subscription meters, the stacked bar chart of the tokens of each day,
+  and the four tables. The day range writes the address (`?days=90`), so a
+  bookmark of a range opens the same window. With `CORE_URL` or
+  `JOSHUA_TOKEN_VIEWER` unset, or with a core that does not answer, the page
+  says which half is missing and shows the other one. The app reads one JSON
+  address with the sign-in of a page: `GET /api/v1/usage?days=<n>`, which
+  makes both calls to core at the same time and derives every number of a
+  meter.
+- **The search in the viewer is a React page.** The field in the app bar now
+  goes to `/search?q=<query>` inside the app, so no page loads, and a
+  bookmark of a search opens the same hits. The page keeps both halves: the
+  search by meaning through core first, then the search by words over the
+  Markdown you can read, at most 50 hits. With `CORE_URL` or
+  `JOSHUA_TOKEN_VIEWER` unset, or with a core that does not answer, the page
+  shows the words half alone. The app reads one JSON address with the sign-in
+  of a page: `GET /api/v1/search?q=<query>`.
+- **The journal in the viewer is a React page.** The feed of one month at
+  `/journal` and one day at `/journal/<year>/<month>/<day>` are the app now.
+  The feed opens the newest month that holds an entry, newest day first. The
+  month picker and the person filter write the address (`?month=2026-11`,
+  `?person=alex`), so a bookmark of a month, of a person, or of both opens the
+  same thing. A day page links the day before and the day after that hold an
+  entry. A member still edits an entry from the entry, and lands back on the
+  day at that entry. The app reads two JSON addresses with the sign-in of a
+  page: `GET /api/v1/journal?month=&person=` and
+  `GET /api/v1/journal/<year>/<month>/<day>`.
+- **The writes on the wiki are React pages.** The editor of a page, the
+  editor of a journal entry, the new page, and the trash are all the app now.
+  Edit a page, save it, and the page comes back with your change committed;
+  start a page in a folder from "new page in …"; the trash asks first and
+  moves the page under `wiki/.trash/`. The app writes through four JSON
+  addresses with the sign-in of a page: `GET /api/v1/edit?path=`,
+  `GET /api/v1/new?folder=`, `POST /api/v1/save`, and
+  `POST /api/v1/delete`. Each write keeps the checks it had: a member only, a
+  token of the person and the page, an origin of the host, the 256 KB cap, and
+  one commit of the wiki. A guest still reads.
+- **The wiki in the viewer is a React page.** A page, a folder, the front
+  page at `/wiki/`, a file under `/shared/` and one of your own attachments
+  are all the app now. A page shows the crumbs, the frontmatter, the
+  Markdown, and the other pages of its folder, and a member still gets the
+  edit and the trash. The app reads one JSON address,
+  `GET /api/v1/wiki?path=<path>`, which answers a page, a folder, or a file,
+  and `GET /api/v1/files/<root>/<path>` delivers the bytes of a file: an
+  image shows inline, anything else downloads with its name. Every address
+  you have in a bookmark still opens the same thing, and a page you wrote
+  before does not change.
+- **Your own page in the viewer is a React page.** The viewer now ships a
+  JavaScript app beside the pages it renders in Python, and `/me` is the
+  first page of it: your name, your profile, the journal, your recent
+  attachments, and the wiki tree, as before. The navigation reaches every
+  other section, which the server still renders. The app reads JSON
+  addresses under `/api/v1/`: `/api/v1/session`, `/api/v1/me`, and
+  `/api/v1/wiki/tree`, each with the sign-in of a page. The content policy of
+  the viewer now allows a script from the viewer itself (`script-src
+  'self'`); no inline script runs. See
+  [security.md](security.md#the-headers-of-the-viewer).
+- **An HTML artifact shows with its own styles (#123).** The viewer serves
+  the body of an HTML document from an address of its own,
+  `/documents/<owner>/<slug>/artifact`, and the frame of the document page
+  loads it. The address has a content policy of its own: the styles of the
+  document render, an image comes from the viewer, and the document reaches
+  no network, submits no form, and opens no frame. A script runs only with
+  `scripts: true` in the frontmatter. The frame keeps its `sandbox` and never
+  gets `allow-same-origin`, so the document still cannot reach the viewer or
+  your sign-in. The address has the sign-in and the owner rule of the page. A
+  Markdown document does not change. See
+  [documents.md](documents.md#artifacts) and
+  [security.md](security.md#the-headers-of-the-viewer).
+- **A small JSON address for the head of a document.**
+  `GET /documents/<owner>/<slug>.json` in the viewer gives the title, the
+  kind, the status, and the time of the last change of one document, and no
+  part of the body. The chat shows the title of an artifact card from it, and
+  reads it again while the panel is open to see a change that no turn made.
+  It has the same sign-in and the same owner rule as the document page, and
+  the answer is never cached. A document slug now never ends in `.json`. See
+  [documents.md](documents.md#the-documents-section-of-the-viewer).
+- **A page of the viewer can frame a document page.** The content policy of
+  the viewer now has `frame-ancestors 'self'`, and the viewer sends
+  `X-Frame-Options: SAMEORIGIN`. So the chat shows a document in an artifact
+  panel, which is the document page of the viewer itself. Only the same
+  origin can frame the viewer: no other site can. An HTML document still
+  shows in a sandboxed frame with no access to the viewer. See
+  [security.md](security.md#the-headers-of-the-viewer).
+- **A terminal turn can carry a file.** `POST /v1/cli/turns/stream` now also
+  takes `multipart/form-data` with `person`, `text`, and one `file` part for
+  each file. Channels runs the same attachment pipeline every other channel
+  runs: it reads the type from the bytes, stores an image, a PDF, or a text
+  file under `people/<id>/attachments/YYYY/MM/`, and skips any other type. The
+  turn carries the stored paths. A JSON body works as before, so `make chat`
+  does not change. See [channels.md](channels.md#the-terminal).
+- **A Chat entry in the viewer navigation.** The sidebar and the phone tabs
+  have a Chat item. It opens `/chat/<your id>`, the chat on the same host as
+  the viewer. The viewer only links to the chat; it serves no chat page.
+- **A chat client can read a conversation back (#54).** Core has a new route,
+  `GET /v1/transcript`, for `channels` and `laptop`. It returns the messages
+  of one conversation, oldest first, a page at a time. Channels has
+  `GET /v1/cli/transcript?person=<id>` for the terminal conversation. Each
+  message carries only safe `meta` keys, such as the turn id and the tools
+  the turn used. An unknown conversation returns no messages.
 - **The worker and Joshua write in Simplified Technical English (#140).**
   The worker prompt and the documents skill page have the same section, "How
   you write": one idea in each sentence, the present tense and the active

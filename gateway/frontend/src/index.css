@@ -1,0 +1,36 @@
+/* The two stylesheets of the viewer are the master copies: the shared Joshua
+   look, then what only the viewer needs. Neither is copied into this
+   workspace, and the app adds no class that is already in them. Anything the
+   app adds goes under these two imports. */
+@import "../../joshua_gateway/ui/joshua-ui.css";
+@import "../../joshua_gateway/viewer.css";
+
+/* A code block of a page, with the button that copies its text. The button
+   shows on hover and on focus, so it never covers the first line. */
+.v-code { position: relative; }
+.v-code-copy { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity 120ms; }
+.v-code:hover .v-code-copy, .v-code-copy:focus-visible { opacity: 1; }
+
+/* The buttons of one row of the links editor: move it, or remove it. */
+.v-link-actions { display: flex; align-items: center; gap: 6px; }
+
+/* The "+" of a unit and of a line of the source, which opens the form of a
+   comment. The server renderer draws it as the summary of a <details>; here
+   it is a button, so it takes the place and the look of that summary. */
+.v-plus {
+  position: absolute; left: 40px; top: 0; width: 18px; height: 1.6em;
+  padding: 0; background: none; border: 0; cursor: pointer; text-align: center;
+  color: var(--j-accent); font-weight: 700; opacity: 0.25;
+}
+li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
+.a-unit > .v-plus { left: 8px; top: 3px; }
+.a-unit:hover > .v-plus { opacity: 1; }
+.d-unit > .v-plus { left: 6px; top: 8px; }
+.a-head > .v-plus { position: static; opacity: 0.4; }
+.a-head:hover > .v-plus { opacity: 1; }
+.v-plus-actions { display: flex; align-items: center; gap: 6px; }
+
+@media (max-width: 560px) {
+  .v-plus { left: 30px; opacity: 0.6; }
+  .a-unit > .v-plus { left: 4px; }
+}

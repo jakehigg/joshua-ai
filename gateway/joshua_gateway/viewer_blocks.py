@@ -148,6 +148,20 @@ def blocks(text: str) -> list[Block]:
     return out
 
 
+def block_markdown(lines: Sequence[str], block: Block) -> str:
+    """The Markdown of one block, with the indent of its first line removed.
+
+    A nested list item keeps its own marker that way: with the indent left
+    in, four spaces would render as a code block.
+    """
+    chunk = lines[block.first - 1 : block.last]
+    first = next((line for line in chunk if line.strip()), "")
+    indent = len(first) - len(first.lstrip(" "))
+    return "\n".join(
+        line[indent:] if line[:indent].strip() == "" else line.lstrip() for line in chunk
+    ).strip("\n")
+
+
 @dataclass(frozen=True)
 class Field:
     """One top-level key of a definition: lines ``first`` to ``last`` (from

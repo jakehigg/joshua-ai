@@ -265,8 +265,6 @@ section.limits > .j-meta { margin-top: -6px; }
 .v-link-row legend { padding: 0 4px; }
 .v-icon-field .j-icon { color: var(--j-accent); }
 .v-icon-field select { appearance: none; -webkit-appearance: none; cursor: pointer; }
-.v-remove { display: flex; align-items: center; gap: 6px; color: var(--j-muted); font-size: var(--j-text-sm); white-space: nowrap; }
-.v-remove input { accent-color: var(--j-bad); }
 .v-hint { margin: 0; font-size: var(--j-text-sm); }
 @media (max-width: 640px) {
   .v-link-row { grid-template-columns: minmax(0, 1fr) auto; }
@@ -458,6 +456,8 @@ blockquote.a-quote {
 /* the follow-ups, and the task boxes of a plan */
 ul.a-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 ul.a-checklist li { display: flex; align-items: flex-start; gap: 10px; overflow-wrap: anywhere; }
+ul.a-checklist li > .j-prose { min-width: 0; }
+ul.a-checklist li > .j-prose > :last-child { margin-bottom: 0; }
 .a-box {
   flex: none;
   display: inline-block;
@@ -469,9 +469,12 @@ ul.a-checklist li { display: flex; align-items: flex-start; gap: 10px; overflow-
 }
 .j-prose li.a-task { list-style: none; margin-left: -22px; }
 .j-prose li.a-task .a-box { margin: 0 8px 0 0; vertical-align: -2px; }
-.j-prose li.a-task.done { color: var(--j-muted); }
-.j-prose li.a-task.done .a-box { position: relative; background: var(--j-ok-soft); border-color: var(--j-ok); }
-.j-prose li.a-task.done .a-box::after {
+.j-prose li.a-task.done,
+ul.a-checklist li.done { color: var(--j-muted); }
+.j-prose li.a-task.done .a-box,
+ul.a-checklist li.done .a-box { position: relative; background: var(--j-ok-soft); border-color: var(--j-ok); }
+.j-prose li.a-task.done .a-box::after,
+ul.a-checklist li.done .a-box::after {
   content: "";
   position: absolute;
   left: 4px;

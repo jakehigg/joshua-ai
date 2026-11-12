@@ -1,5 +1,9 @@
 """Tests for the cut of Markdown and of a definition into blocks.
 
+The same cut gives the blocks of the body of a document, which
+``viewer_api.documents`` sends with the first line and the last line of each
+block, so a comment on a block anchors to a line of the file.
+
 Each definition here is the text that the assignments manager renders for
 the spec in its comment, so the line numbers are the line numbers of the
 manager.

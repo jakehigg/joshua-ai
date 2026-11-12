@@ -1,7 +1,8 @@
-"""Offline tests for the viewer's search by meaning.
+"""Offline tests for the client of the search by meaning.
 
 A MockTransport stands in for core, so no network and no model are needed. The
-fixture shape is the same as in `test_viewer.py`.
+route that calls this client is ``viewer_api.search``
+(`test_viewer_api_search.py`).
 """
 
 from __future__ import annotations
@@ -15,12 +16,9 @@ import pytest
 from joshua_gateway import viewer
 from joshua_gateway import viewer_search as search_mod
 from joshua_shared import config
-from joshua_shared.contracts import SearchHit, SearchResponse
 from starlette.testclient import TestClient
 
 ALEX_PW = "alex-secret"
-ALEX = ("alex", ALEX_PW)
-VIEWER_TOKEN = "viewer-token"
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -80,80 +78,6 @@ class FakeCore:
         return httpx.Response(200, json={"results": self.results})
 
 
-def _with_core(monkeypatch, core: FakeCore) -> None:
-    transport = httpx.MockTransport(core.handler)
-    monkeypatch.setattr(
-        search_mod,
-        "from_env",
-        lambda env: search_mod.CoreSearch("http://core", VIEWER_TOKEN, transport=transport),
-    )
-
-
-def test_without_core_the_page_is_words_only(data) -> None:
-    html = TestClient(viewer.build_app()).get("/search", params={"q": "Dough"}, auth=ALEX).text
-    assert "/wiki/pizza.md" in html
-    assert "By meaning" not in html
-    assert "By words" not in html
-
-
-def test_meaning_section_comes_first_and_links_the_page(data, monkeypatch) -> None:
-    core = FakeCore([_hit("wiki/journal/2026/09/04/oatmeal.md")])
-    _with_core(monkeypatch, core)
-    html = TestClient(viewer.build_app()).get("/search", params={"q": "Dough"}, auth=ALEX).text
-    assert html.index("By meaning") < html.index("By words")
-    assert 'href="/wiki/journal/2026/09/04/oatmeal.md"' in html
-    assert "journal · 2026-09-04" in html
-    assert "/wiki/pizza.md" in html  # the words section is still there
-
-
-def test_the_wiki_call_names_no_person_and_the_documents_call_names_the_member(
-    data, monkeypatch
-) -> None:
-    core = FakeCore([])
-    _with_core(monkeypatch, core)
-    TestClient(viewer.build_app()).get("/search", params={"q": "oats"}, auth=ALEX)
-    bodies = {}
-    for request in core.requests:
-        assert request.url.path == search_mod.SEARCH_PATH
-        assert request.headers["authorization"] == f"Bearer {VIEWER_TOKEN}"
-        assert not any(k.lower().startswith("x-joshua") for k in request.headers)
-        body = json.loads(request.content)
-        bodies[body["source"]] = body
-    assert set(bodies) == {"files", "documents"}
-    assert bodies["files"]["query"] == "oats"
-    assert bodies["files"]["person"] is None
-    assert bodies["documents"]["person"] == "alex"
-
-
-def test_a_guest_search_names_no_person_and_asks_for_no_document(
-    data, monkeypatch, tmp_path
-) -> None:
-    cfg = tmp_path / "joshua.yaml"
-    cfg.write_text(CONFIG.replace("    name: Alex\n", "    name: Alex\n    role: guest\n"))
-    core = FakeCore([])
-    _with_core(monkeypatch, core)
-    TestClient(viewer.build_app()).get("/search", params={"q": "oats"}, auth=ALEX)
-    [request] = core.requests
-    assert json.loads(request.content)["source"] == "files"
-    assert "alex" not in request.content.decode()
-
-
-def test_a_document_hit_links_to_the_document_page(data, monkeypatch) -> None:
-    doc = _hit(
-        "documents/alex/party-plan.md",
-        title="Party plan",
-        text="Food and music.",
-        kind="document",
-        heading="plan, active",
-        date=None,
-    )
-    _with_core(monkeypatch, FakeCore([doc]))
-    html = TestClient(viewer.build_app()).get("/search", params={"q": "party"}, auth=ALEX).text
-    assert 'href="/documents/alex/party-plan"' in html
-    assert "document · plan, active" in html
-    assert "Party plan ›" not in html
-
-
 async def test_documents_merge_by_score_and_a_failed_documents_call_is_left_out() -> None:
     wiki = {**_hit("wiki/a.md"), "score": 0.7}
     doc = {**_hit("documents/alex/b.md", kind="document", date=None), "score": 0.9}
@@ -179,34 +103,28 @@ async def test_documents_merge_by_score_and_a_failed_documents_call_is_left_out(
     assert response is not None and [h.path for h in response.results] == ["wiki/a.md"]
 
 
-def test_core_down_says_so_and_keeps_words(data, monkeypatch) -> None:
-    _with_core(monkeypatch, FakeCore([], status=503))
-    html = TestClient(viewer.build_app()).get("/search", params={"q": "Dough"}, auth=ALEX).text
-    assert "Search by meaning is not available now." in html
-    assert "/wiki/pizza.md" in html
+async def test_a_file_both_searches_name_is_one_hit() -> None:
+    """Core can answer the same file for both sources, and a reader needs one
+    row for it: the hit with the higher score."""
+    core = FakeCore([{**_hit("wiki/a.md"), "score": 0.6}, {**_hit("wiki/a.md"), "score": 0.9}])
+    client = search_mod.CoreSearch("http://core", "t", transport=httpx.MockTransport(core.handler))
+    response = await client.search("x", person="alex")
+    assert response is not None
+    assert [(h.path, h.score) for h in response.results] == [("wiki/a.md", 0.9)]
 
 
-def test_core_unreachable_says_so(data, monkeypatch) -> None:
+async def test_a_refused_search_is_none() -> None:
+    core = FakeCore([], status=503)
+    client = search_mod.CoreSearch("http://core", "t", transport=httpx.MockTransport(core.handler))
+    assert await client.search("oats") is None
+
+
+async def test_an_unreachable_core_is_none() -> None:
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused", request=request)
 
-    transport = httpx.MockTransport(refuse)
-    monkeypatch.setattr(
-        search_mod,
-        "from_env",
-        lambda env: search_mod.CoreSearch("http://core", VIEWER_TOKEN, transport=transport),
-    )
-    html = TestClient(viewer.build_app()).get("/search", params={"q": "Dough"}, auth=ALEX).text
-    assert "Search by meaning is not available now." in html
-
-
-def test_passage_html_is_escaped(data, monkeypatch) -> None:
-    core = FakeCore([_hit("wiki/x.md", text="<script>alert(1)</script>", title="<b>t</b>")])
-    _with_core(monkeypatch, core)
-    html = TestClient(viewer.build_app()).get("/search", params={"q": "x"}, auth=ALEX).text
-    assert "<script>alert(1)</script>" not in html
-    assert "&lt;script&gt;" in html
-    assert "<b>t</b>" not in html
+    client = search_mod.CoreSearch("http://core", "t", transport=httpx.MockTransport(refuse))
+    assert await client.search("oats") is None
 
 
 def test_a_path_outside_the_wiki_is_not_linked() -> None:
@@ -218,12 +136,6 @@ def test_a_path_outside_the_wiki_is_not_linked() -> None:
     assert search_mod.viewer_url("documents/alex/../mia/plan.md") is None
     assert search_mod.viewer_url("documents/plan.md") is None
     assert search_mod.viewer_url("documents/alex/page.html") is None
-    response = SearchResponse(
-        results=[
-            SearchHit(**_hit("people/alex/attachments/scan.pdf", kind="wiki")),
-        ]
-    )
-    assert "scan.pdf" not in search_mod.meaning_html(response)
 
 
 def test_from_env_needs_the_url_and_the_token() -> None:

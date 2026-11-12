@@ -1,7 +1,7 @@
-"""The search by meaning of the viewer: one call to core, and its HTML.
+"""The search by meaning of the viewer: one call to core.
 
 Core owns the index and the embedding model, so the viewer sends the query to
-core's ``POST /v1/memory/search`` with its own fleet token and shows the
+core's ``POST /v1/memory/search`` with its own fleet token and answers with the
 passages that come back. The search is in the shared scope and names no
 person. Core returns only wiki pages, journal entries, and profiles, which any
 reader of the wiki can already open. For a member, a second search names the
@@ -11,21 +11,20 @@ and the shared ones, by title and summary, and each one links to
 
 The viewer needs ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER``. With either one
 missing, :func:`from_env` returns None and the viewer searches by words only.
-A call that fails returns None too, and the page says so; the search by words
-still shows.
+A call that fails returns None too, and the page shows the search by words
+alone.
 
-The functions here build data and HTML only. The route lives in ``viewer``.
+The route is ``viewer_api.search``, which shapes the answer of this module.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from html import escape
 from urllib.parse import quote
 
 import httpx
-from joshua_shared.contracts import SearchRequest, SearchResponse
+from joshua_shared.contracts import SearchHit, SearchRequest, SearchResponse
 from joshua_shared.http import FleetClient
 from joshua_shared.log import get_logger
 from pydantic import ValidationError
@@ -39,11 +38,22 @@ SEARCH_PATH = "/v1/memory/search"
 # A person waits for this page, so a slow core must not hold it open.
 TIMEOUT_S = 5.0
 MEANING_MAX_RESULTS = 10
-SNIPPET_CHARS = 280
 
 _WIKI_PREFIX = "wiki/"
 _DOCUMENTS_PREFIX = "documents/"
-_DOCUMENT_KIND = "document"
+
+
+def _by_path(hits: list[SearchHit]) -> list[SearchHit]:
+    """One hit per file, in the order of ``hits``.
+
+    The two searches can both name a file, and a reader needs one row for it.
+    ``hits`` comes in order of score, so the best hit of a file is the one
+    that stays.
+    """
+    best: dict[str, SearchHit] = {}
+    for hit in hits:
+        best.setdefault(hit.path, hit)
+    return list(best.values())
 
 
 class CoreSearch:
@@ -62,8 +72,8 @@ class CoreSearch:
         """Return core's answer, or None when core cannot answer.
 
         With ``person``, the answer also holds the documents of that person and
-        the shared ones, in order of score. A failed search of documents leaves
-        them out."""
+        the shared ones, in order of score, one hit per file. A failed search of
+        documents leaves them out."""
         try:
             body = SearchRequest(query=query, limit=limit).model_dump()
             documents = (
@@ -83,7 +93,7 @@ class CoreSearch:
         if docs is None:
             return files
         merged = sorted([*files.results, *docs.results], key=lambda hit: -hit.score)
-        return SearchResponse(results=merged[:limit])
+        return SearchResponse(results=_by_path(merged)[:limit])
 
     async def _post(self, body: dict[str, object]) -> SearchResponse | None:
         try:
@@ -127,55 +137,3 @@ def viewer_url(path: str) -> str | None:
     if not path.startswith(_WIKI_PREFIX):
         return None
     return "/wiki/" + quote(path[len(_WIKI_PREFIX) :])
-
-
-def _snippet(text: str) -> str:
-    flat = " ".join(text.split())
-    if len(flat) <= SNIPPET_CHARS:
-        return flat
-    return flat[:SNIPPET_CHARS].rstrip() + "…"
-
-
-def results_html(hits: list[tuple[str, str, str, str]]) -> str:
-    """A list of search hits. Each hit is ``(url, label, meta, snippet)``, all
-    plain text; ``meta`` and ``snippet`` may be empty."""
-    rows = []
-    for url, label, meta, snippet in hits:
-        sub = f'<span class="j-list-sub">{escape(meta)}</span>' if meta else ""
-        text = f'<span class="j-list-sub hit-text">{escape(snippet)}</span>' if snippet else ""
-        rows.append(
-            '<li class="j-list-row"><div class="j-list-main">'
-            f'<a class="j-list-title wrap" href="{escape(url)}">{escape(label)}</a>'
-            f"{sub}{text}</div></li>"
-        )
-    return f'<ul class="j-list">{"".join(rows)}</ul>'
-
-
-def meaning_html(response: SearchResponse | None) -> str:
-    """The "by meaning" section. None means core did not answer."""
-    if response is None:
-        return (
-            '<section class="meaning"><h2>By meaning</h2>'
-            '<p class="j-empty">Search by meaning is not available now.</p></section>'
-        )
-    hits: list[tuple[str, str, str, str]] = []
-    for hit in response.results:
-        url = viewer_url(hit.path)
-        if url is None:
-            continue
-        label = hit.title or hit.path
-        if hit.kind == _DOCUMENT_KIND:
-            # The heading of a document hit is its kind and status.
-            meta = f"document · {hit.heading}" if hit.heading else "document"
-            hits.append((url, label, meta, _snippet(hit.text)))
-            continue
-        if hit.heading and hit.heading != hit.title:
-            label = f"{label} › {hit.heading}"
-        meta = hit.kind if hit.date is None else f"{hit.kind} · {hit.date}"
-        hits.append((url, label, meta, _snippet(hit.text)))
-    if not hits:
-        return (
-            '<section class="meaning"><h2>By meaning</h2>'
-            '<p class="j-empty">No close match.</p></section>'
-        )
-    return f'<section class="meaning"><h2>By meaning</h2>{results_html(hits)}</section>'

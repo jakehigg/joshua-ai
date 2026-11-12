@@ -9,8 +9,8 @@ the wiki's git repository still records each change.
 The icons are built in because the viewer's CSP allows images from ``'self'``
 only, so a link cannot bring its own favicon.
 
-This module has no routes. ``viewer`` serves the page and the form; this module
-reads, checks, writes and renders the list.
+This module has no routes. ``viewer_api.links`` serves the list and the write;
+this module reads, checks and writes the file.
 """
 
 from __future__ import annotations
@@ -34,9 +34,6 @@ LINKS_FILE = "links.yaml"
 MAX_LINKS = 30
 MAX_TITLE = 40
 MAX_URL = 500
-
-# The form shows this many blank rows under the saved links, for new ones.
-BLANK_ROWS = 3
 
 DEFAULT_ICON = "link"
 
@@ -80,7 +77,7 @@ ICONS: dict[str, str] = {
 
 
 class LinkError(ValueError):
-    """A link from the form that cannot be saved. The message is for the person."""
+    """A link of a write that cannot be saved. The message is for the person."""
 
 
 @dataclass(frozen=True)
@@ -188,21 +185,27 @@ def dump(links: list[Link]) -> str:
     )
 
 
-def from_form(form: Any) -> list[Link]:
-    """The links from the edit form, in row order.
+def from_rows(rows: Any) -> list[Link]:
+    """The links of the rows of a write, in the order the person put them.
 
-    Row ``i`` has the fields ``title-i``, ``url-i``, ``icon-i`` and
-    ``remove-i``. A row with no title and no URL, or with ``remove`` ticked, is
-    dropped. Any other row must be a valid link; the first error raises
-    ``LinkError`` and names the row.
+    One row is an object with ``title``, ``url`` and ``icon``. A row with no
+    title and no URL is dropped, so a blank row of the editor is not an
+    error. Any other row must be a valid link, and its icon must be a
+    built-in one: the first error raises ``LinkError`` and names the row.
     """
+    if not isinstance(rows, list):
+        raise LinkError("the write carries no links")
     links: list[Link] = []
-    for index in range(MAX_LINKS + BLANK_ROWS):
-        title = str(form.get(f"title-{index}", ""))
-        url = str(form.get(f"url-{index}", ""))
-        icon = str(form.get(f"icon-{index}", DEFAULT_ICON))
-        if form.get(f"remove-{index}") or (not title.strip() and not url.strip()):
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise LinkError(f"row {index + 1}: that is not a link")
+        title = str(row.get("title") or "")
+        url = str(row.get("url") or "")
+        icon = str(row.get("icon") or DEFAULT_ICON)
+        if not title.strip() and not url.strip():
             continue
+        if icon not in ICONS:
+            raise LinkError(f"row {index + 1}: {icon} is not a built-in icon")
         try:
             links.append(check_link(title, url, icon))
         except LinkError as exc:
@@ -213,6 +216,11 @@ def from_form(form: Any) -> list[Link]:
 
 
 # -- HTML ---------------------------------------------------------------------
+#
+# The server-rendered shell (``viewer._shell``) draws the sidebar of the pages
+# the server still renders, and ``nav_html`` is its links group. The React app
+# draws its own list (``shell/LinksNav.tsx``), so this builder goes away with
+# ``_shell``, when the last page of the viewer is a page of the app.
 
 
 def _anchor(link: Link, cls: str) -> str:
@@ -233,73 +241,4 @@ def nav_html(links: list[Link], *, current: bool) -> str:
         f'<nav class="v-sections v-links" aria-label="Links">{items}'
         f'<a class="j-nav-item sub v-links-edit" href="/links"{mark}>{manage}</a>'
         "</nav>"
-    )
-
-
-def list_html(links: list[Link]) -> str:
-    """The list on the ``/links`` page."""
-    if not links:
-        return '<p class="j-empty">No links yet.</p>'
-    rows = "".join(
-        f'<li><a class="j-list-row" href="{escape(link.url, quote=True)}" '
-        'target="_blank" rel="noopener noreferrer">'
-        f"{icon_svg(link.icon)}"
-        f'<span class="j-list-main"><span class="j-list-title">{escape(link.title)}</span>'
-        f'<span class="j-list-sub">{escape(link.url)}</span></span></a></li>'
-        for link in links
-    )
-    return f'<ul class="j-list v-link-list">{rows}</ul>'
-
-
-def _icon_select(index: int, chosen: str) -> str:
-    options = "".join(
-        f'<option value="{name}"{" selected" if name == chosen else ""}>{name}</option>'
-        for name in ICONS
-    )
-    return (
-        f'<label class="j-field v-icon-field">{icon_svg(chosen)}'
-        f'<select name="icon-{index}" aria-label="Icon for row {index + 1}">'
-        f"{options}</select></label>"
-    )
-
-
-def _row(index: int, link: Link | None) -> str:
-    title = escape(link.title, quote=True) if link else ""
-    url = escape(link.url, quote=True) if link else ""
-    remove = (
-        f'<label class="v-remove"><input type="checkbox" name="remove-{index}" value="1">'
-        " remove</label>"
-        if link
-        else '<span class="v-remove" aria-hidden="true"></span>'
-    )
-    return (
-        '<fieldset class="v-link-row">'
-        f'<legend class="j-label">{"Link " + str(index + 1) if link else "New link"}</legend>'
-        f'<label class="j-field"><input name="title-{index}" value="{title}" '
-        f'maxlength="{MAX_TITLE}" placeholder="Title" '
-        f'aria-label="Title for row {index + 1}"></label>'
-        f'<label class="j-field"><input name="url-{index}" value="{url}" type="url" '
-        f'maxlength="{MAX_URL}" placeholder="https://" '
-        f'aria-label="URL for row {index + 1}"></label>'
-        f"{_icon_select(index, link.icon if link else DEFAULT_ICON)}"
-        f"{remove}"
-        "</fieldset>"
-    )
-
-
-def form_html(links: list[Link], *, csrf: str, error: str = "") -> str:
-    """The edit form: one row per saved link, then ``BLANK_ROWS`` empty rows."""
-    rows = [_row(i, link) for i, link in enumerate(links)]
-    free = max(0, min(BLANK_ROWS, MAX_LINKS - len(links)))
-    rows += [_row(len(links) + i, None) for i in range(free)]
-    err = f'<p class="j-error" role="alert">{escape(error)}</p>' if error else ""
-    return (
-        '<form class="v-links-form" action="/links" method="post">'
-        f'<input type="hidden" name="csrf" value="{escape(csrf, quote=True)}">'
-        f"{err}{''.join(rows)}"
-        '<p class="j-muted v-hint">Links open in a new tab. Clear a row, or tick remove, '
-        "to delete a link.</p>"
-        '<div class="j-row-flex"><button class="j-btn primary" type="submit">Save links</button>'
-        '<a class="j-btn ghost" href="/links">Cancel</a></div>'
-        "</form>"
     )

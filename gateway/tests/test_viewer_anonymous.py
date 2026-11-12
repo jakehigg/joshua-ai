@@ -53,6 +53,9 @@ CONFIG_MEMBER = textwrap.dedent("""\
 SAM_PW = "sam-secret"
 SAM = ("sam", SAM_PW)
 
+# The wiki is the React app, which reads a page from this route.
+PAGE_JSON = "/api/v1/wiki?path=wiki/pizza.md"
+
 CONFIG_NO_ANON = textwrap.dedent("""\
     name: Test
     timezone: America/New_York
@@ -115,68 +118,67 @@ def no_anon_client(monkeypatch, tmp_path) -> TestClient:
 
 
 def test_no_credentials_reads_the_wiki(anon_client):
-    response = anon_client.get("/wiki/pizza.md")
+    response = anon_client.get(PAGE_JSON)
     assert response.status_code == 200
-    assert "Dough and sauce" in response.text
+    assert "Dough and sauce" in response.json()["markdown"]
 
 
 def test_no_credentials_reads_the_journal(anon_client):
-    response = anon_client.get("/journal")
-    assert response.status_code == 200
-    feed = anon_client.get("/journal/2026/09/04")
+    feed = anon_client.get("/api/v1/journal")
     assert feed.status_code == 200
-    assert "Oats" in feed.text
+    assert feed.json()["month"] == "2026-09"
+    day = anon_client.get("/api/v1/journal/2026/09/04")
+    assert day.status_code == 200
+    assert "Oats" in day.json()["entries"][0]["markdown"]
 
 
 def test_no_credentials_home_page_has_no_profile_link(anon_client):
     """There is no such person on disk, so the anonymous identity gets no
-    profile link and no personal files folder on the home page."""
-    home = anon_client.get("/me")
-    assert home.status_code == 200
-    assert "/wiki/people/" not in home.text
-    assert "profile" not in home.text
-    assert "attachments" not in home.text.lower()
+    profile link and no personal files folder on its own page."""
+    body = anon_client.get("/api/v1/me").json()
+    assert body["person"]["id"] == "anonymous"
+    assert body["profile_url"] is None
+    assert body["attachments"] == []
 
 
 # -- with anonymous:true, every write route works, same result as a member --
 
 
 def test_no_credentials_sees_edit_and_new_links(anon_client):
-    page = anon_client.get("/wiki/pizza.md")
-    assert 'href="/edit/pizza.md"' in page.text
-    folder = anon_client.get("/wiki/")
-    assert 'href="/new"' in folder.text
+    page = anon_client.get(PAGE_JSON).json()
+    assert page["can_edit"] is True and page["edit_url"] == "/edit/pizza.md"
+    folder = anon_client.get("/api/v1/wiki?path=wiki").json()
+    assert folder["can_create"] is True and folder["new_url"] == "/new"
 
 
 def test_no_credentials_can_edit(anon_client, tmp_path):
     token = viewer._csrf_token("anonymous", "wiki/pizza.md")
     response = anon_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged by anyone.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged by anyone.\n"},
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "url": "/wiki/pizza.md"}
     assert (tmp_path / "data/wiki/pizza.md").read_text() == "# Pizza\n\nChanged by anyone.\n"
 
 
 def test_no_credentials_can_create(anon_client, tmp_path):
     token = viewer._csrf_token("anonymous", "new:")
     response = anon_client.post(
-        "/save",
-        data={"folder": "", "name": "soup", "csrf": token, "body": "# Soup\n\nHot.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"folder": "", "name": "soup", "csrf": token, "body": "# Soup\n\nHot.\n"},
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "url": "/wiki/soup.md"}
     assert (tmp_path / "data/wiki/soup.md").read_text() == "# Soup\n\nHot.\n"
 
 
 def test_no_credentials_can_trash(anon_client, tmp_path):
     path = "wiki/pizza.md"
     token = viewer._csrf_token("anonymous", path)
-    response = anon_client.post(
-        "/delete", data={"path": path, "csrf": token}, follow_redirects=False
-    )
-    assert response.status_code == 303
+    response = anon_client.post("/api/v1/delete", json={"path": path, "csrf": token})
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "url": "/"}
     original = tmp_path / "data" / "wiki" / "pizza.md"
     assert not original.exists()
     trash = list((tmp_path / "data" / "wiki" / ".trash").rglob("pizza.md"))
@@ -195,9 +197,8 @@ def test_anonymous_write_goes_through_the_same_commit_path(anon_client, tmp_path
     wikigit.commit(wiki, None, "start: sync the wiki")
     token = viewer._csrf_token("anonymous", "wiki/pizza.md")
     anon_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged.\n"},
     )
     log = subprocess.run(
         ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True
@@ -209,7 +210,7 @@ def test_anonymous_write_goes_through_the_same_commit_path(anon_client, tmp_path
 
 
 def test_wrong_credentials_still_401_even_with_anonymous_true(anon_client):
-    response = anon_client.get("/wiki/pizza.md", auth=("alex", "wrong"))
+    response = anon_client.get(PAGE_JSON, auth=("alex", "wrong"))
     assert response.status_code == 401
 
 
@@ -217,18 +218,17 @@ def test_wrong_credentials_still_401_even_with_anonymous_true(anon_client):
 
 
 def test_member_signs_in_and_writes_on_an_open_viewer(anon_client, tmp_path):
-    response = anon_client.get("/wiki/pizza.md", auth=ALEX)
+    response = anon_client.get(PAGE_JSON, auth=ALEX)
     assert response.status_code == 200
-    assert 'href="/edit/pizza.md"' in response.text
+    assert response.json()["edit_url"] == "/edit/pizza.md"
 
     token = viewer._csrf_token("alex", "wiki/pizza.md")
     response = anon_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged.\n"},
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nChanged.\n"},
         auth=ALEX,
-        follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
     assert (tmp_path / "data/wiki/pizza.md").read_text() == "# Pizza\n\nChanged.\n"
 
 
@@ -236,7 +236,7 @@ def test_member_signs_in_and_writes_on_an_open_viewer(anon_client, tmp_path):
 
 
 def test_no_credentials_still_gets_401_when_anonymous_is_unset(no_anon_client):
-    response = no_anon_client.get("/wiki/pizza.md")
+    response = no_anon_client.get(PAGE_JSON)
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"].startswith("Basic")
 
@@ -251,15 +251,16 @@ def test_readyz_says_open_and_names_no_person(member_client):
 
 
 def test_no_credentials_home_page_is_the_members_page(member_client):
-    home = member_client.get("/me")
-    assert home.status_code == 200
-    assert "<h1" in home.text and "Alex</h1>" in home.text
-    assert 'href="/wiki/people/alex.md"' in home.text
-    assert "/attachments/2026/09/receipt.txt" in home.text
+    body = member_client.get("/api/v1/me").json()
+    assert body["person"] == {"id": "alex", "name": "Alex", "role": "member"}
+    assert body["profile_url"] == "/wiki/people/alex.md"
+    assert {"path": "2026/09/receipt.txt", "url": "/attachments/2026/09/receipt.txt"} in body[
+        "attachments"
+    ]
 
 
 def test_no_credentials_reads_the_members_attachments(member_client):
-    response = member_client.get("/attachments/2026/09/receipt.txt")
+    response = member_client.get("/api/v1/files/attachments/2026/09/receipt.txt")
     assert response.status_code == 200
     assert "paid" in response.text
 
@@ -268,18 +269,16 @@ def test_no_credentials_writes_as_the_member(member_client, tmp_path):
     """The CSRF token is bound to the member, so the write is the member's."""
     wrong = viewer._csrf_token("anonymous", "wiki/pizza.md")
     response = member_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": wrong, "body": "# Pizza\n\nNo.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": wrong, "body": "# Pizza\n\nNo.\n"},
     )
     assert response.status_code == 403
     token = viewer._csrf_token("alex", "wiki/pizza.md")
     response = member_client.post(
-        "/save",
-        data={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nAlex.\n"},
-        follow_redirects=False,
+        "/api/v1/save",
+        json={"path": "pizza.md", "csrf": token, "body": "# Pizza\n\nAlex.\n"},
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
     assert (tmp_path / "data/wiki/pizza.md").read_text() == "# Pizza\n\nAlex.\n"
 
 
@@ -298,15 +297,14 @@ def test_no_credentials_reads_the_members_assignments(member_client, monkeypatch
         "from_env",
         lambda env: am.AssignmentsClient("http://assignments", "token", transport=transport),
     )
-    assert member_client.get("/assignments").status_code == 200
+    assert member_client.get("/api/v1/assignments").status_code == 200
     assert member_client.get("/assignments/saved").status_code == 200
     assert people and set(people) == {"alex"}
 
 
 def test_credentials_on_a_member_viewer_are_still_checked(member_client):
-    assert member_client.get("/wiki/pizza.md", auth=("sam", "wrong")).status_code == 401
+    assert member_client.get(PAGE_JSON, auth=("sam", "wrong")).status_code == 401
     # alex is not in viewer.users, so alex cannot sign in by password.
-    assert member_client.get("/wiki/pizza.md", auth=ALEX).status_code == 401
-    home = member_client.get("/me", auth=SAM)
-    assert home.status_code == 200
-    assert 'href="/wiki/people/sam.md"' in home.text
+    assert member_client.get(PAGE_JSON, auth=ALEX).status_code == 401
+    body = member_client.get("/api/v1/me", auth=SAM).json()
+    assert body["profile_url"] == "/wiki/people/sam.md"

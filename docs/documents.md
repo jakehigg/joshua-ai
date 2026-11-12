@@ -73,7 +73,8 @@ Joshua keeps the status true as the document changes.
 
 A document is Markdown (`.md`) or HTML (`.html`). The name of the file gives
 the format. One slug holds one document, so `party.md` and `party.html`
-cannot both exist.
+cannot both exist. A slug never ends in `.comments` or in `.json`: the
+comments file and the frontmatter route of the viewer own those names.
 
 ### The frontmatter
 
@@ -106,20 +107,19 @@ to read. It is Markdown or HTML.
   reach the viewer, your sign-in, or a form of the viewer. Scripts do not
   run unless the frontmatter has `scripts: true`.
 
-Today the frame also gets the content policy of the viewer. That policy
-blocks a `<style>` element, a `style` attribute, and each script in the
-document, also with `scripts: true`. So an HTML artifact shows with no
-styles. Issue #123 plans to serve the artifact from its own route with its
-own policy: styles and images in the document are allowed, scripts only
-with `scripts: true`, and no network. Until it merges, keep an artifact
-simple, or make it Markdown.
+The frame loads the artifact from an address of its own,
+`/documents/<owner>/<slug>/artifact`, which has a content policy of its own.
+So a `<style>` element and a `style` attribute of the artifact render, and an
+image comes from the viewer. The artifact reaches no network: it loads no
+font, no stylesheet, and no script from a file, and it sends no request. It
+submits no form and opens no frame. Write the styles in the file.
 
 ## Comments
 
 You comment on a document in the viewer, part by part:
 
 1. Open the document.
-2. Click the `+` beside a paragraph, a heading, a list item, or a card.
+2. Click the `+` beside a paragraph, a heading, or a list item.
    The `+` at the head of the page is a comment on the whole document. The `Source` fold has a `+` on each line,
    for one exact line.
 3. Write what to change, such as "make this two days" or "remove the
@@ -178,12 +178,18 @@ link.
   `shared`), the time of the last change, the count of open comments, and
   the status.
 - A document opens at `/documents/<owner>/<slug>`. A Markdown document shows
-  in blocks. A document with the headings of an assignment report
-  (`Highlights`, `What was asked`, `What was done`, `Outputs`,
-  `Decisions for you`, `Follow-ups`) shows as that report does, with cards.
-  An HTML document shows in its frame (see [artifacts](#artifacts)).
+  in blocks: one block for each paragraph, heading, list item, quote, code
+  block, and table. An HTML document shows in its frame (see
+  [artifacts](#artifacts)).
 - `Source` gives the frontmatter and each line of the body. `Versions` gives
   the history.
+- `/documents/<owner>/<slug>.json` gives the title, the kind, the status, and
+  the time of the last change, as JSON, and no part of the body. The chat
+  shows the title of an artifact card from it, and reads it again while the
+  panel is open to see a change that no turn made. It needs the same sign-in
+  as the page, a document of another member is 404, and the answer is never
+  cached. A slug never ends in `.json`, so this address always names the
+  frontmatter of `<slug>`.
 
 The viewer writes only your comments. Joshua makes every other change.
 [operations.md](operations.md#the-documents-section) has the details, and

@@ -246,6 +246,23 @@ def test_load_reads_and_caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert config.reload().name == "Lake house"
 
 
+def test_load_reads_the_file_the_path_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cache belongs to one path. A call that names another path reads
+    that file, so a container that is pointed at a new config gets it."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    first = tmp_path / "first.yaml"
+    first.write_text(GOOD)
+    monkeypatch.setenv(config.CONFIG_ENV_VAR, str(first))
+    config.reload(first)
+    assert config.load().name == "Home"
+    second = tmp_path / "second.yaml"
+    second.write_text(GOOD.replace("Home", "Lake house"))
+    monkeypatch.setenv(config.CONFIG_ENV_VAR, str(second))
+    assert config.load().name == "Lake house"
+
+
 def test_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(config.ConfigError) as exc:
         config.reload(tmp_path / "absent.yaml")

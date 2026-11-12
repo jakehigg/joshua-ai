@@ -1768,11 +1768,12 @@ def load(path: Path | str | None = None) -> JoshuaConfig:
     """Return the config, reading and caching it on first call.
 
     The path comes from ``path``, else the ``JOSHUA_CONFIG`` env var, else
-    ``/etc/joshua/joshua.yaml``. Raises ``ConfigError`` on any failure.
+    ``/etc/joshua/joshua.yaml``. The cache belongs to that path: a call that
+    names another path reads that file. Raises ``ConfigError`` on any failure.
     """
     global _cache, _cache_path, _cache_people_file_mtime
-    if _cache is None:
-        resolved = _resolve_path(path)
+    resolved = _resolve_path(path)
+    if _cache is None or (_cache_path is not None and resolved != _cache_path):
         _cache = _read(resolved)
         _cache_path = resolved
         _cache_people_file_mtime = _people_file_mtime()
@@ -1782,7 +1783,7 @@ def load(path: Path | str | None = None) -> JoshuaConfig:
     # `stat` per call is cheap; the file is re-read only when it changed.
     current = _people_file_mtime()
     if current != _cache_people_file_mtime:
-        _cache = _read(_cache_path or _resolve_path(path))
+        _cache = _read(_cache_path or resolved)
         _cache_people_file_mtime = current
     return _cache
 

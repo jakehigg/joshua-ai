@@ -241,6 +241,58 @@ are refused before any file operation. The server alone sets `author`,
 `created`, `updated`, and `promoted_to`. The tools add no comment: a comment
 comes from the person in the viewer, and Joshua only resolves one.
 
+### The headers of the viewer
+
+Every response of the viewer carries the same headers, and only the artifact
+address of an HTML document has a policy of its own:
+
+- `Content-Security-Policy: default-src 'none'; img-src 'self'; style-src
+  'self'; script-src 'self' '<hash of the copy script>'; connect-src 'self';
+  frame-src 'self'; frame-ancestors 'self'`. The page loads its stylesheets,
+  its images, its scripts and its data from the viewer itself. The viewer
+  serves a JavaScript bundle of its own, so `script-src` holds `'self'`, and
+  the hash of the copy script of a report beside it. No inline script runs:
+  `'self'` allows a file of this origin, never a `<script>` with a body and
+  never an event attribute. Where the bundle renders Markdown, the
+  sanitizer runs before the highlighter and raw HTML is not rendered, so
+  text from the wiki or from a document cannot become an element.
+- `X-Frame-Options: SAMEORIGIN`, for a browser that reads no
+  `frame-ancestors`.
+- `X-Content-Type-Options: nosniff`.
+
+`frame-ancestors 'self'` lets one page of the viewer frame another: the chat
+shows a document page in its artifact panel, so there is no second renderer
+and no second comment surface. The value is always `'self'`, never `*` and
+never a host, so no page off the origin can frame the viewer.
+
+An HTML document is different. The page shows it in a `sandbox` frame with
+no `allow-same-origin`, so the document has an opaque origin and cannot
+reach the viewer, its sign-in, or a form of the viewer. The frame loads
+`/documents/<owner>/<slug>/artifact`, which serves the body of the document
+with its own policy:
+
+- `default-src 'none'`, so the document loads nothing: no fetch, no font, no
+  stylesheet, and no script from a file. There is no `connect-src`, so it
+  reaches no network.
+- `style-src 'unsafe-inline'`, so a `<style>` element and a `style`
+  attribute of the document render. An artifact is a thing to look at, and
+  it must show its own styles.
+- `img-src 'self'`, so an image comes from the viewer only.
+- `form-action 'none'` and `frame-src 'none'`, so the document submits no
+  form and opens no frame of its own.
+- `script-src 'unsafe-inline'` only when the frontmatter of the document says
+  `scripts: true`. Without it, no script runs.
+- `sandbox`, and `sandbox allow-scripts` with `scripts: true`. The directive
+  repeats the sandbox of the frame on the response, so the document has an
+  opaque origin also when a browser opens the address alone. It never has
+  `allow-same-origin`.
+
+The address has the sign-in, the owner rule, and the guest rule of the
+document page. The chat frames the document page itself, with no `sandbox` on
+that outer frame, because the comment form of the viewer needs its cookie and
+its CSRF token. So the isolation of an HTML artifact is the policy of this
+address and the `sandbox` of the inner frame.
+
 ## Secrets
 
 Secrets live in `.env` and nowhere else. `joshua.yaml` refers to them as

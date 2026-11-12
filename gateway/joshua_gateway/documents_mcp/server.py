@@ -349,7 +349,10 @@ def _resolve(req: Request, path: Any) -> Doc:
     if not dot or ext not in docstore.FORMATS or not docstore.valid_owner(owner):
         raise DocumentError(_PATH_HINT)
     if not docstore.valid_slug(slug):
-        raise DocumentError(f"{_PATH_HINT}; slug is letters, digits, '.', '_', and '-'")
+        raise DocumentError(
+            f"{_PATH_HINT}; slug is letters, digits, '.', '_', and '-', "
+            "and does not end in '.comments' or '.json'"
+        )
     if owner not in req.owners():
         raise DocumentError(_NOT_YOURS)
     folder = layout.documents_owner_dir(owner, req.root_dir)

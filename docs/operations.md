@@ -721,7 +721,12 @@ off by default. To turn it on:
 The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
 `http://127.0.0.1:8082/` and sign in with the person id and the password.
 The address opens the wiki. "Your page" in the menu, at `/me`, has the profile
-link and the recent attachments of the person who signed in.
+link and the recent attachments of the person who signed in. That page is a
+JavaScript app, which the gateway image carries beside the pages it renders in
+Python. It reads JSON addresses under `/api/v1/`, with the same sign-in as a
+page. An image with no build of the app logs `no frontend build; the React
+pages are off` at start, and `/me` answers 404; the rest of the viewer does
+not change.
 Nothing off the host reaches it: put a reverse proxy in front, for TLS, before
 you expose it.
 
@@ -737,10 +742,11 @@ people of an instance use beside Joshua, for example the pantry or the tasks
 page. Each link opens in a new tab. On a phone, the "Links" tab opens the
 list.
 
-A member keeps the list at `/links`. Each link has a title, a URL, and an icon
-from a small built-in set. A URL must start with `http://` or `https://`. Clear
-a row, or tick "remove", to delete a link. A guest sees the links but cannot
-change them. The list holds at most 30 links.
+A member keeps the list at `/links`, under "Edit links": one row per link,
+with a title, a URL, and an icon from a small built-in set. A URL must start
+with `http://` or `https://`. "Add a link" puts a row at the end, the arrows
+move a row, "remove" drops it, and "Save links" writes the whole list. A guest
+sees the links but cannot change them. The list holds at most 30 links.
 
 The viewer keeps the list in `wiki/.viewer/links.yaml`. The wiki tree, the
 search, and the index skip the file, because its directory name starts with a
@@ -833,8 +839,8 @@ model. A group whose rows name a worker gets a table of its workers under the
 totals table. The "Each day" sections show only the groups with usage on that
 day.
 
-`?days=N` sets the window, today included: default 30, at most 366. The links
-above the chart give 7, 30, 90, and 366 days.
+`?days=N` sets the window, today included: default 30, at most 366. The
+buttons above the chart give 7, 30, 90, and 366 days.
 
 **Subscription limits.** Above the chart, the page shows one meter for each
 limit window of the Claude subscription: `5-hour` and `Weekly`. Each meter
@@ -1065,24 +1071,40 @@ documents yet, and the viewer does not create the folder.
 
 A document opens at `/documents/<owner>/<slug>`:
 
-- A Markdown document shows in blocks, as the goal of an assignment shows.
-  When it has the headings of the report of an assignment (`Highlights`,
-  `What was asked`, `What was done`, `Outputs`, `Decisions for you`,
-  `Follow-ups`), it shows as that report does: the lede, the highlights as
-  cards, the decisions as numbered cards, the outputs as cards, the prose,
-  and the follow-ups. The assignments pages and the documents pages use the
-  same renderer.
-- An HTML document shows in a frame with `sandbox` and `srcdoc`. The frame
+- A Markdown document shows in blocks, as the goal of an assignment shows:
+  one block for each paragraph, heading, list item, quote, code block, and
+  table, and each block takes a comment on its first line.
+- An HTML document shows in a frame with `sandbox` that loads the artifact
+  address of the document, `/documents/<owner>/<slug>/artifact`. The frame
   cannot reach the viewer, its sign-in, or a form of the viewer. Scripts do
   not run, unless the frontmatter of the document has `scripts: true`: then
-  the sandbox allows scripts and nothing more. The frame also gets the
-  content policy of the viewer, so the policy still blocks a `<style>`
-  element, a `style` attribute, and a script inside the document.
+  the sandbox allows scripts and nothing more.
 - The `Source` fold gives the frontmatter first, with no number and no `+`,
   then each line of the body with its number and a `+`.
 - The `Versions` fold lists the commits of the file in the git repository of
   `/data/documents`, newest first. Click a version to read it at
   `?rev=<sha>`. An old version is read-only and has no comments.
+
+`/documents/<owner>/<slug>.json` gives the same document as JSON, with four
+fields only: `title`, `kind`, `status`, and `updated`. It reads no body, it
+renders nothing, it reads no git history, and it answers with
+`Cache-Control: no-store`, so the chat can read it again while its artifact
+panel is open. It has the sign-in and the owner rule of the page, so a
+document of another member and a document that is not there are both 404. A
+document slug never ends in `.json`, so this address cannot name a file.
+
+`/documents/<owner>/<slug>/artifact` gives the body of an HTML document
+alone, for the frame of the page. `?rev=<sha>` gives an older version. It has
+the sign-in and the owner rule of the page, so a document of another member,
+a document that is not there, and a Markdown document, which has no frame,
+are all 404. The address has a content policy of its own:
+`default-src 'none'; img-src 'self'; style-src 'unsafe-inline';
+form-action 'none'; frame-src 'none'; frame-ancestors 'self'; sandbox`, and
+`script-src 'unsafe-inline'` only with `scripts: true`. So a `<style>`
+element and a `style` attribute of the document render, and the document
+loads nothing from the network, submits no form, and opens no frame. The
+`sandbox` directive never has `allow-same-origin`, so the document has an
+opaque origin, also when a browser opens the address alone.
 
 To comment on a document, use the `+` of a block, a card, a heading, or a line
 of `Source`, as on a definition (see

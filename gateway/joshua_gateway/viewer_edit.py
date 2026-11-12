@@ -1,39 +1,37 @@
-"""The one editor of the viewer: the form, and how a save composes the file.
+"""The one editor of the viewer: how a save composes the file.
 
-A wiki page and a journal entry are edited through the same form and the
+A wiki page and a journal entry are edited through the same editor and the
 same save. The path decides the shape:
 
 - A journal entry, under a day folder, edits its text and its people. Its
   frontmatter keys stay, its ``people`` list is replaced, and a title
-  heading the form did not show is written back.
+  heading the editor did not show is written back.
 - Any other wiki page edits its body. Frontmatter, when the file has one, is
-  kept byte for byte and shown above the form, not in it.
+  kept byte for byte and shown above the text, not in it.
 - A new page is a wiki page: the journal has one writer, the agent's
   ``write_journal_entry`` tool, and this editor never creates an entry.
 
-The routes, the auth, and the write live in ``viewer``. This module builds
-HTML and text only.
+The routes, the auth, and the write live in ``viewer_api.edit``. This module
+builds text only.
 """
 
 from __future__ import annotations
 
 from datetime import date
-from html import escape
-from urllib.parse import quote
+from typing import Any
 
 import yaml
 
 from joshua_gateway import viewer_journal as journal
-from joshua_gateway import viewer_wiki as wiki
 
-# The form field for a page name accepts a path under the folder; every
+# The name field of a new page accepts a path under the folder; every
 # segment must be a plain file or folder name.
 _NAME_MAX = 200
 
 
 class EditError(ValueError):
     """A save the person can fix: a bad person id, a bad page name, bad
-    frontmatter. The message is shown on the form."""
+    frontmatter. The message is shown in the editor."""
 
 
 # -- text -------------------------------------------------------------------
@@ -56,8 +54,15 @@ def split_raw_frontmatter(text: str) -> tuple[str, str]:
 
 
 def normalize_body(body: str) -> str:
-    """The text from the form: unix line ends, one trailing newline."""
+    """The text from the editor: unix line ends, one trailing newline."""
     return body.replace("\r\n", "\n").strip("\n") + "\n"
+
+
+def render_frontmatter(front: dict[str, Any]) -> str:
+    """The ``---`` block for ``front``, in the same shape the gateway tool and
+    the nightly run write, so an edit changes only what the person changed."""
+    block = yaml.safe_dump(front, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{block}\n---\n\n"
 
 
 def compose_wiki(text: str, body: str) -> str:
@@ -80,7 +85,7 @@ def compose_new(body: str) -> str:
 
 def compose_journal(text: str, rel: str, day: date, people_field: str, body: str) -> str:
     """A journal entry after an edit: the frontmatter keys as they were with
-    ``people`` replaced, the title heading the form did not show, then the
+    ``people`` replaced, the title heading the editor did not show, then the
     new text."""
     try:
         people = journal.parse_people_field(people_field)
@@ -91,7 +96,7 @@ def compose_journal(text: str, rel: str, day: date, people_field: str, body: str
     entry = journal.parse_entry(rel, day, text)
     heading, _ = journal._first_heading(raw_body)
     lead = f"# {entry.title}\n\n" if heading and not entry.is_day_page else ""
-    return journal.render_frontmatter(front) + lead + normalize_body(body)
+    return render_frontmatter(front) + lead + normalize_body(body)
 
 
 def _check_frontmatter(body: str) -> None:
@@ -107,7 +112,7 @@ def _check_frontmatter(body: str) -> None:
 
 def new_page_rel(folder: str, name: str) -> str:
     """The wiki-relative path of a new page from the folder and the name the
-    form gave. ``.md`` is added when absent. Raises :class:`EditError` for
+    editor gave. ``.md`` is added when absent. Raises :class:`EditError` for
     an empty, dotted, absolute, or escaping name."""
     name = name.strip().replace("\\", "/")
     if not name or len(name) > _NAME_MAX:
@@ -119,81 +124,3 @@ def new_page_rel(folder: str, name: str) -> str:
         raise EditError("A page name is a file name, or a path of plain names, under the folder.")
     folder = folder.strip("/")
     return f"{folder}/{name}" if folder else name
-
-
-# -- html -------------------------------------------------------------------
-
-
-def edit_url(rel: str) -> str:
-    return "/edit/" + quote(rel)
-
-
-def new_url(folder: str) -> str:
-    return "/new?folder=" + quote(folder) if folder else "/new"
-
-
-def form_html(
-    *,
-    title: str,
-    subtitle: str,
-    csrf: str,
-    body: str,
-    cancel_url: str,
-    path: str = "",
-    people: tuple[str, ...] | None = None,
-    folder: str | None = None,
-    name: str = "",
-    kept_front: str = "",
-    error: str = "",
-) -> str:
-    """The edit form. ``people`` adds the people field (a journal entry).
-    ``folder`` makes it a new-page form with a name field. ``kept_front`` is
-    the frontmatter the save keeps, shown above the text."""
-    parts = [
-        f'<h1 class="j-doc-title">{escape(title)}</h1>',
-        f'<p class="j-meta">{escape(subtitle)}</p>',
-    ]
-    if error:
-        parts.append(f'<p class="j-error">{escape(error)}</p>')
-    parts.append('<form class="edit" action="/save" method="post">')
-    parts.append(f'<input type="hidden" name="csrf" value="{escape(csrf, quote=True)}">')
-    if folder is not None:
-        parts.append(f'<input type="hidden" name="folder" value="{escape(folder, quote=True)}">')
-        parts.append(
-            '<label class="j-field-label">name (a file name; folders with a slash)'
-            f'<span class="j-field"><input name="name" value="{escape(name, quote=True)}" '
-            'placeholder="my-page.md" required></span></label>'
-        )
-    else:
-        parts.append(f'<input type="hidden" name="path" value="{escape(path, quote=True)}">')
-    if people is not None:
-        parts.append(
-            '<label class="j-field-label">people (ids, comma separated)'
-            '<span class="j-field"><input name="people" '
-            f'value="{escape(", ".join(people), quote=True)}"></span></label>'
-        )
-    if kept_front:
-        parts.append(
-            '<details class="kept"><summary>frontmatter, kept as it is</summary>'
-            f"<pre>{escape(kept_front.strip())}</pre></details>"
-        )
-    parts.append(
-        '<label class="j-field-label">text<span class="j-field mono">'
-        f'<textarea name="body" rows="22">{escape(body)}</textarea></span></label>'
-    )
-    cancel = escape(cancel_url, quote=True)
-    parts.append(
-        '<div class="j-row-flex"><button class="j-btn primary" type=submit>save</button>'
-        f'<a class="j-btn ghost" href="{cancel}">cancel</a></div>'
-    )
-    parts.append("</form>")
-    return "".join(parts)
-
-
-def edit_link(rel: str) -> str:
-    return f'<a class="j-btn sm" href="{edit_url(rel)}">edit this page</a>'
-
-
-def new_link(folder: str) -> str:
-    where = wiki.stem_title(folder.rsplit("/", 1)[-1]) if folder else "the wiki"
-    return f'<a class="j-btn sm" href="{new_url(folder)}">new page in {escape(where)}</a>'

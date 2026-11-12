@@ -51,6 +51,16 @@ A reply that arrives while nobody is in a session, for example a reminder,
 goes to `people/<id>/cli/outbox.jsonl`. The next session shows each line first,
 as `[joshua earlier, <time>] <text>`, and marks it read.
 
+A client can read the conversation back, a page at a time, with
+`GET /v1/cli/transcript?person=<id>`. `contracts.md` has the reply.
+
+A client can also send a file. It posts `multipart/form-data` with `person`,
+`text`, and one `file` part for each file. Channels runs the same attachment
+pipeline every other channel runs, so it stores the file under
+`people/<id>/attachments/YYYY/MM/` and the turn carries the path. See
+"Attachments" below for what the pipeline accepts. `make chat` sends JSON and
+no file.
+
 ## Telegram
 
 ### Make a bot
