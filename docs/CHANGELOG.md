@@ -6,6 +6,16 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The viewer answers the chat.** Two JSON routes of the viewer, behind the
+  sign-in of a page: `POST /api/v1/chat/<person>/turns` streams one turn as
+  server-sent events (a JSON body, or a multipart body with one file), and
+  `GET /api/v1/chat/<person>/history` gives a page of the `cli:` conversation.
+  The viewer calls channels at `CHANNELS_URL` with `JOSHUA_TOKEN_VIEWER`; the
+  chart and docker compose set the URL. With either one unset, both routes
+  answer 503 and `/readyz` shows `"chat": false`. The default of
+  `channels.webhooks.allowed_callers` is now `laptop`, `ci` and `viewer`; an
+  instance that lists the callers in `joshua.yaml` must add `viewer`, and the
+  channels container must hold `JOSHUA_TOKEN_VIEWER`.
 - **The assignments in the viewer are React pages.** The list at
   `/assignments` and one assignment at `/assignments/<id>` are the app now.
   The state pills write the address (`?state=draft`), so a bookmark of a state

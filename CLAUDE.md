@@ -98,7 +98,7 @@ that is not on the route's allowlist gets 403. There is no other bearer path.
 Identities: `channels`, `core`, `gateway`, plus `laptop` and `ci` for
 operators, and `viewer` and `mcp`, which call core's search by meaning. The
 `viewer` also reads core's usage by day, and the assignments of a person from
-the assignments container. `assignments` is the assignments
+the assignments container, and calls channels for its chat: `POST /api/v1/chat/<person>/turns` (streams one turn as server-sent events) and `GET /api/v1/chat/<person>/history`. `assignments` is the assignments
 container: core's model forwarder and usage write, the gateway MCP routes for
 a person, and channels events.
 `make init-env` mints the tokens into `.env`. Each of the three containers gets
@@ -132,7 +132,7 @@ Route allowlists, by default:
   otherwise). `api/hello` (GET, HEAD) is open. An empty list is 404.
 - channels `POST /v1/deliver`, `GET /v1/channels/resolve`: `core`.
 - channels `POST /v1/events`, `POST /v1/cli/*`, `GET /v1/cli/*`:
-  `channels.webhooks.allowed_callers` (default `laptop`, `ci`).
+  `channels.webhooks.allowed_callers` (default `laptop`, `ci`, `viewer`).
 - channels `POST /v1/voice/chat/completions`, `GET /v1/models`:
   `channels.voice.allowed_callers` (default `voice`). Both answer 404 with no
   `channels.voice` section.

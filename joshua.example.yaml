@@ -68,6 +68,7 @@ channels:
     allowed_callers:
       - laptop
       - ci
+      - viewer                 # the viewer sends the turns of its chat
       - assignments            # the assignments container sends its reports and questions
   destinations:
     everyone: imessage:group:everyone

@@ -109,7 +109,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import BaseRoute, Route
 
-from joshua_gateway import viewer_api, viewer_spa
+from joshua_gateway import viewer_api, viewer_channels, viewer_spa
 from joshua_gateway import viewer_assignments as assignments_mod
 from joshua_gateway import viewer_comments as comments_mod
 from joshua_gateway import viewer_docstore as docstore
@@ -782,6 +782,10 @@ async def readyz(request: Request) -> JSONResponse:
             "data": data_root().is_dir(),
             "core_search": search_mod.from_env(os.environ) is not None,
             "assignments": assignments_mod.from_env(os.environ) is not None,
+            "chat": bool(
+                os.environ.get(viewer_channels.CHANNELS_URL_ENV)
+                and os.environ.get(viewer_channels.VIEWER_TOKEN_ENV)
+            ),
         }
     )
 

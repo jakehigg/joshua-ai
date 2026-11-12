@@ -115,7 +115,7 @@ def test_happy_path_and_defaults() -> None:
     assert cfg.core.model == "claude-opus-5"
     assert cfg.core.scheduler_tick_seconds == 15
     assert cfg.memory.inject.top_k == 2
-    assert cfg.channels.webhooks.allowed_callers == ["laptop", "ci"]
+    assert cfg.channels.webhooks.allowed_callers == ["laptop", "ci", "viewer"]
 
 
 def test_usage_callers_default_to_the_viewer_and_an_empty_value_turns_it_off() -> None:

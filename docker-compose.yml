@@ -190,6 +190,8 @@ services:
       # the assignments container, with the same token. Without the
       # container, the page says that the manager did not answer.
       ASSIGNMENTS_URL: http://assignments:8000
+      # The chat routes (/api/v1/chat/...) call channels, with the same token.
+      CHANNELS_URL: http://channels:8000
     volumes:
       - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
       - data:/data

@@ -278,7 +278,7 @@ class VoiceChannel(_Model):
 
 
 class Webhooks(_Model):
-    allowed_callers: list[str] = ["laptop", "ci"]
+    allowed_callers: list[str] = ["laptop", "ci", "viewer"]
 
 
 class Limits(_Model):

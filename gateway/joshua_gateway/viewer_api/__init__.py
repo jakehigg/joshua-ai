@@ -8,6 +8,10 @@ off. Each handler takes ``(request, person)``.
 A write route takes a JSON body, and the body carries the CSRF token of its
 scope. Every write also checks the ``Origin`` header (``viewer_api.edit``).
 
+The chat has two routes: ``POST /api/v1/chat/<person>/turns`` streams one turn
+as server-sent events, and ``GET /api/v1/chat/<person>/history`` gives a page
+of the conversation. Both go to the channels container (``CHANNELS_URL``).
+
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
 
@@ -21,6 +25,7 @@ from starlette.routing import Route
 
 from joshua_gateway.viewer_api import (
     assignments,
+    chat,
     documents,
     edit,
     files,
@@ -83,6 +88,8 @@ def routes() -> list[Route]:
             _require_auth(assignments.delete_comment),
             methods=["POST"],
         ),
+        Route(api_path("chat/{person}/turns"), _require_auth(chat.turns), methods=["POST"]),
+        Route(api_path("chat/{person}/history"), _require_auth(chat.history)),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),
         Route(api_path("files/{root}/{path:path}"), _require_auth(files.file)),
