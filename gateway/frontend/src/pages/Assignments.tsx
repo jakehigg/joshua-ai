@@ -159,9 +159,9 @@ export default function Assignments() {
               ),
             )}
           </div>
-          <a className="a-saved-link" href="/assignments/saved">
+          <Link className="a-saved-link" to="/assignments/saved">
             Saved
-          </a>
+          </Link>
         </div>
         <Unavailable configured={list.configured} available={list.available} />
         {ready &&

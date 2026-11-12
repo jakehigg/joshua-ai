@@ -15,6 +15,8 @@ import JournalDay from "./pages/JournalDay";
 import Links from "./pages/Links";
 import Me from "./pages/Me";
 import New from "./pages/New";
+import Saved from "./pages/Saved";
+import SavedAssignment from "./pages/SavedAssignment";
 import Search from "./pages/Search";
 import Usage from "./pages/Usage";
 import WikiFolder, { type WikiFolderData } from "./pages/WikiFolder";
@@ -96,6 +98,8 @@ export default function App() {
       <Route path="/shared/*" element={<Content root="shared" />} />
       <Route path="/attachments/*" element={<Content root="attachments" />} />
       <Route path="/assignments" element={<Assignments />} />
+      <Route path="/assignments/saved" element={<Saved />} />
+      <Route path="/assignments/saved/:id" element={<SavedAssignment />} />
       <Route path="/assignments/:id" element={<Assignment />} />
       <Route path="/documents" element={<Documents />} />
       <Route path="/documents/:owner/:slug" element={<Document />} />

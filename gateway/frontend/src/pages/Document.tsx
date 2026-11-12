@@ -9,6 +9,12 @@
  * with its own "+", and the `Versions` fold lists the commits of the file;
  * `?rev=<sha>` opens an older version, which is read-only.
  *
+ * A body with the headings of a report shows as the same showcase as the
+ * report of an assignment (`src/showcase/`): its lede goes in the head, which
+ * then holds the lines of the title and the lede, and each card takes a
+ * comment. A decision has a copy button there, because a document is not a
+ * run a person answers.
+ *
  * Embed mode (`?embed=1`, or any page in a frame, which is how the chat panel
  * loads it; `?rev=` works with it): only the body. There is no app shell, no
  * breadcrumb and no head card. The comment gutter works as on the full page.
@@ -33,7 +39,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import { ApiError, getJson } from "../api/client";
-import Blocks, { span, spans, what, type DocBlock } from "../blocks/Blocks";
+import Blocks, { span, what, type DocBlock } from "../blocks/Blocks";
+import type { ShowcaseData } from "../assignments/data";
 import Markdown from "../md/Markdown";
 import { When, type DocComment } from "../comments/CommentCard";
 import {
@@ -46,6 +53,9 @@ import {
   useGutter,
   type Span,
 } from "../comments/Gutter";
+import Hero from "../showcase/Hero";
+import Showcase, { decisions, outputs, showcaseSpans } from "../showcase/Showcase";
+import type { TileData } from "../showcase/Tiles";
 import Shell, { embedded, type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Fold from "../ui/Fold";
@@ -75,7 +85,7 @@ export interface DocumentData {
   frontmatter: Record<string, unknown>;
   artifact_url: string | null;
   blocks: DocBlock[];
-  report: unknown;
+  report: ShowcaseData | null;
   lines: string[];
   preamble: string[];
   comments: DocComment[];
@@ -84,8 +94,27 @@ export interface DocumentData {
   csrf: string | null;
 }
 
-/** The unit of the head: line 0, the document as a whole. */
-const HEAD: Span = { first: 0, last: 0 };
+/**
+ * The unit of the head: line 0, the document as a whole, and, in a showcase,
+ * the lines of the title and the lede, which the head shows itself.
+ */
+export function headSpan(report: ShowcaseData | null): Span {
+  if (report === null || !report.structured) {
+    return { first: 0, last: 0 };
+  }
+  const line = report.preamble?.line ?? report.first_section;
+  return { first: 0, last: Math.max(0, line - 1) };
+}
+
+/** The numbers of a showcase document: what it asks and what it names. */
+export function tiles(report: ShowcaseData | null): TileData[] {
+  const asks = decisions(report).length;
+  const made = outputs(report).length;
+  return [
+    { value: asks === 0 ? "" : String(asks), label: asks === 1 ? "decision" : "decisions" },
+    { value: made === 0 ? "" : String(made), label: made === 1 ? "output" : "outputs" },
+  ];
+}
 
 /** The properties the chips of the head already give. */
 const CHIPPED = new Set(["title", "kind", "status", "updated"]);
@@ -294,7 +323,12 @@ export default function Document() {
     document.title = doc === null ? "document" : doc.title;
   }, [doc]);
 
-  const units = useMemo(() => [HEAD, ...spans(doc?.blocks ?? [])], [doc]);
+  const report = doc?.report ?? null;
+  const headUnit = useMemo(() => headSpan(report), [report]);
+  const units = useMemo(
+    () => [headUnit, ...showcaseSpans(report, doc?.blocks ?? [])],
+    [headUnit, report, doc],
+  );
   const gutter = useGutter({
     url: path,
     lines: doc?.lines ?? [],
@@ -319,26 +353,36 @@ export default function Document() {
       </Shell>
     );
   }
+  const showcase = report !== null && report.structured;
   const headCards = gutter.cards.get(0) ?? [];
   const classes = ["a-hero", "d-hero", "d-unit", headCards.length > 0 ? "has-comments" : ""];
+  // A showcase gives the title of the document once: its own title line is
+  // the lede of the head, not a block of the body.
   const head = (
-    <header className={classes.filter((part) => part !== "").join(" ")} id="L0">
-      <div className="a-chips">
-        <StatusChip status={doc.status} />
-        <KindChip kind={doc.kind} />
-        <Links front={doc.frontmatter} />
-        <CommentsBadge open={gutter.open} />
-        {doc.updated !== null && (
-          <span className="j-meta">
-            updated <When at={doc.updated} />
-          </span>
-        )}
-      </div>
-      {!bodyHasTitle(doc.lines) && <h1 className="j-doc-title">{doc.title}</h1>}
-      <Props front={doc.frontmatter} />
+    <Hero
+      className={classes.filter((part) => part !== "").join(" ")}
+      id="L0"
+      title={showcase || !bodyHasTitle(doc.lines) ? doc.title : ""}
+      lede={showcase ? report.lede : ""}
+      tiles={showcase ? tiles(report) : []}
+      chips={
+        <>
+          <StatusChip status={doc.status} />
+          <KindChip kind={doc.kind} />
+          <Links front={doc.frontmatter} />
+          <CommentsBadge open={gutter.open} />
+          {doc.updated !== null && (
+            <span className="j-meta">
+              updated <When at={doc.updated} />
+            </span>
+          )}
+        </>
+      }
+      sub={<Props front={doc.frontmatter} />}
+    >
       <Plus gutter={gutter} line={0} text={titleLine(doc.preamble)} what="the document" />
-      <Cards gutter={gutter} unit={HEAD} />
-    </header>
+      <Cards gutter={gutter} unit={headUnit} />
+    </Hero>
   );
   const folds = (
     <div className="a-folds">
@@ -352,7 +396,7 @@ export default function Document() {
   );
 
   if (embed) {
-    const code = doc.format === "html" ? null : codeFirst(doc.blocks);
+    const code = doc.format === "html" || showcase ? null : codeFirst(doc.blocks);
     const rest = code === null ? [] : doc.blocks.filter((block) => block !== code);
     let body;
     if (doc.format === "html") {
@@ -378,7 +422,7 @@ export default function Document() {
         </>
       );
     } else {
-      body = <Blocks blocks={doc.blocks} gutter={gutter} />;
+      body = <Showcase report={report} blocks={doc.blocks} gutter={gutter} />;
     }
     return (
       <Shell section="documents">
@@ -407,7 +451,11 @@ export default function Document() {
       </nav>
       {head}
       <Older doc={doc} />
-      {doc.format === "html" ? <Frame doc={doc} info /> : <Blocks blocks={doc.blocks} gutter={gutter} />}
+      {doc.format === "html" ? (
+        <Frame doc={doc} info />
+      ) : (
+        <Showcase report={report} blocks={doc.blocks} gutter={gutter} />
+      )}
       {folds}
     </Shell>
   );
