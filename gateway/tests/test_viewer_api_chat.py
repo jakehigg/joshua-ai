@@ -362,6 +362,7 @@ def test_history_asks_for_the_default_limit_and_passes_the_cursor(client, channe
     assert client.get(HISTORY + "?limit=&before=", auth=ALEX).json() == {
         "messages": [],
         "nextBefore": None,
+        "pending": None,
     }
 
 
@@ -401,3 +402,142 @@ def test_unmark_is_exact() -> None:
     assert chat.unmark("[speak-brief]hi") == ("[speak-brief]hi", False)
     assert chat.unmark("[speak-brief]\r\nhi") == ("hi", True)
     assert chat.unmark("[speak-brief] ") == ("", True)
+
+
+# --- accepted, pending, attachments, and a browser that leaves ----------------
+
+
+def test_accepted_and_status_frames_pass_through(client, channels) -> None:
+    channels.turn = httpx.Response(
+        200,
+        text='event: accepted\ndata: {"turn_id": "t-1"}\n\n'
+        'event: status\ndata: {"state": "queued"}\n\n'
+        'event: done\ndata: {"text": "ok"}\n\n',
+    )
+    text = client.post(TURNS, json={"text": "hi"}, auth=ALEX).text
+    assert text.index("event: accepted") < text.index("event: status") < text.index("event: done")
+    assert '"state": "queued"' in text
+
+
+def test_history_gives_the_pending_turn(client, channels) -> None:
+    pending = {
+        "turn_id": "t-7",
+        "state": "queued",
+        "since": "2026-03-04T12:00:00+00:00",
+        "text": "hi",
+    }
+    channels.transcript = httpx.Response(200, json={"messages": [], "pending": pending})
+    body = client.get(HISTORY, auth=ALEX).json()
+    assert body["pending"] == {
+        "turnId": "t-7",
+        "state": "queued",
+        "since": "2026-03-04T12:00:00+00:00",
+        "text": "hi",
+    }
+    channels.transcript = httpx.Response(200, json={"messages": [], "pending": {"state": "x"}})
+    assert client.get(HISTORY, auth=ALEX).json()["pending"] is None
+
+
+def test_history_gives_the_files_of_a_message(client, channels) -> None:
+    files = [
+        {
+            "path": "wiki/attachments/2026/11/a b.jpg",
+            "mime": "image/jpeg",
+            "name": "IMG_1.jpg",
+            "size": 9,
+        },
+        {
+            "path": "people/alex/attachments/2026/11/s.pdf",
+            "mime": "application/pdf",
+            "name": "s.pdf",
+        },
+        {"path": "people/sam/attachments/2026/11/t.jpg", "mime": "image/jpeg", "name": "t.jpg"},
+        {"path": "wiki/../people/sam/x.jpg", "mime": "image/jpeg", "name": "x.jpg"},
+    ]
+    row = {
+        "id": 3,
+        "direction": "in",
+        "text": "look",
+        "status": "ok",
+        "at": "t",
+        "meta": {"attachments": files},
+    }
+    channels.transcript = httpx.Response(200, json={"messages": [row]})
+    got = client.get(HISTORY, auth=ALEX).json()["messages"][0]["attachments"]
+    assert got[0] == {
+        "name": "IMG_1.jpg",
+        "mime": "image/jpeg",
+        "size": 9,
+        "url": "/api/v1/files/wiki/attachments/2026/11/a%20b.jpg",
+    }
+    assert got[1]["url"] == "/api/v1/files/attachments/2026/11/s.pdf"
+    # Another person's file and a path that climbs get no address.
+    assert "url" not in got[2] and "url" not in got[3]
+
+
+class _FakeStream:
+    """A channels stream that waits for a release before its last frame."""
+
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.closed = False
+
+    async def events(self):
+        yield "accepted", {"turn_id": "t-1"}
+        await self.release.wait()
+        yield "done", {"turn_id": "t-1", "text": "late"}
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _FakeClient:
+    settings = viewer_channels.ChatSettings(sse_keepalive_s=5.0)
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+async def test_a_browser_that_leaves_does_not_stop_the_turn(caplog) -> None:
+    import logging
+
+    stream, client = _FakeStream(), _FakeClient()
+    relay = chat.Relay(stream, client, "alex", 0.0, 2)
+    seen: list[bytes] = []
+
+    async def reader() -> None:
+        async for frame in relay.frames():
+            seen.append(frame)
+
+    with caplog.at_level(logging.INFO):
+        task = asyncio.create_task(reader())
+        for _ in range(100):
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()  # the browser went away
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not stream.closed and relay.client_gone
+        stream.release.set()
+        await asyncio.wait_for(relay.task, 2)
+    assert stream.closed and client.closed
+    assert relay.status == "ok"
+    lines = [r.getMessage() for r in caplog.records]
+    assert any("'status': 'client_gone'" in line for line in lines)
+    assert any("'status': 'ok'" in line and "'client_gone': True" in line for line in lines)
+
+
+async def test_a_failed_stream_logs_its_real_status() -> None:
+    class Broken(_FakeStream):
+        async def events(self):
+            yield "accepted", {"turn_id": "t-1"}
+            raise httpx.ReadError("gone")
+
+    relay = chat.Relay(Broken(), _FakeClient(), "alex", 0.0, 2)
+    frames = [frame async for frame in relay.frames()]
+    assert relay.status == "lost"
+    assert b"the connection to Joshua was lost" in frames[-1]

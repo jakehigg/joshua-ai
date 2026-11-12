@@ -9,8 +9,12 @@ body is never in memory. ``TURN_MAX_BYTES`` caps the text and the file
 together, and the 413 answer names the limit. The write checks the ``Origin``
 header, as every write route does.
 
-The frames from channels pass through unchanged: ``delta``, ``done``, and
-``error``. A refusal before the stream starts is a JSON answer with a mapped
+The frames from channels pass through unchanged: ``accepted`` (core has the
+turn, and it will finish), ``status`` (``queued`` or ``running``), ``delta``,
+``done``, and ``error``. A browser that leaves does not stop the turn: a task
+reads the stream from channels to its end whether or not anyone reads the
+response (see ``Relay``), and the log line of the turn says ``client_gone``.
+A refusal before the stream starts is a JSON answer with a mapped
 status. A failure after the stream started is one ``error`` frame, then the
 end of the stream. While channels is silent, a comment line goes out every
 ``SSE_KEEPALIVE_S`` seconds, so a proxy with a read timeout keeps the stream
@@ -20,7 +24,11 @@ A turn body and a history query take an optional ``workspace`` (the slug or
 the id). Without it, the turn runs in the main thread of the person.
 
 ``GET /api/v1/chat/<person>/history`` gives one page of the main thread of the
-person (or of the workspace), from the channels transcript. ``in`` is the
+person (or of the workspace), from the channels transcript, and ``pending``:
+the turn in flight (``{turnId, state, since, text}``, ``state`` is ``queued`` or
+``running``), or ``null``. A message with files has ``attachments``, each
+``{name, mime, size, url}``; ``url`` is a ``/api/v1/files`` address of the file,
+and it is missing when the person may not read the file through the viewer. ``in`` is the
 person, ``out`` is Joshua, and any other direction is ``system``. A person row
 that starts with the speech marker loses the marker and gets
 ``"spoken": true``.
@@ -53,6 +61,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from joshua_gateway import viewer_channels
 from joshua_gateway.viewer_api.edit import _origin_ok
+from joshua_gateway.viewer_api.files import file_url
 from joshua_gateway.viewer_channels import (
     Attachment,
     ChannelsClient,
@@ -302,6 +311,7 @@ def _log_turn(
     started: float,
     chars_in: int,
     file_bytes: int = 0,
+    client_gone: bool = False,
 ) -> None:
     duration_ms = int((time.monotonic() - started) * 1000)
     logger.info(
@@ -312,60 +322,87 @@ def _log_turn(
             "duration_ms": duration_ms,
             "chars_in": chars_in,
             "file_bytes": file_bytes,
+            "client_gone": client_gone,
         }
     )
 
 
-async def _relay(
-    stream: TurnStream,
-    client: ChannelsClient,
-    person: str,
-    started: float,
-    chars_in: int,
-    file_bytes: int = 0,
-) -> AsyncIterator[bytes]:
-    """Relay the frames of ``stream``, with a keepalive comment while it is silent.
+# The relays that are still reading channels. A relay stays here until its
+# turn ends, so it outlives the response of a browser that left.
+_relays: set[asyncio.Task[None]] = set()
 
-    A task reads the stream into a queue. The relay waits on the queue with
-    a timeout: a timeout sends the keepalive, and never touches the stream.
+
+class Relay:
+    """One turn's stream from channels, read by a task of its own.
+
+    The task reads the stream into a queue and finishes the turn (it closes the
+    stream and the client, and logs the real status). ``frames`` only forwards
+    what the task has read. A browser that leaves ends ``frames`` and nothing
+    else: the task goes on to the end of the stream, so channels and core
+    never see a closed connection and the turn finishes. ``status`` is ``ok``
+    after a ``done`` frame, ``error`` after an ``error`` frame, ``lost`` when
+    the connection to channels failed, and ``incomplete`` when the stream ended
+    with neither.
     """
-    queue: asyncio.Queue[tuple[str, Any] | httpx.HTTPError | None] = asyncio.Queue()
 
-    async def pump() -> None:
+    def __init__(
+        self,
+        stream: TurnStream,
+        client: ChannelsClient,
+        person: str,
+        started: float,
+        chars_in: int,
+        file_bytes: int = 0,
+    ) -> None:
+        self.status = "incomplete"
+        self.client_gone = False
+        self._queue: asyncio.Queue[tuple[str, Any] | None] = asyncio.Queue()
+        self._stream = stream
+        self._client = client
+        self._log = (person, started, chars_in, file_bytes)
+        self._person = person
+        self.task = asyncio.create_task(self._pump(), name="viewer-turn-relay")
+        _relays.add(self.task)
+        self.task.add_done_callback(_relays.discard)
+
+    async def _pump(self) -> None:
         try:
-            async for frame in stream.events():
-                await queue.put(frame)
-        except httpx.HTTPError as exc:
-            await queue.put(exc)
+            async for event, data in self._stream.events():
+                if event == "done":
+                    self.status = "ok"
+                elif event == "error":
+                    self.status = "error"
+                self._queue.put_nowait((event, data))
+        except httpx.HTTPError:
+            self.status = "lost"
+            self._queue.put_nowait(("error", {"message": LOST}))
         finally:
-            await queue.put(None)
+            self._queue.put_nowait(None)
+            with contextlib.suppress(Exception):
+                await self._stream.aclose()
+            with contextlib.suppress(Exception):
+                await self._client.aclose()
+            person, started, chars_in, file_bytes = self._log
+            _log_turn(person, self.status, started, chars_in, file_bytes, self.client_gone)
 
-    task = asyncio.create_task(pump())
-    status = "ok"
-    try:
-        while True:
-            try:
-                item = await asyncio.wait_for(queue.get(), client.settings.sse_keepalive_s)
-            except TimeoutError:
-                yield KEEPALIVE
-                continue
-            if item is None:
-                break
-            if isinstance(item, httpx.HTTPError):
-                status = "lost"
-                yield sse_frame("error", {"message": LOST})
-                break
-            event, data = item
-            if event == "error":
-                status = "error"
-            yield sse_frame(event, data)
-    finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-        await stream.aclose()
-        await client.aclose()
-        _log_turn(person, status, started, chars_in, file_bytes)
+    async def frames(self) -> AsyncIterator[bytes]:
+        """The frames as bytes, with a keepalive comment while the stream is silent."""
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(
+                        self._queue.get(), self._client.settings.sse_keepalive_s
+                    )
+                except TimeoutError:
+                    yield KEEPALIVE
+                    continue
+                if item is None:
+                    return
+                yield sse_frame(*item)
+        finally:
+            if not self.task.done():
+                self.client_gone = True
+                logger.info({"message": "turn", "person": self._person, "status": "client_gone"})
 
 
 async def turns(request: Request, person: Person) -> JSONResponse | StreamingResponse:
@@ -404,8 +441,9 @@ async def turns(request: Request, person: Person) -> JSONResponse | StreamingRes
         # The body has gone out by now, so the temporary file can go.
         if upload is not None:
             upload.close()
+    relay = Relay(stream, client, who, started, chars_in, file_bytes)
     return StreamingResponse(
-        _relay(stream, client, who, started, chars_in, file_bytes),
+        relay.frames(),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
@@ -429,7 +467,63 @@ def _int(value: str | None, name: str, low: int, high: int | None) -> int | None
     return number
 
 
-def map_message(row: Any) -> dict[str, Any] | None:
+def attachment_url(path: str, person: str) -> str | None:
+    """The viewer address of a file of the data volume, or None.
+
+    The files route serves the wiki, the shared files, and the attachments of
+    the person who signed in. A file of another person gets no address, and a
+    path with ``..`` in it never gets one.
+    """
+    parts = path.split("/")
+    if ".." in parts or "" in parts:
+        return None
+    if len(parts) >= 3 and parts[0] == "wiki":
+        return file_url("wiki", "/".join(parts[1:]))
+    if len(parts) >= 3 and parts[0] == "shared":
+        return file_url("shared", "/".join(parts[1:]))
+    if (
+        len(parts) >= 4
+        and parts[0] == "people"
+        and parts[1] == person
+        and parts[2] == "attachments"
+    ):
+        return file_url("attachments", "/".join(parts[3:]))
+    return None
+
+
+def map_attachments(value: Any, person: str) -> list[dict[str, Any]]:
+    """The files of a person's message, as ``{name, mime, size, url}``."""
+    files: list[dict[str, Any]] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            continue
+        path = item["path"]
+        entry: dict[str, Any] = {
+            "name": item["name"] if isinstance(item.get("name"), str) else path.rsplit("/", 1)[-1],
+            "mime": item["mime"] if isinstance(item.get("mime"), str) else DEFAULT_FILE_TYPE,
+        }
+        if isinstance(item.get("size"), int):
+            entry["size"] = item["size"]
+        url = attachment_url(path, person)
+        if url is not None:
+            entry["url"] = url
+        files.append(entry)
+    return files
+
+
+def map_pending(value: Any) -> dict[str, Any] | None:
+    """The turn in flight, or None. The text is the person's message, or ``""``."""
+    if not isinstance(value, dict) or not isinstance(value.get("turn_id"), str):
+        return None
+    return {
+        "turnId": value["turn_id"],
+        "state": "queued" if value.get("state") == "queued" else "running",
+        "since": value.get("since") if isinstance(value.get("since"), str) else "",
+        "text": value.get("text") if isinstance(value.get("text"), str) else "",
+    }
+
+
+def map_message(row: Any, person: str = "") -> dict[str, Any] | None:
     """Map one transcript row to the browser shape. A row with no integer id is dropped."""
     if not isinstance(row, dict) or not isinstance(row.get("id"), int):
         return None
@@ -450,19 +544,23 @@ def map_message(row: Any) -> dict[str, Any] | None:
         message["spoken"] = True
     if isinstance(meta.get("turn_id"), str):
         message["turnId"] = meta["turn_id"]
+    attachments = map_attachments(meta.get("attachments"), person)
+    if attachments:
+        message["attachments"] = attachments
     tools = meta.get("tools")
     if isinstance(tools, list):
         message["tools"] = [name for name in tools if isinstance(name, str)]
     return message
 
 
-def map_page(page: dict[str, Any]) -> dict[str, Any]:
+def map_page(page: dict[str, Any], person: str = "") -> dict[str, Any]:
     rows = page.get("messages")
-    mapped = [map_message(row) for row in rows] if isinstance(rows, list) else []
+    mapped = [map_message(row, person) for row in rows] if isinstance(rows, list) else []
     next_before = page.get("next_before")
     return {
         "messages": [message for message in mapped if message is not None],
         "nextBefore": next_before if isinstance(next_before, int) else None,
+        "pending": map_pending(page.get("pending")),
     }
 
 
@@ -510,7 +608,7 @@ async def history(request: Request, person: Person) -> JSONResponse:
         return unreachable()
     finally:
         await client.aclose()
-    result = map_page(page)
+    result = map_page(page, who)
     logger.info(
         {"message": "history", "person": who, "status": 200, "count": len(result["messages"])}
     )
