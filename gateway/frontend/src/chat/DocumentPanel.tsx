@@ -1,17 +1,21 @@
 // The viewer's own pages, inside the chat.
 //
 // Open on a document card (ArtifactCard.tsx) shows this panel: a same-origin
-// <iframe> of the page the viewer serves at /documents/<owner>/<slug>. There
-// is no second renderer, no srcdoc and no embed mode, so the frame has the
-// viewer's blocks, its `+` gutter for a comment per block, its Versions fold
-// and `?rev=<sha>` for an older version. A comment made in the frame posts
-// with the viewer's own CSRF token, to the viewer's own origin, so it lands
-// on the document with no work here. The frame carries no `sandbox`: a
-// sandbox would drop the cookie and the token the comment form needs.
+// <iframe> of the page the viewer serves at /documents/<owner>/<slug>, in its
+// embed mode (`?embed=1`, pages/Document.tsx). There is no second renderer
+// and no srcdoc. The embed page has no app shell, no breadcrumb and no head
+// card: it is the body, with the `+` gutter for a comment per block and
+// highlighted code (a document that is mostly one code block shows the code
+// first, with a copy button). The status, the tags, the Source fold and the
+// Versions fold are in its closed Details fold, and `?rev=<sha>` opens an
+// older version. A comment made in the frame posts with the viewer's own CSRF
+// token, to the viewer's own origin, so it lands on the document with no work
+// here. The frame carries no `sandbox`: a sandbox would drop the cookie and
+// the token the comment form needs.
 //
-// The src is a host-absolute path, and the frame loads it as a page of its
-// own: it is never a router <Link>, because the frame has its own app and
-// the chat screen stays where it is.
+// The panel header shows the title of the document (its path is the hover
+// text), a link that opens the full page in a new tab, and the close button.
+// The one hint about the `+` is the hover text of the header.
 //
 // A workspace item opens here too (itemTarget.ts), so the chat tab never
 // navigates. Another page of the viewer (/wiki/..., /assignments/...) is
@@ -54,7 +58,7 @@ import type { CardTarget, ItemTarget, PageTarget } from "./itemTarget";
 export const POLL_MS = 15_000;
 
 // The one line of affordance in the panel: what the `+` gutter is for.
-export const COMMENT_HINT = "Comment on a line with +; Joshua reads the comments on the next turn.";
+export const COMMENT_HINT = "Comment on a block with +; Joshua reads the comments on the next turn.";
 
 export type PanelView =
   | { type: "page"; page: PageTarget }
@@ -63,6 +67,8 @@ export type PanelView =
 export interface DocumentPanelState {
   /** The document the panel shows, or null when no panel is open. */
   shown: Artifact | null;
+  /** The title of the open document, once the watch has read it. */
+  title: string | null;
   /**
    * How often the frame was loaded again since the panel opened: by a turn
    * that wrote the document, or by the watch that saw it change.
@@ -80,6 +86,7 @@ export interface DocumentPanelState {
 
 const CLOSED: DocumentPanelState = {
   shown: null,
+  title: null,
   reloads: 0,
   view: null,
   show: () => undefined,
@@ -104,9 +111,16 @@ const Context = createContext<DocumentPanelState>(CLOSED);
 // timer, starts the watch again, and its first answer is the new baseline.
 // So a document the turn just wrote is not loaded a second time. A failed
 // call changes no baseline and reloads nothing.
-function useDocumentWatch(url: string | undefined, reloads: number, reload: () => void): void {
+function useDocumentWatch(
+  url: string | undefined,
+  reloads: number,
+  reload: () => void,
+  onTitle: (title: string) => void,
+): void {
   const reloadRef = useRef(reload);
   reloadRef.current = reload;
+  const titleRef = useRef(onTitle);
+  titleRef.current = onTitle;
   useEffect(() => {
     if (!url) return undefined;
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -119,7 +133,9 @@ function useDocumentWatch(url: string | undefined, reloads: number, reload: () =
       pending = controller;
       const meta = await getDocumentMeta(url, controller.signal);
       if (pending === controller) pending = null;
-      if (gone || controller.signal.aborted || !meta?.updated) return;
+      if (gone || controller.signal.aborted || !meta) return;
+      if (meta.title.trim()) titleRef.current(meta.title.trim());
+      if (!meta.updated) return;
       if (seen !== null && meta.updated !== seen) reloadRef.current();
       seen = meta.updated;
     };
@@ -180,10 +196,12 @@ export function useDocumentPanelState(): DocumentPanelState {
     },
     [bump],
   );
-  useDocumentWatch(shown?.url, reloads, bump);
+  const [title, setTitle] = useState<string | null>(null);
+  useEffect(() => setTitle(null), [shown?.url]);
+  useDocumentWatch(shown?.url, reloads, bump, setTitle);
   return useMemo(
-    () => ({ shown, reloads, view, show, open, close, reload }),
-    [shown, reloads, view, show, open, close, reload],
+    () => ({ shown, title, reloads, view, show, open, close, reload }),
+    [shown, title, reloads, view, show, open, close, reload],
   );
 }
 
@@ -205,20 +223,24 @@ export function DocumentPanelProvider({
 // The src of the frame: the document's page, with a cache-busting query
 // once the turn wrote the document again.
 function frameSrc(artifact: Artifact, reloads: number): string {
-  return reloads > 0 ? `${artifact.url}?r=${reloads}` : artifact.url;
+  return reloads > 0 ? `${artifact.url}?embed=1&r=${reloads}` : `${artifact.url}?embed=1`;
 }
 
 export function DocumentPanel({
   artifact,
   reloads = 0,
+  title = null,
   onClose,
 }: {
   artifact: Artifact;
   reloads?: number;
+  /** The title the watch read from the viewer, or null until it is known. */
+  title?: string | null;
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const src = frameSrc(artifact, reloads);
+  const shownTitle = title ?? artifact.slug;
   // On a phone the panel covers the conversation, so the keyboard and a
   // reader must land in it, on the control that closes it again.
   useEffect(() => {
@@ -226,8 +248,16 @@ export function DocumentPanel({
   }, [artifact.url]);
   return (
     <aside className="doc-panel" aria-label={`${artifact.slug}, the document`}>
-      <header className="doc-panel-header">
-        <span className="doc-panel-path">{artifact.path}</span>
+      <header className="doc-panel-header" title={`${artifact.path}. ${COMMENT_HINT}`}>
+        <span className="doc-panel-title">{shownTitle}</span>
+        <a
+          className="doc-panel-full"
+          href={artifact.url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Open full page
+        </a>
         <button
           type="button"
           ref={closeRef}
@@ -238,7 +268,6 @@ export function DocumentPanel({
           ✕
         </button>
       </header>
-      <p className="doc-panel-hint">{COMMENT_HINT}</p>
       {/* A new document, and a reload of this one, is a new frame, not a
           navigation of this one, which would put the document in the
           browser's own history. */}

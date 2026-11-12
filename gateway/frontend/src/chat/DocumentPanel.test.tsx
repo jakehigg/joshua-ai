@@ -30,7 +30,7 @@ function ChatScreen() {
             wrote the notes
           </button>
         </div>
-        {panel.shown && <DocumentPanel artifact={panel.shown} reloads={panel.reloads} onClose={panel.close} />}
+        {panel.shown && <DocumentPanel artifact={panel.shown} reloads={panel.reloads} title={panel.title} onClose={panel.close} />}
       </div>
     </DocumentPanelProvider>
   );
@@ -86,18 +86,26 @@ describe("the document panel", () => {
     fireEvent.click(open("pumpkin-soup"));
     const iframe = frame() as HTMLIFrameElement;
     // The src is the viewer's page as the browser loads it, not a route path.
-    expect(iframe.getAttribute("src")).toBe("/documents/sam/pumpkin-soup");
+    expect(iframe.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1");
     expect(iframe.getAttribute("srcdoc")).toBeNull();
     expect(iframe.getAttribute("sandbox")).toBeNull();
     expect(iframe.getAttribute("title")).toBe("pumpkin-soup, the document page");
   });
 
-  it("shows the path and the one line about commenting in its header", () => {
+  it("shows the title, a full-page link and the commenting hint as hover text in its header", async () => {
     render(<ChatScreen />);
     fireEvent.click(open("notes"));
     const panel = document.querySelector(".doc-panel") as HTMLElement;
-    expect(panel.querySelector(".doc-panel-path")?.textContent).toBe("documents/sam/notes.md");
-    expect(panel.querySelector(".doc-panel-hint")?.textContent).toBe(COMMENT_HINT);
+    // Until the viewer answers, the slug; then the title it sent.
+    expect(await within(panel).findByText("Pumpkin soup")).toBeTruthy();
+    const header = panel.querySelector(".doc-panel-header") as HTMLElement;
+    expect(header.getAttribute("title")).toContain("documents/sam/notes.md");
+    expect(header.getAttribute("title")).toContain(COMMENT_HINT);
+    expect(panel.querySelector(".doc-panel-hint")).toBeNull();
+    const full = within(panel).getByRole("link", { name: "Open full page" });
+    expect(full.getAttribute("href")).toBe("/documents/sam/notes");
+    expect(full.getAttribute("target")).toBe("_blank");
+    expect(full.getAttribute("rel")).toBe("noopener noreferrer");
     expect(screen.getByRole("button", { name: "Close the document" })).toBeTruthy();
   });
 
@@ -108,7 +116,7 @@ describe("the document panel", () => {
     expect(open("notes").getAttribute("aria-pressed")).toBe("false");
     // One panel at a time: the other card moves it to its own document.
     fireEvent.click(open("notes"));
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/notes");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/notes?embed=1");
     expect(open("pumpkin-soup").getAttribute("aria-pressed")).toBe("false");
     // Open again closes it.
     fireEvent.click(open("notes"));
@@ -132,10 +140,10 @@ describe("the document panel", () => {
     const first = frame() as HTMLIFrameElement;
     fireEvent.click(screen.getByRole("button", { name: "wrote the soup" }));
     // A new frame with a new src, not a navigation of the one before.
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?r=1");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1&r=1");
     expect(frame()).not.toBe(first);
     fireEvent.click(screen.getByRole("button", { name: "wrote the soup" }));
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?r=2");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1&r=2");
   });
 
   it("does not reload for another document, and a reload with no panel does nothing", () => {
@@ -147,16 +155,16 @@ describe("the document panel", () => {
     const first = frame() as HTMLIFrameElement;
     fireEvent.click(screen.getByRole("button", { name: "wrote the notes" }));
     expect(frame()).toBe(first);
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1");
   });
 
   it("opens another document fresh after a reload", () => {
     render(<ChatScreen />);
     fireEvent.click(open("pumpkin-soup"));
     fireEvent.click(screen.getByRole("button", { name: "wrote the soup" }));
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?r=1");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1&r=1");
     fireEvent.click(open("notes"));
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/notes");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/notes?embed=1");
   });
 
   it("gives the keyboard the close control, which the sheet needs on a phone", () => {
@@ -222,18 +230,18 @@ describe("the open panel watching for a change", () => {
     await settle();
     // The panel takes the stamp it opened with: one ask, and no reload.
     expect(asks(fetch, "pumpkin-soup")).toBe(title + 1);
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1");
     // The same stamp a round later: still no reload.
     await tick();
     expect(asks(fetch, "pumpkin-soup")).toBe(title + 2);
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1");
     // Somebody else wrote the document.
     stamp = "2026-02-01T11:00:00Z";
     await tick();
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?r=1");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1&r=1");
     // That stamp is the new baseline: it does not reload again.
     await tick(2);
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?r=1");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1&r=1");
     // The panel asked about its own document only.
     expect(asks(fetch, "notes")).toBe(1);
   });
@@ -270,7 +278,7 @@ describe("the open panel watching for a change", () => {
     await tab("visible");
     // Coming back asks at once, so the change shows with no wait.
     expect(asks(fetch, "pumpkin-soup")).toBeGreaterThan(asked);
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?r=1");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1&r=1");
   });
 
   it("reloads nothing when the viewer cannot be asked", async () => {
@@ -282,7 +290,7 @@ describe("the open panel watching for a change", () => {
     await settle();
     await tick(3);
     // The frame is the one it opened with, and the card shows its slug.
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1");
     expect(open("pumpkin-soup").closest(".artifact-card")?.querySelector(".artifact-slug")?.textContent).toBe(
       "pumpkin-soup",
     );

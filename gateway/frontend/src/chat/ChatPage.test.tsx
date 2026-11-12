@@ -253,7 +253,7 @@ describe("ChatPage document panel", () => {
     expect(card.querySelector(".artifact-path")?.textContent).toBe("documents/sam/pumpkin-soup.md");
     fireEvent.click(card.querySelector(".artifact-open") as HTMLButtonElement);
     // The viewer's own page, loaded by the frame.
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1");
     // The conversation is still there, under the panel.
     expect(screen.getByText("the recipe is ready")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close the document" }));
@@ -274,14 +274,14 @@ describe("ChatPage document panel", () => {
     const path = await screen.findByText("documents/sam/pumpkin-soup.md");
     fireEvent.click((path.closest(".artifact-card") as HTMLElement).querySelector(".artifact-open") as HTMLButtonElement);
     const before = frame();
-    expect(before?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup");
+    expect(before?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1");
     const list = screen.getByRole("log");
     fireEvent.change(screen.getByLabelText("Message to Joshua"), { target: { value: "apply my comments" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await act(async () => release());
     // A fresh query, on a new frame: no navigation the person can go back
     // through, and nothing cached.
-    await waitFor(() => expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?r=1"));
+    await waitFor(() => expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1&r=1"));
     expect(frame()).not.toBe(before);
     // The conversation was not remounted, so it keeps its scroll position.
     expect(screen.getByRole("log")).toBe(list);
@@ -291,7 +291,7 @@ describe("ChatPage document panel", () => {
     const asked = fetch.mock.calls.filter(([u]) => String(u) === "/documents/sam/pumpkin-soup.json");
     expect(asked.length).toBeGreaterThan(0);
     await act(async () => new Promise((r) => setTimeout(r, 50)));
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?r=1");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1&r=1");
   });
 
   it("does not reload when the answer writes another document", async () => {
@@ -312,7 +312,7 @@ describe("ChatPage document panel", () => {
     await waitFor(() => expect(historyCalls()).toHaveLength(2));
     // The other document only changes the card; the panel keeps the
     // document it has open, on the frame it had.
-    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup");
+    expect(frame()?.getAttribute("src")).toBe("/documents/sam/pumpkin-soup?embed=1");
     expect(frame()).toBe(before);
   });
 });

@@ -310,3 +310,78 @@ describe("a document that is not there", () => {
     expect(document.querySelector("header.d-hero")).toBeNull();
   });
 });
+
+const YAML = "```yaml\nesphome:\n  name: dining-room\nlogger:\n  level: DEBUG\n```";
+
+const CODE_DOC: DocumentData = {
+  ...DOC,
+  title: "Dining room panel",
+  kind: "artifact",
+  blocks: [
+    { id: "L1", kind: "p", depth: 0, markdown: "Flash it once.", first_line: 1, last_line: 1 },
+    { id: "L3", kind: "code", depth: 0, markdown: YAML, first_line: 3, last_line: 8 },
+  ],
+  lines: ["Flash it once.", "", "```yaml", "esphome:", "  name: dining-room", "logger:", "  level: DEBUG", "```"],
+};
+
+describe("the embed mode", () => {
+  it("shows no breadcrumb, no head card and no app bar, only the body", async () => {
+    stubDoc();
+    // The browser address carries the flag, which the shell reads.
+    window.history.replaceState({}, "", "/documents/alex/party?embed=1");
+    try {
+      page("/documents/alex/party?embed=1");
+      await screen.findByText("Order the food");
+      expect(document.querySelector("header.j-appbar")).toBeNull();
+      expect(document.querySelector("aside.j-sidebar")).toBeNull();
+    } finally {
+      window.history.replaceState({}, "", "/");
+    }
+    expect(document.querySelector(".j-crumbs")).toBeNull();
+    expect(document.querySelector("header.d-hero")?.closest("details")).not.toBeNull();
+    expect(document.querySelector(".d-embed")).not.toBeNull();
+  });
+
+  it("keeps the metadata, the source and the versions in a closed Details fold", async () => {
+    stubDoc();
+    page("/documents/alex/party?embed=1");
+    await screen.findByText("Order the food");
+    const details = screen.getByText("Details").closest("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain("active");
+    expect(details.textContent).toContain("The plan for the party on Saturday.");
+    expect(details.textContent).toContain("Versions");
+    expect(details.textContent).toContain("Source");
+  });
+
+  it("keeps the comment gutter on the blocks", async () => {
+    stubDoc();
+    page("/documents/alex/party?embed=1&rev=aaaaaaaabbbb");
+    await screen.findByText("Order the food");
+    expect(document.querySelectorAll(".d-body .a-block").length).toBe(2);
+    expect(document.querySelector(".d-body .a-block [title^='Comment on'], .d-body .a-block button")).not.toBeNull();
+  });
+
+  it("shows a body that is mostly one code block code-first, with Copy, and the prose in Notes", async () => {
+    stubDoc(json(CODE_DOC));
+    page("/documents/alex/party?embed=1");
+    const copy = await screen.findByRole("button", { name: "copy" });
+    expect(copy).toBeTruthy();
+    const body = document.querySelector(".d-embed") as HTMLElement;
+    const order = [...body.children].map((el) => el.className);
+    expect(order[0]).toContain("d-codefirst");
+    const notes = screen.getByText("Notes").closest("details") as HTMLDetailsElement;
+    expect(notes.open).toBe(false);
+    expect(notes.textContent).toContain("Flash it once.");
+  });
+});
+
+describe("code on the document page", () => {
+  it("is highlighted, on the full page too", async () => {
+    stubDoc(json(CODE_DOC));
+    page();
+    await screen.findByText("Dining room panel");
+    expect(document.querySelector("pre code.language-yaml .hljs-attr")).not.toBeNull();
+    expect(document.querySelector(".j-crumbs")).not.toBeNull();
+  });
+});

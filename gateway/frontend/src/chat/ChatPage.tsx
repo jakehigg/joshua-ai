@@ -298,7 +298,12 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
           />
         )}
         {panel.shown && (
-          <DocumentPanel artifact={panel.shown} reloads={panel.reloads} onClose={panel.close} />
+          <DocumentPanel
+            artifact={panel.shown}
+            reloads={panel.reloads}
+            title={panel.title}
+            onClose={panel.close}
+          />
         )}
         {panel.view && <PagePanel view={panel.view} onClose={panel.close} />}
         {creating && (

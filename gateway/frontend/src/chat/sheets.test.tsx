@@ -157,7 +157,7 @@ describe("sheets on the chat screen", () => {
     await open();
     fireEvent.click(document.querySelector(".ws-header-actions button") as HTMLButtonElement);
     fireEvent.click(await screen.findByRole("button", { name: "Smoke note", hidden: true }));
-    expect(frame()?.getAttribute("src")).toBe("/documents/jake/smoke-test-note");
+    expect(frame()?.getAttribute("src")).toBe("/documents/jake/smoke-test-note?embed=1");
     expect(document.querySelector(".items.open")).toBeNull();
     expect(frame()?.hasAttribute("sandbox")).toBe(false);
     fireEvent.keyDown(document, { key: "Escape" });

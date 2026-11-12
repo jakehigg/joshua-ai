@@ -53,6 +53,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   overflow: hidden;
 }
 
+:root,
 .chat-screen {
   --chat-width: 860px; /* the reading width of the message column */
   --chat-shadow: 0 2px 12px rgb(0 0 0 / 0.5);
@@ -547,67 +548,67 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 
 
 /* highlight.js classes, colored by the variables above. */
-.chat-screen .hljs-comment,
-.chat-screen .hljs-quote {
+.hljs-comment,
+.hljs-quote {
   color: var(--hl-comment);
   font-style: italic;
 }
-.chat-screen .hljs-keyword,
-.chat-screen .hljs-selector-tag,
-.chat-screen .hljs-literal,
-.chat-screen .hljs-doctag,
-.chat-screen .hljs-template-tag {
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-template-tag {
   color: var(--hl-keyword);
 }
-.chat-screen .hljs-string,
-.chat-screen .hljs-regexp,
-.chat-screen .hljs-template-variable {
+.hljs-string,
+.hljs-regexp,
+.hljs-template-variable {
   color: var(--hl-string);
 }
-.chat-screen .hljs-number,
-.chat-screen .hljs-variable,
-.chat-screen .hljs-symbol,
-.chat-screen .hljs-bullet,
-.chat-screen .hljs-link {
+.hljs-number,
+.hljs-variable,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
   color: var(--hl-number);
 }
-.chat-screen .hljs-title,
-.chat-screen .hljs-section,
-.chat-screen .hljs-function .hljs-title {
+.hljs-title,
+.hljs-section,
+.hljs-function .hljs-title {
   color: var(--hl-title);
 }
-.chat-screen .hljs-type,
-.chat-screen .hljs-built_in,
-.chat-screen .hljs-class .hljs-title,
-.chat-screen .hljs-params {
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title,
+.hljs-params {
   color: var(--hl-type);
 }
-.chat-screen .hljs-attr,
-.chat-screen .hljs-attribute,
-.chat-screen .hljs-property,
-.chat-screen .hljs-selector-attr,
-.chat-screen .hljs-selector-class,
-.chat-screen .hljs-selector-id {
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
   color: var(--hl-attr);
 }
-.chat-screen .hljs-name,
-.chat-screen .hljs-tag,
-.chat-screen .hljs-selector-pseudo {
+.hljs-name,
+.hljs-tag,
+.hljs-selector-pseudo {
   color: var(--hl-tag);
 }
-.chat-screen .hljs-meta {
+.hljs-meta {
   color: var(--hl-meta);
 }
-.chat-screen .hljs-deletion {
+.hljs-deletion {
   background: var(--hl-deletion-bg);
 }
-.chat-screen .hljs-addition {
+.hljs-addition {
   background: var(--hl-addition-bg);
 }
-.chat-screen .hljs-emphasis {
+.hljs-emphasis {
   font-style: italic;
 }
-.chat-screen .hljs-strong {
+.hljs-strong {
   font-weight: 600;
 }
 
@@ -1208,4 +1209,31 @@ html.j-lock body { overflow: hidden; }
   .chat-screen .rail.collapsed,
   .chat-screen .items,
   .chat-screen .items.collapsed { transition: none; }
+}
+
+/* The document page: highlighted code that looks like the chat's, a visible
+   copy button on a touch screen, and the embed mode of the chat panel
+   (pages/Document.tsx). */
+.v-code pre {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  background: var(--j-surface);
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.v-code pre code { background: none; padding: 0; white-space: pre; overflow-wrap: normal; font-size: inherit; }
+@media (hover: none) {
+  .v-code-copy { opacity: 1; }
+}
+.d-embed { display: flex; flex-direction: column; gap: var(--j-gap); min-width: 0; }
+.d-embed .d-codefirst .v-code pre { font-size: 0.9rem; }
+.d-embed .d-codefirst { max-width: none; }
+.chat-screen .doc-panel-full {
+  flex: none;
+  font-size: 0.8125rem;
+  color: var(--j-accent);
+  white-space: nowrap;
 }
