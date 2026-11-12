@@ -286,10 +286,15 @@ def next_steps_section(
 
 
 def _steps_of(data: Any) -> list[str]:
-    """``#<number> <title>`` for each step in the answer of the tasks addon: a
-    list, or an object with ``steps`` or ``items``."""
+    """``#<number> <title>`` for each step in the answer of the tasks addon.
+
+    The tasks addon answers ``[{<project summary>, "tasks": [<task>, ...]}]``:
+    one entry per project, with its next open tasks. A plain list of tasks, or
+    an object with ``steps`` or ``items``, is read too."""
     if isinstance(data, dict):
         data = data.get("steps") or data.get("items") or data.get("next_steps") or []
+    if isinstance(data, list) and any(isinstance(e, dict) and "tasks" in e for e in data):
+        data = [t for e in data if isinstance(e, dict) for t in (e.get("tasks") or [])]
     out = []
     for entry in data if isinstance(data, list) else []:
         if isinstance(entry, str):

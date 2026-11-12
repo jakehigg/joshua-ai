@@ -357,6 +357,26 @@ async def test_next_steps_list_titles_and_numbers_for_a_linked_project() -> None
     assert str(seen[0].url) == "http://tasks:8000/api/next-steps?project=solar-proj&limit=3"
 
 
+async def test_next_steps_read_the_tasks_addon_answer_of_projects_with_tasks() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "p1",
+                    "name": "Solar install",
+                    "health": "on_track",
+                    "tasks": [{"id": "t1", "number": 7, "title": "Order panels"}],
+                }
+            ],
+        )
+
+    repo = WsRepo(_ws(), [_item(kind="tasks_project", ref="p1", title="Solar tasks")])
+    section = ws.next_steps_section(repo, "http://tasks:8000", client_factory=_factory(handler))
+    text = await section(_ws())
+    assert "- #7 Order panels" in text and "Solar install" not in text
+
+
 async def test_next_steps_skip_on_an_error_a_timeout_or_no_project() -> None:
     def broken(request):
         return httpx.Response(500)
