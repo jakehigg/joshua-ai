@@ -77,6 +77,20 @@ export function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+/** Change one thing with a JSON body. */
+export function patchJson<T>(path: string, body: unknown): Promise<T> {
+  return send<T>(path, {
+    method: "PATCH",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Remove one thing. */
+export function deleteJson<T>(path: string): Promise<T> {
+  return send<T>(path, { method: "DELETE", headers: { Accept: "application/json" } });
+}
+
 // The chat calls: one turn, and the history of a conversation.
 
 // The connection failed before the answer, or broke during the stream.
@@ -170,8 +184,8 @@ function turnBody(text: string, file?: File | null, workspace?: string): Request
 // answer and ConnectionLost when the stream fails or ends with no final
 // frame. An abort through `signal` throws the AbortError unchanged.
 // `file` is one photo or one PDF; it makes the request multipart.
-// `workspace` goes in the body as a `workspace` field; the route ignores it
-// for now.
+// `workspace` (a slug or an id) goes in the body as a `workspace` field. The
+// turn then runs in that workspace; without it, in the main thread.
 export async function postTurn(
   person: string,
   text: string,

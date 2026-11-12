@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { ApiError, getJson } from "./api/client";
 import Assignment from "./pages/Assignment";
-import { ChatPage } from "./chat/ChatPage";
+import { ChatPage, WorkspacePage } from "./chat/ChatPage";
 import { ChatHome } from "./chat/Home";
 import Assignments from "./pages/Assignments";
 import Document from "./pages/Document";
@@ -107,6 +107,7 @@ export default function App() {
       <Route path="/edit/*" element={<Edit />} />
       <Route path="/new" element={<New />} />
       <Route path="/chat" element={<ChatHome />} />
+      <Route path="/chat/w/:slug" element={<WorkspacePage />} />
       <Route path="/chat/:person" element={<ChatPage />} />
       <Route path="/me" element={<Me />} />
     </Routes>

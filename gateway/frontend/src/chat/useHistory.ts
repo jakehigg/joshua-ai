@@ -7,7 +7,7 @@
 // stops the one before it. "Load earlier" adds the page before the oldest
 // row. A failed first load shows its error with Retry; a later refresh that
 // fails keeps the list and shows nothing. `workspace` goes to the history
-// route as a query value; the backend ignores it for now.
+// route as a query value: the thread of that workspace, else the main thread.
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { getHistory } from "../api/client";

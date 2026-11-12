@@ -18,8 +18,8 @@
 // (DocumentPanel.tsx): the refine loop inside one turn. The path comes from
 // the answer and not from the stream, because the `done` frame's `tools` is
 // a de-duped list of tool names and never says which document was written.
-// `workspace` is passed through to the turn body. The backend ignores it for
-// now; a later phase binds a chat to a workspace.
+// `workspace` is passed through to the turn body: the turn runs in that
+// workspace, and without it in the main thread.
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { ApiError, ConnectionLost, postTurn } from "../api/client";

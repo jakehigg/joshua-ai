@@ -4,7 +4,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import Shell from "../shell/Shell";
-import { PERSON_ID } from "./people";
+import { PERSON_ID, RESERVED_PERSON } from "./people";
 
 export const LAST_PERSON_KEY = "joshua-chat:last-person";
 
@@ -26,6 +26,7 @@ function lastPerson(): string {
 
 export function personProblem(id: string): string | null {
   if (!id) return null;
+  if (id === RESERVED_PERSON) return "w is reserved for workspaces. Use another id.";
   if (!PERSON_ID.test(id)) {
     return "Use a lowercase letter first, then up to 31 lowercase letters, digits, or -.";
   }
