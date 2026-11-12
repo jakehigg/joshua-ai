@@ -122,6 +122,7 @@ gets 403.
 | core `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) |
 | core `GET /v1/usage` | `usage.allowed_callers` (default `viewer`) |
 | core `POST /v1/usage` | `usage.writers` (default `assignments`), rows of kind `assignment` only |
+| core `/v1/workspaces` (list, create, read, change, items, block) | `workspaces.allowed_callers` (default `viewer`); the caller names the person, and every route is scoped to that person |
 | core `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`), and any other token gets 401 |
 | channels `POST /v1/deliver`, `GET /v1/channels/resolve` | `core` |
 | channels `POST /v1/events` | `channels.webhooks.allowed_callers` (default `laptop`, `ci`, `viewer`) |

@@ -1224,6 +1224,29 @@ these lists. The usage page always shows the `assignment` group, with zero
 counts when it has no row. See [contracts.md](contracts.md#the-usage-route)
 and [the usage write route](contracts.md#the-usage-write-route).
 
+## workspaces
+
+`workspaces` controls core's `/v1/workspaces` routes and the sessions of
+workspace threads. See [workspaces.md](workspaces.md). Nothing changes until a
+person makes a workspace.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `allowed_callers` | `viewer` | The fleet identities that may call `/v1/workspaces`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the routes off, and every caller gets 403. |
+| `models` | empty | The models that a workspace may pick. An empty list accepts any name. |
+| `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. The next turn starts from the workspace block and the last 10 rows of the thread. At least 1000. |
+| `tool_search_max_servers` | `3` | A workspace that picks this many servers or fewer runs with tool search off. More servers turn it on. |
+| `viewer_url` | none | The public address of the viewer. `send_to_normal_chat` adds the link `<viewer_url>/chat/w/<slug>`. Without it, the message has the path only. |
+
+```yaml
+workspaces:
+  allowed_callers:
+    - viewer
+  context_cap: 150000
+  tool_search_max_servers: 3
+  viewer_url: https://joshua.example.org
+```
+
 ## gateway
 
 `gateway` holds the settings of the gateway itself.

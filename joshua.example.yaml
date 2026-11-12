@@ -342,6 +342,19 @@ usage:
   writers:
     - assignments              # the assignments container
 
+# workspaces:
+#   # Core's /v1/workspaces: a place in Chat for one large piece of work. The
+#   # viewer calls it. An empty allowed_callers turns the routes off.
+#   allowed_callers:
+#     - viewer
+#   # The models a workspace may pick. Empty accepts any name.
+#   # models:
+#   #   - claude-opus-5
+#   context_cap: 150000            # input tokens over which a workspace turn ends its session
+#   tool_search_max_servers: 3     # servers up to which a workspace runs with tool search off
+#   # The public address of the viewer, for the link that send_to_normal_chat adds.
+#   # viewer_url: https://joshua.example.org
+
 # gateway:
 #   # The fleet identities that may call the gateway MCP routes and say which
 #   # person, role, group, and conversation a call is for (the X-Joshua-*

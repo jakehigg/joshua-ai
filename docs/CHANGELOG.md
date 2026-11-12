@@ -24,6 +24,17 @@ with the images and the packaged chart, are at
   `channels.webhooks.allowed_callers` is now `laptop`, `ci` and `viewer`; an
   instance that lists the callers in `joshua.yaml` must add `viewer`, and the
   channels container must hold `JOSHUA_TOKEN_VIEWER`.
+- **Workspaces, in core.** A workspace is a place for one large piece of work,
+  with its own chat thread, a model, MCP servers that the person picked, a goal,
+  notes, and links to what was made for it. Core serves `/v1/workspaces` for the
+  viewer and runs each workspace thread as the full Joshua, with a workspace
+  block in each message. A reply in a workspace stays in the thread, and the
+  agent sends one message to the normal chat with `send_to_normal_chat`. New
+  keys: `workspaces.allowed_callers`, `workspaces.models`,
+  `workspaces.context_cap`, `workspaces.tool_search_max_servers`, and
+  `workspaces.viewer_url`. `GET /v1/usage?group=conversation` gives the totals
+  of each conversation. The schema change adds two tables, and nothing changes
+  until a workspace exists. See [workspaces.md](workspaces.md).
 - **The assignments in the viewer are React pages.** The list at
   `/assignments` and one assignment at `/assignments/<id>` are the app now.
   The state pills write the address (`?state=draft`), so a bookmark of a state

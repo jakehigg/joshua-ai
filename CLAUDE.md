@@ -124,6 +124,14 @@ Route allowlists, by default:
 - core `POST /v1/usage`: `usage.writers` (default `assignments`). An empty
   list turns it off. It accepts rows of kind `assignment` only (400
   otherwise), and stores each `ref` as `<writer>:<ref>`.
+- core `GET /v1/usage?group=conversation`: the same callers as `GET /v1/usage`.
+  It returns the totals of each conversation, with the workspace slug and title.
+- core `/v1/workspaces`: `workspaces.allowed_callers` (default `viewer`). An
+  empty list turns it off. The caller names the person with `person`, and every
+  route is scoped to that person: another person's workspace is 404. A turn
+  on `workspace:<id or slug>` runs only for the owner, and core never creates a
+  `workspace:` channel from a turn. A workspace reply is transcript-only:
+  `workspace_delivery_target` drops it. `docs/workspaces.md` has the design.
 - core `ANY /v1/model/{path}`: `inference.forwarder.allowed_callers` (default
   `assignments`). The model forwarder: core puts the credential of the
   inference job `assignment` on a Claude API call, so the model credential
