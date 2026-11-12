@@ -1,16 +1,14 @@
 /**
  * The navigation of the viewer: the sections, and the icons of the links.
  *
- * The table is the one in `viewer.py` (`_SECTIONS`), so the two navigations
- * hold the same items in the same order. `memberOnly` is a section a guest
- * does not get. `personPath` is a section whose address ends with the id of
- * the person who signed in: the chat answers at `/chat/<person id>`.
+ * This table and the one in `viewer_api/session.py` hold the same items in
+ * the same order: the server sends the sections of a person, and this table
+ * adds the icon of each. `memberOnly` is a section a guest does not get.
+ * `personPath` is a section whose address ends with the id of the person who
+ * signed in: the chat answers at `/chat/<person id>`.
  *
- * `migrated` says who renders the section. A migrated section is a route of
- * this app and renders as a router `<Link>`. A section that is not migrated
- * renders as a plain `<a>`: the browser loads the page, and the server
- * renderer of the viewer answers it. Each task of the rewrite migrates one
- * section and turns its flag.
+ * `migrated` says that the section is a route of this app, so the item is a
+ * router `<Link>` and not a plain `<a>`. Every section is migrated.
  */
 
 export interface Section {
@@ -121,10 +119,9 @@ export function section(key: string): Section | undefined {
 /**
  * The key of the links group of the sidebar, and its address.
  *
- * The group is not a row of `SECTIONS`, because that table is the one in
- * `viewer.py` and the server sends the sections of a person. The page is
- * migrated: `/links` is a route of this app, so every item of the group is a
- * router link.
+ * The group is not a row of `SECTIONS`, because that table is the one the
+ * server sends with the session. The page is migrated: `/links` is a route of
+ * this app, so every item of the group is a router link.
  */
 export const LINKS_SECTION = "links";
 export const LINKS_PATH = "/links";

@@ -6,6 +6,13 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The viewer is one React app.** The gateway renders no page in Python any
+  more: it serves the app of `gateway/frontend`, a JSON API under `/api/v1/`
+  that carries the wiki, the journal, the search, the usage, the links, the
+  documents, the assignments, the chat and the workspaces, and the two
+  document routes the chat calls. `/style.css` and `/ui/<file>` are gone; the
+  stylesheet and the images are files of the app. An image with no build of
+  the app serves the JSON API alone.
 - **A photo in a workspace chat is an item of the workspace.** When a turn on a
   workspace thread carries a file, core records each filed attachment as a
   `file` item (added by the person; the title is what the describer says the

@@ -26,8 +26,8 @@ A built asset carries a content hash in its name, so it is immutable;
 
 The mount is behind the sign-in of a page: a request with no credentials and
 no ``viewer.anonymous`` gets the same 401 as a page. With no build in the
-image, ``mount`` returns None and the viewer serves its server-rendered pages
-only, so a bare checkout and the test suite still work.
+image, ``mount`` returns None and the viewer serves its JSON API only, so a
+bare checkout and the test suite still work.
 """
 
 from __future__ import annotations

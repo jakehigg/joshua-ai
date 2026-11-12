@@ -86,9 +86,9 @@ function Content({ root }: { root: string }) {
 }
 
 /**
- * The routes of the app. Only a page that is migrated is here: every other
- * address of the viewer is still a page of the server renderer, so there is
- * no catch-all route that would swallow it.
+ * The routes of the app. Every screen of the viewer is here: there is no
+ * other renderer. An address that no route claims renders an empty page,
+ * because the server has no page of its own behind this app.
  */
 export default function App() {
   return (

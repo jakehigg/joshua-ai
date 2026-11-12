@@ -81,6 +81,18 @@ The `files` MCP runs inside `gateway`. It is the only path that writes the
 wiki and a person's journal, and it confines every path to its root. There is
 one wiki. Everyone reads it, a member writes it, a guest reads it only.
 
+The viewer runs from the same image, as its own service. It is one React
+single-page app (`gateway/frontend`), built by the node stage of
+`gateway/Dockerfile` and served at the root of the host behind HTTP basic and
+`viewer.anonymous`. Everything it shows comes from a JSON API under
+`/api/v1/`, which carries the wiki pages, the journal, the search, the usage,
+the links, the documents, the assignments, the chat and the workspaces. The
+chat reaches the `channels` container through `viewer_channels.py` and
+`viewer_multipart.py`; the workspaces proxy core's `/v1/workspaces` through
+`viewer_api/workspaces.py` and `workspace_items.py`. The viewer holds one
+fleet token, its own, and no upstream credential.
+[operations.md](operations.md#the-viewer) says how to turn it on.
+
 ## assignments
 
 `assignments` is a fourth container, optional and off by default. It runs long

@@ -243,19 +243,21 @@ comes from the person in the viewer, and Joshua only resolves one.
 
 ### The headers of the viewer
 
-Every response of the viewer carries the same headers, and only the artifact
-address of an HTML document has a policy of its own:
+Every response of the viewer carries the same headers. The only exception is
+the artifact address of an HTML document, which still sets a policy of its
+own, stricter on the network:
 
 - `Content-Security-Policy: default-src 'none'; img-src 'self'; style-src
-  'self'; script-src 'self' '<hash of the copy script>'; connect-src 'self';
-  frame-src 'self'; frame-ancestors 'self'`. The page loads its stylesheets,
-  its images, its scripts and its data from the viewer itself. The viewer
-  serves a JavaScript bundle of its own, so `script-src` holds `'self'`, and
-  the hash of the copy script of a report beside it. No inline script runs:
-  `'self'` allows a file of this origin, never a `<script>` with a body and
-  never an event attribute. Where the bundle renders Markdown, the
-  sanitizer runs before the highlighter and raw HTML is not rendered, so
-  text from the wiki or from a document cannot become an element.
+  'self'; script-src 'self'; connect-src 'self'; frame-src 'self';
+  frame-ancestors 'self'`. The app loads its stylesheet, its images, its
+  script and its data from the viewer itself. `script-src` is `'self'`
+  because the one script is the app's own bundle, which the gateway image
+  carries. No inline script runs, and no hash is allowed: `'self'` admits a
+  file of this origin, never a `<script>` with a body and never an event
+  attribute. Where the app renders Markdown, the sanitizer (`rehype-sanitize`)
+  runs before the highlighter (`rehype-highlight`) and there is no
+  `rehype-raw`, so raw HTML is never rendered and text from the wiki, a
+  document or a chat turn cannot become an element.
 - `X-Frame-Options: SAMEORIGIN`, for a browser that reads no
   `frame-ancestors`.
 - `X-Content-Type-Options: nosniff`.

@@ -208,7 +208,7 @@ find under `docs/`:
 - [documents.md](documents.md): plans, reports, and artifacts that Joshua
   makes for you, and how you comment on them.
 - [operations.md](operations.md): logs, health, updates, backup, and the
-  viewer, which is a web page for your notes.
+  viewer, which is the web app for your notes.
 - [architecture.md](architecture.md) and [security.md](security.md): how the
   three containers divide the work, and what the agent cannot do.
 
@@ -225,8 +225,9 @@ make nuke           stop, and delete the data (it asks first)
 `make down` keeps your database and your files. `make nuke` deletes them.
 
 To read your notes in a browser instead of the terminal, turn on the viewer.
-It shows the wiki, your profile, the journal, and your attachments, and a
-member can edit a page or write a new one. It is off until you turn it on, and
+It shows the wiki, your profile, the journal, your attachments, your
+documents and your assignments, and it chats with Joshua. A member can edit a
+page or write a new one. It is off until you turn it on, and
 it listens on the loopback address only. See
 [operations.md](operations.md#the-viewer).
 

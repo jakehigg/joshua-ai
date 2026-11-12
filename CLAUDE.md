@@ -74,6 +74,7 @@ shared/                  package joshua_shared: config, layout, contracts, fleet
 channels/                package joshua_channels
 core/                    package joshua_core
 gateway/                 package joshua_gateway
+gateway/frontend/        the React app of the viewer; the node stage of gateway/Dockerfile builds it
 assignments/             package joshua_assignments: the optional fourth container
 docs/                    the product documentation; core ships it into the wiki
 scripts/                 backup, restore, chat, check_test_policy, ci-local
@@ -349,6 +350,28 @@ drives the internet agent. Do not use it for the internet agent.
 - Security-relevant behavior gets a test that proves the negative: a denied
   path, a 403, a missing tool. If a doc says "cannot", a test tries.
 
+## Frontend rules
+
+The viewer is one React single-page app in `gateway/frontend/`. There is no
+server-rendered page: `joshua_gateway/viewer.py` holds the probes, the JSON
+API (`viewer_api.routes()`), the two document routes the chat calls, and the
+mount of the build.
+
+- React 18 and `react-router-dom` 6. TypeScript in strict mode. No UI
+  framework and no component library.
+- The router has no `basename`: the app is served at the root of the host.
+- `src/shell/sections.ts` is the one source of the navigation.
+  `src/shell/AppNav.tsx` draws it (a drawer on a phone), and
+  `src/shell/panels.ts` keeps the folds of the desktop.
+- The design system is the `.j-*` classes of
+  `gateway/joshua_gateway/ui/joshua-ui.css`, with `gateway/frontend/src/viewer.css`
+  on top. `joshua-ui.css` is the master copy of the shared Joshua look: change
+  it there, never in a copy, and bump the version in its header.
+- Markdown runs `rehype-sanitize` and then `rehype-highlight`, in that order,
+  and never `rehype-raw`. Raw HTML is not rendered.
+- The checks are `npm run typecheck`, `npm test` and `npm run build`, in
+  `gateway/frontend/`.
+
 ## Documentation rules
 
 - **Simplified Technical English.** Docs, READMEs, docstrings, comments, PR
@@ -389,6 +412,15 @@ make lint
 make test
 make test-dates
 uv run python scripts/check_test_policy.py
+```
+
+The React app of the viewer has its own checks. Run them in
+`gateway/frontend/` when you change it:
+
+```
+npm run typecheck
+npm test
+npm run build
 ```
 
 `make smoke` boots Postgres in compose and runs the integration suite against

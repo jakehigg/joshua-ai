@@ -16,8 +16,8 @@
 .v-link-actions { display: flex; align-items: center; gap: 6px; }
 
 /* The "+" of a unit and of a line of the source, which opens the form of a
-   comment. The server renderer draws it as the summary of a <details>; here
-   it is a button, so it takes the place and the look of that summary. */
+   comment. It is a button in the place of the summary of a <details>, so it
+   takes the look of one. */
 .v-plus {
   position: absolute; left: 40px; top: 0; width: 18px; height: 1.6em;
   padding: 0; background: none; border: 0; cursor: pointer; text-align: center;

@@ -1145,12 +1145,14 @@ has no effect. The loader accepts it and validates its shape.
 
 ## viewer
 
-`viewer` runs a web viewer for the wiki and a person's own files. A person
-opens a browser, signs in with a password, and reads the wiki, their own
-profile, the journal, their own attachments, and the shared profile. A member
-also writes: they edit any wiki page, make a new one, correct a journal entry,
-and delete a page, which moves it to `wiki/.trash/`. A guest reads and nothing
-more. The agent never reaches the viewer. The viewer calls core for two
+`viewer` runs the web interface of Joshua: one React single-page app in the
+gateway image, served at the root of the host, with a JSON API under
+`/api/v1/` behind the same sign-in. A person opens a browser, signs in with a
+password, and reads the wiki, their own profile, the journal, their own
+attachments, the shared profile, their documents and their assignments, and
+chats with Joshua. A member also writes: they edit any wiki page, make a new
+one, correct a journal entry, and delete a page, which moves it to
+`wiki/.trash/`. A guest reads and nothing more. The agent never reaches the viewer. The viewer calls core for two
 things, with the `viewer` fleet token: its search page asks core to search by
 meaning, and its usage page reads the tokens of each day (see [usage](#usage)).
 The usage page also reads the subscription limits from core's open

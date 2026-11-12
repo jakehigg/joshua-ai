@@ -7,8 +7,8 @@
  * half always shows, so the page works when core is down or not configured;
  * then the meaning half is absent and the page says nothing about it.
  *
- * A hit links the page it names, which can be a page of this app or one the
- * server renders, so it is a plain link and the browser loads the address.
+ * A hit links the page it names, which can also be a file of the data
+ * volume, so it is a plain link and the browser loads the address.
  */
 
 import { useEffect, useState } from "react";
