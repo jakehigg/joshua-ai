@@ -98,7 +98,7 @@ that is not on the route's allowlist gets 403. There is no other bearer path.
 Identities: `channels`, `core`, `gateway`, plus `laptop` and `ci` for
 operators, and `viewer` and `mcp`, which call core's search by meaning. The
 `viewer` also reads core's usage by day, and the assignments of a person from
-the assignments container, and calls channels for its chat: `POST /api/v1/chat/<person>/turns` (streams one turn as server-sent events) and `GET /api/v1/chat/<person>/history`. `assignments` is the assignments
+the assignments container, and calls channels for its chat: `POST /api/v1/chat/<person>/turns` (streams one turn as server-sent events) and `GET /api/v1/chat/<person>/history`. The chat screen is a section of the React viewer (`gateway/frontend/src/chat/`, routes `/chat` and `/chat/:person`). `assignments` is the assignments
 container: core's model forwarder and usage write, the gateway MCP routes for
 a person, and channels events.
 `make init-env` mints the tokens into `.env`. Each of the three containers gets

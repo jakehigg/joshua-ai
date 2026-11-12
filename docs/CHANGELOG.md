@@ -6,6 +6,14 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The chat is a screen of the viewer.** `/chat` (a person picker) and
+  `/chat/<person>` (the conversation) are routes of the React app, inside the
+  sidebar and the tabs of the viewer. The screen streams a turn, pages earlier
+  history, sends one photo or one PDF, shows the card of a document a turn
+  wrote and opens it in a panel. It calls the two chat routes of the viewer.
+  Voice is not part of it. The app no longer refuses `/chat` to the browser, so
+  a deployment that still routes `/chat` to the separate chat app keeps that
+  app in front until the route is removed.
 - **The viewer answers the chat.** Two JSON routes of the viewer, behind the
   sign-in of a page: `POST /api/v1/chat/<person>/turns` streams one turn as
   server-sent events (a JSON body, or a multipart body with one file), and

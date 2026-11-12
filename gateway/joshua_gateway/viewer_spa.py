@@ -8,10 +8,10 @@ rest reaches the app.
 An address of the app is a path of its router, not a file, so an unknown path
 gets ``index.html`` and the router reads the address. Three kinds of path
 keep their 404 instead, because the app never claims them: a path whose last
-segment holds a dot names a file, so a missing asset never arrives as HTML; a
-path under ``api/`` is the JSON space of the viewer, which covers
-``api/v1/…``; and ``chat`` is the separate chat app, which the cluster routes
-on its own path and docker compose does not serve at all.
+segment holds a dot names a file, so a missing asset never arrives as HTML; and
+a path under ``api/`` is the JSON space of the viewer, which covers
+``api/v1/…``. The chat is a screen of the app, at ``/chat`` and
+``/chat/<person>``, so it falls back like any other page.
 
 The content sections of the viewer and the editor (``CONTENT``) are the
 exception to the dot: a wiki page ends in ``.md``, an attachment keeps the
@@ -46,7 +46,7 @@ STATIC_DIR = "static"
 INDEX = "index.html"
 
 # The first segment of a path the app never claims.
-NO_FALLBACK = frozenset({"api", "chat"})
+NO_FALLBACK = frozenset({"api"})
 
 # The first segment of a path the app always claims, dot or no dot: the
 # content of the viewer, which the app reads from the JSON routes, and the

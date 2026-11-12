@@ -103,6 +103,14 @@ export function embedded(view: Window = window): boolean {
   }
 }
 
+/** The class of the content column: the usage page is wide, the chat fills. */
+function contentClass(section: string): string {
+  if (section === "usage") {
+    return "j-content wide";
+  }
+  return section === "chat" ? "j-content fill" : "j-content";
+}
+
 /**
  * The shell of every page: the sidebar on a wide screen, the app bar and the
  * tabs on a phone. `section` marks the current item. The search field is in
@@ -156,8 +164,10 @@ export default function Shell({
   }
 
   const sections = session?.sections ?? [];
+  // The chat fills the screen: its own column scrolls, and the page does not.
+  const fill = section === "chat";
   return (
-    <div className="j-shell has-sidebar">
+    <div className={fill ? "j-shell has-sidebar fill" : "j-shell has-sidebar"}>
       <aside className="j-sidebar">
         <a className="j-brand" href="/">
           <img className="j-logo" src="/logo-64.png" alt="" />
@@ -211,7 +221,7 @@ export default function Shell({
             Links
           </Link>
         </nav>
-        <main className={section === "usage" ? "j-content wide" : "j-content"}>{children}</main>
+        <main className={contentClass(section)}>{children}</main>
       </div>
     </div>
   );

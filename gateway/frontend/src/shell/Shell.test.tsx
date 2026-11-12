@@ -85,7 +85,7 @@ describe("the shell", () => {
     expect(document.querySelector('form.v-search input[name="q"]')).not.toBeNull();
   });
 
-  it("gives a migrated section a router link and the rest a plain link", async () => {
+  it("gives a migrated section a router link", async () => {
     expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual([
       "wiki",
       "journal",
@@ -93,6 +93,7 @@ describe("the shell", () => {
       "usage",
       "assignments",
       "documents",
+      "chat",
     ]);
     stubSession();
 
@@ -105,6 +106,16 @@ describe("the shell", () => {
     expect(journal?.getAttribute("href")).toEqual("/journal");
     const chat = screen.getAllByText("Chat")[0];
     expect(chat?.getAttribute("href")).toEqual("/chat/alex");
+  });
+
+  it("lets the chat fill the content area", async () => {
+    stubSession();
+
+    shell("chat");
+
+    expect(document.querySelector("main.j-content.fill")).not.toBeNull();
+    expect(document.querySelector(".j-shell.fill")).not.toBeNull();
+    await screen.findAllByText("Wiki");
   });
 
   it("marks the current item, and the wide content of the usage section", async () => {

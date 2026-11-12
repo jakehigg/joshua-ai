@@ -87,10 +87,14 @@ def test_a_file_path_keeps_its_404(client) -> None:
     assert client.get("/assets/gone-123.js", auth=ALEX).status_code == 404
 
 
-def test_the_chat_is_another_app(client) -> None:
-    """``/chat`` belongs to the chat app, which the cluster routes itself."""
-    assert client.get("/chat", auth=ALEX).status_code == 404
-    assert client.get("/chat/alex", auth=ALEX).status_code == 404
+def test_the_chat_is_a_screen_of_the_app(client) -> None:
+    """``/chat`` and ``/chat/<person>`` are routes of the router."""
+    for path in ("/chat", "/chat/alex"):
+        response = client.get(path, auth=ALEX)
+        assert response.status_code == 200, path
+        assert response.text == INDEX
+    # The JSON routes of the chat stay out of the app.
+    assert client.get("/api/v1/chat/nobody/nope", auth=ALEX).status_code == 404
 
 
 def test_an_asset_is_immutable(client) -> None:
@@ -174,5 +178,7 @@ def test_which_path_falls_back_to_the_app() -> None:
     assert viewer_spa.falls_back("attachments/2026/09/a.jpg") is True
     assert viewer_spa.falls_back("edit/recipes/pizza.md") is True
     assert viewer_spa.falls_back("api/v1/session") is False
-    assert viewer_spa.falls_back("chat/alex") is False
+    assert viewer_spa.falls_back("chat") is True
+    assert viewer_spa.falls_back("chat/alex") is True
+    assert viewer_spa.falls_back("api/v1/chat/alex/turns") is False
     assert viewer_spa.falls_back("logo-64.png") is False

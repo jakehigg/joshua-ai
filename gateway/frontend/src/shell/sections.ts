@@ -109,7 +109,7 @@ export const SECTIONS: readonly Section[] = [
     icon: CHAT_ICON,
     memberOnly: false,
     personPath: true,
-    migrated: false,
+    migrated: true,
   },
 ];
 
