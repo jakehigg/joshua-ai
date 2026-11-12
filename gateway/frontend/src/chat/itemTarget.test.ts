@@ -18,7 +18,7 @@ function item(over: Partial<WorkspaceItem>): WorkspaceItem {
 
 describe("itemTarget", () => {
   it("opens a document by its ref, with or without .md or .html", () => {
-    for (const ref of ["documents/jake/smoke-test-note.md", "documents/jake/smoke-test-note", "documents/jake/smoke-test-note.html"]) {
+    for (const ref of ["documents/jake/smoke-test-note.md", "documents/jake/smoke-test-note"]) {
       expect(itemTarget(item({ kind: "document", ref }))).toEqual({
         type: "document",
         artifact: {
@@ -28,6 +28,19 @@ describe("itemTarget", () => {
         },
       });
     }
+  });
+
+  it("keeps .html for an artifact, from its ref or its kind", () => {
+    expect(itemTarget(item({ kind: "artifact", ref: "documents/jake/dining-room-panel-mockup.html", url: "/documents/jake/dining-room-panel-mockup" }))).toEqual({
+      type: "document",
+      artifact: {
+        path: "documents/jake/dining-room-panel-mockup.html",
+        slug: "dining-room-panel-mockup",
+        url: "/documents/jake/dining-room-panel-mockup",
+      },
+    });
+    const byUrl = itemTarget(item({ kind: "artifact", ref: "odd", url: "/documents/jake/x" }));
+    expect(byUrl).toMatchObject({ type: "document", artifact: { path: "documents/jake/x.html" } });
   });
 
   it("opens a document by its url when the ref says nothing", () => {

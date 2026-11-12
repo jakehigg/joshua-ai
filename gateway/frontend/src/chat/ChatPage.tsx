@@ -118,6 +118,10 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   // Only one sheet at a time: a panel that opens closes the lists.
   const { close: closePanel } = panel;
   const panelOpen = panel.shown !== null || panel.view !== null;
+  // On a wide desktop the item column steps aside while the panel is open,
+  // without changing the folded state that is kept. Items, opened on purpose,
+  // closes the panel (toggleItems), and the column is back.
+  const itemsCollapsed = panels.collapsed.items || panelOpen;
   useEffect(() => {
     if (panelOpen) {
       setRailOpen(false);
@@ -187,7 +191,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
 
   return (
     <DocumentPanelProvider panel={panel}>
-      <div className={`chat-screen${sheetOpen ? " sheet-open" : ""}${panels.collapsed.items ? " items-collapsed" : ""}`}>
+      <div className={`chat-screen${sheetOpen ? " sheet-open" : ""}${itemsCollapsed ? " items-collapsed" : ""}`}>
         <Rail
           person={person}
           workspaces={workspaces.list}
@@ -290,7 +294,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
             refreshKey={itemsKey}
             open={itemsOpen}
             onClose={() => setItemsOpen(false)}
-            collapsed={panels.collapsed.items}
+            collapsed={itemsCollapsed}
             onCollapse={() => {
               setItemsOpen(false);
               panels.set("items", true);

@@ -60,14 +60,17 @@ export function kindName(kind: string): string {
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 // `documents/<owner>/<slug>` with or without a leading `/` and an extension
-// (.md, .html), or null.
-function documentOf(text: string): Artifact | null {
+// (.md, .html), or null. The path keeps the real extension. When the text has
+// none (a url), the kind decides: an artifact is .html, anything else .md.
+function documentOf(text: string, kind: string): Artifact | null {
   const parts = text.trim().replace(/^\//, "").split("?")[0]!.split("/");
   if (parts.length !== 3 || parts[0] !== "documents") return null;
   const owner = parts[1]!;
-  const slug = parts[2]!.replace(/\.(md|html)$/, "");
+  const file = parts[2]!;
+  const ext = /\.(md|html)$/.exec(file)?.[1] ?? (kind === "artifact" ? "html" : "md");
+  const slug = file.replace(/\.(md|html)$/, "");
   if (!NAME.test(owner) || !NAME.test(slug)) return null;
-  return { path: `documents/${owner}/${slug}.md`, slug, url: `/documents/${owner}/${slug}` };
+  return { path: `documents/${owner}/${slug}.${ext}`, slug, url: `/documents/${owner}/${slug}` };
 }
 
 function viewerPath(url: string): boolean {
@@ -92,7 +95,7 @@ export function itemTarget(item: WorkspaceItem): ItemTarget | null {
   if (raw && !href) return null;
 
   const artifact =
-    (isDoc ? documentOf(item.ref) : null) ?? (href && viewerPath(href) ? documentOf(href) : null);
+    (isDoc ? documentOf(item.ref, item.kind) : null) ?? (href && viewerPath(href) ? documentOf(href, item.kind) : null);
   if (artifact) return { type: "document", artifact };
 
   const path = href && viewerPath(href) ? href : href ? null : fallbackPath(item);

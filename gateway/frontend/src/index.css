@@ -1237,3 +1237,81 @@ html.j-lock body { overflow: hidden; }
   color: var(--j-accent);
   white-space: nowrap;
 }
+
+/* The item list: one line per item. The title is cut with an ellipsis, a "..."
+   button opens the menu of the row, a group folds with its header, and the
+   row of the item open in the panel is marked. */
+.chat-screen .item {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 2px 6px;
+  border-bottom: 0;
+  border-radius: var(--j-radius-sm);
+}
+.chat-screen .item.active { background: var(--j-surface-2); }
+.chat-screen .item.active .item-open { color: var(--j-text); font-weight: 600; }
+.chat-screen .item-icon { flex: none; width: 1.25rem; text-align: center; }
+.chat-screen .item .item-open,
+.chat-screen .item .item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.chat-screen .item-pin { flex: none; font-size: 0.75rem; }
+.chat-screen .item-menu-wrap { position: relative; flex: none; }
+.chat-screen .item-more { min-height: 32px; min-width: 32px; padding: 0; }
+.chat-screen .item-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 7rem;
+  padding: 4px;
+  border: 1px solid var(--j-line);
+  border-radius: var(--j-radius-sm);
+  background: var(--j-bg);
+  box-shadow: var(--chat-shadow);
+}
+.chat-screen .item-menu button { min-height: 36px; text-align: left; border: 0; background: none; }
+.chat-screen .item-menu button:hover { background: var(--j-surface-2); }
+.chat-screen .item-group { margin: 12px 0 2px; }
+.chat-screen .item-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-transform: inherit;
+}
+.chat-screen .item-count { margin-left: auto; color: var(--j-faint); font-weight: 500; }
+.chat-screen .item-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--j-line);
+  border-radius: var(--j-radius-sm);
+  background: var(--j-surface-2);
+  font-size: 0.8125rem;
+}
+.chat-screen .item-undo button { min-height: 32px; }
+.chat-screen .item-add-open { margin-top: 8px; align-self: flex-start; }
+.chat-screen .item-add-actions { display: flex; gap: 8px; justify-content: flex-end; }

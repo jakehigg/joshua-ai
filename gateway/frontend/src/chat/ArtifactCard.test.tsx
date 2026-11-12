@@ -30,6 +30,22 @@ describe("parseArtifact", () => {
     expect(parseArtifact("\ndocuments/sam/notes.md\n")?.slug).toBe("notes");
   });
 
+  it("takes an .html artifact and keeps its extension", () => {
+    expect(parseArtifact("documents/jake/dining-room-panel-mockup.html")).toEqual({
+      path: "documents/jake/dining-room-panel-mockup.html",
+      slug: "dining-room-panel-mockup",
+      url: "/documents/jake/dining-room-panel-mockup",
+    });
+  });
+
+  it("shows a card, not the missing line, for an .html artifact fence", () => {
+    viewer(() => json(META));
+    const c = card("documents/jake/dining-room-panel-mockup.html");
+    expect(c.querySelector(".artifact-card")).not.toBeNull();
+    expect(c.querySelector(".artifact-path")?.textContent).toBe("documents/jake/dining-room-panel-mockup.html");
+    expect(c.textContent).not.toContain(MISSING_LINE);
+  });
+
   it("gives null for anything that is not one such path", () => {
     for (const bad of [
       "",

@@ -2,7 +2,9 @@
 //
 // A turn that creates or changes a document ends with one fenced block whose
 // info string is `artifact`, holding the document path alone, on one line,
-// in the form `documents/<owner>/<slug>.md`. Message.tsx takes that block
+// in the form `documents/<owner>/<slug>.md`, or `.html` for an HTML
+// artifact. The real extension stays in the path; the viewer's page and JSON
+// route have no extension (`/documents/<owner>/<slug>`) for both. Message.tsx takes that block
 // out of the printed answer (blocks.ts) and hands the content
 // here. The card shows the document's title, the path, and Open. The title
 // comes from the viewer's own JSON route for the document
@@ -38,7 +40,7 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const MISSING_LINE = "Joshua pointed at a document that is not there";
 
 // The document of an `artifact` block's content, or null when the content is
-// not one `documents/<owner>/<slug>.md` path.
+// not one `documents/<owner>/<slug>.md` or `.html` path.
 export function parseArtifact(content: string): Artifact | null {
   const path = content.trim();
   if (!path || /\s/.test(path)) return null;
@@ -46,12 +48,13 @@ export function parseArtifact(content: string): Artifact | null {
   if (parts.length !== 3 || parts[0] !== "documents") return null;
   const owner = parts[1] as string;
   const file = parts[2] as string;
-  if (!NAME.test(owner) || !file.endsWith(".md")) return null;
-  const slug = file.slice(0, -".md".length);
+  const ext = /\.(md|html)$/.exec(file)?.[0];
+  if (!NAME.test(owner) || !ext) return null;
+  const slug = file.slice(0, -ext.length);
   if (!NAME.test(slug)) return null;
   // The viewer serves the document at /documents/<owner>/<slug>, the path
-  // without its .md.
-  return { path, slug, url: `/${path.slice(0, -".md".length)}` };
+  // without its extension.
+  return { path, slug, url: `/documents/${owner}/${slug}` };
 }
 
 export function ArtifactCard({ content }: { content: string }) {

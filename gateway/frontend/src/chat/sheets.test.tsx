@@ -25,6 +25,7 @@ function item(over: Partial<WorkspaceItem>): WorkspaceItem {
 
 const ITEMS = [
   item({ id: "a", kind: "document", ref: "documents/jake/smoke-test-note", title: "Smoke note", url: "/documents/jake/smoke-test-note" }),
+  item({ id: "h", kind: "artifact", ref: "documents/jake/dining-room-panel-mockup.html", title: "Mockup", url: "/documents/jake/dining-room-panel-mockup" }),
   item({ id: "b", kind: "wiki", ref: "w", title: "Menu notes", url: "/wiki/menu.md" }),
   item({ id: "c", kind: "pr", ref: "p", title: "Fix the thing", url: "https://github.com/a/b/pull/1" }),
   item({ id: "d", kind: "tasks_project", ref: "trip-plan", title: "Trip plan" }),
@@ -287,5 +288,33 @@ describe("the side columns on a desktop", () => {
     expect(document.querySelector(".rail.open")).toBeTruthy();
     fireEvent.click(screen.getByTestId("rail-backdrop"));
     expect(document.querySelector(".rail.open")).toBeNull();
+  });
+});
+
+describe("the item column and the panel", () => {
+  const items = () => document.querySelector(".items") as HTMLElement;
+
+  it("steps aside while the panel is open, keeps the saved fold, and comes back", async () => {
+    await open();
+    expect(items().className).not.toContain("collapsed");
+    fireEvent.click(await screen.findByRole("button", { name: "Smoke note", hidden: true }));
+    expect(items().className).toContain("collapsed");
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").items ?? false).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Close the document" }));
+    expect(items().className).not.toContain("collapsed");
+  });
+
+  it("closes the panel when Items is opened on purpose", async () => {
+    await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Smoke note", hidden: true }));
+    fireEvent.click(document.querySelector(".items-toggle") as HTMLButtonElement);
+    expect(document.querySelector(".doc-panel")).toBeNull();
+    expect(items().className).not.toContain("collapsed");
+  });
+
+  it("opens an .html artifact with its real path", async () => {
+    await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Mockup", hidden: true }));
+    expect(frame()?.getAttribute("src")).toBe("/documents/jake/dining-room-panel-mockup?embed=1");
   });
 });

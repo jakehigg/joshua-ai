@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workspace, WorkspaceItem } from "../api/workspaces";
 import { ChatPage, WorkspacePage } from "./ChatPage";
 import { DocumentPanelProvider, useDocumentPanelState } from "./DocumentPanel";
-import { ItemPanel } from "./ItemPanel";
+import { GROUPS_KEY, ItemPanel, UNDO_MS } from "./ItemPanel";
 import { NewWorkspace } from "./NewWorkspace";
 import { Rail } from "./Rail";
 import { validPerson } from "./people";
@@ -196,7 +196,7 @@ describe("the item panel", () => {
     expect(screen.getByTestId("shown").textContent).toBe("/documents/alex/pie");
   });
 
-  it("pins, removes and adds a link, and loads again", async () => {
+  it("pins from the row menu, removes with an undo window, and adds a link behind a button", async () => {
     const { calls } = viewer({
       "GET /api/v1/workspaces/solar/items": { items: [item()] },
       "PATCH /api/v1/workspaces/solar/items/i1": item({ pinned: true }),
@@ -205,12 +205,34 @@ describe("the item panel", () => {
     });
     render(<Panel />);
     await screen.findByText("Quote");
-    fireEvent.click(screen.getByRole("button", { name: "Pin Quote" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Quote" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin Quote" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ pinned: true });
-    fireEvent.click(screen.getByRole("button", { name: "Remove Quote" }));
+
+    // Remove hides the row at once and can be undone; no call goes out.
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Quote" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove Quote" }));
+    expect(screen.queryByRole("button", { name: "Quote" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("button", { name: "Quote" })).toBeTruthy();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+
+    // Left alone, the removal goes out when the time is up.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Actions for Quote" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Remove Quote" }));
+      await act(async () => {
+        vi.advanceTimersByTime(UNDO_MS + 50);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE")).toBe(true));
 
+    expect(screen.queryByLabelText("Add a link")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "+ Add link" }));
     fireEvent.change(screen.getByLabelText("Add a link"), { target: { value: "https://a.test" } });
     fireEvent.change(screen.getByLabelText("Link title"), { target: { value: "A" } });
     fireEvent.click(screen.getByRole("button", { name: "Add link" }));
@@ -221,8 +243,53 @@ describe("the item panel", () => {
       title: "A",
       url: "https://a.test",
     });
-    const lists = calls.filter((c) => c.method === "GET").length;
-    expect(lists).toBeGreaterThanOrEqual(4); // open, then after each write
+    expect(screen.queryByLabelText("Add a link")).toBeNull();
+  });
+
+  it("shows one line per item, with the whole title on hover, a pin mark, pinned first", async () => {
+    viewer({
+      "GET /api/v1/workspaces/solar/items": {
+        items: [
+          item({ id: "a", kind: "link", title: "A long title that gets cut", url: "https://a.test" }),
+          item({ id: "b", kind: "link", title: "Pinned one", url: "https://b.test", pinned: true }),
+        ],
+      },
+    });
+    render(<Panel />);
+    const long = await screen.findByRole("button", { name: "A long title that gets cut" });
+    expect(long.getAttribute("title")).toBe("A long title that gets cut");
+    expect(document.querySelectorAll(".item-pin").length).toBe(1);
+    const rows = [...document.querySelectorAll(".item .item-open")].map((el) => el.textContent);
+    expect(rows).toEqual(["Pinned one", "A long title that gets cut"]);
+    // Pin and Remove are not on the row until its menu opens.
+    expect(screen.queryByRole("menuitem")).toBeNull();
+  });
+
+  it("folds a group with its header, keeps that, and counts the items", async () => {
+    window.localStorage.clear();
+    viewer({ "GET /api/v1/workspaces/solar/items": { items } });
+    const { unmount } = render(<Panel />);
+    await screen.findByText("Quote");
+    const toggle = screen.getByRole("button", { name: /Links/ });
+    expect(toggle.textContent).toContain("2");
+    fireEvent.click(toggle);
+    expect(screen.queryByText("Quote")).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "[]")).toEqual(["link"]);
+    unmount();
+    render(<Panel />);
+    await screen.findByText("Pie");
+    expect(screen.queryByText("Quote")).toBeNull();
+    window.localStorage.clear();
+  });
+
+  it("marks the item open in the panel", async () => {
+    viewer({ "GET /api/v1/workspaces/solar/items": { items } });
+    render(<Panel />);
+    const pie = await screen.findByRole("button", { name: "Pie" });
+    expect(pie.getAttribute("aria-current")).toBeNull();
+    fireEvent.click(pie);
+    expect(screen.getByRole("button", { name: "Pie" }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("button", { name: "Menu notes" }).getAttribute("aria-current")).toBeNull();
   });
 
   it("reloads on a finished turn and on focus", async () => {
