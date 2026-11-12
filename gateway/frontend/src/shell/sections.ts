@@ -91,7 +91,7 @@ export const SECTIONS: readonly Section[] = [
     icon: ASSIGNMENTS_ICON,
     memberOnly: false,
     personPath: false,
-    migrated: false,
+    migrated: true,
   },
   {
     key: "documents",

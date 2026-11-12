@@ -150,12 +150,12 @@ def _get(path: str, auth=ALEX, **params):
 
 
 def test_the_nav_has_documents_for_a_member(data) -> None:
-    html = _get("/assignments").text
+    html = _get("/assignments/saved").text
     assert 'href="/documents">' in html and ">Documents</a>" in html
 
 
 def test_a_guest_has_no_documents_section(docs) -> None:
-    html = _get("/assignments", auth=GUEST).text
+    html = _get("/assignments/saved", auth=GUEST).text
     assert 'href="/documents"' not in html
     assert _get("/documents/shared/meals.json", auth=GUEST).status_code == 404
     assert _get("/documents/shared/meals/artifact", auth=GUEST).status_code == 404

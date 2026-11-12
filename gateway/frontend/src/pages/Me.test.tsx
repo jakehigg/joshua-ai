@@ -106,11 +106,15 @@ describe("the page of the person", () => {
   it("says what went wrong when the viewer refuses", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: "forbidden" }), {
-          status: 403,
-          headers: { "Content-Type": "application/json" },
-        }),
+      // A Response gives its body once, and the page reads three routes, so
+      // each call needs one of its own.
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: "forbidden" }), {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
       ),
     );
 

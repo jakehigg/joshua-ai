@@ -162,20 +162,6 @@ async def documents(request: Request, person: Person) -> JSONResponse:
 # -- one document -----------------------------------------------------------
 
 
-def _markdown(lines: list[str], block: vb.Block) -> str:
-    """The Markdown of one block, with the indent of its first line removed.
-
-    A nested list item keeps its own marker that way: with the indent left
-    in, four spaces would render as a code block.
-    """
-    chunk = lines[block.first - 1 : block.last]
-    first = next((line for line in chunk if line.strip()), "")
-    indent = len(first) - len(first.lstrip(" "))
-    return "\n".join(
-        line[indent:] if line[:indent].strip() == "" else line.lstrip() for line in chunk
-    ).strip("\n")
-
-
 def _blocks(doc: docstore.Document) -> list[dict[str, Any]]:
     """The blocks of a Markdown document, each with its lines of the body.
 
@@ -190,7 +176,7 @@ def _blocks(doc: docstore.Document) -> list[dict[str, Any]]:
             "id": f"L{block.first}",
             "kind": block.kind,
             "depth": min(block.depth, vb.MAX_DEPTH),
-            "markdown": _markdown(lines, block),
+            "markdown": vb.block_markdown(lines, block),
             "first_line": block.first,
             "last_line": block.last,
         }

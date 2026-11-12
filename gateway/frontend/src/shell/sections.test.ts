@@ -39,12 +39,13 @@ describe("the section table", () => {
     expect(section("chat")?.path).toEqual("/chat");
   });
 
-  it("keeps the documents migrated with the wiki, the journal, the search and the usage", () => {
+  it("keeps every section but the chat migrated", () => {
     expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual([
       "wiki",
       "journal",
       "search",
       "usage",
+      "assignments",
       "documents",
     ]);
   });

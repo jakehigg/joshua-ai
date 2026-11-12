@@ -17,9 +17,18 @@
  * - the resolved comments are folded;
  * - with no `csrf` the gutter is read-only: it shows the cards and no "+".
  *
- * The form posts JSON to `POST /api/v1/documents/<owner>/<slug>/comments`,
- * and the answer carries the comments as the file now holds them, so the
- * page needs no reload. One form is open at a time.
+ * The form posts JSON to `<url>/comments`: a document
+ * (`/api/v1/documents/<owner>/<slug>`) or an assignment
+ * (`/api/v1/assignments/<id>`). `fields` are the fields the body carries
+ * beside the comment, which is the `target` of an assignment: the
+ * definition, the plan, or the report. When the answer carries the comments,
+ * as a document does, the page needs no reload; when it does not, as the
+ * assignments manager does not, `reload` reads the page again.
+ *
+ * One form is open at a time: the "+" of a unit and the "+" of the same line
+ * in the Source fold are two forms, so a key names the one that is open.
+ * `prefix` starts the id of each unit, so two texts on one page have no id
+ * in common (`viewer_comments.Gutter`).
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -40,13 +49,16 @@ export interface Span {
 /** The answer of a write of a comment. */
 interface CommentsAnswer {
   ok: boolean;
-  comments: DocComment[];
+  /** The comments as the text now holds them, when the route sends them. */
+  comments?: DocComment[];
 }
 
-/** The gutter of one document, as the parts of the page read it. */
+/** The gutter of one text, as the parts of the page read it. */
 export interface Gutter {
   /** The lines of the body, which a comment counts from 1. */
   lines: string[];
+  /** The start of the id of each unit and each anchor: `L`, `P` or `R`. */
+  prefix: string;
   /** The token of a write, or null when the gutter is read-only. */
   csrf: string | null;
   /** The person who signed in: only their own open comment has a Delete. */
@@ -61,9 +73,9 @@ export interface Gutter {
   marked: Set<number>;
   /** How many comments are open. */
   open: number;
-  /** The line whose form is open, or null. */
-  openLine: number | null;
-  setOpenLine: (line: number | null) => void;
+  /** The key of the "+" whose form is open, or null. */
+  openForm: string | null;
+  setOpenForm: (key: string | null) => void;
   /** What the viewer said about the last write, or "". */
   error: string;
   busy: boolean;
@@ -76,12 +88,18 @@ function lineName(lineNo: number): string {
   return lineNo === 0 ? "the document" : `line ${lineNo}`;
 }
 
+/** The key of one "+": its line, and what it is on, which the place names. */
+function formKey(line: number, what: string): string {
+  return `${line}:${what}`;
+}
+
 /**
- * The gutter of one document.
+ * The gutter of one text.
  *
  * `units` are the spans of the page, in the order the page shows them, so a
  * comment lands on the first one that holds its line. `onComments` takes the
- * comments of an answer, so the page keeps one copy of them.
+ * comments of an answer, so the page keeps one copy of them; a route that
+ * sends no comments calls `reload` instead.
  */
 export function useGutter({
   url,
@@ -91,6 +109,9 @@ export function useGutter({
   person,
   units,
   onComments,
+  prefix = "L",
+  fields = {},
+  reload,
 }: {
   url: string;
   lines: string[];
@@ -99,8 +120,11 @@ export function useGutter({
   person: string;
   units: Span[];
   onComments: (next: DocComment[]) => void;
+  prefix?: string;
+  fields?: Record<string, unknown>;
+  reload?: () => void;
 }): Gutter {
-  const [openLine, setOpenLine] = useState<number | null>(null);
+  const [openForm, setOpenForm] = useState<string | null>(null);
   const [error, setError] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
@@ -142,34 +166,44 @@ export function useGutter({
     }
   }
 
+  /** The comments of an answer, or a reload when the answer sends none. */
+  function took(answer: CommentsAnswer): void {
+    if (answer.comments === undefined) {
+      reload?.();
+    } else {
+      onComments(answer.comments);
+    }
+  }
+
   return {
     ...placed,
     lines,
+    prefix,
     csrf,
     person,
-    openLine,
-    setOpenLine,
+    openForm,
+    setOpenForm,
     error,
     busy,
     async add(lineNo: number, lineText: string, body: string): Promise<void> {
       const answer = await write(
         `${url}/comments`,
-        { csrf, line_no: lineNo, line_text: lineText, body },
+        { ...fields, csrf, line_no: lineNo, line_text: lineText, body },
         "the comment was not stored",
       );
       if (answer !== null) {
-        onComments(answer.comments);
-        setOpenLine(null);
+        took(answer);
+        setOpenForm(null);
       }
     },
     async remove(id: string): Promise<void> {
       const answer = await write(
         `${url}/comments/${encodeURIComponent(id)}/delete`,
-        { csrf },
+        { ...fields, csrf },
         "the comment was not removed",
       );
       if (answer !== null) {
-        onComments(answer.comments);
+        took(answer);
       }
     },
   };
@@ -198,7 +232,8 @@ export function Plus({
     return null;
   }
   const label = `Comment on ${what === "" ? lineName(line) : what}`;
-  const open = gutter.openLine === line;
+  const key = formKey(line, what);
+  const open = gutter.openForm === key;
   if (!open) {
     return (
       <button
@@ -207,7 +242,7 @@ export function Plus({
         title={label}
         aria-label={label}
         onClick={() => {
-          gutter.setOpenLine(line);
+          gutter.setOpenForm(key);
         }}
       >
         +
@@ -246,7 +281,7 @@ export function Plus({
           className="j-btn sm"
           type="button"
           onClick={() => {
-            gutter.setOpenLine(null);
+            gutter.setOpenForm(null);
           }}
         >
           Cancel
@@ -297,10 +332,13 @@ export function Unit({
   const classes = ["a-unit", className, cards.length > 0 ? "has-comments" : ""];
   const anchors: ReactNode[] = [];
   for (let line = unit.first + 1; line <= unit.last; line += 1) {
-    anchors.push(<span className="a-anchor" key={line} id={`L${line}`} />);
+    anchors.push(<span className="a-anchor" key={line} id={`${gutter.prefix}${line}`} />);
   }
   return (
-    <div className={classes.filter((part) => part !== "").join(" ")} id={`L${unit.first}`}>
+    <div
+      className={classes.filter((part) => part !== "").join(" ")}
+      id={`${gutter.prefix}${unit.first}`}
+    >
       {anchors}
       <div className="a-unit-body">{children}</div>
       <Plus

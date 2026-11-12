@@ -20,6 +20,7 @@ from __future__ import annotations
 from starlette.routing import Route
 
 from joshua_gateway.viewer_api import (
+    assignments,
     documents,
     edit,
     files,
@@ -68,6 +69,18 @@ def routes() -> list[Route]:
         Route(
             api_path("documents/{owner}/{slug}/comments/{cid}/delete"),
             _require_auth(documents.delete_comment),
+            methods=["POST"],
+        ),
+        Route(api_path("assignments"), _require_auth(assignments.assignments)),
+        Route(api_path("assignments/{id:int}"), _require_auth(assignments.assignment)),
+        Route(
+            api_path("assignments/{id:int}/comments"),
+            _require_auth(assignments.add_comment),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("assignments/{id:int}/comments/{cid:int}/delete"),
+            _require_auth(assignments.delete_comment),
             methods=["POST"],
         ),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { ApiError, getJson } from "./api/client";
+import Assignment from "./pages/Assignment";
+import Assignments from "./pages/Assignments";
 import Document from "./pages/Document";
 import Documents from "./pages/Documents";
 import Edit from "./pages/Edit";
@@ -91,6 +93,8 @@ export default function App() {
       <Route path="/wiki/*" element={<Content root="wiki" />} />
       <Route path="/shared/*" element={<Content root="shared" />} />
       <Route path="/attachments/*" element={<Content root="attachments" />} />
+      <Route path="/assignments" element={<Assignments />} />
+      <Route path="/assignments/:id" element={<Assignment />} />
       <Route path="/documents" element={<Documents />} />
       <Route path="/documents/:owner/:slug" element={<Document />} />
       <Route path="/journal" element={<Journal />} />

@@ -12,7 +12,9 @@ tokens of each group by day (``viewer_usage``) under the subscription limits
 ``GET /v1/limits`` has no bearer. ``/assignments`` shows the assignments of
 the person who signed in, read from the assignments manager when
 ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set
-(``viewer_assignments``). ``/documents`` shows the documents of the member
+(``viewer_assignments``); ``/assignments/saved`` and
+``/assignments/saved/<id>`` are the last pages of that section the server
+still renders. ``/documents`` shows the documents of the member
 who signed in and the shared ones, read from ``/data/documents``
 (``viewer_api.documents``); a guest has no such section. The two routes of a
 document that the chat calls stay here: ``<slug>.json`` for the head of an
@@ -27,7 +29,8 @@ The wiki, the shared attachments, a person's own attachments, the journal, the
 search, the usage, the links, the documents and the editor are the React app:
 ``/``, ``/wiki/…``, ``/shared/…``, ``/attachments/…``, ``/journal``,
 ``/journal/<year>/<month>/<day>``, ``/search``, ``/usage``, ``/links``,
-``/documents``, ``/documents/<owner>/<slug>``, ``/edit/…`` and ``/new`` are
+``/documents``, ``/documents/<owner>/<slug>``, ``/assignments``,
+``/assignments/<id>``, ``/edit/…`` and ``/new`` are
 addresses of its router (``viewer_spa``), and it
 reads ``GET /api/v1/wiki`` for a page, a folder or a file,
 ``GET /api/v1/files/<root>/<path>`` for the bytes,
@@ -41,6 +44,11 @@ reads ``GET /api/v1/wiki`` for a page, a folder or a file,
 ``GET /api/v1/documents/<owner>/<slug>`` for one document, its blocks and its
 comments, ``POST /api/v1/documents/<owner>/<slug>/comments`` and
 ``POST /api/v1/documents/<owner>/<slug>/comments/<id>/delete`` for a comment,
+``GET /api/v1/assignments`` for the list of the assignments of one state,
+``GET /api/v1/assignments/<id>`` for one assignment, its definition, its
+plan and its comments,
+``POST /api/v1/assignments/<id>/comments`` and
+``POST /api/v1/assignments/<id>/comments/<id>/delete`` for a comment on it,
 and ``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
 ``POST /api/v1/delete`` for a write (``viewer_api``).
 
@@ -572,60 +580,6 @@ def _clock() -> tuple[tzinfo, datetime]:
     return tz, _now(tz)
 
 
-async def assignments_list(request: Request, person: Person) -> Response:
-    """The assignments of the person who signed in, one state at a time.
-    With no ``state``, the page shows those in progress when there is one,
-    else the drafts when there is one, else the completed ones. The page
-    answers 200 also when the manager is not configured or does not answer,
-    and says so; then no pill is selected."""
-    client = assignments_mod.from_env(os.environ)
-    tz, now = _clock()
-    state = assignments_mod.parse_state(request.query_params.get("state"))
-    body = None
-    if client is None:
-        state = None
-    elif state is None:
-        for state in ("in_progress", "draft", "completed"):
-            body = await client.list(person.id, state)
-            if body is None:
-                state = None
-                break
-            if body.items:
-                break
-    else:
-        body = await client.list(person.id, state)
-        if body is None:
-            state = None
-    html = assignments_mod.list_html(
-        body, state=state, configured=client is not None, tz=tz, now=now
-    )
-    return _page("assignments", html, section="assignments")
-
-
-async def assignment_page(request: Request, person: Person) -> Response:
-    """One assignment of the person who signed in, as a document. A row of
-    another person is 404, as the manager answers."""
-    client = assignments_mod.from_env(os.environ)
-    title = f"assignment {request.path_params['id']}"
-    if client is None:
-        html = assignments_mod.unavailable_html(title, configured=False)
-        return _page(title, html, section="assignments")
-    item = await client.detail(person.id, request.path_params["id"])
-    if item is assignments_mod.NOT_FOUND:
-        return _not_found()
-    if not isinstance(item, assignments_mod.Detail):
-        html = assignments_mod.unavailable_html(title, configured=True)
-        return _page(title, html, section="assignments")
-    tz, now = _clock()
-    forms = _comment_forms(person, "assignment", item.id)
-    return _page(
-        item.title,
-        assignments_mod.detail_html(item, tz=tz, now=now, forms=forms),
-        section="assignments",
-        head=assignments_mod.refresh_meta(item),
-    )
-
-
 async def saved_list(request: Request, person: Person) -> Response:
     """The saved assignments of the person who signed in."""
     client = assignments_mod.from_env(os.environ)
@@ -640,16 +594,19 @@ async def saved_page(request: Request, person: Person) -> Response:
     client = assignments_mod.from_env(os.environ)
     title = "saved assignment"
     if client is None:
-        html = assignments_mod.unavailable_html(title, configured=False)
+        html = assignments_mod.saved_unavailable_html(title, configured=False)
         return _page(title, html, section="assignments")
     saved = await client.saved_detail(person.id, request.path_params["id"])
     if saved is assignments_mod.NOT_FOUND:
         return _not_found()
     if not isinstance(saved, assignments_mod.SavedDetail):
-        html = assignments_mod.unavailable_html(title, configured=True)
+        html = assignments_mod.saved_unavailable_html(title, configured=True)
         return _page(title, html, section="assignments")
     tz, now = _clock()
-    forms = _comment_forms(person, "saved", saved.id)
+    forms = comments_mod.CommentForms(
+        action=f"/assignments/saved/{saved.id}/comments",
+        csrf=_csrf_token(person.id, saved_scope(saved.id)),
+    )
     return _page(
         saved.name,
         assignments_mod.saved_detail_html(saved, tz=tz, now=now, forms=forms),
@@ -657,52 +614,32 @@ async def saved_page(request: Request, person: Person) -> Response:
     )
 
 
-def _comment_base(kind: str, parent_id: int) -> str:
-    """The viewer path of an assignment (``assignment``) or a saved one (``saved``)."""
-    return f"/assignments/saved/{parent_id}" if kind == "saved" else f"/assignments/{parent_id}"
+def saved_scope(saved_id: int) -> str:
+    """The CSRF scope of a comment on a saved assignment."""
+    return f"comments:/assignments/saved/{saved_id}"
 
 
-def _comment_forms(person: Person, kind: str, parent_id: int) -> comments_mod.CommentForms:
-    base = _comment_base(kind, parent_id)
-    return comments_mod.CommentForms(
-        action=f"{base}/comments", csrf=_csrf_token(person.id, f"comments:{base}")
-    )
+async def comment_on_saved(request: Request, person: Person) -> Response:
+    """Send one comment write of the person on a saved assignment to the
+    manager, then go back to the line.
 
-
-# The texts of an assignment that take a comment, and the anchor that the
-# page goes back to after a comment on each. A saved assignment has only a
-# definition.
-COMMENT_TARGETS = ("definition", "plan", "report")
-_TARGET_PREFIX = {"definition": "L", "plan": "P", "report": "R"}
-_TARGET_SECTION = {"definition": "definition", "plan": "plan", "report": "lead"}
-
-
-async def _comment_write(request: Request, person: Person, kind: str) -> Response:
-    """Send one comment write of the person to the manager, then go back to the line.
-
-    The form carries the CSRF token of the assignment, and a cross-site
-    ``Origin`` is refused. ``target`` names the text (the definition, the
-    plan, or the report). The manager writes the comment as the person who
-    signed in, on their own row only, and a row of another person is 404."""
+    The form carries the CSRF token of the saved assignment, and a cross-site
+    ``Origin`` is refused. A saved assignment has a definition only. The
+    manager writes the comment as the person who signed in, on their own row
+    only, and a row of another person is 404."""
     client = assignments_mod.from_env(os.environ)
     if client is None:
         return _not_found()
-    parent_id = int(request.path_params["id"])
-    base = _comment_base(kind, parent_id)
+    saved_id = int(request.path_params["id"])
+    base = f"/assignments/saved/{saved_id}"
     form = await request.form()
     token = str(form.get("csrf", ""))
-    if not _csrf_valid(person.id, f"comments:{base}", token) or not _origin_ok(request):
+    if not _csrf_valid(person.id, saved_scope(saved_id), token) or not _origin_ok(request):
         return _forbidden()
-    target = str(form.get("target", "") or "definition")
-    if target not in COMMENT_TARGETS or (kind == "saved" and target != "definition"):
-        target = ""
     comment_id = request.path_params.get("cid")
-    if not target:
-        written: assignments_mod.Written | None = assignments_mod.Written(400, "a bad target")
-        anchor = ""
-    elif comment_id is not None:
-        written = await client.delete_comment(person.id, kind, parent_id, int(comment_id))
-        anchor = _TARGET_SECTION[target]
+    if comment_id is not None:
+        written = await client.delete_comment(person.id, "saved", saved_id, int(comment_id))
+        anchor = "definition"
     else:
         try:
             line_no = int(str(form.get("line_no", "")))
@@ -710,41 +647,27 @@ async def _comment_write(request: Request, person: Person, kind: str) -> Respons
             line_no = 0
         written = await client.add_comment(
             person.id,
-            kind,
-            parent_id,
+            "saved",
+            saved_id,
             line_no=line_no,
             line_text=str(form.get("line_text", "")),
             body=str(form.get("body", "")),
-            target=target,
+            target="definition",
         )
-        anchor = f"{_TARGET_PREFIX[target]}{line_no}"
+        anchor = f"L{line_no}"
     if written is not None and written.status == 404:
         return _not_found()
     if written is None or not written.ok:
         reason = written.error if written is not None else "the manager did not answer"
-        body = assignments_mod.message_html(
-            "comment not stored",
+        body = (
+            f'<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
+            f'<h1 class="j-doc-title">comment not stored</h1>'
             f'<p class="j-error">{escape(reason or "The manager refused the comment.")}</p>'
-            f'<p><a href="{escape(base)}">Back</a></p>',
+            f'<p><a href="{escape(base)}">Back</a></p>'
         )
         return _page("comment not stored", body, status=400, section="assignments")
-    logger.info(
-        {
-            "message": "viewer comment",
-            "kind": kind,
-            "target": target,
-            "delete": comment_id is not None,
-        }
-    )
+    logger.info({"message": "viewer comment", "kind": "saved", "delete": comment_id is not None})
     return RedirectResponse(f"{base}#{anchor}", status_code=303)
-
-
-async def comment_on_assignment(request: Request, person: Person) -> Response:
-    return await _comment_write(request, person, "assignment")
-
-
-async def comment_on_saved(request: Request, person: Person) -> Response:
-    return await _comment_write(request, person, "saved")
 
 
 # -- documents --------------------------------------------------------------
@@ -911,20 +834,8 @@ def build_app() -> Starlette:
         *viewer_api.routes(),
         Route("/style.css", _require_auth(style)),
         Route("/ui/{name}", _require_auth(ui_file)),
-        Route("/assignments", _require_auth(assignments_list)),
         Route("/assignments/saved", _require_auth(saved_list)),
         Route("/assignments/saved/{id:int}", _require_auth(saved_page)),
-        Route("/assignments/{id:int}", _require_auth(assignment_page)),
-        Route(
-            "/assignments/{id:int}/comments",
-            _require_auth(comment_on_assignment),
-            methods=["POST"],
-        ),
-        Route(
-            "/assignments/{id:int}/comments/{cid:int}/delete",
-            _require_auth(comment_on_assignment),
-            methods=["POST"],
-        ),
         Route(
             "/assignments/saved/{id:int}/comments",
             _require_auth(comment_on_saved),

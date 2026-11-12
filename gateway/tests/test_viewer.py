@@ -299,7 +299,7 @@ def test_the_viewer_stylesheet_uses_the_shared_tokens(client):
 
 
 def test_a_page_has_the_shared_shell(client):
-    html = client.get("/assignments", auth=("alex", ALEX_PW)).text
+    html = client.get("/assignments/saved", auth=("alex", ALEX_PW)).text
     assert '<link rel=stylesheet href="/ui/joshua-ui.css">' in html
     assert html.index("/ui/joshua-ui.css") < html.index("/style.css")
     assert 'href="/ui/favicon-32.png"' in html
@@ -316,7 +316,7 @@ def test_a_page_has_the_shared_shell(client):
 
 
 def test_the_current_section_is_marked(client):
-    html = client.get("/assignments", auth=("alex", ALEX_PW)).text
+    html = client.get("/assignments/saved", auth=("alex", ALEX_PW)).text
     assert 'class="j-nav-item" href="/assignments" aria-current="page"' in html
     assert 'class="j-tab" href="/assignments" aria-current="page"' in html
     assert html.count('aria-current="page"') == 2
@@ -327,7 +327,7 @@ def test_the_current_section_is_marked(client):
 
 def test_the_chat_entry_names_the_person_of_the_request(client):
     for creds, person in ((("alex", ALEX_PW), "alex"), (MIA, "mia")):
-        html = client.get("/assignments", auth=creds).text
+        html = client.get("/assignments/saved", auth=creds).text
         link = f'href="/chat/{person}"'
         assert f'<a class="j-nav-item" {link}>' in html, person
         assert f'<a class="j-tab" {link}>Chat</a>' in html, person

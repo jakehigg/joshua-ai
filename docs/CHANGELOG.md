@@ -6,6 +6,22 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The assignments in the viewer are React pages.** The list at
+  `/assignments` and one assignment at `/assignments/<id>` are the app now.
+  The state pills write the address (`?state=draft`), so a bookmark of a state
+  opens the same rows. An assignment shows its definition as a document: each
+  field of the specification is a property, the goal is blocks, and each part
+  takes a comment on its first line, with the `Source` fold for one exact
+  line. The plan shows its task boxes as a checklist with the steps that are
+  done and the next step. An assignment in progress reads itself again every
+  20 seconds and stops when it finishes. The report shows in blocks for now.
+  The app reads and writes JSON addresses with the sign-in of a page:
+  `GET /api/v1/assignments`, `GET /api/v1/assignments/<id>`,
+  `POST /api/v1/assignments/<id>/comments` and
+  `POST /api/v1/assignments/<id>/comments/<id>/delete`. The saved assignments
+  at `/assignments/saved` are the same pages as before. With
+  `ASSIGNMENTS_URL` or `JOSHUA_TOKEN_VIEWER` unset, both pages say that the
+  assignments manager is not configured and select no state.
 - **The documents in the viewer are React pages.** The list at `/documents`
   and one document at `/documents/<owner>/<slug>` are the app now. The status
   tabs and the kind chips write the address (`?status=draft&kind=plan`), so a

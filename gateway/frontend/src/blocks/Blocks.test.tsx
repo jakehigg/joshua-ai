@@ -44,6 +44,7 @@ const COMMENT: DocComment = {
 function gutter(fields: Partial<Gutter> = {}): Gutter {
   return {
     lines: ["# Party plan", "", "Food and music for twenty people."],
+    prefix: "L",
     csrf: "a-token",
     person: "alex",
     cards: new Map(),
@@ -51,8 +52,8 @@ function gutter(fields: Partial<Gutter> = {}): Gutter {
     resolved: [],
     marked: new Set(),
     open: 0,
-    openLine: null,
-    setOpenLine: () => undefined,
+    openForm: null,
+    setOpenForm: () => undefined,
     error: "",
     busy: false,
     add: () => Promise.resolve(),

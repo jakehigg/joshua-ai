@@ -91,6 +91,7 @@ describe("the shell", () => {
       "journal",
       "search",
       "usage",
+      "assignments",
       "documents",
     ]);
     stubSession();
