@@ -30,7 +30,7 @@ import {
   type WorkspaceItem,
 } from "../api/workspaces";
 import { useDocumentPanel } from "./DocumentPanel";
-import { itemTarget } from "./itemTarget";
+import { isImageItem, itemTarget } from "./itemTarget";
 
 const KIND_LABELS: Record<string, string> = {
   document: "Documents",
@@ -129,9 +129,13 @@ function Entry({
   );
   return (
     <li className={active ? "item active" : "item"}>
-      <span className="item-icon" aria-hidden="true">
-        {KIND_ICONS[item.kind] ?? "•"}
-      </span>
+      {isImageItem(item) ? (
+        <img className="item-thumb" src={item.url ?? ""} alt="" loading="lazy" />
+      ) : (
+        <span className="item-icon" aria-hidden="true">
+          {KIND_ICONS[item.kind] ?? "•"}
+        </span>
+      )}
       {name}
       {item.pinned && (
         <span className="item-pin" role="img" aria-label="Pinned">
@@ -284,6 +288,7 @@ export function ItemPanel({
     if (!t) return false;
     if (t.type === "document") return panel.shown?.url === t.artifact.url;
     if (t.type === "page") return panel.view?.type === "page" && panel.view.page.url === t.page.url;
+    if (t.type === "image") return panel.view?.type === "image" && panel.view.image.url === t.image.url;
     return (
       panel.view?.type === "card" &&
       panel.view.card.title === t.card.title &&

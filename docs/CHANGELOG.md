@@ -6,6 +6,20 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A photo in a workspace chat is an item of the workspace.** When a turn on a
+  workspace thread carries a file, core records each filed attachment as a
+  `file` item (added by the person; the title is what the describer says the
+  file is, else the name the sender gave it). A file that the agent added first
+  is the same item, not a second one. The Items panel shows a photo as a
+  thumbnail and opens it in the panel.
+- **Attachments look cleaner.** A photo sits above the bubble with no frame, a
+  tap shows it full size in the panel, the preview in the composer has its
+  remove button on the corner, and a file is a quiet row.
+- **A phone that comes back finds its turn.** The page asks for the history on
+  `pageshow`, `online`, focus and visible. A stream with no byte for 45 s when
+  the page returns is dropped, and the page shows the pending turn and polls,
+  as it does for a stream that broke.
+
 - **An HTML document fits the phone.** The frame is as tall as its content, so
   the panel is the only scroll, and a document wider than the panel (a 792 px
   mockup on a phone) is scaled to the width. "Actual size" and "Fit width" switch

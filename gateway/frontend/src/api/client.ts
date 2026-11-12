@@ -218,6 +218,9 @@ function turnBody(text: string, file?: File | null, workspace?: string): Request
 export interface TurnHooks {
   // Bytes of the request that have gone out. Only a turn with a file reports.
   onUploadProgress?: (loaded: number, total: number) => void;
+  // Bytes arrived or went out: a frame, or the keepalive comment between frames.
+  // A caller that sees none for a long time knows the connection is dead.
+  onActivity?: () => void;
 }
 
 // Reads the frames of one answer. `final` is true after a `done` or an
@@ -279,9 +282,11 @@ function postTurnXhr(
     xhr.open("POST", url);
     xhr.setRequestHeader("Accept", "text/event-stream");
     xhr.upload.onprogress = (e) => {
+      hooks.onActivity?.();
       if (e.lengthComputable) hooks.onUploadProgress?.(e.loaded, e.total);
     };
     xhr.onprogress = () => {
+      hooks.onActivity?.();
       if (xhr.status >= 200 && xhr.status < 300) pull();
     };
     xhr.onerror = xhr.ontimeout = () => {
@@ -347,6 +352,7 @@ export async function postTurn(
     for (;;) {
       const { done, value } = await stream.read();
       if (done) break;
+      hooks.onActivity?.();
       reader.feed(decoder.decode(value, { stream: true }));
       if (reader.final) break;
     }

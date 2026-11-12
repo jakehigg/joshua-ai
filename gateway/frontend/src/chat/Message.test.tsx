@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "./store";
+import { DocumentPanelProvider } from "./DocumentPanel";
 import { Message } from "./Message";
 
 function show(extra: Partial<ChatMessage>) {
@@ -133,5 +134,48 @@ describe("a message with a file", () => {
       />,
     );
     expect(screen.getByText("Waiting for Joshua to finish another turn…")).toBeTruthy();
+  });
+});
+
+describe("a photo in a message", () => {
+  const base = { id: "m", role: "person" as const, text: "(file attached — no caption)", ts: "2026-01-01T10:00:00Z", state: "ok" as const };
+  const photo = { name: "IMG_1.jpg", mime: "image/jpeg", url: "/api/v1/files/wiki/attachments/a.jpg" };
+
+  it("sits above the bubble with no frame, and a file with no caption has no bubble", () => {
+    const { container } = render(
+      <Message message={{ ...base, attachments: [photo] }} canRetry onRetry={() => undefined} />,
+    );
+    expect(container.querySelector(".msg-media .thumb")).not.toBeNull();
+    expect(container.querySelector(".bubble")).toBeNull();
+  });
+
+  it("keeps the bubble for a real caption", () => {
+    const { container } = render(
+      <Message message={{ ...base, text: "the rotation", attachments: [photo] }} canRetry onRetry={() => undefined} />,
+    );
+    expect(container.querySelector(".bubble")?.textContent).toBe("the rotation");
+    expect(container.querySelector(".msg-media + .bubble")).not.toBeNull();
+  });
+
+  it("opens in the panel of the chat on a tap, and not as a page", () => {
+    const open = vi.fn();
+    const panel = { shown: null, title: null, reloads: 0, view: null, live: true, show: vi.fn(), open, close: vi.fn(), reload: vi.fn() };
+    render(
+      <DocumentPanelProvider panel={panel}>
+        <Message message={{ ...base, attachments: [photo] }} canRetry onRetry={() => undefined} />
+      </DocumentPanelProvider>,
+    );
+    const link = screen.getByAltText("IMG_1.jpg").closest("a") as HTMLAnchorElement;
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    link.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledWith({ type: "image", image: { url: photo.url, title: "IMG_1.jpg" } });
+  });
+
+  it("is a plain link outside a chat screen", () => {
+    render(<Message message={{ ...base, attachments: [photo] }} canRetry onRetry={() => undefined} />);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    (screen.getByAltText("IMG_1.jpg").closest("a") as HTMLAnchorElement).dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
   });
 });

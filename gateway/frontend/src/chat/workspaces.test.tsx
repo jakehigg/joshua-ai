@@ -189,6 +189,45 @@ describe("the item panel", () => {
     expect(document.querySelector('a[href^="javascript"]')).toBeNull();
   });
 
+  it("shows a photo item as a thumbnail, not the kind icon, and a PDF with the icon", async () => {
+    const photo = item({
+      id: "p1",
+      kind: "file",
+      ref: "wiki/attachments/2026/11/epaper.jpg",
+      title: "An e-paper display",
+      url: "/api/v1/files/wiki/attachments/2026/11/epaper.jpg",
+    });
+    const pdf = item({ id: "p2", kind: "file", ref: "wiki/attachments/bill.pdf", title: "Bill", url: "/api/v1/files/wiki/attachments/bill.pdf" });
+    viewer({ "GET /api/v1/workspaces/solar/items": { items: [photo, pdf] } });
+    render(<Panel />);
+    await screen.findByText("An e-paper display");
+    const row = screen.getByRole("button", { name: "An e-paper display" }).closest("li") as HTMLElement;
+    expect(row.querySelector("img.item-thumb")?.getAttribute("src")).toBe(photo.url);
+    expect(row.querySelector(".item-icon")).toBeNull();
+    const pdfRow = screen.getByRole("button", { name: "Bill" }).closest("li") as HTMLElement;
+    expect(pdfRow.querySelector("img.item-thumb")).toBeNull();
+    expect(pdfRow.querySelector(".item-icon")).not.toBeNull();
+  });
+
+  it("opens a photo item in the image view of the panel", async () => {
+    const photo = item({ id: "p1", kind: "file", ref: "a.jpg", title: "Display", url: "/api/v1/files/wiki/a.jpg" });
+    viewer({ "GET /api/v1/workspaces/solar/items": { items: [photo] } });
+    function Both() {
+      const state = useDocumentPanelState();
+      return (
+        <MemoryRouter future={FUTURE}>
+          <DocumentPanelProvider panel={state}>
+            <ItemPanel slug="solar" refreshKey={0} open onClose={vi.fn()} />
+            <output data-testid="view">{state.view?.type === "image" ? state.view.image.url : ""}</output>
+          </DocumentPanelProvider>
+        </MemoryRouter>
+      );
+    }
+    render(<Both />);
+    fireEvent.click(await screen.findByRole("button", { name: "Display" }));
+    expect(screen.getByTestId("view").textContent).toBe("/api/v1/files/wiki/a.jpg");
+  });
+
   it("opens a document in the document panel", async () => {
     viewer({ "GET /api/v1/workspaces/solar/items": { items } });
     render(<Panel />);

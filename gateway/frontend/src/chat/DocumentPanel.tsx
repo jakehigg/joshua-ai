@@ -52,7 +52,7 @@ import {
 } from "react";
 import { getDocumentMeta } from "../api/client";
 import type { Artifact } from "./ArtifactCard";
-import type { CardTarget, ItemTarget, PageTarget } from "./itemTarget";
+import type { CardTarget, ImageTarget, ItemTarget, PageTarget } from "./itemTarget";
 
 // How often an open panel asks the viewer whether its document changed.
 export const POLL_MS = 15_000;
@@ -62,7 +62,8 @@ export const COMMENT_HINT = "Comment on a block with +; Joshua reads the comment
 
 export type PanelView =
   | { type: "page"; page: PageTarget }
-  | { type: "card"; card: CardTarget };
+  | { type: "card"; card: CardTarget }
+  | { type: "image"; image: ImageTarget };
 
 export interface DocumentPanelState {
   /** The document the panel shows, or null when no panel is open. */
@@ -76,6 +77,8 @@ export interface DocumentPanelState {
   reloads: number;
   /** A page or a card of a workspace item, or null. Never set with `shown`. */
   view: PanelView | null;
+  /** True inside a chat screen, where the panel exists; false outside one. */
+  live: boolean;
   show: (artifact: Artifact) => void;
   /** Open what an item points at: a document, a page of the viewer, or a card. */
   open: (target: ItemTarget) => void;
@@ -89,6 +92,7 @@ const CLOSED: DocumentPanelState = {
   title: null,
   reloads: 0,
   view: null,
+  live: false,
   show: () => undefined,
   open: () => undefined,
   close: () => undefined,
@@ -181,7 +185,13 @@ export function useDocumentPanelState(): DocumentPanelState {
       if (target.type === "document") return show(target.artifact);
       setShown(null);
       setReloads(0);
-      setView(target.type === "page" ? { type: "page", page: target.page } : { type: "card", card: target.card });
+      setView(
+        target.type === "page"
+          ? { type: "page", page: target.page }
+          : target.type === "image"
+            ? { type: "image", image: target.image }
+            : { type: "card", card: target.card },
+      );
     },
     [show],
   );
@@ -200,7 +210,7 @@ export function useDocumentPanelState(): DocumentPanelState {
   useEffect(() => setTitle(null), [shown?.url]);
   useDocumentWatch(shown?.url, reloads, bump, setTitle);
   return useMemo(
-    () => ({ shown, title, reloads, view, show, open, close, reload }),
+    () => ({ shown, title, reloads, view, live: true, show, open, close, reload }),
     [shown, title, reloads, view, show, open, close, reload],
   );
 }
@@ -281,12 +291,13 @@ export function DocumentPanel({
   );
 }
 
-// Any other page of the viewer, or a card for an address that cannot be
+// A photo of a message or of a workspace item shows as an image view in the
+// same sheet. Any other page of the viewer, or a card for an address that cannot be
 // framed. Same sheet and header as the document panel.
 export function PagePanel({ view, onClose }: { view: PanelView; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
-  const key = view.type === "page" ? view.page.url : view.card.title;
-  const title = view.type === "page" ? view.page.title : view.card.title;
+  const title = view.type === "page" ? view.page.title : view.type === "image" ? view.image.title : view.card.title;
+  const key = view.type === "page" ? view.page.url : view.type === "image" ? view.image.url : view.card.title;
   useEffect(() => {
     closeRef.current?.focus();
   }, [view]);
@@ -306,6 +317,13 @@ export function PagePanel({ view, onClose }: { view: PanelView; onClose: () => v
       </header>
       {view.type === "page" ? (
         <iframe key={key} className="doc-panel-frame" src={view.page.url} title={`${title}, the page`} />
+      ) : view.type === "image" ? (
+        <div className="image-view" key={key}>
+          <img src={view.image.url} alt={title} />
+          <a className="item-card-open" href={view.image.url} target="_blank" rel="noopener noreferrer">
+            Open in new tab
+          </a>
+        </div>
       ) : (
         <div className="item-card">
           <span className="item-card-kind">{view.card.kindLabel}</span>

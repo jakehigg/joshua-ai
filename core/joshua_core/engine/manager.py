@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -279,6 +280,20 @@ def failed_writes(tool_calls: list[dict[str, Any]]) -> int:
 
 def _new_turn_id() -> str:
     return "t-" + uuid4().hex[:12]
+
+
+def _file_url(path: str) -> str | None:
+    """The address of a filed attachment in the viewer (``/api/v1/files``), or
+    None for a path the viewer does not serve. A person's own folder is the
+    ``attachments`` root of the person who signed in."""
+    parts = path.split("/")
+    if ".." in parts or "" in parts:
+        return None
+    if len(parts) >= 3 and parts[0] in ("wiki", "shared"):
+        return "/api/v1/files/" + quote("/".join(parts))
+    if len(parts) >= 4 and parts[0] == "people" and parts[2] == "attachments":
+        return "/api/v1/files/attachments/" + quote("/".join(parts[3:]))
+    return None
 
 
 async def _tell(hook: StateHook | None, state: str) -> None:
@@ -741,6 +756,42 @@ class ConversationManager:
             )
         return kept
 
+    async def _record_workspace_files(
+        self,
+        channel: Channel,
+        attachments: list[Attachment],
+        described: dict[str, AttachmentMeta],
+    ) -> None:
+        """On a workspace thread, record each filed attachment as a ``file``
+        item, so the photos of the thread are in its Items.
+
+        The title is what the describer says the file is, else the name the
+        sender gave. An item with the same ref (the agent added the file
+        first, or this is a retry) is the same item, and keeps its title. A
+        turn that is not on a workspace adds nothing. A failure never fails
+        the turn.
+        """
+        workspace_id = workspace_engine.workspace_id_of(channel.id)
+        if workspace_id is None:
+            return
+        for a in attachments:
+            meta = described.get(a.path)
+            subject = meta.description.subject if meta and meta.description else ""
+            title = (subject or a.original_name or Path(a.path).name).strip()[:120]
+            url = _file_url(a.path)
+            try:
+                await self._repo.add_workspace_item(
+                    workspace_id,
+                    "file",
+                    a.path,
+                    title or Path(a.path).name,
+                    url=url,
+                    added_by="person",
+                    rename=False,
+                )
+            except Exception as exc:  # noqa: BLE001 — an item never fails a turn
+                logger.warning({"message": "workspace file not recorded", "error": str(exc)})
+
     async def _prepare_attachments(
         self,
         attachments: list[Attachment] | None,
@@ -982,6 +1033,8 @@ class ConversationManager:
                 in_meta["speaker"] = speaker
             if attachments:
                 in_meta["attachments"] = self._attachment_meta(attachments)
+                if direction == "in":
+                    await self._record_workspace_files(channel, attachments, described)
             await self._repo.add_transcript(conversation.id, direction, text, meta=in_meta)
             try:
                 result = await self._run_with_resume_retry(

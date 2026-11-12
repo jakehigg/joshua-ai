@@ -18,6 +18,13 @@
 // A turn can carry one photo or one PDF. The file goes with the request as
 // multipart; the person message keeps its name for the chip, and the file
 // itself, so Retry sends the same message again.
+// A phone that locks or switches app can leave the stream open on the screen
+// with no connection behind it: the browser may never raise an error. The
+// viewer sends a keepalive every 20 s, so a stream with no byte for STALE_MS
+// is dead. When the page comes back (visible, pageshow from the back-forward
+// cache, focus, online) a stale stream is dropped: before `accepted` the turn
+// is lost (Retry, with the draft kept); after it, the turn goes on without this
+// screen, as for a stream that broke.
 // `upload` is the state of the progress toast of a turn with a file:
 // uploading with a percent, then saving (the bytes are out, the server has not
 // said it has them), then sent after `accepted`. It goes when the answer
@@ -53,6 +60,9 @@ function writtenPath(text: string): string | null {
   if (!content) return null;
   return parseArtifact(content)?.path ?? null;
 }
+
+// No byte for this long on a stream that should send a keepalive every 20 s.
+export const STALE_MS = 45_000;
 
 // The progress toast of a turn that carries a file.
 export interface Upload {
@@ -93,6 +103,9 @@ export function useTurn(
   onDetachedRef.current = onDetached;
   const runningRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
+  // When a byte last arrived, and the way to drop a stream that has gone quiet.
+  const activityRef = useRef(0);
+  const dropRef = useRef<(() => void) | null>(null);
   const onRefusedRef = useRef(onRefused);
   onRefusedRef.current = onRefused;
   const onDoneRef = useRef(onDone);
@@ -106,6 +119,24 @@ export function useTurn(
     },
     [],
   );
+
+  // The page is back: a stream with no byte for STALE_MS is dead.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === "hidden") return;
+      if (runningRef.current && Date.now() - activityRef.current > STALE_MS) dropRef.current?.();
+    };
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("pageshow", check);
+    window.addEventListener("focus", check);
+    window.addEventListener("online", check);
+    return () => {
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("pageshow", check);
+      window.removeEventListener("focus", check);
+      window.removeEventListener("online", check);
+    };
+  }, []);
 
   // While the file is going out, closing the page loses it: ask the browser to
   // warn. A page that is hidden may be thrown away, so the draft is saved again.
@@ -142,6 +173,13 @@ export function useTurn(
       let streamed = "";
       // The id Joshua gave the turn, once it has accepted it.
       let acceptedId: string | null = null;
+      // The stream went quiet and was dropped on the page's return.
+      let dropped = false;
+      activityRef.current = Date.now();
+      dropRef.current = () => {
+        dropped = true;
+        controller.abort();
+      };
       const accept = () => {
         draftRef.current = null;
         void clearDraft(person, workspaceKey);
@@ -189,6 +227,9 @@ export function useTurn(
           personMsg.file,
           workspace,
           {
+            onActivity: () => {
+              activityRef.current = Date.now();
+            },
             onUploadProgress: (loaded, total) => {
               if (acceptedId !== null) return;
               const percent = Math.min(100, Math.floor((loaded / total) * 100));
@@ -198,7 +239,7 @@ export function useTurn(
           },
         );
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted && !dropped) return;
         setUploadState(null);
         if (acceptedId !== null && !(err instanceof ApiError)) {
           // Joshua has the turn. The answer will be in the history.
@@ -220,7 +261,8 @@ export function useTurn(
         }
       } finally {
         if (controllerRef.current === controller) controllerRef.current = null;
-        if (!controller.signal.aborted) {
+        if (dropRef.current && controllerRef.current === null) dropRef.current = null;
+        if (!controller.signal.aborted || dropped) {
           runningRef.current = false;
           setRunning(false);
           if (completed) {

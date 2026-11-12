@@ -13,8 +13,9 @@
 // (ArtifactCard.tsx). An old answer can carry a `speech` block, which is
 // taken out too and shows nowhere. Both blocks are part of the stored answer
 // text, so a reloaded history row goes through this same code path.
-// A person message that carried a photo or a PDF shows it: a photo as a
-// thumbnail that opens the full image, a PDF as a chip with its name. A
+// A person message that carried a photo or a PDF shows it above its bubble, at
+// the right like the bubble, with no frame of its own (a file with no caption
+// has no bubble at all): a photo as a thumbnail that opens the full image, a PDF as a chip with its name. A
 // message that this screen just sent shows the file it holds; a message from
 // the history shows the files the transcript row names, from the viewer's
 // files route. A turn that waits for another turn of the conversation says so.
@@ -22,6 +23,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import type { FileRef } from "../api/client";
 import type { ChatMessage } from "./store";
+import { useDocumentPanel } from "./DocumentPanel";
 import { ARTIFACT_INFO, SPEECH_INFO, splitFence } from "./blocks";
 import { ArtifactCard } from "./ArtifactCard";
 import { Markdown } from "./Markdown";
@@ -73,12 +75,25 @@ function FileChip({ name, url }: { name: string; url?: string }) {
   );
 }
 
-// A photo as a thumbnail that opens the full image, anything else as a chip.
+// A photo as a thumbnail. A tap shows it full size in the panel of the chat;
+// outside a chat screen the link opens the image in a new tab.
 function Attachment({ file }: { file: FileRef }) {
+  const panel = useDocumentPanel();
   if (file.mime.startsWith("image/") && file.url) {
+    const url = file.url;
     return (
-      <a className="thumb-link" href={file.url} target="_blank" rel="noopener noreferrer">
-        <img className="thumb" src={file.url} alt={file.name} loading="lazy" />
+      <a
+        className="thumb-link"
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => {
+          if (!panel.live) return;
+          e.preventDefault();
+          panel.open({ type: "image", image: { url, title: file.name } });
+        }}
+      >
+        <img className="thumb" src={url} alt={file.name} loading="lazy" />
       </a>
     );
   }
@@ -103,6 +118,9 @@ function LocalFile({ file }: { file: File }) {
   if (!url) return <FileChip name={file.name} />;
   return <img className="thumb" src={url} alt={file.name} />;
 }
+
+// The text that a file with no caption of its own gets (shared/attachments.py).
+const NO_CAPTION = "(file attached — no caption)";
 
 interface Props {
   message: ChatMessage;
@@ -176,6 +194,7 @@ export const Message = memo(function Message({ message, canRetry, onRetry }: Pro
   }
   // A failed row from the transcript: its text is the error.
   const failedRow = message.serverId !== undefined && message.state === "failed";
+  const hasFile = !!message.file || !!message.fileName || !!message.attachments?.length;
   const retryButton = !message.retried && (
     <button
       type="button"
@@ -191,17 +210,23 @@ export const Message = memo(function Message({ message, canRetry, onRetry }: Pro
   return (
     <article className={`msg ${isPerson ? "msg-person" : "msg-joshua"}`}>
       {isPerson ? (
-        <div className="bubble">
-          {message.file ? (
-            <LocalFile file={message.file} />
-          ) : (
-            message.fileName && <FileChip name={message.fileName} />
+        <>
+          {hasFile && (
+            <div className="msg-media">
+              {message.file ? (
+                <LocalFile file={message.file} />
+              ) : (
+                message.fileName && <FileChip name={message.fileName} />
+              )}
+              {message.attachments?.map((file) => (
+                <Attachment key={file.url ?? file.name} file={file} />
+              ))}
+            </div>
           )}
-          {message.attachments?.map((file) => (
-            <Attachment key={file.url ?? file.name} file={file} />
-          ))}
-          {message.text}
-        </div>
+          {(!hasFile || message.text !== NO_CAPTION) && message.text && (
+            <div className="bubble">{message.text}</div>
+          )}
+        </>
       ) : (
         <div className="reading">
           {failedRow ? (

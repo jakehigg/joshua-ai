@@ -590,3 +590,110 @@ describe("ChatPage pending turn", () => {
     expect(screen.queryByText("Joshua is working…")).toBeNull();
   });
 });
+
+describe("ChatPage when the page comes back", () => {
+  let now = 5_000_000;
+  beforeEach(() => {
+    now = 5_000_000;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  const SINCE = new Date().toISOString();
+  const RUNNING = { turnId: "t-1", state: "running", since: SINCE, text: "" };
+
+  // Each way a page can come back: the history is fetched again, and the
+  // working line shows, and the polling starts.
+  it.each([
+    ["visibilitychange", () => document.dispatchEvent(new Event("visibilitychange"))],
+    ["pageshow", () => window.dispatchEvent(new Event("pageshow"))],
+    ["online", () => window.dispatchEvent(new Event("online"))],
+    ["focus", () => window.dispatchEvent(new Event("focus"))],
+  ])("shows the working line when the page is back (%s)", async (_name, resume) => {
+    let pending: unknown = null;
+    const { historyCalls } = backend(() =>
+      json({ messages: rows([{ id: 1, role: "person", text: "photo", turnId: "t-1" }]), nextBefore: null, pending }),
+    );
+    open();
+    await advance(0);
+    expect(screen.queryByText("Joshua is working…")).toBeNull();
+    // The phone was away: the turn went on without this page.
+    pending = RUNNING;
+    now += FOCUS_REFRESH_MS + 1;
+    act(() => resume());
+    await advance(0);
+    expect(screen.getByText("Joshua is working…")).toBeTruthy();
+    const calls = historyCalls().length;
+    await advance(POLL_MS);
+    expect(historyCalls().length).toBeGreaterThan(calls);
+  });
+
+  // A stream that the phone killed: no error comes, and no byte.
+  function deadStream() {
+    const enc = new TextEncoder();
+    let history: () => Response = () => json({ messages: [], nextBefore: null, pending: null });
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://test");
+      if (url.pathname.endsWith("/history")) return history();
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(enc.encode('event: accepted\ndata: {"turn_id":"t-1"}\n\n'));
+          init?.signal?.addEventListener("abort", () =>
+            controller.error(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetch);
+    return { setHistory: (h: () => Response) => (history = h) };
+  }
+
+  it("drops a stream that went quiet when the page is back, and shows the pending turn", async () => {
+    const { setHistory } = deadStream();
+    open();
+    await advance(0);
+    fireEvent.change(screen.getByLabelText("Message to Joshua"), { target: { value: "rotate it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await advance(0);
+    // The local message and its working line are on screen.
+    expect(screen.getAllByText("rotate it")).toHaveLength(1);
+
+    setHistory(() =>
+      json({
+        messages: rows([{ id: 5, role: "person", text: "rotate it", turnId: "t-1" }]),
+        nextBefore: null,
+        pending: RUNNING,
+      }),
+    );
+    now += 60_000; // the phone slept for a minute, with no byte
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await advance(0);
+    await advance(10);
+    expect(screen.getByText("Joshua is working…")).toBeTruthy();
+    expect(screen.getAllByText("rotate it")).toHaveLength(1);
+    expect(screen.queryByText("the connection was lost")).toBeNull();
+  });
+
+  it("keeps a stream that is quiet for a short time", async () => {
+    deadStream();
+    open();
+    await advance(0);
+    fireEvent.change(screen.getByLabelText("Message to Joshua"), { target: { value: "hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await advance(0);
+    now += 10_000;
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await advance(10);
+    // Still streaming: the composer is busy.
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});

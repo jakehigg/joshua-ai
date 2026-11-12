@@ -1514,3 +1514,124 @@ html.vv-fit .chat-screen .ws-overlay {
     height: var(--vvh);
   }
 }
+
+
+/* Attachments. A photo has no frame of its own: it sits above the bubble, at
+   the right, with the radius of the bubble and a hairline that only shows
+   against a background of the same color. A file is a quiet row like an item. */
+.chat-screen .msg-person {
+  gap: 4px;
+}
+.chat-screen .msg-media {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: min(85%, 600px);
+}
+.chat-screen .thumb-link {
+  display: block;
+  margin: 0;
+  line-height: 0;
+  border-radius: var(--j-radius);
+  border-bottom-right-radius: 4px;
+  overflow: hidden;
+}
+.chat-screen .thumb {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(100%, 240px);
+  max-height: 240px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--j-radius);
+  border-bottom-right-radius: 4px;
+  object-fit: cover;
+  outline: 1px solid var(--j-line-soft);
+  outline-offset: -1px;
+}
+.chat-screen .thumb-link .thumb {
+  border-radius: 0;
+}
+.chat-screen .file-chip,
+.chat-screen .file-chip.sent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--j-radius-sm);
+  background: var(--j-surface-2);
+  color: inherit;
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+.chat-screen .file-chip .chip-remove {
+  min-width: 24px;
+  min-height: 24px;
+}
+.chat-screen .attached {
+  max-width: var(--chat-width);
+  margin: 0 auto 6px;
+}
+.chat-screen .preview-thumb {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+.chat-screen .preview-thumb img {
+  display: block;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--j-radius-sm);
+  object-fit: cover;
+  outline: 1px solid var(--j-line-soft);
+  outline-offset: -1px;
+}
+.chat-screen .preview-thumb .chip-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 2px solid var(--j-bg);
+  border-radius: 50%;
+  background: var(--j-text);
+  color: var(--j-bg);
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+
+/* The image view of the panel, and the thumbnail of an item. */
+.chat-screen .image-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px max(12px, env(safe-area-inset-right)) 16px max(12px, env(safe-area-inset-left));
+  overflow: auto;
+}
+.chat-screen .image-view img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--j-radius-sm);
+}
+.chat-screen .item-thumb {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+  outline: 1px solid var(--j-line-soft);
+  outline-offset: -1px;
+}

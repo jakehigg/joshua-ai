@@ -170,3 +170,36 @@ describe("Composer attachment", () => {
     expect(MAX_ROWS).toBe(5);
   });
 });
+
+describe("the file preview", () => {
+  beforeEach(() => pointer(true));
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function pick(file: File) {
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+  }
+
+  it("shows a photo as a thumbnail with the remove button on its corner", () => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:p", revokeObjectURL: vi.fn() }));
+    render(<Composer onSend={vi.fn()} busy={false} />);
+    pick(new File(["x"], "photo.png", { type: "image/png" }));
+    const thumb = document.querySelector(".preview-thumb") as HTMLElement;
+    expect(thumb.querySelector("img")?.getAttribute("src")).toBe("blob:p");
+    const remove = thumb.querySelector("button.chip-remove") as HTMLButtonElement;
+    fireEvent.click(remove);
+    expect(document.querySelector(".preview-thumb")).toBeNull();
+  });
+
+  it("shows a PDF as a chip with the same button", () => {
+    render(<Composer onSend={vi.fn()} busy={false} />);
+    pick(new File(["%PDF"], "bill.pdf", { type: "application/pdf" }));
+    expect(screen.getByText("bill.pdf")).toBeTruthy();
+    expect(document.querySelector(".preview-thumb")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove the file" }));
+    expect(screen.queryByText("bill.pdf")).toBeNull();
+  });
+});

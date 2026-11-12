@@ -34,8 +34,15 @@ export interface CardTarget {
   external: string | null;
 }
 
+export interface ImageTarget {
+  /** A same-origin path of the viewer that serves the image. */
+  url: string;
+  title: string;
+}
+
 export type ItemTarget =
   | { type: "document"; artifact: Artifact }
+  | { type: "image"; image: ImageTarget }
   | { type: "page"; page: PageTarget }
   | { type: "card"; card: CardTarget };
 
@@ -86,6 +93,19 @@ function fallbackPath(item: WorkspaceItem): string | null {
   return null;
 }
 
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|heic|avif)$/i;
+
+/** True for a path or address that ends in an image extension. */
+export function isImagePath(text: string): boolean {
+  return IMAGE_EXT.test(text.trim().split("?")[0] ?? "");
+}
+
+/** A `file` item that is a photo the viewer can serve: it has a viewer path. */
+export function isImageItem(item: WorkspaceItem): boolean {
+  const url = item.url?.trim() ?? "";
+  return item.kind === "file" && url.startsWith("/") && !url.startsWith("//") && (isImagePath(url) || isImagePath(item.ref));
+}
+
 export function itemTarget(item: WorkspaceItem): ItemTarget | null {
   const title = item.title.trim() || item.ref;
   const kindLabel = kindName(item.kind);
@@ -93,6 +113,8 @@ export function itemTarget(item: WorkspaceItem): ItemTarget | null {
   const raw = item.url?.trim() ?? "";
   const href = safeHref(raw);
   if (raw && !href) return null;
+
+  if (isImageItem(item) && href) return { type: "image", image: { url: href, title } };
 
   const artifact =
     (isDoc ? documentOf(item.ref, item.kind) : null) ?? (href && viewerPath(href) ? documentOf(href, item.kind) : null);

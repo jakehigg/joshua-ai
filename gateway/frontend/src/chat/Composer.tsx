@@ -16,7 +16,9 @@
 // file attached, a message with no text can be sent.
 
 import {
+  useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -57,6 +59,48 @@ function ClipIcon() {
         d="M16.5 6.5v8.75a4.5 4.5 0 0 1-9 0V7a3 3 0 0 1 6 0v8.25a1.5 1.5 0 0 1-3 0V7.5H9v7.75a3 3 0 0 0 6 0V7a4.5 4.5 0 0 0-9 0v8.25a6 6 0 0 0 12 0V6.5h-1.5Z"
       />
     </svg>
+  );
+}
+
+// The chosen file above the box: a photo as a small rounded thumbnail with the
+// remove button on its corner, anything else as a chip with the same button.
+function Preview({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const url = useMemo(
+    () =>
+      file.type.startsWith("image/") && typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(file)
+        : null,
+    [file],
+  );
+  useEffect(
+    () => () => {
+      if (url) URL.revokeObjectURL(url);
+    },
+    [url],
+  );
+  const remove = (
+    <button type="button" className="chip-remove" onClick={onRemove} aria-label="Remove the file">
+      ✕
+    </button>
+  );
+  if (url) {
+    return (
+      <div className="attached">
+        <span className="preview-thumb">
+          <img src={url} alt={file.name} />
+          {remove}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="attached">
+      <span className="file-chip">
+        <span aria-hidden="true">📎</span>
+        <span className="file-name">{file.name}</span>
+        {remove}
+      </span>
+    </div>
   );
 }
 
@@ -128,17 +172,7 @@ export function Composer({ onSend, busy }: Props) {
 
   return (
     <form className="composer" onSubmit={onSubmit}>
-      {file && (
-        <div className="attached">
-          <span className="file-chip">
-            <span aria-hidden="true">📎</span>
-            <span className="file-name">{file.name}</span>
-            <button type="button" className="chip-remove" onClick={removeFile} aria-label="Remove the file">
-              ✕
-            </button>
-          </span>
-        </div>
-      )}
+      {file && <Preview file={file} onRemove={removeFile} />}
       <div className="composer-inner">
         <label className="attach" title="Attach a photo or a PDF">
           <ClipIcon />

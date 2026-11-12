@@ -140,6 +140,13 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   const polling = !turn.running && (view.pending !== null || detached !== null);
   const history = useHistory(person, setView, turn.isRunning, showToast, workspace, polling);
   refreshRef.current = history.refresh;
+  // The stream is gone: look for the turn now, not at the first poll.
+  const { refresh: refreshHistory } = history;
+  useEffect(() => {
+    if (detached === null) return undefined;
+    const timer = setTimeout(refreshHistory, 0);
+    return () => clearTimeout(timer);
+  }, [detached, refreshHistory]);
   useEffect(() => {
     if (detached === null) return undefined;
     if (view.pending !== null || view.messages.some((m) => m.role === "joshua" && m.turnId === detached)) {

@@ -1,8 +1,9 @@
 // The server-backed history of one chat screen.
 //
 // On open it loads the newest page. It refreshes (loads the newest page
-// again and reconciles) when the tab becomes visible, on window focus, and
-// after a turn's `done`. A visibility or focus refresh does not run while a
+// again and reconciles) when the tab becomes visible, on window focus, on
+// pageshow (a page back from the back-forward cache), when the network is back
+// (`online`), and after a turn's `done`. A visibility or focus refresh does not run while a
 // turn streams, and runs at most once per FOCUS_REFRESH_MS. A new refresh
 // stops the one before it. "Load earlier" adds the page before the oldest
 // row. A failed first load shows its error with Retry; a later refresh that
@@ -104,7 +105,13 @@ export function useHistory(
     void load();
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("focus", wake);
+    // A page that comes back from the back-forward cache, or a phone that is
+    // online again, has not seen the last minutes.
+    window.addEventListener("pageshow", wake);
+    window.addEventListener("online", wake);
     return () => {
+      window.removeEventListener("pageshow", wake);
+      window.removeEventListener("online", wake);
       document.removeEventListener("visibilitychange", wake);
       window.removeEventListener("focus", wake);
       latest.current?.abort();

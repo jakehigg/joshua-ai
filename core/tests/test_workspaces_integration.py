@@ -725,3 +725,19 @@ async def test_the_workspaces_source_is_indexed_for_its_owner_and_hidden_from_re
     await seeded.update_workspace(ws.id, status="archived")
     await indexer.reindex()
     assert await search(store, "alex", vec, k=3, min_sim=0.5, kinds=("workspace",)) == []
+
+
+async def test_a_file_item_added_twice_is_one_item_and_keeps_its_title(seeded) -> None:
+    ws = await seeded.create_workspace("alex", "Trip")
+    path = "wiki/attachments/2026/11/epaper-1.jpg"
+    url = "/api/v1/files/wiki/attachments/2026/11/epaper-1.jpg"
+    first = await seeded.add_workspace_item(
+        ws.id, "file", path, "an e-paper display", url=url, added_by="person", rename=False
+    )
+    # The agent adds the same file with no title of its own: nothing changes.
+    again = await seeded.add_workspace_item(
+        ws.id, "file", path, path, added_by="tool:files", rename=False
+    )
+    assert again.id == first.id
+    items = await seeded.list_workspace_items(ws.id)
+    assert [(i.title, i.url) for i in items] == [("an e-paper display", url)]

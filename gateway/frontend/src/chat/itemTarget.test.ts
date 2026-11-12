@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceItem } from "../api/workspaces";
-import { itemTarget } from "./itemTarget";
+import { isImageItem, itemTarget } from "./itemTarget";
 
 function item(over: Partial<WorkspaceItem>): WorkspaceItem {
   return {
@@ -81,5 +81,24 @@ describe("itemTarget", () => {
   it("gives no target for an unsafe url", () => {
     expect(itemTarget(item({ url: "javascript:alert(1)" }))).toBeNull();
     expect(itemTarget(item({ url: "//evil.test/x" }))).toBeNull();
+  });
+});
+
+describe("a photo item", () => {
+  const url = "/api/v1/files/wiki/attachments/2026/11/epaper.jpg";
+
+  it("opens as an image in the panel", () => {
+    expect(itemTarget(item({ kind: "file", ref: "wiki/attachments/2026/11/epaper.jpg", title: "Display", url }))).toEqual({
+      type: "image",
+      image: { url, title: "Display" },
+    });
+    expect(isImageItem(item({ kind: "file", ref: "x.PNG", url }))).toBe(true);
+  });
+
+  it("is not an image without a viewer path, or for another kind, or another file type", () => {
+    expect(isImageItem(item({ kind: "file", ref: "a.jpg", url: null }))).toBe(false);
+    expect(isImageItem(item({ kind: "file", ref: "a.jpg", url: "https://x.test/a.jpg" }))).toBe(false);
+    expect(isImageItem(item({ kind: "link", ref: "a.jpg", url }))).toBe(false);
+    expect(isImageItem(item({ kind: "file", ref: "bill.pdf", url: "/api/v1/files/wiki/bill.pdf" }))).toBe(false);
   });
 });
