@@ -1136,6 +1136,7 @@ connections, and the history continues. The turn in progress is not stopped.
 | Key | Default | Meaning |
 |---|---|---|
 | `core.mcp_replace_seconds` | `300` | At most one such replacement per session in this many seconds, so a server that fails again and again cannot cause a reconnect storm. `0` turns the replacement off. |
+| `core.context_cap` | `150000` | Input tokens over which a turn in a conversation that is not a workspace ends its SDK session. The next turn starts a new session and gets the last 10 rows of the thread. `0` turns the cap off. A workspace uses `workspaces.context_cap`. |
 
 ## modules
 

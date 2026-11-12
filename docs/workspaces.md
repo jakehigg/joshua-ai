@@ -106,6 +106,10 @@ When the input of a workspace turn is over `workspaces.context_cap` (default
 starts new, from the block and the last 10 rows. The input is the size of the
 last model call of the turn.
 
+Every other conversation has the same cap in `core.context_cap`. See
+[config.md](config.md#core). A workspace keeps its own setting, so each can
+change on its own.
+
 The nightly rollover skips workspace conversations. The nightly reflection
 still reads them.
 

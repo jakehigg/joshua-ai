@@ -458,15 +458,98 @@ async def test_a_turn_under_the_cap_keeps_the_session(tmp_path, monkeypatch):
     assert repo.cleared == []
 
 
-async def test_the_cap_never_touches_a_normal_chat(tmp_path, monkeypatch):
+def _general_manager(repo, tmp_path, cap: int | None = None):
+    settings = make_settings(mcp=MCP)
+    if cap is not None:
+        settings.core.context_cap = cap
+    return make_manager(repo, tmp_path, settings)
+
+
+_CLI = Channel(id="cli:alex", channel_type="cli")
+
+
+async def test_a_general_chat_over_the_cap_resets(tmp_path, monkeypatch):
     install_fake_sdk(monkeypatch)
     from joshua_core.engine import agent
 
     monkeypatch.setattr(agent, "ClaudeSDKClient", _client_with_context(900_000))
     repo = WsRepo(_ws())
-    channel = Channel(id="cli:alex", channel_type="cli")
-    await make_manager(repo, tmp_path).run_turn(channel, _conversation(), "big turn")
+    manager = _general_manager(repo, tmp_path)
+    await manager.run_turn(_CLI, _conversation(), "big turn")
+    assert repo.cleared == ["c-ws"]
+    mc = manager._pool["c-ws"]
+    assert mc.replace_pending and mc.replace_reason == "context cap"
+    assert mc.conversation.sdk_session_id is None
+
+
+async def test_a_general_chat_under_the_cap_keeps_the_session(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", _client_with_context(100_000))
+    repo = WsRepo(_ws())
+    manager = _general_manager(repo, tmp_path)
+    await manager.run_turn(_CLI, _conversation(), "small turn")
     assert repo.cleared == []
+    assert not manager._pool["c-ws"].replace_pending
+
+
+async def test_a_disabled_cap_never_resets(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", _client_with_context(900_000))
+    repo = WsRepo(_ws())
+    await _general_manager(repo, tmp_path, cap=0).run_turn(_CLI, _conversation(), "big turn")
+    assert repo.cleared == []
+
+
+async def test_an_unknown_context_size_keeps_the_session(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    repo = WsRepo(_ws())
+    manager = _general_manager(repo, tmp_path)
+    result = SimpleNamespace(context_tokens=None)
+    await manager.run_turn(_CLI, _conversation(), "turn")
+    await manager._apply_context_cap(manager._pool["c-ws"], _CLI, result)
+    assert repo.cleared == []
+
+
+async def test_the_workspace_cap_ignores_the_general_cap(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", _client_with_context(6000))
+    repo = WsRepo(_ws())
+    manager = _general_manager(repo, tmp_path, cap=0)
+    await manager.run_turn(_channel(), _conversation(), "big turn")
+    assert repo.cleared == ["c-ws"]
+    assert manager._pool["c-ws"].replace_reason == "workspace context cap"
+
+
+async def test_the_fresh_session_gets_the_last_rows(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    prompts: list[str] = []
+
+    class Client(_client_with_context(900_000)):
+        async def query(self, prompt):
+            prompts.append(prompt)
+
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", Client)
+    repo = WsRepo(_ws())
+    repo.tail = [
+        {"direction": "in", "content": "the garden plan", "status": "ok"},
+        {"direction": "out", "content": "ok, noted", "status": "ok"},
+    ]
+    manager = _general_manager(repo, tmp_path)
+    await manager.run_turn(_CLI, _conversation(), "big turn")
+    assert "The last rows of this thread" not in prompts[0]
+    assert manager._pool["c-ws"].carry_recent
+    await manager.run_turn(_CLI, _conversation(), "next")
+    assert "The last rows of this thread" in prompts[1]
+    assert "- alex: the garden plan" in prompts[1]
+    assert "- you: ok, noted" in prompts[1]
 
 
 # --- RAG ---------------------------------------------------------------------------------

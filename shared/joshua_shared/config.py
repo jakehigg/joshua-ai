@@ -309,6 +309,11 @@ class Core(_Model):
     # many seconds at most, so a server that keeps failing cannot cause a
     # reconnect storm. 0 or less turns the replacement off.
     mcp_replace_seconds: int = 300
+    # Input tokens over which a turn in a conversation that is not a workspace
+    # ends its SDK session. The next turn starts a new session from the last
+    # rows of the thread. 0 turns the cap off. A workspace uses
+    # ``workspaces.context_cap``.
+    context_cap: int = Field(default=150_000, ge=0)
     # None uses the prompts packaged in the image. Set a path only to read a
     # prompts directory mounted into the container.
     prompts_dir: str | None = None

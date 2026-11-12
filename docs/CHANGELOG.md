@@ -18,6 +18,11 @@ with the images and the packaged chart, are at
   document routes the chat calls. `/style.css` and `/ui/<file>` are gone; the
   stylesheet and the images are files of the app. An image with no build of
   the app serves the JSON API alone.
+- **A long chat starts a new session at a size cap.** When the input of a turn
+  in a conversation that is not a workspace is over `core.context_cap` (default
+  150000 tokens), core forgets the SDK session after the turn. The next turn
+  starts new and gets the last 10 rows of the thread. `0` turns the cap off.
+  Workspaces keep `workspaces.context_cap`.
 - **A photo in a workspace chat is an item of the workspace.** When a turn on a
   workspace thread carries a file, core records each filed attachment as a
   `file` item (added by the person; the title is what the describer says the

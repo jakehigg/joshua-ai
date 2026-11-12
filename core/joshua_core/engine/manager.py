@@ -136,6 +136,9 @@ class _Managed:
     replaced_at: float | None = None
     # Why the session is marked for replacement, for the log line.
     replace_reason: str = "mcp server failed"
+    # Set by the context cap on a conversation that is not a workspace. The
+    # next turn adds the last rows of the thread to its prompt, then clears it.
+    carry_recent: bool = False
     # The model, the server, and the environment the session was built with.
     inference: ResolvedInference | None = None
     # True while the SDK session holds the history of the thread: it resumed
@@ -994,6 +997,14 @@ class ConversationManager:
                 continue
             if note:
                 provider_notes.append(note)
+        if channel.channel_type != WORKSPACE_CHANNEL_TYPE:
+            try:
+                carried = await self._carried_rows_note(mc, ctx)
+            except Exception as e:  # noqa: BLE001 — carrying rows never fails a turn
+                logger.warning({"message": "carry rows failed", "error": str(e)})
+                carried = None
+            if carried:
+                provider_notes.append(carried)
         channel_note = self._channel_note(mc, channel)
         prompt = "\n\n".join(
             p for p in (preamble, framing, channel_note, *provider_notes, attach_note, body) if p
@@ -1174,30 +1185,57 @@ class ConversationManager:
         )
 
     async def _apply_context_cap(self, mc: _Managed, channel: Channel, result: TurnResult) -> None:
-        """After a workspace turn whose input went over ``workspaces.context_cap``,
-        forget the SDK session. The next turn starts a new one, from the
-        workspace block and the last rows of the thread. A channel that is not a
-        workspace is never touched."""
-        if channel.channel_type != WORKSPACE_CHANNEL_TYPE:
-            return
+        """After a turn whose input went over the context cap, forget the SDK
+        session. The next turn starts a new one. A workspace uses
+        ``workspaces.context_cap`` and restarts from the workspace block and the
+        last rows of the thread. Any other conversation uses ``core.context_cap``
+        (0 is off) and restarts from the last rows of the thread."""
+        is_workspace = channel.channel_type == WORKSPACE_CHANNEL_TYPE
+        cap = (
+            self._settings.workspaces.context_cap
+            if is_workspace
+            else self._settings.core.context_cap
+        )
         # Without the size of the last call, the summed usage would count the
         # cache reads of every call of the turn again. Do not guess: keep the
         # session.
         used = result.context_tokens
-        cap = self._settings.workspaces.context_cap
-        if used is None or used <= cap:
+        if cap <= 0 or used is None or used <= cap:
             return
         await self._repo.clear_sdk_session(mc.conversation.id)
         mc.conversation = replace(mc.conversation, sdk_session_id=None)
         mc.replace_pending = True
-        mc.replace_reason = "workspace context cap"
+        if is_workspace:
+            mc.replace_reason = "workspace context cap"
+            message = "workspace context cap reached; next turn starts fresh"
+        else:
+            mc.replace_reason = "context cap"
+            mc.carry_recent = True
+            message = "context cap reached; next turn starts fresh"
         logger.info(
             {
-                "message": "workspace context cap reached; next turn starts fresh",
+                "message": message,
                 "conversation_id": mc.conversation.id,
                 "input_tokens": used,
                 "cap": cap,
             }
+        )
+
+    async def _carried_rows_note(self, mc: _Managed, ctx: TurnCtx) -> str | None:
+        """For the first turn after the context cap: the last rows of the
+        thread, because the new session has no history. A workspace block
+        carries its own rows, so a workspace never takes this note."""
+        if not mc.carry_recent:
+            return None
+        mc.carry_recent = False
+        rows = await self._repo.transcript_tail(
+            ctx.conversation.id, workspace_engine.BLOCK_RECENT_ROWS
+        )
+        lines = workspace_engine.recent_lines(rows, ctx.person_id)
+        if not lines:
+            return None
+        return "\n".join(
+            ["The last rows of this thread, because the session starts fresh:", *lines]
         )
 
     async def _run_with_resume_retry(
