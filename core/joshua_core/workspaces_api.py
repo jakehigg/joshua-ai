@@ -21,6 +21,8 @@ checked before the body is read. A ``person`` that is not a member of
 - ``GET`` and ``POST /v1/workspaces/{slug}/items`` list and add items.
   ``DELETE /v1/workspaces/{slug}/items/{id}`` removes one and
   ``PATCH /v1/workspaces/{slug}/items/{id}`` changes ``pinned`` or ``seen``.
+- ``GET /v1/workspaces/options`` gives the servers and the models that the
+  person may pick.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
 
 ``servers`` must be among the servers the person may use. ``model`` must be in
@@ -260,6 +262,24 @@ def build_workspaces_router() -> APIRouter:
         )
         logger.info({"message": "workspace created", "workspace": workspace.id})
         return JSONResponse(workspace_json(workspace), status_code=201)
+
+    @router.get(WORKSPACES_PATH + "/options")
+    async def get_options(request: Request):  # type: ignore[no-untyped-def]
+        """What a person may pick for a workspace: the servers they may use (a
+        name and one line) and the models in ``workspaces.models``. An empty
+        ``models`` means any text, and the list is empty."""
+        denied, person_id, _ = await _scope(request)
+        if denied is not None:
+            return denied
+        settings = request.app.state.ctx.settings
+        servers = [
+            {
+                "name": name,
+                "description": (settings.mcp[name].description or "").strip() or name,
+            }
+            for name in allowed_gateway_servers(settings, person_id)
+        ]
+        return JSONResponse({"servers": servers, "models": list(settings.workspaces.models)})
 
     @router.get(WORKSPACES_PATH + "/{slug}")
     async def get_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]

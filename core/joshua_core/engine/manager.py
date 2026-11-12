@@ -114,6 +114,11 @@ class _Managed:
     # For a workspace: the model and the servers it was built from. A change
     # rebuilds the session on the next turn.
     workspace_sig: tuple[Any, ...] | None = None
+    # The channel the system prompt was built for, and the channel of the last
+    # turn. A thread that several channels share (the main thread) gets a note
+    # in the turn when its channel is not the one the prompt names.
+    built_channel: str = ""
+    last_turn_channel: str = ""
 
 
 @dataclass
@@ -528,6 +533,7 @@ class ConversationManager:
                 lock=asyncio.Lock(),
                 last_used=monotonic(),
                 built_at=monotonic(),
+                built_channel=channel.id,
             )
             built.apply(mc)
             self._pool[conversation.id] = mc
@@ -561,6 +567,7 @@ class ConversationManager:
         old = mc.session
         built = await self._build_session(channel, mc.conversation, mc.conversation.sdk_session_id)
         built.apply(mc)
+        mc.built_channel = channel.id
         mc.built_at = monotonic()
         mc.replace_pending = False
         await old.close()
@@ -756,7 +763,11 @@ class ConversationManager:
         speaker: str | None = None,
         person_id: str | None = None,
         attachments: list[Attachment] | None = None,
+        pull_only: bool = False,
     ) -> TurnResult:
+        """Run one turn. ``pull_only`` marks a turn from a channel that only
+        pulls (the viewer) on a thread that another channel owns: the turn must
+        not move ``last_channel_id``, so a reminder still goes to the phone."""
         turn_id = _new_turn_id()
         t_start = monotonic()
         mc = await self._get_or_create(channel, conversation)
@@ -797,8 +808,9 @@ class ConversationManager:
             note = await provider(ctx)
             if note:
                 provider_notes.append(note)
+        channel_note = self._channel_note(mc, channel)
         prompt = "\n\n".join(
-            p for p in (preamble, framing, *provider_notes, attach_note, body) if p
+            p for p in (preamble, framing, channel_note, *provider_notes, attach_note, body) if p
         )
 
         # Time-to-first-output: stamp the first streamed delta even when the
@@ -869,7 +881,7 @@ class ConversationManager:
                 await self._repo.set_sdk_session(
                     conversation.id,
                     result.session_id,
-                    last_channel_id=channel.id,
+                    last_channel_id=None if pull_only else channel.id,
                     inference_endpoint=resolved.endpoint,
                 )
                 mc.conversation = replace(
@@ -878,7 +890,9 @@ class ConversationManager:
                     inference_endpoint=resolved.endpoint,
                 )
             else:
-                await self._repo.touch_conversation(conversation.id, last_channel_id=channel.id)
+                await self._repo.touch_conversation(
+                    conversation.id, last_channel_id=None if pull_only else channel.id
+                )
 
             metrics = {
                 "turn_id": turn_id,
@@ -942,6 +956,27 @@ class ConversationManager:
                 await self._apply_context_cap(mc, channel, result)
             await self._check_mcp_failed(mc)
             return result
+
+    @staticmethod
+    def _channel_note(mc: _Managed, channel: Channel) -> str | None:
+        """A note for a turn whose channel is not the one the system prompt names.
+
+        The prompt names the channel of the turn that built the session, and
+        the snippets of ``user/`` apply to every turn. When one thread takes
+        turns from several channels, this note says which channel speaks now,
+        on a switch and on each turn off the built channel, so the guidance for
+        that channel applies and the guidance for another channel does not.
+        """
+        switched = bool(mc.last_turn_channel) and mc.last_turn_channel != channel.id
+        mc.last_turn_channel = channel.id
+        if channel.id == mc.built_channel and not switched:
+            return None
+        return (
+            f"[This message arrives on channel `{channel.id}`. It replaces the channel "
+            "named in the system prompt. Pass this channel id to tools that ask for one. "
+            "Follow the guidance for this channel only. A format rule for another "
+            "channel does not apply to this reply.]"
+        )
 
     async def _apply_context_cap(self, mc: _Managed, channel: Channel, result: TurnResult) -> None:
         """After a workspace turn whose input went over ``workspaces.context_cap``,

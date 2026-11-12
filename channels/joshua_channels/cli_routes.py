@@ -310,6 +310,7 @@ def build_cli_router() -> APIRouter:
             handle=Handle(type=CHANNEL_TYPE, id=person_id),
             text=text,
             attachments=attachments,
+            thread=None if submission.workspace else "main",
         )
 
         async def stream():  # type: ignore[no-untyped-def]
@@ -380,6 +381,8 @@ def build_cli_router() -> APIRouter:
 
         workspace = _workspace_ref(request.query_params.get("workspace"))
         params = {"channel": _channel_id(person_id, workspace), "person": person_id}
+        if not workspace:
+            params["thread"] = "main"  # the person's main thread, as for a turn
         for key in ("limit", "before"):
             value = request.query_params.get(key)
             if value is not None:

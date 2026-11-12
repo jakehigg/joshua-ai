@@ -54,10 +54,16 @@ WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "sta
 _SLUG_MAX = 48
 
 
+# Slugs that a route of /v1/workspaces uses.
+RESERVED_SLUGS = frozenset({"options"})
+
+
 def slugify(title: str) -> str:
     """A lower-case slug of ``title``: letters and digits, joined by ``-``."""
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:_SLUG_MAX].strip("-")
-    return slug or "workspace"
+    slug = slug or "workspace"
+    # ``options`` is a route of /v1/workspaces, so no workspace may take it.
+    return f"{slug}-1" if slug in RESERVED_SLUGS else slug
 
 
 def _channel(row: dict[str, Any]) -> Channel:
@@ -1297,8 +1303,8 @@ class Repo:
 
     async def main_conversation(self, person_id: str) -> Conversation | None:
         """The person's main thread: the most recently active conversation that
-        is not a workspace and not a voice thread, on a direct channel
-        (``session_mode`` ``per_person``). Send to
+        is not a workspace, a terminal (``cli``) or a voice thread, on a direct
+        channel (``session_mode`` ``per_person``). Send to
         ``conversation.last_channel_id or conversation.channel_id``."""
         async with self._pool.connection() as conn:
             cur = await conn.execute(
@@ -1307,7 +1313,7 @@ class Repo:
                 JOIN channels ch ON ch.id = c.channel_id
                 WHERE c.person_id = %s
                   AND ch.session_mode = 'per_person'
-                  AND ch.channel_type NOT IN ('workspace', 'voice')
+                  AND ch.channel_type NOT IN ('workspace', 'cli', 'voice')
                 ORDER BY c.last_active_at DESC
                 LIMIT 1
                 """,

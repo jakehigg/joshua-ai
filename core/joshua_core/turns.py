@@ -77,6 +77,9 @@ class Resolution:
     person: Person | None
     is_group: bool
     speaker: str | None
+    # True for a viewer turn on the main thread of another channel: the turn
+    # must not move the conversation's last channel.
+    pull_only: bool = False
 
 
 class TurnService:
@@ -145,7 +148,17 @@ class TurnService:
             assert channel is not None
 
         conversation_person = None if is_group else (person.id if person else None)
-        conversation = await self._repo.get_or_create_conversation(channel.id, conversation_person)
+        conversation = None
+        pull_only = False
+        if event.thread == "main" and handle.type == "cli" and person is not None and not is_group:
+            # The viewer joins the person's main thread. Without one, the
+            # terminal conversation stays the fallback.
+            conversation = await self._repo.main_conversation(person.id)
+            pull_only = conversation is not None
+        if conversation is None:
+            conversation = await self._repo.get_or_create_conversation(
+                channel.id, conversation_person
+            )
 
         speaker = None
         if is_group:
@@ -157,6 +170,7 @@ class TurnService:
             person=person,
             is_group=is_group,
             speaker=speaker,
+            pull_only=pull_only,
         )
 
     async def _resolve_workspace(
@@ -205,6 +219,7 @@ class TurnService:
             speaker=resolution.speaker,
             person_id=person_id,
             attachments=self._engine_attachments(event),
+            **({"pull_only": True} if resolution.pull_only else {}),
         )
 
     # --- POST /v1/turns ----------------------------------------------------

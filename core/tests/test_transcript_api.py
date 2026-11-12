@@ -98,6 +98,28 @@ def test_the_core_app_serves_the_route() -> None:
     assert TRANSCRIPT_PATH in build_app().openapi()["paths"]
 
 
+# --- the main thread ---------------------------------------------------------
+
+
+def test_the_main_thread_reads_the_main_conversation(client: TestClient) -> None:
+    main = Conversation(id="dm-1", channel_id="imessage:+1", person_id="alex")
+
+    async def main_conversation(person_id: str) -> Any:
+        return main if person_id == "alex" else None
+
+    client.repo.main_conversation = main_conversation
+    body = _get(client, thread="main").json()
+    assert body["conversation_id"] == "dm-1"
+    # Without the field, and without a main conversation, the terminal one is read.
+    assert _get(client).json()["conversation_id"] == "conv-1"
+    client.repo.main_conversation = lambda person_id: _none()
+    assert _get(client, thread="main").json()["conversation_id"] == "conv-1"
+
+
+async def _none() -> None:
+    return None
+
+
 # --- auth ------------------------------------------------------------------
 
 

@@ -367,6 +367,7 @@ async def test_a_json_turn_may_name_a_workspace(tmp_path: Path) -> None:
     assert event.channel == "workspace:solar"
     assert event.chat.kind == "dm" and event.chat.id == "alex"
     assert event.handle.type == "cli" and event.handle.id == "alex"
+    assert event.thread is None  # a workspace is its own thread
 
 
 async def test_a_multipart_turn_may_name_a_workspace(tmp_path: Path) -> None:
@@ -392,6 +393,7 @@ async def test_a_turn_without_a_workspace_stays_on_the_terminal(tmp_path: Path) 
             headers=_bearer(LAPTOP_TOKEN),
         )
     assert core.events[0].channel == "cli:alex"
+    assert core.events[0].thread == "main"  # the terminal and the viewer join the main thread
 
 
 # --- outbound --------------------------------------------------------------
@@ -587,6 +589,7 @@ async def test_transcript_asks_core_with_the_channels_token(tmp_path: Path) -> N
     assert dict(request.url.params) == {
         "channel": "cli:alex",
         "person": "alex",
+        "thread": "main",
         "limit": "20",
         "before": "99",
     }
@@ -601,7 +604,11 @@ async def test_transcript_reads_a_workspace_thread(tmp_path: Path) -> None:
 async def test_transcript_sends_no_limit_or_before_it_was_not_given(tmp_path: Path) -> None:
     core = TranscriptCore()
     await _read(_make_transcript(tmp_path, core), {"person": "gwen"})
-    assert dict(core.requests[0].url.params) == {"channel": "cli:gwen", "person": "gwen"}
+    assert dict(core.requests[0].url.params) == {
+        "channel": "cli:gwen",
+        "person": "gwen",
+        "thread": "main",
+    }
 
 
 async def test_transcript_passes_core_status_through(tmp_path: Path) -> None:

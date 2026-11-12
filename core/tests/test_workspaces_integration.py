@@ -42,6 +42,7 @@ mcp:
   tasks:
     type: http
     url: "http://tasks/mcp"
+    description: Tasks and projects
   github:
     type: http
     url: "http://gh/mcp"
@@ -229,9 +230,11 @@ async def test_main_conversation_is_the_latest_direct_non_workspace_thread(seede
     await seeded.upsert_channel("telegram:1", "telegram", session_mode="per_person")
     await seeded.upsert_channel("telegram:-9", "telegram", session_mode="shared")
     await seeded.upsert_channel("voice:kitchen", "voice", session_mode="per_person")
+    await seeded.upsert_channel("cli:alex", "cli", session_mode="per_person")
     old = await seeded.get_or_create_conversation("telegram:1", "alex")
     await seeded.get_or_create_conversation("telegram:-9", None)
     await seeded.get_or_create_conversation("voice:kitchen", "alex")
+    await seeded.get_or_create_conversation("cli:alex", "alex")  # the terminal is never main
     await seeded.touch_conversation(
         (await seeded.find_conversation(f"workspace:{ws.id}", "alex")).id
     )
@@ -529,3 +532,25 @@ async def test_usage_group_conversation(client, seeded) -> None:
     assert "groups" in default and "conversations" not in default  # unchanged without group
     bad = await client.get("/v1/usage", params={"group": "person"}, headers=_h())
     assert bad.status_code == 422
+
+
+async def test_options_list_the_servers_of_the_person_and_the_models(client) -> None:
+    resp = await client.get("/v1/workspaces/options", params={"person": "alex"}, headers=_h())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["models"] == ["model-a", "model-b"]
+    # A server with no description shows its name. A private server is hidden.
+    assert body["servers"] == [
+        {"name": "tasks", "description": "Tasks and projects"},
+        {"name": "github", "description": "github"},
+    ]
+    mia = await client.get("/v1/workspaces/options", params={"person": "mia"}, headers=_h())
+    assert [s["name"] for s in mia.json()["servers"]] == ["tasks", "github", "private"]
+    assert (
+        await client.get("/v1/workspaces/options", params={"person": "alex"})
+    ).status_code == 401
+
+
+async def test_a_workspace_titled_options_does_not_take_the_route_name(client) -> None:
+    ws = await _create(client, title="Options")
+    assert ws["slug"] == "options-1"

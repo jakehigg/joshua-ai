@@ -809,6 +809,9 @@ class McpServer(_Model):
     tools: McpToolPolicy | None = None
     identities: dict[str, McpIdentity] = {}
     options: dict[str, Any] = {}
+    # One line that says what the server is for. The workspace dialog of the
+    # viewer shows it beside the name. Empty shows the name alone.
+    description: str | None = Field(default=None, max_length=200)
     # Reserved for the trust policy: none | grant-required (default grant-required).
     url_args: str = "grant-required"
 

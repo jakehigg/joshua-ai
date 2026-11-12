@@ -75,6 +75,7 @@ def build_transcript_router() -> APIRouter:
         person: str | None = None,
         limit: int = Query(DEFAULT_LIMIT, ge=1, le=TRANSCRIPT_PAGE_MAX),
         before: int | None = Query(None, ge=1),
+        thread: str | None = None,
         _identity: str = Depends(require_identity(["channels", "laptop"])),
     ):
         channel_id = (channel or "").strip()
@@ -94,7 +95,12 @@ def build_transcript_router() -> APIRouter:
             if workspace is None:
                 return JSONResponse({"conversation_id": None, "messages": [], "next_before": None})
             channel_id = workspace.channel_id
-        conversation = await repo.find_conversation(channel_id, person_id)
+        conversation = None
+        if thread == "main" and channel_id.startswith("cli:") and person_id:
+            # The terminal and the viewer read the person's main thread.
+            conversation = await repo.main_conversation(person_id)
+        if conversation is None:
+            conversation = await repo.find_conversation(channel_id, person_id)
         if conversation is None:
             return JSONResponse({"conversation_id": None, "messages": [], "next_before": None})
 

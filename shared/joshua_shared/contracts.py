@@ -114,6 +114,8 @@ class TurnEvent(_Model):
     payload: dict | None = None
     options: EventOptions | None = None
     framing: str | None = None
+    # "main": a terminal or viewer turn that runs in the person's main thread.
+    thread: Literal["main"] | None = None
 
 
 class TurnAck(_Model):
