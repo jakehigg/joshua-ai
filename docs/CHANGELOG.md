@@ -6,6 +6,28 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **A turn survives the client that sent it.** A message that Joshua has
+  accepted is finished even when the phone locks, the tab closes, or the
+  signal drops. Core runs a streamed turn in a task of its own, `channels` and
+  the viewer read the stream in their own tasks, and the reply lands in the
+  transcript as it does for any turn. Before, a closed stream cancelled the
+  turn and no reply was stored. The viewer log now says `client_gone` and the
+  real status of the turn.
+- **Every device sees the pending turn.** `GET /v1/transcript` gives `pending`
+  (`queued` or `running`, with the turn id, the start time and the text). The
+  viewer shows "Joshua is working…", or "Waiting for Joshua to finish another
+  turn…", and reloads the history every 3 seconds until the answer is in. The
+  stream sends `accepted` and `status` events.
+- **A photo stays with its message.** The transcript row of a message keeps
+  the files (`meta.attachments`: path, type, name, size). The viewer shows a
+  thumbnail of a photo and a chip for a PDF, in a new message and in the
+  history.
+- **Upload progress and a draft that survives.** A send with a file shows
+  "Uploading photo… 42%", then "Sent — Joshua is working". The page asks before
+  it is closed while the file goes out. The browser keeps the unsent message and
+  its file until Joshua says it has them, and the next visit offers to send
+  them again.
+
 - **Normal chat knows workspaces.** A member's direct chat gets the list of
   the active workspaces (title and goal, at most 10) when the person has any,
   and a line to record what belongs to one. The index holds one record for each

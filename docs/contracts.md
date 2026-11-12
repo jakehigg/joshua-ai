@@ -359,9 +359,19 @@ keeps it.
 
 | Event | Data |
 |---|---|
+| `accepted` | `{"turn_id"}`, sent first: core has the turn and will finish it |
+| `status` | `{"state": "queued"}` while another turn of the conversation runs, then `{"state": "running"}` |
 | `delta` | `{"text": "<chunk>"}` |
 | `done` | `{"turn_id", "text", "tools"}`, the full text and the tools used |
 | `error` | `{"message": "<what failed>"}` |
+
+A closed stream does not stop the turn. Core runs the turn in a task of its
+own, and `channels` and the viewer read the stream in a task of their own, so
+a phone that locks or a tab that closes leaves the turn to finish. The reply
+lands in the transcript as the reply of any other turn, and the same delivery
+rules apply: a viewer, terminal, or workspace turn is only pulled, so nothing
+is pushed to another channel. Only a shutdown of core cancels a turn. The
+inference timeout still ends a turn that runs too long.
 
 The `delta` frames carry only the answer, and together they are the text of
 `done`. The text that the model writes before it calls a tool, such as "Not
@@ -385,9 +395,18 @@ messages.
     {"id": 41, "direction": "in", "text": "<the message>", "status": "ok",
      "at": "2026-03-04T12:00:01+00:00", "meta": {"turn_id": "t-…"}}
   ],
-  "next_before": 41
+  "next_before": 41,
+  "pending": null
 }
 ```
+
+`pending` is null when no turn of the conversation is in flight. Otherwise it
+is `{"turn_id", "state", "since", "text"}`: `state` is `queued` while the turn
+waits for another turn of the conversation, and `running` after that. `since`
+is when core took the turn, and `text` is the message of the person (empty for
+a turn that is not from a person). A client that sees it knows that a reply is
+coming, whichever device sent the message. Core keeps the list in memory, so
+a restart clears it.
 
 The messages are oldest first. `direction` is the stored value: `in` for a
 person's message, `out` for Joshua's reply, `task` for a scheduled task, and
@@ -400,7 +419,10 @@ when older rows exist, else null. Send it as `before` to get the page before
 this one.
 
 `meta` holds only these keys: `turn_id`, `tools` (the tool names the turn
-used), `call_count`, `duration_ms`, and `first_output_ms`. Core drops every
+used), `call_count`, `duration_ms`, `first_output_ms`, and `attachments` (on
+the row of a message that came with files: a list of `{path, mime, name,
+size}`, where `path` is the filed path under the data volume and `name` is
+the name the sender gave). Core drops every
 other key, for example the token usage, the cost, the speaker, and the paths
 the turn wrote. Core never logs a message.
 

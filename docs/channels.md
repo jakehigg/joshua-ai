@@ -61,6 +61,11 @@ pipeline every other channel runs, so it stores the file under
 "Attachments" below for what the pipeline accepts. `make chat` sends JSON and
 no file.
 
+A client that closes its connection does not stop the turn. Channels reads the
+stream from core in a task of its own, so core never sees a closed stream, and
+the reply is in the transcript when the client comes back. `GET
+/v1/cli/transcript` says which turn is still `pending`.
+
 ## Telegram
 
 ### Make a bot
