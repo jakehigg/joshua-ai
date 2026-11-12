@@ -1,8 +1,17 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as draft from "./draft";
+import { repliesWith, stubXhr } from "./fakeXhr";
 import type { ChatMessage } from "./store";
 import { useTurn } from "./useTurn";
+
+// The browser store of the unsent draft is not under test here.
+vi.mock("./draft", () => ({
+  saveDraft: vi.fn(async () => undefined),
+  clearDraft: vi.fn(async () => undefined),
+  loadDraft: vi.fn(async () => null),
+}));
 
 // A stream that sends `chunks`, then ends, or errors with `fail`.
 // `hold` keeps it open until the test calls release().
@@ -297,46 +306,31 @@ describe("useTurn", () => {
   });
 
   // Records the init of each call, so the FormData body can be read.
-  function recordingFetch(answer: () => Promise<Response>) {
-    const inits: RequestInit[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) => {
-        inits.push(init ?? {});
-        return answer();
-      }),
-    );
-    return inits;
-  }
-
   it("sends a file as multipart, keeps its name on the message, and retries with it", async () => {
     const photo = new File(["pixels"], "photo.png", { type: "image/png" });
-    const inits = recordingFetch(async () =>
-      new Response(stream([sse("error", { message: "boom" })]).body, { status: 200 }),
-    );
+    const sent = stubXhr(repliesWith([sse("error", { message: "boom" })]));
     const { hook } = setup();
     act(() => {
       hook.result.current.turn.send("what is on this?", photo);
     });
     await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
-    const form = inits[0]?.body as FormData;
+    const form = sent[0]?.body as FormData;
     expect(form).toBeInstanceOf(FormData);
+    expect(sent[0]).toMatchObject({ method: "POST", url: "/api/v1/chat/alex/turns" });
     expect(form.get("text")).toBe("what is on this?");
     expect((form.get("file") as File).name).toBe("photo.png");
     expect((form.get("file") as File).type).toBe("image/png");
-    expect(inits[0]?.headers).toEqual({ Accept: "text/event-stream" });
+    expect(sent[0]?.headers).toEqual({ Accept: "text/event-stream" });
     expect(hook.result.current.messages[0]).toMatchObject({ role: "person", fileName: "photo.png", file: photo });
     // Retry sends the same text with the same file.
     act(() => hook.result.current.turn.retry(hook.result.current.messages[1] as ChatMessage));
     await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
-    expect(((inits[1]?.body as FormData).get("file") as File).name).toBe("photo.png");
+    expect(((sent[1]?.body as FormData).get("file") as File).name).toBe("photo.png");
   });
 
   it("sends a file with no text at all", async () => {
     const pdf = new File(["%PDF"], "bill.pdf", { type: "application/pdf" });
-    const inits = recordingFetch(
-      async () => new Response(stream([sse("done", { turn_id: "t1", text: "ok", tools: [] })]).body, { status: 200 }),
-    );
+    const requests = stubXhr(repliesWith([sse("done", { turn_id: "t1", text: "ok", tools: [] })]));
     const { hook } = setup();
     let sent = false;
     act(() => {
@@ -344,7 +338,7 @@ describe("useTurn", () => {
     });
     expect(sent).toBe(true);
     await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
-    const form = inits[0]?.body as FormData;
+    const form = requests[0]?.body as FormData;
     expect(form.get("text")).toBe("");
     expect((form.get("file") as File).name).toBe("bill.pdf");
     expect(hook.result.current.messages[0]?.fileName).toBe("bill.pdf");
@@ -376,15 +370,13 @@ describe("useTurn", () => {
   });
 
   it("sends the workspace as a form field with a file", async () => {
-    const inits = recordingFetch(
-      async () => new Response(stream([sse("done", { turn_id: "t1", text: "ok", tools: [] })]).body, { status: 200 }),
-    );
+    const requests = stubXhr(repliesWith([sse("done", { turn_id: "t1", text: "ok", tools: [] })]));
     const { hook } = setup("notes");
     act(() => {
       hook.result.current.turn.send("look", new File(["x"], "a.png", { type: "image/png" }));
     });
     await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
-    expect((inits[0]?.body as FormData).get("workspace")).toBe("notes");
+    expect((requests[0]?.body as FormData).get("workspace")).toBe("notes");
   });
 
   it("sends no workspace field without one", async () => {
@@ -396,5 +388,161 @@ describe("useTurn", () => {
     });
     await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
     expect(fetch).toHaveBeenCalledWith("/api/v1/chat/alex/turns", expect.objectContaining({ body: JSON.stringify({ text: "hi" }) }));
+  });
+
+  // --- upload toast, draft, and a stream that breaks after the ack -------------
+
+  describe("a turn with a file", () => {
+    const photo = new File(["pixels"], "photo.png", { type: "image/png" });
+    const ACCEPTED = sse("accepted", { turn_id: "t-5" });
+
+    function setupWith(onDetached = vi.fn()) {
+      const hook = renderHook(() => {
+        const [messages, setMessages] = useState<ChatMessage[]>([]);
+        const turn = useTurn("alex", setMessages, undefined, undefined, undefined, undefined, onDetached);
+        return { messages, turn };
+      });
+      return { hook, onDetached };
+    }
+
+    afterEach(() => vi.clearAllMocks());
+
+    it("shows the upload percent, then saving, then sent, then nothing when the answer starts", async () => {
+      const sent = stubXhr();
+      const { hook } = setupWith();
+      act(() => {
+        hook.result.current.turn.send("look", photo);
+      });
+      expect(hook.result.current.turn.upload).toEqual({ phase: "uploading", percent: 0, kind: "photo" });
+      const xhr = sent[0];
+      act(() => xhr?.uploaded(42, 100));
+      expect(hook.result.current.turn.upload).toEqual({ phase: "uploading", percent: 42, kind: "photo" });
+      act(() => xhr?.uploaded(100, 100));
+      expect(hook.result.current.turn.upload).toMatchObject({ phase: "saving", percent: 100 });
+      act(() => xhr?.chunk(ACCEPTED));
+      expect(hook.result.current.turn.upload).toMatchObject({ phase: "sent" });
+      act(() => xhr?.chunk(sse("delta", { text: "It is" })));
+      expect(hook.result.current.turn.upload).toBeNull();
+      act(() => {
+        xhr?.chunk(sse("done", { turn_id: "t-5", text: "It is a cat", tools: [] }));
+        xhr?.answer(200);
+      });
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    });
+
+    it("names a PDF a file in the toast", () => {
+      stubXhr();
+      const { hook } = setupWith();
+      act(() => {
+        hook.result.current.turn.send("", new File(["%PDF"], "a.pdf", { type: "application/pdf" }));
+      });
+      expect(hook.result.current.turn.upload).toMatchObject({ kind: "file" });
+    });
+
+    it("asks the browser to warn on leaving only while the bytes are going out", () => {
+      const sent = stubXhr();
+      const { hook } = setupWith();
+      const add = vi.spyOn(window, "addEventListener");
+      act(() => {
+        hook.result.current.turn.send("look", photo);
+      });
+      expect(add.mock.calls.some(([type]) => type === "beforeunload")).toBe(true);
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      act(() => sent[0]?.uploaded(100, 100));
+      const later = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(later);
+      expect(later.defaultPrevented).toBe(false);
+      add.mockRestore();
+    });
+
+    it("saves the draft before the request and clears it when Joshua accepts", async () => {
+      const sent = stubXhr();
+      const { hook } = setupWith();
+      act(() => {
+        hook.result.current.turn.send("look", photo);
+      });
+      expect(draft.saveDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ person: "alex", workspace: "", text: "look", file: photo }),
+      );
+      expect(draft.clearDraft).not.toHaveBeenCalled();
+      act(() => sent[0]?.chunk(ACCEPTED));
+      expect(draft.clearDraft).toHaveBeenCalledWith("alex", "");
+      act(() => sent[0]?.answer(200, sse("done", { turn_id: "t-5", text: "ok", tools: [] })));
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    });
+
+    it("keeps the draft when the connection fails before the ack", async () => {
+      const sent = stubXhr();
+      const { hook, onDetached } = setupWith();
+      act(() => {
+        hook.result.current.turn.send("look", photo);
+      });
+      act(() => sent[0]?.uploaded(30, 100));
+      act(() => sent[0]?.fail());
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+      expect(draft.clearDraft).not.toHaveBeenCalled();
+      expect(hook.result.current.turn.upload).toBeNull();
+      expect(hook.result.current.messages[1]).toMatchObject({ state: "lost" });
+      expect(onDetached).not.toHaveBeenCalled();
+    });
+
+    it("hands the turn to the page when the stream breaks after the ack", async () => {
+      const sent = stubXhr();
+      const { hook, onDetached } = setupWith();
+      act(() => {
+        hook.result.current.turn.send("look", photo);
+      });
+      act(() => sent[0]?.chunk(ACCEPTED));
+      act(() => sent[0]?.fail());
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+      expect(onDetached).toHaveBeenCalledWith("t-5");
+      // The history shows the message and the answer, so no local copy stays.
+      expect(hook.result.current.messages).toEqual([]);
+      expect(draft.clearDraft).toHaveBeenCalled();
+    });
+
+    it("clears the draft when the backend refuses the message", async () => {
+      const sent = stubXhr();
+      const { hook } = setupWith();
+      act(() => {
+        hook.result.current.turn.send("look", photo);
+      });
+      act(() => sent[0]?.answer(413, '{"error":"too large"}'));
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+      expect(draft.clearDraft).toHaveBeenCalledWith("alex", "");
+      expect(hook.result.current.messages[0]).toMatchObject({ refused: "too large" });
+    });
+  });
+
+  describe("a text turn", () => {
+    afterEach(() => vi.clearAllMocks());
+
+    it("keeps the draft until the accepted frame, and shows no upload toast", async () => {
+      const s = stream([sse("accepted", { turn_id: "t-6" })], { hold: true });
+      fakeFetch(new Response(s.body, { status: 200 }));
+      const { hook } = setup();
+      act(() => {
+        hook.result.current.turn.send("hi");
+      });
+      expect(draft.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ text: "hi", file: null }));
+      expect(hook.result.current.turn.upload).toBeNull();
+      await waitFor(() => expect(draft.clearDraft).toHaveBeenCalledWith("alex", ""));
+      s.release();
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    });
+
+    it("shows a queued turn as waiting, then as working", async () => {
+      const s = stream([sse("accepted", { turn_id: "t-6" }), sse("status", { state: "queued" })], { hold: true });
+      fakeFetch(new Response(s.body, { status: 200 }));
+      const { hook } = setup();
+      act(() => {
+        hook.result.current.turn.send("hi");
+      });
+      await waitFor(() => expect(hook.result.current.messages[1]?.waiting).toBe(true));
+      s.release();
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    });
   });
 });

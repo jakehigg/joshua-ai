@@ -6,7 +6,7 @@
 // message of a turn and its Joshua answer while the answer streams, or a
 // person message that the backend refused.
 
-import type { HistoryMessage, HistoryPage } from "../api/client";
+import type { FileRef, HistoryMessage, HistoryPage, Pending } from "../api/client";
 import { isSilentReply } from "./silent";
 
 export type Role = "person" | "joshua" | "system";
@@ -45,15 +45,21 @@ export interface ChatMessage {
   fileName?: string;
   // On a local person message: the file itself, to send again on Retry.
   file?: File;
+  // On a server person message: the files that came with it.
+  attachments?: FileRef[];
+  // On a local Joshua message: the turn waits for another turn of the
+  // conversation to end.
+  waiting?: boolean;
 }
 
 // The messages on screen and the cursor of the page before them.
 export interface View {
   messages: ChatMessage[];
   nextBefore: number | null;
+  pending: Pending | null;
 }
 
-export const EMPTY_VIEW: View = { messages: [], nextBefore: null };
+export const EMPTY_VIEW: View = { messages: [], nextBefore: null, pending: null };
 
 // A reply that says nothing is not a message of the conversation (silent.ts).
 function listed(rows: HistoryMessage[]): HistoryMessage[] {
@@ -75,6 +81,7 @@ export function fromServer(m: HistoryMessage): ChatMessage {
     ...(m.turnId ? { turnId: m.turnId } : {}),
     ...(m.tools ? { tools: m.tools } : {}),
     ...(m.spoken ? { spoken: true } : {}),
+    ...(m.attachments ? { attachments: m.attachments } : {}),
   };
 }
 
@@ -112,7 +119,7 @@ export function reconcile(view: View, page: HistoryPage): View {
   const fresh = unique(listed(page.messages).map(fromServer));
   const local = keepLocal(view.messages);
   if (fresh.length === 0 || page.nextBefore === null) {
-    return { messages: [...fresh, ...local], nextBefore: page.nextBefore };
+    return { messages: [...fresh, ...local], nextBefore: page.nextBefore, pending: page.pending };
   }
   const oldest = Math.min(...fresh.map((m) => m.serverId as number));
   const shown = view.messages.filter((m) => m.serverId !== undefined);
@@ -121,6 +128,7 @@ export function reconcile(view: View, page: HistoryPage): View {
   return {
     messages: [...older, ...fresh, ...local],
     nextBefore: older.length > 0 ? view.nextBefore : page.nextBefore,
+    pending: page.pending,
   };
 }
 
@@ -131,7 +139,7 @@ export function prependOlder(view: View, page: HistoryPage): View {
   const older = unique(listed(page.messages).map(fromServer)).filter(
     (m) => !present.has(m.serverId as number),
   );
-  return { messages: [...older, ...view.messages], nextBefore: page.nextBefore };
+  return { messages: [...older, ...view.messages], nextBefore: page.nextBefore, pending: view.pending };
 }
 
 export function appendMessage(messages: ChatMessage[], ...added: ChatMessage[]): ChatMessage[] {

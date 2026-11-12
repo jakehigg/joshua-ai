@@ -2,15 +2,27 @@
 //
 // send() appends the person's message and an empty Joshua message in the
 // `pending` state, then streams the answer into it:
+//   accepted       -> Joshua has the turn and will finish it, whoever is
+//                     connected: the saved draft goes (draft.ts)
+//   status         -> `queued` shows "Waiting for Joshua to finish another
+//                     turn"; `running` shows "working"
 //   delta          -> append the text
 //   done           -> set the text to done.text; state ok
 //   error frame    -> state failed, with the message; partial text is kept
 //   non-2xx answer -> remove the empty Joshua message; the person message
 //                     carries the refusal, and onRefused shows a toast
-//   lost stream    -> state lost; partial text is kept
+//   lost stream    -> before `accepted`: state lost, with Retry. After
+//                     `accepted`: the turn goes on without this screen. The
+//                     local messages go, and onDetached(turnId) lets the page
+//                     watch the history for the answer (useHistory.ts).
 // A turn can carry one photo or one PDF. The file goes with the request as
 // multipart; the person message keeps its name for the chip, and the file
 // itself, so Retry sends the same message again.
+// `upload` is the state of the progress toast of a turn with a file:
+// uploading with a percent, then saving (the bytes are out, the server has not
+// said it has them), then sent after `accepted`. It goes when the answer
+// starts. While the bytes are going out, the page asks the browser to warn
+// before it is closed, and a hidden page saves the draft again.
 // One turn runs at a time. After a `done`, onDone runs, once the turn is
 // no longer running; the chat page refreshes the history then. When the
 // finished answer carries an `artifact` fence, onArtifact gets the document
@@ -26,6 +38,7 @@
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { ApiError, ConnectionLost, postTurn } from "../api/client";
+import { clearDraft, saveDraft } from "./draft";
 import { parseArtifact } from "./ArtifactCard";
 import { ARTIFACT_INFO, splitFence } from "./blocks";
 import { isSilentReply, maybeSilentReply } from "./silent";
@@ -41,8 +54,17 @@ function writtenPath(text: string): string | null {
   return parseArtifact(content)?.path ?? null;
 }
 
+// The progress toast of a turn that carries a file.
+export interface Upload {
+  phase: "uploading" | "saving" | "sent";
+  // 0 to 100, while uploading.
+  percent: number;
+  kind: "photo" | "file";
+}
+
 export interface Turn {
   running: boolean;
+  upload: Upload | null;
   // The running state now, also between a change and the next render.
   isRunning: () => boolean;
   send: (text: string, file?: File | null) => boolean;
@@ -56,8 +78,19 @@ export function useTurn(
   onDone?: () => void,
   onArtifact?: (path: string) => void,
   workspace?: string,
+  onDetached?: (turnId: string) => void,
 ): Turn {
   const [running, setRunning] = useState(false);
+  const [upload, setUpload] = useState<Upload | null>(null);
+  const uploadRef = useRef<Upload | null>(null);
+  const setUploadState = useCallback((next: Upload | null) => {
+    uploadRef.current = next;
+    setUpload(next);
+  }, []);
+  const draftRef = useRef<{ text: string; file: File | null } | null>(null);
+  const workspaceKey = workspace ?? "";
+  const onDetachedRef = useRef(onDetached);
+  onDetachedRef.current = onDetached;
   const runningRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
   const onRefusedRef = useRef(onRefused);
@@ -74,6 +107,29 @@ export function useTurn(
     [],
   );
 
+  // While the file is going out, closing the page loses it: ask the browser to
+  // warn. A page that is hidden may be thrown away, so the draft is saved again.
+  const uploading = upload?.phase === "uploading";
+  useEffect(() => {
+    if (!uploading) return undefined;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    const hidden = () => {
+      const draft = draftRef.current;
+      if (document.visibilityState === "hidden" && draft) {
+        void saveDraft({ person, workspace: workspaceKey, ...draft, savedAt: Date.now() });
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      document.removeEventListener("visibilitychange", hidden);
+    };
+  }, [uploading, person, workspaceKey]);
+
   const run = useCallback(
     async (personMsg: ChatMessage, replyId: string) => {
       const controller = new AbortController();
@@ -84,6 +140,12 @@ export function useTurn(
       // The streamed text so far, which the message shows unless it could
       // still become the silent reply.
       let streamed = "";
+      // The id Joshua gave the turn, once it has accepted it.
+      let acceptedId: string | null = null;
+      const accept = () => {
+        draftRef.current = null;
+        void clearDraft(person, workspaceKey);
+      };
       const patch = (p: Partial<ChatMessage> | ((m: ChatMessage) => Partial<ChatMessage>)) =>
         setMessages((list) => updateMessage(list, replyId, p));
       try {
@@ -92,11 +154,21 @@ export function useTurn(
           personMsg.text,
           (frame) => {
             switch (frame.type) {
+              case "accepted":
+                acceptedId = frame.turnId || "accepted";
+                accept();
+                if (uploadRef.current) setUploadState({ ...uploadRef.current, phase: "sent" });
+                break;
+              case "status":
+                patch({ waiting: frame.state === "queued" });
+                break;
               case "delta":
+                setUploadState(null);
                 streamed += frame.text;
                 if (!maybeSilentReply(streamed)) patch({ text: streamed });
                 break;
               case "done":
+                setUploadState(null);
                 completed = true;
                 if (isSilentReply(frame.text)) {
                   setMessages((list) => list.filter((m) => m.id !== replyId));
@@ -106,6 +178,7 @@ export function useTurn(
                 written = writtenPath(frame.text);
                 break;
               case "error":
+                setUploadState(null);
                 patch({ state: "failed", error: frame.message });
                 break;
               default:
@@ -115,10 +188,24 @@ export function useTurn(
           controller.signal,
           personMsg.file,
           workspace,
+          {
+            onUploadProgress: (loaded, total) => {
+              if (acceptedId !== null) return;
+              const percent = Math.min(100, Math.floor((loaded / total) * 100));
+              const kind = personMsg.file?.type.startsWith("image/") ? "photo" : "file";
+              setUploadState({ phase: percent >= 100 ? "saving" : "uploading", percent, kind });
+            },
+          },
         );
       } catch (err) {
         if (controller.signal.aborted) return;
-        if (err instanceof ApiError) {
+        setUploadState(null);
+        if (acceptedId !== null && !(err instanceof ApiError)) {
+          // Joshua has the turn. The answer will be in the history.
+          setMessages((list) => list.filter((m) => m.id !== replyId && m.id !== personMsg.id));
+          onDetachedRef.current?.(acceptedId);
+        } else if (err instanceof ApiError) {
+          accept();
           setMessages((list) =>
             updateMessage(
               list.filter((m) => m.id !== replyId),
@@ -143,7 +230,7 @@ export function useTurn(
         }
       }
     },
-    [person, workspace, setMessages],
+    [person, workspace, workspaceKey, setMessages, setUploadState],
   );
 
   const send = useCallback(
@@ -151,6 +238,11 @@ export function useTurn(
       if (runningRef.current || (!text.trim() && !file)) return false;
       runningRef.current = true;
       setRunning(true);
+      draftRef.current = { text, file: file ?? null };
+      void saveDraft({ person, workspace: workspaceKey, text, file: file ?? null, savedAt: Date.now() });
+      if (file) {
+        setUploadState({ phase: "uploading", percent: 0, kind: file.type.startsWith("image/") ? "photo" : "file" });
+      }
       const now = new Date().toISOString();
       const personMsg: ChatMessage = {
         id: newId(),
@@ -174,7 +266,7 @@ export function useTurn(
       void run(personMsg, reply.id);
       return true;
     },
-    [run, setMessages],
+    [run, setMessages, setUploadState, person, workspaceKey],
   );
 
   // A refused person message is removed and sent again at the end. A failed
@@ -199,5 +291,5 @@ export function useTurn(
 
   const isRunning = useCallback(() => runningRef.current, []);
 
-  return { running, isRunning, send, retry };
+  return { running, upload, isRunning, send, retry };
 }

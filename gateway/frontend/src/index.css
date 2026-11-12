@@ -790,6 +790,40 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 .chat-screen .count.over {
   color: var(--j-bad);
 }
+.chat-screen .toast-progress {
+  top: calc(env(safe-area-inset-top) + 112px);
+}
+.chat-screen .draft-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: var(--chat-width);
+  margin: 0 auto 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  background: var(--j-surface-2);
+  font-size: 0.875rem;
+}
+.chat-screen .draft-banner span {
+  flex: 1 1 12rem;
+}
+.chat-screen .thumb-link {
+  display: block;
+  margin-bottom: 4px;
+}
+.chat-screen .thumb {
+  display: block;
+  max-width: min(100%, 260px);
+  max-height: 260px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.chat-screen .thumb-link .thumb {
+  margin-bottom: 0;
+}
 .chat-screen .toast {
   position: fixed;
   left: 50%;

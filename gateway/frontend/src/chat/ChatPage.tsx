@@ -16,6 +16,15 @@
 // and Ctrl or Cmd + \, fold them all or open them all (panels.ts keeps the
 // choice per browser). The phone sheets below do not use this state.
 //
+// A message that Joshua has accepted is Joshua's: closing the page or losing
+// the signal does not stop the turn. The history says which turn is `pending`
+// (View.pending). This screen then ends its message list with a working line
+// and loads the history every few seconds until the answer is in. That is how
+// a laptop shows the answer to a message sent from a phone, and how this
+// screen finds the answer of a stream that broke. A send that never reached
+// Joshua leaves its draft in the browser (draft.ts); the next open offers to
+// send it again, and a send with a file shows a progress toast.
+//
 // The screen has a rail on the left (Rail.tsx): Chat, the workspaces, and
 // "+ New workspace". `/chat/:person` is the normal chat, the person's one main
 // thread. `/chat/w/:slug` (WorkspacePage) is a workspace of the person who
@@ -44,6 +53,7 @@ import { Composer } from "./Composer";
 import { NewWorkspace } from "./NewWorkspace";
 import { usePanels } from "../shell/panels";
 import { Rail } from "./Rail";
+import { clearDraft, loadDraft, type Draft } from "./draft";
 import { ItemPanel } from "./ItemPanel";
 import { useWorkspaces, type Workspaces } from "./useWorkspaces";
 import { WorkspaceHeader } from "./WorkspaceHeader";
@@ -58,9 +68,17 @@ import { MessageList } from "./MessageList";
 import { validPerson } from "./people";
 import { EMPTY_VIEW, type ChatMessage, type View } from "./store";
 import { useHistory } from "./useHistory";
-import { useTurn } from "./useTurn";
+import { useTurn, type Upload } from "./useTurn";
 
 const TOAST_MS = 6000;
+// How long the page waits for a broken stream's turn to show in the history.
+const DETACHED_WAIT_MS = 30_000;
+
+function uploadText(upload: Upload): string {
+  if (upload.phase === "sent") return "Sent — Joshua is working";
+  if (upload.phase === "saving") return `Saving your ${upload.kind}…`;
+  return `Uploading ${upload.kind}… ${upload.percent}%`;
+}
 
 function useToast(): [string | null, (message: string) => void] {
   const [toast, setToast] = useState<string | null>(null);
@@ -111,9 +129,39 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   // panel.reload is stable, and reloads the frame only when the document the
   // finished answer wrote is the one the panel has open.
   const panel = useDocumentPanelState();
-  const turn = useTurn(person, setMessages, showToast, onDone, panel.reload, workspace);
-  const history = useHistory(person, setView, turn.isRunning, showToast, workspace);
+  // The turn of a stream that broke after Joshua accepted it, until the
+  // history shows it.
+  const [detached, setDetached] = useState<string | null>(null);
+  const turn = useTurn(person, setMessages, showToast, onDone, panel.reload, workspace, setDetached);
+  const polling = !turn.running && (view.pending !== null || detached !== null);
+  const history = useHistory(person, setView, turn.isRunning, showToast, workspace, polling);
   refreshRef.current = history.refresh;
+  useEffect(() => {
+    if (detached === null) return undefined;
+    if (view.pending !== null || view.messages.some((m) => m.role === "joshua" && m.turnId === detached)) {
+      setDetached(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => setDetached(null), DETACHED_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [detached, view]);
+
+  // A send that did not arrive, kept by the last visit. It is offered again
+  // until it is sent, or thrown away, or a new message is sent.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const workspaceKey = workspace ?? "";
+  useEffect(() => {
+    let live = true;
+    void loadDraft(person, workspaceKey).then((found) => {
+      if (live) setDraft(found);
+    });
+    return () => {
+      live = false;
+    };
+  }, [person, workspaceKey]);
+  useEffect(() => {
+    if (turn.running) setDraft(null);
+  }, [turn.running]);
 
   // Only one sheet at a time: a panel that opens closes the lists.
   const { close: closePanel } = panel;
@@ -280,8 +328,43 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
             hasEarlier={nextBefore !== null}
             loadingEarlier={history.loadingEarlier}
             onLoadEarlier={onLoadEarlier}
+            pending={turn.running ? null : view.pending}
           />
+          {draft && (
+            <div className="draft-banner" role="alert">
+              <span>
+                {draft.file
+                  ? `Your ${draft.file.type.startsWith("image/") ? "photo" : "file"} didn't finish uploading (${draft.file.name}).`
+                  : "Your last message didn't finish sending."}
+              </span>
+              <button
+                type="button"
+                className="retry"
+                onClick={() => {
+                  setDraft(null);
+                  turn.send(draft.text, draft.file);
+                }}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                className="retry"
+                onClick={() => {
+                  setDraft(null);
+                  void clearDraft(person, workspaceKey);
+                }}
+              >
+                Discard
+              </button>
+            </div>
+          )}
           <Composer onSend={turn.send} busy={turn.running} />
+          {turn.upload && (
+            <div className="toast toast-progress" role="status">
+              {uploadText(turn.upload)}
+            </div>
+          )}
           {toast && (
             <div className="toast" role="alert">
               {toast}

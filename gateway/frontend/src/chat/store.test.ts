@@ -17,7 +17,7 @@ function row(id: number, extra: Partial<HistoryMessage> = {}): HistoryMessage {
 }
 
 function page(ids: number[], nextBefore: number | null = null): HistoryPage {
-  return { messages: ids.map((id) => row(id)), nextBefore };
+  return { messages: ids.map((id) => row(id)), nextBefore, pending: null };
 }
 
 function local(id: string, extra: Partial<ChatMessage> = {}): ChatMessage {
@@ -46,7 +46,7 @@ describe("history store", () => {
   });
 
   it("replaces the list with the server list", () => {
-    const view: View = { messages: [fromServer(row(1)), local("old-done", { role: "joshua" })], nextBefore: null };
+    const view: View = { messages: [fromServer(row(1)), local("old-done", { role: "joshua" })], nextBefore: null, pending: null };
     const next = reconcile(view, page([1, 2, 3]));
     expect(ids(next)).toEqual([1, 2, 3]);
     expect(next.nextBefore).toBeNull();
@@ -55,7 +55,7 @@ describe("history store", () => {
   it("keeps an in-flight turn at the end until its done", () => {
     const person = local("p");
     const reply = local("r", { role: "joshua", state: "pending", text: "", forId: "p" });
-    const view: View = { messages: [fromServer(row(1)), person, reply], nextBefore: null };
+    const view: View = { messages: [fromServer(row(1)), person, reply], nextBefore: null, pending: null };
     expect(ids(reconcile(view, page([1, 2])))).toEqual([1, 2, "p", "r"]);
     // After done the answer is no longer pending: the server rows replace both.
     const done = { ...view, messages: [fromServer(row(1)), person, { ...reply, state: "ok" as const }] };
@@ -68,14 +68,14 @@ describe("history store", () => {
   });
 
   it("keeps the older pages when the new page joins them", () => {
-    const view: View = { messages: [1, 2, 3, 4, 5].map((id) => fromServer(row(id))), nextBefore: 1 };
+    const view: View = { messages: [1, 2, 3, 4, 5].map((id) => fromServer(row(id))), nextBefore: 1, pending: null };
     const next = reconcile(view, page([4, 5, 6], 4));
     expect(ids(next)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(next.nextBefore).toBe(1);
   });
 
   it("drops the older pages when the new page does not join them", () => {
-    const view: View = { messages: [1, 2].map((id) => fromServer(row(id))), nextBefore: 1 };
+    const view: View = { messages: [1, 2].map((id) => fromServer(row(id))), nextBefore: 1, pending: null };
     const next = reconcile(view, page([10, 11], 10));
     expect(ids(next)).toEqual([10, 11]);
     expect(next.nextBefore).toBe(10);
@@ -83,18 +83,18 @@ describe("history store", () => {
 
   it("starts from an empty view and from an empty page", () => {
     expect(reconcile(EMPTY_VIEW, page([3, 4], 3))).toMatchObject({ nextBefore: 3 });
-    expect(reconcile({ messages: [fromServer(row(1))], nextBefore: null }, page([]))).toEqual(EMPTY_VIEW);
+    expect(reconcile({ messages: [fromServer(row(1))], nextBefore: null, pending: null }, page([]))).toEqual(EMPTY_VIEW);
   });
 
   it("prepends the page before and keeps the order", () => {
-    const view: View = { messages: [3, 4].map((id) => fromServer(row(id))), nextBefore: 3 };
+    const view: View = { messages: [3, 4].map((id) => fromServer(row(id))), nextBefore: 3, pending: null };
     const next = prependOlder(view, page([1, 2], null));
     expect(ids(next)).toEqual([1, 2, 3, 4]);
     expect(next.nextBefore).toBeNull();
   });
 
   it("dedupes by id", () => {
-    const view: View = { messages: [2, 3].map((id) => fromServer(row(id))), nextBefore: 2 };
+    const view: View = { messages: [2, 3].map((id) => fromServer(row(id))), nextBefore: 2, pending: null };
     expect(ids(prependOlder(view, page([1, 2], null)))).toEqual([1, 2, 3]);
     expect(ids(reconcile(EMPTY_VIEW, page([1, 1, 2])))).toEqual([1, 2]);
   });
@@ -110,7 +110,7 @@ describe("history store", () => {
 });
 
 describe("a silent reply in a history page", () => {
-  const page = (messages: HistoryMessage[], nextBefore: number | null = null): HistoryPage => ({ messages, nextBefore });
+  const page = (messages: HistoryMessage[], nextBefore: number | null = null): HistoryPage => ({ messages, nextBefore, pending: null });
   const row = (id: number, role: HistoryMessage["role"], text: string, status: HistoryMessage["status"] = "ok"): HistoryMessage => ({
     id,
     role,
@@ -128,5 +128,28 @@ describe("a silent reply in a history page", () => {
   it("keeps a person text of that word, and a failed row", () => {
     const rows = [row(1, "person", "[IGNORE]"), row(2, "joshua", "[IGNORE]", "failed")];
     expect(reconcile(EMPTY_VIEW, page(rows)).messages).toHaveLength(2);
+  });
+});
+
+describe("pending and files in the view", () => {
+  const PENDING = { turnId: "t-1", state: "running" as const, since: "2026-01-01T10:00:00Z", text: "hi" };
+
+  it("takes the pending turn from the newest page, and clears it", () => {
+    const withPending = reconcile(EMPTY_VIEW, { ...page([1]), pending: PENDING });
+    expect(withPending.pending).toEqual(PENDING);
+    expect(reconcile(withPending, page([1, 2])).pending).toBeNull();
+    // An empty page says it too.
+    expect(reconcile(withPending, page([])).pending).toBeNull();
+  });
+
+  it("keeps the pending turn when an older page is added", () => {
+    const view: View = { messages: [fromServer(row(3))], nextBefore: 3, pending: PENDING };
+    expect(prependOlder(view, page([1, 2]))).toMatchObject({ pending: PENDING });
+  });
+
+  it("keeps the files of a server row", () => {
+    const files = [{ name: "a.jpg", mime: "image/jpeg", url: "/api/v1/files/wiki/a.jpg" }];
+    expect(fromServer(row(4, { attachments: files })).attachments).toEqual(files);
+    expect("attachments" in fromServer(row(5))).toBe(false);
   });
 });

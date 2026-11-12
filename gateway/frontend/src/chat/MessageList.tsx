@@ -3,10 +3,15 @@
 // the list stays put and a "new" button appears instead. "Load earlier"
 // at the top adds the page before; the rows on screen do not move. A time
 // line stands before the first message of a run (see stamps.ts).
+//
+// `pending` is a turn that Joshua works on and this screen does not stream (a
+// message sent from another device): the list ends with the same working line,
+// and with the message of the person when the transcript does not hold it yet.
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { Pending } from "../api/client";
 import type { ChatMessage } from "./store";
-import { Message } from "./Message";
+import { Message, Working } from "./Message";
 import { formatStamp, needsStamp } from "./stamps";
 import type { LoadStatus } from "./useHistory";
 
@@ -30,6 +35,7 @@ interface Props {
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
+  pending?: Pending | null;
 }
 
 export function MessageList({
@@ -42,6 +48,7 @@ export function MessageList({
   hasEarlier = false,
   loadingEarlier = false,
   onLoadEarlier,
+  pending = null,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -71,7 +78,12 @@ export function MessageList({
   // The newest content: the last message and its text length. A page added
   // at the top does not change it.
   const last = messages[messages.length - 1];
-  const signature = `${last?.id ?? ""}:${last?.text.length ?? 0}:${last?.state ?? ""}`;
+  const signature = `${last?.id ?? ""}:${last?.text.length ?? 0}:${last?.state ?? ""}:${pending?.turnId ?? ""}`;
+  // The message of a queued turn is not in the transcript yet.
+  const ghost: ChatMessage | null =
+    pending && pending.text && !messages.some((m) => m.turnId === pending.turnId)
+      ? { id: `pending-${pending.turnId}`, role: "person", text: pending.text, ts: pending.since, state: "ok" }
+      : null;
 
   const loadEarlier = () => {
     const el = ref.current;
@@ -159,6 +171,12 @@ export function MessageList({
               <Message message={m} canRetry={canRetry} onRetry={onRetry} />
             </Fragment>
           ))}
+          {ghost && <Message message={ghost} canRetry={false} onRetry={onRetry} />}
+          {pending && (
+            <div className="reading pending-turn">
+              <Working since={pending.since} waiting={pending.state === "queued"} />
+            </div>
+          )}
         </div>
       </div>
       {unseen && (

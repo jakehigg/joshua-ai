@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "./store";
 import { Message } from "./Message";
 
@@ -79,5 +79,59 @@ describe("Message", () => {
   it("prints a person message's text as plain text", () => {
     const c = show({ role: "person", text: "```speech\nx\n```" });
     expect(c.querySelector(".bubble")?.textContent).toBe("```speech\nx\n```");
+  });
+});
+
+describe("a message with a file", () => {
+  const base = { id: "m", role: "person" as const, text: "look", ts: "2026-01-01T10:00:00Z", state: "ok" as const };
+
+  it("shows a photo of the history as a thumbnail that opens the image", () => {
+    render(
+      <Message
+        message={{ ...base, attachments: [{ name: "IMG_1.jpg", mime: "image/jpeg", url: "/api/v1/files/wiki/a.jpg" }] }}
+        canRetry
+        onRetry={() => undefined}
+      />,
+    );
+    const img = screen.getByAltText("IMG_1.jpg");
+    expect(img.getAttribute("src")).toBe("/api/v1/files/wiki/a.jpg");
+    expect(img.closest("a")?.getAttribute("href")).toBe("/api/v1/files/wiki/a.jpg");
+  });
+
+  it("shows a file with no address as a chip that is not a link", () => {
+    render(
+      <Message
+        message={{ ...base, attachments: [{ name: "x.jpg", mime: "image/jpeg" }] }}
+        canRetry
+        onRetry={() => undefined}
+      />,
+    );
+    expect(screen.getByText("x.jpg").closest("a")).toBeNull();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("shows the photo that was just sent from memory, and revokes it on unmount", () => {
+    const create = vi.fn(() => "blob:photo");
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke }));
+    const file = new File(["pixels"], "photo.png", { type: "image/png" });
+    const { unmount } = render(
+      <Message message={{ ...base, fileName: "photo.png", file }} canRetry onRetry={() => undefined} />,
+    );
+    expect(screen.getByAltText("photo.png").getAttribute("src")).toBe("blob:photo");
+    unmount();
+    expect(revoke).toHaveBeenCalledWith("blob:photo");
+    vi.unstubAllGlobals();
+  });
+
+  it("says that a queued turn waits", () => {
+    render(
+      <Message
+        message={{ ...base, role: "joshua", text: "", state: "pending", waiting: true, ts: new Date().toISOString() }}
+        canRetry
+        onRetry={() => undefined}
+      />,
+    );
+    expect(screen.getByText("Waiting for Joshua to finish another turn…")).toBeTruthy();
   });
 });

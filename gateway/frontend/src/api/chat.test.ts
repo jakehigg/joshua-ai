@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { repliesWith, stubXhr } from "../chat/fakeXhr";
 import { ApiError, ConnectionLost, getDocumentMeta, getHistory, postTurn, type TurnFrame } from "./client";
 
 function json(body: unknown, status = 200) {
@@ -37,13 +38,14 @@ describe("getHistory", () => {
         { id: 9, role: "person", text: "bad flag", status: "ok", at: "" },
       ],
       nextBefore: 3,
+      pending: null,
     });
   });
 
   it("asks with no query when no option is given, and reads a bad cursor as null", async () => {
     const fetch = vi.fn(async () => json({ messages: "nope", nextBefore: "3" }));
     vi.stubGlobal("fetch", fetch);
-    expect(await getHistory("mia")).toEqual({ messages: [], nextBefore: null });
+    expect(await getHistory("mia")).toEqual({ messages: [], nextBefore: null, pending: null });
     expect(fetch).toHaveBeenCalledWith("/api/v1/chat/mia/history", expect.anything());
   });
 
@@ -162,5 +164,105 @@ describe("postTurn", () => {
     expect((err as ApiError).reason).toBe("rate_limited");
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
     await expect(postTurn("alex", "x", () => undefined)).rejects.toBeInstanceOf(ConnectionLost);
+  });
+});
+
+describe("getHistory: pending and files", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("maps the pending turn and the files of a message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json({
+          messages: [
+            {
+              id: 3,
+              role: "person",
+              text: "look",
+              status: "ok",
+              at: "",
+              attachments: [
+                { name: "IMG_1.jpg", mime: "image/jpeg", size: 9, url: "/api/v1/files/wiki/attachments/a.jpg" },
+                { name: "bill.pdf", mime: "application/pdf", url: "https://elsewhere.test/x" },
+                { mime: "image/png" },
+              ],
+            },
+          ],
+          nextBefore: null,
+          pending: { turnId: "t-4", state: "queued", since: "2026-01-01T10:00:00Z", text: "hi" },
+        }),
+      ),
+    );
+    const page = await getHistory("alex");
+    expect(page.pending).toEqual({ turnId: "t-4", state: "queued", since: "2026-01-01T10:00:00Z", text: "hi" });
+    // A file with no name is dropped, and an address that leaves the viewer is not kept.
+    expect(page.messages[0]?.attachments).toEqual([
+      { name: "IMG_1.jpg", mime: "image/jpeg", size: 9, url: "/api/v1/files/wiki/attachments/a.jpg" },
+      { name: "bill.pdf", mime: "application/pdf" },
+    ]);
+  });
+
+  it("reads a pending turn with no id as none", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ messages: [], pending: { state: "running" } })));
+    expect((await getHistory("alex")).pending).toBeNull();
+  });
+});
+
+describe("postTurn with a file", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const photo = new File(["pixels"], "photo.png", { type: "image/png" });
+
+  it("sends the form with XMLHttpRequest, reports the upload, and reads the frames", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const sent = stubXhr((xhr) => {
+      setTimeout(() => {
+        xhr.uploaded(50, 200);
+        xhr.uploaded(200, 200);
+        // One frame arrives in two pieces.
+        xhr.chunk('event: accepted\ndata: {"turn_id":"t-1"}\n\nevent: stat');
+        xhr.chunk('us\ndata: {"state":"queued"}\n\n');
+        xhr.chunk('event: done\ndata: {"turn_id":"t-1","text":"ok","tools":[]}\n\n');
+        xhr.answer(200);
+      }, 0);
+    });
+    const got: TurnFrame[] = [];
+    const progress: number[][] = [];
+    await postTurn("alex", "look", (f) => got.push(f), undefined, photo, "notes", {
+      onUploadProgress: (loaded, total) => progress.push([loaded, total]),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(sent[0]).toMatchObject({ method: "POST", url: "/api/v1/chat/alex/turns" });
+    expect(progress).toEqual([
+      [50, 200],
+      [200, 200],
+    ]);
+    expect(got.map((f) => f.type)).toEqual(["accepted", "status", "done"]);
+    expect(got[0]).toEqual({ type: "accepted", turnId: "t-1" });
+    expect(got[1]).toEqual({ type: "status", state: "queued" });
+  });
+
+  it("throws ApiError for a refusal with the message of the body", async () => {
+    stubXhr((xhr) => setTimeout(() => xhr.answer(413, '{"error":"too large","reason":"big"}'), 0));
+    const err = await postTurn("alex", "x", () => undefined, undefined, photo).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 413, message: "too large", reason: "big" });
+  });
+
+  it("throws ConnectionLost for a network error, and for an end with no final frame", async () => {
+    stubXhr((xhr) => setTimeout(() => xhr.fail(), 0));
+    await expect(postTurn("alex", "x", () => undefined, undefined, photo)).rejects.toBeInstanceOf(ConnectionLost);
+    stubXhr(repliesWith(['event: accepted\ndata: {"turn_id":"t"}\n\n']));
+    await expect(postTurn("alex", "x", () => undefined, undefined, photo)).rejects.toBeInstanceOf(ConnectionLost);
+  });
+
+  it("aborts the request and throws the AbortError", async () => {
+    const sent = stubXhr();
+    const controller = new AbortController();
+    const result = postTurn("alex", "x", () => undefined, controller.signal, photo);
+    controller.abort();
+    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    expect(sent[0]?.aborted).toBe(true);
   });
 });

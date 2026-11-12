@@ -32,24 +32,31 @@ export class ApiError extends Error {
   }
 }
 
-async function readError(response: Response): Promise<ApiError> {
-  let message = `the viewer answered ${response.status}`;
+// The error of a refused call: the `error` and `reason` of a JSON body, else
+// the status alone.
+function apiErrorOf(status: number, body: unknown): ApiError {
+  let message = `the viewer answered ${status}`;
   let reason: string | undefined;
-  try {
-    const body: unknown = await response.json();
-    if (body && typeof body === "object") {
-      const { error, reason: why } = body as { error?: unknown; reason?: unknown };
-      if (typeof error === "string") {
-        message = error;
-      }
-      if (typeof why === "string") {
-        reason = why;
-      }
+  if (body && typeof body === "object") {
+    const { error, reason: why } = body as { error?: unknown; reason?: unknown };
+    if (typeof error === "string") {
+      message = error;
     }
+    if (typeof why === "string") {
+      reason = why;
+    }
+  }
+  return new ApiError(status, message, reason);
+}
+
+async function readError(response: Response): Promise<ApiError> {
+  let body: unknown;
+  try {
+    body = await response.json();
   } catch {
     // The body is not JSON: the status is all there is to say.
   }
-  return new ApiError(response.status, message, reason);
+  return apiErrorOf(response.status, body);
 }
 
 async function send<T>(path: string, init: RequestInit): Promise<T> {
@@ -113,15 +120,39 @@ export interface HistoryMessage {
   // A person row that was sent with Brief on, in the days of voice; the
   // route removed the marker.
   spoken?: boolean;
+  // The files the person sent with the message. `url` is missing when the
+  // viewer cannot serve the file to this person.
+  attachments?: FileRef[];
+}
+
+// One file of a message, as the backend maps it.
+export interface FileRef {
+  name: string;
+  mime: string;
+  size?: number;
+  url?: string;
+}
+
+// The turn that Joshua has accepted and not finished, as the history route
+// says it: waiting for another turn of the conversation, or running.
+export interface Pending {
+  turnId: string;
+  state: "queued" | "running";
+  since: string;
+  // The message of the person, or "" for a turn that is not from a person.
+  text: string;
 }
 
 // One page, oldest first. `nextBefore` is the cursor of the page before, or null.
 export interface HistoryPage {
   messages: HistoryMessage[];
   nextBefore: number | null;
+  pending: Pending | null;
 }
 
 export type TurnFrame =
+  | { type: "accepted"; turnId: string }
+  | { type: "status"; state: "queued" | "running" }
   | { type: "delta"; text: string }
   | { type: "done"; turnId: string; text: string; tools: unknown[] }
   | { type: "error"; message: string }
@@ -147,6 +178,10 @@ function parseFrame(event: string, data: string): TurnFrame {
   }
   const str = (key: string) => (typeof body[key] === "string" ? (body[key] as string) : "");
   switch (event) {
+    case "accepted":
+      return { type: "accepted", turnId: str("turn_id") };
+    case "status":
+      return { type: "status", state: body.state === "queued" ? "queued" : "running" };
     case "delta":
       return { type: "delta", text: str("text") };
     case "done":
@@ -179,11 +214,107 @@ function turnBody(text: string, file?: File | null, workspace?: string): Request
   return { headers: { Accept: "text/event-stream" }, body: form };
 }
 
+// What the caller hears while a turn goes out.
+export interface TurnHooks {
+  // Bytes of the request that have gone out. Only a turn with a file reports.
+  onUploadProgress?: (loaded: number, total: number) => void;
+}
+
+// Reads the frames of one answer. `final` is true after a `done` or an
+// `error` frame.
+class FrameReader {
+  final = false;
+  private readonly parser = new SseParser();
+  constructor(private readonly onFrame: (frame: TurnFrame) => void) {}
+
+  feed(text: string): void {
+    this.handle(this.parser.feed(text));
+  }
+
+  finish(rest = ""): void {
+    this.handle(this.parser.feed(rest).concat(this.parser.flush()));
+  }
+
+  private handle(frames: { event: string; data: string }[]): void {
+    for (const { event, data } of frames) {
+      const frame = parseFrame(event, data);
+      this.onFrame(frame);
+      if (frame.type === "done" || frame.type === "error") this.final = true;
+    }
+  }
+}
+
+// A turn with a file goes out with XMLHttpRequest, because only it reports how
+// much of the upload has gone out, and Safari cannot stream a request body
+// with fetch. The answer is the same event stream: `onprogress` gives the text
+// that has arrived so far.
+function postTurnXhr(
+  url: string,
+  body: FormData,
+  reader: FrameReader,
+  signal: AbortSignal | undefined,
+  hooks: TurnHooks,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let seen = 0;
+    const pull = () => {
+      const text = xhr.responseText;
+      if (text.length > seen) {
+        const chunk = text.slice(seen);
+        seen = text.length;
+        reader.feed(chunk);
+      }
+    };
+    const abort = () => {
+      xhr.abort();
+      reject(new DOMException("The turn was stopped", "AbortError"));
+    };
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+    const settled = () => signal?.removeEventListener("abort", abort);
+    xhr.open("POST", url);
+    xhr.setRequestHeader("Accept", "text/event-stream");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) hooks.onUploadProgress?.(e.loaded, e.total);
+    };
+    xhr.onprogress = () => {
+      if (xhr.status >= 200 && xhr.status < 300) pull();
+    };
+    xhr.onerror = xhr.ontimeout = () => {
+      settled();
+      reject(new ConnectionLost(seen === 0 ? "Joshua could not be reached" : undefined));
+    };
+    xhr.onload = () => {
+      settled();
+      if (xhr.status < 200 || xhr.status >= 300) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(xhr.responseText);
+        } catch {
+          // The body is not JSON: the status is all there is to say.
+        }
+        reject(apiErrorOf(xhr.status, parsed));
+        return;
+      }
+      pull();
+      reader.finish();
+      if (reader.final) resolve();
+      else reject(new ConnectionLost());
+    };
+    xhr.send(body);
+  });
+}
+
 // Sends one turn and calls `onFrame` for each frame of the answer.
 // Resolves after a `done` or an `error` frame. Throws ApiError for a non-2xx
 // answer and ConnectionLost when the stream fails or ends with no final
 // frame. An abort through `signal` throws the AbortError unchanged.
-// `file` is one photo or one PDF; it makes the request multipart.
+// `file` is one photo or one PDF; it makes the request multipart, and
+// `hooks.onUploadProgress` hears how much of it has gone out.
 // `workspace` (a slug or an id) goes in the body as a `workspace` field. The
 // turn then runs in that workspace; without it, in the main thread.
 export async function postTurn(
@@ -193,14 +324,16 @@ export async function postTurn(
   signal?: AbortSignal,
   file?: File | null,
   workspace?: string,
+  hooks: TurnHooks = {},
 ): Promise<void> {
+  const url = `${base(person)}/turns`;
+  const reader = new FrameReader(onFrame);
+  const init = turnBody(text, file, workspace);
+  if (file) return postTurnXhr(url, init.body as FormData, reader, signal, hooks);
+
   let response: Response;
   try {
-    response = await fetch(`${base(person)}/turns`, {
-      method: "POST",
-      ...turnBody(text, file, workspace),
-      signal,
-    });
+    response = await fetch(url, { method: "POST", ...init, signal });
   } catch (err) {
     if (isAbort(err)) throw err;
     throw new ConnectionLost("Joshua could not be reached");
@@ -208,32 +341,51 @@ export async function postTurn(
   if (!response.ok) throw await readError(response);
   if (!response.body) throw new ConnectionLost();
 
-  const reader = response.body.getReader();
+  const stream = response.body.getReader();
   const decoder = new TextDecoder();
-  const parser = new SseParser();
-  let final = false;
-  const handle = (frames: { event: string; data: string }[]) => {
-    for (const { event, data } of frames) {
-      const frame = parseFrame(event, data);
-      onFrame(frame);
-      if (frame.type === "done" || frame.type === "error") final = true;
-    }
-  };
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await stream.read();
       if (done) break;
-      handle(parser.feed(decoder.decode(value, { stream: true })));
-      if (final) break;
+      reader.feed(decoder.decode(value, { stream: true }));
+      if (reader.final) break;
     }
-    if (!final) handle(parser.feed(decoder.decode()).concat(parser.flush()));
+    if (!reader.final) reader.finish(decoder.decode());
   } catch (err) {
     if (isAbort(err)) throw err;
     throw new ConnectionLost();
   } finally {
-    if (final) reader.cancel().catch(() => undefined);
+    if (reader.final) stream.cancel().catch(() => undefined);
   }
-  if (!final) throw new ConnectionLost();
+  if (!reader.final) throw new ConnectionLost();
+}
+
+function fileRefs(raw: unknown): FileRef[] {
+  const files: FileRef[] = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!item || typeof item !== "object") continue;
+    const f = item as Record<string, unknown>;
+    if (typeof f.name !== "string") continue;
+    files.push({
+      name: f.name,
+      mime: typeof f.mime === "string" ? f.mime : "application/octet-stream",
+      ...(typeof f.size === "number" ? { size: f.size } : {}),
+      ...(typeof f.url === "string" && f.url.startsWith("/") ? { url: f.url } : {}),
+    });
+  }
+  return files;
+}
+
+function pendingOf(raw: unknown): Pending | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as Record<string, unknown>;
+  if (typeof p.turnId !== "string") return null;
+  return {
+    turnId: p.turnId,
+    state: p.state === "queued" ? "queued" : "running",
+    since: typeof p.since === "string" ? p.since : "",
+    text: typeof p.text === "string" ? p.text : "",
+  };
 }
 
 function historyMessage(raw: unknown): HistoryMessage | null {
@@ -251,6 +403,8 @@ function historyMessage(raw: unknown): HistoryMessage | null {
   if (typeof m.turnId === "string") message.turnId = m.turnId;
   if (Array.isArray(m.tools)) message.tools = m.tools.filter((t): t is string => typeof t === "string");
   if (role === "person" && m.spoken === true) message.spoken = true;
+  const files = fileRefs(m.attachments);
+  if (files.length > 0) message.attachments = files;
   return message;
 }
 
@@ -284,12 +438,13 @@ export async function getHistory(
     if (isAbort(err)) throw err;
     throw new ConnectionLost("the history answer was not readable");
   }
-  const page = (body ?? {}) as { messages?: unknown; nextBefore?: unknown };
+  const page = (body ?? {}) as { messages?: unknown; nextBefore?: unknown; pending?: unknown };
   const list = Array.isArray(page.messages) ? page.messages : [];
   return {
     messages: list.map(historyMessage).filter((m): m is HistoryMessage => m !== null),
     nextBefore:
       typeof page.nextBefore === "number" && Number.isInteger(page.nextBefore) ? page.nextBefore : null,
+    pending: pendingOf(page.pending),
   };
 }
 

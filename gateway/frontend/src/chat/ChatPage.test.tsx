@@ -2,7 +2,16 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPage } from "./ChatPage";
-import { FOCUS_REFRESH_MS } from "./useHistory";
+import * as draft from "./draft";
+import { repliesWith, stubXhr } from "./fakeXhr";
+import { FOCUS_REFRESH_MS, POLL_HIDDEN_MS, POLL_MS } from "./useHistory";
+
+// The browser store of the unsent draft is a stand-in here.
+vi.mock("./draft", () => ({
+  saveDraft: vi.fn(async () => undefined),
+  clearDraft: vi.fn(async () => undefined),
+  loadDraft: vi.fn(async () => null),
+}));
 
 // The v7 behavior the app turns on in main.tsx, so the router does not warn.
 const ROUTER_FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
@@ -365,5 +374,219 @@ describe("ChatPage person id", () => {
     open("Not-Valid");
     expect(screen.getByText(/not a valid person id/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Choose another" }).getAttribute("href")).toBe("/chat");
+  });
+});
+
+describe("ChatPage pending turn", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  // A turn that started now, so the line says "working" and not "still working".
+  const SINCE = new Date().toISOString();
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+
+  it("shows that Joshua is working, polls every 3 s, and shows the reply when pending clears", async () => {
+    let pending: unknown = { turnId: "t-1", state: "running", since: SINCE, text: "photo" };
+    let list: Row[] = [{ id: 1, role: "person", text: "photo", turnId: "t-1" }];
+    const { historyCalls } = backend(() => json({ messages: rows(list), nextBefore: null, pending }));
+    open();
+    await advance(0);
+    expect(screen.getByText("Joshua is working…")).toBeTruthy();
+    expect(historyCalls()).toHaveLength(1);
+    await advance(POLL_MS);
+    expect(historyCalls()).toHaveLength(2);
+    await advance(POLL_MS);
+    expect(historyCalls()).toHaveLength(3);
+
+    pending = null;
+    list = [...list, { id: 2, role: "joshua", text: "It works now", turnId: "t-1" }];
+    await advance(POLL_MS);
+    expect(screen.getByText("It works now")).toBeTruthy();
+    expect(screen.queryByText("Joshua is working…")).toBeNull();
+    // Nothing is pending, so the polling has stopped.
+    const calls = historyCalls().length;
+    await advance(POLL_MS * 5);
+    expect(historyCalls()).toHaveLength(calls);
+  });
+
+  it("says that a queued turn waits, and shows its message before the transcript has it", async () => {
+    backend(() =>
+      json({
+        messages: rows([{ id: 1, role: "joshua", text: "earlier answer" }]),
+        nextBefore: null,
+        pending: { turnId: "t-2", state: "queued", since: SINCE, text: "the photo caption" },
+      }),
+    );
+    open();
+    await advance(0);
+    expect(screen.getByText("Waiting for Joshua to finish another turn…")).toBeTruthy();
+    expect(screen.getByText("the photo caption")).toBeTruthy();
+  });
+
+  it("does not show the message twice once the transcript holds it", async () => {
+    backend(() =>
+      json({
+        messages: rows([{ id: 1, role: "person", text: "the photo caption", turnId: "t-2" }]),
+        nextBefore: null,
+        pending: { turnId: "t-2", state: "running", since: SINCE, text: "the photo caption" },
+      }),
+    );
+    open();
+    await advance(0);
+    expect(screen.getAllByText("the photo caption")).toHaveLength(1);
+  });
+
+  it("polls slowly while the tab is hidden, and refreshes at once when it shows again", async () => {
+    const { historyCalls } = backend(() =>
+      json({ messages: [], nextBefore: null, pending: { turnId: "t-1", state: "running", since: SINCE, text: "" } }),
+    );
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    open();
+    await advance(0);
+    expect(historyCalls()).toHaveLength(1);
+    await advance(POLL_MS * 3);
+    expect(historyCalls()).toHaveLength(1);
+    await advance(POLL_HIDDEN_MS);
+    expect(historyCalls()).toHaveLength(2);
+    visibility.mockReturnValue("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await advance(0);
+    expect(historyCalls()).toHaveLength(3);
+  });
+
+  it("does not poll when nothing is pending", async () => {
+    const { historyCalls } = backend(() => json({ messages: [], nextBefore: null, pending: null }));
+    open();
+    await advance(0);
+    await advance(POLL_MS * 4);
+    expect(historyCalls()).toHaveLength(1);
+  });
+
+  it("shows the thumbnail of a photo in the history, and a chip for a PDF", async () => {
+    backend(() =>
+      json({
+        messages: rows([
+          {
+            id: 1,
+            role: "person",
+            text: "look",
+            attachments: [
+              { name: "IMG_1.jpg", mime: "image/jpeg", url: "/api/v1/files/wiki/attachments/2026/11/a.jpg" },
+              { name: "bill.pdf", mime: "application/pdf", url: "/api/v1/files/attachments/2026/11/b.pdf" },
+            ],
+          } as Row,
+        ]),
+        nextBefore: null,
+        pending: null,
+      }),
+    );
+    open();
+    await advance(0);
+    const img = screen.getByAltText("IMG_1.jpg") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("/api/v1/files/wiki/attachments/2026/11/a.jpg");
+    expect(img.closest("a")?.getAttribute("href")).toBe("/api/v1/files/wiki/attachments/2026/11/a.jpg");
+    const chip = screen.getByText("bill.pdf").closest("a");
+    expect(chip?.getAttribute("href")).toBe("/api/v1/files/attachments/2026/11/b.pdf");
+  });
+
+  it("offers to send again a draft that did not arrive, with its file, and then sends it", async () => {
+    const file = new File(["pixels"], "photo.png", { type: "image/png" });
+    vi.mocked(draft.loadDraft).mockResolvedValueOnce({
+      person: "alex",
+      workspace: "",
+      text: "the rotation",
+      file,
+      savedAt: 1,
+    });
+    backend(() => json({ messages: [], nextBefore: null, pending: null }));
+    const sent = stubXhr(repliesWith(['event: done\ndata: {"turn_id":"t","text":"ok","tools":[]}\n\n']));
+    open();
+    await advance(0);
+    expect(screen.getByText(/Your photo didn't finish uploading \(photo\.png\)/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await advance(10);
+    expect(sent).toHaveLength(1);
+    expect(((sent[0]?.body as FormData).get("file") as File).name).toBe("photo.png");
+    expect((sent[0]?.body as FormData).get("text")).toBe("the rotation");
+    expect(screen.queryByText(/didn't finish uploading/)).toBeNull();
+  });
+
+  it("drops a draft on Discard", async () => {
+    vi.mocked(draft.loadDraft).mockResolvedValueOnce({
+      person: "alex",
+      workspace: "",
+      text: "lost words",
+      file: null,
+      savedAt: 1,
+    });
+    backend(() => json({ messages: [], nextBefore: null, pending: null }));
+    open();
+    await advance(0);
+    expect(screen.getByText("Your last message didn't finish sending.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(draft.clearDraft).toHaveBeenCalledWith("alex", "");
+    expect(screen.queryByText(/didn't finish sending/)).toBeNull();
+  });
+
+  it("shows the upload toast while a photo goes out, and the sent toast after the ack", async () => {
+    backend(() => json({ messages: [], nextBefore: null, pending: null }));
+    const sent = stubXhr();
+    open();
+    await advance(0);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["pixels"], "photo.png", { type: "image/png" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.getByText("Uploading photo… 0%")).toBeTruthy();
+    act(() => sent[0]?.uploaded(42, 100));
+    expect(screen.getByText("Uploading photo… 42%")).toBeTruthy();
+    act(() => sent[0]?.uploaded(100, 100));
+    expect(screen.getByText("Saving your photo…")).toBeTruthy();
+    act(() => sent[0]?.chunk('event: accepted\ndata: {"turn_id":"t-3"}\n\n'));
+    expect(screen.getByText("Sent — Joshua is working")).toBeTruthy();
+    act(() => sent[0]?.chunk('event: delta\ndata: {"text":"Nice"}\n\n'));
+    expect(screen.queryByText("Sent — Joshua is working")).toBeNull();
+    expect(screen.getByText("Nice")).toBeTruthy();
+    await act(async () => {
+      sent[0]?.answer(200, 'event: done\ndata: {"turn_id":"t-3","text":"Nice","tools":[]}\n\n');
+    });
+  });
+
+  it("finds the reply of a stream that broke after the ack", async () => {
+    let list: Row[] = [];
+    let pending: unknown = null;
+    backend(() => json({ messages: rows(list), nextBefore: null, pending }));
+    const sent = stubXhr();
+    open();
+    await advance(0);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["pixels"], "photo.png", { type: "image/png" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    act(() => sent[0]?.chunk('event: accepted\ndata: {"turn_id":"t-3"}\n\n'));
+    // The phone locked: the connection closes with no answer.
+    list = [{ id: 1, role: "person", text: "(file attached — no caption)", turnId: "t-3" }];
+    pending = { turnId: "t-3", state: "running", since: SINCE, text: "" };
+    await act(async () => {
+      sent[0]?.fail();
+    });
+    await advance(POLL_MS);
+    expect(screen.getByText("Joshua is working…")).toBeTruthy();
+    expect(screen.queryByText("the connection was lost")).toBeNull();
+    // The turn ended on the server.
+    pending = null;
+    list = [...list, { id: 2, role: "joshua", text: "Landscape now", turnId: "t-3" }];
+    await advance(POLL_MS);
+    expect(screen.getByText("Landscape now")).toBeTruthy();
+    expect(screen.queryByText("Joshua is working…")).toBeNull();
   });
 });

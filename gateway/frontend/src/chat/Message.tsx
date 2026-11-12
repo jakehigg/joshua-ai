@@ -13,9 +13,14 @@
 // (ArtifactCard.tsx). An old answer can carry a `speech` block, which is
 // taken out too and shows nowhere. Both blocks are part of the stored answer
 // text, so a reloaded history row goes through this same code path.
-// A person message that carried a photo or a PDF shows a chip with its name.
+// A person message that carried a photo or a PDF shows it: a photo as a
+// thumbnail that opens the full image, a PDF as a chip with its name. A
+// message that this screen just sent shows the file it holds; a message from
+// the history shows the files the transcript row names, from the viewer's
+// files route. A turn that waits for another turn of the conversation says so.
 
 import { memo, useEffect, useMemo, useState } from "react";
+import type { FileRef } from "../api/client";
 import type { ChatMessage } from "./store";
 import { ARTIFACT_INFO, SPEECH_INFO, splitFence } from "./blocks";
 import { ArtifactCard } from "./ArtifactCard";
@@ -25,7 +30,7 @@ import { cleanEvent, eventLinks, headline, isQuestion, questionPreview } from ".
 export const ELAPSED_FROM_S = 5;
 export const SLOW_FROM_S = 30;
 
-function Working({ since }: { since: string }) {
+export function Working({ since, waiting = false }: { since: string; waiting?: boolean }) {
   const start = new Date(since).getTime();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -41,11 +46,62 @@ function Working({ since }: { since: string }) {
         <span />
       </span>
       <span>
-        {seconds >= SLOW_FROM_S ? "Joshua is still working, tools can take a while" : "Joshua is working…"}
+        {waiting
+          ? "Waiting for Joshua to finish another turn…"
+          : seconds >= SLOW_FROM_S
+            ? "Joshua is still working, tools can take a while"
+            : "Joshua is working…"}
       </span>
       {seconds >= ELAPSED_FROM_S && <span className="elapsed">{seconds} s</span>}
     </div>
   );
+}
+
+function FileChip({ name, url }: { name: string; url?: string }) {
+  const inner = (
+    <>
+      <span aria-hidden="true">📎</span>
+      <span className="file-name">{name}</span>
+    </>
+  );
+  return url ? (
+    <a className="file-chip sent" href={url} target="_blank" rel="noopener noreferrer">
+      {inner}
+    </a>
+  ) : (
+    <span className="file-chip sent">{inner}</span>
+  );
+}
+
+// A photo as a thumbnail that opens the full image, anything else as a chip.
+function Attachment({ file }: { file: FileRef }) {
+  if (file.mime.startsWith("image/") && file.url) {
+    return (
+      <a className="thumb-link" href={file.url} target="_blank" rel="noopener noreferrer">
+        <img className="thumb" src={file.url} alt={file.name} loading="lazy" />
+      </a>
+    );
+  }
+  return <FileChip name={file.name} url={file.url} />;
+}
+
+// The file this screen just sent. A photo shows from the bytes in memory.
+function LocalFile({ file }: { file: File }) {
+  const url = useMemo(
+    () =>
+      file.type.startsWith("image/") && typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(file)
+        : null,
+    [file],
+  );
+  useEffect(
+    () => () => {
+      if (url) URL.revokeObjectURL(url);
+    },
+    [url],
+  );
+  if (!url) return <FileChip name={file.name} />;
+  return <img className="thumb" src={url} alt={file.name} />;
 }
 
 interface Props {
@@ -136,12 +192,14 @@ export const Message = memo(function Message({ message, canRetry, onRetry }: Pro
     <article className={`msg ${isPerson ? "msg-person" : "msg-joshua"}`}>
       {isPerson ? (
         <div className="bubble">
-          {message.fileName && (
-            <span className="file-chip sent">
-              <span aria-hidden="true">📎</span>
-              <span className="file-name">{message.fileName}</span>
-            </span>
+          {message.file ? (
+            <LocalFile file={message.file} />
+          ) : (
+            message.fileName && <FileChip name={message.fileName} />
           )}
+          {message.attachments?.map((file) => (
+            <Attachment key={file.url ?? file.name} file={file} />
+          ))}
           {message.text}
         </div>
       ) : (
@@ -154,7 +212,7 @@ export const Message = memo(function Message({ message, canRetry, onRetry }: Pro
               {answer?.artifact && <ArtifactCard content={answer.artifact} />}
             </>
           )}
-          {pending && <Working since={message.ts} />}
+          {pending && <Working since={message.ts} waiting={message.waiting} />}
         </div>
       )}
       {isPerson && message.refused && (

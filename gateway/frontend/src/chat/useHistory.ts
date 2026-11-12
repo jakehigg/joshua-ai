@@ -8,6 +8,14 @@
 // row. A failed first load shows its error with Retry; a later refresh that
 // fails keeps the list and shows nothing. `workspace` goes to the history
 // route as a query value: the thread of that workspace, else the main thread.
+//
+// `polling` is true while Joshua works on a turn that this screen does not
+// stream: the history said `pending`, or the stream of a turn broke after
+// Joshua had accepted it. The newest page is then loaded again every
+// POLL_MS while the tab is visible and every POLL_HIDDEN_MS while it is
+// hidden, until `polling` is false: the answer is in the transcript, and the
+// refresh brings it. A tab that becomes visible refreshes at once, with no
+// wait for the rate limit.
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { getHistory } from "../api/client";
@@ -15,6 +23,8 @@ import { prependOlder, reconcile, type View } from "./store";
 
 export const PAGE_SIZE = 50;
 export const FOCUS_REFRESH_MS = 10_000;
+export const POLL_MS = 3_000;
+export const POLL_HIDDEN_MS = 30_000;
 
 export type LoadStatus = "loading" | "ready" | "error";
 
@@ -39,6 +49,7 @@ export function useHistory(
   isRunning: () => boolean,
   onError?: (message: string) => void,
   workspace?: string,
+  polling = false,
 ): History {
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -79,10 +90,13 @@ export function useHistory(
     }
   }, [person, workspace, setView]);
 
+  const pollingRef = useRef(polling);
+  pollingRef.current = polling;
+
   const wake = useCallback(() => {
     if (document.visibilityState !== "visible") return;
     if (isRunningRef.current()) return;
-    if (Date.now() - lastAt.current < FOCUS_REFRESH_MS) return;
+    if (!pollingRef.current && Date.now() - lastAt.current < FOCUS_REFRESH_MS) return;
     void load();
   }, [load]);
 
@@ -97,6 +111,17 @@ export function useHistory(
       earlier.current?.abort();
     };
   }, [load, wake]);
+
+  useEffect(() => {
+    if (!polling) return undefined;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      if (!isRunningRef.current()) void load();
+      timer = setTimeout(tick, document.visibilityState === "visible" ? POLL_MS : POLL_HIDDEN_MS);
+    };
+    timer = setTimeout(tick, document.visibilityState === "visible" ? POLL_MS : POLL_HIDDEN_MS);
+    return () => clearTimeout(timer);
+  }, [polling, load]);
 
   const refresh = useCallback(() => {
     if (!isRunningRef.current()) void load();
