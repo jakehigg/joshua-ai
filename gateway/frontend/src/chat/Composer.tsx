@@ -1,8 +1,11 @@
-// The text box and the Send button.
+// The text box and the Send button, in one rounded pill: the paperclip inside
+// at the left, the round send button (an up arrow) inside at the right.
 //
 // On a fine pointer (a mouse or trackpad), Enter sends and Shift+Enter
 // adds a new line. On a coarse pointer (a touch screen), Enter adds a new
-// line and only the button sends. The box grows from 1 to 8 rows. A text
+// line and only the button sends. The box grows from 1 to MAX_ROWS rows, then
+// scrolls. The hidden file input is out of the tab order, so the keyboard's
+// "next field" arrow on a phone does not stop at it. A text
 // over MAX_CHARS characters cannot be sent; the counter shows past
 // COUNTER_FROM characters. The length is counted as the backend counts it:
 // code points, after trim.
@@ -25,6 +28,8 @@ export const MAX_CHARS = 8000;
 export const COUNTER_FROM = 7000;
 // One file per message, as the backend's TURN_MAX_BYTES allows.
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// The box stops growing at this many lines and scrolls (index.css, max-height).
+export const MAX_ROWS = 5;
 export const FILE_ACCEPT = "image/*,application/pdf";
 
 function finePointer(): boolean {
@@ -34,6 +39,14 @@ function finePointer(): boolean {
 
 export function charCount(text: string): number {
   return Array.from(text.trim()).length;
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M12 4l7 7-1.4 1.4L13 7.8V20h-2V7.8l-4.6 4.6L5 11z" />
+    </svg>
+  );
 }
 
 function ClipIcon() {
@@ -130,7 +143,7 @@ export function Composer({ onSend, busy }: Props) {
         <label className="attach" title="Attach a photo or a PDF">
           <ClipIcon />
           <span className="visually-hidden">Attach a photo or a PDF</span>
-          <input type="file" accept={FILE_ACCEPT} onChange={onPick} disabled={busy} />
+          <input type="file" accept={FILE_ACCEPT} onChange={onPick} disabled={busy} tabIndex={-1} />
         </label>
         <textarea
           ref={ref}
@@ -143,10 +156,10 @@ export function Composer({ onSend, busy }: Props) {
           aria-label="Message to Joshua"
           aria-invalid={tooLong || undefined}
           aria-describedby={count > COUNTER_FROM ? "composer-count" : undefined}
-          enterKeyHint="enter"
+          enterKeyHint="send"
         />
         <button type="submit" className="send" disabled={!canSend} aria-label="Send">
-          Send
+          <SendIcon />
         </button>
       </div>
       {fileError && (

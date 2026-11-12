@@ -21,6 +21,7 @@
 // back.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { inertProps, useMedia } from "./viewport";
 import {
   addItem,
   listItems,
@@ -179,6 +180,9 @@ export function ItemPanel({
   collapsed?: boolean;
   onCollapse?: () => void;
 }) {
+  // From 1100px the panel is a column; below it, a drawer. One that is not on
+  // screen is inert, so its "Add link" fields are out of the keyboard's order.
+  const column = useMedia("(min-width: 1100px)");
   const [items, setItems] = useState<WorkspaceItem[]>([]);
   const [error, setError] = useState("");
   const [url, setUrl] = useState("");
@@ -304,6 +308,7 @@ export function ItemPanel({
       id="workspace-items"
       className={`items${open ? " open" : ""}${collapsed ? " collapsed" : ""}`}
       aria-label="Workspace items"
+      {...inertProps(column ? collapsed : !open)}
     >
       <header className="items-header">
         <h2>Items</h2>

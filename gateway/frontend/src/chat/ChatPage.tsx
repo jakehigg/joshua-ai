@@ -69,6 +69,7 @@ import { validPerson } from "./people";
 import { EMPTY_VIEW, type ChatMessage, type View } from "./store";
 import { useHistory } from "./useHistory";
 import { useTurn, type Upload } from "./useTurn";
+import { useKeyboardFit } from "./viewport";
 
 const TOAST_MS = 6000;
 // How long the page waits for a broken stream's turn to show in the history.
@@ -111,6 +112,9 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   const [itemsKey, setItemsKey] = useState(0);
   const [creating, setCreating] = useState(false);
   const [view, setView] = useState<View>(EMPTY_VIEW);
+  // The shell follows the visible part of the page, so the keyboard of a
+  // phone never covers the composer or a dialog (viewport.ts).
+  useKeyboardFit();
   const [toast, showToast] = useToast();
   const setMessages = useCallback(
     (update: SetStateAction<ChatMessage[]>) =>

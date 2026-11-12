@@ -1411,3 +1411,106 @@ html.j-lock body { overflow: hidden; }
 .chat-screen .item-undo button { min-height: 32px; }
 .chat-screen .item-add-open { margin-top: 8px; align-self: flex-start; }
 .chat-screen .item-add-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+
+/* The composer as one rounded pill: the paperclip inside at the left, the
+   growing text box, and the round send button inside at the right. */
+.chat-screen .composer-inner {
+  align-items: flex-end;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--j-line);
+  border-radius: 24px;
+  background: var(--j-surface-2);
+}
+.chat-screen .composer-inner:focus-within {
+  border-color: var(--j-accent);
+}
+.chat-screen .composer .attach {
+  flex: none;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--j-muted);
+}
+.chat-screen .composer .composer-input {
+  flex: 1;
+  min-height: 40px;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1.5;
+  /* MAX_ROWS (5) lines of 1.5em plus the padding, then it scrolls. */
+  max-height: calc(5 * 1.5em + 16px);
+  outline: none;
+}
+.chat-screen .composer .send {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 50%;
+}
+.chat-screen .composer .send:disabled {
+  background: var(--j-line);
+  border-color: var(--j-line);
+  color: var(--j-muted);
+  opacity: 1;
+}
+.chat-screen .composer .send svg {
+  display: block;
+}
+/* The keyboard stands where the home indicator was: no safe-area gap. */
+html.kb-open .chat-screen .composer {
+  padding-bottom: 8px;
+}
+
+/* The shell follows the visible part of the page while the hook of
+   viewport.ts runs: the keyboard of a phone never covers the composer, and the
+   document under it cannot scroll. */
+html.vv-fit,
+html.vv-fit body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html.vv-fit .j-shell.fill {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--vv-top, 0px);
+  height: var(--vvh);
+}
+html.vv-fit .chat-screen .ws-overlay {
+  inset: auto;
+  top: var(--vv-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--vvh);
+}
+@media (max-width: 899px) {
+  html.vv-fit .chat-screen .ws-dialog {
+    height: 100%;
+  }
+  html.vv-fit .chat-screen .rail {
+    bottom: auto;
+    top: var(--vv-top, 0px);
+    height: var(--vvh);
+  }
+}
+@media (max-width: 1099px) {
+  html.vv-fit .chat-screen .items {
+    bottom: auto;
+    top: var(--vv-top, 0px);
+    height: var(--vvh);
+  }
+}

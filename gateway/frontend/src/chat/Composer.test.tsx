@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Composer, COUNTER_FROM, MAX_CHARS, MAX_FILE_BYTES } from "./Composer";
+import { Composer, COUNTER_FROM, MAX_CHARS, MAX_FILE_BYTES, MAX_ROWS } from "./Composer";
 
 function pointer(fine: boolean) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -144,5 +144,29 @@ describe("Composer attachment", () => {
     setup();
     const input = screen.getByLabelText("Attach a photo or a PDF") as HTMLInputElement;
     expect(input.accept).toBe("image/*,application/pdf");
+  });
+
+  it("asks the phone keyboard for a send key, and keeps the file input out of the field order", () => {
+    const { box } = setup();
+    expect(box.getAttribute("enterkeyhint")).toBe("send");
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.tabIndex).toBe(-1);
+  });
+
+  it("has the send button disabled when empty, and enabled with text or a file", () => {
+    const { box, send } = setup();
+    expect(send.disabled).toBe(true);
+    fireEvent.change(box, { target: { value: "hi" } });
+    expect(send.disabled).toBe(false);
+    fireEvent.change(box, { target: { value: "  " } });
+    expect(send.disabled).toBe(true);
+  });
+
+  it("sits in one pill with the clip and the send button, and starts at one row", () => {
+    const { box, send } = setup();
+    const pill = document.querySelector(".composer-inner") as HTMLElement;
+    expect(pill.contains(box) && pill.contains(send) && pill.querySelector(".attach") !== null).toBe(true);
+    expect(box.rows).toBe(1);
+    expect(MAX_ROWS).toBe(5);
   });
 });

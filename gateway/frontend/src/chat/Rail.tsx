@@ -6,11 +6,14 @@
 // On a desktop it folds away with « (the chat header brings it back).
 // On a phone it is a drawer with a close
 // button; the screen also closes it on a tap of the backdrop and on Escape.
+// A rail that is not on screen (a closed drawer, or a folded column) is inert,
+// so no field in it is reachable, and the keyboard's "next field" arrow skips it.
 
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import type { Workspace } from "../api/workspaces";
 import AppNav, { useNav } from "../shell/AppNav";
+import { inertProps, useMedia } from "./viewport";
 
 export function Rail({
   person,
@@ -36,6 +39,8 @@ export function Rail({
   onCollapse?: () => void;
 }) {
   const nav = useNav();
+  const column = useMedia("(min-width: 900px)");
+  const closed = column ? collapsed : !open;
   const closeRef = useRef<HTMLButtonElement>(null);
   // The drawer takes the focus when it opens, on its close button, so no link
   // looks selected.
@@ -60,6 +65,7 @@ export function Rail({
       id="chat-rail"
       className={`rail${open ? " open" : ""}${collapsed ? " collapsed" : ""}`}
       aria-label="Chats and workspaces"
+      {...inertProps(closed)}
     >
       <header className="rail-header">
         <span className="rail-title">
