@@ -1,9 +1,10 @@
 """``GET /api/v1/session``: who signed in, and the navigation of that person.
 
 The answer holds the person, the sections of the navigation, the chat
-address of the person, and the timezone of the instance. The sections come
-from ``viewer._sections``, the same source as the server-rendered shell, so
-the member rule and the person rule stay in one place.
+address of the person, and the timezone of the instance. The table below is
+the one source of the sections on the server, and the app holds the same
+table with the icons (``src/shell/sections.ts``), so the member rule and the
+person rule stay in one place.
 
 The links of the sidebar are not here: ``GET /api/v1/links`` is the one
 source of the list, and the sidebar reads it (``viewer_api.links``).
@@ -15,6 +16,39 @@ from joshua_shared import config
 from joshua_shared.config import Person
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+# The sections of the navigation: (key, label, URL).
+SECTIONS = (
+    ("wiki", "Wiki", "/wiki/"),
+    ("journal", "Journal", "/journal"),
+    ("search", "Search", "/search"),
+    ("usage", "Usage", "/usage"),
+    ("assignments", "Assignments", "/assignments"),
+    ("documents", "Documents", "/documents"),
+    ("chat", "Chat", "/chat"),
+)
+# The sections that a guest does not get.
+MEMBER_SECTIONS = frozenset({"documents"})
+# The sections whose URL ends with the id of the person of the request. The
+# chat answers at ``/chat/<person id>``, so the item follows the identity of
+# the person who reads the viewer.
+PERSON_SECTIONS = frozenset({"chat"})
+
+
+def sections(person: Person) -> list[dict[str, str]]:
+    """The sections of a person: a guest gets no Documents.
+
+    A section of ``PERSON_SECTIONS`` gets the id of the person on its URL.
+    """
+    member = person.role == "member"
+    out: list[dict[str, str]] = []
+    for key, label, url in SECTIONS:
+        if not member and key in MEMBER_SECTIONS:
+            continue
+        if key in PERSON_SECTIONS:
+            url = f"{url}/{person.id}"
+        out.append({"key": key, "label": label, "path": url})
+    return out
 
 
 def person_json(person: Person) -> dict[str, str]:
@@ -30,10 +64,7 @@ async def session(request: Request, person: Person) -> JSONResponse:
         {
             "person": person_json(person),
             "anonymous": person.id == viewer.ANONYMOUS_PERSON_ID,
-            "sections": [
-                {"key": key, "label": label, "path": url}
-                for key, label, url, _ in viewer._sections()
-            ],
+            "sections": sections(person),
             "chat_url": f"/chat/{person.id}",
             "timezone": config.load().timezone,
         },

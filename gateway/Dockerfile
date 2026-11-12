@@ -7,11 +7,11 @@ WORKDIR /build
 COPY gateway/frontend/package.json gateway/frontend/package-lock.json ./
 RUN npm ci --no-fund --no-audit
 COPY gateway/frontend/ ./
-# The app imports the two stylesheets of the viewer, which are the master
-# copies and live beside the Python code. `src/index.css` names them
-# `../../joshua_gateway/...`, one level above the workspace, which is `/` here.
+# The app imports the shared Joshua stylesheet, whose master copy lives beside
+# the Python code. `src/index.css` names it `../../joshua_gateway/ui/...`, one
+# level above the workspace, which is `/` here. `viewer.css` is in the
+# workspace, so it arrives with the rest of `gateway/frontend/`.
 COPY gateway/joshua_gateway/ui/joshua-ui.css /joshua_gateway/ui/
-COPY gateway/joshua_gateway/viewer.css /joshua_gateway/
 RUN npm run build
 
 # Build stage: resolve and install the member and its dependencies.
@@ -67,8 +67,8 @@ WORKDIR /app
 COPY --from=builder --chown=1000:1000 /app/.venv /app/.venv
 COPY --from=builder --chown=1000:1000 /app/shared /app/shared
 COPY --from=builder --chown=1000:1000 /app/gateway /app/gateway
-# The React app of the viewer. The viewer mounts this folder, and with no
-# build in the image every page is a server-rendered one.
+# The React app of the viewer. The viewer mounts this folder; with no build in
+# the image the viewer serves its JSON API and no page at all.
 COPY --from=frontend --chown=1000:1000 /build/dist/ /app/gateway/joshua_gateway/static/
 ENV PATH="/app/.venv/bin:$PATH"
 USER 1000

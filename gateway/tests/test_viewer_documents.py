@@ -393,7 +393,7 @@ def test_the_marks_of_a_document(docs) -> None:
 
 
 def test_the_documents_fit_a_phone() -> None:
-    css = (Path(viewer.__file__).parent / "viewer.css").read_text()
+    css = (Path(viewer.__file__).parent.parent / "frontend" / "src" / "viewer.css").read_text()
     rule = css[css.index("iframe.d-frame {") :][:300]
     assert "width: 100%" in rule and "max-width: 100%" in rule
     assert ".a-card-unit > details.a-add[open], .a-card-unit > .a-comment" in css

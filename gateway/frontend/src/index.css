@@ -1,9 +1,10 @@
-/* The two stylesheets of the viewer are the master copies: the shared Joshua
-   look, then what only the viewer needs. Neither is copied into this
-   workspace, and the app adds no class that is already in them. Anything the
+/* The two stylesheets of the viewer: the shared Joshua look, whose master
+   copy lives beside the Python code (`joshua_gateway/ui/joshua-ui.css`) and
+   is never edited in a copy, then `viewer.css`, which holds what only the
+   viewer needs. The app adds no class that is already in them. Anything the
    app adds goes under these two imports. */
 @import "../../joshua_gateway/ui/joshua-ui.css";
-@import "../../joshua_gateway/viewer.css";
+@import "./viewer.css";
 
 /* A code block of a page, with the button that copies its text. The button
    shows on hover and on focus, so it never covers the first line. */

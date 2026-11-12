@@ -298,7 +298,7 @@ def test_the_definition_fits_a_phone() -> None:
     """No part of the definition is wider than a phone: the property rows go to
     one column, the text wraps, and a code block or a table scrolls in its own
     box."""
-    css = (Path(viewer.__file__).parent / "viewer.css").read_text()
+    css = (Path(viewer.__file__).parent.parent / "frontend" / "src" / "viewer.css").read_text()
     ui = (Path(viewer.__file__).parent / "ui" / "joshua-ui.css").read_text()
     phone = css[css.index("@media (max-width: 560px)") :]
     phone = phone[: phone.index("\n}\n")]

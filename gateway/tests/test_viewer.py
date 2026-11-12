@@ -12,8 +12,9 @@ from pathlib import Path
 
 import bcrypt
 import pytest
-from joshua_gateway import viewer
+from joshua_gateway import viewer, viewer_api
 from joshua_shared import config
+from starlette.routing import Route
 from starlette.testclient import TestClient
 
 ALEX_PW = "alex-secret"
@@ -256,46 +257,27 @@ def test_only_the_same_origin_may_frame_the_viewer(client):
     assert "autrui.net" not in policy
 
 
-# -- the shared look ---------------------------------------------------------
-
-UI_FILES = {
-    "/ui/joshua-ui.css": "text/css",
-    "/ui/logo-512.png": "image/png",
-    "/ui/logo-64.png": "image/png",
-    "/ui/apple-touch-icon.png": "image/png",
-    "/ui/favicon-32.png": "image/png",
-    "/style.css": "text/css",
-}
+# -- the route table ---------------------------------------------------------
 
 
-def test_the_shared_files_are_served(client):
-    for path, media_type in UI_FILES.items():
-        response = client.get(path, auth=("alex", ALEX_PW))
-        assert response.status_code == 200, path
-        assert response.headers["content-type"].split(";")[0] == media_type, path
-        assert response.content, path
-    css = client.get("/ui/joshua-ui.css", auth=MIA).text
-    assert "--j-bg" in css and ".j-shell" in css
-    assert client.get("/ui/logo-64.png", auth=MIA).content.startswith(b"\x89PNG")
+def test_the_route_table_is_the_probes_the_api_and_the_two_documents(client):
+    """The two probes, every JSON route of ``viewer_api``, and the two routes
+    of a document the chat calls. The mount of the React app is last, and an
+    image with no build has none."""
+    routes = [route for route in viewer.build_app().routes if isinstance(route, Route)]
+    assert [route.path for route in routes[:2]] == ["/healthz", "/readyz"]
+    api = [route.path for route in viewer_api.routes()]
+    assert [route.path for route in routes[2 : 2 + len(api)]] == api
+    assert [route.path for route in routes[2 + len(api) :]] == [
+        "/documents/{owner}/{slug}.json",
+        "/documents/{owner}/{slug}/artifact",
+    ]
 
 
-def test_the_shared_files_need_auth(client):
-    for path in UI_FILES:
-        response = client.get(path)
-        assert response.status_code == 401, path
-        assert response.headers["WWW-Authenticate"].startswith("Basic"), path
-        assert client.get(path, auth=("alex", "wrong")).status_code == 401, path
-
-
-def test_only_the_named_shared_files_are_served(client):
-    for path in ("/ui/README.md", "/ui/nope.css", "/ui/..%2fviewer.py", "/ui/%2e%2e"):
+def test_the_viewer_serves_no_stylesheet_and_no_image_of_its_own(client):
+    """Every stylesheet and every image is a file of the React app now."""
+    for path in ("/style.css", "/ui/joshua-ui.css", "/ui/logo-64.png"):
         assert client.get(path, auth=("alex", ALEX_PW)).status_code == 404, path
-
-
-def test_the_viewer_stylesheet_uses_the_shared_tokens(client):
-    css = client.get("/style.css", auth=("alex", ALEX_PW)).text
-    assert "var(--j-" in css
-    assert "prefers-color-scheme" not in css  # dark only, like the shared file
 
 
 # -- search -----------------------------------------------------------------
