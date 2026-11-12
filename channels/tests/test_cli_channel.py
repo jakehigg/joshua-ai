@@ -6,11 +6,13 @@ reaches core. These tests run the real routes over ``ASGITransport``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,13 +21,14 @@ import pytest
 from joshua_channels.adapters.cli import CliAdapter, outbox_path
 from joshua_channels.app import build_app
 from joshua_channels.attachments import AttachmentPipeline
-from joshua_channels.cli_routes import build_cli_router, inbox_name
+from joshua_channels.cli_routes import _relay, build_cli_router, inbox_name
 from joshua_channels.core_client import CoreClient
 from joshua_channels.deliver import ChannelsContext
 from joshua_channels.guard import Guard
 from joshua_channels.registry import AdapterRegistry
 from joshua_shared import config as config_module
 from joshua_shared.attachments import NO_CAPTION_TEXT
+from joshua_shared.contracts import Chat, Handle, TurnEvent
 from joshua_shared.http import FleetClient
 from pdf_fixtures import pdf_with_text
 from PIL import Image
@@ -686,3 +689,98 @@ async def test_transcript_logs_no_message_text(
         line = record.getMessage() + json.dumps(record.msg, default=str)
         assert "secret plan" not in line
         assert "whole answer" not in line
+
+
+async def test_transcript_passes_pending_and_attachments_through(tmp_path: Path) -> None:
+    pending = {
+        "turn_id": "t2",
+        "state": "queued",
+        "since": "2026-03-04T12:01:00+00:00",
+        "text": "x",
+    }
+    files = [{"path": "wiki/attachments/2026/11/a.jpg", "mime": "image/jpeg", "name": "a.jpg"}]
+    body = {
+        **TRANSCRIPT_BODY,
+        "pending": pending,
+        "messages": [{**TRANSCRIPT_BODY["messages"][0], "meta": {"attachments": files}}],
+    }
+    response = await _read(
+        _make_transcript(tmp_path, TranscriptCore(body=body)), {"person": "alex"}
+    )
+    assert response.json()["pending"] == pending
+    assert response.json()["messages"][0]["meta"]["attachments"] == files
+
+
+# --- a caller that leaves ----------------------------------------------------
+
+
+class SlowCore:
+    """A core that waits for a release before the reply, and notes how far it got."""
+
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.finished = asyncio.Event()
+        self.closed_early = False
+
+    async def stream_turn(self, event: Any):
+        try:
+            yield "accepted", {"turn_id": "t9"}
+            yield "status", {"state": "queued"}
+            await self.release.wait()
+            yield "done", {"turn_id": "t9", "text": "late", "tools": []}
+            self.finished.set()
+        except (asyncio.CancelledError, GeneratorExit):
+            self.closed_early = True
+            raise
+
+
+async def test_the_frames_of_core_pass_through_in_order(tmp_path: Path) -> None:
+    core = SlowCore()
+    core.release.set()
+    app, _ = _make(tmp_path, core=core)
+    async with _client(app) as client:
+        response = await client.post(
+            "/v1/cli/turns/stream",
+            json={"person": "alex", "text": "hi"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    names = [
+        line.removeprefix("event: ")
+        for line in response.text.splitlines()
+        if line.startswith("event:")
+    ]
+    assert names == ["accepted", "status", "done"]
+
+
+async def test_a_caller_that_leaves_does_not_close_the_stream_to_core(tmp_path: Path) -> None:
+    """ASGITransport buffers a response, so the generator is read directly and
+    its reader is cancelled, as the server cancels the response of a caller that left."""
+    core = SlowCore()
+    _, _ = _make(tmp_path, core=core)
+    ctx = SimpleNamespace(core_client=core)
+    event = TurnEvent(
+        channel="cli:alex",
+        chat=Chat(kind="dm", id="alex"),
+        handle=Handle(type="cli", id="alex"),
+        text="hi",
+    )
+    seen: list[str] = []
+
+    async def reader() -> None:
+        async for frame in _relay(ctx, event):  # type: ignore[arg-type]
+            seen.append(frame)
+
+    task = asyncio.create_task(reader())
+    for _ in range(100):
+        if len(seen) == 2:
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # The caller is gone. Core is still waiting for the reply.
+    assert not core.finished.is_set()
+    core.release.set()
+    await asyncio.wait_for(core.finished.wait(), 2)
+    assert core.closed_early is False
+    assert len(seen) == 2

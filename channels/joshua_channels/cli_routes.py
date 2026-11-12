@@ -8,6 +8,12 @@ The body is JSON (``person``, ``text``) or ``multipart/form-data`` (``person``,
 inbox directory and hands it to the attachment pipeline, the same pipeline every
 other channel uses, so the turn carries stored paths and never bytes.
 
+A turn does not stop when the person's connection does. The stream from core
+is read by a task of its own, and the response only forwards what that task
+reads. A caller that closes the connection (a phone that locks) stops the
+forwarding, and the task goes on to the end of core's stream, so core never
+sees a closed stream and the turn finishes. See ``_relay``.
+
 ``GET /v1/cli/outbox`` returns what core sent to this person while they were
 away, and marks it read.
 
@@ -23,9 +29,11 @@ never logs a message.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import posixpath
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -113,6 +121,55 @@ def _channel_id(person_id: str, workspace: str) -> str:
     if workspace:
         return f"{WORKSPACE_CHANNEL_TYPE}:{workspace}"
     return f"{CHANNEL_TYPE}:{person_id}"
+
+
+# The tasks that read core's stream. A task stays here until it ends, so it
+# outlives the response of a caller that left.
+_relays: set[asyncio.Task[None]] = set()
+
+
+async def _relay(ctx: ChannelsContext, event: TurnEvent) -> AsyncIterator[str]:
+    """Forward the frames of core's turn stream, as server-sent events.
+
+    A task reads core into a queue. This generator ends when the caller leaves,
+    and the task does not: it reads core to the end and drops what no one reads.
+    A failure of the stream to core goes to the caller as the same exception,
+    when the caller is still there.
+    """
+    queue: asyncio.Queue[tuple[str, dict] | BaseException | None] = asyncio.Queue()
+    gone = False
+
+    async def pump() -> None:
+        try:
+            async for frame in ctx.core_client.stream_turn(event):
+                if not gone:
+                    queue.put_nowait(frame)
+        except Exception as exc:  # noqa: BLE001 — the caller gets it, or the log does
+            if gone:
+                logger.warning(
+                    {"message": "cli turn: core stream failed after the caller left"}
+                    | {"error": type(exc).__name__}
+                )
+            queue.put_nowait(exc)
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(pump(), name="cli-turn-relay")
+    _relays.add(task)
+    task.add_done_callback(_relays.discard)
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            name, data = item
+            yield f"event: {name}\ndata: {json.dumps(data)}\n\n"
+    finally:
+        if not task.done():
+            gone = True
+            logger.info({"message": "cli turn: the caller left; the turn goes on"})
 
 
 def _context(request: Request) -> ChannelsContext:
@@ -313,11 +370,7 @@ def build_cli_router() -> APIRouter:
             thread=None if submission.workspace else "main",
         )
 
-        async def stream():  # type: ignore[no-untyped-def]
-            async for name, data in ctx.core_client.stream_turn(event):
-                yield f"event: {name}\ndata: {json.dumps(data)}\n\n"
-
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        return StreamingResponse(_relay(ctx, event), media_type="text/event-stream")
 
     @router.get("/v1/cli/outbox")
     async def get_cli_outbox(request: Request):  # type: ignore[no-untyped-def]
