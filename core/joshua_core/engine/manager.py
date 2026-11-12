@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -87,6 +87,28 @@ class TurnCtx:
 
 
 ContextProvider = Callable[[TurnCtx], Awaitable[str | None]]
+
+
+# What a turn tells its caller about where it is: "queued" while it waits for
+# the conversation lock, "running" once it holds the lock.
+StateHook = Callable[[str], Awaitable[None]]
+
+
+@dataclass
+class PendingTurn:
+    """One turn that has been accepted and has not finished.
+
+    The manager keeps one per turn in flight, so a client that was not on the
+    stream (a second device, or the same one after a reload) can still see that
+    Joshua is working. ``text`` is the person's message and is empty for a turn
+    that is not from a person (a task or an event).
+    """
+
+    turn_id: str
+    direction: str
+    text: str
+    since: datetime
+    state: str = "running"
 
 
 @dataclass
@@ -259,6 +281,16 @@ def _new_turn_id() -> str:
     return "t-" + uuid4().hex[:12]
 
 
+async def _tell(hook: StateHook | None, state: str) -> None:
+    """Tell the caller where the turn is. A hook that fails never fails the turn."""
+    if hook is None:
+        return
+    try:
+        await hook(state)
+    except Exception as exc:  # noqa: BLE001 — a status line is not worth a turn
+        logger.warning({"message": "turn state hook failed", "error": str(exc)})
+
+
 def _chat_id(channel_id: str) -> str:
     """The platform chat id inside a namespaced channel id.
 
@@ -310,6 +342,8 @@ class ConversationManager:
         self._pool_lock = asyncio.Lock()
         # The teardowns of abandoned clients, kept until they finish.
         self._teardowns: set[asyncio.Task[None]] = set()
+        # The turns in flight, by conversation id, oldest first.
+        self._pending: dict[str, list[PendingTurn]] = {}
         self._reaper: asyncio.Task[None] | None = None
 
     @property
@@ -687,6 +721,26 @@ class ConversationManager:
             "by its full path."
         )
 
+    def _attachment_meta(self, attachments: list[Attachment]) -> list[dict[str, Any]]:
+        """What the inbound row keeps of each file: where it is filed, its type,
+        the name the sender gave it, and its size. A history client shows the
+        file from this."""
+        kept: list[dict[str, Any]] = []
+        for a in attachments:
+            try:
+                size = (self._data_dir / a.path).stat().st_size
+            except OSError:
+                size = None
+            kept.append(
+                {
+                    "path": a.path,
+                    "mime": a.mime,
+                    "name": a.original_name or Path(a.path).name,
+                    "size": size,
+                }
+            )
+        return kept
+
     async def _prepare_attachments(
         self,
         attachments: list[Attachment] | None,
@@ -763,12 +817,68 @@ class ConversationManager:
             )
         return prepared, described
 
+    def pending_for(self, conversation_id: str) -> dict[str, Any] | None:
+        """The turn of a conversation that has not finished, or None.
+
+        A turn from a person wins over one that is not (the last one, when
+        several wait). Otherwise the oldest turn in flight is the answer. The
+        text of a turn that is not from a person is never given out.
+        """
+        turns = self._pending.get(conversation_id)
+        if not turns:
+            return None
+        from_people = [t for t in turns if t.direction == "in"]
+        turn = from_people[-1] if from_people else turns[0]
+        return {
+            "turn_id": turn.turn_id,
+            "state": turn.state,
+            "since": turn.since.isoformat(),
+            "text": turn.text if turn.direction == "in" else "",
+        }
+
     async def run_turn(
         self,
         channel: Channel,
         conversation: Conversation,
         text: str,
         *,
+        turn_id: str | None = None,
+        on_state: StateHook | None = None,
+        **kwargs: Any,
+    ) -> TurnResult:
+        """Run one turn, and keep it in the pending list until it ends.
+
+        ``turn_id`` names the turn when the caller already told someone its id.
+        ``on_state`` hears ``"queued"`` when the turn has to wait for another
+        turn of the conversation, then ``"running"``. The other arguments are
+        those of ``_run_turn``.
+        """
+        pending = PendingTurn(
+            turn_id=turn_id or _new_turn_id(),
+            direction=kwargs.get("direction", "in"),
+            text=text,
+            since=datetime.now(UTC),
+        )
+        self._pending.setdefault(conversation.id, []).append(pending)
+        try:
+            return await self._run_turn(
+                channel, conversation, text, pending=pending, on_state=on_state, **kwargs
+            )
+        finally:
+            turns = self._pending.get(conversation.id, [])
+            if pending in turns:
+                turns.remove(pending)
+            if not turns:
+                self._pending.pop(conversation.id, None)
+
+    async def _run_turn(
+        self,
+        channel: Channel,
+        conversation: Conversation,
+        text: str,
+        *,
+        pending: PendingTurn,
+        on_state: StateHook | None = None,
         on_delta: OnDelta | None = None,
         framing: str | None = None,
         direction: str = "in",
@@ -780,7 +890,7 @@ class ConversationManager:
         """Run one turn. ``pull_only`` marks a turn from a channel that only
         pulls (the viewer) on a thread that another channel owns: the turn must
         not move ``last_channel_id``, so a reminder still goes to the phone."""
-        turn_id = _new_turn_id()
+        turn_id = pending.turn_id
         t_start = monotonic()
         mc = await self._get_or_create(channel, conversation)
         # The current turn's speaker. A per-person session carries a fixed
@@ -849,7 +959,12 @@ class ConversationManager:
                 await on_delta(chunk)
 
         t_lock = monotonic()
+        if mc.lock.locked():
+            pending.state = "queued"
+            await _tell(on_state, "queued")
         async with mc.lock:
+            pending.state = "running"
+            await _tell(on_state, "running")
             lock_wait_ms = round((monotonic() - t_lock) * 1000)
             mc.last_used = monotonic()
             # Bind the in-process tools to THIS turn's channel and speaker. Safe
@@ -865,6 +980,8 @@ class ConversationManager:
             in_meta: dict[str, Any] = {"turn_id": turn_id}
             if speaker:
                 in_meta["speaker"] = speaker
+            if attachments:
+                in_meta["attachments"] = self._attachment_meta(attachments)
             await self._repo.add_transcript(conversation.id, direction, text, meta=in_meta)
             try:
                 result = await self._run_with_resume_retry(

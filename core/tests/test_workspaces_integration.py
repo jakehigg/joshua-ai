@@ -81,7 +81,9 @@ def _app(repo, settings=None) -> FastAPI:
     settings = settings or config_module.parse(CONFIG, env={}, source="<test>")
     app = FastAPI()
     app.state.ctx = SimpleNamespace(
-        settings=settings, repo=repo, manager=SimpleNamespace(workspace_block=None)
+        settings=settings,
+        repo=repo,
+        manager=SimpleNamespace(workspace_block=None, pending_for=lambda conversation_id: None),
     )
     app.include_router(build_workspaces_router())
     app.include_router(build_transcript_router())
@@ -513,7 +515,12 @@ async def test_the_transcript_reads_a_workspace_by_slug_or_id_for_its_owner(clie
         {"channel": "workspace:nothing", "person": "alex"},
     ):
         body = (await client.get("/v1/transcript", params=params, headers=_h(CHANNELS))).json()
-        assert body == {"conversation_id": None, "messages": [], "next_before": None}
+        assert body == {
+            "conversation_id": None,
+            "messages": [],
+            "next_before": None,
+            "pending": None,
+        }
 
 
 # --- usage by conversation -------------------------------------------------------------------

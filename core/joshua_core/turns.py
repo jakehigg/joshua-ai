@@ -8,6 +8,15 @@ the reply back over SSE (``/v1/turns/stream``).
 ``TurnService`` holds the resolution logic, the idempotency cache, and the
 background-turn set. The two routes are thin wrappers that authenticate the
 caller and call it.
+
+A streamed turn runs in a task of its own, and the HTTP stream only reads
+what that task puts on a queue. A client that closes the stream (a phone that
+locks, a tab that closes, a proxy that times out) stops the reading and nothing
+else: the turn goes on, and its reply lands in the transcript like the reply of
+any other turn. The turn is cancelled only when the process shuts down. The
+stream tells the client what happens, in these events: ``accepted`` (core has
+the turn and it will finish), ``status`` (``queued`` while another turn of the
+conversation runs, then ``running``), ``delta``, ``done``, and ``error``.
 """
 
 from __future__ import annotations
@@ -17,6 +26,7 @@ import json
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -101,6 +111,9 @@ class TurnService:
         self._events = events
         self._seen = SeenCache()
         self._background: set[asyncio.Task[None]] = set()
+        # The tasks of streamed turns. A task stays here until it ends, so no
+        # one drops it while the client is gone.
+        self._streamed: set[asyncio.Task[None]] = set()
 
     # --- resolution --------------------------------------------------------
 
@@ -208,7 +221,9 @@ class TurnService:
             for a in event.attachments
         ]
 
-    async def _run(self, resolution: Resolution, event: TurnEvent, on_delta: Any = None) -> Any:
+    async def _run(
+        self, resolution: Resolution, event: TurnEvent, on_delta: Any = None, **extra: Any
+    ) -> Any:
         person_id = resolution.person.id if resolution.person else None
         return await self._manager.run_turn(
             resolution.channel,
@@ -220,6 +235,7 @@ class TurnService:
             person_id=person_id,
             attachments=self._engine_attachments(event),
             **({"pull_only": True} if resolution.pull_only else {}),
+            **extra,
         )
 
     # --- POST /v1/turns ----------------------------------------------------
@@ -289,36 +305,63 @@ class TurnService:
         if resolution is None:
             return JSONResponse({"reason": "unknown_sender"}, status_code=403)
 
-        turn_id = "t-" + resolution.conversation.id.replace("-", "")[:12]
+        turn_id = "t-" + uuid4().hex[:12]
         return StreamingResponse(
             self._sse(resolution, event, turn_id),
             media_type="text/event-stream",
         )
 
     async def _sse(self, resolution: Resolution, event: TurnEvent, turn_id: str) -> Any:
+        """Start the turn in its own task and relay its events until it ends.
+
+        This generator ends when the client leaves: Starlette cancels it, and
+        the ``finally`` block marks the client gone. The task is not awaited
+        there, and no cancellation reaches it, because it is a separate task
+        that ``self._streamed`` holds. It stops writing to the queue and runs to
+        the end.
+        """
         queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
+        gone = False
+
+        def put(name: str, data: dict[str, Any]) -> None:
+            if not gone:
+                queue.put_nowait((name, data))
 
         async def on_delta(chunk: str) -> None:
-            await queue.put(("delta", {"text": chunk}))
+            put("delta", {"text": chunk})
+
+        async def on_state(state: str) -> None:
+            put("status", {"state": state})
 
         async def run() -> None:
             try:
-                result = await self._run(resolution, event, on_delta=on_delta)
-                await queue.put(
-                    (
-                        "done",
-                        {"turn_id": turn_id, "text": result.text or "", "tools": result.tools_used},
-                    )
+                result = await self._run(
+                    resolution, event, on_delta=on_delta, turn_id=turn_id, on_state=on_state
                 )
+                put(
+                    "done",
+                    {"turn_id": turn_id, "text": result.text or "", "tools": result.tools_used},
+                )
+            except asyncio.CancelledError:
+                # Shutdown. The manager has already abandoned the client.
+                put("error", {"message": "Joshua is restarting"})
+                raise
             except Exception as exc:  # noqa: BLE001 — surface the failure as an SSE error
                 logger.error(
                     {"message": "stream turn failed", "channel": event.channel, "error": str(exc)}
                 )
-                await queue.put(("error", {"message": str(exc)}))
+                put("error", {"message": str(exc)})
             finally:
-                await queue.put(None)
+                if gone:
+                    logger.info(
+                        {"message": "turn finished after the client left", "turn_id": turn_id}
+                    )
+                queue.put_nowait(None)
 
-        task = asyncio.create_task(run())
+        task = asyncio.create_task(run(), name=f"stream-turn-{turn_id}")
+        self._streamed.add(task)
+        task.add_done_callback(self._streamed.discard)
+        put("accepted", {"turn_id": turn_id})
         try:
             while True:
                 item = await queue.get()
@@ -327,12 +370,15 @@ class TurnService:
                 name, data = item
                 yield f"event: {name}\ndata: {json.dumps(data)}\n\n"
         finally:
-            await task
+            if not task.done():
+                gone = True
+                logger.info({"message": "client left a running turn", "turn_id": turn_id})
 
     async def drain(self) -> None:
         """Await every in-flight background turn. Called on shutdown."""
-        if self._background:
-            await asyncio.gather(*list(self._background), return_exceptions=True)
+        tasks = [*self._background, *self._streamed]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         if self._events is not None:
             await self._events.drain()
 

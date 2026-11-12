@@ -173,7 +173,12 @@ def test_a_bad_before_is_422(client: TestClient, before: str) -> None:
 def test_an_unknown_conversation_is_empty(client: TestClient) -> None:
     response = _get(client, channel="cli:nobody", person="nobody")
     assert response.status_code == 200
-    assert response.json() == {"conversation_id": None, "messages": [], "next_before": None}
+    assert response.json() == {
+        "conversation_id": None,
+        "messages": [],
+        "next_before": None,
+        "pending": None,
+    }
     assert client.repo.created == 0
 
 
@@ -269,3 +274,38 @@ def test_message_takes_a_naive_time_as_utc() -> None:
 def test_message_with_no_time_has_no_at() -> None:
     row = {"id": 1, "direction": "in", "content": "x"}
     assert message(row)["at"] is None
+
+
+# --- pending and attachments ---------------------------------------------------
+
+
+def test_an_idle_conversation_has_no_pending(client: TestClient) -> None:
+    client.app.state.ctx.manager = SimpleNamespace(pending_for=lambda conversation_id: None)
+    assert _get(client).json()["pending"] is None
+    # An unknown conversation answers the same field.
+    assert _get(client, person="nobody").json()["pending"] is None
+
+
+def test_a_turn_in_flight_is_pending(client: TestClient) -> None:
+    seen: list[str] = []
+    pending = {
+        "turn_id": "t-1",
+        "state": "queued",
+        "since": "2026-03-04T12:00:00+00:00",
+        "text": "hi",
+    }
+
+    def pending_for(conversation_id: str) -> dict[str, Any]:
+        seen.append(conversation_id)
+        return pending
+
+    client.app.state.ctx.manager = SimpleNamespace(pending_for=pending_for)
+    assert _get(client).json()["pending"] == pending
+    assert seen == ["conv-1"]
+
+
+def test_the_attachments_of_a_message_pass_the_filter() -> None:
+    files = [
+        {"path": "wiki/attachments/2026/11/a.jpg", "mime": "image/jpeg", "name": "a.jpg", "size": 3}
+    ]
+    assert safe_meta({"attachments": files, "usage": {"x": 1}}) == {"attachments": files}
