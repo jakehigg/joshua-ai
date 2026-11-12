@@ -120,6 +120,8 @@ describe("useKeyboardFit", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    // jsdom has no scrollIntoView; a test that stands one in takes it back.
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
   function install(vv: FakeViewport | undefined) {
@@ -165,6 +167,24 @@ describe("useKeyboardFit", () => {
     expect(root.style.getPropertyValue("--vvh")).toBe("450px");
     vi.advanceTimersByTime(400);
     expect(scroll.mock.calls.length).toBeGreaterThanOrEqual(3);
+    vi.useRealTimers();
+  });
+
+  it("brings the field to the middle of what shows, once the keyboard is up", () => {
+    vi.useFakeTimers();
+    const vv = new FakeViewport();
+    install(vv);
+    vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const into = vi.fn();
+    Element.prototype.scrollIntoView = into;
+    render(<Probe />);
+    act(() => {
+      screen.getByLabelText("field").focus();
+    });
+    // Not before the keyboard has resized the viewport.
+    expect(into).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(400);
+    expect(into).toHaveBeenCalledWith({ block: "center" });
     vi.useRealTimers();
   });
 

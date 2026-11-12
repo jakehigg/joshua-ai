@@ -11,8 +11,11 @@
 //   class vv-fit  (always, while the hook runs) and kb-open (keyboard up)
 // index.css then pins the chat shell to that box (position fixed, the visible
 // top and height), so the header stays at the top, the list scrolls, and the
-// composer sits on the keyboard. The page itself cannot scroll under it. A
-// browser with no visualViewport gets none of this and keeps the 100dvh layout.
+// composer sits on the keyboard. The page itself cannot scroll under it. On
+// focus the hook also brings the field that has the focus to the middle of
+// what shows, after the keyboard has opened, so the caret is never behind it.
+// A browser with no visualViewport gets none of this and keeps the 100dvh
+// layout.
 //
 // useMedia: a media query as state, for the drawers that are columns on a wide
 // screen. Without matchMedia it answers `fallback` (a wide screen).
@@ -41,16 +44,21 @@ export function useKeyboardFit(): void {
     };
     // iOS scrolls the document to bring a focused field up. The shell is
     // pinned to the visible box, so put the document back and measure again,
-    // at once and after the keyboard has finished opening.
-    const settle = () => {
+    // at once and after the keyboard has finished opening. Each later pass
+    // also brings the field itself to the middle of what shows, once the
+    // viewport has resized: the composer of the chat, and the caret in it,
+    // then stand above the keyboard and not behind it.
+    const settle = (field?: HTMLElement) => {
       window.scrollTo(0, 0);
       apply();
+      field?.scrollIntoView?.({ block: "center" });
     };
     const timers: ReturnType<typeof setTimeout>[] = [];
     const onFocus = (e: FocusEvent) => {
       if (!(e.target instanceof HTMLElement) || !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      const field = e.target;
       settle();
-      timers.push(setTimeout(settle, 120), setTimeout(settle, 350));
+      timers.push(setTimeout(() => settle(field), 120), setTimeout(() => settle(field), 350));
     };
     root.classList.add("vv-fit");
     apply();
