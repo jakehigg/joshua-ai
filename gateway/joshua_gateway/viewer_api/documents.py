@@ -1,6 +1,6 @@
 """The JSON routes of the documents: the list, one document, and its comments.
 
-- ``GET /api/v1/documents?status=&kind=`` gives the documents of the member
+- ``GET /api/v1/documents?status=&kind=&tag=`` gives the documents of the member
   who signed in and the shared ones, one status at a time, with how many
   documents each status holds and the kinds of the chips.
 - ``GET /api/v1/documents/{owner}/{slug}?rev=<sha>`` gives one document: its
@@ -120,6 +120,7 @@ def _row(doc: docstore.Document, *, person_id: str, open_comments: int) -> dict[
         "owner": doc.owner,
         "owner_label": documents_mod.owner_label(doc.owner, person_id),
         "summary": doc.summary,
+        "tags": doc.tags,
         "updated": doc.updated,
         "open_comments": open_comments,
     }
@@ -142,7 +143,10 @@ async def documents(request: Request, person: Person) -> JSONResponse:
     kind = documents_mod.parse_kind(request.query_params.get("kind"))
     base = docstore.root()
     docs = docstore.list_documents(base, docstore.owners(person.id)) if base.is_dir() else []
-    of_kind = [d for d in docs if kind is None or d.kind == kind]
+    tag = (request.query_params.get("tag") or "").strip()
+    # ``tag`` narrows the list like ``kind`` does: a workspace shows its own
+    # documents with ``tag=ws:<slug>``.
+    of_kind = [d for d in docs if (kind is None or d.kind == kind) and (not tag or tag in d.tags)]
     counts = {key: sum(1 for d in of_kind if d.status == key) for key, _, _ in documents_mod.PILLS}
     shown = [d for d in of_kind if d.status == status]
     kinds = list(dict.fromkeys([*docstore.KINDS, *sorted({d.kind for d in docs})]))
@@ -150,6 +154,7 @@ async def documents(request: Request, person: Person) -> JSONResponse:
         {
             "status": status,
             "kind": kind,
+            "tag": tag or None,
             "counts": counts,
             "kinds": kinds,
             "documents": [

@@ -200,6 +200,7 @@ def test_the_list_gives_the_active_own_and_shared_documents(docs) -> None:
         "owner": "alex",
         "owner_label": "yours",
         "summary": "The plan for the party on Saturday.",
+        "tags": [],
         "updated": "2026-11-09T12:00:00+00:00",
         "open_comments": 0,
     }
@@ -219,6 +220,20 @@ def test_the_status_and_the_kind_of_the_query(docs) -> None:
     # An unknown status is the default, and a bad kind is no kind.
     assert _list(status="bogus").json()["status"] == "active"
     assert _list(kind="<x>").json()["kind"] is None
+
+
+def test_the_tag_of_the_query_keeps_the_documents_with_that_tag(docs) -> None:
+    _write(
+        docs / "alex/pie.md",
+        "---\ntitle: Pie\nkind: note\nstatus: active\ntags: [ws:thanksgiving, food]\n---\nPie.\n",
+    )
+    body = _list(tag="ws:thanksgiving").json()
+    assert [row["title"] for row in body["documents"]] == ["Pie"]
+    assert body["documents"][0]["tags"] == ["ws:thanksgiving", "food"]
+    assert body["tag"] == "ws:thanksgiving"
+    assert body["counts"]["active"] == 1
+    assert _list(tag="ws:nothing").json()["documents"] == []
+    assert _list().json()["tag"] is None
 
 
 def test_a_row_counts_only_the_open_comments(docs) -> None:

@@ -12,6 +12,9 @@ The chat has two routes: ``POST /api/v1/chat/<person>/turns`` streams one turn
 as server-sent events, and ``GET /api/v1/chat/<person>/history`` gives a page
 of the conversation. Both go to the channels container (``CHANNELS_URL``).
 
+The workspaces have nine routes under ``/api/v1/workspaces``, which proxy
+core (``CORE_URL``). See ``viewer_api.workspaces``.
+
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
 
@@ -36,6 +39,7 @@ from joshua_gateway.viewer_api import (
     session,
     usage,
     wiki,
+    workspaces,
 )
 
 # Every JSON route of the viewer is under this prefix, from the first one.
@@ -90,6 +94,27 @@ def routes() -> list[Route]:
         ),
         Route(api_path("chat/{person}/turns"), _require_auth(chat.turns), methods=["POST"]),
         Route(api_path("chat/{person}/history"), _require_auth(chat.history)),
+        Route(api_path("workspaces"), _require_auth(workspaces.list_workspaces)),
+        Route(api_path("workspaces"), _require_auth(workspaces.create), methods=["POST"]),
+        Route(api_path("workspaces/options"), _require_auth(workspaces.options)),
+        Route(api_path("workspaces/{slug}"), _require_auth(workspaces.read)),
+        Route(api_path("workspaces/{slug}"), _require_auth(workspaces.change), methods=["PATCH"]),
+        Route(api_path("workspaces/{slug}/items"), _require_auth(workspaces.list_items)),
+        Route(
+            api_path("workspaces/{slug}/items"),
+            _require_auth(workspaces.add_item),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("workspaces/{slug}/items/{id}"),
+            _require_auth(workspaces.change_item),
+            methods=["PATCH"],
+        ),
+        Route(
+            api_path("workspaces/{slug}/items/{id}"),
+            _require_auth(workspaces.delete_item),
+            methods=["DELETE"],
+        ),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),
         Route(api_path("files/{root}/{path:path}"), _require_auth(files.file)),

@@ -221,7 +221,11 @@ class ChannelsClient:
         await self._client.aclose()
 
     async def open_turn(
-        self, person: str, text: str, attachment: Attachment | None = None
+        self,
+        person: str,
+        text: str,
+        attachment: Attachment | None = None,
+        workspace: str = "",
     ) -> TurnStream:
         """Start a turn and return its stream once channels has accepted it.
 
@@ -234,7 +238,11 @@ class ChannelsClient:
             request = self._client.build_request(
                 "POST",
                 TURN_PATH,
-                json={"person": person, "text": text},
+                json={
+                    "person": person,
+                    "text": text,
+                    **({"workspace": workspace} if workspace else {}),
+                },
                 headers=headers,
                 timeout=self._stream_timeout,
             )
@@ -242,7 +250,11 @@ class ChannelsClient:
             request = self._client.build_request(
                 "POST",
                 TURN_PATH,
-                data={"person": person, "text": text},
+                data={
+                    "person": person,
+                    "text": text,
+                    **({"workspace": workspace} if workspace else {}),
+                },
                 files={"file": attachment},
                 headers=headers,
                 timeout=self._stream_timeout,
@@ -262,7 +274,11 @@ class ChannelsClient:
         return TurnStream(response)
 
     async def transcript(
-        self, person: str, limit: int | None = None, before: int | None = None
+        self,
+        person: str,
+        limit: int | None = None,
+        before: int | None = None,
+        workspace: str = "",
     ) -> dict[str, Any]:
         """Return one page of the conversation of ``person``, oldest first.
 
@@ -274,6 +290,8 @@ class ChannelsClient:
             params["limit"] = limit
         if before is not None:
             params["before"] = before
+        if workspace:
+            params["workspace"] = workspace
         try:
             response = await self._client.get(
                 TRANSCRIPT_PATH, params=params, timeout=self._outbox_timeout

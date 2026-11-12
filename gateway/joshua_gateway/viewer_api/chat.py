@@ -16,8 +16,11 @@ end of the stream. While channels is silent, a comment line goes out every
 ``SSE_KEEPALIVE_S`` seconds, so a proxy with a read timeout keeps the stream
 open through a long turn.
 
-``GET /api/v1/chat/<person>/history`` gives one page of the ``cli:``
-conversation of the person, from the channels transcript. ``in`` is the
+A turn body and a history query take an optional ``workspace`` (the slug or
+the id). Without it, the turn runs in the main thread of the person.
+
+``GET /api/v1/chat/<person>/history`` gives one page of the main thread of the
+person (or of the workspace), from the channels transcript. ``in`` is the
 person, ``out`` is Joshua, and any other direction is ``system``. A person row
 that starts with the speech marker loses the marker and gets
 ``"spoken": true``.
@@ -82,6 +85,9 @@ UNREACHABLE = "Joshua is unreachable"
 CROSS_SITE = "the request comes from another site"
 
 PERSON_ID = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+# The slug or the id of a workspace. Core finds it for the person.
+WORKSPACE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+BAD_WORKSPACE = "workspace: not a workspace slug or id"
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
@@ -156,6 +162,8 @@ class TurnIn(BaseModel):
     # "brief" asks Joshua for a short spoken version. Outgoing spoken turns
     # are not part of this route, so the value is read and ignored.
     spoken: Any = None
+    # The slug or the id of a workspace, or "" for the main chat.
+    workspace: str = ""
 
 
 @dataclass
@@ -165,6 +173,16 @@ class Turn:
     text: str
     spoken: Any = None
     upload: Part | None = None
+    workspace: str = ""
+
+
+def _workspace_of(value: Any) -> str:
+    """The workspace of a body, or "" for none. A bad value is refused."""
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or not WORKSPACE_REF.fullmatch(value.strip()):
+        raise _Refused(422, BAD_WORKSPACE)
+    return value.strip()
 
 
 class _Refused(Exception):
@@ -231,7 +249,7 @@ def _json_turn(raw: bytes) -> Turn:
         turn = TurnIn.model_validate(payload)
     except ValidationError as exc:
         raise _Refused(422, _validation_message(exc)) from None
-    return Turn(turn.text, turn.spoken)
+    return Turn(turn.text, turn.spoken, workspace=_workspace_of(payload.get("workspace")))
 
 
 def _form_turn(parts: list[Part]) -> Turn:
@@ -245,6 +263,7 @@ def _form_turn(parts: list[Part]) -> Turn:
         if upload is not None and upload.size == 0:
             raise _Refused(422, f"{FILE_FIELD}: the file is empty")
         text = _checked_text(fields.get("text", ""), has_file=upload is not None)
+        workspace = _workspace_of(fields.get("workspace"))
     except _Refused:
         for part in parts:
             part.close()
@@ -252,7 +271,7 @@ def _form_turn(parts: list[Part]) -> Turn:
     for part in parts:
         if part is not upload:
             part.close()
-    return Turn(text, fields.get("spoken"), upload)
+    return Turn(text, fields.get("spoken"), upload, workspace)
 
 
 async def read_turn(request: Request, limit: int) -> Turn:
@@ -372,7 +391,7 @@ async def turns(request: Request, person: Person) -> JSONResponse | StreamingRes
     if upload is not None:
         attachment = (upload.filename, upload.open(), upload.content_type or DEFAULT_FILE_TYPE)
     try:
-        stream = await client.open_turn(who, turn.text, attachment)
+        stream = await client.open_turn(who, turn.text, attachment, workspace=turn.workspace)
     except ChannelsError as exc:
         _log_turn(who, f"refused:{exc.reason}", started, chars_in, file_bytes)
         await client.aclose()
@@ -460,12 +479,19 @@ async def history(request: Request, person: Person) -> JSONResponse:
     cursor = _int(request.query_params.get("before"), "before", 1, None)
     if isinstance(cursor, JSONResponse):
         return cursor
+    try:
+        workspace = _workspace_of(request.query_params.get("workspace"))
+    except _Refused as exc:
+        return _json({"error": exc.message}, exc.status)
     client = viewer_channels.from_env()
     if client is None:
         return _json({"error": NOT_CONFIGURED}, 503)
     try:
         page = await client.transcript(
-            who, limit=DEFAULT_LIMIT if size is None else size, before=cursor
+            who,
+            limit=DEFAULT_LIMIT if size is None else size,
+            before=cursor,
+            workspace=workspace,
         )
     except ChannelsError as exc:
         answer = channels_error(exc)

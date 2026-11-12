@@ -258,6 +258,44 @@ def test_the_routes_need_the_sign_in(client, monkeypatch) -> None:
     assert client.get(HISTORY, auth=("alex", "wrong")).status_code == 401
 
 
+# -- workspace ----------------------------------------------------------------
+
+
+def test_a_json_turn_passes_the_workspace_to_channels(client, channels) -> None:
+    response = client.post(TURNS, json={"text": "hi", "workspace": " solar "}, auth=ALEX)
+    assert response.status_code == 200
+    assert json.loads(channels.bodies[0]) == {"person": "alex", "text": "hi", "workspace": "solar"}
+
+
+def test_a_multipart_turn_passes_the_workspace_to_channels(client, channels) -> None:
+    client.post(
+        TURNS,
+        data={"text": "look", "workspace": "solar"},
+        files={"file": ("a.txt", b"quote", "text/plain")},
+        auth=ALEX,
+    )
+    assert b'name="workspace"' in channels.bodies[0] and b"solar" in channels.bodies[0]
+
+
+@pytest.mark.parametrize("workspace", ["../x", "a b", 7, "x" * 90])
+def test_a_bad_workspace_is_422_and_never_reaches_channels(client, channels, workspace) -> None:
+    response = client.post(TURNS, json={"text": "hi", "workspace": workspace}, auth=ALEX)
+    assert response.status_code == 422
+    assert response.json()["error"].startswith("workspace:")
+    if isinstance(workspace, str):
+        assert client.get(HISTORY, params={"workspace": workspace}, auth=ALEX).status_code == 422
+    assert channels.requests == []
+
+
+def test_history_passes_the_workspace(client, channels) -> None:
+    client.get(HISTORY + "?workspace=solar", auth=ALEX)
+    assert dict(channels.requests[0].url.params) == {
+        "person": "alex",
+        "limit": "50",
+        "workspace": "solar",
+    }
+
+
 # -- history ---------------------------------------------------------------------
 
 
