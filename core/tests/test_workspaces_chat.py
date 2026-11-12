@@ -153,7 +153,7 @@ async def test_send_writes_a_row_and_unseen_items_and_runs_no_turn() -> None:
         _deps(repo),
         workspace="THANKSGIVING plans",
         text="I like this turkey recipe",
-        items=[{"kind": "link", "ref": "https://ex.org/t", "title": "Turkey"}, {"kind": "x"}],
+        items=[{"kind": "link", "ref": "https://example.com/t", "title": "Turkey"}, {"kind": "x"}],
     )
     assert "Recorded in workspace 'Thanksgiving plans' with 1 item(s)" in _text(reply)
     assert "Not added" in _text(reply)
