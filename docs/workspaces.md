@@ -49,6 +49,11 @@ so when the person asked ("text me when done") or when `notify` allows it.
 A scheduled task belongs to the conversation that made it, so a task that was
 made in a workspace runs in that workspace.
 
+A scheduled or event turn in a workspace starts with this line: "This is a
+scheduled task in a workspace. Nothing you write here reaches the person. If
+the person should see it, call send_to_normal_chat." The description of
+`schedule_task` says the same inside a workspace.
+
 ## What a session gets
 
 - **Model.** The model of the workspace replaces the model of the chat job.
@@ -102,6 +107,13 @@ The `workspace` builtin server has these tools.
 | `update_workspace_notes(notes)` | workspace | Replace the notes. Keep them short, under 4000 characters. |
 | `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the person's main chat. |
 
+A group chat gets no `workspace` tools, because other people read it. In a
+direct chat, a name that matches no workspace gets the slugs of the person's
+active workspaces in the error.
+
+An item `url` must be an `http` or `https` address, or a path that starts with a
+single `/`. The routes answer 422 and the tool refuses any other value.
+
 The main chat is the most recently active direct conversation that is not a
 workspace, a terminal or a voice thread. Core sends to its last channel. The link is
 `<workspaces.viewer_url>/chat/w/<slug>`. With no `viewer_url`, the message has
@@ -132,7 +144,7 @@ A chat turn in a workspace goes through the channels terminal routes.
 `POST /v1/cli/turns/stream` and `GET /v1/cli/transcript` take an optional
 `workspace` (the slug or the id). Core looks the workspace up for the person.
 
-`GET /v1/usage?group=conversation` gives the totals of each conversation, with
+`GET /v1/usage?group=conversation&person=<id>` gives the totals of each conversation, with
 the slug and the title of the workspace when the conversation belongs to one.
 It shows what a workspace costs.
 

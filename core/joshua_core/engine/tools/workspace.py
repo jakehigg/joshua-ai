@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from joshua_shared.config import JoshuaConfig
+from joshua_shared.item_url import check_item_url
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
@@ -79,6 +80,10 @@ async def do_add_to_workspace(
         return _reply(f"Unknown kind '{kind}'. Use one of: {', '.join(WORKSPACE_ITEM_KINDS)}.")
     if not ref:
         return _reply("Give a ref: the id, slug, path, or address of the item.")
+    try:
+        address = check_item_url(url)
+    except ValueError as exc:
+        return _reply(f"The url was not added: {exc}.")
     target: Workspace | None
     if workspace and workspace.strip():
         target = await _named(deps, workspace)
@@ -87,6 +92,10 @@ async def do_add_to_workspace(
     else:
         return _reply("Name the workspace: its slug or its title.")
     if target is None:
+        # Only a direct chat may see the names of the workspaces: a group chat
+        # shows to other people.
+        if deps.channel.session_mode != "per_person":
+            return _reply("No such workspace.")
         names = ", ".join(w.slug for w in await _active(deps)) or "none"
         return _reply(f"No such workspace. Your workspaces: {names}.")
     here = _in_workspace(deps) and target.channel_id == deps.channel.id
@@ -95,7 +104,7 @@ async def do_add_to_workspace(
         kind,
         ref,
         title or ref,
-        url=(url or "").strip() or None,
+        url=address,
         added_by="agent",
         # An item sent in from another chat is new to the workspace.
         seen=here,
@@ -198,12 +207,15 @@ _SEND_SCHEMA = {
 
 def build_workspace_server(
     deps: ToolDeps, settings: JoshuaConfig, deliver: Deliver | None = None
-) -> Any:
+) -> Any | None:
     """Build the ``workspace`` MCP server for one conversation.
 
-    A workspace thread gets all three tools. Any other chat gets
-    ``add_to_workspace`` only.
+    A workspace thread gets all three tools. A direct chat gets
+    ``add_to_workspace`` only. A shared (group) chat gets no server: the
+    workspaces of one person do not belong in a chat that others read.
     """
+    if not _in_workspace(deps) and deps.channel.session_mode != "per_person":
+        return None
 
     @tool(
         "add_to_workspace",

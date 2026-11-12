@@ -1132,13 +1132,20 @@ class Repo:
         if row is None:
             raise ValueError("no free slug for this title")
         workspace = _workspace(row)
-        await self.upsert_channel(
-            workspace.channel_id,
-            WORKSPACE_CHANNEL_TYPE,
-            display_name=title,
-            default_person_id=owner,
-        )
-        await self.get_or_create_conversation(workspace.channel_id, owner)
+        try:
+            await self.upsert_channel(
+                workspace.channel_id,
+                WORKSPACE_CHANNEL_TYPE,
+                display_name=title,
+                default_person_id=owner,
+            )
+            await self.get_or_create_conversation(workspace.channel_id, owner)
+        except Exception:
+            # No row without its channel: a workspace that cannot hold a thread
+            # would show in the list and fail on the first turn.
+            async with self._pool.connection() as conn:
+                await conn.execute("DELETE FROM workspaces WHERE id = %s", (workspace.id,))
+            raise
         return workspace
 
     async def get_workspace(self, workspace_id: str) -> Workspace | None:
@@ -1322,8 +1329,9 @@ class Repo:
             row = await cur.fetchone()
         return _conversation(row) if row else None
 
-    async def usage_by_conversation(self, since: datetime) -> list[dict[str, Any]]:
-        """The sums of `usage_event` since `since`, for each conversation, with
+    async def usage_by_conversation(self, since: datetime, person_id: str) -> list[dict[str, Any]]:
+        """The sums of `usage_event` since `since`, for each conversation of
+        `person_id`, with
         the slug and the title of its workspace when it belongs to one."""
         async with self._pool.connection() as conn:
             cur = await conn.execute(
@@ -1335,12 +1343,12 @@ class Repo:
                 FROM usage_event u
                 LEFT JOIN conversations c ON c.id = u.conversation_id
                 LEFT JOIN workspaces w ON c.channel_id = 'workspace:' || w.id::text
-                WHERE u.at >= %s AND u.conversation_id IS NOT NULL
+                WHERE u.at >= %s AND u.conversation_id IS NOT NULL AND c.person_id = %s
                 GROUP BY u.conversation_id, c.channel_id, w.slug, w.title
                 ORDER BY SUM(u.input + u.output + u.cache_read + u.cache_write) DESC,
                          u.conversation_id
                 """,
-                (since,),
+                (since, person_id),
             )
             return await cur.fetchall()
 

@@ -52,6 +52,13 @@ logger = get_logger("engine.manager")
 # None. Phase 4 re-adds memory and kb injection through this hook; it is empty now.
 BuiltinFactory = Callable[[ToolDeps], Any]
 
+# The first line of a scheduled or event turn in a workspace: the reply does not
+# reach the person, so the agent must say how to reach them.
+WORKSPACE_UNATTENDED_NOTE = (
+    "[This is a scheduled task in a workspace. Nothing you write here reaches the "
+    "person. If the person should see it, call send_to_normal_chat.]"
+)
+
 
 @dataclass
 class TurnCtx:
@@ -462,7 +469,9 @@ class ConversationManager:
             person_id=conversation.person_id,
         )
         for name, factory in builtins.items():
-            mcp[name] = factory(deps)
+            server = factory(deps)
+            if server is not None:  # a factory may decline for this conversation
+                mcp[name] = server
         options = build_options(
             system_prompt=system_prompt,
             cwd=cwd,
@@ -777,6 +786,9 @@ class ConversationManager:
         # A fresh local-time header each turn — the CLI injects the date, not the
         # clock time. Cheap and always current, unlike the cached system prompt.
         preamble = f"[Current local time: {self._now_str()}]"
+        if channel.channel_type == WORKSPACE_CHANNEL_TYPE and direction in ("task", "inject"):
+            # The delivery gate keeps a workspace reply in the transcript.
+            preamble += "\n" + WORKSPACE_UNATTENDED_NOTE
         # A shared conversation labels the message with who sent it.
         body = f"{speaker}: {text}" if speaker else text
         role = self._conversation_role(channel, conversation)
@@ -805,7 +817,17 @@ class ConversationManager:
         )
         provider_notes: list[str] = []
         for provider in self._context_providers:
-            note = await provider(ctx)
+            try:
+                note = await provider(ctx)
+            except Exception as e:  # noqa: BLE001 — a provider never fails a turn
+                logger.warning(
+                    {
+                        "message": "context provider failed",
+                        "provider": getattr(provider, "__qualname__", type(provider).__name__),
+                        "error": f"{type(e).__name__}: {e}",
+                    }
+                )
+                continue
             if note:
                 provider_notes.append(note)
         channel_note = self._channel_note(mc, channel)
@@ -985,10 +1007,10 @@ class ConversationManager:
         workspace is never touched."""
         if channel.channel_type != WORKSPACE_CHANNEL_TYPE:
             return
+        # Without the size of the last call, the summed usage would count the
+        # cache reads of every call of the turn again. Do not guess: keep the
+        # session.
         used = result.context_tokens
-        if used is None and isinstance(result.usage, dict):
-            counts = Usage.from_sdk(result.usage)
-            used = counts.input + counts.cache_read + counts.cache_write
         cap = self._settings.workspaces.context_cap
         if used is None or used <= cap:
             return

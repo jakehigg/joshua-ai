@@ -38,8 +38,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from joshua_shared.fleet_auth import identify_bearer, load_fleet_tokens
 from joshua_shared.gateway_mcp import allowed_gateway_servers
+from joshua_shared.item_url import check_item_url
 from joshua_shared.log import get_logger
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from joshua_core.engine.workspace import WorkspaceBlock
 from joshua_core.store.models import (
@@ -103,6 +104,11 @@ class ItemBody(_Body):
     ref: str = Field(min_length=1, max_length=1000)
     title: str = Field(default="", max_length=500)
     url: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def _safe_url(cls, value: str | None) -> str | None:
+        return check_item_url(value)
 
 
 class ItemPatchBody(_Body):

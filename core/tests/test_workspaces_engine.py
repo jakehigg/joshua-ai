@@ -701,3 +701,157 @@ def test_register_wires_the_builtin_for_every_job() -> None:
     manager.register_builtin = lambda name, factory, **kw: manager.registered.update({name: kw})
     ws_tools.register(manager, make_settings(), None)
     assert manager.registered == {"workspace": {}}
+
+
+# --- the phase 1 review fixes -----------------------------------------------------------
+
+
+async def test_a_provider_that_raises_does_not_fail_the_turn(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    prompts: list[str] = []
+
+    class Client(FakeSDKClient):
+        async def query(self, prompt):
+            prompts.append(prompt)
+
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", Client)
+    manager = make_manager(WsRepo(_ws()), tmp_path)
+
+    async def broken(ctx):
+        raise RuntimeError("db down")
+
+    async def good(ctx):
+        return "NOTE-FROM-GOOD"
+
+    manager.add_context_provider(broken)
+    manager.add_context_provider(good)
+    result = await manager.run_turn(_channel(), _conversation(), "hello")
+
+    assert not result.is_error
+    assert "NOTE-FROM-GOOD" in prompts[0]
+
+
+async def test_rag_exclusions_fall_back_to_none_on_an_error() -> None:
+    class Broken(WsRepo):
+        async def list_workspace_items(self, workspace_id, *, unseen_only=False):
+            raise RuntimeError("db down")
+
+    assert await ws.rag_exclude_paths(Broken(_ws()), _ctx(_channel())) == set()
+
+
+async def test_without_the_context_size_the_session_is_kept(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    from joshua_core.engine import agent
+
+    # Summed over calls, this would be over the cap: it counts cache reads again.
+    monkeypatch.setattr(agent, "ClaudeSDKClient", _client_with_context(6000))
+    monkeypatch.setattr(agent, "_context_tokens", lambda usage: None)
+    repo = WsRepo(_ws())
+    await make_manager(repo, tmp_path).run_turn(_channel(), _conversation(), "big turn")
+    assert repo.cleared == []
+
+
+def _group_channel() -> Channel:
+    return Channel(id="telegram:-100", channel_type="telegram", session_mode="shared")
+
+
+def test_a_group_chat_gets_no_workspace_server(listed_tools: None) -> None:
+    deps = ToolDeps(
+        repo=WsRepo(_ws()),
+        conversation=Conversation(id="g", channel_id="telegram:-100", person_id=None),
+        channel=_group_channel(),
+        tz="UTC",
+        person_id="alex",
+    )
+    assert ws_tools.build_workspace_server(deps, make_settings()) is None
+
+
+async def test_a_group_chat_error_names_no_workspace() -> None:
+    repo = WsRepo(_ws())
+    deps = ToolDeps(
+        repo=repo,
+        conversation=Conversation(id="g", channel_id="telegram:-100", person_id=None),
+        channel=_group_channel(),
+        tz="UTC",
+        person_id="alex",
+    )
+    reply = await ws_tools.do_add_to_workspace(
+        deps, kind="link", ref="r", title="R", workspace="nowhere"
+    )
+    assert _text(reply) == "No such workspace."
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "javascript:alert(1)",
+        "data:text/html,x",
+        "//evil.example/a",
+        "file:///etc/passwd",
+        "ftp://x/y",
+        "http://",
+    ],
+)
+async def test_add_refuses_an_unsafe_url(url: str) -> None:
+    repo = WsRepo(_ws())
+    reply = await ws_tools.do_add_to_workspace(
+        _deps(repo), kind="link", ref="r", title="t", url=url
+    )
+    assert "url was not added" in _text(reply)
+    assert repo.added == []
+
+
+async def test_add_accepts_http_https_and_a_relative_path() -> None:
+    repo = WsRepo(_ws())
+    for url in ("https://example.org/a", "http://example.org", "/documents/alex/x"):
+        await ws_tools.do_add_to_workspace(_deps(repo), kind="link", ref=url, title="t", url=url)
+    assert [a["url"] for a in repo.added] == [
+        "https://example.org/a",
+        "http://example.org",
+        "/documents/alex/x",
+    ]
+
+
+async def test_a_scheduled_or_event_turn_in_a_workspace_gets_the_unattended_note(
+    tmp_path, monkeypatch
+):
+    install_fake_sdk(monkeypatch)
+    prompts: list[str] = []
+
+    class Client(FakeSDKClient):
+        async def query(self, prompt):
+            prompts.append(prompt)
+
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", Client)
+    manager = make_manager(WsRepo(_ws()), tmp_path)
+    await manager.run_turn(_channel(), _conversation(), "water the plants", direction="task")
+    await manager.run_turn(_channel(), _conversation(), "build done", direction="inject")
+    await manager.run_turn(_channel(), _conversation(), "hi")
+    for prompt in prompts[:2]:
+        assert "Nothing you write here reaches the person" in prompt
+        assert "send_to_normal_chat" in prompt
+    assert "Nothing you write here reaches" not in prompts[2]
+
+
+async def test_the_scheduling_tool_notes_the_workspace_rule(monkeypatch) -> None:
+    from joshua_core.engine.tools import scheduling
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        scheduling,
+        "tool",
+        lambda name, desc, schema: (
+            (seen.append(desc) or (lambda f: f)) if name == "schedule_task" else (lambda f: f)
+        ),
+    )
+    monkeypatch.setattr(scheduling, "create_sdk_mcp_server", lambda **kw: None)
+    scheduling.build_scheduling_server(_deps(WsRepo(_ws())))
+    scheduling.build_scheduling_server(
+        _deps(WsRepo(_ws()), Channel(id="cli:alex", channel_type="cli"))
+    )
+    assert "send_to_normal_chat" in seen[0]
+    assert "send_to_normal_chat" not in seen[1]

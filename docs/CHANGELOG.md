@@ -6,6 +6,14 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Workspace fixes.** A context provider that fails no longer fails the turn.
+  Without the size of the last model call, a workspace keeps its session
+  instead of guessing from summed usage. A group chat gets no `workspace`
+  tools. `GET /v1/usage?group=conversation` needs `person` and lists only that
+  person's conversations. A scheduled or event turn in a workspace is told that
+  its reply does not reach the person. An item `url` must be `http(s)` or a path
+  that starts with `/`. A workspace is not left without its channel when the
+  channel write fails.
 - **The chat is a screen of the viewer.** `/chat` (a person picker) and
   `/chat/<person>` (the conversation) are routes of the React app, inside the
   sidebar and the tabs of the viewer. The screen streams a turn, pages earlier

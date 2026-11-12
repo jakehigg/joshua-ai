@@ -124,7 +124,7 @@ Route allowlists, by default:
 - core `POST /v1/usage`: `usage.writers` (default `assignments`). An empty
   list turns it off. It accepts rows of kind `assignment` only (400
   otherwise), and stores each `ref` as `<writer>:<ref>`.
-- core `GET /v1/usage?group=conversation`: the same callers as `GET /v1/usage`.
+- core `GET /v1/usage?group=conversation&person=<id>`: the same callers as `GET /v1/usage`; it needs `person` and lists only that person's conversations.
   It returns the totals of each conversation, with the workspace slug and title.
 - core `/v1/workspaces`: `workspaces.allowed_callers` (default `viewer`). An
   empty list turns it off. The caller names the person with `person`, and every

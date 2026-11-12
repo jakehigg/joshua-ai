@@ -249,7 +249,11 @@ async def rag_exclude_paths(repo: Repo, ctx: Any) -> set[str]:
     if getattr(channel, "channel_type", None) != WORKSPACE_CHANNEL_TYPE:
         return set()
     workspace_id = workspace_id_of(channel.id)
-    workspace = await repo.get_workspace(workspace_id) if workspace_id else None
-    if workspace is None:
+    try:
+        workspace = await repo.get_workspace(workspace_id) if workspace_id else None
+        if workspace is None:
+            return set()
+        return exclude_paths(workspace, await repo.list_workspace_items(workspace.id))
+    except Exception as exc:  # noqa: BLE001 — RAG falls back to no exclusions
+        logger.warning({"message": "rag exclusions failed", "error": type(exc).__name__})
         return set()
-    return exclude_paths(workspace, await repo.list_workspace_items(workspace.id))

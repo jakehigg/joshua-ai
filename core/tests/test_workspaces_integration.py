@@ -181,6 +181,9 @@ async def test_seen_flag_and_marking(seeded) -> None:
     await seeded.mark_items_seen([])
     await seeded.mark_items_seen([i.id for i in await seeded.list_workspace_items(ws.id)])
     assert await seeded.list_workspace_items(ws.id, unseen_only=True) == []
+    # A re-send from normal chat makes a seen item new again.
+    await seeded.add_workspace_item(ws.id, "link", "new", "From chat", seen=False)
+    assert [i.ref for i in await seeded.list_workspace_items(ws.id, unseen_only=True)] == ["new"]
 
 
 async def test_item_calls_ignore_a_bad_id_and_another_workspace(seeded) -> None:
@@ -419,6 +422,21 @@ async def test_item_routes(client) -> None:
     assert (
         await client.post(base, params=params, headers=_h(), json={"kind": "photo", "ref": "r"})
     ).status_code == 422
+    for bad in ("javascript:alert(1)", "data:text/html,x", "//evil.example/x"):
+        refused = await client.post(
+            base,
+            params=params,
+            headers=_h(),
+            json={"kind": "link", "ref": "r", "title": "t", "url": bad},
+        )
+        assert refused.status_code == 422, bad
+    relative = await client.post(
+        base,
+        params=params,
+        headers=_h(),
+        json={"kind": "link", "ref": "rel", "title": "t", "url": "/assignments/3"},
+    )
+    assert relative.status_code == 200 and relative.json()["url"] == "/assignments/3"
 
     pinned = await client.patch(
         f"{base}/{item['id']}", params=params, headers=_h(), json={"pinned": True}
@@ -428,7 +446,7 @@ async def test_item_routes(client) -> None:
         await client.patch(f"{base}/nope", params=params, headers=_h(), json={"pinned": True})
     ).status_code == 404
     listing = (await client.get(base, params=params, headers=_h())).json()["items"]
-    assert [i["ref"] for i in listing] == ["quote"]
+    assert [i["ref"] for i in listing] == ["quote", "rel"]
     assert (
         await client.delete(f"{base}/{item['id']}", params=params, headers=_h())
     ).status_code == 204
@@ -516,8 +534,16 @@ async def test_usage_group_conversation(client, seeded) -> None:
     await seeded.add_usage_event(
         UsageEvent(kind="reflection", name="reflection", usage=Usage(input=999))
     )
+    # A conversation of another person is never listed for alex.
+    await seeded.upsert_channel("telegram:2", "telegram")
+    theirs = await seeded.get_or_create_conversation("telegram:2", "mia")
+    await seeded.add_usage_event(
+        UsageEvent(kind="chat", name="chat", usage=Usage(input=5), conversation_id=theirs.id)
+    )
 
-    resp = await client.get("/v1/usage", params={"group": "conversation"}, headers=_h())
+    resp = await client.get(
+        "/v1/usage", params={"group": "conversation", "person": "alex"}, headers=_h()
+    )
     body = resp.json()
     rows = {r["conversation_id"]: r for r in body["conversations"]}
 
@@ -532,6 +558,13 @@ async def test_usage_group_conversation(client, seeded) -> None:
     assert "groups" in default and "conversations" not in default  # unchanged without group
     bad = await client.get("/v1/usage", params={"group": "person"}, headers=_h())
     assert bad.status_code == 422
+    # The person is required, and must be a member.
+    no_person = await client.get("/v1/usage", params={"group": "conversation"}, headers=_h())
+    assert no_person.status_code == 422
+    stranger = await client.get(
+        "/v1/usage", params={"group": "conversation", "person": "nobody"}, headers=_h()
+    )
+    assert stranger.status_code == 403
 
 
 async def test_options_list_the_servers_of_the_person_and_the_models(client) -> None:
@@ -554,3 +587,13 @@ async def test_options_list_the_servers_of_the_person_and_the_models(client) -> 
 async def test_a_workspace_titled_options_does_not_take_the_route_name(client) -> None:
     ws = await _create(client, title="Options")
     assert ws["slug"] == "options-1"
+
+
+async def test_create_workspace_leaves_no_row_when_the_channel_fails(seeded, monkeypatch) -> None:
+    async def broken(*a, **k):
+        raise RuntimeError("channel write failed")
+
+    monkeypatch.setattr(seeded, "upsert_channel", broken)
+    with pytest.raises(RuntimeError):
+        await seeded.create_workspace("alex", "Doomed")
+    assert await seeded.list_workspaces("alex") == []

@@ -142,12 +142,12 @@ def _parse_days(raw: str | None) -> int | None:
         return None
 
 
-async def _by_conversation(repo: Any, since: datetime, days: int) -> dict[str, Any]:
+async def _by_conversation(repo: Any, since: datetime, days: int, person_id: str) -> dict[str, Any]:
     """The totals of each conversation. A workspace conversation names its
     workspace. The answer holds ids, slugs, titles, and counts: no person and
     no message."""
     conversations = []
-    for row in await repo.usage_by_conversation(since):
+    for row in await repo.usage_by_conversation(since, person_id):
         slug = row.get("workspace_slug")
         conversations.append(
             {
@@ -176,7 +176,18 @@ async def _answer(request: Request, clock: Clock) -> JSONResponse:
     since = window_start(clock(), timezone, days)
     group = request.query_params.get("group")
     if group == "conversation":
-        return JSONResponse(await _by_conversation(ctx.repo, since, days))
+        # The titles of a workspace are private to its owner, so the totals
+        # are scoped to one person's conversations.
+        name = (request.query_params.get("person") or "").strip()
+        if not name:
+            return JSONResponse(
+                {"error": "invalid request", "detail": "group=conversation needs a person"},
+                status_code=422,
+            )
+        person = ctx.settings.person(name)
+        if person is None or person.role != "member":
+            return JSONResponse({"error": "unknown person"}, status_code=403)
+        return JSONResponse(await _by_conversation(ctx.repo, since, days, person.id))
     if group:
         return JSONResponse(
             {"error": "invalid request", "detail": "group must be conversation"}, status_code=422
