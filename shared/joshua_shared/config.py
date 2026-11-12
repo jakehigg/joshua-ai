@@ -941,7 +941,11 @@ class WorkspacesConfig(_Model):
     the last rows of the thread. ``tool_search_max_servers`` is the number of
     picked servers up to which a workspace turn runs with tool search off.
     ``viewer_url`` is the public address of the viewer, for the link that
-    ``send_to_normal_chat`` adds.
+    ``send_to_normal_chat`` adds. ``hint_sim`` is the similarity over which
+    normal chat gets the line "May relate to workspace X". ``tasks_url`` is
+    the address of the tasks addon: with it, the block of a workspace that
+    links a tasks project lists the next steps. Without it, the section is
+    off.
     """
 
     allowed_callers: list[str] = ["viewer", "gateway"]
@@ -949,6 +953,17 @@ class WorkspacesConfig(_Model):
     context_cap: int = Field(default=150_000, ge=1_000)
     tool_search_max_servers: int = Field(default=3, ge=0)
     viewer_url: str | None = None
+    hint_sim: float = Field(default=0.70, ge=0.0, le=1.0)
+    tasks_url: str | None = None
+
+    @field_validator("tasks_url", mode="before")
+    @classmethod
+    def _check_tasks_url(cls, value: Any) -> Any:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        if not isinstance(value, str) or not value.strip().startswith(("http://", "https://")):
+            raise ValueError("tasks_url must be an http or https address")
+        return value.strip().rstrip("/")
 
     @field_validator("allowed_callers", "models", mode="before")
     @classmethod

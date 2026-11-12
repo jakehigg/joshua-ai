@@ -60,3 +60,15 @@ def test_bad_values_are_refused(section: str) -> None:
 
 def test_an_empty_viewer_url_means_none() -> None:
     assert load('workspaces:\n  viewer_url: ""\n').workspaces.viewer_url is None
+
+
+def test_hint_sim_and_tasks_url() -> None:
+    ws = load().workspaces
+    assert ws.hint_sim == 0.70 and ws.tasks_url is None
+    ws = load("workspaces:\n  hint_sim: 0.8\n  tasks_url: http://tasks:8000/\n").workspaces
+    assert ws.hint_sim == 0.8 and ws.tasks_url == "http://tasks:8000"
+    assert load("workspaces:\n  tasks_url: ''\n").workspaces.tasks_url is None
+    with pytest.raises(ConfigError):
+        load("workspaces:\n  tasks_url: tasks:8000\n")
+    with pytest.raises(ConfigError):
+        load("workspaces:\n  hint_sim: 1.5\n")

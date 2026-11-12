@@ -8,12 +8,19 @@ block of that workspace as new. ``update_workspace_notes`` and
 ``send_to_normal_chat`` are in a workspace thread only: the server builder reads
 ``deps.channel.channel_type``.
 
+A direct chat that is not a workspace also gets ``send_to_workspace`` (a row and
+items in the thread, no turn), ``tell_workspace`` (the same, then one workspace
+turn whose reply stays in the thread), ``list_workspaces`` and
+``workspace_status`` (the block as text). A workspace name is a slug or a title,
+matched with no regard to case among the workspaces of the person.
+
 Every tool acts for ``deps.person_id``. A workspace of another person is never
 found.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -35,6 +42,15 @@ SERVER_NAME = "workspace"
 NOTES_MAX_CHARS = 4000
 
 Deliver = Callable[[str, str], Awaitable[bool]]
+# Starts one turn in a workspace thread, in the background: (workspace, text).
+RunTurn = Callable[[Workspace, str], Awaitable[None]]
+# Renders the workspace block as text, with no side effect.
+RenderBlock = Callable[[Workspace], Awaitable[str]]
+
+GOAL_LINE_CHARS = 120
+# send_to_workspace and tell_workspace cut a message at this length.
+MESSAGE_MAX_CHARS = 4000
+CHAT_PREFIX = "[From normal chat] "
 
 
 def _reply(text: str) -> dict[str, Any]:
@@ -52,17 +68,29 @@ async def _current(deps: ToolDeps) -> Workspace | None:
 
 
 async def _named(deps: ToolDeps, name: str) -> Workspace | None:
-    """A workspace of the person by slug, id, or title (not case-sensitive)."""
-    if not deps.person_id:
-        return None
-    found = await deps.repo.find_workspace(deps.person_id, name)
-    if found is not None:
-        return found
+    """A workspace of the person by slug, id, or title (not case-sensitive).
+    An ambiguous title gives None."""
+    found, _ = await _match(deps, name)
+    return found
+
+
+async def _match(deps: ToolDeps, name: str) -> tuple[Workspace | None, list[Workspace]]:
+    """``(workspace, candidates)``. ``workspace`` is the one match. With no
+    match it is None and ``candidates`` is empty. With an ambiguous name it is
+    None and ``candidates`` lists the workspaces that match."""
+    if not deps.person_id or not (name or "").strip():
+        return None, []
     wanted = name.strip().casefold()
-    for workspace in await deps.repo.list_workspaces(deps.person_id):
-        if workspace.title.strip().casefold() == wanted:
-            return workspace
-    return None
+    owned = await deps.repo.list_workspaces(deps.person_id)
+    exact = [w for w in owned if wanted in (w.slug.casefold(), w.id.casefold())]
+    if len(exact) == 1:
+        return exact[0], []
+    by_title = [w for w in owned if w.title.strip().casefold() == wanted]
+    if len(by_title) == 1:
+        return by_title[0], []
+    if by_title:
+        return None, by_title
+    return None, []
 
 
 async def do_add_to_workspace(
@@ -167,6 +195,139 @@ async def do_send_to_normal_chat(
     return _reply("Sent to the person's normal chat.")
 
 
+def _normal_chat(deps: ToolDeps) -> bool:
+    """A direct chat that is not a workspace: the home of the four tools."""
+    return not _in_workspace(deps) and deps.channel.session_mode == "per_person"
+
+
+def _one_line(text: str, limit: int) -> str:
+    flat = " ".join((text or "").split())
+    return flat if len(flat) <= limit else flat[: limit - 3] + "..."
+
+
+async def _resolve(deps: ToolDeps, name: str) -> tuple[Workspace | None, str]:
+    """The workspace that ``name`` means, or None and the answer to give."""
+    if not (name or "").strip():
+        return None, f"Name the workspace: its slug or its title.{await _known(deps)}"
+    found, candidates = await _match(deps, name)
+    if found is not None:
+        return found, ""
+    if candidates:
+        slugs = ", ".join(f"{w.slug} ({w.title})" for w in candidates)
+        return None, f"More than one workspace has that title. Use a slug: {slugs}."
+    return None, f"No such workspace.{await _known(deps)}"
+
+
+async def _known(deps: ToolDeps) -> str:
+    names = ", ".join(f"{w.slug}" for w in await _active(deps)) or "none"
+    return f" Your workspaces: {names}."
+
+
+async def _items_in(deps: ToolDeps, workspace: Workspace, items: Any) -> tuple[int, list[str]]:
+    """Add the items of ``send_to_workspace`` as unseen. Returns the number
+    added and the problems found."""
+    added, problems = 0, []
+    for raw in items if isinstance(items, list) else []:
+        if not isinstance(raw, dict):
+            problems.append("an item that is not an object")
+            continue
+        kind = (raw.get("kind") or "link").strip()
+        ref, title = (raw.get("ref") or "").strip(), (raw.get("title") or "").strip()
+        if kind not in WORKSPACE_ITEM_KINDS or not ref:
+            problems.append(f"item '{title or ref or kind}' needs a known kind and a ref")
+            continue
+        try:
+            address = check_item_url(raw.get("url") or None)
+        except ValueError as exc:
+            problems.append(f"item '{title or ref}': {exc}")
+            continue
+        await deps.repo.add_workspace_item(
+            workspace.id, kind, ref, title or ref, url=address, added_by="agent", seen=False
+        )
+        added += 1
+    return added, problems
+
+
+def _message(text: str) -> str:
+    return (text or "").strip()[:MESSAGE_MAX_CHARS]
+
+
+async def do_send_to_workspace(
+    deps: ToolDeps, *, workspace: str, text: str, items: Any = None
+) -> dict[str, Any]:
+    """Write ``text`` into the thread of a workspace as a row from normal chat,
+    and add the items as unseen. No turn runs: the block of the workspace shows
+    both on its next turn, once."""
+    if not _normal_chat(deps):
+        return _reply("This tool is for normal chat.")
+    text = _message(text)
+    if not text:
+        return _reply("Give the text to send.")
+    target, problem = await _resolve(deps, workspace)
+    if target is None:
+        return _reply(problem)
+    if target.status == "archived":
+        return _reply(f"Workspace '{target.title}' is archived.")
+    conversation = await deps.repo.get_or_create_conversation(target.channel_id, target.owner)
+    added, problems = await _items_in(deps, target, items)
+    await deps.repo.add_chat_row(conversation.id, text)
+    note = f" with {added} item(s)" if added else ""
+    tail = f" Not added: {'; '.join(problems)}." if problems else ""
+    return _reply(f"Recorded in workspace '{target.title}'{note}. It shows on its next turn.{tail}")
+
+
+async def do_tell_workspace(
+    deps: ToolDeps, *, workspace: str, text: str, run: RunTurn | None
+) -> dict[str, Any]:
+    """Run one turn in the workspace thread with ``text``. The reply stays in the
+    thread. The turn runs in the background."""
+    if not _normal_chat(deps):
+        return _reply("This tool is for normal chat.")
+    text = _message(text)
+    if not text:
+        return _reply("Give the text to send.")
+    if run is None:
+        return _reply("Telling a workspace is not available here.")
+    target, problem = await _resolve(deps, workspace)
+    if target is None:
+        return _reply(problem)
+    if target.status != "active":
+        return _reply(f"Workspace '{target.title}' is {target.status}. Resume it first.")
+    await run(target, CHAT_PREFIX + text)
+    return _reply(
+        f"Told workspace '{target.title}'. It is working on it, and its reply "
+        "stays in the workspace thread."
+    )
+
+
+async def do_list_workspaces(deps: ToolDeps) -> dict[str, Any]:
+    """The workspaces of the person: title, slug, status, and the goal."""
+    if not _normal_chat(deps):
+        return _reply("This tool is for normal chat.")
+    owned = await deps.repo.list_workspaces(deps.person_id) if deps.person_id else []
+    if not owned:
+        return _reply("The person has no workspaces.")
+    lines = []
+    for w in owned:
+        goal = f" - {_one_line(w.goal, GOAL_LINE_CHARS)}" if w.goal else ""
+        lines.append(f"- {w.title} ({w.slug}, {w.status}){goal}")
+    return _reply("\n".join(lines))
+
+
+async def do_workspace_status(
+    deps: ToolDeps, *, workspace: str, render: RenderBlock | None
+) -> dict[str, Any]:
+    """The workspace block as text, never the thread."""
+    if not _normal_chat(deps):
+        return _reply("This tool is for normal chat.")
+    if render is None:
+        return _reply("The workspace status is not available here.")
+    target, problem = await _resolve(deps, workspace)
+    if target is None:
+        return _reply(problem)
+    return _reply(await render(target))
+
+
 _ADD_SCHEMA = {
     "type": "object",
     "properties": {
@@ -198,6 +359,50 @@ _NOTES_SCHEMA = {
     "required": ["notes"],
 }
 
+_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "kind": {"type": "string", "enum": list(WORKSPACE_ITEM_KINDS)},
+        "ref": {"type": "string", "description": "The id, slug, path, or address of the item."},
+        "title": {"type": "string"},
+        "url": {"type": "string"},
+    },
+    "required": ["ref"],
+}
+
+_WORKSPACE_ARG = {
+    "type": "string",
+    "description": "The slug or the title of one of the person's workspaces.",
+}
+
+_SEND_WS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "workspace": _WORKSPACE_ARG,
+        "text": {"type": "string", "description": "What to record in the workspace."},
+        "items": {
+            "type": "array",
+            "items": _ITEM_SCHEMA,
+            "description": "Links, documents, or other items to add with it.",
+        },
+    },
+    "required": ["workspace", "text"],
+}
+
+_TELL_SCHEMA = {
+    "type": "object",
+    "properties": {"workspace": _WORKSPACE_ARG, "text": {"type": "string"}},
+    "required": ["workspace", "text"],
+}
+
+_STATUS_SCHEMA = {
+    "type": "object",
+    "properties": {"workspace": _WORKSPACE_ARG},
+    "required": ["workspace"],
+}
+
+_NO_ARGS_SCHEMA = {"type": "object", "properties": {}}
+
 _SEND_SCHEMA = {
     "type": "object",
     "properties": {"text": {"type": "string", "description": "The message."}},
@@ -206,12 +411,16 @@ _SEND_SCHEMA = {
 
 
 def build_workspace_server(
-    deps: ToolDeps, settings: JoshuaConfig, deliver: Deliver | None = None
+    deps: ToolDeps,
+    settings: JoshuaConfig,
+    deliver: Deliver | None = None,
+    run: RunTurn | None = None,
+    render: RenderBlock | None = None,
 ) -> Any | None:
     """Build the ``workspace`` MCP server for one conversation.
 
-    A workspace thread gets all three tools. A direct chat gets
-    ``add_to_workspace`` only. A shared (group) chat gets no server: the
+    A workspace thread gets three tools. A direct chat gets ``add_to_workspace``
+    and the four tools of normal chat. A shared (group) chat gets no server: the
     workspaces of one person do not belong in a chat that others read.
     """
     if not _in_workspace(deps) and deps.channel.session_mode != "per_person":
@@ -255,19 +464,101 @@ def build_workspace_server(
             deps, text=args.get("text", ""), settings=settings, deliver=deliver
         )
 
+    @tool(
+        "send_to_workspace",
+        "Record something in one of the person's workspaces, without a turn: use it when "
+        "what they said belongs to a workspace (a recipe for the dinner plans, a quote for "
+        "the solar project). The workspace reads it on its next turn. Add links or "
+        "documents with items. Say in one line that you did it.",
+        _SEND_WS_SCHEMA,
+    )
+    async def send_to_workspace(args: dict[str, Any]) -> dict[str, Any]:
+        return await do_send_to_workspace(
+            deps,
+            workspace=args.get("workspace", ""),
+            text=args.get("text", ""),
+            items=args.get("items"),
+        )
+
+    @tool(
+        "tell_workspace",
+        "Give a workspace a message and have it act on it now: it runs one turn in its own "
+        "thread. Its reply stays in the workspace. Use send_to_workspace when no action is "
+        "needed.",
+        _TELL_SCHEMA,
+    )
+    async def tell_workspace(args: dict[str, Any]) -> dict[str, Any]:
+        return await do_tell_workspace(
+            deps, workspace=args.get("workspace", ""), text=args.get("text", ""), run=run
+        )
+
+    @tool(
+        "list_workspaces",
+        "List the person's workspaces: title, slug, status, and goal.",
+        _NO_ARGS_SCHEMA,
+    )
+    async def list_workspaces(args: dict[str, Any]) -> dict[str, Any]:
+        return await do_list_workspaces(deps)
+
+    @tool(
+        "workspace_status",
+        "The state of one workspace: its goal, notes, items, and open work. It does not "
+        "show the thread.",
+        _STATUS_SCHEMA,
+    )
+    async def workspace_status(args: dict[str, Any]) -> dict[str, Any]:
+        return await do_workspace_status(deps, workspace=args.get("workspace", ""), render=render)
+
     tools = [add_to_workspace]
     if _in_workspace(deps):
         tools += [update_workspace_notes, send_to_normal_chat]
+    else:
+        tools += [send_to_workspace, tell_workspace, list_workspaces, workspace_status]
     return create_sdk_mcp_server(name=SERVER_NAME, version="1.0.0", tools=tools)
 
 
-def register(manager: Any, settings: JoshuaConfig, deliverer: Any = None) -> None:
+def register(manager: Any, settings: JoshuaConfig, deliverer: Any = None, repo: Any = None) -> None:
     """Wire the ``workspace`` builtin into the conversation manager.
 
     ``deliverer`` is core's ``Deliverer``. Without one, ``send_to_normal_chat``
-    says it is not available.
+    says it is not available. ``tell_workspace`` runs its turn through the
+    manager, and ``workspace_status`` renders the block of ``manager``.
     """
     deliver: Deliver | None = deliverer.deliver if deliverer is not None else None
+    repo = repo or getattr(manager, "_repo", None)
+    background: set[asyncio.Task[None]] = set()
+
+    async def run(workspace: Workspace, text: str) -> None:
+        """Start one turn in the thread of ``workspace`` and do not wait for it.
+        The turn is an event turn: the delivery gate keeps its reply in the
+        transcript."""
+        channel = await repo.get_channel(workspace.channel_id)
+        if channel is None:
+            return
+        conversation = await repo.get_or_create_conversation(channel.id, workspace.owner)
+
+        async def turn() -> None:
+            try:
+                await manager.run_turn(channel, conversation, text, direction="inject")
+            except Exception as exc:  # noqa: BLE001 — a failed turn is in the thread already
+                logger.warning(
+                    {"message": "tell_workspace turn failed", "error": type(exc).__name__}
+                )
+
+        task = asyncio.create_task(turn())
+        background.add(task)
+        task.add_done_callback(background.discard)
+
+    async def render(workspace: Workspace) -> str:
+        block = getattr(manager, "workspace_block", None)
+        if block is None:
+            return "The workspace status is not available here."
+        conversation = await repo.find_conversation(workspace.channel_id, workspace.owner)
+        return await block.render(
+            workspace, conversation.id if conversation else "", fresh=False, mark_seen=None
+        )
+
     manager.register_builtin(
-        SERVER_NAME, lambda deps: build_workspace_server(deps, settings, deliver)
+        SERVER_NAME,
+        lambda deps: build_workspace_server(deps, settings, deliver, run, render),
     )

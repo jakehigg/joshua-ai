@@ -6,6 +6,17 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Normal chat knows workspaces.** A member's direct chat gets the list of
+  the active workspaces (title and goal, at most 10) when the person has any,
+  and a line to record what belongs to one. The index holds one record for each
+  active workspace (source `workspaces`). A message that matches a record
+  above `workspaces.hint_sim` (default 0.70) gets the line "May relate to
+  workspace X". The `workspace` tools add `send_to_workspace` (a row and items
+  in the thread, no turn), `tell_workspace` (the same, then one turn whose reply
+  stays in the thread), `list_workspaces`, and `workspace_status`. The block of
+  a workspace shows the messages from normal chat once, the next steps of a
+  linked tasks project when `workspaces.tasks_url` is set (it has no default), and
+  the jobs that were started from it.
 - **Workspaces get items and the return path.** A workspace session sends
   `X-Joshua-Workspace` to the gateway. The gateway puts
   `_meta["joshua/workspace"]` on each tool call from a workspace, and after a

@@ -653,3 +653,68 @@ async def test_the_by_id_route_checks_the_caller_the_workspace_and_the_body(clie
         {**good, "url": "javascript:alert(1)"},
     ):
         assert (await client.post(path, headers=_h(GATEWAY), json=bad)).status_code == 422, bad
+
+
+# --- normal chat and workspaces -----------------------------------------------------------
+
+
+async def test_chat_rows_are_unseen_until_marked_and_the_block_shows_them_once(seeded) -> None:
+    ws = await seeded.create_workspace("alex", "Trip", goal="Plan")
+    conv = await seeded.find_conversation(ws.channel_id, "alex")
+    row = await seeded.add_chat_row(conv.id, "book the cabin")
+    await seeded.add_transcript(conv.id, "inject", "an event row", meta={"event": True})
+    assert [r["content"] for r in await seeded.unseen_chat_rows(conv.id)] == ["book the cabin"]
+    channel = await seeded.get_channel(ws.channel_id)
+    ctx = SimpleNamespace(channel=channel, conversation=conv, fresh_session=False, after_turn=[])
+
+    text = await WorkspaceBlock(seeded)(ctx)
+
+    assert "From normal chat, since your last turn:" in text and "book the cabin" in text
+    assert await seeded.unseen_chat_rows(conv.id) != []  # not before the turn succeeds
+    for settle in ctx.after_turn:
+        await settle()
+    assert await seeded.unseen_chat_rows(conv.id) == []
+    ctx.after_turn.clear()
+    assert "book the cabin" not in await WorkspaceBlock(seeded)(ctx)
+    tail = await seeded.transcript_tail(conv.id, 5)
+    assert tail[0]["meta"] == {"source": "normal_chat", "seen": True} and row > 0
+    assert tail[0]["direction"] == "inject"
+
+
+async def test_list_all_workspaces_filters_by_status(seeded) -> None:
+    a = await seeded.create_workspace("alex", "Alpha")
+    await seeded.create_workspace("mia", "Beta")
+    await seeded.update_workspace(a.id, status="paused")
+    assert {w.title for w in await seeded.list_all_workspaces()} == {"Alpha", "Beta"}
+    assert [w.title for w in await seeded.list_all_workspaces("active")] == ["Beta"]
+
+
+async def test_the_workspaces_source_is_indexed_for_its_owner_and_hidden_from_recall(
+    seeded, monkeypatch
+) -> None:
+    from joshua_core.memory import embed as embed_module
+    from joshua_core.memory.indexer import Indexer
+    from joshua_core.memory.search import search
+    from joshua_core.memory.sources.workspaces import WorkspacesSource
+    from joshua_core.memory.store import MemoryStore
+
+    vec = [1.0] + [0.0] * 383
+    monkeypatch.setattr(embed_module, "embed", lambda text, model="": list(vec))
+    ws = await seeded.create_workspace("alex", "Solar install", goal="Go solar")
+    await seeded.add_workspace_item(ws.id, "document", "quote", "Roof quote")
+    store = MemoryStore(seeded._db.pool)
+    indexer = Indexer(
+        store, {"workspaces": WorkspacesSource(seeded)}, embed_model="m", chunk_chars=1600
+    )
+
+    await indexer.reindex()
+
+    hint = await search(store, "alex", vec, k=3, min_sim=0.5, kinds=("workspace",))
+    assert [c.path for c in hint] == [f"workspaces/{ws.id}"]
+    assert "Go solar" in hint[0].text and "Roof quote" in hint[0].text
+    assert await search(store, "mia", vec, k=3, min_sim=0.5, kinds=("workspace",)) == []
+    assert await search(store, "alex", vec, k=3, min_sim=0.5) == []
+
+    await seeded.update_workspace(ws.id, status="archived")
+    await indexer.reindex()
+    assert await search(store, "alex", vec, k=3, min_sim=0.5, kinds=("workspace",)) == []

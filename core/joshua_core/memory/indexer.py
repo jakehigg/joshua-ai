@@ -49,7 +49,8 @@ from joshua_core.memory.skills import (
 )
 from joshua_core.memory.sources import Document, Source
 from joshua_core.memory.sources.documents import DOCUMENTS_SOURCE, pointer_heading
-from joshua_core.memory.store import DOCUMENT_KIND, MemoryStore
+from joshua_core.memory.sources.workspaces import WORKSPACES_SOURCE
+from joshua_core.memory.store import DOCUMENT_KIND, WORKSPACE_KIND, MemoryStore
 
 logger = get_logger("memory.indexer")
 
@@ -184,6 +185,8 @@ class Indexer:
     async def _index_document(self, doc: Document) -> int:
         if doc.source == DOCUMENTS_SOURCE:
             return await self._index_pointer(doc)
+        if doc.source == WORKSPACES_SOURCE:
+            return await self._index_workspace(doc)
         if doc.source == "files" and is_skill_path(doc.uri):
             rows = await self._index_skill(doc)
             if rows is not None:
@@ -227,6 +230,27 @@ class Indexer:
             person_id=doc.person_id,
             path=doc.uri,
             kind=DOCUMENT_KIND,
+            title=doc.title,
+            provenance=doc.provenance,
+            file_sha256=doc.rev,
+            file_mtime=doc.updated_at,
+            doc_date=doc.doc_date,
+            chunks=[(heading, doc.text, vec)],
+        )
+
+    async def _index_workspace(self, doc: Document) -> int:
+        """Index a workspace as one ``kind='workspace'`` row: the title, the
+        status (the heading), and the record text."""
+        heading = doc.frontmatter["status"]
+        embed_text = "\n".join(part for part in (doc.title, doc.text) if part)
+        vec = await asyncio.to_thread(embed_module.embed, embed_text, self._embed_model)
+        if vec is None:
+            raise RuntimeError("embedding unavailable (fastembed not loaded?)")
+        return await self._store.kb_replace_item(
+            source=doc.source,
+            person_id=doc.person_id,
+            path=doc.uri,
+            kind=WORKSPACE_KIND,
             title=doc.title,
             provenance=doc.provenance,
             file_sha256=doc.rev,

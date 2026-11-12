@@ -94,6 +94,7 @@ class WsRepo(FakeRepo):
         self.notes: list[str] = []
         self.main: Conversation | None = None
         self.others: list[Workspace] = []
+        self.chat_rows: list[dict[str, Any]] = []
 
     async def get_workspace(self, workspace_id: str):
         return self.workspace if self.workspace and self.workspace.id == workspace_id else None
@@ -105,7 +106,11 @@ class WsRepo(FakeRepo):
         return None
 
     async def list_workspaces(self, owner: str, status: str | None = None):
-        return [w for w in [self.workspace, *self.others] if w and w.owner == owner]
+        return [
+            w
+            for w in [self.workspace, *self.others]
+            if w and w.owner == owner and (status is None or w.status == status)
+        ]
 
     async def list_workspace_items(self, workspace_id: str, *, unseen_only: bool = False):
         return list(self.items)
@@ -127,6 +132,21 @@ class WsRepo(FakeRepo):
 
     async def main_conversation(self, person_id: str):
         return self.main
+
+    async def unseen_chat_rows(self, conversation_id: str):
+        return [r for r in self.chat_rows if not r.get("seen")]
+
+    async def mark_chat_rows_seen(self, row_ids):
+        for row in self.chat_rows:
+            if row["id"] in row_ids:
+                row["seen"] = True
+
+    async def get_or_create_conversation(self, channel_id, person_id=None):
+        return Conversation(id="c-ws", channel_id=channel_id, person_id=person_id)
+
+    async def add_chat_row(self, conversation_id, text):
+        self.chat_rows.append({"id": len(self.chat_rows) + 1, "content": text, "seen": False})
+        return len(self.chat_rows)
 
 
 def _derive(person, channel):
@@ -688,7 +708,7 @@ async def test_send_to_normal_chat_falls_back_to_the_path_and_reports_failures()
     )
 
 
-def test_the_server_has_three_tools_in_a_workspace_and_one_in_normal_chat(
+def test_the_server_has_three_tools_in_a_workspace_and_five_in_normal_chat(
     listed_tools: None,
 ) -> None:
     settings = make_settings()
@@ -698,7 +718,13 @@ def test_the_server_has_three_tools_in_a_workspace_and_one_in_normal_chat(
         _deps(repo, Channel(id="cli:alex", channel_type="cli")), settings
     )
     assert _names(in_ws) == {"add_to_workspace", "update_workspace_notes", "send_to_normal_chat"}
-    assert _names(normal) == {"add_to_workspace"}
+    assert _names(normal) == {
+        "add_to_workspace",
+        "send_to_workspace",
+        "tell_workspace",
+        "list_workspaces",
+        "workspace_status",
+    }
 
 
 def test_register_wires_the_builtin_for_every_job() -> None:

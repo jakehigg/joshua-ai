@@ -20,7 +20,7 @@ from typing import Any
 
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.ranking import PER_DOC_CAP, rank_chunks
-from joshua_core.memory.store import DOCUMENT_KIND, MemoryStore
+from joshua_core.memory.store import DOCUMENT_KIND, WORKSPACE_KIND, MemoryStore
 
 _WIKI_PREFIX = "wiki/"
 
@@ -97,6 +97,9 @@ async def search(
         # The person rule of the database uses ``person_id``, so the reader is
         # the person of the search.
         person_id = document_reader
+    if WORKSPACE_KIND not in (kinds or ()):
+        # A workspace row is for the one-line hint of normal chat only.
+        exclude_kinds = tuple(dict.fromkeys([*(exclude_kinds or ()), WORKSPACE_KIND]))
     candidates = await store.kb_search(
         person_id,
         query_vec,

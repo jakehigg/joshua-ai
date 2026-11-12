@@ -49,6 +49,9 @@ TRANSCRIPT_PAGE_MAX = 200
 
 # The channel type of a workspace thread. Its channel id is ``workspace:<id>``.
 WORKSPACE_CHANNEL_TYPE = "workspace"
+# The ``meta.source`` of a transcript row that normal chat wrote into a
+# workspace thread. ``meta.seen`` is False until a block has shown the row.
+FROM_CHAT_SOURCE = "normal_chat"
 # The columns that ``update_workspace`` may change.
 WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "status")
 _SLUG_MAX = 48
@@ -1185,6 +1188,53 @@ class Repo:
             cur = await conn.execute(sql, tuple(args))
             rows = await cur.fetchall()
         return [_workspace(r) for r in rows]
+
+    async def list_all_workspaces(self, status: str | None = None) -> list[Workspace]:
+        """Every workspace of every owner, for the KB source."""
+        sql = "SELECT * FROM workspaces"
+        args: tuple[Any, ...] = ()
+        if status is not None:
+            sql += " WHERE status = %s"
+            args = (status,)
+        sql += " ORDER BY owner, slug"
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, args)
+            rows = await cur.fetchall()
+        return [_workspace(r) for r in rows]
+
+    async def add_chat_row(self, conversation_id: str, text: str) -> int:
+        """Write ``text`` into a workspace thread as a row from normal chat. It
+        is unseen until the workspace block shows it. No turn runs."""
+        return await self.add_transcript(
+            conversation_id, "inject", text, meta={"source": FROM_CHAT_SOURCE, "seen": False}
+        )
+
+    async def unseen_chat_rows(self, conversation_id: str) -> list[dict[str, Any]]:
+        """The rows from normal chat that no block has shown yet, oldest first."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT id, content, created_at FROM transcript
+                WHERE conversation_id = %s
+                  AND meta->>'source' = %s AND meta->>'seen' = 'false'
+                ORDER BY created_at, id
+                """,
+                (conversation_id, FROM_CHAT_SOURCE),
+            )
+            rows = await cur.fetchall()
+        return [
+            {"id": int(r["id"]), "content": r["content"], "created_at": r.get("created_at")}
+            for r in rows
+        ]
+
+    async def mark_chat_rows_seen(self, row_ids: Collection[int]) -> None:
+        if not row_ids:
+            return
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                "UPDATE transcript SET meta = meta || '{\"seen\": true}'::jsonb WHERE id = ANY(%s)",
+                (list(row_ids),),
+            )
 
     async def update_workspace(self, workspace_id: str, **fields: Any) -> Workspace | None:
         """Change the given fields of a workspace. ``fields`` are among

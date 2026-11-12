@@ -24,7 +24,7 @@ from joshua_shared.inference import (
 from joshua_shared.log import get_logger
 
 from joshua_core.store.models import Workspace, WorkspaceItem
-from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE, Repo
+from joshua_core.store.repo import FROM_CHAT_SOURCE, WORKSPACE_CHANNEL_TYPE, Repo
 from joshua_core.store.transcript import FAILED_STATUS, SILENT_REPLY
 
 logger = get_logger("engine.workspace")
@@ -37,6 +37,8 @@ BLOCK_MAX_ITEMS = 30
 # A fresh session gets this many rows of the thread, each cut short.
 BLOCK_RECENT_ROWS = 10
 RECENT_ROW_CHARS = 300
+# A row from normal chat is shown in the block up to this length.
+CHAT_ROW_CHARS = 600
 
 
 def workspace_id_of(channel_id: str) -> str | None:
@@ -109,7 +111,10 @@ def recent_lines(rows: list[dict[str, Any]], person: str | None) -> list[str]:
         text = (row.get("content") or "").strip()
         if not text or text == SILENT_REPLY or row.get("status") == FAILED_STATUS:
             continue
-        who = "you" if row.get("direction") == "out" else (person or "person")
+        if (row.get("meta") or {}).get("source") == FROM_CHAT_SOURCE:
+            who = "from normal chat"
+        else:
+            who = "you" if row.get("direction") == "out" else (person or "person")
         lines.append(f"- {who}: {_one_line(text, RECENT_ROW_CHARS)}")
     return lines
 
@@ -119,6 +124,7 @@ def render_block(
     items: list[WorkspaceItem],
     *,
     unseen: list[WorkspaceItem] | None = None,
+    chat_rows: list[str] | None = None,
     recent: list[str] | None = None,
     extra: list[str] | None = None,
 ) -> str:
@@ -127,7 +133,9 @@ def render_block(
     It holds the title, the goal, the notes, the items (``BLOCK_MAX_ITEMS``,
     pinned first, then newest), the items that came from normal chat and are
     not yet seen, and, for a fresh session, the last rows of the thread.
-    ``extra`` holds the text of the sections that later phases add.
+    ``chat_rows`` holds the text of the rows that normal chat sent to the
+    thread and that no block has shown. ``extra`` holds the text of the
+    sections that ``add_section`` registers.
     """
     lines = [f"[Workspace: {workspace.title} ({workspace.slug})]"]
     if workspace.goal:
@@ -143,6 +151,9 @@ def render_block(
     if unseen:
         lines.append("New since your last turn, sent from normal chat:")
         lines += [_item_line(i) for i in unseen]
+    if chat_rows:
+        lines.append("From normal chat, since your last turn:")
+        lines += [f"- {_one_line(text, CHAT_ROW_CHARS)}" for text in chat_rows]
     lines += extra or []
     if recent:
         lines.append("The last rows of this thread, because the session starts fresh:")
@@ -150,9 +161,8 @@ def render_block(
     return "\n".join(lines)
 
 
-# A section that a later phase adds to the block: it gets the workspace and
-# returns text, or None for nothing to say. Phase 4 adds ``next_steps`` of a
-# linked tasks project, and the running jobs.
+# A section of the block: it gets the workspace and returns text, or None for
+# nothing to say. ``next_steps_section`` and ``jobs_section`` are two.
 BlockSection = Callable[[Workspace], Awaitable[str | None]]
 
 
@@ -188,9 +198,17 @@ class WorkspaceBlock:
                 continue
             if text:
                 extra.append(text)
-        if unseen and mark_seen is not None:
-            mark_seen(unseen)
-        return render_block(workspace, items, unseen=unseen, recent=recent, extra=extra)
+        chat_rows = await self._repo.unseen_chat_rows(conversation_id) if conversation_id else []
+        if (unseen or chat_rows) and mark_seen is not None:
+            mark_seen(unseen, [r["id"] for r in chat_rows])
+        return render_block(
+            workspace,
+            items,
+            unseen=unseen,
+            chat_rows=[r["content"] for r in chat_rows],
+            recent=recent,
+            extra=extra,
+        )
 
     async def __call__(self, ctx: Any) -> str | None:
         if ctx.channel.channel_type != WORKSPACE_CHANNEL_TYPE:
@@ -200,17 +218,110 @@ class WorkspaceBlock:
         if workspace is None:
             return None
 
-        def mark_seen(unseen: list[WorkspaceItem]) -> None:
+        def mark_seen(unseen: list[WorkspaceItem], row_ids: list[int]) -> None:
             ids = [i.id for i in unseen]
 
             async def done() -> None:
                 await self._repo.mark_items_seen(ids)
+                await self._repo.mark_chat_rows_seen(row_ids)
 
             ctx.after_turn.append(done)
 
         return await self.render(
             workspace, ctx.conversation.id, fresh=ctx.fresh_session, mark_seen=mark_seen
         )
+
+
+# --- sections ----------------------------------------------------------------
+
+# The next-steps call waits this long, then the section is skipped.
+NEXT_STEPS_TIMEOUT_S = 2.0
+NEXT_STEPS_LIMIT = 3
+# The jobs section lists at most this many items.
+JOBS_MAX = 10
+JOB_KINDS = ("developer_task", "assignment")
+
+
+def next_steps_section(
+    repo: Repo, tasks_url: str | None, *, client_factory: Any = None
+) -> BlockSection | None:
+    """The "Next steps" section, or None when ``workspaces.tasks_url`` is not set.
+
+    For each ``tasks_project`` item it calls ``GET <tasks_url>/api/next-steps?
+    project=<ref>&limit=3`` with a 2 second timeout. Any error, a bad answer,
+    or no steps skips that project, and so the section.
+    """
+    if not tasks_url:
+        return None
+    import httpx
+
+    base = tasks_url.rstrip("/")
+
+    async def section(workspace: Workspace) -> str | None:
+        items = await repo.list_workspace_items(workspace.id)
+        projects = [i for i in items if i.kind == "tasks_project"][:3]
+        if not projects:
+            return None
+        lines: list[str] = []
+        factory = client_factory or (lambda: httpx.AsyncClient(timeout=NEXT_STEPS_TIMEOUT_S))
+        async with factory() as client:
+            for project in projects:
+                try:
+                    resp = await client.get(
+                        f"{base}/api/next-steps",
+                        params={"project": project.ref, "limit": NEXT_STEPS_LIMIT},
+                        timeout=NEXT_STEPS_TIMEOUT_S,
+                    )
+                    resp.raise_for_status()
+                    steps = _steps_of(resp.json())
+                except Exception as exc:  # noqa: BLE001 — a slow tasks addon never blocks a turn
+                    logger.info({"message": "next steps skipped", "error": type(exc).__name__})
+                    continue
+                if steps:
+                    lines.append(f"Next steps ({project.title or project.ref}):")
+                    lines += [f"- {step}" for step in steps[:NEXT_STEPS_LIMIT]]
+        return "\n".join(lines) or None
+
+    return section
+
+
+def _steps_of(data: Any) -> list[str]:
+    """``#<number> <title>`` for each step in the answer of the tasks addon: a
+    list, or an object with ``steps`` or ``items``."""
+    if isinstance(data, dict):
+        data = data.get("steps") or data.get("items") or data.get("next_steps") or []
+    out = []
+    for entry in data if isinstance(data, list) else []:
+        if isinstance(entry, str):
+            out.append(_one_line(entry, 160))
+        elif isinstance(entry, dict) and entry.get("title"):
+            number = entry.get("number") or entry.get("id")
+            head = f"#{number} " if number not in (None, "") else ""
+            out.append(_one_line(f"{head}{entry['title']}", 160))
+    return out
+
+
+def jobs_section(repo: Repo) -> BlockSection:
+    """The jobs section: the ``developer_task`` and ``assignment`` items with the
+    date they were added. The block makes no network call, and the thread does
+    not tie a status line to an item, so it shows no job status. A job reports
+    in the thread as an event, and the last rows show it."""
+
+    async def section(workspace: Workspace) -> str | None:
+        items = [i for i in await repo.list_workspace_items(workspace.id) if i.kind in JOB_KINDS]
+        if not items:
+            return None
+        items.sort(key=lambda i: i.added_at.timestamp() if i.added_at else 0.0, reverse=True)
+        lines = [
+            "Jobs started from this workspace "
+            "(status is not tracked here; a job reports in the thread):"
+        ]
+        for item in items[:JOBS_MAX]:
+            added = f", added {item.added_at.date().isoformat()}" if item.added_at else ""
+            lines.append(f"- {item.kind}: {item.title or item.ref} ({item.ref}{added})")
+        return "\n".join(lines)
+
+    return section
 
 
 # --- RAG --------------------------------------------------------------------

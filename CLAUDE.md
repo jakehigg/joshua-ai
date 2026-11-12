@@ -133,6 +133,12 @@ Route allowlists, by default:
   `workspace:` channel from a turn. A workspace reply is transcript-only:
   `workspace_delivery_target` drops it. `docs/workspaces.md` has the design.
   `GET /v1/workspaces/options` gives the servers and models a person may pick.
+  Normal chat gets the list of active workspaces and a hint line from the
+  `workspaces` KB source (`engine/workspace_awareness.py`, `workspaces.hint_sim`),
+  and the `send_to_workspace`, `tell_workspace`, `list_workspaces` and
+  `workspace_status` tools. A row from normal chat is a `inject` transcript row
+  with `meta.source` `normal_chat` and `meta.seen`; the block shows it once.
+  `workspaces.tasks_url` (no default) turns on "Next steps" in the block.
   `POST /v1/workspaces/by-id/{id}/items` takes no person: the gateway records
   the items of a tool call from a workspace there (`added_by` `tool:<server>`).
   A workspace session sends `X-Joshua-Workspace`; the gateway stamps

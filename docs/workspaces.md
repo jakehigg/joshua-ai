@@ -77,6 +77,18 @@ Each turn of a workspace starts with the workspace block. It holds:
   then the newest, at most 30;
 - the items that came from normal chat and that this workspace has not seen.
   Core marks them seen after the turn;
+- the messages that normal chat sent with `send_to_workspace`, under "From
+  normal chat, since your last turn". Core marks them seen after the turn, so
+  each shows once;
+- "Next steps", when the workspace has a `tasks_project` item and
+  `workspaces.tasks_url` is set: up to 3 steps (number and title) for each of the
+  first 3 projects, from `GET <tasks_url>/api/next-steps?project=<ref>&limit=3`.
+  The call waits 2 seconds. Any error skips the section;
+- "Jobs started from this workspace": the `developer_task` and `assignment`
+  items, newest first, at most 10, each with the date it was added. The block
+  makes no network call, and the thread does not tie a status line to an item,
+  so the block shows no job status. A job reports in the thread as an event, and
+  the last rows of the thread show it;
 - when the session has no history of its own (the first turn, a start after
   the context cap, a reset, or a restart that could not resume), the last 10
   rows of the thread, cut short.
@@ -107,6 +119,19 @@ The `workspace` builtin server has these tools.
 | `update_workspace_notes(notes)` | workspace | Replace the notes. Keep them short, under 4000 characters. |
 | `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the person's main chat. |
 
+A normal chat (a direct chat that is not a workspace) has four more tools.
+`workspace` takes a slug or a title, matched with no regard to case among the
+workspaces of the person. A name that matches none gets the slugs of the active
+workspaces in the answer, and a title that two workspaces share is refused with
+their slugs.
+
+| Tool | Use |
+|---|---|
+| `send_to_workspace(workspace, text, items?)` | Write `text` into the thread as a row from normal chat, and add the items (`kind`, `ref`, `title`, `url`) as new. No turn runs. The block shows both on the next turn of the workspace, once. Refused for an archived workspace. |
+| `tell_workspace(workspace, text)` | Run one turn in the thread with `text`, as an event turn that starts "[From normal chat]". The tool returns at once. The reply stays in the thread, and core delivers nothing. Refused unless the workspace is active. |
+| `list_workspaces()` | The title, slug, status, and goal of each workspace. |
+| `workspace_status(workspace)` | The workspace block as text. It never shows the thread, and it marks nothing seen. |
+
 A group chat gets no `workspace` tools, because other people read it. In a
 direct chat, a name that matches no workspace gets the slugs of the person's
 active workspaces in the error.
@@ -118,6 +143,30 @@ The main chat is the most recently active direct conversation that is not a
 workspace, a terminal or a voice thread. Core sends to its last channel. The link is
 `<workspaces.viewer_url>/chat/w/<slug>`. With no `viewer_url`, the message has
 the path `/chat/w/<slug>`.
+
+## Normal chat knows its workspaces
+
+A direct chat of a member that is not a workspace gets two things on each turn.
+A person with no active workspace gets neither. A guest, a group chat, and a
+workspace thread get neither.
+
+- **The list.** "Your workspaces:" and one line for each active workspace, at
+  most 10: the title (60 characters) and the goal (90). A last line says to
+  record what belongs to a workspace with `send_to_workspace` and to say so in
+  one line.
+- **The hint.** Core indexes one record for each active workspace in the
+  knowledge index, as the source `workspaces`. The record holds the title, the
+  goal, the notes, and the item titles. The indexing cycle writes it again when
+  it changes (`memory.index_interval_s`). The record is for the owner only, and
+  it is never shown as text: recall and the RAG note never return it. When the
+  message matches a record with a similarity of `workspaces.hint_sim` or more
+  (default 0.70, just under `memory.inject.full_sim`), the turn gets one line:
+  "May relate to workspace *<title>*."
+
+The rows that `send_to_workspace` writes are rows of the thread of the
+workspace with `direction` `inject` and `meta` `{"source": "normal_chat",
+"seen": false}`. Core sets `seen` to true after the workspace turn that showed
+them. There is no schema change.
 
 ## Routes
 
@@ -325,6 +374,8 @@ session.
 | `workspaces.context_cap` | `150000` | Input tokens over which a workspace turn ends its session. |
 | `workspaces.tool_search_max_servers` | `3` | Servers up to which a workspace runs with tool search off. |
 | `workspaces.viewer_url` | none | The public address of the viewer, for the link in `send_to_normal_chat`. |
+| `workspaces.hint_sim` | `0.70` | The similarity over which normal chat gets the line "May relate to workspace X". |
+| `workspaces.tasks_url` | none | The address of the tasks addon, for "Next steps" in the block. Without it, the section is off. Kubernetes: `http://tasks:8000` in this cluster. The docker compose file has no tasks service, so it sets nothing. |
 
 Each `mcp:` server can have a `description`, one line (200 characters at most)
 that the new workspace dialog shows beside the name.

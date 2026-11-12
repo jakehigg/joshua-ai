@@ -106,7 +106,7 @@ async def test_skill_rows_excluded_from_search_memory() -> None:
     results = await _run(_deps("alice"), store)
     # The exclude filter is forwarded, and a turn with no member as reader
     # excludes the documents too.
-    assert store.exclude_seen[0] == ("skill", "document")
+    assert store.exclude_seen[0] == ("skill", "document", "workspace")
     assert all("skills/" not in r["path"] for r in results)  # never a taught skill
 
 

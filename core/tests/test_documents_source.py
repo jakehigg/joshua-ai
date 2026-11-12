@@ -286,7 +286,7 @@ async def test_a_search_with_no_reader_excludes_documents() -> None:
     store = FakeStore([_document("alex"), _document(None), _wiki()])
     rows = await search(store, "alex", [0.1], k=5, min_sim=0.5)  # type: ignore[arg-type]
     assert [r.path for r in rows] == ["wiki/garden.md"]
-    assert store.calls[0]["exclude"] == ("document",)
+    assert store.calls[0]["exclude"] == ("document", "workspace")
 
 
 async def test_a_reader_finds_own_and_shared_but_not_another_member() -> None:
@@ -468,7 +468,7 @@ def test_the_default_source_never_returns_a_document(monkeypatch: pytest.MonkeyP
     client = _client(monkeypatch, _ROWS)
     response = client.post(SEARCH_PATH, json={"query": "party"}, headers=_HEADERS)
     assert [h["path"] for h in response.json()["results"]] == ["wiki/garden.md"]
-    assert client.store.calls[0]["exclude"] == ("document",)
+    assert client.store.calls[0]["exclude"] == ("document", "workspace")
 
 
 def test_the_route_refuses_a_bad_source_or_person(monkeypatch: pytest.MonkeyPatch) -> None:

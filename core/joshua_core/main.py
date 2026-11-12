@@ -25,8 +25,9 @@ from joshua_core import limits as limits_module
 from joshua_core.admin import build_admin_router
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
 from joshua_core.engine import inference as inference_plan
-from joshua_core.engine import injection, taught_skills
+from joshua_core.engine import injection, taught_skills, workspace_awareness
 from joshua_core.engine import internet as internet_agent
+from joshua_core.engine import workspace as workspace_engine
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
@@ -53,6 +54,7 @@ from joshua_core.memory.sources.files import FilesSource
 from joshua_core.memory.sources.memos import build_memos_source, schedule_seconds
 from joshua_core.memory.sources.snapshots import SOURCE_NAME as SNAPSHOTS_SOURCE
 from joshua_core.memory.sources.snapshots import SnapshotsSource
+from joshua_core.memory.sources.workspaces import WORKSPACES_SOURCE, WorkspacesSource
 from joshua_core.memory.store import MemoryStore
 from joshua_core.migrate_links import migrate_page_links
 from joshua_core.model_forwarder import ModelForwarder
@@ -350,6 +352,12 @@ def _build_manager(
     # keeps it for the block route, and for the sections that later phases add.
     manager.workspace_block = WorkspaceBlock(repo)
     manager.add_context_provider(manager.workspace_block)
+    # The sections of the block that need no network, and the next steps of a
+    # linked tasks project when ``workspaces.tasks_url`` is set.
+    manager.workspace_block.add_section(workspace_engine.jobs_section(repo))
+    next_steps = workspace_engine.next_steps_section(repo, settings.workspaces.tasks_url)
+    if next_steps is not None:
+        manager.workspace_block.add_section(next_steps)
     registration.register(manager, data_dir)
     scheduling.register(manager)
     history.register(manager)
@@ -384,6 +392,9 @@ def _build_memory(
             data_dir, members=[p.id for p in settings.people if p.role == "member"]
         )
         intervals[DOCUMENTS_SOURCE] = float(memory.index_interval_s)
+    # One record for each active workspace, for the hint in normal chat.
+    sources[WORKSPACES_SOURCE] = WorkspacesSource(repo)
+    intervals[WORKSPACES_SOURCE] = float(memory.index_interval_s)
     for name, options in memory.sources.items():
         if name == "files":
             continue
@@ -418,6 +429,7 @@ def _build_memory(
         )
         internet.register(manager, settings, manager.url_grants, searcher)
     injection.register(manager, store, settings, repo)
+    workspace_awareness.register(manager, store, settings, repo)
     taught_skills.register(manager, store, settings, repo, indexer.skills)
     return indexer, IndexerLoop(indexer, intervals)
 

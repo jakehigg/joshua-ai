@@ -1240,6 +1240,8 @@ person makes a workspace.
 | `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. The next turn starts from the workspace block and the last 10 rows of the thread. At least 1000. |
 | `tool_search_max_servers` | `3` | A workspace that picks this many servers or fewer runs with tool search off. More servers turn it on. |
 | `viewer_url` | none | The public address of the viewer. `send_to_normal_chat` adds the link `<viewer_url>/chat/w/<slug>`. Without it, the message has the path only. |
+| `hint_sim` | `0.70` | The similarity over which normal chat gets the line "May relate to workspace X", from the `workspaces` record of the index. Between 0 and 1. |
+| `tasks_url` | none | The address of the tasks addon (`http` or `https`). With it, the block of a workspace with a `tasks_project` item lists up to 3 next steps from `GET <tasks_url>/api/next-steps`, with a 2 second timeout. Without it, the section is off. |
 
 ```yaml
 workspaces:
@@ -1248,6 +1250,8 @@ workspaces:
   context_cap: 150000
   tool_search_max_servers: 3
   viewer_url: https://joshua.example.org
+  hint_sim: 0.70
+  tasks_url: http://tasks:8000
 ```
 
 ## gateway
