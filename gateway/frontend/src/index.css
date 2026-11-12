@@ -54,6 +54,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 }
 
 .chat-screen {
+  --chat-width: 860px; /* the reading width of the message column */
   --chat-shadow: 0 2px 12px rgb(0 0 0 / 0.5);
 
   /* Code highlight, after the GitHub dark palette. */
@@ -162,7 +163,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   -webkit-overflow-scrolling: touch;
 }
 .chat-screen .column {
-  max-width: var(--j-content);
+  max-width: var(--chat-width);
   margin: 0 auto;
   padding: 16px max(16px, env(safe-area-inset-right)) 24px max(16px, env(safe-area-inset-left));
   display: flex;
@@ -619,7 +620,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
     max(12px, env(safe-area-inset-left));
 }
 .chat-screen .composer-inner {
-  max-width: var(--j-content);
+  max-width: var(--chat-width);
   margin: 0 auto;
   display: flex;
   align-items: flex-end;
@@ -681,7 +682,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 
 /* The chip of the file on the composer and on the message that carried it. */
 .chat-screen .attached {
-  max-width: var(--j-content);
+  max-width: var(--chat-width);
   margin: 0 auto 6px;
 }
 .chat-screen .file-chip {
@@ -716,7 +717,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   line-height: 1;
 }
 .chat-screen .count {
-  max-width: var(--j-content);
+  max-width: var(--chat-width);
   margin: 4px auto 0;
   text-align: right;
   font-size: 0.75rem;
@@ -1108,7 +1109,6 @@ html.j-lock body { overflow: hidden; }
 @media (max-width: 759px) {
   .j-appbar { padding-block: calc(6px + env(safe-area-inset-top, 0px)) 6px; min-height: 48px; box-sizing: border-box; }
   .j-appbar .j-appbar-title small { display: none; }
-  .j-shell.fill .j-appbar { display: none; }
   .chat-screen .chat-header {
     justify-content: flex-start;
     min-height: 48px;
@@ -1125,4 +1125,87 @@ html.j-lock body { overflow: hidden; }
   .chat-screen .items { z-index: 31; }
   .chat-screen .scrim { z-index: 30; }
   .chat-screen .doc-panel { z-index: 32; }
+}
+
+/* Desktop: every side column folds away, so the person can focus. The app
+   sidebar folds from 760px, the rail from 900px, the item column from
+   1100px, the widths where each is a column. The state is in panels.ts. The
+   conversation takes the freed room, and its message column stays at the
+   reading width, centred. The chat has no app bar: its own header says where
+   you are. The fold is animated, and not for a person who asked for less
+   motion. */
+.j-shell.fill .j-appbar { display: none; }
+.j-nav-collapse,
+.j-nav-expand,
+.chat-screen .nav-expand,
+.chat-screen .rail-expand,
+.chat-screen .focus-toggle,
+.chat-screen .rail-collapse,
+.chat-screen .items-collapse { display: none; }
+.j-nav-collapse,
+.j-nav-expand {
+  flex: none;
+  min-height: 36px;
+  min-width: 36px;
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  background: var(--j-surface-2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+@media (min-width: 760px) {
+  .j-shell.has-sidebar { transition: grid-template-columns 0.2s ease; }
+  .j-shell.has-sidebar .j-sidebar { transition: padding 0.2s ease, visibility 0s linear 0s; }
+  .j-shell.has-sidebar.nav-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+  .j-shell.has-sidebar.nav-collapsed .j-sidebar {
+    visibility: hidden;
+    overflow: hidden;
+    padding-inline: 0;
+    border-right-width: 0;
+    transition: padding 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .j-nav-collapse { display: inline-grid; place-items: center; }
+  .j-sidebar-head { align-items: center; }
+  .j-shell.nav-collapsed .j-nav-expand { display: inline-grid; place-items: center; }
+  .j-shell.nav-collapsed .chat-screen .nav-expand { display: inline-grid; place-items: center; }
+}
+@media (min-width: 900px) {
+  .chat-screen .rail { transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0s; }
+  .chat-screen .rail.collapsed {
+    flex-basis: 0;
+    padding-inline: 0;
+    border-right-width: 0;
+    overflow: hidden;
+    visibility: hidden;
+    transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .chat-screen .rail-title { display: none; }
+  .chat-screen .rail-header { justify-content: flex-end; }
+  .chat-screen .rail-collapse,
+  .chat-screen .focus-toggle { display: inline-grid; place-items: center; }
+  .chat-screen .rail.collapsed ~ .chat .rail-expand { display: inline-grid; place-items: center; }
+  .chat-screen .chat-header .focus-toggle { margin-left: auto; }
+}
+@media (min-width: 1100px) {
+  .chat-screen .items { transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0s; }
+  .chat-screen .items.collapsed {
+    flex-basis: 0;
+    padding-inline: 0;
+    border-left-width: 0;
+    overflow: hidden;
+    visibility: hidden;
+    transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .chat-screen .items-collapse { display: inline-grid; place-items: center; }
+  .chat-screen.items-collapsed .items-toggle { display: inline-block; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .j-shell.has-sidebar,
+  .j-shell.has-sidebar .j-sidebar,
+  .j-shell.has-sidebar.nav-collapsed .j-sidebar,
+  .chat-screen .rail,
+  .chat-screen .rail.collapsed,
+  .chat-screen .items,
+  .chat-screen .items.collapsed { transition: none; }
 }

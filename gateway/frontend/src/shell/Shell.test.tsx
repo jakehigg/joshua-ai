@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { reloadPanels, STORAGE_KEY } from "./panels";
 import Shell, { embedded, type Session } from "./Shell";
 import { SECTIONS } from "./sections";
 
@@ -275,5 +276,39 @@ describe("the navigation drawer", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByRole("button", { name: "Show the navigation" })).toBeNull();
+  });
+});
+
+describe("the sidebar on a desktop", () => {
+  const shellEl = () => document.querySelector(".j-shell") as HTMLElement;
+
+  afterEach(() => {
+    window.localStorage.clear();
+    reloadPanels();
+  });
+
+  it("folds with « and opens with », on any page, and remembers it", async () => {
+    stubSession();
+    shell("journal");
+    const hide = screen.getByRole("button", { name: "Hide the navigation" });
+    expect(hide.getAttribute("aria-controls")).toBe("app-nav");
+    fireEvent.click(hide);
+    expect(shellEl().className).toContain("nav-collapsed");
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}")).toMatchObject({ nav: true });
+    cleanup();
+    reloadPanels();
+    shell("usage");
+    expect(shellEl().className).toContain("nav-collapsed");
+    fireEvent.click(screen.getByRole("button", { name: "Open the navigation column" }));
+    expect(shellEl().className).not.toContain("nav-collapsed");
+  });
+
+  it("does not touch the phone drawer", () => {
+    stubSession();
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ nav: true }));
+    reloadPanels();
+    shell("journal");
+    fireEvent.click(screen.getByRole("button", { name: "Show the navigation" }));
+    expect(document.querySelector(".j-sidebar.open")).not.toBeNull();
   });
 });

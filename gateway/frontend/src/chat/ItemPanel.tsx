@@ -4,7 +4,8 @@
 // or a preview card for an external link. Nothing navigates the chat tab. An
 // item with an unsafe address (links.ts) is shown as text. On a phone the
 // screen closes this list when an item opens, so the panel is visible. The
-// list is a sheet there, with a close button. Each item can be pinned or
+// list is a sheet there, with a close button. On a wide desktop it is a
+// column that folds away with » (the workspace header brings it back). Each item can be pinned or
 // removed, and a form adds a link. The list loads on open, after each turn
 // (`refreshKey`) and when the tab gets focus back.
 
@@ -88,11 +89,16 @@ export function ItemPanel({
   refreshKey,
   open,
   onClose,
+  collapsed = false,
+  onCollapse,
 }: {
   slug: string;
   refreshKey: number;
   open: boolean;
   onClose: () => void;
+  /** A desktop column that is folded away (index.css). */
+  collapsed?: boolean;
+  onCollapse?: () => void;
 }) {
   const [items, setItems] = useState<WorkspaceItem[]>([]);
   const [error, setError] = useState("");
@@ -135,11 +141,25 @@ export function ItemPanel({
 
   const ordered = [...items].sort((a, b) => Number(b.pinned) - Number(a.pinned));
   return (
-    <aside className={open ? "items open" : "items"} aria-label="Workspace items">
+    <aside
+      id="workspace-items"
+      className={`items${open ? " open" : ""}${collapsed ? " collapsed" : ""}`}
+      aria-label="Workspace items"
+    >
       <header className="items-header">
         <h2>Items</h2>
         <button type="button" className="items-close" onClick={onClose} aria-label="Close the items">
           ✕
+        </button>
+        <button
+          type="button"
+          className="items-collapse"
+          aria-label="Hide the items"
+          aria-expanded={!collapsed}
+          aria-controls="workspace-items"
+          onClick={onCollapse}
+        >
+          »
         </button>
       </header>
       {error && (

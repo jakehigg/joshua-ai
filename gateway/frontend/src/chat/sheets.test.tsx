@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceItem } from "../api/workspaces";
+import { reloadPanels, STORAGE_KEY } from "../shell/panels";
 import { WorkspacePage } from "./ChatPage";
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
@@ -59,7 +60,11 @@ async function open() {
 const screenEl = () => document.querySelector(".chat-screen") as HTMLElement;
 const frame = () => document.querySelector(".doc-panel-frame") as HTMLIFrameElement | null;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+  reloadPanels();
+});
 
 describe("sheets on the chat screen", () => {
   it("opens the items, and the backdrop, the close button and Escape close them", async () => {
@@ -188,5 +193,99 @@ describe("sheets on the chat screen", () => {
     expect(panel.textContent).toContain("trip-plan");
     expect(screen.queryByRole("link", { name: "Open in new tab" })).toBeNull();
     await act(async () => undefined);
+  });
+});
+
+describe("the side columns on a desktop", () => {
+  const rail = () => document.querySelector(".rail") as HTMLElement;
+  const items = () => document.querySelector(".items") as HTMLElement;
+  const shell = () => document.querySelector(".j-shell") as HTMLElement;
+  const click = (name: string) =>
+    fireEvent.click(screen.getByRole("button", { name, hidden: true }));
+
+  it("folds and opens the rail, the items and the sidebar with their buttons", async () => {
+    await open();
+    expect(rail().className).not.toContain("collapsed");
+    click("Hide the workspaces");
+    expect(rail().className).toContain("collapsed");
+    expect(screen.getByRole("button", { name: "Open the workspaces column", hidden: true })).toBeTruthy();
+    fireEvent.click(document.querySelector(".rail-expand") as HTMLButtonElement);
+    expect(rail().className).not.toContain("collapsed");
+
+    click("Hide the items");
+    expect(items().className).toContain("collapsed");
+    expect(screenEl().className).toContain("items-collapsed");
+    fireEvent.click(document.querySelector(".items-toggle") as HTMLButtonElement);
+    expect(items().className).not.toContain("collapsed");
+
+    click("Hide the navigation");
+    expect(shell().className).toContain("nav-collapsed");
+    fireEvent.click(document.querySelector(".chat-header .nav-expand") as HTMLButtonElement);
+    expect(shell().className).not.toContain("nav-collapsed");
+  });
+
+  it("has aria state on the buttons", async () => {
+    await open();
+    const hide = screen.getByRole("button", { name: "Hide the workspaces", hidden: true });
+    expect(hide.getAttribute("aria-expanded")).toBe("true");
+    expect(hide.getAttribute("aria-controls")).toBe("chat-rail");
+    fireEvent.click(hide);
+    expect(hide.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("focus mode folds everything, and a second press opens everything", async () => {
+    await open();
+    const focus = screen.getByRole("button", { name: "Focus mode", hidden: true });
+    fireEvent.click(focus);
+    expect(shell().className).toContain("nav-collapsed");
+    expect(rail().className).toContain("collapsed");
+    expect(items().className).toContain("collapsed");
+    expect(focus.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(focus);
+    expect(shell().className).not.toContain("nav-collapsed");
+    expect(rail().className).not.toContain("collapsed");
+    expect(items().className).not.toContain("collapsed");
+    // The keyboard shortcut does the same.
+    fireEvent.keyDown(document, { key: "\\", ctrlKey: true });
+    expect(rail().className).toContain("collapsed");
+  });
+
+  it("keeps the state in localStorage and restores it", async () => {
+    await open();
+    click("Hide the workspaces");
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}")).toMatchObject({ rail: true });
+    cleanup();
+    reloadPanels();
+    await open();
+    expect(rail().className).toContain("collapsed");
+    expect(items().className).not.toContain("collapsed");
+  });
+
+  it("restores a stored state, and works with no storage", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ nav: true, items: true }));
+    reloadPanels();
+    await open();
+    expect(shell().className).toContain("nav-collapsed");
+    expect(items().className).toContain("collapsed");
+    expect(rail().className).not.toContain("collapsed");
+    cleanup();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("no storage");
+    });
+    reloadPanels();
+    await open();
+    click("Hide the workspaces");
+    expect(rail().className).toContain("collapsed");
+    vi.restoreAllMocks();
+  });
+
+  it("leaves the phone drawers alone: the drawer still opens when a column is folded", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ rail: true }));
+    reloadPanels();
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Show the workspaces", hidden: true }));
+    expect(document.querySelector(".rail.open")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("rail-backdrop"));
+    expect(document.querySelector(".rail.open")).toBeNull();
   });
 });

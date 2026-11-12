@@ -10,6 +10,12 @@
 // fence of the open document, the panel reloads that frame; while it is open,
 // it also watches that document for a change made outside this chat.
 //
+// On a desktop every side column can be folded away: the app sidebar (shell),
+// the rail and the item column, each with a « or » button in its header, and
+// a ☰ or » button in the chat header that brings it back. The focus button,
+// and Ctrl or Cmd + \, fold them all or open them all (panels.ts keeps the
+// choice per browser). The phone sheets below do not use this state.
+//
 // The screen has a rail on the left (Rail.tsx): Chat, the workspaces, and
 // "+ New workspace". `/chat/:person` is the normal chat, the person's one main
 // thread. `/chat/w/:slug` (WorkspacePage) is a workspace of the person who
@@ -36,6 +42,7 @@ import ErrorLine from "../ui/ErrorLine";
 import Spinner from "../ui/Spinner";
 import { Composer } from "./Composer";
 import { NewWorkspace } from "./NewWorkspace";
+import { usePanels } from "../shell/panels";
 import { Rail } from "./Rail";
 import { ItemPanel } from "./ItemPanel";
 import { useWorkspaces, type Workspaces } from "./useWorkspaces";
@@ -80,6 +87,7 @@ interface ChatProps {
 function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const panels = usePanels();
   const [railOpen, setRailOpen] = useState(false);
   const [itemsOpen, setItemsOpen] = useState(false);
   const [itemsKey, setItemsKey] = useState(0);
@@ -129,6 +137,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
       closePanel();
     }
     setItemsOpen(!itemsOpen);
+    panels.set("items", false);
   };
   // A route change closes the rail, which holds the app links on a phone.
   useEffect(() => setRailOpen(false), [pathname]);
@@ -139,6 +148,19 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
     if (railWas.current && !railOpen) toggleRef.current?.focus();
     railWas.current = railOpen;
   }, [railOpen]);
+  // Focus mode, on a desktop: Ctrl or Cmd + \ folds every side column away,
+  // or opens them all again.
+  const { focus } = panels;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "\\") {
+        e.preventDefault();
+        focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [focus]);
   const sheetOpen = railOpen || itemsOpen || panelOpen;
   useEffect(() => {
     if (!sheetOpen) return undefined;
@@ -165,7 +187,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
 
   return (
     <DocumentPanelProvider panel={panel}>
-      <div className={sheetOpen ? "chat-screen sheet-open" : "chat-screen"}>
+      <div className={`chat-screen${sheetOpen ? " sheet-open" : ""}${panels.collapsed.items ? " items-collapsed" : ""}`}>
         <Rail
           person={person}
           workspaces={workspaces.list}
@@ -177,6 +199,8 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
           }}
           onNavigate={() => setRailOpen(false)}
           onClose={() => setRailOpen(false)}
+          collapsed={panels.collapsed.rail}
+          onCollapse={() => panels.set("rail", true)}
         />
         {railOpen && (
           <div className="scrim scrim-rail" data-testid="rail-backdrop" onClick={() => setRailOpen(false)} />
@@ -186,6 +210,26 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
         )}
         <div className="chat">
           <header className="chat-header">
+            <button
+              type="button"
+              className="nav-expand"
+              aria-label="Open the navigation column"
+              aria-expanded={!panels.collapsed.nav}
+              aria-controls="app-nav"
+              onClick={() => panels.set("nav", false)}
+            >
+              »
+            </button>
+            <button
+              type="button"
+              className="rail-expand"
+              aria-label="Open the workspaces column"
+              aria-expanded={!panels.collapsed.rail}
+              aria-controls="chat-rail"
+              onClick={() => panels.set("rail", false)}
+            >
+              ☰
+            </button>
             <button
               type="button"
               ref={toggleRef}
@@ -211,6 +255,16 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
                 <span className="subtitle">{person}</span>
               </div>
             )}
+            <button
+              type="button"
+              className="focus-toggle"
+              aria-label="Focus mode"
+              aria-pressed={panels.collapsed.nav && panels.collapsed.rail && (!ws || panels.collapsed.items)}
+              title="Hide or show every side column (Ctrl or Cmd + \\)"
+              onClick={focus}
+            >
+              ⤢
+            </button>
           </header>
           <MessageList
             messages={view.messages}
@@ -236,6 +290,11 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
             refreshKey={itemsKey}
             open={itemsOpen}
             onClose={() => setItemsOpen(false)}
+            collapsed={panels.collapsed.items}
+            onCollapse={() => {
+              setItemsOpen(false);
+              panels.set("items", true);
+            }}
           />
         )}
         {panel.shown && (

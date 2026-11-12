@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 
 import { getJson, type Person } from "../api/client";
+import { usePanels } from "./panels";
 import AppNav, { ME_SECTION, NavContext, type SessionSection } from "./AppNav";
 import { LINKS_SECTION, SECTIONS } from "./sections";
 
@@ -65,12 +66,15 @@ function contentClass(section: string): string {
  * is open the page behind does not scroll, focus goes into it, and comes back
  * to the hamburger when it closes. `section` marks the current item.
  *
+ * On a desktop the sidebar can be collapsed with « and opened again with »
+ * in the app bar (panels.ts keeps the choice per browser, for every page).
  * There is no search field in the app bar: the Search link of the navigation
  * opens the search page, which holds the field.
  *
  * The chat has its own compact top bar on a phone (the chat header, with the
  * hamburger of its rail, which holds the workspaces and these same links), so
- * the app bar is not drawn there below 760px, and there is one toggle.
+ * the app bar is not drawn on the chat page at any width, and on a phone
+ * there is one toggle.
  *
  * In a frame there is no navigation at all: no sidebar and no app bar, so the
  * page of the frame is the content and the person navigates in the app that
@@ -86,6 +90,8 @@ export default function Shell({
   const [session, setSession] = useState<Session | null>(null);
   const frame = embedded();
   const [open, setOpen] = useState(false);
+  const panels = usePanels();
+  const navCollapsed = panels.collapsed.nav;
   const toggleRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
@@ -148,7 +154,9 @@ export default function Shell({
   const fill = section === "chat";
   return (
     <NavContext.Provider value={{ sections, section }}>
-      <div className={fill ? "j-shell has-sidebar fill" : "j-shell has-sidebar"}>
+      <div
+        className={`j-shell has-sidebar${fill ? " fill" : ""}${navCollapsed ? " nav-collapsed" : ""}`}
+      >
         <aside
           className={open ? "j-sidebar open" : "j-sidebar"}
           id="app-nav"
@@ -171,6 +179,16 @@ export default function Shell({
             >
               ✕
             </button>
+            <button
+              type="button"
+              className="j-nav-collapse"
+              aria-label="Hide the navigation"
+              aria-expanded={!navCollapsed}
+              aria-controls="app-nav"
+              onClick={() => panels.set("nav", true)}
+            >
+              «
+            </button>
           </div>
           <AppNav sections={sections} section={section} />
         </aside>
@@ -190,6 +208,16 @@ export default function Shell({
                 ☰
               </button>
             )}
+            <button
+              type="button"
+              className="j-nav-expand"
+              aria-label="Open the navigation column"
+              aria-expanded={!navCollapsed}
+              aria-controls="app-nav"
+              onClick={() => panels.set("nav", false)}
+            >
+              »
+            </button>
             <img className="j-logo" src="/logo-64.png" alt="" />
             <a className="j-appbar-title" href="/">
               <small>Joshua</small>

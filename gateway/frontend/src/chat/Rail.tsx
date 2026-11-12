@@ -3,6 +3,7 @@
 // navigation links of the shell (AppNav), without Chat, which the first entry
 // of the rail already is, which the shell's own sidebar shows
 // only from 760px; so on a phone this drawer is the one menu of the chat.
+// On a desktop it folds away with « (the chat header brings it back).
 // On a phone it is a drawer with a close
 // button; the screen also closes it on a tap of the backdrop and on Escape.
 
@@ -19,6 +20,8 @@ export function Rail({
   onNew,
   onNavigate,
   onClose,
+  collapsed = false,
+  onCollapse,
 }: {
   person: string;
   workspaces: Workspace[];
@@ -28,6 +31,9 @@ export function Rail({
   onNew: () => void;
   onNavigate: () => void;
   onClose: () => void;
+  /** A desktop column that is folded away (index.css). */
+  collapsed?: boolean;
+  onCollapse?: () => void;
 }) {
   const nav = useNav();
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -50,7 +56,11 @@ export function Rail({
     </li>
   );
   return (
-    <nav className={open ? "rail open" : "rail"} aria-label="Chats and workspaces">
+    <nav
+      id="chat-rail"
+      className={`rail${open ? " open" : ""}${collapsed ? " collapsed" : ""}`}
+      aria-label="Chats and workspaces"
+    >
       <header className="rail-header">
         <span className="rail-title">
           <img className="j-logo" src="/logo-64.png" alt="" />
@@ -58,6 +68,16 @@ export function Rail({
         </span>
         <button type="button" ref={closeRef} className="rail-close" onClick={onClose} aria-label="Close the workspaces">
           ✕
+        </button>
+        <button
+          type="button"
+          className="rail-collapse"
+          aria-label="Hide the workspaces"
+          aria-expanded={!collapsed}
+          aria-controls="chat-rail"
+          onClick={onCollapse}
+        >
+          «
         </button>
       </header>
       <ul>
