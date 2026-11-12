@@ -1,4 +1,4 @@
-// The viewer's own document page, inside the chat.
+// The viewer's own pages, inside the chat.
 //
 // Open on a document card (ArtifactCard.tsx) shows this panel: a same-origin
 // <iframe> of the page the viewer serves at /documents/<owner>/<slug>. There
@@ -13,9 +13,18 @@
 // own: it is never a router <Link>, because the frame has its own app and
 // the chat screen stays where it is.
 //
-// The layout: a column beside the conversation on a desktop, a sheet over it
-// on a phone (index.css). The conversation stays mounted in both, so closing
-// the panel gives back the scroll position it had.
+// A workspace item opens here too (itemTarget.ts), so the chat tab never
+// navigates. Another page of the viewer (/wiki/..., /assignments/...) is
+// framed the same way, in PagePanel, with no reload and no watch. An address
+// that cannot be framed, such as a GitHub pull request, shows a small card
+// with an "Open in new tab" button. Only one view is open at a time: showing
+// one closes the other.
+//
+// The layout: a column beside the conversation on a desktop, a full-height
+// sheet over it on a phone (index.css). The sheet has a fixed header with the
+// title and a close button; the frame scrolls inside it. The conversation
+// stays mounted in both, so closing the panel gives back the scroll position
+// it had.
 //
 // reload() is the refine loop inside one turn: the person comments on lines
 // in the panel, says "apply them", and the finished answer carries the
@@ -39,12 +48,17 @@ import {
 } from "react";
 import { getDocumentMeta } from "../api/client";
 import type { Artifact } from "./ArtifactCard";
+import type { CardTarget, ItemTarget, PageTarget } from "./itemTarget";
 
 // How often an open panel asks the viewer whether its document changed.
 export const POLL_MS = 15_000;
 
 // The one line of affordance in the panel: what the `+` gutter is for.
 export const COMMENT_HINT = "Comment on a line with +; Joshua reads the comments on the next turn.";
+
+export type PanelView =
+  | { type: "page"; page: PageTarget }
+  | { type: "card"; card: CardTarget };
 
 export interface DocumentPanelState {
   /** The document the panel shows, or null when no panel is open. */
@@ -54,7 +68,11 @@ export interface DocumentPanelState {
    * that wrote the document, or by the watch that saw it change.
    */
   reloads: number;
+  /** A page or a card of a workspace item, or null. Never set with `shown`. */
+  view: PanelView | null;
   show: (artifact: Artifact) => void;
+  /** Open what an item points at: a document, a page of the viewer, or a card. */
+  open: (target: ItemTarget) => void;
   close: () => void;
   /** Reload the frame, when `path` is the document the panel has open. */
   reload: (path: string) => void;
@@ -63,7 +81,9 @@ export interface DocumentPanelState {
 const CLOSED: DocumentPanelState = {
   shown: null,
   reloads: 0,
+  view: null,
   show: () => undefined,
+  open: () => undefined,
   close: () => undefined,
   reload: () => undefined,
 };
@@ -129,6 +149,7 @@ function useDocumentWatch(url: string | undefined, reloads: number, reload: () =
 /** The panel state of a chat screen; the screen puts it in the context. */
 export function useDocumentPanelState(): DocumentPanelState {
   const [shown, setShown] = useState<Artifact | null>(null);
+  const [view, setView] = useState<PanelView | null>(null);
   const [reloads, setReloads] = useState(0);
   // reload() is called from a turn's `done`, and must not change with each
   // render of the screen, so it reads the open document from a ref.
@@ -136,9 +157,22 @@ export function useDocumentPanelState(): DocumentPanelState {
   shownRef.current = shown;
   const show = useCallback((artifact: Artifact) => {
     setShown(artifact);
+    setView(null);
     setReloads(0);
   }, []);
-  const close = useCallback(() => setShown(null), []);
+  const open = useCallback(
+    (target: ItemTarget) => {
+      if (target.type === "document") return show(target.artifact);
+      setShown(null);
+      setReloads(0);
+      setView(target.type === "page" ? { type: "page", page: target.page } : { type: "card", card: target.card });
+    },
+    [show],
+  );
+  const close = useCallback(() => {
+    setShown(null);
+    setView(null);
+  }, []);
   const bump = useCallback(() => setReloads((n) => n + 1), []);
   const reload = useCallback(
     (path: string) => {
@@ -147,7 +181,10 @@ export function useDocumentPanelState(): DocumentPanelState {
     [bump],
   );
   useDocumentWatch(shown?.url, reloads, bump);
-  return useMemo(() => ({ shown, reloads, show, close, reload }), [shown, reloads, show, close, reload]);
+  return useMemo(
+    () => ({ shown, reloads, view, show, open, close, reload }),
+    [shown, reloads, view, show, open, close, reload],
+  );
 }
 
 /** The panel a card opens. Outside a chat screen, a card opens nothing. */
@@ -211,6 +248,52 @@ export function DocumentPanel({
         src={src}
         title={`${artifact.slug}, the document page`}
       />
+    </aside>
+  );
+}
+
+// Any other page of the viewer, or a card for an address that cannot be
+// framed. Same sheet and header as the document panel.
+export function PagePanel({ view, onClose }: { view: PanelView; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const key = view.type === "page" ? view.page.url : view.card.title;
+  const title = view.type === "page" ? view.page.title : view.card.title;
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, [view]);
+  return (
+    <aside className="doc-panel" aria-label={`${title}, the item`}>
+      <header className="doc-panel-header">
+        <span className="doc-panel-title">{title}</span>
+        <button
+          type="button"
+          ref={closeRef}
+          className="doc-panel-close"
+          aria-label="Close the item"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+      </header>
+      {view.type === "page" ? (
+        <iframe key={key} className="doc-panel-frame" src={view.page.url} title={`${title}, the page`} />
+      ) : (
+        <div className="item-card">
+          <span className="item-card-kind">{view.card.kindLabel}</span>
+          <h2 className="item-card-title">{view.card.title}</h2>
+          {view.card.address && <p className="item-card-address">{view.card.address}</p>}
+          {view.card.external && (
+            <a
+              className="item-card-open"
+              href={view.card.external}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open in new tab
+            </a>
+          )}
+        </div>
+      )}
     </aside>
   );
 }

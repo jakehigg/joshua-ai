@@ -5,7 +5,8 @@
 // (useHistory), and streams turns (useTurn). Open on a document card shows
 // the viewer's document page in the panel beside the conversation
 // (DocumentPanel); the conversation stays mounted behind it, so closing the
-// panel gives back its scroll position. When a turn ends with the `artifact`
+// panel gives back its scroll position. An item of a workspace opens in the
+// same panel (itemTarget.ts), as a document, a framed page or a card. When a turn ends with the `artifact`
 // fence of the open document, the panel reloads that frame; while it is open,
 // it also watches that document for a change made outside this chat.
 //
@@ -15,6 +16,14 @@
 // signed in: the same chat, with the workspace header and the item panel
 // (ItemPanel.tsx). `workspace` goes to the turn and the history calls. Each
 // finished turn reloads the items, because the turn may have made some.
+//
+// On a phone the rail, the item list and the panel are sheets over the
+// conversation, and only one is open at a time: opening one closes the
+// others. A rail or item sheet has a dimmed backdrop, and a tap on it closes
+// the sheet. Escape closes the top sheet (the panel, then the items, then the
+// rail). While a sheet is open the page behind it does not scroll
+// (`sheet-open`, index.css). From 900px the rail is a column, and from 1100px
+// so is the item list, and the same state drives their close buttons.
 
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -29,7 +38,12 @@ import { Rail } from "./Rail";
 import { ItemPanel } from "./ItemPanel";
 import { useWorkspaces, type Workspaces } from "./useWorkspaces";
 import { WorkspaceHeader } from "./WorkspaceHeader";
-import { DocumentPanel, DocumentPanelProvider, useDocumentPanelState } from "./DocumentPanel";
+import {
+  DocumentPanel,
+  DocumentPanelProvider,
+  PagePanel,
+  useDocumentPanelState,
+} from "./DocumentPanel";
 import { rememberPerson } from "./Home";
 import { MessageList } from "./MessageList";
 import { validPerson } from "./people";
@@ -90,6 +104,42 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   const history = useHistory(person, setView, turn.isRunning, showToast, workspace);
   refreshRef.current = history.refresh;
 
+  // Only one sheet at a time: a panel that opens closes the lists.
+  const { close: closePanel } = panel;
+  const panelOpen = panel.shown !== null || panel.view !== null;
+  useEffect(() => {
+    if (panelOpen) {
+      setRailOpen(false);
+      setItemsOpen(false);
+    }
+  }, [panelOpen, panel.shown, panel.view]);
+  const toggleRail = () => {
+    if (!railOpen) {
+      setItemsOpen(false);
+      closePanel();
+    }
+    setRailOpen(!railOpen);
+  };
+  const toggleItems = () => {
+    if (!itemsOpen) {
+      setRailOpen(false);
+      closePanel();
+    }
+    setItemsOpen(!itemsOpen);
+  };
+  const sheetOpen = railOpen || itemsOpen || panelOpen;
+  useEffect(() => {
+    if (!sheetOpen) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (panelOpen) closePanel();
+      else if (itemsOpen) setItemsOpen(false);
+      else setRailOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sheetOpen, panelOpen, itemsOpen, closePanel]);
+
   useEffect(() => {
     rememberPerson(person);
     document.title = ws ? `Joshua — ${ws.title}` : `Joshua — ${person}`;
@@ -103,7 +153,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
 
   return (
     <DocumentPanelProvider panel={panel}>
-      <div className="chat-screen">
+      <div className={sheetOpen ? "chat-screen sheet-open" : "chat-screen"}>
         <Rail
           person={person}
           workspaces={workspaces.list}
@@ -114,7 +164,14 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
             setCreating(true);
           }}
           onNavigate={() => setRailOpen(false)}
+          onClose={() => setRailOpen(false)}
         />
+        {railOpen && (
+          <div className="scrim scrim-rail" data-testid="rail-backdrop" onClick={() => setRailOpen(false)} />
+        )}
+        {itemsOpen && (
+          <div className="scrim scrim-items" data-testid="items-backdrop" onClick={() => setItemsOpen(false)} />
+        )}
         <div className="chat">
           <header className="chat-header">
             <button
@@ -122,7 +179,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
               className="rail-toggle"
               aria-label="Show the workspaces"
               aria-expanded={railOpen}
-              onClick={() => setRailOpen((o) => !o)}
+              onClick={toggleRail}
             >
               ☰
             </button>
@@ -133,7 +190,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
                   onWs?.(w);
                   workspaces.reload();
                 }}
-                onItems={() => setItemsOpen((o) => !o)}
+                onItems={toggleItems}
               />
             ) : (
               <div className="title">
@@ -171,6 +228,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
         {panel.shown && (
           <DocumentPanel artifact={panel.shown} reloads={panel.reloads} onClose={panel.close} />
         )}
+        {panel.view && <PagePanel view={panel.view} onClose={panel.close} />}
         {creating && (
           <NewWorkspace
             onClose={() => setCreating(false)}

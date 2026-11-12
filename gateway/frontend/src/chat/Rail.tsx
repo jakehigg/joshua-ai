@@ -1,5 +1,6 @@
 // The left rail of the chat screen: Chat, the active workspaces, the paused
-// ones (folded), and "+ New workspace". On a phone it is a drawer.
+// ones (folded), and "+ New workspace". On a phone it is a drawer with a close
+// button; the screen also closes it on a tap of the backdrop and on Escape.
 
 import { Link } from "react-router-dom";
 import type { Workspace } from "../api/workspaces";
@@ -11,6 +12,7 @@ export function Rail({
   open,
   onNew,
   onNavigate,
+  onClose,
 }: {
   person: string;
   workspaces: Workspace[];
@@ -19,6 +21,7 @@ export function Rail({
   open: boolean;
   onNew: () => void;
   onNavigate: () => void;
+  onClose: () => void;
 }) {
   const active = workspaces.filter((w) => w.status === "active");
   const paused = workspaces.filter((w) => w.status === "paused");
@@ -35,6 +38,12 @@ export function Rail({
   );
   return (
     <nav className={open ? "rail open" : "rail"} aria-label="Chats and workspaces">
+      <header className="rail-header">
+        <span className="rail-title">Joshua</span>
+        <button type="button" className="rail-close" onClick={onClose} aria-label="Close the workspaces">
+          ✕
+        </button>
+      </header>
       <ul>
         <li>
           <Link

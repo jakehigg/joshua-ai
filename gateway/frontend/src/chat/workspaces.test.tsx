@@ -86,7 +86,7 @@ describe("the rail", () => {
   function show(activeSlug?: string, onNew = vi.fn()) {
     render(
       <MemoryRouter future={FUTURE}>
-        <Rail person="alex" workspaces={list} activeSlug={activeSlug} open onNew={onNew} onNavigate={vi.fn()} />
+        <Rail person="alex" workspaces={list} activeSlug={activeSlug} open onNew={onNew} onNavigate={vi.fn()} onClose={vi.fn()} />
       </MemoryRouter>,
     );
     return onNew;
@@ -174,19 +174,18 @@ describe("the item panel", () => {
     item({ id: "i4", kind: "wiki", ref: "w", title: "Menu notes", url: "/wiki/menu.md", pinned: true }),
   ];
 
-  it("groups by kind and links only http(s) and viewer paths", async () => {
+  it("groups by kind and opens items in the panel, never as links", async () => {
     viewer({ "GET /api/v1/workspaces/solar/items": { items } });
     render(<Panel />);
     await screen.findByText("Quote");
     expect(screen.getByText("Links")).toBeTruthy();
     expect(screen.getByText("Documents")).toBeTruthy();
-    const quote = screen.getByRole("link", { name: "Quote" });
-    expect(quote.getAttribute("href")).toBe("https://example.com");
-    expect(quote.getAttribute("target")).toBe("_blank");
-    expect(quote.getAttribute("rel")).toContain("noopener");
-    expect(screen.getByRole("link", { name: "Menu notes" }).getAttribute("href")).toBe("/wiki/menu.md");
-    // A javascript: address is text, never an href.
-    expect(screen.getByText("Sneaky").closest("a")).toBeNull();
+    // No item is a link: nothing here can navigate the chat tab.
+    expect(document.querySelector(".items a")).toBeNull();
+    expect(screen.getByRole("button", { name: "Quote" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Menu notes" })).toBeTruthy();
+    // A javascript: address is text, never a button or an href.
+    expect(screen.getByText("Sneaky").closest("button")).toBeNull();
     expect(document.querySelector('a[href^="javascript"]')).toBeNull();
   });
 

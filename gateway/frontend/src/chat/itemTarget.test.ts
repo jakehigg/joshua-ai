@@ -1,0 +1,72 @@
+import { describe, expect, it } from "vitest";
+import type { WorkspaceItem } from "../api/workspaces";
+import { itemTarget } from "./itemTarget";
+
+function item(over: Partial<WorkspaceItem>): WorkspaceItem {
+  return {
+    id: "i",
+    kind: "link",
+    ref: "x",
+    title: "T",
+    url: null,
+    added_by: "tool:x",
+    pinned: false,
+    seen: true,
+    ...over,
+  };
+}
+
+describe("itemTarget", () => {
+  it("opens a document by its ref, with or without .md or .html", () => {
+    for (const ref of ["documents/jake/smoke-test-note.md", "documents/jake/smoke-test-note", "documents/jake/smoke-test-note.html"]) {
+      expect(itemTarget(item({ kind: "document", ref }))).toEqual({
+        type: "document",
+        artifact: {
+          path: "documents/jake/smoke-test-note.md",
+          slug: "smoke-test-note",
+          url: "/documents/jake/smoke-test-note",
+        },
+      });
+    }
+  });
+
+  it("opens a document by its url when the ref says nothing", () => {
+    const target = itemTarget(item({ kind: "artifact", ref: "odd", url: "/documents/jake/smoke-test-note" }));
+    expect(target?.type).toBe("document");
+  });
+
+  it("frames another viewer path as a page", () => {
+    expect(itemTarget(item({ kind: "wiki", ref: "w", title: "Menu", url: "/wiki/menu.md" }))).toEqual({
+      type: "page",
+      page: { url: "/wiki/menu.md", title: "Menu", kindLabel: "Wiki page" },
+    });
+    expect(itemTarget(item({ kind: "assignment", ref: "7", url: null }))).toMatchObject({
+      type: "page",
+      page: { url: "/assignments/7" },
+    });
+  });
+
+  it("shows a card with an external button for an http(s) url", () => {
+    expect(itemTarget(item({ kind: "pr", ref: "r", title: "Fix", url: "https://github.com/a/b/pull/1" }))).toEqual({
+      type: "card",
+      card: {
+        title: "Fix",
+        kindLabel: "Pull request",
+        address: "https://github.com/a/b/pull/1",
+        external: "https://github.com/a/b/pull/1",
+      },
+    });
+  });
+
+  it("shows a card for an item with no url and no viewer page", () => {
+    expect(itemTarget(item({ kind: "tasks_project", ref: "trip-plan", title: "Trip" }))).toEqual({
+      type: "card",
+      card: { title: "Trip", kindLabel: "Task project", address: "trip-plan", external: null },
+    });
+  });
+
+  it("gives no target for an unsafe url", () => {
+    expect(itemTarget(item({ url: "javascript:alert(1)" }))).toBeNull();
+    expect(itemTarget(item({ url: "//evil.test/x" }))).toBeNull();
+  });
+});

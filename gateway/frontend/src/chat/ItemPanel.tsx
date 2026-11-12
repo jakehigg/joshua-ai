@@ -1,7 +1,10 @@
 // The item panel of a workspace, at the right of the chat: what was built or
-// collected for it, grouped by kind. A document or an artifact opens in the
-// document panel. An item with an http(s) or viewer address opens as a link;
-// any other address is shown as text (links.ts). Each item can be pinned or
+// collected for it, grouped by kind. Every item opens inside the chat screen,
+// in the panel (itemTarget.ts): a document or artifact, a page of the viewer,
+// or a preview card for an external link. Nothing navigates the chat tab. An
+// item with an unsafe address (links.ts) is shown as text. On a phone the
+// screen closes this list when an item opens, so the panel is visible. The
+// list is a sheet there, with a close button. Each item can be pinned or
 // removed, and a form adds a link. The list loads on open, after each turn
 // (`refreshKey`) and when the tab gets focus back.
 
@@ -13,9 +16,8 @@ import {
   removeItem,
   type WorkspaceItem,
 } from "../api/workspaces";
-import { parseArtifact } from "./ArtifactCard";
 import { useDocumentPanel } from "./DocumentPanel";
-import { safeHref } from "./links";
+import { itemTarget } from "./itemTarget";
 
 const KIND_LABELS: Record<string, string> = {
   document: "Documents",
@@ -53,25 +55,14 @@ function Entry({
   onRemove: () => void;
 }) {
   const panel = useDocumentPanel();
-  const doc =
-    item.kind === "document" || item.kind === "artifact" ? parseArtifact(item.ref) : null;
-  const href = safeHref(item.url);
-  let name;
-  if (doc) {
-    name = (
-      <button type="button" className="item-open" onClick={() => panel.show(doc)}>
-        {label(item)}
-      </button>
-    );
-  } else if (href) {
-    name = (
-      <a href={href} target="_blank" rel="noopener noreferrer">
-        {label(item)}
-      </a>
-    );
-  } else {
-    name = <span className="item-text">{label(item)}</span>;
-  }
+  const target = itemTarget(item);
+  const name = target ? (
+    <button type="button" className="item-open" onClick={() => panel.open(target)}>
+      {label(item)}
+    </button>
+  ) : (
+    <span className="item-text">{label(item)}</span>
+  );
   return (
     <li className="item">
       {name}

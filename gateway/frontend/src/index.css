@@ -862,3 +862,65 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   .chat-screen .items-toggle,
   .chat-screen .items-close { display: none; }
 }
+
+/* Sheets on a phone. The rail and the item list are drawers with a dimmed
+   backdrop; a tap on it closes them. The document panel is a full-height
+   sheet with a fixed header, and its frame scrolls inside it. While a sheet
+   is open the page behind it does not scroll. */
+.chat-screen .scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  background: rgb(0 0 0 / 0.5);
+}
+.chat-screen .rail-header { display: flex; align-items: center; justify-content: space-between; }
+.chat-screen .rail-title { font-weight: 600; }
+.chat-screen .rail-close,
+.chat-screen .items-close { min-height: 32px; padding: 2px 12px; }
+.chat-screen .doc-panel { height: 100dvh; max-width: 100vw; overflow: hidden; }
+.chat-screen .doc-panel-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-screen .doc-panel-frame { max-width: 100%; }
+.chat-screen .item-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 16px max(12px, env(safe-area-inset-right)) 16px max(12px, env(safe-area-inset-left));
+  overflow-y: auto;
+}
+.chat-screen .item-card-kind { color: var(--j-muted); font-size: 0.75rem; text-transform: uppercase; }
+.chat-screen .item-card-title { margin: 0; font-size: 1.125rem; overflow-wrap: anywhere; }
+.chat-screen .item-card-address {
+  margin: 0;
+  color: var(--j-muted);
+  font-family: var(--j-mono);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.chat-screen .item-card-open {
+  padding: 8px 14px;
+  border: 1px solid var(--j-line);
+  border-radius: 8px;
+  background: var(--j-surface-2);
+  color: inherit;
+  text-decoration: none;
+}
+@media (max-width: 899px) {
+  body:has(.chat-screen.sheet-open),
+  html:has(.chat-screen.sheet-open) { overflow: hidden; }
+}
+@media (min-width: 900px) {
+  .chat-screen .rail-close,
+  .chat-screen .scrim-rail { display: none; }
+  .chat-screen .doc-panel { height: auto; max-width: none; }
+}
+@media (min-width: 1100px) {
+  .chat-screen .scrim-items { display: none; }
+}
