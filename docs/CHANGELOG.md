@@ -6,6 +6,11 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The viewer installs as an app.** Add to Home Screen puts a Joshua icon on
+  the phone; it opens the whole viewer at the wiki, with no browser chrome,
+  and the shell comes from the cache of its service worker when the network
+  is slow. No answer under `/api/v1/` is ever cached, so the chat and the
+  workspaces always come from the instance.
 - **The viewer is one React app.** The gateway renders no page in Python any
   more: it serves the app of `gateway/frontend`, a JSON API under `/api/v1/`
   that carries the wiki, the journal, the search, the usage, the links, the

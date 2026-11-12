@@ -237,11 +237,13 @@ def test_image_attachment_renders_inline(client):
 
 def test_security_headers_on_every_response(client):
     response = client.get("/assignments", auth=("alex", ALEX_PW))
-    # The policy allows the bundle of the React app, from this origin, and
-    # nothing else. No inline script, so no hash.
+    # The policy allows the bundle of the React app, the manifest and the
+    # service worker of the installed app, all from this origin, and nothing
+    # else. No inline script, so no hash.
     assert response.headers["content-security-policy"] == (
         "default-src 'none'; img-src 'self'; style-src 'self'; "
         "script-src 'self'; connect-src 'self'; "
+        "manifest-src 'self'; worker-src 'self'; "
         "frame-src 'self'; frame-ancestors 'self'"
     )
     assert "unsafe-inline" not in response.headers["content-security-policy"]

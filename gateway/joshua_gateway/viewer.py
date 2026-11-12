@@ -471,6 +471,10 @@ class SecurityHeaders(BaseHTTPMiddleware):
     viewer serves a JavaScript bundle of its own, so ``script-src`` holds
     ``'self'`` alone. No inline script runs, and no hash is allowed.
 
+    The viewer is an installable app: ``manifest-src 'self'`` allows its
+    manifest and ``worker-src 'self'`` allows its service worker, both files
+    of this origin and of no other.
+
     ``frame-ancestors 'self'`` lets a page of the viewer, the chat and its
     artifact panel, frame a document page of the same origin. No other
     origin can frame the viewer: the value is always ``'self'``, never a
@@ -488,6 +492,7 @@ class SecurityHeaders(BaseHTTPMiddleware):
             "Content-Security-Policy",
             "default-src 'none'; img-src 'self'; style-src 'self'; "
             "script-src 'self'; connect-src 'self'; "
+            "manifest-src 'self'; worker-src 'self'; "
             "frame-src 'self'; frame-ancestors 'self'",
         )
         response.headers["X-Frame-Options"] = "SAMEORIGIN"

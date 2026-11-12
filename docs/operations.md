@@ -744,6 +744,26 @@ page to `wiki/.trash/` and drops it from the search index at the next index run.
 A guest reads the wiki but cannot delete. To restore a page, move it back from
 `wiki/.trash/<timestamp>/` with a shell.
 
+### Install the viewer on a phone
+
+The viewer is an installable app, scoped to the whole viewer and not to the
+chat alone. Open it over HTTPS and use "Add to Home Screen" (Safari) or
+"Install app" (Chrome). The phone keeps a Joshua icon, the elephant on the
+dark square. Tapping it opens the wiki with no address bar and no browser
+chrome, on the dark background of the look, and every screen of the viewer is
+in it: the wiki, the journal, the search, the usage, the assignments, the
+documents and the chat.
+
+The app signs in as the browser does, so set up the sign-in, and the TLS in
+front of it, first: a browser installs no app from a plain `http://` address
+other than `localhost`.
+
+A service worker keeps the shell of the app and its assets, so the app opens
+on a slow network and shows its frame at once. Nothing under `/api/v1/` is
+kept: the chat, the wiki pages, the documents and the workspaces always come
+from the instance, and no answer of a person sits in the cache of the phone.
+An update arrives on the next visit with a network.
+
 ### Links in the menu
 
 The menu has a "Links" group: links to the addons and other tools that the

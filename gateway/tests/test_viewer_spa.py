@@ -51,6 +51,9 @@ def _build(monkeypatch, tmp_path: Path) -> Path:
     (static / "index.html").write_text(INDEX)
     (static / "assets/main-abc123.js").write_text("console.log(1)\n")
     (static / "favicon-32.png").write_bytes(b"\x89PNG\r\n")
+    (static / "logo-192.png").write_bytes(b"\x89PNG\r\n")
+    (static / "manifest.webmanifest").write_text('{"name": "Joshua"}\n')
+    (static / "sw.js").write_text("self.addEventListener('fetch', () => {});\n")
     monkeypatch.setattr(viewer_spa, "static_dir", lambda: static)
     return static
 
@@ -101,6 +104,21 @@ def test_an_asset_is_immutable(client) -> None:
     response = client.get("/assets/main-abc123.js", auth=ALEX)
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_the_installed_app_gets_its_manifest_and_its_worker(client) -> None:
+    """Both are files of the build, at the root, so the scope of the worker
+    is the scope of the app. The worker is never cached: a stale copy would
+    keep an old shell alive."""
+    manifest = client.get("/manifest.webmanifest", auth=ALEX)
+    assert manifest.status_code == 200
+    assert manifest.json()["name"] == "Joshua"
+    worker = client.get("/sw.js", auth=ALEX)
+    assert worker.status_code == 200
+    assert worker.headers["cache-control"] == "no-cache"
+    assert client.get("/logo-192.png", auth=ALEX).status_code == 200
+    # The app starts at the root, so that answer is never cached either.
+    assert client.get("/", auth=ALEX).headers["cache-control"] == "no-cache"
 
 
 def test_the_app_needs_the_same_sign_in_as_a_page(client) -> None:

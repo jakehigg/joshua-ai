@@ -248,9 +248,13 @@ the artifact address of an HTML document, which still sets a policy of its
 own, stricter on the network:
 
 - `Content-Security-Policy: default-src 'none'; img-src 'self'; style-src
-  'self'; script-src 'self'; connect-src 'self'; frame-src 'self';
-  frame-ancestors 'self'`. The app loads its stylesheet, its images, its
-  script and its data from the viewer itself. `script-src` is `'self'`
+  'self'; script-src 'self'; connect-src 'self'; manifest-src 'self';
+  worker-src 'self'; frame-src 'self'; frame-ancestors 'self'`. The app loads
+  its stylesheet, its images, its script and its data from the viewer itself.
+  `manifest-src 'self'` and `worker-src 'self'` are the installed app: the
+  manifest at `/manifest.webmanifest` and the service worker at `/sw.js` are
+  files of the build, of this origin, and no other origin can give the viewer
+  either of them. `script-src` is `'self'`
   because the one script is the app's own bundle, which the gateway image
   carries. No inline script runs, and no hash is allowed: `'self'` admits a
   file of this origin, never a `<script>` with a body and never an event
@@ -261,6 +265,13 @@ own, stricter on the network:
 - `X-Frame-Options: SAMEORIGIN`, for a browser that reads no
   `frame-ancestors`.
 - `X-Content-Type-Options: nosniff`.
+
+The service worker caches the shell of the app and its hashed assets, so an
+installed app opens on a slow network. It never takes a request under
+`/api/v1/`: the chat stream, the workspace routes and every other JSON answer
+go to the network, and no answer that names a person is ever written to the
+cache of the browser. It writes nothing else either: only a GET of this
+origin that answered 200, so a 401 of the sign-in is never kept.
 
 `frame-ancestors 'self'` lets one page of the viewer frame another: the chat
 shows a document page in its artifact panel, so there is no second renderer
