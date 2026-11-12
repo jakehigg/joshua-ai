@@ -274,6 +274,52 @@ def test_the_route_table_is_the_probes_the_api_and_the_two_documents(client):
     ]
 
 
+# A value for each path parameter of the JSON routes, so an address can be
+# built from the table itself and no route is forgotten.
+PATH_SAMPLES = {
+    "year": "2026",
+    "month": "8",
+    "day": "20",
+    "owner": "alex",
+    "slug": "party",
+    "person": "alex",
+    "root": "wiki",
+    "path": "pizza.md",
+    "cid": "1",
+    "id": "1",
+}
+
+
+def _an_address_of(path: str) -> str:
+    """One address of a route of the table, with every parameter filled in."""
+    for name, value in PATH_SAMPLES.items():
+        for spec in (f"{{{name}}}", f"{{{name}:int}}", f"{{{name}:path}}"):
+            path = path.replace(spec, value)
+    assert "{" not in path, path
+    return path
+
+
+def test_every_json_route_answers_for_a_signed_in_person(client, monkeypatch):
+    """Every route of ``viewer_api.routes()`` reaches its own handler.
+
+    The answer is JSON, or the bytes of a file, never the plain ``Not Found``
+    of an address that no route matches. A 404 here is a handler saying that
+    a document or an assignment is not there, which each suite covers on its
+    own. Nothing upstream is set, so the chat and the workspaces answer
+    without a call.
+    """
+    for name in ("CHANNELS_URL", "CORE_URL", "ASSIGNMENTS_URL"):
+        monkeypatch.delenv(name, raising=False)
+    for route in viewer_api.routes():
+        address = _an_address_of(route.path)
+        method = sorted(route.methods - {"HEAD", "OPTIONS"})[0]
+        response = client.request(method, address, auth=("alex", ALEX_PW), json={})
+        assert response.status_code != 405, address
+        assert response.text != "Not Found", address
+        kind = response.headers["content-type"]
+        assert kind.startswith(("application/json", "application/octet-stream")), address
+
+
 def test_the_viewer_serves_no_stylesheet_and_no_image_of_its_own(client):
     """Every stylesheet and every image is a file of the React app now."""
     for path in ("/style.css", "/ui/joshua-ui.css", "/ui/logo-64.png"):

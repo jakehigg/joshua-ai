@@ -301,9 +301,13 @@ def test_the_artifact_route_has_the_rules_of_the_page(docs) -> None:
     assert client().get("/documents/alex/mockup/artifact").status_code == 401
     assert _get("/documents/mia/private/artifact").status_code == 404
     assert _get("/documents/alex/mockup/artifact", auth=GUEST).status_code == 404
-    assert _get("/documents/alex/none/artifact").status_code == 404
+    missing = _get("/documents/alex/none/artifact")
+    assert missing.status_code == 404
     # A Markdown document has no frame, so it has no artifact.
     assert _get("/documents/alex/party/artifact").status_code == 404
+    # The 404 is plain text: the viewer renders no page of its own.
+    assert missing.headers["content-type"].startswith("text/plain")
+    assert "<" not in missing.text
 
 
 @NEEDS_GIT
