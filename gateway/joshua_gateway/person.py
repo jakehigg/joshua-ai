@@ -16,13 +16,15 @@ for the audit trail and for the provenance of a journal entry.
 
 A trusted person must match the person id pattern and exist in ``people``, or
 be the literal ``unknown``. A trusted role must be ``member`` or ``guest``. A
-trusted group must exist in ``groups``. Anything else is a 400.
+trusted group must exist in ``groups``. A trusted workspace
+(``X-Joshua-Workspace``) must be a UUID. Anything else is a 400.
 """
 
 from __future__ import annotations
 
 from collections.abc import Container
 from dataclasses import dataclass
+from uuid import UUID
 
 from joshua_shared import config
 from joshua_shared.config import PERSON_ID_RE, GatewayConfig
@@ -58,6 +60,7 @@ class Attribution:
     conversation: str | None
     role: str | None = None
     group: str | None = None
+    workspace: str | None = None
 
 
 def trusted_identities() -> frozenset[str]:
@@ -75,6 +78,7 @@ def resolve(
     group_header: str | None = None,
     known_groups: Container[str] = (),
     trusted: Container[str] = DEFAULT_TRUSTED,
+    workspace_header: str | None = None,
 ) -> Attribution:
     """Attribute a request to a person, a conversation, a role, and a group.
 
@@ -99,5 +103,14 @@ def resolve(
     if group is not None and group not in known_groups:
         raise PersonError(f"unknown group: {group}")
 
+    workspace = (workspace_header or "").strip() or None
+    if workspace is not None:
+        try:
+            workspace = str(UUID(workspace))
+        except ValueError:
+            raise PersonError("workspace must be a UUID") from None
+
     conversation = (conversation_header or "").strip() or None
-    return Attribution(person=person, conversation=conversation, role=role, group=group)
+    return Attribution(
+        person=person, conversation=conversation, role=role, group=group, workspace=workspace
+    )

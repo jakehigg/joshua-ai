@@ -436,6 +436,10 @@ Two shapes exist:
 
 - A **named event** carries `event_type` and an optional `payload`. Core runs
   the skill file `skills/<event_type>.md`. See `events.md`.
+- A **workspace message** carries `workspace` (a workspace id) and `text`. Core
+  runs the text as a turn in the thread of that workspace, and nothing goes to
+  an adapter. With `verbatim: true`, core only records the text there. A
+  `destination` beside it is not used. See `workspaces.md`.
 - A **message** carries `destination` and `text`. Core runs the text as one
   turn and delivers the reply to the destination. With `verbatim: true`,
   channels sends the text as it is and no model runs.

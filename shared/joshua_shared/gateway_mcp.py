@@ -45,6 +45,7 @@ def gateway_servers(
     conversation_id: str,
     role: str = "guest",
     group_id: str | None = None,
+    workspace_id: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build the SDK ``mcp_servers`` map that routes each name through the gateway.
 
@@ -56,6 +57,10 @@ def gateway_servers(
     Joshua is shared, so the role alone decides whether the agent writes. The
     person rides along for the audit trail. A direct message carries the role of
     that person; a group carries the role derived from its members.
+
+    ``workspace_id`` is the id of the workspace when the session is a workspace
+    thread. It rides in ``X-Joshua-Workspace`` and, like the conversation, is
+    fixed for the session.
 
     The role of a conversation cannot change inside a session. The SDK writes
     this whole map onto the command line of the CLI subprocess when the session
@@ -70,6 +75,10 @@ def gateway_servers(
     }
     if group_id is not None:
         headers["X-Joshua-Group"] = group_id
+    if workspace_id is not None:
+        # A workspace session: the gateway stamps ``_meta["joshua/workspace"]``
+        # on each tool call from it, and records items for the workspace.
+        headers["X-Joshua-Workspace"] = workspace_id
     return {
         name: {"type": "http", "url": f"{base}/{name}", "headers": dict(headers)} for name in names
     }

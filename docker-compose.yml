@@ -76,6 +76,9 @@ services:
       <<: [*fleet-tokens, *runtime-vars]
       JOSHUA_CONFIG: /etc/joshua/joshua.yaml
       ADMIN_CALLERS: laptop
+      # The items of a tool call from a workspace go to core, with
+      # JOSHUA_TOKEN_GATEWAY. This is also the default in code.
+      CORE_URL: http://core:8000
     # Every upstream credential an `mcp:` entry names with `${VAR:-}`: one
     # `NAME=value` line per variable in `.env.gateway`, which is yours and is
     # gitignored. It is optional, so a stack with no upstream credential starts

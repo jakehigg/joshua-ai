@@ -125,7 +125,7 @@ The viewer calls `/v1/workspaces` on core. The caller names the person with the
 `person` query parameter, and core trusts it, as for a search of documents.
 Every route works on the workspaces of that person. A workspace of another
 person answers 404. The callers are `workspaces.allowed_callers` (default
-`viewer`). An empty list turns the routes off (403).
+`viewer` and `gateway`). An empty list turns the routes off (403).
 
 | Route | Use |
 |---|---|
@@ -135,6 +135,7 @@ person answers 404. The callers are `workspaces.allowed_callers` (default
 | `GET`, `POST /v1/workspaces/{slug}/items` | List or add items. |
 | `PATCH`, `DELETE /v1/workspaces/{slug}/items/{id}` | Change `pinned` or `seen`, or remove an item. |
 | `GET /v1/workspaces/{slug}/block` | The workspace block as text. |
+| `POST /v1/workspaces/by-id/{id}/items` | Add an item for a tool call. The gateway calls it (see Items from tools). It takes no `person`. |
 
 `servers` must be servers that the person may use (422 otherwise). `model`
 must be in `workspaces.models` when that list is not empty, and can be any text
@@ -147,6 +148,107 @@ A chat turn in a workspace goes through the channels terminal routes.
 `GET /v1/usage?group=conversation&person=<id>` gives the totals of each conversation, with
 the slug and the title of the workspace when the conversation belongs to one.
 It shows what a workspace costs.
+
+## Items from tools
+
+Joshua adds items without being asked, from the tool calls of a workspace
+thread. The gateway does this. It adds no container.
+
+A session of a workspace sends `X-Joshua-Workspace: <workspace id>` to the
+gateway on every MCP server, and the gateway trusts the header only from
+`gateway.person_header_callers`, as it does the conversation header. The header
+is fixed for the session.
+
+After a tool call from a workspace succeeds, the gateway records items. It does
+this in the background and never fails the call: a failed post is a log line.
+
+- **The per-tool map.** The map is in code
+  (`gateway/joshua_gateway/workspace_items.py`). The key is the server name and
+  the tool name, as the gateway sees them.
+
+  | Server | Tool | Item |
+  |---|---|---|
+  | `documents` | `write_document` | `document`, or `artifact` for an `.html` file. `ref` is the path, and `url` is `/documents/<owner>/<slug>`. |
+  | `joshua` or `wiki` | `write_page` | `wiki`. `ref` is the path, and `url` is `/wiki/<path>`. |
+  | `tasks` | `create_project` | `tasks_project`. `ref` is the slug. |
+  | `developer` | `develop`, `rework` | `developer_task`. `ref` is the `task_id`. |
+  | `assignments` | `start_assignment` | `assignment`. `ref` is the id, and `url` is `/assignments/<id>`. |
+
+  A refusal (`status: rejected`), an error, and a tool that is not in the map
+  add nothing from the map.
+- **Links.** Every MCP `resource_link` block in the result of any tool becomes a
+  `link` item: `ref` and `url` are the `uri`, and `title` is the `name`. The
+  `url` is kept only when it is `http(s)` or a path that starts with `/`. A link
+  that an item of the map already covers is not added again.
+
+The gateway posts to core at `POST /v1/workspaces/by-id/<id>/items`, with its own
+fleet token. The route takes the id of the workspace and no person. The caller is
+trusted: it is in `workspaces.allowed_callers` (default `viewer` and `gateway`).
+The body is `kind`, `ref`, `title`, `url`, and `added_by` (`tool:<server>`). An
+item with the same kind and ref updates the row, and an empty `title` keeps the
+title that the item has.
+
+The gateway needs `JOSHUA_TOKEN_GATEWAY`, which it holds already, and the
+address of core. `CORE_URL` names it. Without it, the address is
+`http://joshua-core:8000` on Kubernetes and `http://core:8000` on docker
+compose. Without the token, the gateway records nothing and says so once.
+
+## The stamp and the return
+
+Each tool call from a workspace thread reaches the upstream server with
+`params._meta["joshua/workspace"] = "<workspace id>"`. A call from any other chat
+has no such key. The gateway sets it, and nothing else can: the header that
+carries the id is trusted only from `core` and `assignments`.
+
+A job that a workspace started goes back to the workspace. The addon that runs
+the job keeps the id with the job, and when the job ends or asks a question, it
+sends the event with the id:
+
+```
+POST /v1/events
+{"workspace": "<id>", "text": "...", "verbatim": false}
+```
+
+- `workspace` is the id from the stamp. Without it, the event goes to normal chat
+  as it did before.
+- Channels accepts `workspace` with `text` and no `destination`. A `destination`
+  that comes with it is not used. An id that is not a UUID gets 400
+  `invalid_workspace`.
+- Core runs the text as a turn in the thread of the workspace, with the owner as
+  the person. An unknown id gets 404 `unknown_workspace`. The turn starts with the
+  line for a scheduled task in a workspace, and the reply stays in the transcript.
+  The agent uses `send_to_normal_chat` when `notify` allows it or the person
+  asked.
+- With `"verbatim": true`, core records the text in the thread and runs no model.
+  Channels delivers nothing to an adapter.
+
+## For addon authors
+
+1. **Read the stamp.** In a FastMCP tool, `ctx.request_context.meta` holds
+   `_meta`. The workspace id is `meta.get("joshua/workspace")`. The value is
+   `None` outside a workspace, and `ctx.request_context.meta` itself can be
+   `None`.
+
+   ```python
+   def origin_of(ctx) -> str | None:
+       meta = ctx.request_context.meta
+       value = meta.get("joshua/workspace") if meta else None
+       return value if isinstance(value, str) and value else None
+   ```
+
+2. **Keep it with a long job.** Store the id with the job. A job that was not
+   started from a workspace has none.
+3. **Send it back.** Add `"workspace": <id>` to every completion, failure, and
+   question event that you post to channels `/v1/events`, when the job has one.
+4. **Return links.** Add an MCP `resource_link` block to the result of a tool for
+   anything a person may want to open (a pull request, a report, a cart):
+   `{"type": "resource_link", "uri": ..., "name": ..., "description"?, "mimeType"?}`.
+   Use an `http(s)` address, or a path that starts with `/` for a page of the
+   viewer. The gateway makes a `link` item of it for a call from a workspace.
+   You can add the block to every result: it costs nothing outside a workspace.
+
+The gateway test `gateway/tests/test_workspace_stamp.py` runs a real FastMCP
+server behind the gateway and reads the stamp the way step 1 does.
 
 ## The viewer
 
@@ -218,7 +320,7 @@ session.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `workspaces.allowed_callers` | `viewer` | Fleet identities that may call `/v1/workspaces`. |
+| `workspaces.allowed_callers` | `viewer`, `gateway` | Fleet identities that may call `/v1/workspaces`. |
 | `workspaces.models` | empty | The models a workspace may pick. Empty accepts any text. |
 | `workspaces.context_cap` | `150000` | Input tokens over which a workspace turn ends its session. |
 | `workspaces.tool_search_max_servers` | `3` | Servers up to which a workspace runs with tool search off. |

@@ -24,6 +24,7 @@ pytestmark = pytest.mark.integration
 VIEWER = "viewer-token"
 MCP = "mcp-token"
 CHANNELS = "channels-token"
+GATEWAY = "gateway-token"
 
 CONFIG = """
 name: Test House
@@ -63,6 +64,7 @@ def _tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JOSHUA_TOKEN_VIEWER", VIEWER)
     monkeypatch.setenv("JOSHUA_TOKEN_MCP", MCP)
     monkeypatch.setenv("JOSHUA_TOKEN_CHANNELS", CHANNELS)
+    monkeypatch.setenv("JOSHUA_TOKEN_GATEWAY", GATEWAY)
 
 
 @pytest.fixture
@@ -597,3 +599,57 @@ async def test_create_workspace_leaves_no_row_when_the_channel_fails(seeded, mon
     with pytest.raises(RuntimeError):
         await seeded.create_workspace("alex", "Doomed")
     assert await seeded.list_workspaces("alex") == []
+
+
+# --- the gateway records items by id -------------------------------------------------------
+
+
+async def test_the_gateway_records_an_item_by_id_with_no_person(client, seeded) -> None:
+    made = await _create(client)
+    path = f"/v1/workspaces/by-id/{made['id']}/items"
+    body = {
+        "kind": "document",
+        "ref": "documents/alex/plan.md",
+        "title": "The plan",
+        "url": "/documents/alex/plan",
+        "added_by": "tool:documents",
+    }
+    first = await client.post(path, headers=_h(GATEWAY), json=body)
+    assert first.status_code == 200
+    item = first.json()
+    assert item["added_by"] == "tool:documents" and item["seen"] is True
+
+    # The same kind and ref updates the row. An empty title keeps the title.
+    again = await client.post(path, headers=_h(GATEWAY), json={**body, "title": ""})
+    assert again.json()["id"] == item["id"] and again.json()["title"] == "The plan"
+    renamed = await client.post(path, headers=_h(GATEWAY), json={**body, "title": "New name"})
+    assert renamed.json()["title"] == "New name"
+    assert len(await seeded.list_workspace_items(made["id"])) == 1
+
+    # A new item with no title shows its ref.
+    bare = await client.post(
+        path,
+        headers=_h(GATEWAY),
+        json={"kind": "wiki", "ref": "homelab/solar.md", "title": "", "added_by": "tool:joshua"},
+    )
+    assert bare.json()["title"] == "homelab/solar.md"
+
+
+async def test_the_by_id_route_checks_the_caller_the_workspace_and_the_body(client) -> None:
+    made = await _create(client)
+    path = f"/v1/workspaces/by-id/{made['id']}/items"
+    good = {"kind": "link", "ref": "r", "title": "t", "added_by": "tool:x"}
+    assert (await client.post(path, json=good)).status_code == 401
+    assert (await client.post(path, headers=_h(CHANNELS), json=good)).status_code == 403
+    missing = "/v1/workspaces/by-id/22222222-2222-4222-8222-222222222222/items"
+    assert (await client.post(missing, headers=_h(GATEWAY), json=good)).status_code == 404
+    assert (
+        await client.post("/v1/workspaces/by-id/nope/items", headers=_h(GATEWAY), json=good)
+    ).status_code == 404
+    for bad in (
+        {**good, "added_by": "person"},
+        {k: v for k, v in good.items() if k != "added_by"},
+        {**good, "kind": "photo"},
+        {**good, "url": "javascript:alert(1)"},
+    ):
+        assert (await client.post(path, headers=_h(GATEWAY), json=bad)).status_code == 422, bad

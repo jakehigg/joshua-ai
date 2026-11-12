@@ -932,7 +932,9 @@ class WorkspacesConfig(_Model):
 
     ``allowed_callers`` names the fleet identities that may call
     ``/v1/workspaces``. The caller vouches for the person with the ``person``
-    query parameter. An empty list turns the routes off. ``models`` is the
+    query parameter. The ``gateway`` records the items of a tool call on
+    ``POST /v1/workspaces/by-id/<id>/items``, which takes no person. An empty
+    list turns the routes off. ``models`` is the
     list of models a workspace may pick; an empty list accepts any name.
     ``context_cap`` is the input size, in tokens, over which a workspace turn
     ends its SDK session: the next turn starts from the workspace block and
@@ -942,7 +944,7 @@ class WorkspacesConfig(_Model):
     ``send_to_normal_chat`` adds.
     """
 
-    allowed_callers: list[str] = ["viewer"]
+    allowed_callers: list[str] = ["viewer", "gateway"]
     models: list[str] = []
     context_cap: int = Field(default=150_000, ge=1_000)
     tool_search_max_servers: int = Field(default=3, ge=0)

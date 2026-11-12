@@ -44,3 +44,13 @@ def test_each_entry_carries_the_bearer_and_the_person_headers() -> None:
         "X-Joshua-Conversation": "assignment:7",
         "X-Joshua-Role": "member",
     }
+
+
+def test_a_workspace_session_adds_the_workspace_header_and_others_do_not() -> None:
+    ws = "11111111-1111-4111-8111-111111111111"
+    plain = gateway_servers(["files"], "http://g", "tok", "alex", "c1", role="member")
+    stamped = gateway_servers(
+        ["files"], "http://g", "tok", "alex", "c1", role="member", workspace_id=ws
+    )
+    assert "X-Joshua-Workspace" not in plain["files"]["headers"]
+    assert stamped["files"]["headers"]["X-Joshua-Workspace"] == ws

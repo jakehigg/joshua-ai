@@ -49,7 +49,7 @@ from joshua_core.delivery import (
 )
 from joshua_core.engine.types import Attachment as EngineAttachment
 from joshua_core.store.models import Channel
-from joshua_core.store.repo import Repo
+from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE, Repo
 
 logger = get_logger("events")
 
@@ -245,6 +245,8 @@ class EventService:
     async def handle(self, event: TurnEvent) -> JSONResponse:
         """Route one event. Named events look up a skill; the rest are
         channel-addressed."""
+        if event.workspace:
+            return await self._workspace_event(event)
         if event.event_type:
             return await self._named(event)
         return await self._channel_addressed(event)
@@ -292,6 +294,36 @@ class EventService:
             )
         )
         return JSONResponse({"accepted": True, "event_type": event.event_type}, status_code=202)
+
+    # --- workspace events ---------------------------------------------------
+
+    async def _workspace_event(self, event: TurnEvent) -> JSONResponse:
+        """An event for a workspace: the text runs as a turn in its thread, or
+        with ``verbatim`` is only recorded there. Nothing is delivered to a
+        phone: the gate keeps the reply in the transcript, and the agent uses
+        ``send_to_normal_chat`` when the person is to be told."""
+        workspace = await self._repo.get_workspace(event.workspace or "")
+        channel = await self._repo.get_channel(workspace.channel_id) if workspace else None
+        if workspace is None or channel is None or channel.channel_type != WORKSPACE_CHANNEL_TYPE:
+            logger.warning({"message": "workspace event: unknown workspace"})
+            return JSONResponse({"accepted": False, "reason": "unknown_workspace"}, status_code=404)
+        conversation = await self._repo.get_or_create_conversation(channel.id, workspace.owner)
+        if event.options and event.options.verbatim:
+            await self._repo.add_transcript(
+                conversation.id, "inject", event.text, meta={"event": True}
+            )
+            return JSONResponse({"accepted": True, "verbatim": True}, status_code=200)
+        self._spawn(
+            self._run_and_deliver(
+                channel=channel,
+                conversation=conversation,
+                text=event.text,
+                framing=self._inject_framing(),
+                target=channel.id,
+                event=event,
+            )
+        )
+        return JSONResponse({"accepted": True}, status_code=202)
 
     # --- channel-addressed events -----------------------------------------
 

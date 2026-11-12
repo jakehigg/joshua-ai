@@ -344,9 +344,11 @@ usage:
 
 # workspaces:
 #   # Core's /v1/workspaces: a place in Chat for one large piece of work. The
-#   # viewer calls it. An empty allowed_callers turns the routes off.
+#   # viewer calls it; the gateway records the items of a tool call from a
+#   # workspace. An empty allowed_callers turns the routes off.
 #   allowed_callers:
 #     - viewer
+#     - gateway
 #   # The models a workspace may pick. Empty accepts any name.
 #   # models:
 #   #   - claude-opus-5

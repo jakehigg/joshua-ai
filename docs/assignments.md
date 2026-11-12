@@ -1031,6 +1031,16 @@ the conversation of the destination. The destination is `report_to` of the
 spec, or `assignments.people.<id>.notify` for `report_to: conversation`. With
 no destination, or with no `CHANNELS_URL`, no event goes out.
 
+An assignment that a workspace started goes back to that workspace. The gateway
+sets `_meta["joshua/workspace"]` on the `start_assignment` call from a workspace
+thread, and the container keeps the id in `workspace` of the spec (a caller
+cannot set it in a spec: the spec refuses the field). The report, the question,
+and the comment event of that run carry `"workspace": <id>`, and then a person
+with no destination still gets them. A re-run takes the workspace of its own
+start. `start_assignment` and `assignment_status` return a `resource_link` to
+`/assignments/<id>` (under `workspaces.viewer_url` when it is set) on a call from
+a workspace.
+
 The report starts with fixed lines from the row:
 
 ```

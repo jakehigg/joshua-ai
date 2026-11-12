@@ -1235,7 +1235,7 @@ person makes a workspace.
 
 | Knob | Default | Effect |
 |---|---|---|
-| `allowed_callers` | `viewer` | The fleet identities that may call `/v1/workspaces`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the routes off, and every caller gets 403. |
+| `allowed_callers` | `viewer`, `gateway` | The fleet identities that may call `/v1/workspaces`. The viewer acts for a person; the gateway records the items of a tool call at `POST /v1/workspaces/by-id/<id>/items`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the routes off, and every caller gets 403. |
 | `models` | empty | The models that a workspace may pick. An empty list accepts any name. |
 | `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. The next turn starts from the workspace block and the last 10 rows of the thread. At least 1000. |
 | `tool_search_max_servers` | `3` | A workspace that picks this many servers or fewer runs with tool search off. More servers turn it on. |
@@ -1256,7 +1256,7 @@ workspaces:
 
 | Knob | Default | Effect |
 |---|---|---|
-| `person_header_callers` | `core`, `assignments` | The fleet identities that may call the MCP routes and say which person, role, group, and conversation a call is for, with the `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, and `X-Joshua-Conversation` headers. Every other identity gets 403 on an MCP route. The list must hold `core`, or the load fails. |
+| `person_header_callers` | `core`, `assignments` | The fleet identities that may call the MCP routes and say which person, role, group, and conversation a call is for, with the `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, `X-Joshua-Workspace`, and `X-Joshua-Conversation` headers. Every other identity gets 403 on an MCP route. The list must hold `core`, or the load fails. |
 
 ```yaml
 gateway:

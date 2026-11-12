@@ -126,13 +126,22 @@ Route allowlists, by default:
   otherwise), and stores each `ref` as `<writer>:<ref>`.
 - core `GET /v1/usage?group=conversation&person=<id>`: the same callers as `GET /v1/usage`; it needs `person` and lists only that person's conversations.
   It returns the totals of each conversation, with the workspace slug and title.
-- core `/v1/workspaces`: `workspaces.allowed_callers` (default `viewer`). An
+- core `/v1/workspaces`: `workspaces.allowed_callers` (default `viewer`, `gateway`). An
   empty list turns it off. The caller names the person with `person`, and every
   route is scoped to that person: another person's workspace is 404. A turn
   on `workspace:<id or slug>` runs only for the owner, and core never creates a
   `workspace:` channel from a turn. A workspace reply is transcript-only:
   `workspace_delivery_target` drops it. `docs/workspaces.md` has the design.
   `GET /v1/workspaces/options` gives the servers and models a person may pick.
+  `POST /v1/workspaces/by-id/{id}/items` takes no person: the gateway records
+  the items of a tool call from a workspace there (`added_by` `tool:<server>`).
+  A workspace session sends `X-Joshua-Workspace`; the gateway stamps
+  `_meta["joshua/workspace"]` on each tool call and keeps the per-tool item map
+  in `gateway/joshua_gateway/workspace_items.py`. A `workspace` on channels
+  `POST /v1/events` (UUID, with `text`, no `destination`) runs in that
+  workspace thread, or with `verbatim` is only recorded there; core answers
+  404 `unknown_workspace`. Item urls are `http(s)` or a path that starts
+  with `/` (`joshua_shared.item_url`).
   A viewer or terminal turn with `thread: "main"` runs in the person's main
   conversation (`Repo.main_conversation`, never `cli`), pull-only: it never
   sets `last_channel_id`.
@@ -153,7 +162,7 @@ Route allowlists, by default:
   200 fast, because BlueBubbles never retries.
 - gateway MCP routes: `gateway.person_header_callers` (default `core`,
   `assignments`; it must hold `core`). `X-Joshua-Person`, `X-Joshua-Role`,
-  `X-Joshua-Group`, and `X-Joshua-Conversation` are trusted only from them.
+  `X-Joshua-Group`, `X-Joshua-Workspace`, and `X-Joshua-Conversation` are trusted only from them.
 - gateway `POST /v1/snapshots/{name}`: `core` only. The body is empty: the
   gateway reads the tool and the arguments from `memory.snapshots`, so the
   config is the allowlist.

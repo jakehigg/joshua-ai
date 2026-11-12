@@ -1232,21 +1232,22 @@ class Repo:
         url: str | None = None,
         added_by: str = "agent",
         seen: bool = True,
+        rename: bool = True,
     ) -> WorkspaceItem:
         """Add an item. An item with the same kind and ref gets the new title
-        and url, and keeps its pin."""
+        and url, and keeps its pin. With ``rename`` false it keeps its title."""
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
                 INSERT INTO workspace_items (workspace_id, kind, ref, title, url, added_by, seen)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (workspace_id, kind, ref) DO UPDATE SET
-                    title = EXCLUDED.title,
+                    title = CASE WHEN %s THEN EXCLUDED.title ELSE workspace_items.title END,
                     url = COALESCE(EXCLUDED.url, workspace_items.url),
                     seen = workspace_items.seen AND EXCLUDED.seen
                 RETURNING *
                 """,
-                (workspace_id, kind, ref, title, url, added_by, seen),
+                (workspace_id, kind, ref, title, url, added_by, seen, rename),
             )
             row = await cur.fetchone()
             await conn.execute(

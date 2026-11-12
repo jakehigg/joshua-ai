@@ -248,6 +248,18 @@
       ],
       "default": null,
       "title": "Thread"
+    },
+    "workspace": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workspace"
     }
   },
   "required": [

@@ -6,6 +6,21 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Workspaces get items and the return path.** A workspace session sends
+  `X-Joshua-Workspace` to the gateway. The gateway puts
+  `_meta["joshua/workspace"]` on each tool call from a workspace, and after a
+  successful call it adds items: from a per-tool map (`write_document`,
+  `write_page`, `create_project`, `develop`, `rework`, `start_assignment`), and
+  from every MCP `resource_link` in a result. It posts them to core at
+  `POST /v1/workspaces/by-id/<id>/items`, so `gateway` is now in the default of
+  `workspaces.allowed_callers`; an instance that lists the callers must add it.
+  Channels `POST /v1/events` takes `workspace`: the event runs in the thread of
+  that workspace, or with `verbatim` is only recorded there, and no adapter gets
+  it. The assignments container keeps the workspace of a start and sends it on
+  its report, question, and comment events, and returns a `resource_link` to
+  its viewer page. The gateway reaches core at `CORE_URL`, which defaults to
+  the service of core on the platform. `docs/workspaces.md` has a section for
+  addon authors.
 - **Workspace fixes.** A context provider that fails no longer fails the turn.
   Without the size of the last model call, a workspace keeps its session
   instead of guessing from summed usage. A group chat gets no `workspace`

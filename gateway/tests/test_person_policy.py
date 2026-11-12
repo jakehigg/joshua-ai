@@ -15,7 +15,7 @@ from conftest import FIXTURE, TOKENS, bearer, gateway_session
 from joshua_gateway import person
 from joshua_gateway.main import lifespan
 from joshua_gateway.observability import CALL_LOG, SESSIONS
-from joshua_gateway.person import Attribution, PersonError, resolve
+from joshua_gateway.person import DEFAULT_TRUSTED, Attribution, PersonError, resolve
 from joshua_shared import config
 from starlette.testclient import TestClient
 
@@ -297,3 +297,27 @@ async def test_allow_with_no_value_admits_no_person(gateway):
         for person in ("alex", "mia", "unknown", None):
             resp = await _get(app, "/c", "core", person_header(person))
             assert resp.status_code == 403
+
+
+# -- the workspace header ----------------------------------------------------
+
+
+def test_a_trusted_caller_may_name_a_workspace():
+    from uuid import UUID
+
+    ws = "11111111-1111-4111-8111-111111111111"
+    attr = resolve(
+        "core", "alex", "c1", {"alex"}, None, None, (), DEFAULT_TRUSTED, f" {ws.upper()} "
+    )
+    assert attr.workspace == str(UUID(ws))
+
+
+def test_an_untrusted_caller_has_no_workspace():
+    ws = "11111111-1111-4111-8111-111111111111"
+    attr = resolve("laptop", "alex", "c1", {"alex"}, None, None, (), DEFAULT_TRUSTED, ws)
+    assert attr.workspace is None
+
+
+def test_a_workspace_that_is_not_a_uuid_is_refused():
+    with pytest.raises(PersonError):
+        resolve("core", "alex", "c1", {"alex"}, None, None, (), DEFAULT_TRUSTED, "../etc")

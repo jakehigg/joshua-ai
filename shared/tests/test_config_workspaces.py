@@ -21,7 +21,7 @@ def load(section: str = ""):
 
 def test_the_defaults() -> None:
     ws = load().workspaces
-    assert ws.allowed_callers == ["viewer"]
+    assert ws.allowed_callers == ["viewer", "gateway"]
     assert ws.context_cap == 150_000
     assert ws.tool_search_max_servers == 3
     assert ws.models == []

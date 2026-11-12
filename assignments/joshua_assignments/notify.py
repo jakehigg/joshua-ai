@@ -149,16 +149,31 @@ def destination_for(section: Assignments, row: dict[str, Any]) -> str | None:
 
 
 async def send_event(
-    settings: Settings, destination: str, text: str, assignment_id: int | None = None
+    settings: Settings,
+    destination: str | None,
+    text: str,
+    assignment_id: int | None = None,
+    workspace: str | None = None,
 ) -> bool:
-    """Post one event to channels. Returns True when channels accepted it."""
-    where = {"assignment_id": assignment_id, "destination_ref": destination_ref(destination)}
+    """Post one event to channels. Returns True when channels accepted it.
+
+    With ``workspace``, the event goes to the thread of that workspace and
+    ``destination`` is only a fallback that channels ignores."""
+    where = {
+        "assignment_id": assignment_id,
+        "destination_ref": destination_ref(destination or ""),
+        "workspace": workspace,
+    }
     if not settings.will_notify or not settings.channels_url:
         logger.info({"message": "event not sent: channels is not configured", **where})
         return False
     url = settings.channels_url.rstrip("/") + EVENTS_PATH
     headers = {"Authorization": f"Bearer {settings.fleet_token}"}
-    body = {"destination": destination, "text": text}
+    body: dict[str, Any] = {"text": text}
+    if destination:
+        body["destination"] = destination
+    if workspace:
+        body["workspace"] = workspace
     logger.debug({"message": "event destination", "destination": destination, **where})
     async with _make_client() as client:
         for attempt in range(1, CONNECT_RETRIES + 1):
@@ -212,6 +227,12 @@ def _reason(response: httpx.Response) -> str | None:
         return None
     reason = data.get("reason") if isinstance(data, dict) else None
     return str(reason)[:100] if reason else None
+
+
+def workspace_of(row: dict[str, Any]) -> str | None:
+    """The workspace that started an assignment, from its spec, or None."""
+    value = (row.get("spec") or {}).get("workspace")
+    return value if isinstance(value, str) and value else None
 
 
 def read_line(assignment_id: Any) -> str:
@@ -285,10 +306,11 @@ def question_text(row: dict[str, Any], question: str) -> str:
 async def send_report(settings: Settings, section: Assignments, row: dict[str, Any]) -> bool:
     """Send the report of ``row``. Returns True when channels accepted it."""
     destination = destination_for(section, row)
-    if not destination:
+    workspace = workspace_of(row)
+    if not destination and not workspace:
         logger.info({"message": "report not sent: no destination", "assignment_id": row["id"]})
         return False
-    return await send_event(settings, destination, report_text(row), row["id"])
+    return await send_event(settings, destination, report_text(row), row["id"], workspace)
 
 
 async def send_question(
@@ -296,10 +318,13 @@ async def send_question(
 ) -> bool:
     """Send the question of ``row``. Returns True when channels accepted it."""
     destination = destination_for(section, row)
-    if not destination:
+    workspace = workspace_of(row)
+    if not destination and not workspace:
         logger.info({"message": "question not sent: no destination", "assignment_id": row["id"]})
         return False
-    return await send_event(settings, destination, question_text(row, question), row["id"])
+    return await send_event(
+        settings, destination, question_text(row, question), row["id"], workspace
+    )
 
 
 def comment_where(comment: dict[str, Any]) -> str:

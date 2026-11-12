@@ -532,3 +532,89 @@ async def test_an_event_attachment_keeps_the_sender_filename(tmp_path) -> None:
     sent = manager.calls[0].attachments[0]
     assert sent.original_name == "porch.jpg"
     assert sent.name == "2026-08-27-000000-porch.jpg"
+
+
+# --- workspace events -----------------------------------------------------------------------
+
+WS_ID = "11111111-1111-4111-8111-111111111111"
+
+
+def workspace_repo() -> EventsFakeRepo:
+    from joshua_core.store.models import Workspace
+
+    repo = EventsFakeRepo()
+    workspace = Workspace(id=WS_ID, slug="solar", title="Solar", owner="alex")
+    repo.channels[workspace.channel_id] = Channel(
+        id=workspace.channel_id, channel_type="workspace", default_person_id="alex"
+    )
+
+    async def get_workspace(workspace_id: str):
+        return workspace if workspace_id == WS_ID else None
+
+    repo.get_workspace = get_workspace  # type: ignore[attr-defined]
+    return repo
+
+
+def workspace_event(**overrides: Any) -> TurnEvent:
+    data: dict[str, Any] = {
+        "channel": f"workspace:{WS_ID}",
+        "chat": Chat(kind="dm", id=WS_ID),
+        "kind": "event",
+        "text": "the build finished",
+        "workspace": WS_ID,
+    }
+    data.update(overrides)
+    return TurnEvent(**data)
+
+
+async def test_a_workspace_event_runs_in_the_workspace_thread_and_delivers_nothing(tmp_path):
+    service, repo, manager, received = build_service(tmp_path, repo=workspace_repo())
+
+    resp = await service.handle(workspace_event())
+    await service.drain()
+
+    assert resp.status_code == 202
+    assert len(manager.calls) == 1
+    call = manager.calls[0]
+    assert call.channel.id == f"workspace:{WS_ID}"
+    assert call.conversation.person_id == "alex"  # the owner
+    assert call.direction == "inject"
+    assert call.text == "the build finished"
+    assert received == []  # the phase 1 gate keeps the reply in the transcript
+
+
+async def test_a_verbatim_workspace_event_is_recorded_in_the_thread_with_no_model_call(tmp_path):
+    service, repo, manager, received = build_service(tmp_path, repo=workspace_repo())
+
+    resp = await service.handle(workspace_event(options=EventOptions(verbatim=True)))
+    await service.drain()
+
+    assert resp.status_code == 200
+    assert manager.calls == [] and received == []
+    rows = [r for r in repo.transcripts if r["direction"] == "inject"]
+    assert [r["content"] for r in rows] == ["the build finished"]
+    assert rows[0]["conversation_id"] == repo.conversations[(f"workspace:{WS_ID}", "alex")].id
+
+
+async def test_a_workspace_event_for_an_unknown_workspace_is_refused_with_a_reason(tmp_path):
+    other = "22222222-2222-4222-8222-222222222222"
+    service, repo, manager, received = build_service(tmp_path, repo=workspace_repo())
+
+    for workspace in (other, "not-a-uuid"):
+        resp = await service.handle(workspace_event(workspace=workspace))
+        assert resp.status_code == 404
+        assert b"unknown_workspace" in resp.body
+    assert manager.calls == [] and received == [] and repo.transcripts == []
+    # No channel or conversation is created for an unknown id.
+    assert list(repo.conversations) == []
+
+
+async def test_a_workspace_event_with_a_destination_or_an_event_type_still_goes_to_the_workspace(
+    tmp_path,
+):
+    service, repo, manager, received = build_service(tmp_path, repo=workspace_repo())
+    resp = await service.handle(workspace_event(event_type="motion", channel="telegram:998877"))
+    await service.drain()
+    assert resp.status_code == 202
+    assert manager.calls[0].channel.id == f"workspace:{WS_ID}"
+    assert received == []

@@ -400,6 +400,7 @@ class ConversationManager:
         group_id = group.id if group is not None else None
         gateway_names = allowed_gateway_servers(self._settings, conversation.person_id, group_id)
         workspace_sig = None
+        workspace_id: str | None = None
         if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
             # A workspace thread: the model of the workspace, the servers it
             # picked among the ones the person may use, and tool search by the
@@ -415,6 +416,7 @@ class ConversationManager:
                     ),
                 )
                 workspace_sig = workspace_engine.signature(workspace)
+                workspace_id = workspace.id
         resume = self._resume_on(conversation, resume, resolved)
         memory = self._memory_block(person, channel)
         system_prompt = self._composer.compose(
@@ -460,6 +462,7 @@ class ConversationManager:
             conversation.id,
             role,
             group_id,
+            workspace_id,
         )
         deps = ToolDeps(
             repo=self._repo,

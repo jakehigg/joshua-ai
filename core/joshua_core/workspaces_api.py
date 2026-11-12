@@ -24,6 +24,10 @@ checked before the body is read. A ``person`` that is not a member of
 - ``GET /v1/workspaces/options`` gives the servers and the models that the
   person may pick.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
+- ``POST /v1/workspaces/by-id/{id}/items`` is for the gateway, which records
+  the items of a tool call from a workspace. It takes the id of the workspace
+  and no ``person``: the caller is trusted, and the workspace is the one of the
+  stamp. The body is an item and ``added_by`` (``tool:<server>``).
 
 ``servers`` must be among the servers the person may use. ``model`` must be in
 ``workspaces.models`` when that list is not empty, and any text otherwise. The
@@ -109,6 +113,12 @@ class ItemBody(_Body):
     @classmethod
     def _safe_url(cls, value: str | None) -> str | None:
         return check_item_url(value)
+
+
+class ToolItemBody(ItemBody):
+    """An item that the gateway records for a tool call."""
+
+    added_by: str = Field(pattern=r"^tool:[A-Za-z0-9_.-]{1,64}$")
 
 
 class ItemPatchBody(_Body):
@@ -364,6 +374,32 @@ def build_workspaces_router() -> APIRouter:
             url=(body.url or "").strip() or None,
             added_by="person",
         )
+        return JSONResponse(item_json(item))
+
+    @router.post(WORKSPACES_PATH + "/by-id/{workspace_id}/items")
+    async def add_tool_item(workspace_id: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, identity = _authorize(request)
+        if denied is not None:
+            return denied
+        try:
+            body = ToolItemBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        repo = request.app.state.ctx.repo
+        workspace = await repo.get_workspace(workspace_id)
+        if workspace is None:
+            return _not_found()
+        item = await repo.add_workspace_item(
+            workspace.id,
+            body.kind,
+            body.ref.strip(),
+            body.title.strip() or body.ref.strip(),
+            url=(body.url or "").strip() or None,
+            added_by=body.added_by,
+            # An update with no title keeps the title that the item has.
+            rename=bool(body.title.strip()),
+        )
+        logger.info({"message": "tool item recorded", "caller": identity, "kind": body.kind})
         return JSONResponse(item_json(item))
 
     @router.patch(WORKSPACES_PATH + "/{slug}/items/{item_id}")

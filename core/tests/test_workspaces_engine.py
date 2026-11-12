@@ -178,6 +178,9 @@ async def test_session_build_uses_the_model_servers_and_tool_search(tmp_path, mo
     # The workspace picks tasks and github; mia-only `secret` and the unknown
     # name are dropped, and files (not picked) is out. No builtin is registered.
     assert list(options.mcp_servers) == ["tasks", "github"]
+    # Each gateway server of a workspace session names the workspace.
+    for server in options.mcp_servers.values():
+        assert server["headers"]["X-Joshua-Workspace"] == WS_ID
     assert options.model == "model-b"
     assert built.inference.model == "model-b"
     # Two picked servers, limit two: tool search is off.
@@ -211,6 +214,8 @@ async def test_a_normal_chat_session_is_unchanged(tmp_path, monkeypatch):
 
     assert set(built.session._options.mcp_servers) == {"files", "tasks", "github", "gitlab"}
     assert built.workspace_sig is None
+    for server in built.session._options.mcp_servers.values():
+        assert "X-Joshua-Workspace" not in server["headers"]
 
 
 async def test_a_missing_workspace_row_builds_a_normal_session(tmp_path, monkeypatch):

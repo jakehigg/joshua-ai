@@ -413,3 +413,124 @@ async def test_download_skips_non_200(tmp_path: Path) -> None:
         outcome = await download_image_urls(client, ["http://img/x"], tmp_path, max_bytes=1000)
     assert outcome.stored == []
     assert outcome.skipped == ["http://img/x: HTTP 404"]
+
+
+# --- workspace -------------------------------------------------------------
+
+WORKSPACE = "11111111-1111-4111-8111-111111111111"
+
+
+async def test_a_workspace_event_goes_to_core_with_the_workspace(tmp_path: Path) -> None:
+    app, core, telegram, imessage = _make(tmp_path)
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/events",
+            json={"workspace": WORKSPACE.upper(), "text": "the build finished"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert resp.status_code == 202
+    assert len(core.events) == 1
+    event = core.events[0]
+    assert event.workspace == WORKSPACE
+    assert event.text == "the build finished"
+    assert event.kind == "event"
+    assert event.options.verbatim is False
+    assert telegram.sent == [] and imessage.sent == []
+
+
+async def test_a_destination_beside_a_workspace_is_not_used(tmp_path: Path) -> None:
+    app, core, _, imessage = _make(tmp_path)
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/events",
+            json={"workspace": WORKSPACE, "destination": "nowhere-at-all", "text": "done"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert resp.status_code == 202
+    assert core.events[0].workspace == WORKSPACE
+    assert imessage.sent == []
+
+
+async def test_a_verbatim_workspace_event_is_recorded_and_delivered_to_no_adapter(
+    tmp_path: Path,
+) -> None:
+    app, core, telegram, imessage = _make(tmp_path)
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/events",
+            json={
+                "workspace": WORKSPACE,
+                "destination": "everyone",
+                "text": "task 3 of 5 done",
+                "verbatim": True,
+            },
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert resp.status_code == 202
+    assert resp.json() == {"accepted": True, "verbatim": True}
+    assert telegram.sent == [] and imessage.sent == []
+    assert len(core.events) == 1
+    assert core.events[0].workspace == WORKSPACE
+    assert core.events[0].options.verbatim is True
+
+
+async def test_a_verbatim_workspace_event_needs_no_destination(tmp_path: Path) -> None:
+    app, core, _, _ = _make(tmp_path, core=FakeCore(TurnAck(accepted=False, status=200)))
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/events",
+            json={"workspace": WORKSPACE, "text": "x", "verbatim": True},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert resp.status_code == 202  # core answered 200: it recorded the row
+    assert len(core.events) == 1
+
+
+async def test_an_unknown_workspace_is_core_s_404_with_its_reason(tmp_path: Path) -> None:
+    core = FakeCore(TurnAck(accepted=False, status=404, reason="unknown_workspace"))
+    app, _, _, imessage = _make(tmp_path, core=core)
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/events",
+            json={"workspace": WORKSPACE, "text": "x", "verbatim": True},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert resp.status_code == 404
+    assert resp.json() == {"accepted": False, "reason": "unknown_workspace"}
+    assert imessage.sent == []
+
+
+@pytest.mark.parametrize("bad", ["not-a-uuid", 7, ["x"], "../etc"])
+async def test_a_workspace_that_is_not_a_uuid_is_400(tmp_path: Path, bad: Any) -> None:
+    app, core, _, _ = _make(tmp_path)
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/events",
+            json={"workspace": bad, "text": "x"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "invalid_workspace"
+    assert core.events == []
+
+
+async def test_a_workspace_without_text_is_not_an_event(tmp_path: Path) -> None:
+    app, _, _, _ = _make(tmp_path)
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/events", json={"workspace": WORKSPACE}, headers=_bearer(LAPTOP_TOKEN)
+        )
+    assert resp.status_code == 400
+    assert resp.json()["reason"] == "invalid_event"
+
+
+async def test_an_event_without_a_workspace_is_as_before(tmp_path: Path) -> None:
+    app, core, _, imessage = _make(tmp_path)
+    async with _client(app) as client:
+        await client.post(
+            "/v1/events",
+            json={"destination": "everyone", "text": "hi", "verbatim": True},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert imessage.sent == [(GROUP_CHAT, "hi", [])]
+    assert core.events[0].workspace is None

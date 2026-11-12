@@ -35,6 +35,9 @@ identity_ctx: ContextVar[str] = ContextVar("gateway_identity", default="unknown"
 # back by the tool-call hook. None when the caller asserted no person.
 person_ctx: ContextVar[str | None] = ContextVar("gateway_person", default=None)
 conversation_ctx: ContextVar[str | None] = ContextVar("gateway_conversation", default=None)
+# The workspace (a UUID) that core named for a workspace thread. None outside a
+# workspace. The tool-call hook stamps it into the ``_meta`` of the call.
+workspace_ctx: ContextVar[str | None] = ContextVar("gateway_workspace", default=None)
 
 # The role core asserted for this request. Unlike ``person_ctx``, this one IS
 # access control: the files server builds its root set from it. None means the
