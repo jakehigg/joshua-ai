@@ -631,6 +631,9 @@ refuses it. Everyone in the chat uses the server through the same credential.
 person comes from the `X-Joshua-Person` header, which the gateway trusts only from
 the identities in [`gateway.person_header_callers`](#gateway).
 
+`description` is one line (200 characters at most) that says what the server is
+for. The new workspace dialog of the viewer shows it beside the name.
+
 `tools` filters the tool list. `allow` and `deny` are `fnmatch` globs matched
 against the tool name. `deny` beats `allow`. An absent `tools` block means every
 tool. A user server without a filter exposes every tool, so set `allow`.

@@ -24,6 +24,26 @@ with the images and the packaged chart, are at
   `channels.webhooks.allowed_callers` is now `laptop`, `ci` and `viewer`; an
   instance that lists the callers in `joshua.yaml` must add `viewer`, and the
   channels container must hold `JOSHUA_TOKEN_VIEWER`.
+- **The workspace UI, and one main thread.** The chat screen has a left rail
+  (Chat, the active workspaces, the paused ones, and "+ New workspace"), a new
+  workspace dialog (title, goal, model, servers), and the route
+  `/chat/w/<slug>`. A workspace shows a header with an edit drawer (goal,
+  notes, servers, model, notify, pause, archive) and an item panel with pin,
+  remove and add link. Nine viewer routes under `/api/v1/workspaces` proxy
+  core; a guest gets 403. The chat turn and history routes take `workspace`,
+  and the documents list takes `tag`. The id `w` is reserved: it is not a
+  person id. New: `GET /v1/workspaces/options`, and an optional `description`
+  for each `mcp:` server, which the dialog shows.
+- **Normal chat is one thread.** A turn from the viewer or the terminal now
+  runs in the main conversation of the person: the most recently active direct
+  conversation that is not a workspace, `cli` or voice thread (for most people,
+  the iMessage or Telegram chat). The viewer only pulls, so its turn never
+  changes where a reminder or an event reply goes: that stays the phone. When
+  there is no such conversation, the `cli:` conversation is used. Old `cli:`
+  history stays in the database and is not shown. A turn on a thread that
+  several channels share now names the channel it arrives on, so guidance for
+  one channel (for example Markdown in the viewer) does not leak to another.
+  The `TurnEvent` has a new optional field, `thread`.
 - **Workspaces, in core.** A workspace is a place for one large piece of work,
   with its own chat thread, a model, MCP servers that the person picked, a goal,
   notes, and links to what was made for it. Core serves `/v1/workspaces` for the

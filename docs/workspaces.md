@@ -103,7 +103,7 @@ The `workspace` builtin server has these tools.
 | `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the person's main chat. |
 
 The main chat is the most recently active direct conversation that is not a
-workspace and not a voice thread. Core sends to its last channel. The link is
+workspace, a terminal or a voice thread. Core sends to its last channel. The link is
 `<workspaces.viewer_url>/chat/w/<slug>`. With no `viewer_url`, the message has
 the path `/chat/w/<slug>`.
 
@@ -136,6 +136,72 @@ A chat turn in a workspace goes through the channels terminal routes.
 the slug and the title of the workspace when the conversation belongs to one.
 It shows what a workspace costs.
 
+## The viewer
+
+The chat screen of the viewer is the workspace UI. It works the same on docker
+compose and on Kubernetes, and it adds no container.
+
+- `/chat/<person>` is the normal chat. `/chat/w/<slug>` is a workspace of the
+  person who signed in. The id `w` is reserved, so no person can have it.
+- The left rail shows Chat, the active workspaces, the paused workspaces (folded),
+  and "+ New workspace". On a phone it is a drawer.
+- The new workspace dialog asks for a title, a goal (optional), a model, and the
+  servers. It creates the workspace and opens it.
+- A workspace view has the chat in the centre, an item panel at the right, and
+  a header with the title and the goal. The edit drawer changes the goal, the
+  notes, the servers, the model, `notify`, and the status (pause, resume,
+  archive). The item panel groups items by kind. A document or an artifact opens
+  in the document panel. Another item opens in a new tab, but only when its
+  address is http(s) or a path that starts with `/`. Any other address is shown
+  as text. Each item can be pinned or removed, and a form adds a link. The panel
+  loads again after each finished turn and when the tab gets focus.
+
+### Viewer routes
+
+Every route is under `/api/v1/workspaces`, behind the sign-in. Each one proxies
+the route of the same name on core, with `CORE_URL` and `JOSHUA_TOKEN_VIEWER`,
+and names the signed-in person. A guest gets 403. Every write checks the
+`Origin` header. Core's status and body come back as they are.
+
+| Route | Core route |
+|---|---|
+| `GET`, `POST /api/v1/workspaces` | `GET`, `POST /v1/workspaces` |
+| `GET /api/v1/workspaces/options` | `GET /v1/workspaces/options` |
+| `GET`, `PATCH /api/v1/workspaces/{slug}` | `GET`, `PATCH /v1/workspaces/{slug}` |
+| `GET`, `POST /api/v1/workspaces/{slug}/items` | `GET`, `POST /v1/workspaces/{slug}/items` |
+| `PATCH`, `DELETE /api/v1/workspaces/{slug}/items/{id}` | the same on core |
+
+`GET /v1/workspaces/options` returns `servers` (the servers that the person may
+use, each with a `name` and a one-line `description`) and `models` (the list
+`workspaces.models`, empty when any model is allowed). The description is the
+optional `description` of the server in `mcp:`. Without it, the name is used.
+The slug `options` is reserved.
+
+The chat routes take `workspace` (the slug or the id): `POST
+/api/v1/chat/<person>/turns` in the JSON body or the form, and `GET
+/api/v1/chat/<person>/history` in the query. The documents list takes
+`tag`: `GET /api/v1/documents?tag=ws:<slug>` keeps the documents with that tag.
+
+## The main thread
+
+Normal chat is one thread. A viewer turn, or a turn from the terminal, with no
+`workspace` runs in the main conversation of the person: the most recently
+active conversation of the person that is a direct chat and is not a
+`workspace`, `cli` or `voice` channel. The fallback is the `cli:<person>`
+conversation. Channels sends `thread: "main"` in the turn, and the transcript
+route reads the same conversation.
+
+The viewer only pulls. A viewer turn does not change `last_channel_id` of the
+main conversation, so a reminder or the reply to an event still goes to the
+phone. Core runs the turns of one conversation one at a time, whatever the
+channel. Old `cli:<person>` history stays in the database and is not shown.
+
+A session is built for the channel of its first turn. When a turn arrives from
+another channel, it starts with a line that names its channel, so the guidance
+for that channel applies (Markdown in the viewer, plain text on iMessage). The
+line is added when the channel changes, and on each turn off the channel of the
+session.
+
 ## Configuration
 
 | Key | Default | Meaning |
@@ -145,5 +211,8 @@ It shows what a workspace costs.
 | `workspaces.context_cap` | `150000` | Input tokens over which a workspace turn ends its session. |
 | `workspaces.tool_search_max_servers` | `3` | Servers up to which a workspace runs with tool search off. |
 | `workspaces.viewer_url` | none | The public address of the viewer, for the link in `send_to_normal_chat`. |
+
+Each `mcp:` server can have a `description`, one line (200 characters at most)
+that the new workspace dialog shows beside the name.
 
 See [config.md](config.md#workspaces).
