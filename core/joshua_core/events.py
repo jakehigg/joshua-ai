@@ -45,6 +45,7 @@ from joshua_core.delivery import (
     Deliverer,
     is_ignore,
     voice_delivery_target,
+    workspace_delivery_target,
 )
 from joshua_core.engine.types import Attachment as EngineAttachment
 from joshua_core.store.models import Channel
@@ -349,13 +350,17 @@ class EventService:
             return
         reply = result.text or ""
         if reply and not is_ignore(reply):
-            deliver_target = voice_delivery_target(
-                channel_type=channel.channel_type,
-                conversation_id=conversation.id,
-                person_id=conversation.person_id,
-                target=target,
-                voice=self._voice,
+            deliver_target = workspace_delivery_target(
+                channel_type=channel.channel_type, target=target
             )
+            if deliver_target is not None:
+                deliver_target = voice_delivery_target(
+                    channel_type=channel.channel_type,
+                    conversation_id=conversation.id,
+                    person_id=conversation.person_id,
+                    target=deliver_target,
+                    voice=self._voice,
+                )
             if deliver_target is not None:
                 await self._deliverer.deliver(deliver_target, reply)
 

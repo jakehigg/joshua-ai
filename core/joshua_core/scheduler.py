@@ -15,7 +15,12 @@ from pathlib import Path
 from joshua_shared.config import VoiceChannel
 from joshua_shared.log import get_logger
 
-from joshua_core.delivery import Deliverer, is_ignore, voice_delivery_target
+from joshua_core.delivery import (
+    Deliverer,
+    is_ignore,
+    voice_delivery_target,
+    workspace_delivery_target,
+)
 from joshua_core.engine.cron import compute_next_cron, now_in
 from joshua_core.store.models import Task
 from joshua_core.store.repo import Repo
@@ -151,13 +156,17 @@ class Scheduler:
 
         text = result.text or ""
         if text and not is_ignore(text):
-            deliver_target = voice_delivery_target(
-                channel_type=channel.channel_type,
-                conversation_id=conv.id,
-                person_id=conv.person_id,
-                target=target,
-                voice=self._voice,
+            deliver_target = workspace_delivery_target(
+                channel_type=channel.channel_type, target=target
             )
+            if deliver_target is not None:
+                deliver_target = voice_delivery_target(
+                    channel_type=channel.channel_type,
+                    conversation_id=conv.id,
+                    person_id=conv.person_id,
+                    target=deliver_target,
+                    voice=self._voice,
+                )
             if deliver_target is not None:
                 await self._deliverer.deliver(deliver_target, text)
 

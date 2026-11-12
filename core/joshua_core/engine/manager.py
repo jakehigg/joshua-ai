@@ -29,6 +29,7 @@ from joshua_shared.log import get_logger
 
 from joshua_core.attachments import file_attachment
 from joshua_core.engine import inference as inference_plan
+from joshua_core.engine import workspace as workspace_engine
 from joshua_core.engine.describe import (
     attachment_note,
     describe_attachment,
@@ -42,7 +43,7 @@ from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.engine.usage import Usage
 from joshua_core.memory import prompt as memory_prompt
 from joshua_core.store.models import Channel, Conversation
-from joshua_core.store.repo import Repo
+from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE, Repo
 from joshua_core.store.usage_events import record_usage
 
 logger = get_logger("engine.manager")
@@ -69,6 +70,13 @@ class TurnCtx:
     # The message embedding, computed once and shared between providers (the
     # injection provider fills it; the taught-skill provider reuses it).
     embedding: list[float] | None = None
+    # True when the session has no history of its own: a first turn, a start
+    # after a reset, the context cap, or a restart that could not resume. A
+    # workspace block then adds the last rows of the thread.
+    fresh_session: bool = False
+    # Calls that run after the turn succeeded. A provider adds one to settle
+    # what it showed, such as marking workspace items seen.
+    after_turn: list[Callable[[], Awaitable[None]]] = field(default_factory=list)
 
 
 ContextProvider = Callable[[TurnCtx], Awaitable[str | None]]
@@ -100,6 +108,12 @@ class _Managed:
     replace_reason: str = "mcp server failed"
     # The model, the server, and the environment the session was built with.
     inference: ResolvedInference | None = None
+    # True while the SDK session holds the history of the thread: it resumed
+    # one, or a turn has run in it.
+    has_history: bool = False
+    # For a workspace: the model and the servers it was built from. A change
+    # rebuilds the session on the next turn.
+    workspace_sig: tuple[Any, ...] | None = None
 
 
 @dataclass
@@ -119,6 +133,8 @@ class _Built:
     memory_paths: list[Path]
     memory_mtime: float
     inference: ResolvedInference
+    resumed: bool = False
+    workspace_sig: tuple[Any, ...] | None = None
 
     def apply(self, mc: _Managed) -> None:
         """Put this session and its fields on ``mc``."""
@@ -128,6 +144,8 @@ class _Built:
         mc.idle_ttl_s = getattr(self.profile, "idle_ttl_s", None)
         mc.memory_paths = self.memory_paths
         mc.memory_mtime = self.memory_mtime
+        mc.has_history = self.resumed
+        mc.workspace_sig = self.workspace_sig
         mc.inference = self.inference
 
 
@@ -273,6 +291,9 @@ class ConversationManager:
         self._builtin_jobs: dict[str, frozenset[str]] = {}
         # Iterated before assembling each turn's prompt; empty until phase 4.
         self._context_providers: list[ContextProvider] = []
+        # The workspace block provider, when main wires one. The workspaces
+        # route renders the same block, and later phases add sections to it.
+        self.workspace_block: Any = None
         self._pool: dict[str, _Managed] = {}
         self._pool_lock = asyncio.Lock()
         # The teardowns of abandoned clients, kept until they finish.
@@ -362,12 +383,28 @@ class ConversationManager:
         )
         profile = self._derive_profile(person, channel)
         resolved = inference_plan.resolve(self._settings, inference_plan.turn_job(profile))
-        resume = self._resume_on(conversation, resume, resolved)
-        memory = self._memory_block(person, channel)
         role = self._conversation_role(channel, conversation)
         group = self._conversation_group(channel, conversation)
         group_id = group.id if group is not None else None
         gateway_names = allowed_gateway_servers(self._settings, conversation.person_id, group_id)
+        workspace_sig = None
+        if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+            # A workspace thread: the model of the workspace, the servers it
+            # picked among the ones the person may use, and tool search by the
+            # number of servers. A missing row builds a normal direct session.
+            workspace = await self._workspace_of(channel)
+            if workspace is not None:
+                gateway_names = workspace_engine.picked_servers(gateway_names, workspace)
+                resolved = workspace_engine.with_workspace(
+                    resolved,
+                    workspace,
+                    tool_search=workspace_engine.tool_search_for(
+                        gateway_names, self._settings.workspaces.tool_search_max_servers
+                    ),
+                )
+                workspace_sig = workspace_engine.signature(workspace)
+        resume = self._resume_on(conversation, resume, resolved)
+        memory = self._memory_block(person, channel)
         system_prompt = self._composer.compose(
             profile, person, channel, memory, servers=gateway_names
         )
@@ -390,7 +427,16 @@ class ConversationManager:
                 wiki_git=wikigit.is_enabled(self._settings),
                 inference=resolved,
             )
-            return _Built(session, None, profile, mem_paths, mem_mtime, resolved)
+            return _Built(
+                session,
+                None,
+                profile,
+                mem_paths,
+                mem_mtime,
+                resolved,
+                resumed=resume is not None,
+                workspace_sig=workspace_sig,
+            )
 
         from joshua_core.engine.agent import AgentSession, build_options
 
@@ -422,7 +468,21 @@ class ConversationManager:
             resume=resume,
             tool_search=resolved.tool_search,
         )
-        return _Built(AgentSession(options), deps, profile, mem_paths, mem_mtime, resolved)
+        return _Built(
+            AgentSession(options),
+            deps,
+            profile,
+            mem_paths,
+            mem_mtime,
+            resolved,
+            resumed=resume is not None,
+            workspace_sig=workspace_sig,
+        )
+
+    async def _workspace_of(self, channel: Channel) -> Any:
+        """The workspace row of a ``workspace:<id>`` channel, or None."""
+        workspace_id = workspace_engine.workspace_id_of(channel.id)
+        return await self._repo.get_workspace(workspace_id) if workspace_id else None
 
     def _conversation_role(self, channel: Channel, conversation: Conversation) -> str:
         """The role this conversation carries, for the gateway file policy.
@@ -487,6 +547,11 @@ class ConversationManager:
         if mc.replace_pending:
             await self._rebuild_locked(mc, channel, f"session rebuilt ({mc.replace_reason})")
             return
+        if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+            workspace = await self._workspace_of(channel)
+            if workspace is not None and workspace_engine.signature(workspace) != mc.workspace_sig:
+                await self._rebuild_locked(mc, channel, "session rebuilt (workspace changed)")
+                return
         if memory_prompt.newest_mtime(mc.memory_paths) <= mc.memory_mtime:
             return
         await self._rebuild_locked(mc, channel, "session rebuilt (memory changed)")
@@ -725,6 +790,7 @@ class ConversationManager:
             turn_id=turn_id,
             profile=mc.profile,
             role=role,
+            fresh_session=not mc.has_history,
         )
         provider_notes: list[str] = []
         for provider in self._context_providers:
@@ -782,6 +848,8 @@ class ConversationManager:
                 raise
 
             mc.had_success = True
+            if not result.is_error:
+                mc.has_history = True
             mc.last_used = monotonic()
             resolved = mc.inference or inference_plan.resolve(self._settings, "chat")
             if result.is_error:
@@ -865,8 +933,42 @@ class ConversationManager:
                     **metrics,
                 }
             )
+            if not result.is_error:
+                for settle in ctx.after_turn:
+                    try:
+                        await settle()
+                    except Exception as e:  # noqa: BLE001 — a settle never fails a turn
+                        logger.warning({"message": "after-turn step failed", "error": str(e)})
+                await self._apply_context_cap(mc, channel, result)
             await self._check_mcp_failed(mc)
             return result
+
+    async def _apply_context_cap(self, mc: _Managed, channel: Channel, result: TurnResult) -> None:
+        """After a workspace turn whose input went over ``workspaces.context_cap``,
+        forget the SDK session. The next turn starts a new one, from the
+        workspace block and the last rows of the thread. A channel that is not a
+        workspace is never touched."""
+        if channel.channel_type != WORKSPACE_CHANNEL_TYPE:
+            return
+        used = result.context_tokens
+        if used is None and isinstance(result.usage, dict):
+            counts = Usage.from_sdk(result.usage)
+            used = counts.input + counts.cache_read + counts.cache_write
+        cap = self._settings.workspaces.context_cap
+        if used is None or used <= cap:
+            return
+        await self._repo.clear_sdk_session(mc.conversation.id)
+        mc.conversation = replace(mc.conversation, sdk_session_id=None)
+        mc.replace_pending = True
+        mc.replace_reason = "workspace context cap"
+        logger.info(
+            {
+                "message": "workspace context cap reached; next turn starts fresh",
+                "conversation_id": mc.conversation.id,
+                "input_tokens": used,
+                "cap": cap,
+            }
+        )
 
     async def _run_with_resume_retry(
         self,

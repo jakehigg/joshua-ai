@@ -157,6 +157,15 @@ def _remote_server_names(mcp_servers: Any) -> set[str]:
     return names
 
 
+def _context_tokens(usage: Any) -> int | None:
+    """The input of one model call: new input, cache read, and cache write.
+    None when the message has no usage."""
+    if not isinstance(usage, dict):
+        return None
+    used = Usage.from_sdk(usage)
+    return used.input + used.cache_read + used.cache_write
+
+
 def build_options(
     *,
     system_prompt: str,
@@ -860,6 +869,8 @@ class AgentSession:
         error: str | None = None
         tool_errors: dict[str, bool] = {}
         result_text: str | None = None
+        # The input of the last model call of the turn: the size of the context.
+        context_tokens: int | None = None
 
         # The text of the model message in progress. It is held until the
         # message's stop reason arrives: a message that stops to call a tool is
@@ -897,6 +908,10 @@ class AgentSession:
                 tool_errors.update(_tool_results(msg))
             elif cls == "AssistantMessage":
                 calls.extend(_tool_calls(msg))
+                if getattr(msg, "parent_tool_use_id", None) is None:
+                    held = _context_tokens(getattr(msg, "usage", None))
+                    if held is not None:
+                        context_tokens = held
                 kind = getattr(msg, "error", None)
                 if kind:
                     # The CLI writes a failed call as a message whose text is
@@ -947,6 +962,7 @@ class AgentSession:
             session_id=session_id,
             is_error=is_error,
             usage=usage,
+            context_tokens=context_tokens,
             cost_usd=cost,
             tools_used=tools_used,
             tool_calls=calls,

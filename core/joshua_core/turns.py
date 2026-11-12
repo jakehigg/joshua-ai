@@ -24,14 +24,17 @@ from joshua_shared.contracts import TurnEvent
 from joshua_shared.fleet_auth import require_identity
 from joshua_shared.log import get_logger
 
-from joshua_core.delivery import Deliverer, is_ignore
+from joshua_core.delivery import Deliverer, is_ignore, workspace_delivery_target
 from joshua_core.engine.types import FAILED_REPLY
 from joshua_core.engine.types import Attachment as EngineAttachment
 from joshua_core.events import EventService
 from joshua_core.store.models import Channel, Conversation, Person
-from joshua_core.store.repo import Repo
+from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE, Repo
 
 logger = get_logger("turns")
+
+# The prefix of a workspace channel id.
+WORKSPACE_PREFIX = f"{WORKSPACE_CHANNEL_TYPE}:"
 
 # Idempotency window: a message_id seen inside this many seconds is a duplicate.
 SEEN_TTL_SECONDS = 900
@@ -126,6 +129,9 @@ class TurnService:
             if default_person_id:
                 person = await self._repo.get_person(default_person_id)
 
+        if event.channel.startswith(WORKSPACE_PREFIX):
+            return await self._resolve_workspace(event, person)
+
         channel = await self._repo.get_channel(event.channel)
         if channel is None:
             await self._repo.upsert_channel(
@@ -151,6 +157,31 @@ class TurnService:
             person=person,
             is_group=is_group,
             speaker=speaker,
+        )
+
+    async def _resolve_workspace(
+        self, event: TurnEvent, person: Person | None
+    ) -> Resolution | None:
+        """Resolve a turn on ``workspace:<id or slug>``.
+
+        The workspace must exist, and its owner must be the person of the turn.
+        Any other turn is refused: None, and the caller answers 403. A turn
+        never creates a ``workspace:`` channel. The ``workspaces`` routes
+        create it with the workspace.
+        """
+        if person is None or event.chat.kind == "group":
+            return None
+        ref = event.channel[len(WORKSPACE_PREFIX) :]
+        workspace = await self._repo.find_workspace(person.id, ref)
+        if workspace is None:
+            logger.warning({"message": "workspace turn refused", "reason": "no such workspace"})
+            return None
+        channel = await self._repo.get_channel(workspace.channel_id)
+        if channel is None:
+            return None
+        conversation = await self._repo.get_or_create_conversation(channel.id, person.id)
+        return Resolution(
+            channel=channel, conversation=conversation, person=person, is_group=False, speaker=None
         )
 
     # --- run helpers -------------------------------------------------------
@@ -222,11 +253,18 @@ class TurnService:
             result = await self._run(resolution, event)
         except Exception as exc:  # noqa: BLE001 — any turn failure still answers the channel
             logger.error({"message": "turn failed", "channel": event.channel, "error": str(exc)})
-            await self._deliverer.deliver(event.channel, TURN_FAILED)
+            target = workspace_delivery_target(
+                channel_type=resolution.channel.channel_type, target=event.channel
+            )
+            if target is not None:
+                await self._deliverer.deliver(target, TURN_FAILED)
             return
         text = result.text or ""
-        if text and not is_ignore(text):
-            await self._deliverer.deliver(event.channel, text)
+        target = workspace_delivery_target(
+            channel_type=resolution.channel.channel_type, target=event.channel
+        )
+        if text and not is_ignore(text) and target is not None:
+            await self._deliverer.deliver(target, text)
 
     # --- POST /v1/turns/stream ---------------------------------------------
 
