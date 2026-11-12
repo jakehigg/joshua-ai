@@ -354,6 +354,46 @@ async def test_the_json_turn_takes_no_file(tmp_path: Path) -> None:
     assert not (tmp_path / "people" / "alex" / "attachments").exists()
 
 
+async def test_a_json_turn_may_name_a_workspace(tmp_path: Path) -> None:
+    app, core = _make(tmp_path)
+    async with _client(app) as client:
+        response = await client.post(
+            "/v1/cli/turns/stream",
+            json={"person": "alex", "text": "next step?", "workspace": " solar "},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert response.status_code == 200
+    event = core.events[0]
+    assert event.channel == "workspace:solar"
+    assert event.chat.kind == "dm" and event.chat.id == "alex"
+    assert event.handle.type == "cli" and event.handle.id == "alex"
+
+
+async def test_a_multipart_turn_may_name_a_workspace(tmp_path: Path) -> None:
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    response = await _post_parts(
+        app,
+        [("file", ("notes.txt", b"quote: 12000", "text/plain"))],
+        person="alex",
+        text="file this",
+        workspace="solar",
+    )
+    assert response.status_code == 200
+    assert core.events[0].channel == "workspace:solar"
+    assert len(core.events[0].attachments) == 1
+
+
+async def test_a_turn_without_a_workspace_stays_on_the_terminal(tmp_path: Path) -> None:
+    app, core = _make(tmp_path)
+    async with _client(app) as client:
+        await client.post(
+            "/v1/cli/turns/stream",
+            json={"person": "alex", "text": "hi", "workspace": 7},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert core.events[0].channel == "cli:alex"
+
+
 # --- outbound --------------------------------------------------------------
 
 
@@ -550,6 +590,12 @@ async def test_transcript_asks_core_with_the_channels_token(tmp_path: Path) -> N
         "limit": "20",
         "before": "99",
     }
+
+
+async def test_transcript_reads_a_workspace_thread(tmp_path: Path) -> None:
+    core = TranscriptCore()
+    await _read(_make_transcript(tmp_path, core), {"person": "alex", "workspace": "solar"})
+    assert dict(core.requests[0].url.params) == {"channel": "workspace:solar", "person": "alex"}
 
 
 async def test_transcript_sends_no_limit_or_before_it_was_not_given(tmp_path: Path) -> None:

@@ -11,6 +11,11 @@ other channel uses, so the turn carries stored paths and never bytes.
 ``GET /v1/cli/outbox`` returns what core sent to this person while they were
 away, and marks it read.
 
+A turn or a transcript read may name a ``workspace`` (the slug or the id). The
+turn then goes to the channel ``workspace:<name>`` and the read gets the
+thread of that workspace. Core finds the workspace for the person and refuses
+one that the person does not own.
+
 ``GET /v1/cli/transcript`` reads the person's terminal conversation back from
 core, a page at a time. It returns core's body and status as they are, and it
 never logs a message.
@@ -48,6 +53,10 @@ ACKING_SUFFIX = ".acking"
 PERSON_FIELD = "person"
 TEXT_FIELD = "text"
 FILE_FIELD = "file"
+WORKSPACE_FIELD = "workspace"
+
+# The channel type of a workspace thread. Core makes the channel with the workspace.
+WORKSPACE_CHANNEL_TYPE = "workspace"
 
 # One part is read in chunks of this size, so a part over the cap stops early.
 PART_CHUNK_BYTES = 256 * 1024
@@ -79,12 +88,31 @@ class _Submission:
 
     person_id: str
     text: str
+    # The slug or the id of a workspace, or "" for the normal terminal chat.
+    workspace: str = ""
     files: list[tuple[str, bytes]] = field(default_factory=list)
 
     @property
     def attachment_bytes(self) -> int:
         """The size of the largest file, the number the guard takes."""
         return max((len(data) for _, data in self.files), default=0)
+
+
+def _workspace_ref(value: object) -> str:
+    """The workspace of a request: its slug or id, or "" for none."""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _channel_id(person_id: str, workspace: str) -> str:
+    """The channel of a turn: the person's terminal, or a workspace thread.
+
+    Core resolves the name after ``workspace:``, as an id or as the slug of a
+    workspace of that person, and refuses a turn on a workspace that the person
+    does not own.
+    """
+    if workspace:
+        return f"{WORKSPACE_CHANNEL_TYPE}:{workspace}"
+    return f"{CHANNEL_TYPE}:{person_id}"
 
 
 def _context(request: Request) -> ChannelsContext:
@@ -138,7 +166,9 @@ async def _read_json(request: Request) -> _Submission | None:
     if not isinstance(body, dict):
         return None
     return _Submission(
-        person_id=str(body.get("person") or "").strip(), text=str(body.get("text") or "")
+        person_id=str(body.get("person") or "").strip(),
+        text=str(body.get("text") or ""),
+        workspace=_workspace_ref(body.get("workspace")),
     )
 
 
@@ -155,7 +185,9 @@ async def _read_multipart(request: Request, ctx: ChannelsContext) -> _Submission
     max_bytes = ctx.settings.channels.limits.max_attachment_bytes
     try:
         submission = _Submission(
-            person_id=_field(form, PERSON_FIELD).strip(), text=_field(form, TEXT_FIELD)
+            person_id=_field(form, PERSON_FIELD).strip(),
+            text=_field(form, TEXT_FIELD),
+            workspace=_workspace_ref(_field(form, WORKSPACE_FIELD)),
         )
         for index, part in enumerate(form.getlist(FILE_FIELD)):
             if not isinstance(part, _Part):
@@ -273,7 +305,7 @@ def build_cli_router() -> APIRouter:
             text = NO_CAPTION_TEXT
 
         event = TurnEvent(
-            channel=f"{CHANNEL_TYPE}:{person_id}",
+            channel=_channel_id(person_id, submission.workspace),
             chat=Chat(kind="dm", id=person_id),
             handle=Handle(type=CHANNEL_TYPE, id=person_id),
             text=text,
@@ -346,7 +378,8 @@ def build_cli_router() -> APIRouter:
         if ctx.core_client is None:
             return JSONResponse({"reason": "core_unavailable"}, status_code=503)
 
-        params = {"channel": f"{CHANNEL_TYPE}:{person_id}", "person": person_id}
+        workspace = _workspace_ref(request.query_params.get("workspace"))
+        params = {"channel": _channel_id(person_id, workspace), "person": person_id}
         for key in ("limit", "before"):
             value = request.query_params.get(key)
             if value is not None:

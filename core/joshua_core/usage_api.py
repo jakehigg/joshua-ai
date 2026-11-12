@@ -9,6 +9,10 @@ calls, the tokens, and the models of each group (``chat``, ``reflection``,
 ``totals`` always hold each feature of ``usage_features``, with zero counts
 when it made no call. See ``store/usage_events.py``.
 
+``?group=conversation`` gives the totals of each conversation in place of
+the groups by day, with the slug and the title of the workspace when the
+conversation belongs to one. Without ``group`` the answer is unchanged.
+
 ``?days=N`` is the window, today included: default 30, held to 1..366. A
 value that is not an integer gets 422.
 
@@ -34,6 +38,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -137,6 +142,29 @@ def _parse_days(raw: str | None) -> int | None:
         return None
 
 
+async def _by_conversation(repo: Any, since: datetime, days: int) -> dict[str, Any]:
+    """The totals of each conversation. A workspace conversation names its
+    workspace. The answer holds ids, slugs, titles, and counts: no person and
+    no message."""
+    conversations = []
+    for row in await repo.usage_by_conversation(since):
+        slug = row.get("workspace_slug")
+        conversations.append(
+            {
+                "conversation_id": str(row["conversation_id"]),
+                "workspace": (
+                    {"slug": slug, "title": row.get("workspace_title") or ""} if slug else None
+                ),
+                "calls": int(row["calls"]),
+                "input": int(row["input"]),
+                "output": int(row["output"]),
+                "cache_read": int(row["cache_read"]),
+                "cache_write": int(row["cache_write"]),
+            }
+        )
+    return {"days": days, "conversations": conversations}
+
+
 async def _answer(request: Request, clock: Clock) -> JSONResponse:
     days = _parse_days(request.query_params.get("days"))
     if days is None:
@@ -146,6 +174,13 @@ async def _answer(request: Request, clock: Clock) -> JSONResponse:
     ctx = request.app.state.ctx
     timezone = ctx.settings.timezone
     since = window_start(clock(), timezone, days)
+    group = request.query_params.get("group")
+    if group == "conversation":
+        return JSONResponse(await _by_conversation(ctx.repo, since, days))
+    if group:
+        return JSONResponse(
+            {"error": "invalid request", "detail": "group must be conversation"}, status_code=422
+        )
     rows = await ctx.repo.usage_rows(since, timezone)
     body = summarize(rows, timezone=timezone, days=days, features=usage_features(ctx.settings))
     return JSONResponse(body.model_dump())

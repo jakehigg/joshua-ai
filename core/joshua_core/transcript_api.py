@@ -2,7 +2,8 @@
 
 A chat client calls this route to show the messages of a conversation. The
 callers are ``channels`` and ``laptop``. The query names the channel and, for a
-conversation with one person, the person. The route never creates a
+conversation with one person, the person. A workspace thread is the channel
+``workspace:<id or slug>`` with its owner as the person. The route never creates a
 conversation: an unknown one answers ``200`` with no messages.
 
 Each message carries only the ``meta`` keys in ``SAFE_META_KEYS``:
@@ -82,6 +83,17 @@ def build_transcript_router() -> APIRouter:
         person_id = (person or "").strip() or None
 
         repo = request.app.state.ctx.repo
+        if channel_id.startswith("workspace:"):
+            # The name after the colon is the id or the slug of a workspace of
+            # the person. Another person's workspace is as good as none.
+            workspace = (
+                await repo.find_workspace(person_id, channel_id.split(":", 1)[1])
+                if person_id
+                else None
+            )
+            if workspace is None:
+                return JSONResponse({"conversation_id": None, "messages": [], "next_before": None})
+            channel_id = workspace.channel_id
         conversation = await repo.find_conversation(channel_id, person_id)
         if conversation is None:
             return JSONResponse({"conversation_id": None, "messages": [], "next_before": None})

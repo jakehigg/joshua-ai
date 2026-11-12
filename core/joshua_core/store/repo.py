@@ -8,16 +8,25 @@ channel adapters own the platform-specific policy.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection
 from datetime import date, datetime
 from typing import Any
+from uuid import UUID, uuid4
 
 import psycopg
 from joshua_shared.log import get_logger
 from psycopg.types.json import Json
 
 from joshua_core.store.db import Database
-from joshua_core.store.models import Channel, Conversation, Person, Task
+from joshua_core.store.models import (
+    Channel,
+    Conversation,
+    Person,
+    Task,
+    Workspace,
+    WorkspaceItem,
+)
 from joshua_core.store.transcript import (
     BLANK_CHARS,
     FAILED_STATUS,
@@ -37,6 +46,18 @@ logger = get_logger("store.repo")
 
 # The most rows one ``transcript_page`` call returns.
 TRANSCRIPT_PAGE_MAX = 200
+
+# The channel type of a workspace thread. Its channel id is ``workspace:<id>``.
+WORKSPACE_CHANNEL_TYPE = "workspace"
+# The columns that ``update_workspace`` may change.
+WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "status")
+_SLUG_MAX = 48
+
+
+def slugify(title: str) -> str:
+    """A lower-case slug of ``title``: letters and digits, joined by ``-``."""
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:_SLUG_MAX].strip("-")
+    return slug or "workspace"
 
 
 def _channel(row: dict[str, Any]) -> Channel:
@@ -84,6 +105,38 @@ def _task(row: dict[str, Any]) -> Task:
         last_run_at=row.get("last_run_at"),
         last_error=row.get("last_error"),
         created_at=row.get("created_at"),
+    )
+
+
+def _workspace(row: dict[str, Any]) -> Workspace:
+    return Workspace(
+        id=str(row["id"]),
+        slug=row["slug"],
+        title=row["title"],
+        owner=row["owner"],
+        goal=row.get("goal") or "",
+        notes=row.get("notes") or "",
+        servers=tuple(row.get("servers") or ()),
+        model=row.get("model"),
+        notify=row.get("notify") or "none",
+        status=row.get("status") or "active",
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
+    )
+
+
+def _workspace_item(row: dict[str, Any]) -> WorkspaceItem:
+    return WorkspaceItem(
+        id=str(row["id"]),
+        workspace_id=str(row["workspace_id"]),
+        kind=row["kind"],
+        ref=row["ref"],
+        title=row.get("title") or "",
+        url=row.get("url"),
+        added_by=row.get("added_by") or "agent",
+        added_at=row.get("added_at"),
+        pinned=bool(row.get("pinned")),
+        seen=bool(row.get("seen", True)),
     )
 
 
@@ -382,12 +435,15 @@ class Repo:
         Sets ``sdk_session_id = NULL`` and ``session_started_on = today`` for each
         conversation whose ``session_started_on`` is before ``today`` or never
         stamped. The next turn starts a fresh SDK session; continuity comes from
-        the profile and recent posts in the system prompt. Returns the row count.
+        the profile and recent posts in the system prompt. A workspace
+        conversation is skipped: its block and its context cap give it
+        continuity. Returns the row count.
         """
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "UPDATE conversations SET sdk_session_id = NULL, session_started_on = %s "
-                "WHERE session_started_on IS NULL OR session_started_on < %s",
+                "WHERE (session_started_on IS NULL OR session_started_on < %s) "
+                "AND channel_id NOT LIKE 'workspace:%%'",
                 (today, today),
             )
             return cur.rowcount
@@ -1017,6 +1073,268 @@ class Repo:
                 ORDER BY 1 DESC, 2, 3, 4
                 """,
                 (timezone, since),
+            )
+            return await cur.fetchall()
+
+    # --- workspaces --------------------------------------------------------
+
+    async def create_workspace(
+        self,
+        owner: str,
+        title: str,
+        *,
+        goal: str = "",
+        model: str | None = None,
+        servers: Collection[str] = (),
+        notify: str = "none",
+    ) -> Workspace:
+        """Create a workspace, its channel ``workspace:<id>`` (type ``workspace``,
+        a direct thread of the owner), and its conversation.
+
+        The slug comes from the title and is made unique among the owner's
+        workspaces with a number.
+        """
+        base = slugify(title)
+        workspace_id = str(uuid4())
+        row: dict[str, Any] | None = None
+        for attempt in range(1, 50):
+            slug = base if attempt == 1 else f"{base}-{attempt}"
+            try:
+                async with self._pool.connection() as conn:
+                    cur = await conn.execute(
+                        """
+                        INSERT INTO workspaces
+                            (id, slug, title, owner, goal, servers, model, notify)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING *
+                        """,
+                        (
+                            workspace_id,
+                            slug,
+                            title,
+                            owner,
+                            goal,
+                            Json(list(servers)),
+                            model,
+                            notify,
+                        ),
+                    )
+                    row = await cur.fetchone()
+                break
+            except psycopg.errors.UniqueViolation:
+                continue
+        if row is None:
+            raise ValueError("no free slug for this title")
+        workspace = _workspace(row)
+        await self.upsert_channel(
+            workspace.channel_id,
+            WORKSPACE_CHANNEL_TYPE,
+            display_name=title,
+            default_person_id=owner,
+        )
+        await self.get_or_create_conversation(workspace.channel_id, owner)
+        return workspace
+
+    async def get_workspace(self, workspace_id: str) -> Workspace | None:
+        try:
+            UUID(str(workspace_id))
+        except ValueError:
+            return None
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT * FROM workspaces WHERE id = %s", (workspace_id,))
+            row = await cur.fetchone()
+        return _workspace(row) if row else None
+
+    async def find_workspace(self, owner: str, ref: str) -> Workspace | None:
+        """The workspace of ``owner`` that ``ref`` names: its id or its slug.
+        Another person's workspace is never found."""
+        ref = (ref or "").strip()
+        if not ref:
+            return None
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM workspaces WHERE owner = %s AND slug = %s", (owner, ref)
+            )
+            row = await cur.fetchone()
+        if row:
+            return _workspace(row)
+        found = await self.get_workspace(ref)
+        return found if found is not None and found.owner == owner else None
+
+    async def list_workspaces(self, owner: str, status: str | None = None) -> list[Workspace]:
+        sql = "SELECT * FROM workspaces WHERE owner = %s"
+        args: list[Any] = [owner]
+        if status is not None:
+            sql += " AND status = %s"
+            args.append(status)
+        sql += " ORDER BY updated_at DESC, slug"
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, tuple(args))
+            rows = await cur.fetchall()
+        return [_workspace(r) for r in rows]
+
+    async def update_workspace(self, workspace_id: str, **fields: Any) -> Workspace | None:
+        """Change the given fields of a workspace. ``fields`` are among
+        ``WORKSPACE_FIELDS``; a name outside raises ``ValueError``."""
+        unknown = set(fields) - set(WORKSPACE_FIELDS)
+        if unknown:
+            raise ValueError(f"cannot update {sorted(unknown)}")
+        if not fields:
+            return await self.get_workspace(workspace_id)
+        sets = []
+        args: list[Any] = []
+        for name, value in fields.items():
+            sets.append(f"{name} = %s")
+            args.append(Json(list(value)) if name == "servers" else value)
+        args.append(workspace_id)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                f"UPDATE workspaces SET {', '.join(sets)}, updated_at = now() "
+                "WHERE id = %s RETURNING *",
+                tuple(args),
+            )
+            row = await cur.fetchone()
+        return _workspace(row) if row else None
+
+    async def list_workspace_items(
+        self, workspace_id: str, *, unseen_only: bool = False
+    ) -> list[WorkspaceItem]:
+        """The items of a workspace, pinned first, then newest first."""
+        sql = "SELECT * FROM workspace_items WHERE workspace_id = %s"
+        if unseen_only:
+            sql += " AND NOT seen"
+        sql += " ORDER BY pinned DESC, added_at DESC, id"
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (workspace_id,))
+            rows = await cur.fetchall()
+        return [_workspace_item(r) for r in rows]
+
+    async def add_workspace_item(
+        self,
+        workspace_id: str,
+        kind: str,
+        ref: str,
+        title: str,
+        *,
+        url: str | None = None,
+        added_by: str = "agent",
+        seen: bool = True,
+    ) -> WorkspaceItem:
+        """Add an item. An item with the same kind and ref gets the new title
+        and url, and keeps its pin."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                INSERT INTO workspace_items (workspace_id, kind, ref, title, url, added_by, seen)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (workspace_id, kind, ref) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    url = COALESCE(EXCLUDED.url, workspace_items.url),
+                    seen = workspace_items.seen AND EXCLUDED.seen
+                RETURNING *
+                """,
+                (workspace_id, kind, ref, title, url, added_by, seen),
+            )
+            row = await cur.fetchone()
+            await conn.execute(
+                "UPDATE workspaces SET updated_at = now() WHERE id = %s", (workspace_id,)
+            )
+        return _workspace_item(row)
+
+    async def update_workspace_item(
+        self,
+        workspace_id: str,
+        item_id: str,
+        *,
+        pinned: bool | None = None,
+        seen: bool | None = None,
+    ) -> WorkspaceItem | None:
+        try:
+            UUID(str(item_id))
+        except ValueError:
+            return None
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE workspace_items
+                SET pinned = COALESCE(%s, pinned), seen = COALESCE(%s, seen)
+                WHERE id = %s AND workspace_id = %s
+                RETURNING *
+                """,
+                (pinned, seen, item_id, workspace_id),
+            )
+            row = await cur.fetchone()
+        return _workspace_item(row) if row else None
+
+    async def delete_workspace_item(self, workspace_id: str, item_id: str) -> bool:
+        try:
+            UUID(str(item_id))
+        except ValueError:
+            return False
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "DELETE FROM workspace_items WHERE id = %s AND workspace_id = %s",
+                (item_id, workspace_id),
+            )
+            return cur.rowcount > 0
+
+    async def mark_items_seen(self, item_ids: Collection[str]) -> None:
+        if not item_ids:
+            return
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                "UPDATE workspace_items SET seen = TRUE WHERE id = ANY(%s::uuid[])",
+                (list(item_ids),),
+            )
+
+    async def clear_sdk_session(self, conversation_id: str) -> None:
+        """Forget the SDK session of a conversation. The next turn starts a new one."""
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                "UPDATE conversations SET sdk_session_id = NULL WHERE id = %s",
+                (conversation_id,),
+            )
+
+    async def main_conversation(self, person_id: str) -> Conversation | None:
+        """The person's main thread: the most recently active conversation that
+        is not a workspace and not a voice thread, on a direct channel
+        (``session_mode`` ``per_person``). Send to
+        ``conversation.last_channel_id or conversation.channel_id``."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT c.* FROM conversations c
+                JOIN channels ch ON ch.id = c.channel_id
+                WHERE c.person_id = %s
+                  AND ch.session_mode = 'per_person'
+                  AND ch.channel_type NOT IN ('workspace', 'voice')
+                ORDER BY c.last_active_at DESC
+                LIMIT 1
+                """,
+                (person_id,),
+            )
+            row = await cur.fetchone()
+        return _conversation(row) if row else None
+
+    async def usage_by_conversation(self, since: datetime) -> list[dict[str, Any]]:
+        """The sums of `usage_event` since `since`, for each conversation, with
+        the slug and the title of its workspace when it belongs to one."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT u.conversation_id, c.channel_id, w.slug AS workspace_slug,
+                       w.title AS workspace_title,
+                       SUM(u.calls) AS calls, SUM(u.input) AS input, SUM(u.output) AS output,
+                       SUM(u.cache_read) AS cache_read, SUM(u.cache_write) AS cache_write
+                FROM usage_event u
+                LEFT JOIN conversations c ON c.id = u.conversation_id
+                LEFT JOIN workspaces w ON c.channel_id = 'workspace:' || w.id::text
+                WHERE u.at >= %s AND u.conversation_id IS NOT NULL
+                GROUP BY u.conversation_id, c.channel_id, w.slug, w.title
+                ORDER BY SUM(u.input + u.output + u.cache_read + u.cache_write) DESC,
+                         u.conversation_id
+                """,
+                (since,),
             )
             return await cur.fetchall()
 

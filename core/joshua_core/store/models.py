@@ -73,3 +73,63 @@ class Task:
     last_run_at: datetime | None = None
     last_error: str | None = None
     created_at: datetime | None = None
+
+
+# The kinds of item a workspace links to.
+WORKSPACE_ITEM_KINDS = (
+    "document",
+    "artifact",
+    "plan",
+    "wiki",
+    "tasks_project",
+    "task",
+    "assignment",
+    "developer_task",
+    "pr",
+    "link",
+    "file",
+)
+WORKSPACE_NOTIFY = ("none", "questions", "questions+finishes")
+WORKSPACE_STATUSES = ("active", "paused", "archived")
+
+
+@dataclass(frozen=True)
+class Workspace:
+    """One place in Chat for a large piece of work. The thread of a workspace is
+    the conversation of the channel ``workspace:<id>``."""
+
+    id: str
+    slug: str
+    title: str
+    owner: str
+    goal: str = ""
+    notes: str = ""
+    servers: tuple[str, ...] = ()
+    # None keeps the model of the chat job.
+    model: str | None = None
+    notify: str = "none"
+    status: str = "active"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @property
+    def channel_id(self) -> str:
+        return f"workspace:{self.id}"
+
+
+@dataclass(frozen=True)
+class WorkspaceItem:
+    """One link of a workspace: a document, a plan, a page, an outside link."""
+
+    id: str
+    workspace_id: str
+    kind: str
+    ref: str
+    title: str
+    url: str | None = None
+    added_by: str = "agent"
+    added_at: datetime | None = None
+    pinned: bool = False
+    # False for an item that came from normal chat and that the workspace has
+    # not yet seen in its block.
+    seen: bool = True

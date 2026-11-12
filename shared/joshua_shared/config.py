@@ -922,6 +922,49 @@ class UsageConfig(_Model):
         return _callers(value)
 
 
+class WorkspacesConfig(_Model):
+    """Workspaces: a place in Chat for one large piece of work (see
+    ``docs/workspaces.md``). Core serves ``/v1/workspaces`` and runs each
+    workspace thread. Nothing changes until a workspace exists.
+
+    ``allowed_callers`` names the fleet identities that may call
+    ``/v1/workspaces``. The caller vouches for the person with the ``person``
+    query parameter. An empty list turns the routes off. ``models`` is the
+    list of models a workspace may pick; an empty list accepts any name.
+    ``context_cap`` is the input size, in tokens, over which a workspace turn
+    ends its SDK session: the next turn starts from the workspace block and
+    the last rows of the thread. ``tool_search_max_servers`` is the number of
+    picked servers up to which a workspace turn runs with tool search off.
+    ``viewer_url`` is the public address of the viewer, for the link that
+    ``send_to_normal_chat`` adds.
+    """
+
+    allowed_callers: list[str] = ["viewer"]
+    models: list[str] = []
+    context_cap: int = Field(default=150_000, ge=1_000)
+    tool_search_max_servers: int = Field(default=3, ge=0)
+    viewer_url: str | None = None
+
+    @field_validator("allowed_callers", "models", mode="before")
+    @classmethod
+    def _empty_is_none(cls, value: Any) -> Any:
+        return _empty_list(value)
+
+    @field_validator("allowed_callers")
+    @classmethod
+    def _lower_callers(cls, value: list[str]) -> list[str]:
+        return _callers(value)
+
+    @field_validator("viewer_url", mode="before")
+    @classmethod
+    def _check_viewer_url(cls, value: Any) -> Any:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        if not isinstance(value, str):
+            raise ValueError("viewer_url must be text")
+        return _check_base_url(value.strip())
+
+
 class LimitsConfig(_Model):
     """Core's view of the Claude subscription limits: ``GET /v1/limits`` and
     the ``check_limits`` tool.
@@ -1368,12 +1411,13 @@ class JoshuaConfig(_Model):
     modules: list[str] = []
     viewer: Viewer = Viewer()
     usage: UsageConfig = UsageConfig()
+    workspaces: WorkspacesConfig = WorkspacesConfig()
     limits: LimitsConfig = LimitsConfig()
     inference: Inference = Inference()
     gateway: GatewayConfig = GatewayConfig()
     assignments: Assignments = Assignments()
 
-    @field_validator("limits", "gateway", "assignments", mode="before")
+    @field_validator("limits", "gateway", "assignments", "workspaces", mode="before")
     @classmethod
     def _empty_limits(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.
