@@ -219,7 +219,7 @@ describe("the head of an assignment", () => {
       "14",
       "sonnet",
     ]);
-    expect(document.title).toEqual("Clean up the docs");
+    await waitFor(() => expect(document.title).toEqual("Clean up the docs"));
   });
 
   it("names the assignments in the crumbs", async () => {
