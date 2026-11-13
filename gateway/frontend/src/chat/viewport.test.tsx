@@ -188,6 +188,75 @@ describe("useKeyboardFit", () => {
     vi.useRealTimers();
   });
 
+  describe("the room above the keyboard", () => {
+    const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";
+    function ua(value: string) {
+      vi.spyOn(navigator, "userAgent", "get").mockReturnValue(value);
+    }
+    function composer(bottom: number) {
+      document.body.innerHTML = '<div class="chat-screen"><form class="composer"></form></div>';
+      const el = document.querySelector(".composer") as HTMLElement;
+      el.getBoundingClientRect = () => ({ top: bottom - 50, bottom }) as DOMRect;
+    }
+    afterEach(() => {
+      document.body.innerHTML = "";
+      window.history.replaceState(null, "", "/");
+      sessionStorage.clear();
+    });
+
+    it("lifts the composer by the overlap it measures", () => {
+      ua("Mozilla/5.0 (X11; Linux x86_64) Chrome/120");
+      const vv = new FakeViewport();
+      install(vv);
+      composer(520);
+      render(<Probe />);
+      act(() => vv.move(480, 0));
+      expect(root.style.getPropertyValue("--kb-extra")).toBe("44px");
+      composer(480);
+      act(() => vv.move(480, 0));
+      expect(root.style.getPropertyValue("--kb-extra")).toBe("0px");
+    });
+
+    it("adds the iOS allowance only while the keyboard is open, and kbpad tunes it", () => {
+      ua(IPHONE);
+      window.history.replaceState(null, "", "/?kbpad=60");
+      const vv = new FakeViewport();
+      install(vv);
+      composer(400);
+      render(<Probe />);
+      expect(root.style.getPropertyValue("--kb-extra")).toBe("0px");
+      act(() => vv.move(480, 0));
+      expect(root.style.getPropertyValue("--kb-extra")).toBe("60px");
+    });
+
+    it("uses 44px on iOS with no query, and none off iOS", () => {
+      ua(IPHONE);
+      const vv = new FakeViewport();
+      install(vv);
+      composer(400);
+      const { unmount } = render(<Probe />);
+      act(() => vv.move(480, 0));
+      expect(root.style.getPropertyValue("--kb-extra")).toBe("44px");
+      act(() => vv.move(800, 0));
+      expect(root.style.getPropertyValue("--kb-extra")).toBe("0px");
+      unmount();
+      expect(root.style.getPropertyValue("--kb-extra")).toBe("");
+    });
+
+    it("shows the debug readout only with ?debug=vv", () => {
+      const vv = new FakeViewport();
+      install(vv);
+      const { unmount } = render(<Probe />);
+      expect(document.querySelector("[data-vv-debug]")).toBeNull();
+      unmount();
+      window.history.replaceState(null, "", "/?debug=vv");
+      render(<Probe />);
+      const box = document.querySelector("[data-vv-debug]") as HTMLElement;
+      expect(box.style.pointerEvents).toBe("none");
+      expect(box.textContent).toContain("kb-open false");
+    });
+  });
+
   it("does nothing where there is no visualViewport", () => {
     install(undefined);
     render(<Probe />);

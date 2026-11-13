@@ -6,6 +6,10 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The chat composer stays above the iPhone keyboard.** The chat measures the
+  composer while the keyboard is up and lifts it above the keyboard bar. On
+  iOS it keeps at least 44px free; `?kbpad=60` sets another value. Open the
+  chat with `?debug=vv` to see the viewport numbers on screen.
 - **The installed app picks up a new build.** The service worker now carries
   an id of the build, so each deploy installs a new worker and drops the old
   cache. The app checks for it on resume, on focus, when the network returns,

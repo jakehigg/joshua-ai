@@ -1491,6 +1491,10 @@ html.vv-fit .j-shell.fill {
   top: var(--vv-top, 0px);
   height: var(--vvh);
 }
+html.vv-fit.kb-open .j-shell.fill {
+  box-sizing: border-box;
+  padding-bottom: var(--kb-extra, 0px);
+}
 html.vv-fit .chat-screen .ws-overlay {
   inset: auto;
   top: var(--vv-top, 0px);
