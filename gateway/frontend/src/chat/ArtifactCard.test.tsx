@@ -31,18 +31,18 @@ describe("parseArtifact", () => {
   });
 
   it("takes an .html artifact and keeps its extension", () => {
-    expect(parseArtifact("documents/jake/dining-room-panel-mockup.html")).toEqual({
-      path: "documents/jake/dining-room-panel-mockup.html",
-      slug: "dining-room-panel-mockup",
-      url: "/documents/jake/dining-room-panel-mockup",
+    expect(parseArtifact("documents/alex/garden-plan-mockup.html")).toEqual({
+      path: "documents/alex/garden-plan-mockup.html",
+      slug: "garden-plan-mockup",
+      url: "/documents/alex/garden-plan-mockup",
     });
   });
 
   it("shows a card, not the missing line, for an .html artifact fence", () => {
     viewer(() => json(META));
-    const c = card("documents/jake/dining-room-panel-mockup.html");
+    const c = card("documents/alex/garden-plan-mockup.html");
     expect(c.querySelector(".artifact-card")).not.toBeNull();
-    expect(c.querySelector(".artifact-path")?.textContent).toBe("documents/jake/dining-room-panel-mockup.html");
+    expect(c.querySelector(".artifact-path")?.textContent).toBe("documents/alex/garden-plan-mockup.html");
     expect(c.textContent).not.toContain(MISSING_LINE);
   });
 

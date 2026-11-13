@@ -154,7 +154,7 @@ describe("useTurn", () => {
   });
 
   it("gives the real .html path of an html artifact fence", async () => {
-    const answer = "here\n\n```artifact\ndocuments/jake/dining-room-panel-mockup.html\n```\n";
+    const answer = "here\n\n```artifact\ndocuments/alex/garden-plan-mockup.html\n```\n";
     const s = stream([sse("done", { turn_id: "t1", text: answer, tools: ["write_document"] })]);
     fakeFetch(new Response(s.body, { status: 200 }));
     const { hook, onArtifact } = setup();
@@ -162,7 +162,7 @@ describe("useTurn", () => {
       hook.result.current.turn.send("make the mockup");
     });
     await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
-    expect(onArtifact.mock.calls).toEqual([["documents/jake/dining-room-panel-mockup.html"]]);
+    expect(onArtifact.mock.calls).toEqual([["documents/alex/garden-plan-mockup.html"]]);
   });
 
   it("gives no path when the answer has no artifact fence, or not a document path", async () => {

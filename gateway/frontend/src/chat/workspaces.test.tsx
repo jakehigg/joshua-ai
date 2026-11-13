@@ -193,9 +193,9 @@ describe("the item panel", () => {
     const photo = item({
       id: "p1",
       kind: "file",
-      ref: "wiki/attachments/2026/11/epaper.jpg",
+      ref: "wiki/attachments/2026/11/garden.jpg",
       title: "An e-paper display",
-      url: "/api/v1/files/wiki/attachments/2026/11/epaper.jpg",
+      url: "/api/v1/files/wiki/attachments/2026/11/garden.jpg",
     });
     const pdf = item({ id: "p2", kind: "file", ref: "wiki/attachments/bill.pdf", title: "Bill", url: "/api/v1/files/wiki/attachments/bill.pdf" });
     viewer({ "GET /api/v1/workspaces/solar/items": { items: [photo, pdf] } });
@@ -210,7 +210,7 @@ describe("the item panel", () => {
   });
 
   it("opens a photo item in the image view of the panel", async () => {
-    const photo = item({ id: "p1", kind: "file", ref: "a.jpg", title: "Display", url: "/api/v1/files/wiki/a.jpg" });
+    const photo = item({ id: "p1", kind: "file", ref: "a.jpg", title: "Garden bed", url: "/api/v1/files/wiki/a.jpg" });
     viewer({ "GET /api/v1/workspaces/solar/items": { items: [photo] } });
     function Both() {
       const state = useDocumentPanelState();
@@ -224,7 +224,7 @@ describe("the item panel", () => {
       );
     }
     render(<Both />);
-    fireEvent.click(await screen.findByRole("button", { name: "Display" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Garden bed" }));
     expect(screen.getByTestId("view").textContent).toBe("/api/v1/files/wiki/a.jpg");
   });
 

@@ -24,8 +24,8 @@ function item(over: Partial<WorkspaceItem>): WorkspaceItem {
 }
 
 const ITEMS = [
-  item({ id: "a", kind: "document", ref: "documents/jake/smoke-test-note", title: "Smoke note", url: "/documents/jake/smoke-test-note" }),
-  item({ id: "h", kind: "artifact", ref: "documents/jake/dining-room-panel-mockup.html", title: "Mockup", url: "/documents/jake/dining-room-panel-mockup" }),
+  item({ id: "a", kind: "document", ref: "documents/alex/garden-plan", title: "Garden plan", url: "/documents/alex/garden-plan" }),
+  item({ id: "h", kind: "artifact", ref: "documents/alex/garden-plan-mockup.html", title: "Mockup", url: "/documents/alex/garden-plan-mockup" }),
   item({ id: "b", kind: "wiki", ref: "w", title: "Menu notes", url: "/wiki/menu.md" }),
   item({ id: "c", kind: "pr", ref: "p", title: "Fix the thing", url: "https://github.com/a/b/pull/1" }),
   item({ id: "d", kind: "tasks_project", ref: "trip-plan", title: "Trip plan" }),
@@ -157,8 +157,8 @@ describe("sheets on the chat screen", () => {
   it("opens a document item in the panel, closes the items, and Escape closes the panel", async () => {
     await open();
     fireEvent.click(document.querySelector(".ws-header-actions button") as HTMLButtonElement);
-    fireEvent.click(await screen.findByRole("button", { name: "Smoke note", hidden: true }));
-    expect(frame()?.getAttribute("src")).toBe("/documents/jake/smoke-test-note?embed=1");
+    fireEvent.click(await screen.findByRole("button", { name: "Garden plan", hidden: true }));
+    expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan?embed=1");
     expect(document.querySelector(".items.open")).toBeNull();
     expect(frame()?.hasAttribute("sandbox")).toBe(false);
     fireEvent.keyDown(document, { key: "Escape" });
@@ -297,7 +297,7 @@ describe("the item column and the panel", () => {
   it("steps aside while the panel is open, keeps the saved fold, and comes back", async () => {
     await open();
     expect(items().className).not.toContain("collapsed");
-    fireEvent.click(await screen.findByRole("button", { name: "Smoke note", hidden: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "Garden plan", hidden: true }));
     expect(items().className).toContain("collapsed");
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").items ?? false).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Close the document" }));
@@ -306,7 +306,7 @@ describe("the item column and the panel", () => {
 
   it("closes the panel when Items is opened on purpose", async () => {
     await open();
-    fireEvent.click(await screen.findByRole("button", { name: "Smoke note", hidden: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "Garden plan", hidden: true }));
     fireEvent.click(document.querySelector(".items-toggle") as HTMLButtonElement);
     expect(document.querySelector(".doc-panel")).toBeNull();
     expect(items().className).not.toContain("collapsed");
@@ -315,6 +315,6 @@ describe("the item column and the panel", () => {
   it("opens an .html artifact with its real path", async () => {
     await open();
     fireEvent.click(await screen.findByRole("button", { name: "Mockup", hidden: true }));
-    expect(frame()?.getAttribute("src")).toBe("/documents/jake/dining-room-panel-mockup?embed=1");
+    expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan-mockup?embed=1");
   });
 });

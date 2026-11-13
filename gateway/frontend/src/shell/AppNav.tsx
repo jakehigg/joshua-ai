@@ -45,8 +45,8 @@ function iconOf(key: string): string {
 }
 
 /**
- * One item of the navigation. A section this app renders is a router link; a
- * section the server still renders is a plain link, so the browser loads the
+ * One item of the navigation. A section that is a route of this app is a
+ * router link; any other section is a plain link, so the browser loads the
  * page.
  */
 function NavItem({

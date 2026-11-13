@@ -315,17 +315,17 @@ describe("a document that is not there", () => {
   });
 });
 
-const YAML = "```yaml\nesphome:\n  name: dining-room\nlogger:\n  level: DEBUG\n```";
+const YAML = "```yaml\nserver:\n  name: web\nlogger:\n  level: DEBUG\n```";
 
 const CODE_DOC: DocumentData = {
   ...DOC,
-  title: "Dining room panel",
+  title: "Server settings",
   kind: "artifact",
   blocks: [
-    { id: "L1", kind: "p", depth: 0, markdown: "Flash it once.", first_line: 1, last_line: 1 },
+    { id: "L1", kind: "p", depth: 0, markdown: "Set it once.", first_line: 1, last_line: 1 },
     { id: "L3", kind: "code", depth: 0, markdown: YAML, first_line: 3, last_line: 8 },
   ],
-  lines: ["Flash it once.", "", "```yaml", "esphome:", "  name: dining-room", "logger:", "  level: DEBUG", "```"],
+  lines: ["Set it once.", "", "```yaml", "server:", "  name: web", "logger:", "  level: DEBUG", "```"],
 };
 
 describe("the embed mode", () => {
@@ -376,7 +376,7 @@ describe("the embed mode", () => {
     expect(order[0]).toContain("d-codefirst");
     const notes = screen.getByText("Notes").closest("details") as HTMLDetailsElement;
     expect(notes.open).toBe(false);
-    expect(notes.textContent).toContain("Flash it once.");
+    expect(notes.textContent).toContain("Set it once.");
   });
 });
 
@@ -399,7 +399,7 @@ describe("code on the document page", () => {
   it("is highlighted, on the full page too", async () => {
     stubDoc(json(CODE_DOC));
     page();
-    await screen.findByText("Dining room panel");
+    await screen.findByText("Server settings");
     expect(document.querySelector("pre code.language-yaml .hljs-attr")).not.toBeNull();
     expect(document.querySelector(".j-crumbs")).not.toBeNull();
   });

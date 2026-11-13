@@ -5,7 +5,7 @@
 // ArtifactCard.tsx):
 //
 //   ```artifact
-//   documents/jake/plan.md
+//   documents/alex/plan.md
 //   ```
 //
 // An old answer can also end with a `speech` block, the short spoken version

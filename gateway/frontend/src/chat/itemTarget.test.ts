@@ -18,33 +18,33 @@ function item(over: Partial<WorkspaceItem>): WorkspaceItem {
 
 describe("itemTarget", () => {
   it("opens a document by its ref, with or without .md or .html", () => {
-    for (const ref of ["documents/jake/smoke-test-note.md", "documents/jake/smoke-test-note"]) {
+    for (const ref of ["documents/alex/garden-plan.md", "documents/alex/garden-plan"]) {
       expect(itemTarget(item({ kind: "document", ref }))).toEqual({
         type: "document",
         artifact: {
-          path: "documents/jake/smoke-test-note.md",
-          slug: "smoke-test-note",
-          url: "/documents/jake/smoke-test-note",
+          path: "documents/alex/garden-plan.md",
+          slug: "garden-plan",
+          url: "/documents/alex/garden-plan",
         },
       });
     }
   });
 
   it("keeps .html for an artifact, from its ref or its kind", () => {
-    expect(itemTarget(item({ kind: "artifact", ref: "documents/jake/dining-room-panel-mockup.html", url: "/documents/jake/dining-room-panel-mockup" }))).toEqual({
+    expect(itemTarget(item({ kind: "artifact", ref: "documents/alex/garden-plan-mockup.html", url: "/documents/alex/garden-plan-mockup" }))).toEqual({
       type: "document",
       artifact: {
-        path: "documents/jake/dining-room-panel-mockup.html",
-        slug: "dining-room-panel-mockup",
-        url: "/documents/jake/dining-room-panel-mockup",
+        path: "documents/alex/garden-plan-mockup.html",
+        slug: "garden-plan-mockup",
+        url: "/documents/alex/garden-plan-mockup",
       },
     });
-    const byUrl = itemTarget(item({ kind: "artifact", ref: "odd", url: "/documents/jake/x" }));
-    expect(byUrl).toMatchObject({ type: "document", artifact: { path: "documents/jake/x.html" } });
+    const byUrl = itemTarget(item({ kind: "artifact", ref: "odd", url: "/documents/alex/x" }));
+    expect(byUrl).toMatchObject({ type: "document", artifact: { path: "documents/alex/x.html" } });
   });
 
   it("opens a document by its url when the ref says nothing", () => {
-    const target = itemTarget(item({ kind: "artifact", ref: "odd", url: "/documents/jake/smoke-test-note" }));
+    const target = itemTarget(item({ kind: "artifact", ref: "odd", url: "/documents/alex/garden-plan" }));
     expect(target?.type).toBe("document");
   });
 
@@ -85,12 +85,12 @@ describe("itemTarget", () => {
 });
 
 describe("a photo item", () => {
-  const url = "/api/v1/files/wiki/attachments/2026/11/epaper.jpg";
+  const url = "/api/v1/files/wiki/attachments/2026/11/garden.jpg";
 
   it("opens as an image in the panel", () => {
-    expect(itemTarget(item({ kind: "file", ref: "wiki/attachments/2026/11/epaper.jpg", title: "Display", url }))).toEqual({
+    expect(itemTarget(item({ kind: "file", ref: "wiki/attachments/2026/11/garden.jpg", title: "Garden bed", url }))).toEqual({
       type: "image",
-      image: { url, title: "Display" },
+      image: { url, title: "Garden bed" },
     });
     expect(isImageItem(item({ kind: "file", ref: "x.PNG", url }))).toBe(true);
   });

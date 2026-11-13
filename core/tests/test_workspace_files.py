@@ -60,7 +60,7 @@ def described(monkeypatch: pytest.MonkeyPatch) -> None:
             mime=kwargs["mime"],
             original_name="IMG_1.jpg",
             sha256=sha256_file(abs_path),
-            description=Description(kind="photo", subject="an e-paper display", slug="epaper"),
+            description=Description(kind="photo", subject="a garden bed", slug="garden"),
             received_at="2026-11-09T14:05:09+00:00",
         )
         write_meta(abs_path, meta)
@@ -112,7 +112,7 @@ async def test_a_photo_on_a_workspace_thread_is_one_file_item(
     (workspace_id, kind, ref), item = next(iter(repo.items.items()))
     assert (workspace_id, kind) == ("w1", "file")
     assert ref.startswith("people/alex/attachments/2026/11/") and ref.endswith(".jpg")
-    assert item["title"] == "an e-paper display"
+    assert item["title"] == "a garden bed"
     assert item["added_by"] == "person"
     assert item["url"] == "/api/v1/files/attachments/2026/11/" + ref.rsplit("/", 1)[1]
 

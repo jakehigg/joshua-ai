@@ -1,10 +1,9 @@
 /**
- * The search field of the app bar, on every page of the app.
+ * The search field of the search page. The app bar has no search field.
  *
  * A submit goes to `/search?q=<query>` with the router, so no page load
  * happens: the search page reads the address and asks
- * `GET /api/v1/search?q=`. The markup and the classes are the ones of the app
- * bar the server renders, so the field looks the same on both.
+ * `GET /api/v1/search?q=`.
  *
  * `query` is the query of the address, which the search page passes back, so
  * the field holds what the page shows.

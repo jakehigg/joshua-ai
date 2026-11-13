@@ -560,7 +560,7 @@ def test_exclude_paths_map_documents_and_wiki_pages() -> None:
         _item(kind="document", ref="solar-quote"),
         _item(kind="document", ref="documents/alex/plan-b.md", title="B"),
         _item(kind="document", ref="x", url="https://v.example/documents/alex/from-url?v=1"),
-        _item(kind="wiki", ref="homelab/solar.md"),
+        _item(kind="wiki", ref="notes/solar.md"),
         _item(kind="wiki", ref="wiki/garden"),
         _item(kind="link", ref="https://example.org/a"),
     ]
@@ -569,7 +569,7 @@ def test_exclude_paths_map_documents_and_wiki_pages() -> None:
         "documents/alex/plan-b.md",
         "documents/alex/x.md",
         "documents/alex/from-url.md",
-        "wiki/homelab/solar.md",
+        "wiki/notes/solar.md",
         "wiki/garden.md",
     }
 

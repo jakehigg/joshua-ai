@@ -92,19 +92,19 @@ describe("getDocumentMeta", () => {
       json({ title: "Pumpkin soup", kind: "artifact", status: "draft", updated: "2026-02-01T10:00:00Z", body: "no" }),
     );
     vi.stubGlobal("fetch", fetch);
-    expect(await getDocumentMeta("/documents/sam/pumpkin-soup")).toEqual({
+    expect(await getDocumentMeta("/documents/alex/pumpkin-soup")).toEqual({
       title: "Pumpkin soup",
       kind: "artifact",
       status: "draft",
       updated: "2026-02-01T10:00:00Z",
     });
     // The viewer's own route for the document.
-    expect(fetch).toHaveBeenCalledWith("/documents/sam/pumpkin-soup.json", expect.anything());
+    expect(fetch).toHaveBeenCalledWith("/documents/alex/pumpkin-soup.json", expect.anything());
   });
 
   it("reads a key that is not a string as empty", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ title: 7, updated: null })));
-    expect(await getDocumentMeta("/documents/sam/notes")).toEqual({
+    expect(await getDocumentMeta("/documents/alex/notes")).toEqual({
       title: "",
       kind: "",
       status: "",
@@ -115,14 +115,14 @@ describe("getDocumentMeta", () => {
   // A card and a panel show nothing of a failure, so every failure is null.
   it("gives null for a 404, a body that is not JSON, a failed call, and an abort", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ error: "not found" }, 404)));
-    expect(await getDocumentMeta("/documents/sam/notes")).toBeNull();
+    expect(await getDocumentMeta("/documents/alex/notes")).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>", { status: 200 })));
-    expect(await getDocumentMeta("/documents/sam/notes")).toBeNull();
+    expect(await getDocumentMeta("/documents/alex/notes")).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
-    expect(await getDocumentMeta("/documents/sam/notes")).toBeNull();
+    expect(await getDocumentMeta("/documents/alex/notes")).toBeNull();
     const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(abort)));
-    expect(await getDocumentMeta("/documents/sam/notes")).toBeNull();
+    expect(await getDocumentMeta("/documents/alex/notes")).toBeNull();
   });
 });
 

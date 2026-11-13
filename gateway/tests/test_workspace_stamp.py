@@ -253,9 +253,9 @@ def _text_only(payload: dict) -> CallToolResult:
         (
             "joshua",
             "write_page",
-            {"path": "homelab/solar.md", "markdown": "x"},
-            {"path": "homelab/solar.md", "bytes": 4, "overwritten": False, "committed": True},
-            [("wiki", "homelab/solar.md", "", "/wiki/homelab/solar.md")],
+            {"path": "projects/solar.md", "markdown": "x"},
+            {"path": "projects/solar.md", "bytes": 4, "overwritten": False, "committed": True},
+            [("wiki", "projects/solar.md", "", "/wiki/projects/solar.md")],
         ),
         (
             "tasks",

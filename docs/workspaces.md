@@ -379,7 +379,7 @@ session.
 | `workspaces.tool_search_max_servers` | `3` | Servers up to which a workspace runs with tool search off. |
 | `workspaces.viewer_url` | none | The public address of the viewer, for the link in `send_to_normal_chat`. |
 | `workspaces.hint_sim` | `0.70` | The similarity over which normal chat gets the line "May relate to workspace X". |
-| `workspaces.tasks_url` | none | The address of the tasks addon, for "Next steps" in the block. Without it, the section is off. Kubernetes: `http://tasks:8000` in this cluster. The docker compose file has no tasks service, so it sets nothing. |
+| `workspaces.tasks_url` | none | The address of the tasks addon, for "Next steps" in the block. Without it, the section is off. Kubernetes: `http://tasks:8000`. The docker compose file has no tasks service, so it sets nothing. |
 
 Each `mcp:` server can have a `description`, one line (200 characters at most)
 that the new workspace dialog shows beside the name.

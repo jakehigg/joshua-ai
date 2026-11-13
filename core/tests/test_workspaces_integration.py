@@ -236,11 +236,11 @@ async def test_main_conversation_is_the_latest_direct_non_workspace_thread(seede
     ws = await seeded.create_workspace("alex", "Trip")  # newest, but a workspace
     await seeded.upsert_channel("telegram:1", "telegram", session_mode="per_person")
     await seeded.upsert_channel("telegram:-9", "telegram", session_mode="shared")
-    await seeded.upsert_channel("voice:kitchen", "voice", session_mode="per_person")
+    await seeded.upsert_channel("voice:room-1", "voice", session_mode="per_person")
     await seeded.upsert_channel("cli:alex", "cli", session_mode="per_person")
     old = await seeded.get_or_create_conversation("telegram:1", "alex")
     await seeded.get_or_create_conversation("telegram:-9", None)
-    await seeded.get_or_create_conversation("voice:kitchen", "alex")
+    await seeded.get_or_create_conversation("voice:room-1", "alex")
     await seeded.get_or_create_conversation("cli:alex", "alex")  # the terminal is never main
     await seeded.touch_conversation(
         (await seeded.find_conversation(f"workspace:{ws.id}", "alex")).id
@@ -637,9 +637,9 @@ async def test_the_gateway_records_an_item_by_id_with_no_person(client, seeded) 
     bare = await client.post(
         path,
         headers=_h(GATEWAY),
-        json={"kind": "wiki", "ref": "homelab/solar.md", "title": "", "added_by": "tool:joshua"},
+        json={"kind": "wiki", "ref": "notes/solar.md", "title": "", "added_by": "tool:joshua"},
     )
-    assert bare.json()["title"] == "homelab/solar.md"
+    assert bare.json()["title"] == "notes/solar.md"
 
 
 async def test_the_by_id_route_checks_the_caller_the_workspace_and_the_body(client) -> None:
@@ -729,10 +729,10 @@ async def test_the_workspaces_source_is_indexed_for_its_owner_and_hidden_from_re
 
 async def test_a_file_item_added_twice_is_one_item_and_keeps_its_title(seeded) -> None:
     ws = await seeded.create_workspace("alex", "Trip")
-    path = "wiki/attachments/2026/11/epaper-1.jpg"
-    url = "/api/v1/files/wiki/attachments/2026/11/epaper-1.jpg"
+    path = "wiki/attachments/2026/11/garden-1.jpg"
+    url = "/api/v1/files/wiki/attachments/2026/11/garden-1.jpg"
     first = await seeded.add_workspace_item(
-        ws.id, "file", path, "an e-paper display", url=url, added_by="person", rename=False
+        ws.id, "file", path, "a garden bed", url=url, added_by="person", rename=False
     )
     # The agent adds the same file with no title of its own: nothing changes.
     again = await seeded.add_workspace_item(
@@ -740,4 +740,4 @@ async def test_a_file_item_added_twice_is_one_item_and_keeps_its_title(seeded) -
     )
     assert again.id == first.id
     items = await seeded.list_workspace_items(ws.id)
-    assert [(i.title, i.url) for i in items] == [("an e-paper display", url)]
+    assert [(i.title, i.url) for i in items] == [("a garden bed", url)]
