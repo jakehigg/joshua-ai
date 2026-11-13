@@ -212,7 +212,8 @@ describe("useKeyboardFit", () => {
       render(<Probe />);
       act(() => vv.move(480, 0));
       expect(root.style.getPropertyValue("--kb-extra")).toBe("44px");
-      composer(480);
+      // The lift moved it up by 44, so the unpadded bottom is 480: no overlap.
+      composer(436);
       act(() => vv.move(480, 0));
       expect(root.style.getPropertyValue("--kb-extra")).toBe("0px");
     });

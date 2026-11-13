@@ -1,10 +1,9 @@
 // The text box and the Send button, in one rounded pill: the paperclip inside
 // at the left, the round send button (an up arrow) inside at the right.
 //
-// On a fine pointer (a mouse or trackpad), Enter sends and Shift+Enter
-// adds a new line. On a coarse pointer (a touch screen), Enter adds a new
-// line and only the button sends. The box grows from 1 to MAX_ROWS rows, then
-// scrolls. The hidden file input is out of the tab order, so the keyboard's
+// Enter sends and Shift+Enter adds a new line, on every device, a touch
+// screen too. Enter does not send while an IME composition is in progress.
+// The box is one line when empty and grows to MAX_ROWS rows, then scrolls. The hidden file input is out of the tab order, so the keyboard's
 // "next field" arrow on a phone does not stop at it. A text
 // over MAX_CHARS characters cannot be sent; the counter shows past
 // COUNTER_FROM characters. The length is counted as the backend counts it:
@@ -33,11 +32,6 @@ export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // The box stops growing at this many lines and scrolls (index.css, max-height).
 export const MAX_ROWS = 5;
 export const FILE_ACCEPT = "image/*,application/pdf";
-
-function finePointer(): boolean {
-  if (typeof window.matchMedia !== "function") return true;
-  return window.matchMedia("(pointer: fine)").matches;
-}
 
 export function charCount(text: string): number {
   return Array.from(text.trim()).length;
@@ -123,7 +117,12 @@ export function Composer({ onSend, busy }: Props) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    // The CSS max-height holds the box at 8 rows; past that it scrolls.
+    // Empty: no inline height, so the CSS one-line height holds. Otherwise
+    // the text height; the CSS max-height stops it at MAX_ROWS rows.
+    if (text === "") {
+      el.style.height = "";
+      return;
+    }
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
@@ -164,8 +163,8 @@ export function Composer({ onSend, busy }: Props) {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
-    if (!finePointer()) return;
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     e.preventDefault();
     submit();
   };

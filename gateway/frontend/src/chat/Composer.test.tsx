@@ -39,14 +39,39 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("does not send on Enter with a coarse pointer; the button sends", () => {
+  it("sends on Enter with a coarse pointer too", () => {
     pointer(false);
-    const { onSend, box, send } = setup();
+    const { onSend, box } = setup();
     fireEvent.change(box, { target: { value: "hello" } });
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(onSend).not.toHaveBeenCalled();
-    fireEvent.click(send);
     expect(onSend).toHaveBeenCalledWith("hello", null);
+  });
+
+  it("leaves Shift+Enter to the browser on touch: no send, no prevented default", () => {
+    pointer(false);
+    const { onSend, box } = setup();
+    fireEvent.change(box, { target: { value: "hello" } });
+    const notPrevented = fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+    expect(notPrevented).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not send on Enter during an IME composition", () => {
+    const { onSend, box } = setup();
+    fireEvent.change(box, { target: { value: "hello" } });
+    fireEvent.keyDown(box, { key: "Enter", keyCode: 229 });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("is one row when empty, and grows with its text", () => {
+    const { box } = setup();
+    expect(box.rows).toBe(1);
+    expect(box.style.height).toBe("");
+    Object.defineProperty(box, "scrollHeight", { value: 96, configurable: true });
+    fireEvent.change(box, { target: { value: "a\nb\nc" } });
+    expect(box.style.height).toBe("96px");
+    fireEvent.change(box, { target: { value: "" } });
+    expect(box.style.height).toBe("");
   });
 
   it("does not send empty or blank text", () => {

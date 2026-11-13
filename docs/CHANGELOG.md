@@ -6,6 +6,9 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The chat composer is one line when empty, and Enter sends on every device.**
+  The box grows with the text up to five lines. Enter sends, also on a phone;
+  Shift+Enter adds a new line.
 - **The chat composer stays above the iPhone keyboard.** The chat measures the
   composer while the keyboard is up and lifts it above the keyboard bar. On
   iOS it keeps at least 44px free; `?kbpad=60` sets another value. Open the
