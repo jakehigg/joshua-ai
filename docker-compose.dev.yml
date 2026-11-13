@@ -43,8 +43,7 @@ services:
       dockerfile: assignments/Dockerfile
 
   # `make validate-dev` checks joshua.yaml with the core image of this build.
+  # It has no build of its own: `make validate-dev` builds `core` first, so
+  # the tag always holds the image that `core` runs.
   validate:
     image: joshua-ai-core:dev
-    build:
-      context: .
-      dockerfile: core/Dockerfile

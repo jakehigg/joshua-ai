@@ -96,9 +96,11 @@ nuke:
 validate: joshua.yaml
 	$(COMPOSE) run --rm -T validate
 
-# The same check with the core image of this checkout.
+# The same check with the core image of this checkout. It builds `core` first,
+# because `validate` runs that image.
 validate-dev: joshua.yaml
-	$(DEV) run --rm -T --build validate
+	$(DEV) build core
+	$(DEV) run --rm -T validate
 
 # Talk to Joshua. Set AS to a person id from joshua.yaml.
 #   make chat AS=alex              open a session
