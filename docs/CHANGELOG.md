@@ -22,9 +22,9 @@ with the images and the packaged chart, are at
 - After a reset, the rows of the person are shown whole up to 2000
   characters, and the session is told to use `search_history` and
   `read_history` for the exact words of an earlier message.
-- The workspace prompt asks for direct replies. Joshua says what a tool or an
-  internal name is the first time it comes up, marks each step as the
-  person's or its own, and checks the state before it asks the person.
+- The workspace prompt asks for direct replies. Joshua writes for a person
+  who did not watch the work, explains a name the person may not know, says
+  whose each step is, and checks with a tool before it asks the person.
 
 ## 0.3.0 - 2026-11-13
 
