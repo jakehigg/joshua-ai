@@ -142,6 +142,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
+| `POST /admin/people/{id}/role` | `ADMIN_CALLERS` | `{"role"}` (`member`, `guest`, or `owner`) | `{"person": …}` with only the role changed, `400 {"error": …}` for another role, `404` for a person who is not on the roster |
+| `POST /admin/people/{id}/remove` | `ADMIN_CALLERS` | | `{"removed": true, "id"}`. The handles and the sign-in secret go; the data dirs and the transcripts stay. `404` for a person who is not on the roster. |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
 | `POST /admin/sessions/flush` | `ADMIN_CALLERS` | | `{"flushed": n}` |
 | `GET /admin/transcript/{conversation}?limit=` | `ADMIN_CALLERS` | | `{"conversation_id", "rows": […]}` |
