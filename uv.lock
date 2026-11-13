@@ -766,6 +766,7 @@ name = "joshua-core"
 version = "0.0.0"
 source = { editable = "core" }
 dependencies = [
+    { name = "bcrypt" },
     { name = "claude-agent-sdk" },
     { name = "fastapi" },
     { name = "fastembed" },
@@ -777,6 +778,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "bcrypt", specifier = ">=4.0" },
     { name = "claude-agent-sdk", specifier = ">=0.2.165" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "fastembed", specifier = ">=0.3" },

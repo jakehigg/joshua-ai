@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from joshua_core.store.db import Database
+from joshua_core.store.repo import AUTH_IMPORT_MARKER_ID
 from joshua_core.store.seed import seed_people
 from joshua_shared import config as config_module
 
@@ -31,6 +32,16 @@ people:
     handles:
       telegram: "112233"
 """
+
+
+async def _auth_updated_at(repo, person_id: str) -> datetime:
+    """The ``updated_at`` of a person's secret. No repo method gives it, and no
+    route may, so the test reads the column itself."""
+    async with repo._pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT updated_at FROM auth_secret WHERE person_id = %s", (person_id,)
+        )
+        return (await cur.fetchone())["updated_at"]
 
 
 async def test_schema_applies_twice(db: Database) -> None:
@@ -92,6 +103,65 @@ async def test_reseed_updates_name_and_keeps_absent_person(repo) -> None:
 
     assert (await repo.get_person("alex")).display_name == "Jacob"
     assert (await repo.get_person("ghost")) is not None
+
+
+async def test_auth_secret_crud(repo) -> None:
+    cfg = config_module.parse(CONFIG_YAML)
+    await seed_people(repo, cfg)
+
+    assert await repo.get_auth_secret("alex") is None
+    assert await repo.list_auth_person_ids() == []
+    # A person with no secret is not listed, and deleting nothing is False.
+    assert await repo.delete_auth_secret("alex") is False
+
+    await repo.set_auth_secret("alex", "$2b$04$hash-one")
+    await repo.set_auth_secret("mia", "$2b$04$hash-mia")
+    assert await repo.get_auth_secret("alex") == "$2b$04$hash-one"
+    assert await repo.list_auth_person_ids() == ["alex", "mia"]
+
+    # The upsert replaces the hash and bumps updated_at.
+    first = await _auth_updated_at(repo, "alex")
+    await repo.set_auth_secret("alex", "$2b$04$hash-two")
+    assert await repo.get_auth_secret("alex") == "$2b$04$hash-two"
+    assert await _auth_updated_at(repo, "alex") >= first
+
+    assert await repo.delete_auth_secret("alex") is True
+    assert await repo.get_auth_secret("alex") is None
+    assert await repo.list_auth_person_ids() == ["mia"]
+
+
+async def test_auth_secret_cascades_on_a_hard_delete(repo) -> None:
+    cfg = config_module.parse(CONFIG_YAML)
+    await seed_people(repo, cfg)
+    await repo.set_auth_secret("alex", "$2b$04$hash-one")
+    await repo.set_auth_secret("mia", "$2b$04$hash-mia")
+
+    # remove_person keeps the row, so the secret stays.
+    await repo.remove_person("alex")
+    assert await repo.get_auth_secret("alex") == "$2b$04$hash-one"
+
+    # A hard delete of the person takes the secret with it.
+    async with repo._pool.connection() as conn:
+        await conn.execute("DELETE FROM people WHERE id = 'alex'")
+    assert await repo.get_auth_secret("alex") is None
+    assert await repo.list_auth_person_ids() == ["mia"]
+
+
+async def test_auth_import_marker_set_and_get(repo) -> None:
+    assert await repo.get_auth_import_marker() is None
+
+    await repo.set_auth_import_marker(3)
+    marker = await repo.get_auth_import_marker()
+    assert marker["id"] == AUTH_IMPORT_MARKER_ID
+    assert marker["rows_written"] == 3
+    assert marker["done_at"] is not None
+
+    # Setting it again replaces the one row.
+    await repo.set_auth_import_marker(5)
+    assert (await repo.get_auth_import_marker())["rows_written"] == 5
+    async with repo._pool.connection() as conn:
+        cur = await conn.execute("SELECT count(*) AS n FROM auth_import_marker")
+        assert (await cur.fetchone())["n"] == 1
 
 
 async def test_conversation_uniqueness(repo) -> None:

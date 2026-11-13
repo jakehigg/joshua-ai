@@ -23,6 +23,7 @@ from joshua_shared.log import get_logger, install_healthcheck_filter
 
 from joshua_core import limits as limits_module
 from joshua_core.admin import build_admin_router
+from joshua_core.auth_api import build_auth_router
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
 from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import injection, taught_skills, workspace_awareness
@@ -526,6 +527,7 @@ def build_app() -> FastAPI:
     app.add_api_route("/readyz", readyz, methods=["GET"])
     app.include_router(build_router())
     app.include_router(build_admin_router())
+    app.include_router(build_auth_router())
     app.include_router(build_search_router())
     app.include_router(build_transcript_router())
     app.include_router(build_usage_router())

@@ -236,6 +236,24 @@ CREATE TABLE IF NOT EXISTS workspace_items (
 -- Adding an item again updates the row.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_workspace_items_ref
     ON workspace_items (workspace_id, kind, ref);
+
+-- The secret of a person, for the sign-in of the viewer (see joshua_core.auth_api).
+-- Only the bcrypt hash is stored, and no route ever gives it back. A hard
+-- delete of a person takes the row with it.
+CREATE TABLE IF NOT EXISTS auth_secret (
+    person_id   TEXT PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE,
+    secret_hash TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- The marker of the one-time import of the viewer passwords into auth_secret.
+-- This schema has no key/value or meta table, so the import gets this small
+-- one of its own: one row, the id of the import.
+CREATE TABLE IF NOT EXISTS auth_import_marker (
+    id           TEXT PRIMARY KEY,
+    done_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    rows_written INT NOT NULL DEFAULT 0
+);
 """
 
 
