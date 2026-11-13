@@ -608,7 +608,7 @@ sends them for the person who started the assignment:
 |---|---|
 | `X-Joshua-Person` | the person id, or `unknown` |
 | `X-Joshua-Conversation` | the conversation id |
-| `X-Joshua-Role` | `member` or `guest` |
+| `X-Joshua-Role` | `member`, `owner`, or `guest`. Any other value is a 400. |
 | `X-Joshua-Group` | the group id, only for a group chat in `groups` |
 | `X-Joshua-Workspace` | the workspace id (a UUID), only for a workspace thread. The gateway sends it upstream as `_meta["joshua/workspace"]` of each tool call and records the items of the call. |
 

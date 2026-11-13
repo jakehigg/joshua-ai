@@ -24,6 +24,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from joshua_shared.config import is_member
+
 # The person id for a request core could not attribute to a known person. The
 # person is kept for the audit trail. It does not gate a path.
 UNKNOWN = "unknown"
@@ -82,11 +84,13 @@ def roots(data_root: Path, *, role: str) -> dict[str, Root]:
       person. Read-only through this server; ``channels`` owns the write.
     - ``shared``: the shared attachments. Read-only; ``core`` owns the write.
 
-    ``role`` is ``member`` or anything else. Anything else, including a missing
-    role and the literal ``unknown``, reads and writes nothing. That keeps the
+    ``role`` is a role that writes (``member`` or ``owner``, see
+    ``joshua_shared.config.is_member``) or anything else. Anything else,
+    including a missing role and the literal ``unknown``, reads and writes
+    nothing. That keeps the
     safe default: a request core could not attribute gets no write.
     """
-    member = role == MEMBER
+    member = is_member(role)
     return {
         "wiki": Root("wiki", data_root / "wiki", can_write=member, md_only=True),
         "people": Root("people", data_root / "people", can_write=False, md_only=False),

@@ -41,6 +41,7 @@ from typing import Any
 
 import mcp_types as types
 from joshua_shared import layout
+from joshua_shared.config import is_member
 from joshua_shared.contracts import assignment_of
 from joshua_shared.log import get_logger
 from mcp.server.lowlevel import Server
@@ -299,7 +300,7 @@ def build_documents_server(
         return Request(
             root_dir=root_dir,
             person=person,
-            member=role == MEMBER,
+            member=is_member(role),
             assignment=assignment_of(identity_ctx.get(), conversation_ctx.get()),
         )
 

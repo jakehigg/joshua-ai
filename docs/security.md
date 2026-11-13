@@ -196,7 +196,10 @@ still adds a person from chat, as the table says.
 ### What decides a write
 
 The gateway acts on the `X-Joshua-Role` header, which only the identities in
-`gateway.person_header_callers` may assert.
+`gateway.person_header_callers` may assert. The header holds one of the roles
+of the roster: `member`, `owner`, or `guest`. An `owner` writes exactly where
+a `member` writes, through every MCP server. The owner's extra authority is
+the roster under Admin → Users, and nothing else. Any other value is a 400.
 `X-Joshua-Person` rides along for the audit trail and decides nothing about a
 file.
 

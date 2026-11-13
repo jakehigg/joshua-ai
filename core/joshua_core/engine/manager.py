@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from joshua_shared import layout, wikigit
 from joshua_shared.attachments import AttachmentMeta, read_meta
-from joshua_shared.config import Group, JoshuaConfig
+from joshua_shared.config import Group, JoshuaConfig, is_member
 from joshua_shared.inference import ANTHROPIC_ENDPOINT, ResolvedInference
 from joshua_shared.log import get_logger
 
@@ -851,7 +851,7 @@ class ConversationManager:
                     meta,
                     data_root=self._data_dir,
                     auto_save=settings.auto_save,
-                    is_member=role == "member",
+                    is_member=is_member(role),
                 )
                 described[rel] = meta
             prepared.append(

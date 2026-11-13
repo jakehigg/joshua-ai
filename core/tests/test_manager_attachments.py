@@ -38,6 +38,9 @@ people:
   - id: sam
     name: Sam
     role: guest
+  - id: olive
+    name: Olive
+    role: owner
 attachments:
   auto_save: {auto_save}
 """
@@ -185,6 +188,26 @@ async def test_auto_save_moves_a_member_file_into_the_wiki(
     moved = next((tmp_path / "wiki/attachments/2026/09").glob("grocery-receipt-*.jpg"))
     assert moved.is_file()
     assert f"wiki/attachments/2026/09/{moved.name}" in manager._pool["c1"].session.prompts[-1]
+
+
+async def test_auto_save_moves_an_owner_file_into_the_wiki(
+    tmp_path: Path, described: list[dict[str, Any]]
+) -> None:
+    """An owner is a member, so auto-save files their attachment as well."""
+    repo = FakeRepo()
+    manager = _manager(repo, tmp_path, auto_save=True)
+    attachment = _stored(tmp_path, "people/olive/attachments/2026/09/2026-09-16-140509-IMG.jpg")
+
+    await manager.run_turn(
+        make_channel(),
+        make_conversation(person_id="olive"),
+        NO_CAPTION_TEXT,
+        attachments=[attachment],
+        person_id="olive",
+    )
+
+    moved = next((tmp_path / "wiki/attachments/2026/09").glob("grocery-receipt-*.jpg"))
+    assert moved.is_file()
 
 
 async def test_the_note_never_quotes_the_words_on_the_file(

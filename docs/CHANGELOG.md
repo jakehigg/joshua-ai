@@ -28,6 +28,25 @@ with the images and the packaged chart, are at
   nothing reads them again. The new [auth.md](auth.md) is the guide: what a
   person sees on each method, where the secret lives, what the owner does, and
   what the sign-in does not do.
+- **An owner is a member everywhere.** The gateway admits
+  `X-Joshua-Role: owner`, and the files and documents servers let an owner
+  write where a member writes. Before this, the gateway answered
+  `400 unknown role: owner` on every MCP route, so a session of the owner had
+  no gateway server at all. Core also files the attachments of an owner as
+  those of a member.
+- **Profile.** "Your page" is now "Profile", and the owner gets "Admin" under
+  it. On Profile a person changes their own PIN or password, their
+  instructions to Joshua, and their journal consent. Core serves
+  `GET` and `POST /people/<id>/profile`, and the viewer serves
+  `GET` and `POST /api/v1/profile`. Core writes the instructions to
+  `/data/people/<id>/prompt.md` and puts its path in the `prompt` of the
+  people file. Joshua reads a change on the next turn, with no restart.
+- **The people file overlays fields.** An entry of `/data/people.yaml` now
+  changes only the keys it holds on the entry of the same person in
+  `joshua.yaml`, and the handles of the two are the union. Before, the entry
+  replaced the whole person. So a role change under Admin → Users, or a save
+  on Profile, no longer hides a later change of name or handles in
+  `joshua.yaml`. A `role: removed` entry still removes the person.
 - **Upgrade notes for the sign-in.**
   - Give one person `role: owner` in `joshua.yaml`. Without an owner there is
     no Admin → Users; everything else runs, and `make validate` prints
