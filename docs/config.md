@@ -41,7 +41,8 @@ Each `people[]` entry takes:
   an owner writes the wiki, a journal entry, and their own profile. Give one
   person the role. `validate` prints `warning: no person has role 'owner'` when
   nobody is, and the file still loads: an instance with no owner runs, and
-  nobody manages the roster from the viewer.
+  nobody manages the roster from the viewer. See
+  [auth.md](auth.md#the-owner).
 - `handles`: a map of channel to handle. A value is one handle or a list of
   handles, because a person often has an email address and a phone number on
   iMessage. Every handle in the list names the person. The first one is the
@@ -1181,7 +1182,8 @@ reverse proxy in front for TLS, and keep the address on a network you trust.
 - `viewer.enabled`: `false` by default. The viewer refuses to start when it is
   false.
 - `viewer.auth.method`: `anonymous` (default), `pin`, or `password`. It is the
-  method of the whole instance, not of one person.
+  method of the whole instance, not of one person. [auth.md](auth.md) is the
+  guide: what each method shows a person, and what an operator sets up for it.
 
 ```yaml
 viewer:

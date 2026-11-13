@@ -13,14 +13,21 @@ with the images and the packaged chart, are at
   (the default) asks for nothing and leaves `viewer.anonymous` in charge, `pin`
   shows the people who can sign in and asks one of them for a PIN, and
   `password` asks for a person id and a password. Core holds every secret,
-  hashed, in the new `auth_secret` table and answers the viewer over its
-  `/auth/*` routes, so the viewer holds no password and there is no HTTP basic.
-  The new role `owner` is a member who also keeps the roster: under Admin →
-  Users the owner adds a person, sets a secret, changes a role, and takes a
-  person off the roster. `make validate` warns when no person is the owner, and
-  the file is still valid. `viewer.users` and `VIEWER_PASSWORDS` are retired:
-  core reads them one time, at the first start after this version, and nothing
-  reads them again.
+  hashed, in the new `auth_secret` table and answers the viewer over six new
+  routes: `POST /auth/verify`, `POST /auth/secret`, `POST /auth/secret/admin`,
+  `DELETE /auth/secret/<id>`, `GET /auth/people`, and
+  `GET /auth/people/<id>`. So the viewer holds no password of its own, and
+  HTTP basic is gone: no route asks for it, and no answer carries
+  `WWW-Authenticate`. The new role `owner` is a member who also keeps the
+  roster: under Admin → Users the owner adds a person, sets a secret, changes
+  a role, and takes a person off the roster, over core's three roster routes
+  `POST /admin/people`, `POST /admin/people/<id>/role`, and
+  `POST /admin/people/<id>/remove`. `make validate` warns when no person is the
+  owner, and the file is still valid. `viewer.users` and `VIEWER_PASSWORDS` are
+  retired: core reads them one time, at the first start after this version, and
+  nothing reads them again. The new [auth.md](auth.md) is the guide: what a
+  person sees on each method, where the secret lives, what the owner does, and
+  what the sign-in does not do.
 - **Upgrade notes for the sign-in.**
   - Give one person `role: owner` in `joshua.yaml`. Without an owner there is
     no Admin → Users; everything else runs, and `make validate` prints
@@ -31,8 +38,11 @@ with the images and the packaged chart, are at
   - The first start after this version imports the viewer passwords into core,
     once. It reads `viewer.users` from `joshua.yaml`, then `VIEWER_PASSWORDS`,
     then `VIEWER_PW_<ID>` from core's environment, writes a hash for each
-    person who has no secret yet, and marks itself done. It overwrites nothing,
-    it never runs again, and nobody has to sign in again after the upgrade.
+    person who has no secret yet, and marks itself done in a marker table of
+    its own, `auth_import_marker`. The marker, and not the state of the
+    secrets, is what stops it: a restart, a restored database, and a roster
+    whose secrets were all dropped never run it again. It overwrites nothing,
+    and nobody has to sign in again after the upgrade.
     Pass `VIEWER_PASSWORDS` to the `core` service for that one start when your
     passwords live in `.env` alone. Delete `viewer.users` and
     `VIEWER_PASSWORDS` afterwards; `make validate` warns while either is there.

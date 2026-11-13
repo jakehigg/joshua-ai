@@ -167,6 +167,7 @@ the `core` service of `docker-compose.yml`:
 
 Then run `docker compose up -d core`. Without this, the Users section shows
 core's refusal, and the rest of the viewer works as before.
+[auth.md](auth.md) is the guide to the sign-in of the viewer.
 
 ## 8. Give Joshua a new capability
 
@@ -226,6 +227,8 @@ find under `docs/`:
   background, and what to say to Joshua for each step.
 - [documents.md](documents.md): plans, reports, and artifacts that Joshua
   makes for you, and how you comment on them.
+- [auth.md](auth.md): how you sign in to the viewer, what the owner does, and
+  what to set up for it.
 - [operations.md](operations.md): logs, health, updates, backup, and the
   viewer, which is the web app for your notes.
 - [architecture.md](architecture.md) and [security.md](security.md): how the

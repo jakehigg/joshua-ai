@@ -251,6 +251,9 @@ comes from the person in the viewer, and Joshua only resolves one.
 
 ### The sign-in of the viewer
 
+[auth.md](auth.md) is the guide: what a person sees, what the owner does, and
+what the sign-in does not do.
+
 A person signs in on a page of the app, and the viewer holds no password of
 its own. Core owns the roster and every secret: a secret is a bcrypt hash in
 the `auth_secret` table, and the viewer checks one with

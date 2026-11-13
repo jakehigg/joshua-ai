@@ -50,6 +50,8 @@ subscription. You do not need Python, and you do not need a Telegram bot.
   the background. The guide is at the top.
 - [docs/documents.md](docs/documents.md): plans, reports, and artifacts that
   you read and comment on.
+- [docs/auth.md](docs/auth.md): how a person signs in to the viewer, and how
+  the owner keeps the people.
 - [docs/operations.md](docs/operations.md): health, logs, updates, backup, the viewer.
 - [docs/architecture.md](docs/architecture.md): the three containers.
 - [docs/security.md](docs/security.md): what the agent can and cannot reach.

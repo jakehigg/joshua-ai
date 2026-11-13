@@ -682,7 +682,9 @@ by the node stage of `gateway/Dockerfile` and carried in the gateway image,
 served at the root of the host behind its own sign-in page (or
 `viewer.anonymous`).
 Everything it shows comes from a JSON API under `/api/v1/`, with the same
-sign-in as the app.
+sign-in as the app. [auth.md](auth.md) opens with a guide to the sign-in:
+what a person sees on each method, what the owner does under Admin → Users,
+and what the sign-in does not do.
 
 Everybody who signs in reads. A member also writes: they edit any wiki page,
 make a new one, correct a journal entry, move a page to the trash, comment on
