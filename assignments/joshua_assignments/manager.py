@@ -62,7 +62,7 @@ from pathlib import Path
 from typing import Any
 
 from joshua_shared import config
-from joshua_shared.config import Assignments, JoshuaConfig, parse_duration
+from joshua_shared.config import Assignments, JoshuaConfig, is_member, parse_duration
 from joshua_shared.log import get_logger
 from pydantic import ValidationError
 
@@ -338,7 +338,7 @@ class Manager:
     def is_member(self, person: str) -> bool:
         """True when ``person`` is a member in ``joshua.yaml`` now."""
         found = self.load_config().person(person)
-        return found is not None and found.role == "member"
+        return found is not None and is_member(found.role)
 
     # --- start and stop ---------------------------------------------------
 

@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 from joshua_shared import layout
+from joshua_shared.config import is_member
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
@@ -70,7 +71,7 @@ async def _member_actor(deps: ToolDeps) -> Any:
     if not pid:
         return None
     person = await deps.repo.get_person(pid)
-    if person is None or person.role != "member":
+    if person is None or not is_member(person.role):
         return None
     return person
 

@@ -13,7 +13,7 @@ source of the list, and the sidebar reads it (``viewer_api.links``).
 from __future__ import annotations
 
 from joshua_shared import config
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -40,7 +40,7 @@ def sections(person: Person) -> list[dict[str, str]]:
 
     A section of ``PERSON_SECTIONS`` gets the id of the person on its URL.
     """
-    member = person.role == "member"
+    member = is_member(person.role)
     out: list[dict[str, str]] = []
     for key, label, url in SECTIONS:
         if not member and key in MEMBER_SECTIONS:

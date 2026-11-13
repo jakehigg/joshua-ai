@@ -40,6 +40,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from joshua_shared.config import is_member
 from joshua_shared.fleet_auth import identify_bearer, load_fleet_tokens
 from joshua_shared.gateway_mcp import allowed_gateway_servers
 from joshua_shared.item_url import check_item_url
@@ -144,7 +145,7 @@ def _person(request: Request) -> tuple[JSONResponse | None, str | None]:
     if not person_id:
         return JSONResponse({"error": "a person is required"}, status_code=400), None
     person = request.app.state.ctx.settings.person(person_id)
-    if person is None or person.role != "member":
+    if person is None or not is_member(person.role):
         return JSONResponse({"error": "unknown person"}, status_code=403), None
     return None, person.id
 

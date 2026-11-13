@@ -22,7 +22,15 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import strictyaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from joshua_shared.ids import PERSON_ID_PATTERN, PERSON_ID_RE
 from joshua_shared.log import CREDENTIAL_PREFIXES
@@ -81,6 +89,20 @@ class ConfigError(Exception):
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+# What ``JoshuaConfig._check_owner`` says about a roster with no owner.
+NO_OWNER_WARNING = "no person has role 'owner'"
+
+# The roles that write. An ``owner`` is a member with the authority to manage
+# the roster, so every check of "is this person a member" admits one. A
+# ``guest`` reads.
+MEMBER_ROLES = frozenset({"member", "owner"})
+
+
+def is_member(role: str | None) -> bool:
+    """True when ``role`` writes: ``member`` or ``owner``, never ``guest``."""
+    return role in MEMBER_ROLES
 
 
 class Person(_Model):
@@ -1228,6 +1250,17 @@ _TRUE_WORDS = frozenset({"1", "on", "t", "true", "y", "yes"})
 _FALSE_WORDS = frozenset({"0", "off", "f", "false", "n", "no"})
 
 
+class ViewerAuth(_Model):
+    """How the viewer asks a person to prove who they are.
+
+    ``anonymous`` (the default) asks for nothing: the viewer keeps the
+    behaviour of ``viewer.anonymous`` and ``viewer.users``. ``pin`` and
+    ``password`` ask the person for the secret core holds for them.
+    """
+
+    method: Literal["anonymous", "pin", "password"] = "anonymous"
+
+
 class Viewer(_Model):
     # The read-only web viewer. ``users`` maps a person id to a password
     # reference: a ``$2`` bcrypt hash, or a literal password, normally injected
@@ -1244,6 +1277,14 @@ class Viewer(_Model):
     # default) keeps sign-in required. A request that carries credentials is
     # still checked against ``users``, so a member can sign in by password too.
     anonymous: bool | str = False
+    # How a person signs in. See ``ViewerAuth``.
+    auth: ViewerAuth = ViewerAuth()
+
+    @field_validator("auth", mode="before")
+    @classmethod
+    def _empty_auth(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        return {} if value in (None, "") else value
 
     @field_validator("anonymous", mode="before")
     @classmethod
@@ -1442,11 +1483,34 @@ class JoshuaConfig(_Model):
     gateway: GatewayConfig = GatewayConfig()
     assignments: Assignments = Assignments()
 
+    # What is worth saying about this config without refusing to load it. The
+    # validate command prints each line; a container reads the config and runs.
+    _warnings: list[str] = PrivateAttr(default_factory=list)
+
     @field_validator("limits", "gateway", "assignments", "workspaces", mode="before")
     @classmethod
     def _empty_limits(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.
         return {} if value in (None, "") else value
+
+    @property
+    def warnings(self) -> list[str]:
+        """The warnings this config raised while it was validated."""
+        return list(self._warnings)
+
+    @model_validator(mode="after")
+    def _check_owner(self) -> JoshuaConfig:
+        """Warn, and never raise, when no person on the roster is the owner.
+
+        An instance with no owner runs: an owner passes every check a member
+        passes, so what is missing is the person who manages the roster, not a
+        capability. Raising here would stop every container of an instance
+        written before the role existed.
+        """
+        self._warnings = (
+            [] if any(person.role == "owner" for person in self.people) else [NO_OWNER_WARNING]
+        )
+        return self
 
     @model_validator(mode="after")
     def _check_unique(self) -> JoshuaConfig:
@@ -1880,6 +1944,8 @@ def _validate_cli(path: str) -> int:
         name for name in ("telegram", "imessage") if getattr(config.channels, name) is not None
     ]
     print(f"ok: {path}")
+    for warning in config.warnings:
+        print(f"  warning: {warning}")
     print(f"  people: {len(config.people)}")
     print(f"  channels enabled: {', '.join(channels) or 'none'}")
     print(f"  mcp servers: {', '.join(config.mcp) or 'none'}")

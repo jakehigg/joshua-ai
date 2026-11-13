@@ -84,7 +84,7 @@ import bcrypt
 import uvicorn
 import yaml
 from joshua_shared import config, log
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from joshua_shared.layout import is_hidden
 from joshua_shared.log import get_logger, install_healthcheck_filter
 from starlette.applications import Starlette
@@ -278,7 +278,7 @@ def _roots_for(person: Person) -> dict[str, Root]:
     """
     root = data_root()
     home = root / "people" / person.id
-    member = person.role == "member"
+    member = is_member(person.role)
     return {
         "wiki": Root("wiki", root / "wiki", can_write=member, md_only=True),
         "attachments": Root("attachments", home / "attachments", can_write=False, md_only=False),
@@ -375,7 +375,7 @@ def _artifact_not_found() -> Response:
 
 def _document(request: Request, person: Person) -> docstore.Document | None:
     """The document of the URL, when the person may read it."""
-    if person.role != "member":
+    if not is_member(person.role):
         return None
     base = docstore.root()
     if not base.is_dir():

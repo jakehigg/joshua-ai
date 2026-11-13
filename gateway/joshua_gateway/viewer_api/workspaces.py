@@ -22,7 +22,7 @@ import os
 from typing import Any
 
 import httpx
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from joshua_shared.http import FleetClient
 from joshua_shared.log import get_logger
 from starlette.requests import Request
@@ -59,7 +59,7 @@ async def _call(
     request: Request, person: Person, method: str, suffix: str, *, write: bool
 ) -> JSONResponse:
     """Check the person, the origin and the body, then call core."""
-    if person.role != "member":
+    if not is_member(person.role):
         return _error(FORBIDDEN, 403)
     if write and not _origin_ok(request):
         return _error(CROSS_SITE, 403)

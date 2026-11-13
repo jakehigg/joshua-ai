@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from joshua_shared import config as config_module
 from joshua_shared import layout, wikigit
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import JoshuaConfig, is_member
 from joshua_shared.log import get_logger, install_healthcheck_filter
 
 from joshua_core import limits as limits_module
@@ -395,7 +395,7 @@ def _build_memory(
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
     if memory.documents.enabled:
         sources[DOCUMENTS_SOURCE] = DocumentsSource(
-            data_dir, members=[p.id for p in settings.people if p.role == "member"]
+            data_dir, members=[p.id for p in settings.people if is_member(p.role)]
         )
         intervals[DOCUMENTS_SOURCE] = float(memory.index_interval_s)
     # One record for each active workspace, for the hint in normal chat.

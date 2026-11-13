@@ -19,7 +19,7 @@ import asyncio
 from typing import Any
 
 from joshua_shared.attachments import is_no_caption
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import JoshuaConfig, is_member
 from joshua_shared.log import get_logger
 
 from joshua_core.memory import embed as embed_module
@@ -105,7 +105,7 @@ def build_provider(repo: Repo, store: MemoryStore | None, settings: JoshuaConfig
     async def provider(ctx: Any) -> str | None:
         if ctx.channel.channel_type == WORKSPACE_CHANNEL_TYPE:
             return None
-        if ctx.channel.session_mode != "per_person" or getattr(ctx, "role", "guest") != "member":
+        if ctx.channel.session_mode != "per_person" or not is_member(getattr(ctx, "role", "guest")):
             return None
         person = ctx.conversation.person_id
         if not person:
