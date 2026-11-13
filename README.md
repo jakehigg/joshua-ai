@@ -119,10 +119,10 @@ when you change from one to the other.
 Joshua writes Markdown to a volume, so a text editor is enough to read it. The
 optional **viewer** is a web app for the same files: the wiki, which holds the
 journal and every profile, your attachments, your documents, your assignments,
-the usage, and a chat with Joshua. A person signs in with a password and
-reads. A member also writes: they edit any wiki page, make a new one, correct
-a journal entry, and move a page to the trash, which is the only way to delete
-a page, because the agent has no delete tool.
+the usage, and a chat with Joshua. A person signs in on the viewer's own
+sign-in page and reads. A member also writes: they edit any wiki page, make a
+new one, correct a journal entry, and move a page to the trash, which is the
+only way to delete a page, because the agent has no delete tool.
 
 It is off by default, and it holds no credential of its own. To turn it on,
 see [docs/operations.md](docs/operations.md#the-viewer).
