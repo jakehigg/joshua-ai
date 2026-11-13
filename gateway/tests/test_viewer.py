@@ -347,7 +347,9 @@ def test_readyz_needs_no_auth_and_leaks_no_name(client):
     assert response.status_code == 200
     body = response.json()
     assert body["enabled"] is True
-    assert body["users"] == 2
+    # The sign-in method, not a count of the retired viewer.users.
+    assert body["auth"] == "anonymous"
+    assert "users" not in body
     # No person name appears.
     assert "alex" not in response.text
 

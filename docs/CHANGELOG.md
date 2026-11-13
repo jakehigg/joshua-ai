@@ -6,73 +6,74 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
-- **The viewer has a sign-in page, and the owner keeps the people.** A person
-  signs in on a page of the app and gets one signed session cookie:
-  30 days with "remember this device", and the browser drops it when it closes
-  without. `viewer.auth.method` picks the method of the instance: `anonymous`
-  (the default) asks for nothing and leaves `viewer.anonymous` in charge, `pin`
-  shows the people who can sign in and asks one of them for a PIN, and
-  `password` asks for a person id and a password. Core holds every secret,
-  hashed, in the new `auth_secret` table and answers the viewer over six new
-  routes: `POST /auth/verify`, `POST /auth/secret`, `POST /auth/secret/admin`,
-  `DELETE /auth/secret/<id>`, `GET /auth/people`, and
-  `GET /auth/people/<id>`. So the viewer holds no password of its own, and
-  HTTP basic is gone: no route asks for it, and no answer carries
-  `WWW-Authenticate`. The new role `owner` is a member who also keeps the
-  roster: under Admin → Users the owner adds a person, sets a secret, changes
-  a role, and takes a person off the roster, over core's three roster routes
-  `POST /admin/people`, `POST /admin/people/<id>/role`, and
-  `POST /admin/people/<id>/remove`. `make validate` warns when no person is the
-  owner, and the file is still valid. `viewer.users` and `VIEWER_PASSWORDS` are
-  retired: core reads them one time, at the first start after this version, and
-  nothing reads them again. The new [auth.md](auth.md) is the guide: what a
-  person sees on each method, where the secret lives, what the owner does, and
-  what the sign-in does not do.
-- **An owner is a member everywhere.** The gateway admits
-  `X-Joshua-Role: owner`, and the files and documents servers let an owner
-  write where a member writes. Before this, the gateway answered
-  `400 unknown role: owner` on every MCP route, so a session of the owner had
-  no gateway server at all. Core also files the attachments of an owner as
-  those of a member.
-- **Profile.** "Your page" is now "Profile", and the owner gets "Admin" under
-  it. On Profile a person changes their own PIN or password, their
-  instructions to Joshua, and their journal consent. Core serves
-  `GET` and `POST /people/<id>/profile`, and the viewer serves
-  `GET` and `POST /api/v1/profile`. Core writes the instructions to
-  `/data/people/<id>/prompt.md` and puts its path in the `prompt` of the
-  people file. Joshua reads a change on the next turn, with no restart.
-- **The people file overlays fields.** An entry of `/data/people.yaml` now
-  changes only the keys it holds on the entry of the same person in
-  `joshua.yaml`, and the handles of the two are the union. Before, the entry
-  replaced the whole person. So a role change under Admin → Users, or a save
-  on Profile, no longer hides a later change of name or handles in
+- **The viewer has a sign-in page.** `viewer.auth.method` sets one method for
+  the instance. `anonymous` is the default. It asks for nothing, and
+  `viewer.anonymous` decides who a request is. `pin` shows the people who
+  have a secret and asks the person for a PIN. `password` asks for a person
+  id and a password. A PIN and a password are the same thing, one secret that
+  can be any string. "Remember this device" keeps the session cookie for 30
+  days. Without it, the browser drops the cookie when it closes. The files of
+  the app load with no cookie, because the sign-in form is a page of the app.
+  Every JSON route still needs the sign-in. See [auth.md](auth.md).
+- **Core keeps the secrets.** Core stores one salted hash for each person in
+  the new `auth_secret` table. The viewer calls six new routes of core:
+  `POST /auth/verify`, `POST /auth/secret`, `POST /auth/secret/admin`,
+  `DELETE /auth/secret/<id>`, `GET /auth/people`, and `GET /auth/people/<id>`.
+  The viewer holds no password. HTTP basic is gone, and no answer carries
+  `WWW-Authenticate`. A change of a secret, a reset, and a removal sign out
+  every other browser of that person within a minute.
+- **The owner keeps the roster.** `owner` is a new role. An owner is a member
+  everywhere, including every MCP server behind the gateway. The owner also
+  gets "Admin" in the navigation. Under Admin → Users the owner adds a person
+  with a secret, sets a secret, promotes or demotes a person, and removes a
+  person. Core serves three new roster routes: `POST /admin/people`,
+  `POST /admin/people/<id>/role`, and `POST /admin/people/<id>/remove`.
+  Nothing makes a person the owner except `role: owner` in `joshua.yaml`, or
+  another owner. `make validate` warns when no person is the owner, and the
+  file is still valid.
+- **Profile.** "Your page" is now "Profile", at `/me`. There a person changes
+  their own PIN or password, their instructions to Joshua, and their journal
+  consent. Core serves `GET` and `POST /people/<id>/profile`, and the viewer
+  serves `GET` and `POST /api/v1/profile`. Core writes the instructions to
+  `/data/people/<id>/prompt.md` and puts the path of that file in the
+  `prompt` of the person. A person cannot change their own name, role, or
+  handles.
+- **The people file overlays fields.** An entry of `/data/people.yaml`
+  changes only the keys that it holds on the same person in `joshua.yaml`.
+  The handles of the two are the union. Before, the entry replaced the whole
+  person, so one role change hid every later change of that person in
   `joshua.yaml`. A `role: removed` entry still removes the person.
+- **A change of a person applies on the next turn.** Core reads the `prompt`
+  and the `journal` of a person from the current config on each turn. Before,
+  core read them one time, at start.
+- **A text field shows one focus ring.** The wrapper of a field draws the
+  ring, and the control inside it draws none.
+- **`GET /readyz` of the viewer reports `auth`.** The field holds the sign-in
+  method. The `users` count of the retired `viewer.users` is gone.
 - **Upgrade notes for the sign-in.**
-  - Give one person `role: owner` in `joshua.yaml`. Without an owner there is
-    no Admin → Users; everything else runs, and `make validate` prints
-    `warning: no person has role 'owner'` and still exits 0.
-  - Add `viewer` to `ADMIN_CALLERS` on the `core` service
-    (`ADMIN_CALLERS: laptop,ci,viewer`), because core owns the roster. Without
-    it the Users section shows core's refusal on every write.
-  - The first start after this version imports the viewer passwords into core,
-    once. It reads `viewer.users` from `joshua.yaml`, then `VIEWER_PASSWORDS`,
-    then `VIEWER_PW_<ID>` from core's environment, writes a hash for each
-    person who has no secret yet, and marks itself done in a marker table of
-    its own, `auth_import_marker`. The marker, and not the state of the
-    secrets, is what stops it: a restart, a restored database, and a roster
-    whose secrets were all dropped never run it again. It overwrites nothing,
-    and nobody has to sign in again after the upgrade.
-    Pass `VIEWER_PASSWORDS` to the `core` service for that one start when your
-    passwords live in `.env` alone. Delete `viewer.users` and
-    `VIEWER_PASSWORDS` afterwards; `make validate` warns while either is there.
-  - A person with no secret is on the roster and cannot sign in. The owner sets
-    one under Admin → Users, or an operator runs
-    `docker compose exec core python -m joshua_core people auth-reset --id <id>
-    --secret <secret>`.
-  - `JOSHUA_VIEWER_SESSION_SECRET` on the viewer signs the cookies. With no
-    such variable the process mints a random key at start, so a restart signs
-    everybody out; set it to keep a sign-in across a restart, and share it
-    between replicas.
+  - Give one person `role: owner` in `joshua.yaml`.
+  - Add `viewer` to the admin callers of core, because core owns the roster.
+    In docker compose, set `ADMIN_CALLERS: laptop,ci,viewer` on the `core`
+    service. In the chart, set `core.adminCallers: laptop,ci,viewer`. Without
+    it, every write under Admin → Users shows the refusal of core.
+  - Set `JOSHUA_VIEWER_SESSION_SECRET` for the viewer. In the chart, add it to
+    the viewer Secret. With no such key, the viewer makes a new key at each
+    start, so a restart signs everybody out.
+  - The first start of core after the upgrade imports the old viewer
+    passwords one time. It reads `viewer.users` in `joshua.yaml`, then
+    `VIEWER_PASSWORDS` and `VIEWER_PW_<ID>` in the environment of core. It
+    writes a hash for each person who has no secret yet, and it overwrites
+    nothing. The `auth_import_marker` table records that the import ran, so
+    it never runs again. Core reads these variables from its own environment.
+    So put `VIEWER_PASSWORDS` on the `core` service, or in the core Secret of
+    the chart, for that one start. Then delete `viewer.users` and
+    `VIEWER_PASSWORDS`. `make validate` warns while either one is there.
+  - A person with no secret is on the roster and cannot sign in. On a `pin`
+    instance with no secret at all, the sign-in page shows the command that
+    sets the first one:
+    `python -m joshua_core people auth-reset --id <id> --secret '<secret>'`.
+    Run it in the core container. After that, the owner sets the other
+    secrets under Admin → Users.
   - The schema adds the tables `auth_secret` and `auth_import_marker`.
 - **Workspaces.** A workspace is a chat thread for one large piece of work,
   such as a trip, a house project, or a piece of code. It has a title, a goal,

@@ -375,7 +375,7 @@ async def readyz(request: Request) -> JSONResponse:
         {
             "ok": True,
             "enabled": cfg.viewer.enabled,
-            "users": len(cfg.viewer.users),
+            "auth": cfg.viewer.auth.method,
             "anonymous": cfg.viewer.anonymous is not False,
             "data": data_root().is_dir(),
             "core_search": search_mod.from_env(os.environ) is not None,
@@ -471,7 +471,7 @@ def main() -> None:
     logger.info(
         {
             "message": "viewer up",
-            "users": len(cfg.viewer.users),
+            "auth": cfg.viewer.auth.method,
             "anonymous": cfg.viewer.anonymous is not False,
         }
     )
