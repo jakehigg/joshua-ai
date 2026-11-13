@@ -1666,9 +1666,10 @@ class JoshuaConfig(_Model):
         """The role of a group chat, and the handle that lowered it.
 
         A group is a ``member`` chat only when ``members`` is not empty and every
-        handle in it names a person whose role is ``member``. Anything else is a
-        ``guest`` chat: an empty list admits anybody, and a handle that names
-        nobody carries no role to trust.
+        handle in it names a person who writes, a ``member`` or an ``owner``.
+        Anything else is a ``guest`` chat: an empty list admits anybody, and a
+        handle that names nobody carries no role to trust. A ``member`` chat is
+        never an ``owner`` chat: the roster belongs to one person, not to a chat.
 
         The whole chat carries one role, because a session cannot change its role
         for one turn. So one guest in a family chat stops Joshua writing for the
@@ -1680,7 +1681,7 @@ class JoshuaConfig(_Model):
             return "guest", None
         for handle in group.members:
             person = self.people_by_handle(group.channel, handle)
-            if person is None or person.role != "member":
+            if person is None or not is_member(person.role):
                 return "guest", handle
         return "member", None
 

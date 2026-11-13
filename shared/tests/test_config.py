@@ -385,6 +385,11 @@ people:
     role: guest
     handles:
       telegram: "222"
+  - id: robin
+    name: Robin
+    role: owner
+    handles:
+      telegram: "333"
 groups:
   - id: all-members
     channel: telegram
@@ -397,6 +402,12 @@ groups:
     members:
       - "111"
       - "222"
+  - id: with-owner
+    channel: telegram
+    chat_id: "-1005"
+    members:
+      - "111"
+      - "333"
   - id: open
     channel: telegram
     chat_id: "-1003"
@@ -420,6 +431,12 @@ def _group(cfg, group_id: str):
 def test_a_group_of_members_derives_member() -> None:
     cfg = _roles_cfg()
     assert cfg.group_role(_group(cfg, "all-members")) == ("member", None)
+
+
+def test_a_group_holding_an_owner_derives_member() -> None:
+    """An owner writes as a member does, so the chat is a member chat."""
+    cfg = _roles_cfg()
+    assert cfg.group_role(_group(cfg, "with-owner")) == ("member", None)
 
 
 def test_a_group_holding_a_guest_derives_guest() -> None:
