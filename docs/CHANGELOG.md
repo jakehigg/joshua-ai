@@ -28,14 +28,17 @@ with the images and the packaged chart, are at
   with a secret, sets a secret, promotes or demotes a person, and removes a
   person. Core serves three new roster routes: `POST /admin/people`,
   `POST /admin/people/<id>/role`, and `POST /admin/people/<id>/remove`.
-  Nothing makes a person the owner except `role: owner` in `joshua.yaml`,
-  another owner, or an operator with
-  `python -m joshua_core people role --id <id> --role owner`. The roster keeps
-  an owner: core refuses, with `409`, a change that demotes or removes the
-  only one, and the Users page turns off `Demote` and `Remove` on that row.
-  The viewer reaches the roster routes because it is one of core's
-  `AUTH_CALLERS`, and it gets no other admin route. `make validate` warns
-  when no person is the owner, and the file is still valid.
+  `make validate` warns when no person is the owner, and the file is still
+  valid.
+- **The roster always keeps an owner.** Core refuses, with `409`, a change
+  that demotes or removes the only owner. The Users page turns off `Demote`
+  and `Remove` on that row. Only three things make a person the owner:
+  `role: owner` in `joshua.yaml`, another owner, or an operator with
+  `python -m joshua_core people role --id <id> --role owner`.
+- **The viewer reaches the roster routes as an auth caller.** Core admits the
+  callers of `AUTH_CALLERS` (default `viewer`) on its four roster routes. The
+  viewer gets no other admin route, and it serves the roster to the owner
+  alone. You no longer add `viewer` to `ADMIN_CALLERS`.
 - **A person needs no handle.** `Add a person`, `POST /admin/people`, and
   `people add` take the handle as optional, so you can add a person who uses
   only the viewer and the terminal.
@@ -67,8 +70,8 @@ with the images and the packaged chart, are at
   one-shot `validate` service with the channel credentials and no network, so
   a channel with an empty credential no longer shows as enabled.
   `make validate-dev` runs the same check on your own build.
-- **`make restart`** restarts every container that runs, for a release and
-  for your own build.
+- **`make restart` restarts every container that runs.** It keeps each
+  image, so it works for a release and for your own build.
 - **Upgrade notes for the sign-in.**
   - Give one person `role: owner` in `joshua.yaml`.
   - In docker compose, run `make init-env` again. It adds
