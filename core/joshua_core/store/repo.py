@@ -422,6 +422,19 @@ class Repo:
             rows = await cur.fetchall()
         return [r["person_id"] for r in rows]
 
+    async def get_auth_updated_at(self, person_id: str) -> datetime | None:
+        """When a person's secret last changed, or None when they have none.
+
+        The viewer stamps its session cookie with this time, so a changed
+        secret signs out every cookie that carries the old one.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT updated_at FROM auth_secret WHERE person_id = %s", (person_id,)
+            )
+            row = await cur.fetchone()
+        return row["updated_at"] if row else None
+
     async def get_auth_import_marker(
         self, *, conn: psycopg.AsyncConnection | None = None
     ) -> dict[str, Any] | None:

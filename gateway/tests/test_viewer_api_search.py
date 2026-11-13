@@ -16,6 +16,7 @@ from typing import Any
 
 import httpx
 import pytest
+from conftest import ViewerSession, signed_in
 from joshua_gateway import viewer
 from joshua_gateway import viewer_search as search_mod
 from joshua_gateway.viewer_api import search as search_api
@@ -23,9 +24,9 @@ from joshua_shared import config
 from joshua_shared.contracts import SearchHit, SearchResponse
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
-SAM = ("sam", "sam-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
 VIEWER_TOKEN = "viewer-token"
 
 CONFIG = textwrap.dedent("""\
@@ -70,9 +71,6 @@ def data(monkeypatch, tmp_path) -> Path:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(root))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     monkeypatch.delenv(search_mod.CORE_URL_ENV, raising=False)
     monkeypatch.delenv(search_mod.VIEWER_TOKEN_ENV, raising=False)
     monkeypatch.setattr(config, "_cache", None)
@@ -105,7 +103,7 @@ def _with_core(monkeypatch, core: FakeCore) -> None:
     )
 
 
-def _search(query: str, auth: tuple[str, str] = ALEX) -> Any:
+def _search(query: str, auth: ViewerSession = ALEX) -> Any:
     response = TestClient(viewer.build_app()).get("/api/v1/search", params={"q": query}, auth=auth)
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"

@@ -8,14 +8,15 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from conftest import bad_cookie, signed_in
 from joshua_gateway import viewer, viewer_api
 from joshua_gateway.viewer_api import session as session_api
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
-SAM = ("sam", "sam-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -50,9 +51,6 @@ def _data(monkeypatch, tmp_path: Path, text: str) -> Path:
     cfg_path.write_text(text)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     return data
 
 
@@ -136,8 +134,8 @@ def test_the_session_is_json_and_never_cached(client) -> None:
 def test_the_session_needs_a_sign_in(client) -> None:
     response = client.get("/api/v1/session")
     assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Basic")
-    assert client.get("/api/v1/session", auth=("alex", "wrong")).status_code == 401
+    assert "WWW-Authenticate" not in response.headers
+    assert client.get("/api/v1/session", auth=bad_cookie()).status_code == 401
 
 
 def test_every_json_route_is_under_api_v1(data) -> None:

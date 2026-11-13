@@ -8,11 +8,12 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from conftest import bad_cookie, signed_in
 from joshua_gateway import viewer, viewer_spa
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
+ALEX = signed_in("alex")
 
 INDEX = "<!doctype html><html><body><div id=root></div></body></html>"
 
@@ -41,7 +42,6 @@ def _env(monkeypatch, tmp_path: Path, text: str) -> None:
     cfg_path.write_text(text)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
 
 
 def _build(monkeypatch, tmp_path: Path) -> Path:
@@ -124,8 +124,8 @@ def test_the_installed_app_gets_its_manifest_and_its_worker(client) -> None:
 def test_the_app_needs_the_same_sign_in_as_a_page(client) -> None:
     response = client.get("/me")
     assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Basic")
-    assert client.get("/me", auth=("alex", "wrong")).status_code == 401
+    assert "WWW-Authenticate" not in response.headers
+    assert client.get("/me", auth=bad_cookie()).status_code == 401
 
 
 def test_with_anonymous_the_app_opens(monkeypatch, tmp_path) -> None:

@@ -4,6 +4,7 @@ carries a hash. A fake repo stands in for the database."""
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -26,6 +27,7 @@ class FakeRepo:
     def __init__(self, people: list[str], secrets: dict[str, str]) -> None:
         self.people = {p: Person(id=p, display_name=p.title(), role="member") for p in people}
         self.secrets = dict(secrets)
+        self.stamps = {p: datetime(2026, 11, 1, 9, 0, tzinfo=UTC) for p in self.secrets}
 
     async def get_person(self, person_id: str) -> Person | None:
         return self.people.get(person_id)
@@ -35,12 +37,17 @@ class FakeRepo:
 
     async def set_auth_secret(self, person_id: str, secret_hash: str) -> None:
         self.secrets[person_id] = secret_hash
+        self.stamps[person_id] = datetime(2026, 11, 2, 10, 30, tzinfo=UTC)
 
     async def delete_auth_secret(self, person_id: str) -> bool:
+        self.stamps.pop(person_id, None)
         return self.secrets.pop(person_id, None) is not None
 
     async def list_auth_person_ids(self) -> list[str]:
         return sorted(self.secrets)
+
+    async def get_auth_updated_at(self, person_id: str) -> datetime | None:
+        return self.stamps.get(person_id)
 
 
 @pytest.fixture(autouse=True)
@@ -102,6 +109,7 @@ ROUTES = (
     ("POST", "/auth/secret/admin", {"person": "alex", "new_secret": "next"}),
     ("DELETE", "/auth/secret/alex", {}),
     ("GET", "/auth/people", {}),
+    ("GET", "/auth/people/alex", {}),
 )
 
 
@@ -256,6 +264,38 @@ def test_people_lists_only_the_people_with_a_secret(client) -> None:
     assert _call(client, "GET", "/auth/people").json() == {"people": ["mia"]}
 
 
+def test_the_people_list_carries_no_time(client) -> None:
+    """The viewer renders this list with no session, so when each person last
+    changed their secret is not in it."""
+    assert set(_call(client, "GET", "/auth/people").json()) == {"people"}
+
+
+# --- GET /auth/people/{person_id} ------------------------------------------
+
+
+def test_one_person_carries_when_their_secret_last_changed(client) -> None:
+    response = _call(client, "GET", "/auth/people/alex")
+    assert response.status_code == 200
+    assert response.json() == {"person": "alex", "updated_at": "2026-11-01T09:00:00+00:00"}
+
+
+def test_the_time_moves_when_the_secret_changes(client) -> None:
+    before = _call(client, "GET", "/auth/people/alex").json()["updated_at"]
+    _call(client, "POST", "/auth/secret", person="alex", secret=SECRET, new_secret="a new one")
+    assert _call(client, "GET", "/auth/people/alex").json()["updated_at"] != before
+
+
+def test_a_person_with_no_secret_is_404(client) -> None:
+    # `mia` is on the roster with no secret: there is no time to give.
+    response = _call(client, "GET", "/auth/people/mia")
+    assert response.status_code == 404
+    assert response.json() == {"error": "no secret"}
+
+
+def test_a_person_who_is_not_on_the_roster_is_404(client) -> None:
+    assert _call(client, "GET", "/auth/people/nobody").status_code == 404
+
+
 # --- no answer carries a hash ----------------------------------------------
 
 
@@ -264,6 +304,7 @@ def test_no_answer_carries_a_secret_or_a_hash(client) -> None:
     bodies = [
         _call(client, "POST", "/auth/verify", person="alex", secret=SECRET).text,
         _call(client, "GET", "/auth/people").text,
+        _call(client, "GET", "/auth/people/alex").text,
         _call(
             client, "POST", "/auth/secret", person="alex", secret=SECRET, new_secret="a new one"
         ).text,
@@ -286,4 +327,5 @@ def test_the_router_names_the_documented_routes() -> None:
         ("/auth/secret/admin", ("POST",)),
         ("/auth/secret/{person_id}", ("DELETE",)),
         ("/auth/people", ("GET",)),
+        ("/auth/people/{person_id}", ("GET",)),
     }

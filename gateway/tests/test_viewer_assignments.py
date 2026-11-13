@@ -72,7 +72,6 @@ def data(monkeypatch, tmp_path) -> None:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(root))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.delenv(am.ASSIGNMENTS_URL_ENV, raising=False)
     monkeypatch.delenv(am.VIEWER_TOKEN_ENV, raising=False)
     monkeypatch.setattr(config, "_cache", None)

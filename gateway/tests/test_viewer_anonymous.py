@@ -1,5 +1,5 @@
-"""Offline tests for `viewer.anonymous`: a request with no credentials gets
-full access as a synthetic "anonymous" identity, or as the member that the key
+"""Offline tests for `viewer.anonymous`: a request with no cookie gets full
+access as a synthetic "anonymous" identity, or as the member that the key
 names, so a private network needs no sign-in. Same fixture shape as
 `test_viewer.py`."""
 
@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from conftest import bad_cookie, signed_in
 from joshua_gateway import viewer
 from joshua_gateway import viewer_assignments as am
 from joshua_shared import config, wikigit
@@ -19,8 +20,7 @@ from starlette.testclient import TestClient
 
 _GIT_MISSING = shutil.which("git") is None
 
-ALEX_PW = "alex-secret"
-ALEX = ("alex", ALEX_PW)
+ALEX = signed_in("alex")
 
 CONFIG_ANON = textwrap.dedent("""\
     name: Test
@@ -50,8 +50,7 @@ CONFIG_MEMBER = textwrap.dedent("""\
         sam: ${VIEWER_PW_SAM:-}
     """)
 
-SAM_PW = "sam-secret"
-SAM = ("sam", SAM_PW)
+SAM = signed_in("sam")
 
 # The wiki is the React app, which reads a page from this route.
 PAGE_JSON = "/api/v1/wiki?path=wiki/pizza.md"
@@ -66,6 +65,21 @@ CONFIG_NO_ANON = textwrap.dedent("""\
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
+    """)
+
+# A pin instance that is also open: the method says how a person signs in, and
+# ``anonymous`` says nobody has to.
+CONFIG_PIN_ANON = textwrap.dedent("""\
+    name: Test
+    timezone: America/New_York
+    people:
+      - id: alex
+        name: Alex
+    viewer:
+      enabled: true
+      anonymous: true
+      auth:
+        method: pin
     """)
 
 
@@ -90,8 +104,6 @@ def _client(monkeypatch, tmp_path, config_text: str) -> TestClient:
     cfg_path.write_text(config_text)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX_PW)
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM_PW)
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)
@@ -112,6 +124,11 @@ def member_client(monkeypatch, tmp_path) -> TestClient:
 @pytest.fixture
 def no_anon_client(monkeypatch, tmp_path) -> TestClient:
     return _client(monkeypatch, tmp_path, CONFIG_NO_ANON)
+
+
+@pytest.fixture
+def pin_anon_client(monkeypatch, tmp_path) -> TestClient:
+    return _client(monkeypatch, tmp_path, CONFIG_PIN_ANON)
 
 
 # -- reading with no credentials ---------------------------------------------
@@ -206,11 +223,11 @@ def test_anonymous_write_goes_through_the_same_commit_path(anon_client, tmp_path
     assert "viewer: edit pizza.md" in log
 
 
-# -- a wrong credential is never silently treated as anonymous --------------
+# -- a cookie that does not stand is never silently treated as anonymous ----
 
 
-def test_wrong_credentials_still_401_even_with_anonymous_true(anon_client):
-    response = anon_client.get(PAGE_JSON, auth=("alex", "wrong"))
+def test_a_bad_cookie_is_still_401_even_with_anonymous_true(anon_client):
+    response = anon_client.get(PAGE_JSON, auth=bad_cookie())
     assert response.status_code == 401
 
 
@@ -232,13 +249,32 @@ def test_member_signs_in_and_writes_on_an_open_viewer(anon_client, tmp_path):
     assert (tmp_path / "data/wiki/pizza.md").read_text() == "# Pizza\n\nChanged.\n"
 
 
-# -- with anonymous unset or false, the basic-auth challenge is unchanged ---
+# -- with anonymous unset or false, a request with no cookie is 401 ---------
 
 
-def test_no_credentials_still_gets_401_when_anonymous_is_unset(no_anon_client):
+def test_no_cookie_still_gets_401_when_anonymous_is_unset(no_anon_client):
+    """The 401 is plain JSON and carries no challenge: the sign-in page of the
+    app asks, never the browser."""
     response = no_anon_client.get(PAGE_JSON)
     assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Basic")
+    assert "WWW-Authenticate" not in response.headers
+    assert response.json() == {"error": "sign in to read this"}
+
+
+# -- a pin method on an open viewer still needs no sign-in -------------------
+
+
+def test_pin_with_anonymous_true_serves_with_no_sign_in(pin_anon_client):
+    """``anonymous`` wins over the method: a request with no cookie reads the
+    wiki and writes it, and the app renders no sign-in page, because
+    ``auth-method`` says the viewer is open."""
+    page = pin_anon_client.get(PAGE_JSON)
+    assert page.status_code == 200
+    assert "Dough and sauce" in page.json()["markdown"]
+    assert pin_anon_client.get("/api/v1/me").json()["person"]["id"] == "anonymous"
+    method = pin_anon_client.get("/api/v1/auth-method")
+    assert method.status_code == 200
+    assert method.json() == {"method": "pin", "anonymous": True}
 
 
 # -- with anonymous naming a member, no credentials is that member -----------
@@ -302,9 +338,7 @@ def test_no_credentials_reads_the_members_assignments(member_client, monkeypatch
     assert people and set(people) == {"alex"}
 
 
-def test_credentials_on_a_member_viewer_are_still_checked(member_client):
-    assert member_client.get(PAGE_JSON, auth=("sam", "wrong")).status_code == 401
-    # alex is not in viewer.users, so alex cannot sign in by password.
-    assert member_client.get(PAGE_JSON, auth=ALEX).status_code == 401
+def test_a_cookie_on_a_member_viewer_is_still_checked(member_client):
+    assert member_client.get(PAGE_JSON, auth=bad_cookie()).status_code == 401
     body = member_client.get("/api/v1/me", auth=SAM).json()
     assert body["profile_url"] == "/wiki/people/sam.md"

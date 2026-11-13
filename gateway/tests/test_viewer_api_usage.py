@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
+from conftest import core_stamp, signed_in
 from joshua_gateway import viewer
 from joshua_gateway import viewer_limits as limits_mod
 from joshua_gateway import viewer_usage as usage_mod
@@ -26,7 +27,7 @@ from joshua_shared import config
 from joshua_shared.contracts import LimitsResponse, UsageResponse
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
+ALEX = signed_in("alex")
 VIEWER_TOKEN = "viewer-token"
 NY = ZoneInfo("America/New_York")
 NOW = datetime(2026, 11, 7, 22, 20, tzinfo=NY)
@@ -110,9 +111,9 @@ def data(monkeypatch, tmp_path) -> Path:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(root))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.setenv(usage_mod.CORE_URL_ENV, "http://core")
     monkeypatch.setenv(usage_mod.VIEWER_TOKEN_ENV, VIEWER_TOKEN)
+    core_stamp(monkeypatch)
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)
@@ -230,7 +231,7 @@ def test_the_usage_call_carries_the_fleet_token_and_the_limits_call_none(data, m
 def test_the_route_needs_a_sign_in(data) -> None:
     response = TestClient(viewer.build_app()).get("/api/v1/usage")
     assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Basic")
+    assert "WWW-Authenticate" not in response.headers
 
 
 # -- what is missing ------------------------------------------------------------

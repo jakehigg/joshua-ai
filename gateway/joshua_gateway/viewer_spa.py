@@ -27,8 +27,8 @@ service worker of the installed app, ``sw.js``, is never cached either: the
 browser reads it again to find a new version, and a stale copy would keep an
 old shell alive.
 
-The mount is behind the sign-in of a page: a request with no credentials and
-no ``viewer.anonymous`` gets the same 401 as a page. With no build in the
+The mount is behind the sign-in of a page: a request with no session cookie
+and no ``viewer.anonymous`` gets the same 401 as a page. With no build in the
 image, ``mount`` returns None and the viewer serves its JSON API only, so a
 bare checkout and the test suite still work.
 """
@@ -120,7 +120,7 @@ class SignedIn:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         from joshua_gateway import viewer  # ``viewer`` imports this module
 
-        if viewer._authenticate(Request(scope, receive)) is None:
+        if await viewer._authenticate(Request(scope, receive)) is None:
             await viewer._unauthorized()(scope, receive, send)
             return
         await self.app(scope, receive, send)

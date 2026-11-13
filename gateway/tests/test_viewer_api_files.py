@@ -13,13 +13,14 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from conftest import signed_in
 from joshua_gateway import viewer
 from joshua_gateway.viewer_api import files as files_api
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -66,8 +67,6 @@ def client(monkeypatch, tmp_path) -> TestClient:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     return TestClient(viewer.build_app())
 
 
@@ -139,7 +138,7 @@ def test_the_file_route_needs_a_sign_in(client) -> None:
     path = "/api/v1/files/wiki/attachments/2026/09/plant.png"
     unsigned = client.get(path)
     assert unsigned.status_code == 401
-    assert unsigned.headers["WWW-Authenticate"].startswith("Basic")
+    assert "WWW-Authenticate" not in unsigned.headers
     assert client.get(path, auth=MIA).status_code == 200  # a guest reads
 
 

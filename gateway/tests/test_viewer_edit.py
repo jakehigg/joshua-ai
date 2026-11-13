@@ -12,12 +12,13 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from conftest import signed_in
 from joshua_gateway import viewer, viewer_edit
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -63,8 +64,6 @@ def client(monkeypatch, tmp_path) -> TestClient:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     return TestClient(viewer.build_app())
 
 

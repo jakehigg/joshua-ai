@@ -12,14 +12,15 @@ import textwrap
 
 import httpx
 import pytest
+from conftest import bad_cookie, core_stamp, signed_in
 from joshua_gateway import viewer
 from joshua_gateway.viewer_api import workspaces
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-GUS = ("gus", "gus-secret")
-SAM = ("sam", "sam-secret")
+ALEX = signed_in("alex")
+GUS = signed_in("gus")
+SAM = signed_in("sam")
 BASE = "/api/v1/workspaces"
 
 CONFIG = textwrap.dedent("""\
@@ -68,11 +69,9 @@ def client(monkeypatch, tmp_path, core) -> TestClient:
     cfg.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_GUS", GUS[1])
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     monkeypatch.setenv("CORE_URL", "http://core.test")
     monkeypatch.setenv("JOSHUA_TOKEN_VIEWER", "viewer-token")
+    core_stamp(monkeypatch)
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)
@@ -192,6 +191,6 @@ def test_an_unreachable_or_missing_core_is_503(client, core, monkeypatch) -> Non
 
 
 def test_the_routes_need_the_sign_in(client, core) -> None:
-    assert client.get(BASE, auth=("alex", "wrong")).status_code == 401
-    assert client.post(BASE, json={}, auth=("alex", "wrong")).status_code == 401
+    assert client.get(BASE, auth=bad_cookie()).status_code == 401
+    assert client.post(BASE, json={}, auth=bad_cookie()).status_code == 401
     assert core.requests == []

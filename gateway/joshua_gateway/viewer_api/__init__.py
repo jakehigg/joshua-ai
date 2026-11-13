@@ -2,8 +2,13 @@
 
 Every route of this package answers ``application/json``, never caches, and
 sits behind the sign-in of a page (``viewer._require_auth``), so a request
-with no credentials gets the same 401 as a page when ``viewer.anonymous`` is
-off. Each handler takes ``(request, person)``.
+with no session cookie gets the same 401 as a page when ``viewer.anonymous``
+is off. Each handler takes ``(request, person)``.
+
+Four routes are the exception, because the sign-in page calls them before
+there is a session: ``POST session/sign-in``, ``POST session/sign-out``,
+``GET auth-method``, and ``GET sign-in/people`` for the ``pin`` method. Their
+handlers take the request alone (``viewer_api.session``).
 
 A write route takes a JSON body, and the body carries the CSRF token of its
 scope. Every write also checks the ``Origin`` header (``viewer_api.edit``).
@@ -61,6 +66,13 @@ def routes() -> list[Route]:
 
     return [
         Route(api_path("session"), _require_auth(session.session)),
+        # The five routes of the sign-in. Four of them answer with no session,
+        # because the sign-in page is what calls them.
+        Route(api_path("session/sign-in"), session.sign_in, methods=["POST"]),
+        Route(api_path("session/sign-out"), session.sign_out, methods=["POST"]),
+        Route(api_path("session/secret"), _require_auth(session.change_secret), methods=["POST"]),
+        Route(api_path("auth-method"), session.auth_method),
+        Route(api_path("sign-in/people"), session.sign_in_people),
         Route(api_path("me"), _require_auth(me.me)),
         Route(api_path("journal"), _require_auth(journal.feed)),
         Route(api_path("journal/{year:int}/{month:int}/{day:int}"), _require_auth(journal.day)),

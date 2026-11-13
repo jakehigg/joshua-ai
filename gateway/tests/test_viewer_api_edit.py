@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import ViewerSession, signed_in
 from joshua_gateway import viewer
 from joshua_gateway.viewer_api import edit as edit_api
 from joshua_shared import config, wikigit
@@ -23,9 +24,9 @@ from starlette.testclient import TestClient
 
 _GIT_MISSING = shutil.which("git") is None
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
-SAM = ("sam", "sam-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -76,20 +77,17 @@ def client(monkeypatch, tmp_path) -> TestClient:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     return TestClient(viewer.build_app())
 
 
-def _editor(client: TestClient, rel: str, auth: tuple[str, str] = ALEX) -> Any:
+def _editor(client: TestClient, rel: str, auth: ViewerSession = ALEX) -> Any:
     return client.get("/api/v1/edit", params={"path": rel}, auth=auth)
 
 
-def _save(client: TestClient, rel: str, body: str, auth: tuple[str, str] = ALEX, **extra) -> Any:
+def _save(client: TestClient, rel: str, body: str, auth: ViewerSession = ALEX, **extra) -> Any:
     fields = {
         "path": rel,
-        "csrf": viewer._csrf_token(auth[0], "wiki/" + rel),
+        "csrf": viewer._csrf_token(auth.person, "wiki/" + rel),
         "body": body,
         **extra,
     }
@@ -97,19 +95,19 @@ def _save(client: TestClient, rel: str, body: str, auth: tuple[str, str] = ALEX,
 
 
 def _create(
-    client: TestClient, folder: str, name: str, body: str, auth: tuple[str, str] = ALEX
+    client: TestClient, folder: str, name: str, body: str, auth: ViewerSession = ALEX
 ) -> Any:
     fields = {
         "folder": folder,
         "name": name,
-        "csrf": viewer._csrf_token(auth[0], "new:" + folder),
+        "csrf": viewer._csrf_token(auth.person, "new:" + folder),
         "body": body,
     }
     return client.post("/api/v1/save", json=fields, auth=auth)
 
 
-def _delete(client: TestClient, path: str, auth: tuple[str, str] = ALEX) -> Any:
-    fields = {"path": path, "csrf": viewer._csrf_token(auth[0], path)}
+def _delete(client: TestClient, path: str, auth: ViewerSession = ALEX) -> Any:
+    fields = {"path": path, "csrf": viewer._csrf_token(auth.person, path)}
     return client.post("/api/v1/delete", json=fields, auth=auth)
 
 

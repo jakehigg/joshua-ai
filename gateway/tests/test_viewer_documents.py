@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from conftest import signed_in
 from joshua_gateway import viewer
 from joshua_gateway import viewer_comments as vc
 from joshua_gateway import viewer_docstore as ds
@@ -25,10 +26,10 @@ from joshua_gateway.viewer_api import assignments as api
 from joshua_shared import config, wikigit
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
-GUEST = ("gus", "gus-secret")
-SAM = ("sam", "sam-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+GUEST = signed_in("gus")
+SAM = signed_in("sam")
 NOW = datetime(2026, 11, 9, 15, 0, tzinfo=UTC)
 NEEDS_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
@@ -115,10 +116,6 @@ def data(monkeypatch, tmp_path) -> Path:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(root))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
-    monkeypatch.setenv("VIEWER_PW_GUS", GUEST[1])
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)

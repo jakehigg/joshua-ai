@@ -1,6 +1,6 @@
 """The viewer: one React app in the gateway image, and the JSON API it reads.
 
-A person opens a browser, signs in with HTTP basic, and gets the React app
+A person opens a browser, signs in on a form, and gets the React app
 (``gateway/frontend``), which the node stage of ``gateway/Dockerfile`` builds
 and ``viewer_spa`` mounts at ``/``, behind the same sign-in as every other
 route. Every screen is an address of its router: the one wiki (which carries
@@ -56,23 +56,27 @@ comment on a line of a document of their own or a shared one through
 ``viewer_api.documents``: the viewer writes the comment to the comments file
 of the document and commits it.
 
-``viewer.anonymous`` opens the viewer: a request with no ``Authorization``
-header gets full access, read and write, as a synthetic "anonymous" identity,
-so a private network needs no sign-in. When ``viewer.anonymous`` names a
-member, such a request is served as that member, as if they signed in. A
-request that carries credentials is still checked, so a member can sign in by
-password too. ``viewer.users`` is how a household adds restrictions back.
+A sign-in is one signed cookie, ``joshua_session``: the person proves who
+they are on the form of the sign-in page, core checks the secret, and the
+cookie carries the person from then on (``viewer_session``, and the routes of
+``viewer_api.session``). The viewer holds no password of its own, and there is
+no HTTP basic path.
+
+``viewer.anonymous`` opens the viewer: a request with no cookie gets full
+access, read and write, as a synthetic "anonymous" identity, so a private
+network needs no sign-in. When ``viewer.anonymous`` names a member, such a
+request is served as that member, as if they signed in. A request that does
+carry a cookie is still checked, so a member can sign in on an open viewer
+too.
 
 Start it with ``python -m joshua_gateway.viewer``. It refuses to start when
 ``viewer.enabled`` is false. Put a reverse proxy in front for TLS; the viewer
-serves plain HTTP and binds every route behind basic auth except the probes.
+serves plain HTTP and binds every route behind the cookie except the probes
+and the four routes of the sign-in itself.
 """
 
 from __future__ import annotations
 
-import base64
-import binascii
-import hmac
 import os
 import sys
 from collections.abc import Iterator
@@ -80,7 +84,6 @@ from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Any
 
-import bcrypt
 import uvicorn
 import yaml
 from joshua_shared import config, log
@@ -94,7 +97,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 
-from joshua_gateway import viewer_api, viewer_channels, viewer_spa
+from joshua_gateway import viewer_api, viewer_channels, viewer_session, viewer_spa
 from joshua_gateway import viewer_assignments as assignments_mod
 from joshua_gateway import viewer_docstore as docstore
 from joshua_gateway import viewer_documents as documents_mod
@@ -108,15 +111,6 @@ from joshua_gateway.viewer_api.edit import (
 
 logger = get_logger("viewer")
 
-# The basic-auth realm.
-REALM = "joshua viewer"
-
-# Where a viewer password can come from, besides the entry in ``viewer.users``.
-# ``VIEWER_PASSWORDS`` carries every one of them in a single variable, so a
-# tracked file can pass them all through and name no person.
-VIEWER_PASSWORDS_ENV = "VIEWER_PASSWORDS"
-VIEWER_PW_PREFIX = "VIEWER_PW_"
-
 # The person's home page shows at most this many recent attachments.
 HOME_ATTACHMENTS_MAX = 30
 
@@ -124,7 +118,7 @@ HOME_ATTACHMENTS_MAX = 30
 # a piece of content on its own, so a listing hides it.
 _META_SUFFIX = ".meta.json"
 
-# The identity a request with no credentials gets when ``viewer.anonymous`` is
+# The identity a request with no cookie gets when ``viewer.anonymous`` is
 # true. It is not in ``people``: it has full member access, but the home page
 # shows it no profile link and no personal files folder, because there is no
 # such person on disk.
@@ -138,77 +132,8 @@ _NO_STORE = {"Cache-Control": "no-store"}
 # -- auth -------------------------------------------------------------------
 
 
-def _basic_credentials(request: Request) -> tuple[str, str] | None:
-    """Return the ``(user, password)`` from a basic ``Authorization`` header, or
-    None when the header is absent or malformed."""
-    header = request.headers.get("Authorization", "")
-    scheme, _, param = header.partition(" ")
-    if scheme.lower() != "basic" or not param:
-        return None
-    try:
-        decoded = base64.b64decode(param, validate=True).decode("utf-8")
-    except (binascii.Error, ValueError, UnicodeDecodeError):
-        return None
-    user, sep, password = decoded.partition(":")
-    if not sep:
-        return None
-    return user, password
-
-
-def _check_password(reference: str, provided: str) -> bool:
-    """Check ``provided`` against a password reference.
-
-    A reference that starts with ``$2`` is a bcrypt hash and is checked with
-    bcrypt. Any other value is a literal password compared with
-    ``hmac.compare_digest``. An empty reference never matches.
-    """
-    if not reference:
-        return False
-    if reference.startswith("$2"):
-        try:
-            return bcrypt.checkpw(provided.encode("utf-8"), reference.encode("utf-8"))
-        except ValueError:
-            return False
-    return hmac.compare_digest(reference, provided)
-
-
-def _passwords_from_env() -> dict[str, str]:
-    """Parse ``VIEWER_PASSWORDS`` into person id -> password reference.
-
-    One variable carries every password, so the compose file names no person.
-    The format is ``<id>=<reference>``, comma separated. A reference is a
-    bcrypt hash, which holds no comma; a literal password with a comma in it
-    cannot be carried here, and a hash is the wanted form anyway.
-    """
-    out: dict[str, str] = {}
-    for item in os.environ.get(VIEWER_PASSWORDS_ENV, "").split(","):
-        person_id, separator, reference = item.strip().partition("=")
-        if separator and person_id.strip() and reference.strip():
-            out[person_id.strip()] = reference.strip()
-    return out
-
-
-def _password_reference(cfg: Any, user: str) -> str:
-    """The password reference for ``user``, or "" when there is none.
-
-    ``viewer.users`` says who may sign in, and the key must be there. The
-    reference itself comes from the entry, from ``VIEWER_PASSWORDS``, or from
-    ``VIEWER_PW_<ID>``, in that order. An id that is not a key of
-    ``viewer.users`` gets nothing, whatever the environment holds.
-    """
-    if user not in cfg.viewer.users:
-        return ""
-    reference = cfg.viewer.users.get(user) or ""
-    if reference:
-        return reference
-    reference = _passwords_from_env().get(user, "")
-    if reference:
-        return reference
-    return os.environ.get(f"{VIEWER_PW_PREFIX}{user.upper().replace('-', '_')}", "")
-
-
 def _anonymous_person(cfg: config.JoshuaConfig) -> Person | None:
-    """The person a request with no credentials gets, or None.
+    """The person a request with no cookie gets, or None.
 
     ``viewer.anonymous: true`` gives the synthetic anonymous identity, which
     has full member access. A person id gives that member, exactly as if they
@@ -222,41 +147,40 @@ def _anonymous_person(cfg: config.JoshuaConfig) -> Person | None:
     return None
 
 
-def _authenticate(request: Request) -> Person | None:
-    """Return the signed-in person, or None for a missing or wrong credential.
+async def _authenticate(request: Request) -> Person | None:
+    """Return the signed-in person, or None for a cookie that does not stand.
 
-    A wrong user and a wrong password fail the same way. A person named in
-    ``viewer.users`` who is no longer in ``people`` cannot sign in.
-
-    A request with no ``Authorization`` header is served as the person of
-    ``_anonymous_person``, so a private network needs no password. A request
-    that does carry credentials is always checked against ``viewer.users``, so
-    a member can still sign in by password too.
+    A request with no ``joshua_session`` cookie is served as the person of
+    ``_anonymous_person``, so a private network needs no sign-in. A request
+    that does carry a cookie is always checked (``viewer_session``): one this
+    viewer did not sign, an expired one, and one whose stamp is not the one
+    core holds for that person's secret all fail the same way, and so does a
+    person who has left the roster. None of them is quietly served as the
+    anonymous identity.
     """
     cfg = config.load()
-    creds = _basic_credentials(request)
-    if creds is None:
+    if not request.cookies.get(viewer_session.COOKIE_NAME):
         return _anonymous_person(cfg)
-    user, password = creds
-    if not _check_password(_password_reference(cfg, user), password):
+    person_id = await viewer_session.person_from_cookie(request)
+    if person_id is None:
         return None
-    return cfg.person(user)
+    return cfg.person(person_id)
 
 
 def _unauthorized() -> Response:
-    return Response(
-        "authentication required",
-        status_code=401,
-        media_type="text/plain",
-        headers={"WWW-Authenticate": f'Basic realm="{REALM}"'},
-    )
+    """The 401 of every route: plain JSON, and no challenge.
+
+    The sign-in is a form of the React app, so the browser must never put up
+    its own dialog: there is no ``WWW-Authenticate`` header here.
+    """
+    return JSONResponse({"error": "sign in to read this"}, status_code=401, headers=_NO_STORE)
 
 
 def _require_auth(handler: Any) -> Any:
     """Wrap a handler so it runs only for a signed-in person, else returns 401."""
 
     async def wrapper(request: Request) -> Response:
-        person = _authenticate(request)
+        person = await _authenticate(request)
         if person is None:
             return _unauthorized()
         return await handler(request, person)

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import ViewerSession, signed_in
 from joshua_gateway import viewer
 from joshua_gateway import viewer_links as links_mod
 from joshua_gateway.viewer_api import links as links_api
@@ -23,9 +24,9 @@ from starlette.testclient import TestClient
 
 _GIT_MISSING = shutil.which("git") is None
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
-SAM = ("sam", "sam-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -60,9 +61,6 @@ def data(monkeypatch, tmp_path) -> Path:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     return data
 
 
@@ -92,11 +90,11 @@ def _token(person_id: str = "alex") -> str:
 def _post(
     client: TestClient,
     rows: list[dict[str, str]],
-    auth: tuple[str, str] = ALEX,
+    auth: ViewerSession = ALEX,
     csrf: str | None = None,
     headers: dict[str, str] | None = None,
 ) -> Any:
-    body = {"csrf": _token(auth[0]) if csrf is None else csrf, "links": rows}
+    body = {"csrf": _token(auth.person) if csrf is None else csrf, "links": rows}
     return client.post("/api/v1/links", json=body, auth=auth, headers=headers)
 
 

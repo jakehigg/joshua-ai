@@ -22,13 +22,14 @@ from typing import Any
 
 import httpx
 import pytest
+from conftest import signed_in
 from joshua_gateway import viewer
 from joshua_gateway import viewer_assignments as am
 from joshua_gateway.viewer_api import assignments as api
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
+ALEX = signed_in("alex")
 VIEWER_TOKEN = "viewer-token"
 NOW = datetime(2026, 11, 9, 15, 0, tzinfo=UTC)
 
@@ -151,7 +152,6 @@ def data(monkeypatch, tmp_path) -> None:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(root))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.delenv(am.ASSIGNMENTS_URL_ENV, raising=False)
     monkeypatch.delenv(am.VIEWER_TOKEN_ENV, raising=False)
     monkeypatch.setattr(config, "_cache", None)

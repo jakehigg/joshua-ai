@@ -3,6 +3,9 @@
 The upstream is the stdio ``echo_server.py`` fixture. Each test builds a fresh app
 from a joshua.yaml written into a temp dir, with fleet tokens set in the
 environment. The catalog comes from the ``mcp:`` section of that file.
+
+``signed_in`` is the sign-in of the viewer tests: the viewer reads one signed
+cookie now, so a test carries a cookie this process signed.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
+from joshua_gateway import viewer_session
 from joshua_gateway.main import build_app
 from joshua_shared import config
 from mcp import ClientSession
@@ -39,6 +43,59 @@ TOKENS = {
 
 def bearer(identity: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {TOKENS[identity]}"}
+
+
+# The stamp a test cookie carries: core gives the viewer the ``updated_at`` of
+# the person's ``auth_secret`` row. A viewer with no ``CORE_URL`` has nothing
+# to check it against, so an offline test never needs core to agree.
+VIEWER_STAMP = "2026-11-01T09:00:00+00:00"
+
+
+class ViewerSession:
+    """One viewer session cookie, as the ``auth=`` of a request.
+
+    The viewer signs in with the ``joshua_session`` cookie and has no HTTP
+    basic path, so a test signs in by carrying a cookie. It goes on the
+    request as ``auth=``, so one client can be two people in one test, and it
+    is a callable, which every httpx version takes as an auth.
+    """
+
+    def __init__(self, person: str, token: str) -> None:
+        self.person = person
+        self.token = token
+
+    def __call__(self, request):
+        request.headers["Cookie"] = f"{viewer_session.COOKIE_NAME}={self.token}"
+        return request
+
+
+def signed_in(person_id: str, *, remember: bool = False) -> ViewerSession:
+    """The cookie of a person who signed in."""
+    return ViewerSession(
+        person_id, viewer_session.issue(person_id, VIEWER_STAMP, remember=remember)
+    )
+
+
+def bad_cookie() -> ViewerSession:
+    """A cookie no viewer signed: the shape of one, and no signature of ours."""
+    return ViewerSession("alex", "eyJwIjoiYWxleCJ9.not-a-signature")
+
+
+def core_stamp(monkeypatch) -> None:
+    """Answer the one core call a cookie costs, for a test that sets ``CORE_URL``.
+
+    With ``CORE_URL`` set, ``viewer_session`` asks core for the stamp of the
+    person's secret (``GET /auth/people/<id>``) and refuses the cookie when
+    core does not answer. A test that sets the variable for another route
+    calls this, so every person's stamp is ``VIEWER_STAMP``, the one a
+    ``signed_in`` cookie carries. ``test_viewer_session.py`` uses the real
+    call.
+    """
+
+    async def stamp(core: object, person_id: str) -> str:
+        return VIEWER_STAMP
+
+    monkeypatch.setattr(viewer_session, "current_stamp", stamp)
 
 
 def echo_mcp(allow: str = "all", tools_allow: str = "echo") -> str:

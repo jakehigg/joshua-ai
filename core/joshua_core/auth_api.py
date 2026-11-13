@@ -20,7 +20,13 @@ routes off, so every caller gets 403.
   person without the current one, for a first sign-in or a reset.
 - ``DELETE /auth/secret/{person_id}`` — drop the secret of a person.
 - ``GET /auth/people`` — the ids of the people who have a secret. A person
-  with no secret is absent.
+  with no secret is absent. It carries no time: the viewer renders this list
+  on a page with no session, so when each person last changed their secret
+  stays out of it.
+- ``GET /auth/people/{person_id}`` — ``{person, updated_at}``: when that one
+  person's secret last changed. The viewer stamps its session cookie with the
+  time, so a changed secret signs out every cookie that carries the old one.
+  A person with no secret is 404, as is one who is not on the roster.
 
 Every route but ``/auth/verify`` answers 404 for a person who is not on the
 roster. No answer and no log line ever carries a secret or a hash.
@@ -168,5 +174,17 @@ def build_auth_router() -> APIRouter:
     ):
         people = await request.app.state.ctx.repo.list_auth_person_ids()
         return JSONResponse({"people": people})
+
+    @router.get(f"{AUTH_PATH}/people/{{person_id}}")
+    async def person_secret(  # type: ignore[no-untyped-def]
+        person_id: str, request: Request, caller: str = Depends(require_auth_caller)
+    ):
+        repo = request.app.state.ctx.repo
+        if not await _on_roster(request, person_id):
+            return _unknown_person()
+        updated_at = await repo.get_auth_updated_at(person_id)
+        if updated_at is None:
+            return JSONResponse({"error": "no secret"}, status_code=404)
+        return JSONResponse({"person": person_id, "updated_at": updated_at.isoformat()})
 
     return router

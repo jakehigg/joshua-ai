@@ -13,14 +13,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import ViewerSession, signed_in
 from joshua_gateway import viewer, viewer_wiki
 from joshua_gateway.viewer_api import wiki as wiki_api
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
-SAM = ("sam", "sam-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -90,9 +91,6 @@ def client(monkeypatch, tmp_path) -> TestClient:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     return TestClient(viewer.build_app())
 
 
@@ -103,7 +101,7 @@ def files(client: TestClient, tmp_path) -> TestClient:
     return client
 
 
-def _get(client: TestClient, path: str, auth: tuple[str, str] = ALEX) -> Any:
+def _get(client: TestClient, path: str, auth: ViewerSession = ALEX) -> Any:
     response = client.get("/api/v1/wiki", params={"path": path}, auth=auth)
     assert response.status_code == 200, response.text
     return response.json()
@@ -158,8 +156,6 @@ def test_no_wiki_folder_gives_an_empty_tree(monkeypatch, tmp_path) -> None:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(tmp_path / "empty"))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     client = TestClient(viewer.build_app())
     assert client.get("/api/v1/wiki/tree", auth=ALEX).json() == wiki_api.EMPTY_TREE
 

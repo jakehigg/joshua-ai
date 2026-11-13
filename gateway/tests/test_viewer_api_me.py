@@ -8,14 +8,15 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from conftest import signed_in
 from joshua_gateway import viewer
 from joshua_gateway.viewer_api import me as me_api
 from joshua_shared import config
 from starlette.requests import Request
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -46,8 +47,6 @@ def _data(monkeypatch, tmp_path: Path, text: str) -> Path:
     cfg_path.write_text(text)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     return data
 
 
@@ -137,4 +136,4 @@ def test_the_page_is_json_and_never_cached(client) -> None:
 def test_the_page_needs_a_sign_in(client) -> None:
     response = client.get("/api/v1/me")
     assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Basic")
+    assert "WWW-Authenticate" not in response.headers
