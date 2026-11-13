@@ -147,6 +147,7 @@ gets 403.
 | gateway MCP routes | `gateway.person_header_callers` (default `core`, `assignments`) |
 | gateway `POST /v1/snapshots/{name}` | `core` only |
 | `/admin/*` on every container | `ADMIN_CALLERS` (default `laptop`, `ci`) |
+| core `/admin/people` and below (the roster) | `ADMIN_CALLERS`, and `AUTH_CALLERS` (default `viewer`) |
 | `/healthz`, `/readyz` on every container | open, no secrets in the answer |
 | core `GET /v1/limits` | open; percentages and reset times only |
 | assignments `/mcp` | a bearer in `ASSIGNMENTS_TOKENS` (a person) or `ADDON_TOKEN` (read only); the gateway sends it |

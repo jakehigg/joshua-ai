@@ -341,12 +341,12 @@ To read a failure:
 
 ### What was tested
 
-These setups were tested before this release. A setup that is not in this
-list can work, but nobody has tested it.
+These setups were tested. A setup that is not in this list can work, but
+nobody has tested it.
 
 | Setup | Result |
 |---|---|
-| The Claude subscription, no `inference` section | Works as in the release before. |
+| The Claude subscription, no `inference` section | Works. |
 | LiteLLM in front of Bedrock, Claude Opus, Sonnet, and Haiku 5.5 | Works. A conversation turn, a resumed session, a one-shot call, structured output, an image, a PDF, MCP tools, and `WebFetch` were tested with a test script. Then one instance ran on it for several days, with one LiteLLM key for each job: chat, voice, the nightly reflection, the description of attachments, and the internet agent. `POST /admin/inference/check` gave `ok` for each job. |
 | Web search through LiteLLM | Does not work. LiteLLM does not send Anthropic's `WebSearch` to Bedrock. Use SearXNG (see the next section). |
 | SearXNG for the internet agent, on Bedrock through LiteLLM | Works. The internet agent searched, read pages, and answered with sources. |
@@ -431,13 +431,15 @@ Every container mounts `joshua.yaml` read-only. After an edit:
 
 ```
 make validate
-docker compose restart core channels gateway
+make restart
 ```
 
-`make validate` runs in the core image. Compose passes the secrets from
-`.env`, because the file refers to them by name.
-A change to `mcp:` alone needs only `POST /admin/reload` on the gateway and a
-restart of `core`.
+`make validate` runs the core image once, with no network, and stops. It gets
+the channel credentials from `.env`, so its summary names only the channels
+that start. `make restart` restarts every container that runs. After a change
+to `viewer.enabled` or `assignments.enabled`, run `make up` instead: it
+starts or stops that container. A change to `mcp:` alone needs only
+`POST /admin/reload` on the gateway and a restart of `core`.
 
 Every refusal writes one line, so a dropped message is not silent to you:
 
@@ -465,7 +467,10 @@ it only when you change the code. A build is tagged
 `joshua-ai-<component>:dev`, so it never replaces a release on your machine.
 
 Both use the same containers and the same volumes. `make down`, `make logs`,
-`make ps`, `make backup`, and `make restore` work for either.
+`make ps`, `make restart`, `make backup`, and `make restore` work for either.
+On your own build, use `make up-dev` where a page says `make up`, and
+`make validate-dev` where it says `make validate`: each one checks or starts
+the images of your checkout.
 
 ## The version you run
 
@@ -491,13 +496,16 @@ make up
 
 `make pull` gets the images of that release and `make up` restarts the
 containers. The releases are at
-<https://github.com/jakehigg/joshua-ai/releases>. Read `CHANGELOG.md` first.
-The database schema is additive. A new version adds tables and columns and never removes one, so
-an update needs no migration step. The documentation in `wiki/joshua-docs/`
-is replaced at each start.
+<https://github.com/jakehigg/joshua-ai/releases>. Read `CHANGELOG.md` before
+an update. It names every change that a person who runs Joshua can see.
 
-Read `CHANGELOG.md` before an update. It names every change that a person who
-runs Joshua can see.
+Run `make init-env` again after an update. It adds each secret that a newer
+`.env.example` names and your `.env` does not have yet, and changes nothing
+else.
+
+The database schema is additive. A new version adds tables and columns and
+never removes one, so an update needs no migration step. The documentation in
+`wiki/joshua-docs/` is replaced at each start.
 
 ### Run the newest main
 
@@ -712,29 +720,17 @@ off by default. To turn it on:
        method: pin
    ```
 
-2. Let core serve the roster to the viewer. Core owns the roster, and it
-   admits an admin caller only from `ADMIN_CALLERS` (default `laptop,ci`), so
-   name `viewer` on the `core` service of `docker-compose.yml`:
-
-   ```yaml
-     core:
-       environment:
-         ADMIN_CALLERS: laptop,ci,viewer
-   ```
-
-   In the chart, that is `core.adminCallers` in your values. Without this
-   entry every write of Admin → Users shows core's refusal, and the rest of
-   the viewer is unaffected.
-
-3. Validate and start it:
+2. Validate and start it:
 
    ```
    make validate
-   docker compose --profile viewer up -d viewer
-   docker compose up -d core
+   make up
    ```
 
-4. Give the first person their secret. A person with no secret is on the
+   `make up` starts the viewer because `viewer.enabled` is `true`, and
+   `make down` stops it with the rest.
+
+3. Give the first person their secret. A person with no secret is on the
    roster and cannot sign in, so the owner needs one from the console:
 
    ```
@@ -752,10 +748,10 @@ fleet token (`JOSHUA_TOKEN_VIEWER`). No route gives a hash back. A sign-in
 answers with one signed session cookie: the browser drops it when it closes,
 or keeps it for 30 days when the person checks "remember this device".
 Changing a secret, a reset by the owner, and a removal all sign out every
-browser that holds the old one. Set `JOSHUA_VIEWER_SESSION_SECRET` on the
-viewer to keep a sign-in across a restart, and share it between replicas;
-with no such variable the viewer mints a key at start and a restart signs
-everybody out.
+browser that holds the old one. `JOSHUA_VIEWER_SESSION_SECRET` signs the
+cookie, so a sign-in survives a restart; `make init-env` writes it into
+`.env`. Core serves the roster to the viewer, because `viewer` is one of
+core's `AUTH_CALLERS`, so Admin → Users needs no setting of its own.
 
 The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
 `http://127.0.0.1:8082/` and sign in. The address opens the wiki. The menu

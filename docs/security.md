@@ -189,9 +189,11 @@ shared profile from group chats. The owner alone manages the roster in the
 viewer: add a person, set a sign-in secret, change a role, and take a person
 off the roster. Those four are the `/api/v1/admin/*` routes, which refuse a
 member and a guest before any call to core, and which reach core's
-`/admin/people` routes with the `viewer` fleet token, so core's
-`ADMIN_CALLERS` has to name `viewer` for the section to work at all. A member
-still adds a person from chat, as the table says.
+`/admin/people` routes with the `viewer` fleet token. Core admits `viewer`
+there, and on no other admin route, because it is one of `AUTH_CALLERS`: the
+viewer already sets the secret of any person, so the roster gives it no new
+reach. Core keeps one owner: it refuses to demote or remove the only one. A
+member still adds a person from chat, as the table says.
 
 ### What decides a write
 

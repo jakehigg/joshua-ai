@@ -161,7 +161,7 @@ whether that person has a secret. The secret column says `Set`, or
 
 | What Sam does | What happens |
 |---|---|
-| `Add a person` | one dialog: the name, the id, a handle, the role, and the secret. The secret is set in the same step, so Iris is added and can sign in at once. |
+| `Add a person` | one dialog: the name, the id, a handle, the role, and the secret. The secret is set in the same step, so Iris is added and can sign in at once. The handle is optional: without one, Iris uses Joshua from the viewer's chat. |
 | `Set secret` | sets the secret of that person, with no current secret. It is a first secret and a reset in one. |
 | `Promote` or `Demote` | a guest becomes a member, a member becomes an owner, an owner becomes a member. |
 | `Remove` | takes the person off the roster. Their handles and their secret go. What they wrote stays. |
@@ -169,10 +169,15 @@ whether that person has a secret. The secret column says `Set`, or
 The secret of the dialog can stay empty. Then Iris is on the roster and
 cannot sign in, her row says so, and Sam sets one later.
 
+The roster always keeps an owner. On the row of the only owner, `Demote` and
+`Remove` are off, and core refuses both with `409`. To hand the roster to
+Robin, Sam promotes Robin to owner first, and then steps down.
+
 Two other paths add a person, and neither one sets a secret:
 
 - the agent's `add_user` tool, when a member adds somebody from a chat;
-- the CLI, `python -m joshua_core people add`.
+- the CLI, `python -m joshua_core people add --id iris --name Iris`, with
+  `--handle telegram:998877` and `--role` when you want them.
 
 So a person who arrives that way is on the roster, reaches Joshua through
 their channel, and cannot sign in to the viewer until an owner gives them a
@@ -200,9 +205,11 @@ The instructions and the consent go to `POST /api/v1/profile`. Core writes
 the instructions to `/data/people/<id>/prompt.md` and puts two fields in your
 entry of `/data/people.yaml`: `prompt`, the path of that file, and `journal`.
 An entry of the people file overlays only the fields it holds on your entry
-in `joshua.yaml`. So your name, your role, and your handles still come from
-`joshua.yaml`, and a change there still takes effect. Joshua reads the new
-instructions and the new consent on the next turn, with no restart.
+in `joshua.yaml`, so your name and your handles still come from
+`joshua.yaml`. A role that the owner sets under Admin → Users also goes into
+the people file, and from then on it wins over the role in `joshua.yaml`.
+Joshua reads the new instructions and the new consent on the next turn, with
+no restart.
 
 When somebody is locked out, and an owner cannot help, an operator runs one
 command in the core container:
@@ -216,10 +223,16 @@ It writes the hash straight to the database, so it needs no token and no
 running viewer, and it prints no secret. A person who is not on the roster
 gets nothing: a secret without a person is a way in that no roster shows.
 
+When nobody is the owner, an operator names one the same way:
+
+```
+docker compose exec core python -m joshua_core people role --id sam --role owner
+```
+
 ## Deploy it
 
-1. Give one person `role: owner` in `joshua.yaml`, and set
-   `viewer.auth.method`.
+1. Give one person `role: owner` in `joshua.yaml`, and turn the viewer on
+   with a method.
 
    ```yaml
    viewer:
@@ -228,47 +241,34 @@ gets nothing: a secret without a person is a way in that no roster shows.
        method: pin
    ```
 
-2. Name `viewer` in core's `ADMIN_CALLERS`. Core owns the roster and admits
-   an admin caller only from that list, which is `laptop,ci` by default. In
-   `docker-compose.yml`:
+2. Run `make validate`, then `make up`. `make up` starts the viewer because
+   `viewer.enabled` is `true`.
 
-   ```yaml
-     core:
-       environment:
-         ADMIN_CALLERS: laptop,ci,viewer
-   ```
+3. Give the owner the first secret with `auth-reset` above. After that, the
+   owner sets the secret of everybody else under Admin → Users.
 
-   In the chart, that is `core.adminCallers: laptop,ci,viewer` in your
-   values. Without it, every write of Admin → Users shows core's refusal, and
-   the rest of the viewer is unaffected.
-
-3. Set `JOSHUA_VIEWER_SESSION_SECRET` for the viewer, which runs from the
-   gateway image. It signs the cookies. With no such variable the process
-   mints a key at each start, so a restart signs everybody out, and two
-   replicas do not share a session.
-
-4. Start the viewer, and give the owner the first secret with `auth-reset`
-   above. After that, the owner sets the secret of everybody else under
-   Admin → Users.
+Nothing else needs a setting. `make init-env` writes
+`JOSHUA_VIEWER_SESSION_SECRET`, which signs the cookies, so a restart keeps
+everybody signed in. Core serves the roster to the viewer because `viewer` is
+one of core's `AUTH_CALLERS`, the callers of `/auth/*`.
 
 [operations.md](operations.md#the-viewer) has the whole procedure, and
 [the chart README](../charts/joshua/README.md#the-viewer) has the Kubernetes
 form.
 
-### The upgrade from the viewer passwords
+### If you signed in with the viewer passwords before
 
 An instance that signed people in with `viewer.users` and `VIEWER_PASSWORDS`
-needs nobody to sign in again. On the first start after the upgrade, core
+needs nobody to sign in again. At its first start with the new sign-in, core
 reads those two and `VIEWER_PW_<ID>`, writes a hash for each person who has
 no secret yet, and marks the import done in a table of its own. It overwrites
 nothing, and the marker, not the state of the secrets, is what stops it: a
 restart, a restored database, and a roster whose secrets were all dropped
 never run it a second time.
 
-Pass `VIEWER_PASSWORDS` to the `core` service for that one start when the
-passwords live in `.env` alone. Delete `viewer.users` and `VIEWER_PASSWORDS`
-afterwards. Nothing reads them again, and `make validate` warns while either
-one is there.
+Compose gives `VIEWER_PASSWORDS` from `.env` to core. Delete `viewer.users`
+and `VIEWER_PASSWORDS` after that first start. Nothing reads them again, and
+`make validate` warns while either one is there.
 
 ## What this sign-in does not do
 

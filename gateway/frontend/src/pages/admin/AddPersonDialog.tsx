@@ -18,8 +18,10 @@ export interface AddAnswer {
 }
 
 /**
- * The one dialog that adds a person: who they are, the id and the handle
- * they are known by, their role, and the secret they sign in with.
+ * The one dialog that adds a person: who they are, the id, the handle
+ * they are known by, their role, and the secret they sign in with. The
+ * handle is optional: a person with none signs in to the viewer and reaches
+ * Joshua from its chat or from the terminal.
  *
  * It is one form and one call. `POST /api/v1/admin/users` adds the person
  * and sets the secret, so the owner never adds a person and then goes
@@ -106,7 +108,7 @@ export default function AddPersonDialog({
           </span>
         </label>
         <label className="j-field-label">
-          their handle
+          their handle (optional)
           <span className="j-field">
             <input
               name="handle"

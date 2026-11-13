@@ -110,18 +110,21 @@ Three other paths write the people file:
 - The agent's `registration` tool (`add_user`, `list_users`). Only a
   member or the owner can add people. A guest or an unidentified caller gets
   "not available".
-- The CLI `python -m joshua_core people {add,list,remove,auth-reset}`. `add`
-  takes `--id --name --handle <type>:<value> --role member|guest|owner`.
-  `auth-reset --id <id> --secret <secret>` sets the sign-in secret of a person
-  who is locked out of the viewer; it writes the hash to the database with no
-  HTTP hop, so an operator at the console needs no token. Each one runs with
-  `DATABASE_URL` set.
+- The CLI `python -m joshua_core people {add,list,role,remove,auth-reset}`.
+  `add` takes `--id --name`, and optionally `--handle <type>:<value>` and
+  `--role member|guest|owner`. `role --id <id> --role <role>` changes one
+  role. `auth-reset --id <id> --secret <secret>` sets the sign-in secret of a
+  person who is locked out of the viewer; it writes the hash to the database
+  with no HTTP hop, so an operator at the console needs no token. Each one
+  runs with `DATABASE_URL` set.
 - The core admin API `GET /admin/people`, `POST /admin/people`,
-  `POST /admin/people/<id>/role`, and `POST /admin/people/<id>/remove` (all
-  gated by `ADMIN_CALLERS`). `POST /admin/people` takes the same fields as the
-  CLI `add`. The viewer calls these four for the owner, as the identity
-  `viewer`, so `ADMIN_CALLERS` on core must name it (see
-  [viewer](#viewer)).
+  `POST /admin/people/<id>/role`, and `POST /admin/people/<id>/remove`, for
+  the callers of `ADMIN_CALLERS` and of `AUTH_CALLERS`. `POST /admin/people`
+  takes the same fields as the CLI `add`. The viewer calls these four for the
+  owner, as the identity `viewer` (see [viewer](#viewer)).
+
+The roster keeps an owner. Each path refuses to demote or remove the only
+owner: promote another person to owner first.
 
 `remove` marks the person `removed` and drops their handles. It keeps the data dirs
 and the transcripts, so removal of data stays a human action.
@@ -1187,8 +1190,8 @@ search by meaning, and its usage page reads the tokens of each day (see
 [usage](#usage)). The usage page also reads the subscription limits from
 core's open `GET /v1/limits`, with no token (see [limits](#limits)).
 
-The viewer is off by default. Start it with `docker compose --profile viewer
-up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
+The viewer is off by default. `make up` starts it when `viewer.enabled` is
+`true`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
 reverse proxy in front for TLS, and keep the address on a network you trust.
 
 - `viewer.enabled`: `false` by default. The viewer refuses to start when it is
@@ -1227,24 +1230,15 @@ roster with the role of each person and whether they can sign in, and four
 writes — add a person, set their secret, change a role, and take a person off
 the roster. A member and a guest get 403 on every route under
 `/api/v1/admin/`. Core owns the roster, so the viewer calls core's
-`/admin/people` routes as the identity `viewer`, and core admits an admin
-caller only from `ADMIN_CALLERS` (default `laptop,ci`). Add `viewer` to it on
-the `core` service:
-
-```yaml
-  core:
-    environment:
-      ADMIN_CALLERS: laptop,ci,viewer
-```
-
-Without that entry every write of the section gets core's refusal, and the
-rest of the viewer is unaffected. An operator who is locked out sets a secret
-from the console with `python -m joshua_core people auth-reset`.
+`/admin/people` routes as the identity `viewer`. Core admits it there because
+`viewer` is one of its `AUTH_CALLERS`; the viewer gets no other admin route.
+An operator who is locked out sets a secret from the console with
+`python -m joshua_core people auth-reset`.
 
 **`viewer.users` and `VIEWER_PASSWORDS` are retired.** Core holds every
 sign-in secret now. The loader still accepts `viewer.users`, and core reads it
-once, with `VIEWER_PASSWORDS` and `VIEWER_PW_<ID>`, in the one-time import of
-the upgrade (see [CHANGELOG.md](CHANGELOG.md)). After that the viewer ignores
+once, with `VIEWER_PASSWORDS` and `VIEWER_PW_<ID>`, in a one-time import (see
+[auth.md](auth.md#if-you-signed-in-with-the-viewer-passwords-before)). After that the viewer ignores
 all three: they authorize nobody and they refuse nobody. `validate` prints a
 warning while any of them is still there, and the file is still valid. Delete
 them.

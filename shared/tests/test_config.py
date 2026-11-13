@@ -664,3 +664,33 @@ def test_voice_deliver_via_defaults_to_unset() -> None:
 def test_voice_deliver_via_rejects_an_unknown_channel_type() -> None:
     with pytest.raises(config.ConfigError, match="deliver_via must be one of"):
         config.parse(_with_voice_deliver_via("webhook"), ENV, source="<test>")
+
+
+def test_validate_names_only_the_channels_with_a_credential(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A section with an empty credential is off, and the summary says so."""
+    file = tmp_path / "joshua.yaml"
+    file.write_text(
+        "name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n    role: owner\n"
+        "channels:\n  telegram:\n    bot_token: ${TELEGRAM_BOT_TOKEN:-}\n"
+        "  imessage:\n    bluebubbles_url: http://bluebubbles.local:1234\n"
+        "    bluebubbles_password: ${BLUEBUBBLES_PASSWORD:-}\n"
+        "    webhook_path_secret: ${IMESSAGE_WEBHOOK_SECRET:-}\n"
+    )
+    for name in ("TELEGRAM_BOT_TOKEN", "BLUEBUBBLES_PASSWORD", "IMESSAGE_WEBHOOK_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    assert config._validate_cli(str(file)) == 0
+    assert "channels enabled: none" in capsys.readouterr().out
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    assert config._validate_cli(str(file)) == 0
+    assert "channels enabled: telegram\n" in capsys.readouterr().out
+
+    monkeypatch.setenv("BLUEBUBBLES_PASSWORD", "pw")
+    assert config._validate_cli(str(file)) == 0
+    assert "channels enabled: telegram\n" in capsys.readouterr().out
+
+    monkeypatch.setenv("IMESSAGE_WEBHOOK_SECRET", "s")
+    assert config._validate_cli(str(file)) == 0
+    assert "channels enabled: telegram, imessage" in capsys.readouterr().out

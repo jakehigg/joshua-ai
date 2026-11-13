@@ -294,8 +294,8 @@ gateway:
 #
 # A sign-in secret lives in core, hashed, and never in this file or in
 # secrets.viewer. `viewer.auth.method` in your config says what the sign-in
-# page asks for, and `core.adminCallers` must name `viewer` for the owner's
-# Admin -> Users section. See docs/operations.md.
+# page asks for. Core serves the owner's Admin -> Users section to the viewer
+# with no setting here. See docs/auth.md.
 viewer:
   enabled: false
   replicaCount: 1

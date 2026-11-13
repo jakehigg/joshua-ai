@@ -39,6 +39,14 @@ export function roleStep(role: string): { label: string; next: string } {
   return { label: "Promote", next: role === "guest" ? "member" : "owner" };
 }
 
+/** What a disabled Demote or Remove says on the row of the only owner. */
+export const ONLY_OWNER = "the only owner: make another person the owner first";
+
+/** True when `user` is the one owner of `users`. */
+export function isOnlyOwner(user: AdminUser, users: AdminUser[]): boolean {
+  return user.role === "owner" && users.filter((each) => each.role === "owner").length === 1;
+}
+
 /** The class of an action button, primary for the one the row leads with. */
 function action(primary: boolean): string {
   return primary ? "j-btn sm primary" : "j-btn sm";
@@ -163,6 +171,7 @@ export default function Users() {
 
   function row(user: AdminUser): ReactNode {
     const step = roleStep(user.role);
+    const onlyOwner = isOnlyOwner(user, users ?? []);
     const secretButton = (
       <button
         key="secret"
@@ -181,7 +190,8 @@ export default function Users() {
         key="role"
         type="button"
         className={action(false)}
-        disabled={busy}
+        disabled={busy || onlyOwner}
+        title={onlyOwner ? ONLY_OWNER : undefined}
         onClick={() => setRole(user)}
       >
         {step.label}
@@ -192,6 +202,8 @@ export default function Users() {
         key="remove"
         type="button"
         className="j-btn sm danger"
+        disabled={onlyOwner}
+        title={onlyOwner ? ONLY_OWNER : undefined}
         onClick={() => setOpen({ id: user.id, kind: "remove" })}
       >
         Remove

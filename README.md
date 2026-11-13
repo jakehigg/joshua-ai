@@ -126,12 +126,9 @@ sign-in page and reads. A member also writes: they edit any wiki page, make a
 new one, correct a journal entry, and move a page to the trash, which is the
 only way to delete a page, because the agent has no delete tool.
 
-It is off by default, and it holds no credential of its own. To turn it on,
-see [docs/operations.md](docs/operations.md#the-viewer).
-
-```
-docker compose --profile viewer up -d viewer   # then http://127.0.0.1:8082/
-```
+It is off by default, and it holds no credential of its own. Step 8 of
+[docs/quickstart.md](docs/quickstart.md) turns it on: set `viewer.enabled:
+true` in `joshua.yaml`, run `make up`, and open <http://127.0.0.1:8082/>.
 
 ## Enhancements
 

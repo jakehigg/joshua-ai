@@ -28,9 +28,17 @@ with the images and the packaged chart, are at
   with a secret, sets a secret, promotes or demotes a person, and removes a
   person. Core serves three new roster routes: `POST /admin/people`,
   `POST /admin/people/<id>/role`, and `POST /admin/people/<id>/remove`.
-  Nothing makes a person the owner except `role: owner` in `joshua.yaml`, or
-  another owner. `make validate` warns when no person is the owner, and the
-  file is still valid.
+  Nothing makes a person the owner except `role: owner` in `joshua.yaml`,
+  another owner, or an operator with
+  `python -m joshua_core people role --id <id> --role owner`. The roster keeps
+  an owner: core refuses, with `409`, a change that demotes or removes the
+  only one, and the Users page turns off `Demote` and `Remove` on that row.
+  The viewer reaches the roster routes because it is one of core's
+  `AUTH_CALLERS`, and it gets no other admin route. `make validate` warns
+  when no person is the owner, and the file is still valid.
+- **A person needs no handle.** `Add a person`, `POST /admin/people`, and
+  `people add` take the handle as optional, so you can add a person who uses
+  only the viewer and the terminal.
 - **Profile.** "Your page" is now "Profile", at `/me`. There a person changes
   their own PIN or password, their instructions to Joshua, and their journal
   consent. Core serves `GET` and `POST /people/<id>/profile`, and the viewer
@@ -50,24 +58,33 @@ with the images and the packaged chart, are at
   ring, and the control inside it draws none.
 - **`GET /readyz` of the viewer reports `auth`.** The field holds the sign-in
   method. The `users` count of the retired `viewer.users` is gone.
+- **`make up` starts the viewer and the assignments container** when
+  `joshua.yaml` sets `viewer.enabled: true` or `assignments.enabled: true`,
+  and `make down` stops them. You do not name a compose profile.
+- **`make init-env` writes `JOSHUA_VIEWER_SESSION_SECRET`**, so a restart of
+  the viewer keeps everybody signed in.
+- **`make validate` names only the channels that start.** It runs a new
+  one-shot `validate` service with the channel credentials and no network, so
+  a channel with an empty credential no longer shows as enabled.
+  `make validate-dev` runs the same check on your own build.
+- **`make restart`** restarts every container that runs, for a release and
+  for your own build.
 - **Upgrade notes for the sign-in.**
   - Give one person `role: owner` in `joshua.yaml`.
-  - Add `viewer` to the admin callers of core, because core owns the roster.
-    In docker compose, set `ADMIN_CALLERS: laptop,ci,viewer` on the `core`
-    service. In the chart, set `core.adminCallers: laptop,ci,viewer`. Without
-    it, every write under Admin → Users shows the refusal of core.
-  - Set `JOSHUA_VIEWER_SESSION_SECRET` for the viewer. In the chart, add it to
-    the viewer Secret. With no such key, the viewer makes a new key at each
-    start, so a restart signs everybody out.
+  - In docker compose, run `make init-env` again. It adds
+    `JOSHUA_VIEWER_SESSION_SECRET` to `.env` and changes nothing else. In the
+    chart, add `JOSHUA_VIEWER_SESSION_SECRET` to the viewer Secret. With no
+    such key, the viewer makes a new key at each start, so a restart signs
+    everybody out.
   - The first start of core after the upgrade imports the old viewer
     passwords one time. It reads `viewer.users` in `joshua.yaml`, then
     `VIEWER_PASSWORDS` and `VIEWER_PW_<ID>` in the environment of core. It
     writes a hash for each person who has no secret yet, and it overwrites
     nothing. The `auth_import_marker` table records that the import ran, so
-    it never runs again. Core reads these variables from its own environment.
-    So put `VIEWER_PASSWORDS` on the `core` service, or in the core Secret of
-    the chart, for that one start. Then delete `viewer.users` and
-    `VIEWER_PASSWORDS`. `make validate` warns while either one is there.
+    it never runs again. Docker compose gives core `VIEWER_PASSWORDS` from
+    `.env`. In the chart, put it in the core Secret for that one start. Then
+    delete `viewer.users` and `VIEWER_PASSWORDS`. `make validate` warns while
+    either one is there.
   - A person with no secret is on the roster and cannot sign in. On a `pin`
     instance with no secret at all, the sign-in page shows the command that
     sets the first one:

@@ -1993,14 +1993,32 @@ def _retired_viewer_passwords(config: JoshuaConfig) -> bool:
     return any(name.startswith(VIEWER_PW_PREFIX) for name in os.environ)
 
 
+def telegram_enabled(config: JoshuaConfig) -> bool:
+    """True when the telegram section is present and its bot token is set."""
+    telegram = config.channels.telegram
+    return telegram is not None and bool(telegram.bot_token.strip())
+
+
+def imessage_enabled(config: JoshuaConfig) -> bool:
+    """True when the imessage section is present and its credentials are set."""
+    imessage = config.channels.imessage
+    if imessage is None:
+        return False
+    return bool(imessage.bluebubbles_password.strip() and imessage.webhook_path_secret.strip())
+
+
 def _validate_cli(path: str) -> int:
     try:
         config = _read(Path(path))
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    # A section with an empty credential is off, so the summary names only
+    # the channels that start. `make validate` passes the channel credentials.
     channels = [
-        name for name in ("telegram", "imessage") if getattr(config.channels, name) is not None
+        name
+        for name, enabled in (("telegram", telegram_enabled), ("imessage", imessage_enabled))
+        if enabled(config)
     ]
     warnings = [*config.warnings]
     if _retired_viewer_passwords(config):

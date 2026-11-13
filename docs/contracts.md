@@ -148,10 +148,10 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /auth/people/{person_id}` | `AUTH_CALLERS` | | `{"person", "updated_at"}`, when that person's secret last changed. `404 {"error": "no secret"}` for a person who has none, `404` for one who is not on the roster. |
 | `GET /people/{person_id}/profile` | `AUTH_CALLERS` | | `{"prompt", "journal", "in_config"}`. `prompt` is the text of the personal instructions of that person to Joshua, or `null` for none. Core reads it from the snippet file at the path the roster holds. `journal` is `auto`, `ask`, or `off`. `in_config` is `true` when `joshua.yaml` also names the person, so an edit overrides the config file. `404` for a person who is not on the roster. |
 | `POST /people/{person_id}/profile` | `AUTH_CALLERS` | `{"prompt"?, "journal"?}` | The new profile, in the shape of the `GET`. A person edits only their own entry, and only these two fields. `prompt` is text in and text out. Core writes the text to `<data_dir>/people/<id>/prompt.md` and sets `prompt` in the people file to that path. An empty string or `null` clears `prompt`, writes `""` as the path, and removes the file, and a `prompt` over 4000 characters is `400`. A `journal` outside the three values is `400`, as is an unknown field or an empty body. `404` for a person who is not on the roster. |
-| `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
-| `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
-| `POST /admin/people/{id}/role` | `ADMIN_CALLERS` | `{"role"}` (`member`, `guest`, or `owner`) | `{"person": …}` with only the role changed, `400 {"error": …}` for another role, `404` for a person who is not on the roster |
-| `POST /admin/people/{id}/remove` | `ADMIN_CALLERS` | | `{"removed": true, "id"}`. The handles and the sign-in secret go; the data dirs and the transcripts stay. `404` for a person who is not on the roster. |
+| `GET /admin/people` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"people": […]}` |
+| `POST /admin/people` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"id", "name", "handle"?, "role"?}` | `201 {"person": …}`, `400 {"error": …}`, `409` when it takes the role of the only owner. `handle` is `<type>:<value>`; with none, the person has no handle. |
+| `POST /admin/people/{id}/role` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"role"}` (`member`, `guest`, or `owner`) | `{"person": …}` with only the role changed, `400 {"error": …}` for another role, `404` for a person who is not on the roster, `409` for the only owner |
+| `POST /admin/people/{id}/remove` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"removed": true, "id"}`. The handles and the sign-in secret go; the data dirs and the transcripts stay. `404` for a person who is not on the roster, `409` for the only owner. |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
 | `POST /admin/sessions/flush` | `ADMIN_CALLERS` | | `{"flushed": n}` |
 | `GET /admin/transcript/{conversation}?limit=` | `ADMIN_CALLERS` | | `{"conversation_id", "rows": […]}` |
@@ -396,7 +396,10 @@ The roster routes are the admin ones: `POST /admin/people` adds a person,
 `owner`, and `POST /admin/people/{id}/remove` takes a person off the roster
 and drops their handles and their secret with them. The viewer's Admin → Users
 section calls those three and `POST /auth/secret/admin` for the owner, as the
-identity `viewer`, so core's `ADMIN_CALLERS` must name `viewer`.
+identity `viewer`. The roster routes admit the callers of `AUTH_CALLERS` as
+well as those of `ADMIN_CALLERS`, so the viewer needs no admin setting, and it
+gets no other admin route. A change that would leave the roster with no owner
+is `409`.
 
 ### The stream
 

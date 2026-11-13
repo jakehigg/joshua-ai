@@ -32,11 +32,12 @@ make init-env
 ```
 
 This command copies `.env.example` to `.env`. It writes a database password,
-one token for each container, and the version of Joshua you run. Keep this
-file. Do not commit it.
+one token for each container, the key that signs a sign-in to the viewer, and
+the newest release of Joshua. Keep this file. Do not commit it.
 
-Your installation stays on that version until you change `JOSHUA_VERSION` in
+Your installation stays on that release until you change `JOSHUA_VERSION` in
 `.env`. A later `git pull` does not move it.
+[operations.md](operations.md#update-joshua) explains an update.
 
 ## 3. Add your Claude token
 
@@ -153,23 +154,50 @@ next message reaches Joshua, and nothing restarts.
 `member` sees everything and can add people. `guest` sees less. See
 [channels.md](channels.md#adding-someone-from-chat).
 
-The owner does the same in the viewer, under Admin → Users: add a person,
-change a role, set a sign-in secret, and take a person off the roster. Core
-owns the roster, so it serves that section only to callers in its
-`ADMIN_CALLERS` (`laptop` and `ci` by default). Add `viewer` to the list in
-the `core` service of `docker-compose.yml`:
+The owner also keeps the people in the viewer, under Admin → Users. The next
+step turns the viewer on.
+
+## 8. Open the viewer
+
+The viewer is the web app of Joshua: the wiki, the journal, your profile,
+your attachments, your documents, and a chat with Joshua. It is off until you
+turn it on, and it listens on the loopback address only.
+
+Open `joshua.yaml`, find the `viewer` section, and set two lines:
 
 ```yaml
-  core:
-    environment:
-      ADMIN_CALLERS: laptop,ci,viewer
+viewer:
+  enabled: true
+  auth:
+    method: pin
 ```
 
-Then run `docker compose up -d core`. Without this, the Users section shows
-core's refusal, and the rest of the viewer works as before.
-[auth.md](auth.md) is the guide to the sign-in of the viewer.
+`pin` asks each person for a PIN. `password` asks for an id and a password.
+[auth.md](auth.md) explains each method.
 
-## 8. Give Joshua a new capability
+Start it:
+
+```
+make validate
+make up
+```
+
+`make up` starts the viewer because `viewer.enabled` is `true`. The containers
+that did not change keep running.
+
+Nobody can sign in until they have a secret. Give yourself the first one:
+
+```
+docker compose exec core python -m joshua_core people auth-reset \
+  --id sam --secret '<your PIN>'
+```
+
+Open <http://127.0.0.1:8082/>, choose your name, and type your PIN. As the
+owner, you have Admin → Users, under Profile at the bottom of the navigation.
+There you add a person, set their secret, change a role, and take a person
+off the roster.
+
+## 9. Give Joshua a new capability
 
 Joshua starts with your notes, your files, and the open web. It can search
 for a recipe or an opening time, and read a link you send it, because
@@ -200,7 +228,7 @@ You choose the servers. Joshua cannot add one.
 [mcp-servers.md](mcp-servers.md) has the steps, and a tested entry for Home
 Assistant.
 
-## 9. Ask Joshua what to do next
+## 10. Ask Joshua what to do next
 
 Joshua holds its own documentation and can search it. Ask it:
 
@@ -246,12 +274,9 @@ make nuke           stop, and delete the data (it asks first)
 
 `make down` keeps your database and your files. `make nuke` deletes them.
 
-To read your notes in a browser instead of the terminal, turn on the viewer.
-It shows the wiki, your profile, the journal, your attachments, your
-documents and your assignments, and it chats with Joshua. A member can edit a
-page or write a new one. It is off until you turn it on, and
-it listens on the loopback address only. See
-[operations.md](operations.md#the-viewer).
+To read your notes in a browser instead of the terminal, use the viewer
+(step 8). A member can edit a page or write a new one.
+[operations.md](operations.md#the-viewer) has the rest.
 
 ## If something is wrong
 

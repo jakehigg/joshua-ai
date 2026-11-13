@@ -13,7 +13,7 @@ The chart ships as a package on each release. Take it from the release page,
 then install it:
 
 ```
-VERSION=0.0.6
+VERSION=<the newest release, without the v>
 curl -LO https://github.com/jakehigg/joshua-ai/releases/download/v$VERSION/joshua-$VERSION.tgz
 helm install joshua ./joshua-$VERSION.tgz \
   --namespace joshua --create-namespace \
@@ -283,19 +283,18 @@ and the viewer reaches it only through core's `/auth/*` routes with that fleet
 token. A sign-in answers with one signed cookie: the browser session, or 30
 days when the person checks "remember this device". The person who has
 `role: owner` sets a secret, adds a person, changes a role, and takes a person
-off the roster under Admin -> Users. Core serves that section only when its
-`ADMIN_CALLERS` names the viewer, so set `core.adminCallers: laptop,ci,viewer`
-in your values. The owner's own first secret comes from the core pod:
+off the roster under Admin -> Users, with no setting in your values. The
+owner's own first secret comes from the core pod:
 
 ```
 kubectl -n <namespace> exec deploy/joshua-core -- \
   python -m joshua_core people auth-reset --id sam --secret '<a long secret>'
 ```
 
-On the first start after an upgrade from the password viewer, core imports the
-old passwords once, from `viewer.users` in your config and from
-`VIEWER_PASSWORDS` in the core Secret, writes a hash for each person who has
-none, and marks the import done. Nothing is overwritten and it never runs
+If you signed in with the viewer passwords before, core imports them once, at
+its first start with the new sign-in. It reads `viewer.users` in your config
+and `VIEWER_PASSWORDS` in the core Secret, writes a hash for each person who
+has none, and marks the import done. Nothing is overwritten and it never runs
 again. Delete both afterwards.
 
 The viewer serves plain HTTP, and its session cookie crosses the wire with it.

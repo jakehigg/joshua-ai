@@ -33,6 +33,13 @@ class PeopleError(Exception):
     """A people operation failed a precondition (bad input or a handle conflict)."""
 
 
+class LastOwnerError(PeopleError):
+    """The change would leave the roster with no owner."""
+
+
+LAST_OWNER = "{id} is the only owner; make another person the owner first"
+
+
 # --- handle shape ----------------------------------------------------------
 
 
@@ -89,8 +96,20 @@ def slugify_id(name: str) -> str:
     return slug[:32].rstrip("-")
 
 
-def people_entry(person_id: str, name: str, role: str, channel_type: str, handle: str) -> dict:
-    return {"id": person_id, "name": name, "role": role, "handles": {channel_type: handle}}
+def people_entry(
+    person_id: str, name: str, role: str, channel_type: str = "", handle: str = ""
+) -> dict:
+    """One entry of the people file. A person with no handle has no ``handles`` key."""
+    entry: dict[str, Any] = {"id": person_id, "name": name, "role": role}
+    if channel_type and handle:
+        entry["handles"] = {channel_type: handle}
+    return entry
+
+
+async def _is_last_owner(repo: Repo, person_id: str) -> bool:
+    """True when ``person_id`` is an owner and no other live person is one."""
+    owners = [person.id for person in await repo.list_people() if person.role == "owner"]
+    return owners == [person_id]
 
 
 # --- operator path ---------------------------------------------------------
@@ -102,13 +121,16 @@ async def add_person(
     *,
     person_id: str,
     name: str,
-    handle: str,
+    handle: str = "",
     role: str = "member",
 ) -> dict[str, Any]:
     """Add or update a person from an operator request (CLI or admin API).
 
-    ``handle`` is ``<type>:<value>``. Raises ``PeopleError`` on a bad id, a bad
-    role, or a handle that already belongs to a different person.
+    ``handle`` is ``<type>:<value>``, or empty for a person who reaches Joshua
+    only through the viewer or the terminal. Raises ``PeopleError`` on a bad
+    id, a bad role, a handle of a bad shape, or a handle that already belongs
+    to a different person, and ``LastOwnerError`` when an update takes the
+    role of the only owner.
     """
     person_id = person_id.strip()
     if not _PERSON_ID_RE.match(person_id):
@@ -120,21 +142,29 @@ async def add_person(
     if role not in VALID_ROLES:
         raise PeopleError(f"role must be one of {_ROLE_WORDS}")
 
-    ctype, raw = split_handle(handle)
-    norm = normalize_handle(ctype, raw)
-    owner = await repo.get_person_by_handle(ctype, norm)
-    if owner is not None and owner.id != person_id:
-        raise PeopleError(
-            f"handle {ctype}:{norm} already belongs to {owner.display_name} (id {owner.id})"
-        )
+    ctype = norm = ""
+    if handle.strip():
+        ctype, raw = split_handle(handle)
+        norm = normalize_handle(ctype, raw)
+        holder = await repo.get_person_by_handle(ctype, norm)
+        if holder is not None and holder.id != person_id:
+            raise PeopleError(
+                f"handle {ctype}:{norm} already belongs to {holder.display_name} (id {holder.id})"
+            )
+    if role != "owner" and await _is_last_owner(repo, person_id):
+        raise LastOwnerError(LAST_OWNER.format(id=person_id))
 
     await repo.upsert_person(person_id, name, role)
-    await repo.upsert_person_handle(ctype, norm, person_id)
+    if norm:
+        await repo.upsert_person_handle(ctype, norm, person_id)
     people_file.upsert_person(
         Path(data_dir) / "people.yaml", people_entry(person_id, name, role, ctype, norm)
     )
     layout.bootstrap_person(person_id, name, root=data_dir)
-    return {"id": person_id, "name": name, "role": role, "handles": {ctype: norm}}
+    handles: dict[str, Any] = {}
+    for handle_type, value in await repo.handles_for_person(person_id):
+        handles = people_file.merge_handles(handles, {handle_type: value})
+    return {"id": person_id, "name": name, "role": role, "handles": handles}
 
 
 async def set_role(
@@ -144,7 +174,8 @@ async def set_role(
 
     The display name and the handles stay as they are, in the DB and in the
     people file. Raises ``PeopleError`` on a role that is not in
-    ``VALID_ROLES``, and returns None when no such person is on the roster.
+    ``VALID_ROLES``, ``LastOwnerError`` when the change takes the role of the
+    only owner, and returns None when no such person is on the roster.
     """
     person_id = person_id.strip()
     role = (role or "").strip().lower()
@@ -153,6 +184,8 @@ async def set_role(
     person = await repo.get_person(person_id)
     if person is None or person.role == "removed":
         return None
+    if role != "owner" and await _is_last_owner(repo, person_id):
+        raise LastOwnerError(LAST_OWNER.format(id=person_id))
     await repo.upsert_person(person_id, person.display_name, role)
     people_file.set_role(Path(data_dir) / "people.yaml", person_id, role)
     return {"id": person_id, "name": person.display_name, "role": role}
@@ -162,9 +195,12 @@ async def remove_person(repo: Repo, data_dir: Path | str, *, person_id: str) -> 
     """Mark a person removed and drop their handles. Data dirs and transcripts stay.
 
     The sign-in secret goes with the handles: a person who is off the roster
-    must not keep a way in. Returns False when no such person exists.
+    must not keep a way in. Returns False when no such person exists. Raises
+    ``LastOwnerError`` for the only owner.
     """
     person_id = person_id.strip()
+    if await _is_last_owner(repo, person_id):
+        raise LastOwnerError(LAST_OWNER.format(id=person_id))
     ok = await repo.remove_person(person_id)
     if not ok:
         return False

@@ -41,3 +41,10 @@ services:
     build:
       context: .
       dockerfile: assignments/Dockerfile
+
+  # `make validate-dev` checks joshua.yaml with the core image of this build.
+  validate:
+    image: joshua-ai-core:dev
+    build:
+      context: .
+      dockerfile: core/Dockerfile

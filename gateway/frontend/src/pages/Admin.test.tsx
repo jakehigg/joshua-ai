@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "../App";
 import type { Session } from "../shell/Shell";
-import { SECRET_NOT_SET, SECRET_SET, type AdminUsers } from "./admin/Users";
+import { ONLY_OWNER, SECRET_NOT_SET, SECRET_SET, type AdminUsers } from "./admin/Users";
 
 /** The owner who manages the roster, and a member who may not. */
 function session(role: string): Session {
@@ -153,7 +153,9 @@ describe("the admin Users section", () => {
   });
 
   it("promotes a guest one tier, and demotes an owner", async () => {
-    const sent = stubRoutes("owner");
+    const sent = stubRoutes("owner", {
+      users: [...ROSTER.users, { id: "noor", name: "Noor", role: "owner", has_secret: true }],
+    });
 
     app();
 
@@ -169,6 +171,51 @@ describe("the admin Users section", () => {
       expect(sent).toEqual([
         { path: "/api/v1/admin/users/iris/role", body: { role: "member" } },
         { path: "/api/v1/admin/users/mira/role", body: { role: "member" } },
+      ]),
+    );
+  });
+
+  it("will not demote or remove the only owner", async () => {
+    const sent = stubRoutes("owner");
+
+    app();
+
+    expect(await screen.findByText("Mira")).toBeDefined();
+    const demote = within(row("Mira")).getByRole("button", { name: "Demote" });
+    const remove = within(row("Mira")).getByRole("button", { name: "Remove" });
+    expect((demote as HTMLButtonElement).disabled).toBe(true);
+    expect((remove as HTMLButtonElement).disabled).toBe(true);
+    expect(demote.getAttribute("title")).toBe(ONLY_OWNER);
+    fireEvent.click(demote);
+    fireEvent.click(remove);
+    expect(sent).toEqual([]);
+    expect(screen.queryByText(/Remove Mira\?/)).toBeNull();
+  });
+
+  it("adds a person with no handle", async () => {
+    const sent = stubRoutes("owner");
+
+    app();
+
+    expect(await screen.findByText("Mira")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Add a person" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Add a person" }));
+    const handle = document.querySelector('input[name="handle"]') as HTMLInputElement;
+    expect(handle.required).toBe(false);
+    fireEvent.change(document.querySelector('input[name="name"]') as HTMLInputElement, {
+      target: { value: "Nadia" },
+    });
+    fireEvent.change(document.querySelector('input[name="id"]') as HTMLInputElement, {
+      target: { value: "nadia" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "Add" }));
+
+    await waitFor(() =>
+      expect(sent).toEqual([
+        {
+          path: "/api/v1/admin/users",
+          body: { id: "nadia", name: "Nadia", handle: "", role: "member", secret: "" },
+        },
       ]),
     );
   });

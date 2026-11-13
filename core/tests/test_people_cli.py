@@ -131,3 +131,51 @@ def test_cli_list_shows_every_handle(monkeypatch, tmp_path, capsys) -> None:
     assert rc == 0
     out = capsys.readouterr().out
     assert "telegram:10" in out and "telegram:9" in out
+
+
+def test_cli_add_with_no_handle(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo()
+    rc = _run_cli(monkeypatch, repo, ["add", "--id", "iris", "--name", "Iris"], tmp_path)
+    assert rc == 0
+    assert repo.people["iris"].role == "member"
+    assert repo.handles == {}
+    assert "added iris (member) no handles" in capsys.readouterr().out
+
+
+def test_cli_add_an_owner(monkeypatch, tmp_path) -> None:
+    repo = PeopleFakeRepo()
+    argv = ["add", "--id", "sam", "--name", "Sam", "--role", "owner"]
+    assert _run_cli(monkeypatch, repo, argv, tmp_path) == 0
+    assert repo.people["sam"].role == "owner"
+
+
+def test_cli_role_makes_an_owner(monkeypatch, tmp_path, capsys) -> None:
+    """The console way to name an owner, for a roster that has lost its own."""
+    repo = PeopleFakeRepo([Person(id="sam", display_name="Sam", role="member")])
+    rc = _run_cli(monkeypatch, repo, ["role", "--id", "sam", "--role", "owner"], tmp_path)
+    assert rc == 0
+    assert repo.people["sam"].role == "owner"
+    assert "sam is now owner" in capsys.readouterr().out
+
+
+def test_cli_role_unknown_person_returns_1(monkeypatch, tmp_path, capsys) -> None:
+    rc = _run_cli(
+        monkeypatch, PeopleFakeRepo(), ["role", "--id", "ghost", "--role", "owner"], tmp_path
+    )
+    assert rc == 1
+    assert "no such person: ghost" in capsys.readouterr().err
+
+
+def test_cli_role_refuses_to_demote_the_only_owner(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="sam", display_name="Sam", role="owner")])
+    rc = _run_cli(monkeypatch, repo, ["role", "--id", "sam", "--role", "member"], tmp_path)
+    assert rc == 1
+    assert repo.people["sam"].role == "owner"
+    assert "only owner" in capsys.readouterr().err
+
+
+def test_cli_remove_refuses_the_only_owner(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="sam", display_name="Sam", role="owner")])
+    assert _run_cli(monkeypatch, repo, ["remove", "--id", "sam"], tmp_path) == 1
+    assert repo.people["sam"].role == "owner"
+    assert "only owner" in capsys.readouterr().err

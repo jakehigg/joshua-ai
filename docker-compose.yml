@@ -1,10 +1,11 @@
 # The whole deployment on one host. `make init-env && make up` starts the four
-# services. The viewer and assignments are in profiles, so they are off until
-# you name the profile. The images come from the GitHub container registry, so nothing is
-# built here: set JOSHUA_VERSION in `.env` to take another release.
+# services. The viewer and assignments are in profiles: `make up` turns each
+# one on when joshua.yaml enables it. The images come from the GitHub
+# container registry, so nothing is built here: set JOSHUA_VERSION in `.env`
+# to take another release.
 #
-# To run your own build instead, add the developer override:
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# To run your own build instead, run `make up-dev`, which adds
+# docker-compose.dev.yml.
 #
 # Secrets come only from `.env` (see `.env.example`). No secret is written in
 # this file; every value is a literal or a `${VAR}` from `.env`.
@@ -165,8 +166,9 @@ services:
 
   # Read-only web viewer for the wiki and a person's own files. A second
   # entrypoint in the gateway image. Off by default; start it with
-  # `docker compose --profile viewer up`. Set `viewer.enabled: true` and
-  # `viewer.auth.method` in joshua.yaml first. Put a reverse proxy in front for
+  # `make up` when joshua.yaml sets `viewer.enabled: true`: the Makefile
+  # turns on the `viewer` profile. Set `viewer.auth.method` in joshua.yaml
+  # first. Put a reverse proxy in front for
   # TLS. It gets `/data` (read-write, for the delete) and its own fleet token,
   # which it sends to core to search by meaning and to check a sign-in. It
   # holds no other fleet token, no upstream credential, and no password: core
@@ -205,9 +207,9 @@ services:
       - "127.0.0.1:8082:8000"
     healthcheck: *app-healthcheck
 
-  # Long jobs that run for a member in the background. Off by default; start
-  # it with `docker compose --profile assignments up -d`. Set
-  # `assignments.enabled: true` in joshua.yaml first, and add the container as
+  # Long jobs that run for a member in the background. Off by default; `make
+  # up` starts it when joshua.yaml sets `assignments.enabled: true`: the
+  # Makefile turns on the `assignments` profile. Add the container as
   # an `mcp:` server: docs/assignments.md has the steps. It is not published on
   # the host: the gateway calls /mcp, and the viewer calls the read API.
   #
@@ -256,6 +258,22 @@ services:
       channels:
         condition: service_healthy
     healthcheck: *app-healthcheck
+
+  # `make validate`: check joshua.yaml once, and exit. It runs from the core
+  # image and has no network. It gets the channel credentials and the old
+  # viewer passwords only to report on them: the summary names a channel only
+  # when its credential is set, and the old passwords get a warning. It
+  # never starts with the stack.
+  validate:
+    image: ghcr.io/jakehigg/joshua-ai-core:${JOSHUA_VERSION:-0.2.1}
+    profiles: ["validate"]
+    entrypoint: ["joshua-config", "validate", "/etc/joshua/joshua.yaml"]
+    network_mode: none
+    environment:
+      <<: *config-vars
+      VIEWER_PASSWORDS: ${VIEWER_PASSWORDS:-}
+    volumes:
+      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
 
 volumes:
   pgdata:

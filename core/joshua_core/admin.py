@@ -4,13 +4,19 @@ Every ``/admin/*`` route requires an identity in ``ADMIN_CALLERS`` (env, default
 ``laptop,ci``) — checked on every route with no exception. A missing or invalid
 bearer is 401; a valid identity outside the allowlist is 403.
 
+The four roster routes (``/admin/people`` and below) also admit the callers of
+``AUTH_CALLERS`` (default ``viewer``). Those callers already set the sign-in
+secret of any person, and the viewer serves these routes to the owner alone.
+
 Routes:
 
 - ``GET /admin/people`` / ``POST /admin/people`` — read and extend the roster.
+  The handle is optional.
 - ``POST /admin/people/{id}/role`` — change the role of a person (body
   ``{role}``). Only the role changes.
 - ``POST /admin/people/{id}/remove`` — mark a person removed, drop their
   handles and their sign-in secret. The data dirs and the transcripts stay.
+  A role change, an add, or a remove that would leave no owner is 409.
 - ``GET /admin/pool`` — the warm session pool.
 - ``POST /admin/sessions/flush`` — drop every pooled session so the next turn
   reconnects with the current gateway toolset.
@@ -52,6 +58,7 @@ from joshua_shared.fleet_auth import (
 from joshua_shared.log import get_logger
 
 from joshua_core import people
+from joshua_core.auth_api import AUTH_CALLERS_ENV, DEFAULT_AUTH_CALLERS
 from joshua_core.engine import inference as inference_plan
 from joshua_core.memory import embed
 from joshua_core.memory.sources.snapshots import is_listed, split_items
@@ -142,6 +149,29 @@ def authorize_admin(request: Request) -> JSONResponse | None:
     return None
 
 
+def authorize_roster(request: Request) -> JSONResponse | None:
+    """Like ``authorize_admin``, and the callers of ``AUTH_CALLERS`` pass too."""
+    allowed = parse_callers(os.environ.get("ADMIN_CALLERS", DEFAULT_ADMIN_CALLERS)) | parse_callers(
+        os.environ.get(AUTH_CALLERS_ENV, DEFAULT_AUTH_CALLERS)
+    )
+    status, identity = authenticate(
+        request.headers.get("authorization"), load_fleet_tokens(), allowed=allowed
+    )
+    if status == 401:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if status == 403:
+        return JSONResponse(
+            {"error": f"caller {identity} may not change the roster"}, status_code=403
+        )
+    return None
+
+
+def _people_error(exc: people.PeopleError) -> JSONResponse:
+    """400 for a bad request, 409 for a change that leaves no owner."""
+    status = 409 if isinstance(exc, people.LastOwnerError) else 400
+    return JSONResponse({"error": str(exc)}, status_code=status)
+
+
 async def _default_oneshot(**kwargs: Any) -> str:
     """The real check call. Imported lazily so the module loads without the SDK."""
     from joshua_core.engine.agent import run_oneshot
@@ -154,7 +184,7 @@ def build_admin_router() -> APIRouter:
 
     @router.get("/admin/people")
     async def get_people(request: Request):  # type: ignore[no-untyped-def]
-        denied = authorize_admin(request)
+        denied = authorize_roster(request)
         if denied is not None:
             return denied
         repo = request.app.state.ctx.repo
@@ -162,7 +192,7 @@ def build_admin_router() -> APIRouter:
 
     @router.post("/admin/people")
     async def post_people(request: Request):  # type: ignore[no-untyped-def]
-        denied = authorize_admin(request)
+        denied = authorize_roster(request)
         if denied is not None:
             return denied
         try:
@@ -182,12 +212,12 @@ def build_admin_router() -> APIRouter:
                 role=str(body.get("role") or "member"),
             )
         except people.PeopleError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            return _people_error(exc)
         return JSONResponse({"person": result}, status_code=201)
 
     @router.post("/admin/people/{person_id}/role")
     async def post_person_role(person_id: str, request: Request):  # type: ignore[no-untyped-def]
-        denied = authorize_admin(request)
+        denied = authorize_roster(request)
         if denied is not None:
             return denied
         try:
@@ -204,19 +234,22 @@ def build_admin_router() -> APIRouter:
                 role=str(body.get("role") or ""),
             )
         except people.PeopleError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            return _people_error(exc)
         if result is None:
             return JSONResponse({"error": f"unknown person {person_id}"}, status_code=404)
         return JSONResponse({"person": result})
 
     @router.post("/admin/people/{person_id}/remove")
     async def post_person_remove(person_id: str, request: Request):  # type: ignore[no-untyped-def]
-        denied = authorize_admin(request)
+        denied = authorize_roster(request)
         if denied is not None:
             return denied
-        removed = await people.remove_person(
-            request.app.state.ctx.repo, _data_dir(), person_id=person_id
-        )
+        try:
+            removed = await people.remove_person(
+                request.app.state.ctx.repo, _data_dir(), person_id=person_id
+            )
+        except people.PeopleError as exc:
+            return _people_error(exc)
         if not removed:
             return JSONResponse({"error": f"unknown person {person_id}"}, status_code=404)
         return JSONResponse({"removed": True, "id": person_id})

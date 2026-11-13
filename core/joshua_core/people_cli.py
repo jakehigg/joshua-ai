@@ -1,10 +1,14 @@
-"""``python -m joshua_core people {add,list,remove,auth-reset}`` — operator roster
-management.
+"""``python -m joshua_core people {add,list,role,remove,auth-reset}`` — operator
+roster management.
 
 Runs with ``DATABASE_URL`` set. Writes the DB roster cache and the
 ``/data/people.yaml`` people file the loader merges over ``joshua.yaml``. ``remove``
 marks a person removed and drops their handles; it keeps the data dirs and the
 transcripts, so removal of data stays a human action.
+
+``role`` changes the role of one person, ``owner`` too, so an operator can
+always name an owner from the console. ``role`` and ``remove`` refuse to take
+the role of the only owner.
 
 ``auth-reset`` sets the sign-in secret of a person who is locked out. It writes
 the hash to the database itself, with no HTTP hop, so an operator at the
@@ -47,7 +51,17 @@ async def _add(repo: Repo, args: argparse.Namespace) -> int:
     result = await people.add_person(
         repo, _data_dir(), person_id=args.id, name=args.name, handle=args.handle, role=args.role
     )
-    print(f"added {result['id']} ({result['role']}) {_format_handles(result['handles'])}")
+    handles = _format_handles(result["handles"]) or "no handles"
+    print(f"added {result['id']} ({result['role']}) {handles}")
+    return 0
+
+
+async def _role(repo: Repo, args: argparse.Namespace) -> int:
+    result = await people.set_role(repo, _data_dir(), person_id=args.id, role=args.role)
+    if result is None:
+        print(f"no such person: {args.id}", file=sys.stderr)
+        return 1
+    print(f"{result['id']} is now {result['role']}")
     return 0
 
 
@@ -100,9 +114,12 @@ def _parser() -> argparse.ArgumentParser:
     add = sub.add_parser("add", help="add or update a person")
     add.add_argument("--id", required=True)
     add.add_argument("--name", required=True)
-    add.add_argument("--handle", required=True, help="e.g. telegram:998877")
-    add.add_argument("--role", default="member", choices=["member", "guest"])
+    add.add_argument("--handle", default="", help="e.g. telegram:998877; optional")
+    add.add_argument("--role", default="member", choices=list(people.VALID_ROLES))
     sub.add_parser("list", help="list the roster")
+    role = sub.add_parser("role", help="change the role of a person")
+    role.add_argument("--id", required=True)
+    role.add_argument("--role", required=True, choices=list(people.VALID_ROLES))
     remove = sub.add_parser("remove", help="mark a person removed and drop handles")
     remove.add_argument("--id", required=True)
     auth_reset = sub.add_parser("auth-reset", help="set the sign-in secret of a person")
@@ -116,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers: dict[str, Callable[[Repo, argparse.Namespace], Awaitable[int]]] = {
         "add": _add,
         "list": _list,
+        "role": _role,
         "remove": _remove,
         "auth-reset": _auth_reset,
     }

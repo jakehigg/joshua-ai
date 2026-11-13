@@ -2,14 +2,13 @@
 
 Core owns the roster and every secret, so each route here is a call to core
 with ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER``. The viewer calls core's
-``/admin/people`` routes with its own fleet token, as the identity ``viewer``,
-so an operator must name ``viewer`` in core's ``ADMIN_CALLERS`` (default
-``laptop,ci``) for these five routes to work. That is a deployment change, not
-a code one.
+``/admin/people`` routes with its own fleet token, as the identity ``viewer``.
+Core admits it there because ``viewer`` is in core's ``AUTH_CALLERS``, the
+callers of ``/auth/*``.
 
 - ``GET /api/v1/admin/users`` — the roster of ``joshua.yaml``, with
   ``has_secret`` for each person from core's ``GET /auth/people``.
-- ``POST /api/v1/admin/users`` — ``{id, name, handle, role?, secret?}``: core's
+- ``POST /api/v1/admin/users`` — ``{id, name, handle?, role?, secret?}``: core's
   ``POST /admin/people`` adds the person, then ``POST /auth/secret/admin``
   gives them the secret they sign in with. ``secret_set`` says whether the
   second call happened and worked; a person added with no secret cannot sign
@@ -21,6 +20,8 @@ a code one.
   ``POST /admin/people/{id}/role``.
 - ``POST /api/v1/admin/users/{id}/remove`` — core's
   ``POST /admin/people/{id}/remove``.
+
+Core refuses, with 409, a role change or a remove that leaves no owner.
 
 Every route is the owner's: a person whose role is not ``owner`` gets 403, so
 a member and a guest alike are refused before any call to core. A member role
