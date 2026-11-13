@@ -69,6 +69,9 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS session_started_on DATE;
 -- The server label (`anthropic` or a host) the SDK session ran on. NULL is
 -- `anthropic`. A session from another server is not resumed.
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inference_endpoint TEXT;
+-- The handoff that the last session wrote before the context cap ended it.
+-- The fresh session reads it. NULL when no session wrote one.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS handoff TEXT;
 
 CREATE TABLE IF NOT EXISTS tasks (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

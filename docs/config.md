@@ -1289,7 +1289,7 @@ A long conversation makes every model call read its whole history. The cap ends 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `core.context_cap` | `150000` | Input tokens over which a turn in a conversation that is not a workspace ends its SDK session. The next turn starts a new session and gets the last 10 rows of the thread. `0` turns the cap off. A workspace uses `workspaces.context_cap`. |
+| `core.context_cap` | `150000` | Input tokens over which a turn in a conversation that is not a workspace ends its SDK session. Before the session ends, it writes a handoff: the open questions, what waits on the person and on Joshua, the decisions, and the running work. The next turn starts a new session and gets the handoff and the last 10 rows of the thread. `0` turns the cap off. A workspace uses `workspaces.context_cap`. |
 
 ## workspaces
 
@@ -1301,7 +1301,8 @@ person makes a workspace.
 |---|---|---|
 | `allowed_callers` | `viewer`, `gateway` | The fleet identities that may call `/v1/workspaces`. The viewer acts for a person; the gateway records the items of a tool call at `POST /v1/workspaces/by-id/<id>/items`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the routes off, and every caller gets 403. |
 | `models` | empty | The models that a workspace may pick. An empty list accepts any name. |
-| `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. The next turn starts from the workspace block and the last 10 rows of the thread. At least 1000. |
+| `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. Before the session ends, it writes a handoff. The next turn starts from the workspace block, the handoff, and the last 10 rows of the thread. At least 1000. |
+| `max_turns` | `50` | The least number of agent turns that a workspace turn gets. A workspace turn reads repositories, pipelines, and documents, so it needs more than `core.max_turns`. |
 | `tool_search_max_servers` | `3` | A workspace that picks this many servers or fewer runs with tool search off. More servers turn it on. |
 | `viewer_url` | none | The public address of the viewer. `send_to_normal_chat` adds the link `<viewer_url>/chat/w/<slug>`. Without it, the message has the path only. |
 | `hint_sim` | `0.70` | The similarity over which normal chat gets the line "May relate to workspace X", from the `workspaces` record of the index. Between 0 and 1. |
@@ -1312,6 +1313,7 @@ workspaces:
   allowed_callers:
     - viewer
   context_cap: 150000
+  max_turns: 50
   tool_search_max_servers: 3
   viewer_url: https://joshua.example.org
   hint_sim: 0.70

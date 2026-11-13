@@ -68,6 +68,8 @@ class StubAgentSession:
         # Set by a test: the next turn fails the way the CLI reports a failed
         # call, with ``is_error`` and the error text in the result.
         self.fail_with: str | None = None
+        # The ``error`` label of that failed turn.
+        self.fail_error = "http_422"
         self.interrupted = False
         self.abandoned = False
         # When built with a resume id, fail the first run once so the manager's
@@ -132,7 +134,7 @@ class StubAgentSession:
                 is_error=True,
                 usage={"input_tokens": 0, "output_tokens": 0},
                 cost_usd=0.0,
-                error="http_422",
+                error=self.fail_error,
             )
 
         if JOURNAL_MARKER in prompt:

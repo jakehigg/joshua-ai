@@ -57,6 +57,7 @@ class FakeRepo:
         self.sdk_endpoints: dict[str, str | None] = {}
         self.touched: list[str] = []
         self.usage_events: list[Any] = []
+        self.handoffs: dict[str, str] = {}
         self._people = {
             "alex": Person(id="alex", display_name="Alex", role="member"),
             "mia": Person(id="mia", display_name="Mia", role="member"),
@@ -86,6 +87,15 @@ class FakeRepo:
 
     async def add_usage_event(self, event: Any) -> None:
         self.usage_events.append(event)
+
+    async def clear_sdk_session(self, conversation_id: str) -> None:
+        self.sdk_sessions.pop(conversation_id, None)
+
+    async def set_handoff(self, conversation_id: str, text: str) -> None:
+        self.handoffs[conversation_id] = text
+
+    async def conversation_handoff(self, conversation_id: str) -> str | None:
+        return self.handoffs.get(conversation_id)
 
     async def set_sdk_session(
         self,

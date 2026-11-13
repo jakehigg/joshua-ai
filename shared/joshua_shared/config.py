@@ -978,7 +978,10 @@ class WorkspacesConfig(_Model):
     list of models a workspace may pick; an empty list accepts any name.
     ``context_cap`` is the input size, in tokens, over which a workspace turn
     ends its SDK session: the next turn starts from the workspace block and
-    the last rows of the thread. ``tool_search_max_servers`` is the number of
+    the last rows of the thread. ``max_turns`` is the least number of agent
+    turns a workspace turn gets. A workspace turn reads repositories,
+    pipelines, and documents, and after a reset it reads them again, so it
+    needs more than ``core.max_turns``. ``tool_search_max_servers`` is the number of
     picked servers up to which a workspace turn runs with tool search off.
     ``viewer_url`` is the public address of the viewer, for the link that
     ``send_to_normal_chat`` adds. ``hint_sim`` is the similarity over which
@@ -991,6 +994,7 @@ class WorkspacesConfig(_Model):
     allowed_callers: list[str] = ["viewer", "gateway"]
     models: list[str] = []
     context_cap: int = Field(default=150_000, ge=1_000)
+    max_turns: int = Field(default=50, gt=0)
     tool_search_max_servers: int = Field(default=3, ge=0)
     viewer_url: str | None = None
     hint_sim: float = Field(default=0.70, ge=0.0, le=1.0)

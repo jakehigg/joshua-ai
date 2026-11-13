@@ -1474,6 +1474,23 @@ class Repo:
                 (list(item_ids),),
             )
 
+    async def set_handoff(self, conversation_id: str, text: str) -> None:
+        """Keep the handoff that a session wrote before the context cap."""
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                "UPDATE conversations SET handoff = %s WHERE id = %s",
+                (text, conversation_id),
+            )
+
+    async def conversation_handoff(self, conversation_id: str) -> str | None:
+        """The last handoff of a conversation, or None."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT handoff FROM conversations WHERE id = %s", (conversation_id,)
+            )
+            row = await cur.fetchone()
+        return (row or {}).get("handoff") or None
+
     async def clear_sdk_session(self, conversation_id: str) -> None:
         """Forget the SDK session of a conversation. The next turn starts a new one."""
         async with self._pool.connection() as conn:

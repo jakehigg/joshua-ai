@@ -37,6 +37,14 @@ BLOCK_MAX_ITEMS = 30
 # A fresh session gets this many rows of the thread, each cut short.
 BLOCK_RECENT_ROWS = 10
 RECENT_ROW_CHARS = 300
+# A row of the person is short, and its exact words matter: it is cut only
+# past this length.
+PERSON_ROW_CHARS = 2000
+# The line that a fresh session gets after its rows.
+HISTORY_HINT = (
+    "This thread was reset. The handoff and the rows above are short. For the "
+    "exact words of an earlier message, use `search_history` or `read_history`."
+)
 # A row from normal chat is shown in the block up to this length.
 CHAT_ROW_CHARS = 600
 
@@ -112,10 +120,14 @@ def recent_lines(rows: list[dict[str, Any]], person: str | None) -> list[str]:
         if not text or text == SILENT_REPLY or row.get("status") == FAILED_STATUS:
             continue
         if (row.get("meta") or {}).get("source") == FROM_CHAT_SOURCE:
-            who = "from normal chat"
+            who, limit = "from normal chat", RECENT_ROW_CHARS
+        elif row.get("direction") == "out":
+            who, limit = "you", RECENT_ROW_CHARS
+        elif row.get("direction") == "in":
+            who, limit = person or "person", PERSON_ROW_CHARS
         else:
-            who = "you" if row.get("direction") == "out" else (person or "person")
-        lines.append(f"- {who}: {_one_line(text, RECENT_ROW_CHARS)}")
+            who, limit = person or "person", RECENT_ROW_CHARS
+        lines.append(f"- {who}: {_one_line(text, limit)}")
     return lines
 
 
@@ -127,12 +139,14 @@ def render_block(
     chat_rows: list[str] | None = None,
     recent: list[str] | None = None,
     extra: list[str] | None = None,
+    handoff: str | None = None,
 ) -> str:
     """The workspace block as text.
 
     It holds the title, the goal, the notes, the items (``BLOCK_MAX_ITEMS``,
     pinned first, then newest), the items that came from normal chat and are
-    not yet seen, and, for a fresh session, the last rows of the thread.
+    not yet seen, and, for a fresh session, the handoff of the last session,
+    the last rows of the thread, and the line that points at ``history``.
     ``chat_rows`` holds the text of the rows that normal chat sent to the
     thread and that no block has shown. ``extra`` holds the text of the
     sections that ``add_section`` registers.
@@ -155,10 +169,23 @@ def render_block(
         lines.append("From normal chat, since your last turn:")
         lines += [f"- {_one_line(text, CHAT_ROW_CHARS)}" for text in chat_rows]
     lines += extra or []
+    lines += fresh_lines(handoff, recent)
+    return "\n".join(lines)
+
+
+def fresh_lines(handoff: str | None, recent: list[str] | None) -> list[str]:
+    """What a fresh session gets: the handoff, the last rows, and the line
+    that points at the ``history`` tools. Empty when there is neither a
+    handoff nor a row."""
+    lines: list[str] = []
+    if handoff:
+        lines += ["The handoff that the last session wrote before it ended:", handoff.strip()]
     if recent:
         lines.append("The last rows of this thread, because the session starts fresh:")
         lines += recent
-    return "\n".join(lines)
+    if lines:
+        lines.append(HISTORY_HINT)
+    return lines
 
 
 # A section of the block: it gets the workspace and returns text, or None for
@@ -186,9 +213,11 @@ class WorkspaceBlock:
         items = await self._repo.list_workspace_items(workspace.id)
         unseen = [i for i in items if not i.seen]
         recent: list[str] = []
+        handoff: str | None = None
         if fresh:
             rows = await self._repo.transcript_tail(conversation_id, BLOCK_RECENT_ROWS)
             recent = recent_lines(rows, workspace.owner)
+            handoff = await self._repo.conversation_handoff(conversation_id)
         extra = []
         for section in self._sections:
             try:
@@ -208,6 +237,7 @@ class WorkspaceBlock:
             chat_rows=[r["content"] for r in chat_rows],
             recent=recent,
             extra=extra,
+            handoff=handoff,
         )
 
     async def __call__(self, ctx: Any) -> str | None:

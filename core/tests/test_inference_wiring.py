@@ -23,7 +23,8 @@ from joshua_core.engine import inference as inference_plan
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.stub_agent import HANG_MARKER
 from joshua_core.engine.tools.internet import do_lookup
-from joshua_core.engine.types import FAILED_REPLY
+from joshua_core.engine.types import FAILED_REPLY, MAX_TURNS_ERROR, WRAP_UP_PROMPT, TurnResult
+from joshua_core.store.models import Channel
 from joshua_shared import config as config_module
 from joshua_shared.attachments import AttachmentMeta, write_meta
 from joshua_shared.inference import ENV_KEYS
@@ -547,6 +548,77 @@ async def test_a_failed_stub_turn_gives_the_failure_reply(tmp_path: Path) -> Non
     assert result.text == FAILED_REPLY
     assert repo.transcripts[-1]["content"] == FAILED_REPLY
     assert no_key_in(repo.transcripts)
+
+
+# ── a turn that uses all of its max_turns ────────────────────────────────────
+
+
+async def test_a_turn_at_max_turns_gets_a_reply_from_its_work(tmp_path: Path) -> None:
+    repo = FakeRepo()
+    manager = sdk_manager(repo, tmp_path, backend="stub")
+    channel, conversation = make_channel(), make_conversation()
+    await manager.run_turn(channel, conversation, "hello")
+    session = manager._pool["c1"].session
+    session.fail_with = ERROR_TEXT
+    session.fail_error = MAX_TURNS_ERROR
+
+    result = await manager.run_turn(channel, conversation, "look into the pipeline")
+
+    assert session.prompts[-1] == WRAP_UP_PROMPT
+    assert not result.is_error
+    assert result.text and result.text != FAILED_REPLY
+    out = repo.transcripts[-1]
+    assert (out["direction"], out["status"]) == ("out", "ok")
+    assert out["content"] == result.text
+    # The wrap-up message is not a row of the thread.
+    assert all(row["content"] != WRAP_UP_PROMPT for row in repo.transcripts)
+
+
+async def test_a_failed_wrap_up_gives_the_failure_reply(tmp_path: Path) -> None:
+    repo = FakeRepo()
+    manager = sdk_manager(repo, tmp_path, backend="stub")
+    channel, conversation = make_channel(), make_conversation()
+    await manager.run_turn(channel, conversation, "hello")
+    session = manager._pool["c1"].session
+    prompts: list[str] = []
+
+    async def at_the_limit(prompt: str, on_delta: Any = None) -> TurnResult:
+        prompts.append(prompt)
+        return TurnResult(text="", is_error=True, error=MAX_TURNS_ERROR)
+
+    session.run = at_the_limit
+
+    result = await manager.run_turn(channel, conversation, "look into the pipeline")
+
+    assert len(prompts) == 2
+    assert "look into the pipeline" in prompts[0]
+    assert prompts[1] == WRAP_UP_PROMPT
+    assert result.is_error
+    assert result.text == FAILED_REPLY
+    assert repo.transcripts[-1]["status"] == "failed"
+
+
+async def test_another_failure_gets_no_wrap_up(tmp_path: Path) -> None:
+    manager = sdk_manager(FakeRepo(), tmp_path, backend="stub")
+    channel, conversation = make_channel(), make_conversation()
+    await manager.run_turn(channel, conversation, "hello")
+    session = manager._pool["c1"].session
+    session.fail_with = ERROR_TEXT
+
+    result = await manager.run_turn(channel, conversation, "again")
+
+    assert result.text == FAILED_REPLY
+    assert WRAP_UP_PROMPT not in session.prompts
+
+
+def test_a_workspace_session_gets_the_workspace_max_turns(tmp_path: Path) -> None:
+    manager = sdk_manager(FakeRepo(), tmp_path)
+    workspace = Channel(id="workspace:w1", channel_type="workspace", session_mode="per_person")
+    profile = SimpleNamespace(max_turns=0)
+
+    assert manager._max_turns(profile, make_channel()) == 20
+    assert manager._max_turns(profile, workspace) == 50
+    assert manager._max_turns(SimpleNamespace(max_turns=80), workspace) == 80
 
 
 # ── the time limit ───────────────────────────────────────────────────────────
