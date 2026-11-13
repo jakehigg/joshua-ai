@@ -79,6 +79,8 @@ def routes() -> list[Route]:
         Route(api_path("auth-method"), session.auth_method),
         Route(api_path("sign-in/people"), session.sign_in_people),
         Route(api_path("me"), _require_auth(me.me)),
+        Route(api_path("profile"), _require_auth(me.profile)),
+        Route(api_path("profile"), _require_auth(me.save_profile), methods=["POST"]),
         Route(api_path("journal"), _require_auth(journal.feed)),
         Route(api_path("journal/{year:int}/{month:int}/{day:int}"), _require_auth(journal.day)),
         Route(api_path("search"), _require_auth(search.search)),

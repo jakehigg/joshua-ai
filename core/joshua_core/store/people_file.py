@@ -3,8 +3,9 @@
 The people file holds runtime people additions in the same schema as
 ``people``. The config loader merges it over ``joshua.yaml`` at load
 time (``joshua_shared.config.read_people_file``); this module writes it.
-``upsert_person`` adds or replaces a person; ``set_role`` changes the role of a
-person and nothing else about them; ``mark_removed`` writes a ``role: removed``
+``upsert_person`` adds a person or updates the file entry of that id;
+``set_role`` writes a role-only entry; ``set_profile`` writes the ``prompt`` and
+``journal`` keys only; ``mark_removed`` writes a ``role: removed``
 tombstone that drops the person from the merged roster.
 """
 
@@ -95,18 +96,38 @@ def resolved_entry(person_id: str) -> dict[str, Any] | None:
 def set_role(path: Path, person_id: str, role: str) -> None:
     """Write the role of ``person_id`` to the people file. Only the role changes.
 
-    A people file entry replaces the configured one whole, so the entry written
-    here is the person as the loader resolves them now, with the new role:
-    nothing of theirs is lost. A person the loader does not know gets a
-    role-only entry, which is all there is to write.
+    A people file entry overlays the configured one field by field, so the
+    entry written here is just the id and the role. The name and the handles
+    come from ``joshua.yaml`` or from the entry already in the file, and a
+    ``role: removed`` tombstone of that id is replaced by the new role.
     """
-    entry = resolved_entry(person_id)
-    if entry is None:
-        entry = next(
-            (p for p in read_people_file(path) if p.get("id") == person_id),
-            {"id": person_id},
-        )
-    upsert_person(path, {**entry, "role": role})
+    upsert_person(path, {"id": person_id, "role": role})
+
+
+def set_profile(path: Path, person_id: str, *, prompt: str, journal: str) -> dict[str, Any] | None:
+    """Write the ``prompt`` and ``journal`` of ``person_id`` to the people file.
+
+    Only those two keys go in, and both are always written. ``prompt`` is the
+    path of the snippet file, or ``""`` for no snippet, which also overrides a
+    path that ``joshua.yaml`` names. Other keys of the file entry stay, such as
+    a role or the whole entry of a runtime person. Returns the file entry, or
+    None when the loader does not know the person.
+    """
+    if resolved_entry(person_id) is None:
+        return None
+    people = read_people_file(path)
+    out: list[dict[str, Any]] = []
+    entry: dict[str, Any] = {"id": person_id}
+    for person in people:
+        if person.get("id") == person_id:
+            entry = dict(person)
+        else:
+            out.append(person)
+    entry["prompt"] = prompt
+    entry["journal"] = journal
+    out.append(entry)
+    write_people_file(path, out)
+    return entry
 
 
 def mark_removed(path: Path, person_id: str) -> None:

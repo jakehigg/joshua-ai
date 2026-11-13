@@ -114,6 +114,7 @@ export function Rail({
           <AppNav
             sections={nav.sections}
             section={nav.section}
+            owner={nav.owner}
             onNavigate={onNavigate}
             omit={["chat"]}
           />

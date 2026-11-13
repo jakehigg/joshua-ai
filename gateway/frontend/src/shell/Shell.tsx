@@ -33,7 +33,7 @@ const LABELS: Record<string, string> = Object.fromEntries(
 
 function title(section: string): string {
   if (section === ME_SECTION) {
-    return "You";
+    return "Profile";
   }
   if (section === LINKS_SECTION) {
     return "Links";
@@ -167,10 +167,11 @@ export default function Shell({
   }
 
   const sections = session?.sections ?? [];
+  const owner = session?.person.role === "owner";
   // The chat fills the screen: its own column scrolls, and the page does not.
   const fill = section === "chat";
   return (
-    <NavContext.Provider value={{ sections, section }}>
+    <NavContext.Provider value={{ sections, section, owner }}>
       <div
         className={`j-shell has-sidebar${fill ? " fill" : ""}${navCollapsed ? " nav-collapsed" : ""}`}
       >
@@ -207,7 +208,7 @@ export default function Shell({
               «
             </button>
           </div>
-          <AppNav sections={sections} section={section} />
+          <AppNav sections={sections} section={section} owner={owner} />
         </aside>
         {open && <div className="j-scrim" data-testid="nav-backdrop" onClick={() => setOpen(false)} />}
         <div className="j-main">

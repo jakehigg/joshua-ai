@@ -7,6 +7,7 @@ import Empty from "../ui/Empty";
 import ErrorLine from "../ui/ErrorLine";
 import Page from "../ui/Page";
 import Spinner from "../ui/Spinner";
+import ProfileSettings from "./ProfileSettings";
 
 /** One attachment of the person, as `GET /api/v1/me` sends it. */
 export interface Attachment {
@@ -41,9 +42,10 @@ function Attachments({ items }: { items: Attachment[] }) {
 }
 
 /**
- * `/me`: the page of the person who signed in, with the link to their
- * profile, the link to the journal, their recent attachments and the wiki
- * tree. The anonymous identity is no person on disk, so it gets no profile
+ * `/me`, "Profile" in the navigation: the page of the person who signed in.
+ * It holds the settings of that person (their secret, their instructions to
+ * Joshua, and their journal consent), then the link to their profile page,
+ * the link to the journal, their recent attachments and the wiki tree. The anonymous identity is no person on disk, so it gets no profile
  * link and no attachments.
  */
 export default function Me() {
@@ -79,7 +81,7 @@ export default function Me() {
   if (me === null) {
     return (
       <Shell section="me">
-        <Spinner label="Loading your page" />
+        <Spinner label="Loading your profile" />
       </Shell>
     );
   }
@@ -97,6 +99,7 @@ export default function Me() {
           )}
           <a href="/journal">journal</a>
         </p>
+        {!anonymous && <ProfileSettings />}
         {!anonymous && <Attachments items={me.attachments} />}
         <h2 className="j-label">wiki</h2>
         <WikiTree />

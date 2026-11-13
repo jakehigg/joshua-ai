@@ -151,8 +151,9 @@ who keeps the roster from the viewer, not a capability.
 
 ## The Users section
 
-Sam opens `/admin/users`, under Admin → Users. Robin and Kit do not see it,
-and every route behind it refuses them.
+Sam opens Admin, the link under Profile at the bottom of the navigation, or
+`/admin/users`. Robin and Kit do not see the link, and every route behind it
+refuses them.
 
 The table holds one row for each person: the name and the id, the role, and
 whether that person has a secret. The secret column says `Set`, or
@@ -178,13 +179,30 @@ their channel, and cannot sign in to the viewer until an owner gives them a
 secret. The pin list shows only the people who have one, so such a person is
 not on it.
 
-## Change your own secret
+## Your Profile
 
-The viewer changes the secret of the person who signed in at
-`POST /api/v1/session/secret`, with the current secret beside the new one.
-The change moves the stamp of that person, so the browser that made the
-change stays signed in and every other browser of that person signs out. The
-app has no button for it yet.
+"Profile" is at the bottom of the navigation, at `/me`. Every person who
+signs in changes three things about themselves there:
+
+- **Your PIN or password.** Type the current secret, then the new one two
+  times. The viewer sends it to `POST /api/v1/session/secret`. The change
+  moves the stamp of that person, so this browser stays signed in and every
+  other browser of that person signs out.
+- **Your instructions to Joshua.** Joshua reads this text in every
+  conversation with you. It is the `prompt` of your roster entry.
+- **Journal entries about you.** `auto`, `ask`, or `off`: the `journal`
+  consent of your roster entry.
+
+A person cannot change their own name, role, or handles. The owner changes a
+role under Admin → Users.
+
+The instructions and the consent go to `POST /api/v1/profile`. Core writes
+the instructions to `/data/people/<id>/prompt.md` and puts two fields in your
+entry of `/data/people.yaml`: `prompt`, the path of that file, and `journal`.
+An entry of the people file overlays only the fields it holds on your entry
+in `joshua.yaml`. So your name, your role, and your handles still come from
+`joshua.yaml`, and a change there still takes effect. Joshua reads the new
+instructions and the new consent on the next turn, with no restart.
 
 When somebody is locked out, and an owner cannot help, an operator runs one
 command in the core container:

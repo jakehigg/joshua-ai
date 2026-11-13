@@ -146,6 +146,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `DELETE /auth/secret/{person_id}` | `AUTH_CALLERS` | | `{"ok": true, "person", "deleted": bool}`. `deleted` is `false` when that person had no secret. `404` for a person who is not on the roster. |
 | `GET /auth/people` | `AUTH_CALLERS` | | `{"people": […]}`, the ids of the people who have a secret. A person with no secret is absent, and no row carries a time. |
 | `GET /auth/people/{person_id}` | `AUTH_CALLERS` | | `{"person", "updated_at"}`, when that person's secret last changed. `404 {"error": "no secret"}` for a person who has none, `404` for one who is not on the roster. |
+| `GET /people/{person_id}/profile` | `AUTH_CALLERS` | | `{"prompt", "journal", "in_config"}`. `prompt` is the text of the personal instructions of that person to Joshua, or `null` for none. Core reads it from the snippet file at the path the roster holds. `journal` is `auto`, `ask`, or `off`. `in_config` is `true` when `joshua.yaml` also names the person, so an edit overrides the config file. `404` for a person who is not on the roster. |
+| `POST /people/{person_id}/profile` | `AUTH_CALLERS` | `{"prompt"?, "journal"?}` | The new profile, in the shape of the `GET`. A person edits only their own entry, and only these two fields. `prompt` is text in and text out. Core writes the text to `<data_dir>/people/<id>/prompt.md` and sets `prompt` in the people file to that path. An empty string or `null` clears `prompt`, writes `""` as the path, and removes the file, and a `prompt` over 4000 characters is `400`. A `journal` outside the three values is `400`, as is an unknown field or an empty body. `404` for a person who is not on the roster. |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
 | `POST /admin/people/{id}/role` | `ADMIN_CALLERS` | `{"role"}` (`member`, `guest`, or `owner`) | `{"person": …}` with only the role changed, `400 {"error": …}` for another role, `404` for a person who is not on the roster |
@@ -381,6 +383,13 @@ last changed their secret stays out of it;
 `GET /auth/people/{person_id}` carries the time of one person, because the
 viewer stamps its session cookie with it, so a changed secret signs out every
 cookie that carries the old stamp.
+
+The profile routes are no admin action. A person edits their own `prompt` and
+`journal`, and the viewer calls them for the person who signed in, with the
+same `AUTH_CALLERS` check as the routes above. Core writes only the `prompt` and
+`journal` keys to the entry of that person in `people.yaml`. That file overlays
+the configured entry field by field, so the name, the role, and the handles
+stay as they are.
 
 The roster routes are the admin ones: `POST /admin/people` adds a person,
 `POST /admin/people/{id}/role` changes a role to `member`, `guest`, or

@@ -395,3 +395,63 @@ async def test_add_user_keeps_the_handle_the_person_already_has(tmp_path: Path) 
     )
     assert cfg.people_by_handle("imessage", "sam@example.com").id == "sam"
     assert cfg.people_by_handle("imessage", "+15550001111").id == "sam"
+
+
+def _roster_config(tmp_path: Path, monkeypatch) -> Path:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    config_path = tmp_path / "joshua.yaml"
+    config_path.write_text(
+        "name: T\ntimezone: UTC\npeople:\n  - id: robin\n    name: Robin\n    journal: ask\n"
+        '    handles:\n      telegram: "112233"\n'
+    )
+    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("JOSHUA_CONFIG", str(config_path))
+    monkeypatch.setattr(config_module, "_cache", None)
+    monkeypatch.setattr(config_module, "_cache_path", None)
+    return data_dir
+
+
+def test_set_role_writes_only_the_id_and_the_role(tmp_path: Path, monkeypatch) -> None:
+    data_dir = _roster_config(tmp_path, monkeypatch)
+    people_file.set_role(data_dir / "people.yaml", "robin", "owner")
+    assert config_module.read_people_file(data_dir / "people.yaml") == [
+        {"id": "robin", "role": "owner"}
+    ]
+
+
+def test_set_role_clears_a_tombstone(tmp_path: Path, monkeypatch) -> None:
+    data_dir = _roster_config(tmp_path, monkeypatch)
+    path = data_dir / "people.yaml"
+    people_file.mark_removed(path, "robin")
+    people_file.set_role(path, "robin", "guest")
+    assert config_module.read_people_file(path) == [{"id": "robin", "role": "guest"}]
+
+
+def test_set_profile_writes_only_prompt_and_journal_and_keeps_a_role(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_dir = _roster_config(tmp_path, monkeypatch)
+    path = data_dir / "people.yaml"
+    people_file.set_role(path, "robin", "owner")
+    people_file.set_profile(path, "robin", prompt="/data/people/robin/prompt.md", journal="off")
+    assert config_module.read_people_file(path) == [
+        {
+            "id": "robin",
+            "role": "owner",
+            "prompt": "/data/people/robin/prompt.md",
+            "journal": "off",
+        }
+    ]
+    people_file.set_profile(path, "robin", prompt="", journal="auto")
+    entry = config_module.read_people_file(path)[0]
+    assert entry["prompt"] == "" and entry["journal"] == "auto" and entry["role"] == "owner"
+
+
+def test_set_profile_of_an_unknown_person_writes_nothing(tmp_path: Path, monkeypatch) -> None:
+    data_dir = _roster_config(tmp_path, monkeypatch)
+    assert (
+        people_file.set_profile(data_dir / "people.yaml", "nobody", prompt="", journal="off")
+        is None
+    )
+    assert not (data_dir / "people.yaml").exists()

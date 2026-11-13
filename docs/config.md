@@ -47,7 +47,11 @@ Each `people[]` entry takes:
   handles, because a person often has an email address and a phone number on
   iMessage. Every handle in the list names the person. The first one is the
   handle Joshua uses to address them.
-- `prompt`: a path to an extra prompt snippet for this person.
+- `prompt`: a path to an extra prompt snippet for this person. An empty string
+  means no snippet. Core reads the person on each turn, so a change in the
+  people file applies with no restart. The viewer's Profile page writes the
+  text of the person to `<data_dir>/people/<id>/prompt.md` and sets `prompt` to
+  that path in the people file.
 - `journal`: whether Joshua's own journal may record this person's life
   updates: `auto` (default, write an entry on its own), `ask` (offer first), or
   `off` (write an entry only when asked). It does not give the person a
@@ -75,13 +79,16 @@ A runtime change is written to two places:
   the same schema as `people`.
 
 The loader reads the people file and merges it over `people` at load time. An
-entry with the same id as a `joshua.yaml` person replaces that person. A
-new id is appended. An entry with `role: removed` drops that id from the merged
+entry with the same id as a `joshua.yaml` person overlays that person field by
+field: each key the entry holds wins, and each key it leaves out stays as
+`joshua.yaml` has it. The `handles` of the two are the union, per channel type,
+with the `joshua.yaml` handles first. A new id is appended. An entry with `role: removed` drops that id from the merged
 roster. This is how a removed person's handle stops resolving.
 
 **The people file wins, so `joshua.yaml` is a starting point and not a control
 panel.** Once a person is enrolled, an edit to that person in `joshua.yaml`
-changes nothing: the people file entry replaces it at every load. Change an
+changes nothing for the keys the people file entry holds, because those win at
+every load. A key the entry leaves out still comes from `joshua.yaml`. Change an
 enrolled person the same way you added them, with the agent tool, the CLI, or
 the admin route below. This holds for a deployment that renders `joshua.yaml`
 from a git repository too: the merge request is reviewed, merged and synced,
@@ -93,7 +100,12 @@ people file. The next load reads `joshua.yaml` for that id again.
 The data dir comes from `JOSHUA_DATA_DIR` (default `/data`), the same variable all
 three containers read.
 
-Three paths write the people file:
+The viewer's Profile page also writes the people file. It sets only `prompt`
+and `journal` on the entry of the person who signed in, through core's
+`POST /people/<id>/profile`. A `prompt` of `""` clears the snippet and
+overrides a path that `joshua.yaml` names.
+
+Three other paths write the people file:
 
 - The agent's `registration` tool (`add_user`, `list_users`). Only a
   member or the owner can add people. A guest or an unidentified caller gets

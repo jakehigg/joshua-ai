@@ -1852,13 +1852,34 @@ def read_people_file(path: Path) -> list[dict[str, Any]]:
     return people if isinstance(people, list) else []
 
 
+def _union_handles(base: Any, extra: Any) -> dict[str, Any]:
+    """Union two raw handle maps, one channel type at a time.
+
+    A value is one handle or a list. Base handles come first, the others are
+    appended, and no handle repeats.
+    """
+    base = base if isinstance(base, dict) else {}
+    extra = extra if isinstance(extra, dict) else {}
+    merged: dict[str, Any] = {}
+    for handle_type in [*base, *(t for t in extra if t not in base)]:
+        ids: list[str] = []
+        for source in (base.get(handle_type), extra.get(handle_type)):
+            values = [source] if isinstance(source, str) else list(source or [])
+            ids.extend(v for v in values if v not in ids)
+        merged[handle_type] = ids[0] if len(ids) == 1 else ids
+    return merged
+
+
 def _apply_people_file(
     base: list[dict[str, Any]], people: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Merge ``people file`` people over ``base`` by id.
 
-    A people file entry replaces the base entry with the same id, or appends a new
-    one. An entry with ``role: removed`` drops that id from the roster.
+    A people file entry overlays the base entry with the same id: each key it
+    holds wins, and the keys it leaves out stay as the base has them. The
+    ``handles`` of the two are the union, per channel type. A new id is
+    appended as it is. An entry with ``role: removed`` drops that id from the
+    roster.
     """
     result: list[dict[str, Any] | None] = [dict(person) for person in base]
     index = {p["id"]: i for i, p in enumerate(result) if isinstance(p, dict) and "id" in p}
@@ -1868,7 +1889,16 @@ def _apply_people_file(
             continue
         removed = str(entry.get("role", "")).strip().lower() == "removed"
         if pid in index:
-            result[index[pid]] = None if removed else entry
+            current = result[index[pid]]
+            if removed:
+                result[index[pid]] = None
+            elif current is None:
+                result[index[pid]] = entry
+            else:
+                merged = {**current, **entry}
+                if "handles" in current or "handles" in entry:
+                    merged["handles"] = _union_handles(current.get("handles"), entry.get("handles"))
+                result[index[pid]] = merged
         elif not removed:
             index[pid] = len(result)
             result.append(entry)

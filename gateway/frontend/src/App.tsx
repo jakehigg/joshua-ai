@@ -113,6 +113,10 @@ function SignedIn({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (atSignIn) {
+      // Forget the verdict of the last visit. A sign-in changes the answer,
+      // and a stale "sign-in" here would send the browser straight back to
+      // the form on the first render after it.
+      setGate({ at: "waiting" });
       return undefined;
     }
     let live = true;

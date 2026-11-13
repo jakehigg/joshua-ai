@@ -760,9 +760,10 @@ everybody out.
 The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
 `http://127.0.0.1:8082/` and sign in. The address opens the wiki. The menu
 holds Wiki, Journal, Search, Usage,
-Assignments, Documents (members only) and Chat, and "Your page" at `/me`,
-which has the profile link and the recent attachments of the person who
-signed in. Every one of these is an address of the app's router, and the app
+Assignments, Documents (members only) and Chat. At the bottom, "Profile" at
+`/me` has the settings of the person who signed in (their secret, their
+instructions to Joshua, and their journal consent), the profile link, and
+their recent attachments. The owner also gets "Admin" under it. Every one of these is an address of the app's router, and the app
 reads them from `/api/v1/`. The chat is a screen of the same app, at
 `/chat/<person id>`, with a workspace at `/chat/w/<slug>`; it reaches the
 `channels` container through the viewer. An image with no build of the app

@@ -54,6 +54,41 @@ def test_merge_overrides_by_id() -> None:
     assert cfg.people_by_handle("telegram", "999").id == "alex"
 
 
+def test_a_role_only_entry_keeps_the_name_and_handles_of_the_config() -> None:
+    cfg = config_module.parse(BASE, env={}, file_people=[{"id": "alex", "role": "owner"}])
+    alex = cfg.person("alex")
+    assert alex.role == "owner"
+    assert alex.name == "Alex"
+    assert alex.handles == {"telegram": ["998877"]}
+
+
+def test_handles_are_the_union_per_channel_type() -> None:
+    people = [
+        {
+            "id": "alex",
+            "handles": {"telegram": ["998877", "42"], "imessage": "+15551234567"},
+        }
+    ]
+    alex = config_module.parse(BASE, env={}, file_people=people).person("alex")
+    assert alex.handles == {"telegram": ["998877", "42"], "imessage": ["+15551234567"]}
+
+
+def test_an_entry_overlays_only_the_keys_it_holds() -> None:
+    people = [{"id": "alex", "journal": "off", "prompt": ""}]
+    alex = config_module.parse(BASE, env={}, file_people=people).person("alex")
+    assert alex.journal == "off"
+    assert alex.prompt == ""
+    assert alex.role == "member"
+    assert alex.handles == {"telegram": ["998877"]}
+
+
+def test_a_tombstone_then_a_new_entry_is_the_new_entry_alone() -> None:
+    people = [{"id": "alex", "role": "removed"}, {"id": "alex", "name": "Alex 2"}]
+    alex = config_module.parse(BASE, env={}, file_people=people).person("alex")
+    assert alex.name == "Alex 2"
+    assert alex.handles == {}
+
+
 def test_merge_removed_drops_person() -> None:
     people = [{"id": "alex", "role": "removed"}]
     cfg = config_module.parse(BASE, env={}, file_people=people)

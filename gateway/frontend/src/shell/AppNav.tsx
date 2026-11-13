@@ -1,5 +1,5 @@
 // The app-wide navigation links: the sections of the session, the links
-// group, and "Your page". The sidebar of the shell draws them, and on a phone
+// group, "Profile", and "Admin" for the owner. The sidebar of the shell draws them, and on a phone
 // in the chat the rail draws them too, under its workspaces, so the phone has
 // one drawer for both (Rail.tsx). The shell puts `sections` and `section` in
 // a context so the rail can read them without a second session call.
@@ -9,7 +9,7 @@ import { Link } from "react-router-dom";
 
 import Icon from "./Icon";
 import LinksNav from "./LinksNav";
-import { ME_ICON, section as sectionOf } from "./sections";
+import { ADMIN_ICON, ME_ICON, section as sectionOf } from "./sections";
 
 export interface SessionSection {
   key: string;
@@ -17,13 +17,18 @@ export interface SessionSection {
   path: string;
 }
 
-/** The key of the item of "Your page". */
+/** The key of the item of "Profile". */
 export const ME_SECTION = "me";
+
+/** The key of the admin area, which only the owner sees in the navigation. */
+export const ADMIN_NAV = "admin";
 
 export interface NavState {
   sections: SessionSection[];
   /** The key of the current section. */
   section: string;
+  /** True for the owner, who gets "Admin" under "Profile". */
+  owner?: boolean;
 }
 
 export const NavContext = createContext<NavState | null>(null);
@@ -79,6 +84,7 @@ function NavItem({
 export default function AppNav({
   sections,
   section,
+  owner = false,
   onNavigate,
   omit = [],
 }: NavState & {
@@ -113,8 +119,19 @@ export default function AppNav({
           onClick={onNavigate}
         >
           <Icon paths={ME_ICON} />
-          Your page
+          Profile
         </Link>
+        {owner && (
+          <Link
+            className="j-nav-item"
+            to="/admin"
+            aria-current={current(ADMIN_NAV, section)}
+            onClick={onNavigate}
+          >
+            <Icon paths={ADMIN_ICON} />
+            Admin
+          </Link>
+        )}
       </nav>
     </>
   );

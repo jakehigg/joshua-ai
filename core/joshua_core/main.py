@@ -60,6 +60,7 @@ from joshua_core.memory.sources.workspaces import WORKSPACES_SOURCE, WorkspacesS
 from joshua_core.memory.store import MemoryStore
 from joshua_core.migrate_links import migrate_page_links
 from joshua_core.model_forwarder import ModelForwarder
+from joshua_core.profile_api import build_profile_router
 from joshua_core.scheduler import Scheduler
 from joshua_core.search_api import build_search_router
 from joshua_core.snapshots import SnapshotRunner, build_runner
@@ -332,13 +333,7 @@ def _build_manager(
     ``limits``, and ``workspace`` builtins register here. ``limits`` goes only to the jobs
     that ``limits.chat_tool`` and ``limits.voice_tool`` name.
     """
-    person_prompts = {p.id: p.prompt for p in settings.people if p.prompt}
-    person_journal = {p.id: p.journal for p in settings.people if p.journal != "auto"}
-    composer = PromptComposer(
-        settings.core.prompts_dir,
-        person_prompts=person_prompts,
-        person_journal=person_journal,
-    )
+    composer = PromptComposer(settings.core.prompts_dir)
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     # A URL a person writes is granted for that conversation, so the agent may
     # hand it to the internet agent. See ``engine/url_grants.py``.
@@ -533,6 +528,7 @@ def build_app() -> FastAPI:
     app.include_router(build_router())
     app.include_router(build_admin_router())
     app.include_router(build_auth_router())
+    app.include_router(build_profile_router())
     app.include_router(build_search_router())
     app.include_router(build_transcript_router())
     app.include_router(build_usage_router())

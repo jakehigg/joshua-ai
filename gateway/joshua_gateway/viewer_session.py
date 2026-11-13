@@ -47,6 +47,7 @@ import secrets
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from joshua_shared.http import FleetClient
@@ -78,6 +79,7 @@ VIEWER_TOKEN_ENV = "JOSHUA_TOKEN_VIEWER"
 VERIFY_PATH = "/auth/verify"
 SECRET_PATH = "/auth/secret"
 PEOPLE_PATH = "/auth/people"
+PROFILE_PATH = "/people/{person}/profile"
 
 # A person waits for a sign-in, so a slow core must not hold it open.
 TIMEOUT_S = 5.0
@@ -213,6 +215,15 @@ def clear_cookie(response: Response, *, secure: bool) -> None:
 # -- core ------------------------------------------------------------------
 
 
+def _json_object(response: httpx.Response) -> dict[str, Any]:
+    """The JSON object of a core answer, or {} for any other body."""
+    try:
+        body = response.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
 class CoreAuth:
     """The ``/auth/*`` conversation of the viewer with core."""
 
@@ -266,6 +277,36 @@ class CoreAuth:
             logger.warning({"message": "core secret failed", "error": type(exc).__name__})
             return 503
         return response.status_code
+
+    async def profile(self, person_id: str) -> tuple[int, dict[str, Any]]:
+        """The ``prompt`` and ``journal`` of a person, as core gives them.
+
+        Returns core's status and its JSON body. A core that cannot answer is
+        503 with an empty body.
+        """
+        try:
+            async with self._client() as client:
+                response = await client.get_json(PROFILE_PATH.format(person=person_id))
+        except httpx.HTTPError as exc:
+            logger.warning({"message": "core profile failed", "error": type(exc).__name__})
+            return 503, {}
+        return response.status_code, _json_object(response)
+
+    async def set_profile(
+        self, person_id: str, fields: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]]:
+        """Write ``prompt`` and, or, ``journal`` of a person through core.
+
+        Returns core's status and its JSON body, which carries the new profile
+        or an error. A core that cannot answer is 503 with an empty body.
+        """
+        try:
+            async with self._client() as client:
+                response = await client.post_json(PROFILE_PATH.format(person=person_id), fields)
+        except httpx.HTTPError as exc:
+            logger.warning({"message": "core profile write failed", "error": type(exc).__name__})
+            return 503, {}
+        return response.status_code, _json_object(response)
 
     async def people(self) -> list[str] | None:
         """The ids of the people who can sign in, or None when core did not

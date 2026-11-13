@@ -1672,3 +1672,127 @@ html.vv-fit .chat-screen .ws-overlay {
   color: var(--j-text);
   cursor: pointer;
 }
+
+/* The sign-in page, at /sign-in. One card in the middle of the screen: the
+   mark or the badge of a person, a title, then the list of people or the
+   form. Every rule is under .signin-*, and the colors are the --j-* tokens. */
+.signin-screen {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  background:
+    radial-gradient(60rem 30rem at 50% -10%, var(--j-accent-soft), transparent 70%),
+    var(--j-bg);
+}
+.signin-card {
+  width: 100%;
+  max-width: 400px;
+  min-width: 0;
+  margin: auto;
+  padding: 36px 32px 32px;
+  background: var(--j-surface);
+  border: 1px solid var(--j-line);
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.45);
+}
+.signin-head { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 28px; }
+.signin-head h1 { margin: 14px 0 0; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+.signin-head p { margin: 6px 0 0; color: var(--j-muted); font-size: 14px; }
+.signin-mark { width: 48px; height: 48px; border-radius: 12px; }
+
+/* The round badge of a person. Five colors, picked from the id. */
+.signin-avatar {
+  display: inline-grid; place-items: center;
+  width: 44px; height: 44px; border-radius: 50%;
+  font-weight: 700; font-size: 15px; color: var(--j-bg);
+}
+.signin-avatar.lg { width: 60px; height: 60px; font-size: 20px; }
+.signin-avatar.h0 { background: #7fb2ff; }
+.signin-avatar.h1 { background: #8fd3a8; }
+.signin-avatar.h2 { background: #e0b36a; }
+.signin-avatar.h3 { background: #c79af0; }
+.signin-avatar.h4 { background: #f0948f; }
+
+/* The people of a pin instance, as tiles. */
+.signin-people {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.signin-person {
+  width: 100px;
+  box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 18px 8px 14px;
+  font: inherit; color: var(--j-text);
+  background: var(--j-surface-2);
+  border: 1px solid var(--j-line);
+  border-radius: var(--j-radius);
+  cursor: pointer;
+  transition: border-color .15s, transform .15s, background .15s;
+}
+.signin-person:hover { border-color: var(--j-accent); background: var(--j-accent-soft); }
+.signin-person:active { transform: scale(0.97); }
+.signin-person .signin-avatar { margin-bottom: 6px; }
+.signin-person-name { font-size: 15px; font-weight: 600; }
+.signin-person-role { font-size: var(--j-text-xs); color: var(--j-muted); text-transform: capitalize; }
+
+/* The form. */
+.signin-form { display: flex; flex-direction: column; gap: 16px; }
+.signin-field { display: flex; flex-direction: column; gap: 7px; }
+.signin-label-row { display: flex; align-items: baseline; justify-content: space-between; }
+.signin-label { font-size: var(--j-text-sm); font-weight: 600; color: var(--j-muted); }
+.signin-field .j-field { height: 46px; }
+.signin-field .j-field input { font-size: 16px; }
+.signin-link {
+  padding: 0; font: inherit; font-size: var(--j-text-sm); font-weight: 600;
+  color: var(--j-accent); background: none; border: 0; cursor: pointer;
+}
+.signin-link:hover { text-decoration: underline; }
+.signin-remember { display: flex; align-items: center; gap: 10px; color: var(--j-muted); font-size: 14px; cursor: pointer; }
+.signin-submit { width: 100%; height: 46px; font-size: 15px; margin-top: 4px; }
+
+/* No person has a secret yet, or the instance asks for none. */
+.signin-empty { display: flex; flex-direction: column; gap: 10px; color: var(--j-muted); font-size: 14px; text-align: center; }
+.signin-empty p { margin: 0; }
+.signin-empty-lead { color: var(--j-text); font-size: 15px; font-weight: 600; }
+.signin-empty pre {
+  margin: 4px 0; padding: 12px; text-align: left; white-space: pre-wrap; word-break: break-word;
+  font: 13px/1.5 var(--j-mono); color: var(--j-text);
+  background: var(--j-bg); border: 1px solid var(--j-line); border-radius: var(--j-radius-sm);
+}
+.signin-note { margin: 0; text-align: center; color: var(--j-muted); }
+
+@media (max-width: 560px) {
+  .signin-screen { align-items: flex-start; padding-top: 10vh; }
+  .signin-card { padding: 28px 20px 24px; }
+}
+
+/* The settings cards of the Profile page, at /me. */
+.profile-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--j-gap); margin: 8px 0 24px; }
+.profile-card { gap: 12px; padding: 20px; }
+.profile-card-title { margin: 0; font-size: var(--j-text-lg); font-weight: 650; }
+.profile-card > .j-meta { margin: -6px 0 0; }
+.profile-form { display: flex; flex-direction: column; gap: 14px; }
+.profile-field { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.profile-label { font-size: var(--j-text-sm); font-weight: 600; color: var(--j-muted); padding: 0; }
+.profile-hint { display: block; font-size: var(--j-text-sm); color: var(--j-faint); }
+.profile-field .j-field input { font-size: 16px; }
+.profile-choices { gap: 8px; }
+.profile-choice {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--j-line); border-radius: var(--j-radius-sm); background: var(--j-surface-2);
+}
+.profile-choice:has(input:checked) { border-color: var(--j-accent); background: var(--j-accent-soft); }
+.profile-choice input { margin-top: 3px; accent-color: var(--j-accent); }
+.profile-choice-label { display: block; font-weight: 600; }
+.profile-note {
+  margin: 0; padding: 10px 12px; font-size: var(--j-text-sm); color: var(--j-warn);
+  background: var(--j-warn-soft); border-radius: var(--j-radius-sm);
+}
+.profile-ok { margin: 0; font-size: var(--j-text-sm); color: var(--j-ok); }

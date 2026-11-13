@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 
 import { ApiError, getJson, postJson, type Person } from "../api/client";
 import ErrorLine from "../ui/ErrorLine";
-import Page from "../ui/Page";
 import Spinner from "../ui/Spinner";
 
 /** The answer of `GET /api/v1/auth-method`: how this instance signs a person in. */
@@ -31,6 +30,49 @@ export type SecretLabel = "PIN" | "password";
 /** What a refused sign-in says, and it says nothing more than this. */
 function refused(label: SecretLabel): string {
   return `That ${label} didn't match. Try again.`;
+}
+
+/** A person tapped on the list, with the color of their tile. */
+interface Picked {
+  person: Person;
+  tone: number;
+}
+
+/** The initials of a name, for the round badge of a person. */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter((part) => part !== "");
+  const first = parts[0] ?? "?";
+  const last = parts[parts.length - 1] ?? "";
+  const letters = parts.length > 1 ? first.charAt(0) + last.charAt(0) : first.charAt(0);
+  return letters.toUpperCase();
+}
+
+/**
+ * The round badge of a person: their initials on one of five colors. The
+ * color is the place of the person on the list, so the first five people
+ * never share one, and the greeting of the form keeps the color of the tile.
+ */
+function Avatar({ person, tone, large = false }: { person: Person; tone: number; large?: boolean }) {
+  return (
+    <span className={`signin-avatar h${tone % 5}${large ? " lg" : ""}`} aria-hidden="true">
+      {initials(person.name)}
+    </span>
+  );
+}
+
+/** The top of the card: a badge or the mark of Joshua, a title, and one line. */
+function Head({ title, sub, person }: { title: string; sub?: string; person?: Picked }) {
+  return (
+    <header className="signin-head">
+      {person !== undefined ? (
+        <Avatar person={person.person} tone={person.tone} large />
+      ) : (
+        <img className="signin-mark" src="/logo-64.png" alt="" width={48} height={48} />
+      )}
+      <h1>{title}</h1>
+      {sub !== undefined && <p>{sub}</p>}
+    </header>
+  );
 }
 
 /**
@@ -75,14 +117,24 @@ function CredentialForm({
   }
 
   return (
-    <form className="j-stack" onSubmit={submit}>
-      <label className="j-field-label">
-        your id
+    <form className="signin-form" onSubmit={submit}>
+      <div className="signin-field">
+        <div className="signin-label-row">
+          <label className="signin-label" htmlFor="signin-person">
+            Person
+          </label>
+          {onBack !== null && (
+            <button type="button" className="signin-link" onClick={onBack}>
+              Not you?
+            </button>
+          )}
+        </div>
         <span className="j-field">
           <input
+            id="signin-person"
             name="person"
             value={person}
-            placeholder="alex"
+            placeholder="your id"
             autoCapitalize="none"
             autoCorrect="off"
             autoComplete="username"
@@ -91,28 +143,23 @@ function CredentialForm({
             onChange={(event) => onPerson(event.target.value)}
           />
         </span>
-      </label>
-      {onBack !== null && (
-        <p className="j-meta">
-          <button type="button" className="j-btn ghost sm" onClick={onBack}>
-            Not you?
-          </button>
-        </p>
-      )}
-      <label className="j-field-label">
-        your {label}
+      </div>
+      <label className="signin-field">
+        <span className="signin-label">{label === "PIN" ? "PIN" : "Password"}</span>
         <span className="j-field">
           <input
             name="secret"
             type="password"
             value={secret}
             autoComplete="current-password"
+            autoFocus={onBack !== null}
             required
             onChange={(event) => onSecret(event.target.value)}
           />
         </span>
       </label>
-      <label className="j-row-flex">
+      {error !== "" && <ErrorLine text={error} />}
+      <label className="signin-remember">
         <input
           type="checkbox"
           className="j-check"
@@ -122,12 +169,9 @@ function CredentialForm({
         />
         Remember this device
       </label>
-      {error !== "" && <ErrorLine text={error} />}
-      <div className="j-row-flex">
-        <button className="j-btn primary" type="submit" disabled={busy}>
-          Sign in
-        </button>
-      </div>
+      <button className="j-btn primary signin-submit" type="submit" disabled={busy}>
+        {busy ? "Signing in…" : "Sign in"}
+      </button>
     </form>
   );
 }
@@ -139,15 +183,13 @@ function CredentialForm({
  */
 function NoSecrets({ label }: { label: SecretLabel }) {
   return (
-    <div className="j-stack">
-      <p>Nobody can sign in yet, because nobody has a {label}.</p>
-      <p className="j-meta">Set a {label} for the owner first. Run this command in the core container:</p>
+    <div className="signin-empty">
+      <p className="signin-empty-lead">Nobody can sign in yet, because nobody has a {label}.</p>
+      <p>Set a {label} for the owner first. Run this command in the core container:</p>
       <pre>
         <code>{`python -m joshua_core people auth-reset --id <owner id> --secret '<${label}>'`}</code>
       </pre>
-      <p className="j-meta">
-        Then the owner signs in and sets a {label} for each other person under Admin → Users.
-      </p>
+      <p>Then the owner signs in and sets a {label} for each other person under Admin → Users.</p>
     </div>
   );
 }
@@ -174,9 +216,9 @@ export default function SignIn() {
   const [people, setPeople] = useState<Person[]>([]);
   const [failed, setFailed] = useState<string>("");
   const [person, setPerson] = useState<string>("");
-  // True once a name of the list is tapped: the pin method then shows the
-  // same form as the password method.
-  const [picked, setPicked] = useState<boolean>(false);
+  // The person whose name was tapped on the list: the pin method then shows
+  // the same form as the password method, with a greeting of that person.
+  const [picked, setPicked] = useState<Picked | null>(null);
   const [secret, setSecret] = useState<string>("");
   const [remember, setRemember] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
@@ -236,78 +278,99 @@ export default function SignIn() {
   }
 
   function back(): void {
-    setPicked(false);
+    setPicked(null);
     setPerson("");
     setSecret("");
     setError("");
   }
 
-  function pick(id: string): void {
-    setPerson(id);
-    setPicked(true);
+  function pick(one: Person, tone: number): void {
+    setPerson(one.id);
+    setPicked({ person: one, tone });
     setSecret("");
     setError("");
   }
 
   function body() {
     if (failed !== "") {
-      return <ErrorLine text={failed} />;
+      return (
+        <>
+          <Head title="Sign in to Joshua" />
+          <ErrorLine text={failed} />
+        </>
+      );
     }
     if (auth === null) {
       return <Spinner label="Loading the sign-in" />;
     }
     if (auth.method === "anonymous") {
       return (
-        <p className="j-meta">
-          This Joshua asks nobody to sign in. <a href="/">Go to the wiki</a>.
-        </p>
+        <>
+          <Head title="Joshua" />
+          <p className="signin-note">
+            This Joshua asks nobody to sign in. <a href="/">Go to the wiki</a>.
+          </p>
+        </>
       );
     }
-    if (auth.method === "password" || picked) {
+    const form = (
+      <CredentialForm
+        label={label}
+        person={person}
+        onPerson={setPerson}
+        onBack={auth.method === "pin" ? back : null}
+        secret={secret}
+        onSecret={setSecret}
+        remember={remember}
+        onRemember={setRemember}
+        error={error}
+        busy={busy}
+        onSubmit={submit}
+      />
+    );
+    if (auth.method === "password") {
       return (
-        <CredentialForm
-          label={label}
-          person={person}
-          onPerson={setPerson}
-          onBack={auth.method === "pin" ? back : null}
-          secret={secret}
-          onSecret={setSecret}
-          remember={remember}
-          onRemember={setRemember}
-          error={error}
-          busy={busy}
-          onSubmit={submit}
-        />
+        <>
+          <Head title="Sign in to Joshua" sub="Your person id and your password." />
+          {form}
+        </>
+      );
+    }
+    if (picked !== null) {
+      return (
+        <>
+          <Head title={`Hi, ${picked.person.name}`} sub="Enter your PIN." person={picked} />
+          {form}
+        </>
+      );
+    }
+    if (people.length === 0) {
+      return (
+        <>
+          <Head title="Sign in to Joshua" />
+          <NoSecrets label={label} />
+        </>
       );
     }
     return (
-      <div className="j-stack">
-        <p className="j-meta">Who are you?</p>
-        {people.length === 0 ? (
-          <NoSecrets label={label} />
-        ) : (
-          people.map((one) => (
-            <button
-              key={one.id}
-              type="button"
-              className="j-btn block"
-              onClick={() => pick(one.id)}
-            >
-              {one.name}
+      <>
+        <Head title="Who is signing in?" sub="Pick your name, then enter your PIN." />
+        <div className="signin-people">
+          {people.map((one, index) => (
+            <button key={one.id} type="button" className="signin-person" onClick={() => pick(one, index)}>
+              <Avatar person={one} tone={index} />
+              <span className="signin-person-name">{one.name}</span>
+              <span className="signin-person-role">{one.role}</span>
             </button>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="j-shell">
-      <div className="j-main">
-        <main className="j-content">
-          <Page title="Sign in">{body()}</Page>
-        </main>
-      </div>
-    </div>
+    <main className="signin-screen">
+      <section className="signin-card">{body()}</section>
+    </main>
   );
 }

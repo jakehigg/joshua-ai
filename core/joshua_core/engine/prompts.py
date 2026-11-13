@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from pathlib import Path
+from typing import Any
 
+from joshua_shared import config as config_module
 from joshua_shared.log import get_logger
 
 from joshua_core.engine.profiles import Profile
@@ -128,7 +130,10 @@ class PromptComposer:
     self-hoster drops custom ``.md`` snippets in ``user/``; the composer loads every
     such file and appends it to each session. ``person_prompts`` maps a person id to
     the file that holds that person's snippet (from ``people[].prompt``); a
-    member's snippet is appended when the file exists.
+    member's snippet is appended when the file exists. With no mapping the
+    composer reads the person from ``joshua_shared.config.load()`` on each
+    turn, so a change of ``people.yaml`` applies with no restart. An empty path
+    is no snippet.
     """
 
     def __init__(
@@ -141,10 +146,12 @@ class PromptComposer:
         self._dir = Path(prompts_dir) if prompts_dir else Path(__file__).parent.parent / "prompts"
         self._builtin = self._dir / "builtin"
         self._user = self._dir / "user"
-        self._person_prompts = dict(person_prompts or {})
+        # None means "look the person up live on each turn" (the config cache
+        # reloads when ``people.yaml`` changes). A mapping is used as given.
+        self._person_prompts = None if person_prompts is None else dict(person_prompts)
         # id -> journal preference (``auto`` | ``ask`` | ``off``). Only non-default
         # values are stored; a missing id is ``auto``.
-        self._person_journal = dict(person_journal or {})
+        self._person_journal = None if person_journal is None else dict(person_journal)
         # path -> (mtime, text)
         self._cache: dict[Path, tuple[float, str]] = {}
 
@@ -257,15 +264,31 @@ class PromptComposer:
         The setting gates what Joshua's own journal records about them. It does
         not give the person a journal.
         """
-        mode = self._person_journal.get(person.id, "auto")
+        if self._person_journal is not None:
+            mode = self._person_journal.get(person.id, "auto")
+        else:
+            configured = self._live_person(person.id)
+            mode = configured.journal if configured else "auto"
         if mode == "ask":
             return "\n\n" + _JOURNAL_ASK.format(name=person.display_name)
         if mode == "off":
             return "\n\n" + _JOURNAL_OFF.format(name=person.display_name)
         return ""
 
+    @staticmethod
+    def _live_person(person_id: str) -> Any:
+        """The person as the cached config holds them now, or None."""
+        try:
+            return config_module.load().person(person_id)
+        except config_module.ConfigError:
+            return None
+
     def _person_snippet(self, person: Person) -> str:
-        path = self._person_prompts.get(person.id)
+        if self._person_prompts is not None:
+            path = self._person_prompts.get(person.id)
+        else:
+            configured = self._live_person(person.id)
+            path = configured.prompt if configured else None
         if not path:
             return ""
         return self._read_file(Path(path))

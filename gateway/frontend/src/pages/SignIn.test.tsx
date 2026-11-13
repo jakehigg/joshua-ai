@@ -90,7 +90,7 @@ describe("the sign-in page", () => {
     // The id stays editable, so the person can undo a password manager that
     // wrote its own username into the field.
     expect(field("person")?.readOnly).toBe(false);
-    expect(screen.getByText("your PIN")).toBeDefined();
+    expect(screen.getByText("PIN")).toBeDefined();
     type("secret", "4321");
     fireEvent.click(field("remember") as HTMLInputElement);
     submit();
@@ -144,7 +144,7 @@ describe("the sign-in page", () => {
 
     page();
 
-    expect(await screen.findByText("your password")).toBeDefined();
+    expect(await screen.findByText("Password")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Not you?" })).toBeNull();
     expect(field("person")?.readOnly).toBe(false);
     type("person", "alex");
@@ -176,7 +176,7 @@ describe("the sign-in page", () => {
 
     page();
 
-    expect(await screen.findByText("your password")).toBeDefined();
+    expect(await screen.findByText("Password")).toBeDefined();
     type("person", "alex");
     type("secret", "nope");
     submit();
@@ -189,7 +189,7 @@ describe("the sign-in page", () => {
 
     page();
 
-    expect(await screen.findByText("your password")).toBeDefined();
+    expect(await screen.findByText("Password")).toBeDefined();
     type("person", "alex");
     type("secret", "a long one");
     submit();
