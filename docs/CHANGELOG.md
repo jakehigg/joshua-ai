@@ -6,6 +6,19 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Workspaces: one place for one large piece of work.** A workspace is a chat
+  thread of its own for a trip, a house project, or a piece of code. It has a
+  title, a goal, notes that Joshua keeps and reads on every turn, and a list of
+  the items made or collected for it: documents, pull requests, assignments,
+  task projects, links and files. You start one from the rail of the chat, with
+  a goal, a model and the servers it may use, and you open it again from that
+  rail. The normal chat stays small, because the project talk lives in the
+  workspace. A job that you start in a workspace reports back in that thread.
+  It costs you two things. Every turn carries the goal, the notes and the
+  items, so a message in a workspace uses more tokens than the same message in
+  the normal chat. A reply stays in the thread, so nothing reaches your phone
+  until Joshua sends it to the normal chat. A workspace is for members, and it
+  belongs to the one person who made it.
 - **The chat composer is one line when empty.** The box grows with the text up
   to five lines. With a mouse or trackpad, Enter sends and Shift+Enter adds a
   new line. On a touch screen, Enter adds a new line and the send button sends.
