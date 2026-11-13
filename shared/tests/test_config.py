@@ -217,6 +217,15 @@ def test_person_and_destination() -> None:
         cfg.destination("missing")
 
 
+def test_person_role_words() -> None:
+    """``owner`` is a role beside ``member`` and ``guest``; nothing else is."""
+    text = "name: T\ntimezone: UTC\npeople:\n  - id: robin\n    name: Robin\n    role: {role}\n"
+    for role in ("member", "guest", "owner"):
+        assert config.parse(text.format(role=role)).person("robin").role == role
+    with pytest.raises(config.ConfigError, match="role must be"):
+        config.parse(text.format(role="admin"))
+
+
 def test_group_lookup() -> None:
     cfg = config.parse(GOOD, ENV, source="test.yaml")
     group = cfg.groups_by_chat("imessage", "iMessage;+;chat100000000000000001")

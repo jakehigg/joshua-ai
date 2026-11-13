@@ -3,9 +3,9 @@
 The people file holds runtime people additions in the same schema as
 ``people``. The config loader merges it over ``joshua.yaml`` at load
 time (``joshua_shared.config.read_people_file``); this module writes it.
-``upsert_person`` adds or replaces a person; ``set_role`` writes the role of a
-person and nothing else; ``mark_removed`` writes a ``role: removed`` tombstone
-that drops the person from the merged roster.
+``upsert_person`` adds or replaces a person; ``set_role`` changes the role of a
+person and nothing else about them; ``mark_removed`` writes a ``role: removed``
+tombstone that drops the person from the merged roster.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import strictyaml
+from joshua_shared import config as config_module
 from joshua_shared.config import read_people_file
 
 
@@ -68,25 +69,44 @@ def upsert_person(path: Path, entry: dict[str, Any]) -> None:
     write_people_file(path, out)
 
 
-def set_role(path: Path, person_id: str, role: str) -> None:
-    """Write the role of ``person_id`` to the people file, and nothing else.
+def resolved_entry(person_id: str) -> dict[str, Any] | None:
+    """The person as the loader resolves them now, or None when it cannot.
 
-    An entry already in the file keeps its name and its handles and takes the
-    new role. A person who is only in ``joshua.yaml`` gets a role-only entry,
-    so the merged roster carries the new role.
+    The merged roster, so a person defined in ``joshua.yaml`` comes back whole:
+    the name, the handles, and every other field the schema carries. None means
+    the config is unreadable or names nobody with that id.
     """
-    people = read_people_file(path)
-    out: list[dict[str, Any]] = []
-    found = False
-    for person in people:
-        if person.get("id") == person_id:
-            out.append({**person, "role": role})
-            found = True
-        else:
-            out.append(person)
-    if not found:
-        out.append({"id": person_id, "role": role})
-    write_people_file(path, out)
+    try:
+        person = config_module.load().person(person_id)
+    except config_module.ConfigError:
+        return None
+    if person is None:
+        return None
+    entry = person.model_dump(exclude_defaults=True)
+    entry["id"], entry["name"] = person.id, person.name
+    handles = {t: v[0] if len(v) == 1 else v for t, v in person.handles.items() if v}
+    if handles:
+        entry["handles"] = handles
+    else:
+        entry.pop("handles", None)
+    return entry
+
+
+def set_role(path: Path, person_id: str, role: str) -> None:
+    """Write the role of ``person_id`` to the people file. Only the role changes.
+
+    A people file entry replaces the configured one whole, so the entry written
+    here is the person as the loader resolves them now, with the new role:
+    nothing of theirs is lost. A person the loader does not know gets a
+    role-only entry, which is all there is to write.
+    """
+    entry = resolved_entry(person_id)
+    if entry is None:
+        entry = next(
+            (p for p in read_people_file(path) if p.get("id") == person_id),
+            {"id": person_id},
+        )
+    upsert_person(path, {**entry, "role": role})
 
 
 def mark_removed(path: Path, person_id: str) -> None:

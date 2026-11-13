@@ -295,10 +295,41 @@ def test_people_file_upsert_merges_handles(tmp_path: Path) -> None:
     assert entry["handles"] == {"telegram": "1", "imessage": "+15551234567"}
 
 
-def test_people_file_set_role_writes_a_role_only_entry(tmp_path: Path) -> None:
+def test_people_file_set_role_keeps_everything_of_a_configured_person(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A person from ``joshua.yaml`` keeps their name and their handles.
+
+    A people file entry replaces the configured one whole, so a role-only entry
+    would drop both and the config would no longer load.
+    """
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    config_path = tmp_path / "joshua.yaml"
+    config_path.write_text(
+        "name: Test House\ntimezone: UTC\npeople:\n"
+        "  - id: robin\n    name: Robin\n    role: member\n    journal: ask\n"
+        '    handles:\n      telegram: "112233"\n'
+    )
+    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("JOSHUA_CONFIG", str(config_path))
+    monkeypatch.setattr(config_module, "_cache", None)
+    monkeypatch.setattr(config_module, "_cache_path", None)
+
+    people_file.set_role(data_dir / "people.yaml", "robin", "owner")
+
+    robin = config_module.reload(config_path).person("robin")
+    assert robin.role == "owner"
+    assert robin.name == "Robin"
+    assert robin.handles == {"telegram": ["112233"]}
+    assert robin.journal == "ask"
+
+
+def test_people_file_set_role_of_a_person_the_loader_does_not_know(tmp_path: Path) -> None:
+    """Nothing to keep: the entry is the id and the role."""
     path = tmp_path / "people.yaml"
-    people_file.set_role(path, "sam", "owner")
-    assert config_module.read_people_file(path) == [{"id": "sam", "role": "owner"}]
+    people_file.set_role(path, "nova", "owner")
+    assert config_module.read_people_file(path) == [{"id": "nova", "role": "owner"}]
 
 
 def test_people_file_mark_removed_clears_on_readd(tmp_path: Path) -> None:

@@ -115,8 +115,8 @@ class Person(_Model):
     @field_validator("role")
     @classmethod
     def _check_role(cls, value: str) -> str:
-        if value not in ("member", "guest"):
-            raise ValueError("role must be 'member' or 'guest'")
+        if value not in ("member", "guest", "owner"):
+            raise ValueError("role must be 'member', 'guest', or 'owner'")
         return value
 
     @field_validator("handles", mode="before")
