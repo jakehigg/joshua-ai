@@ -94,6 +94,19 @@ class _Model(BaseModel):
 # What ``JoshuaConfig._check_owner`` says about a roster with no owner.
 NO_OWNER_WARNING = "no person has role 'owner'"
 
+# What ``_validate_cli`` says about a sign-in password that is still in the
+# config or the environment. Core holds every secret now, so these are read
+# once by the import and never again.
+RETIRED_VIEWER_WARNING = (
+    "viewer.users, VIEWER_PASSWORDS and VIEWER_PW_* are retired: core holds "
+    "every sign-in secret, and the viewer ignores these. Delete them once the "
+    "one-time import has run."
+)
+
+# The two environment sources of the retired viewer passwords.
+VIEWER_PASSWORDS_ENV = "VIEWER_PASSWORDS"
+VIEWER_PW_PREFIX = "VIEWER_PW_"
+
 # The roles that write. An ``owner`` is a member with the authority to manage
 # the roster, so every check of "is this person a member" admits one. A
 # ``guest`` reads.
@@ -1262,20 +1275,21 @@ class ViewerAuth(_Model):
 
 
 class Viewer(_Model):
-    # The read-only web viewer. ``users`` maps a person id to a password
-    # reference: a ``$2`` bcrypt hash, or a literal password, normally injected
-    # from ``VIEWER_PW_<ID>`` through ``${VIEWER_PW_ALEX:-}``. A key must name a
-    # person in ``people`` (checked in ``JoshuaConfig._check_viewer``). A person
-    # with no entry, or an empty value, cannot sign in.
+    # The web viewer. ``users`` is retired: core holds every sign-in secret,
+    # and the viewer ignores this map. It stays loadable so core's one-time
+    # import can read a password reference out of it — a ``$2`` bcrypt hash,
+    # or a literal password — and ``_validate_cli`` warns while it is here. A
+    # key must name a person in ``people`` (checked in
+    # ``JoshuaConfig._check_viewer``).
     enabled: bool = False
     users: dict[str, str] = {}
-    # ``true`` opens the viewer: a request with no ``Authorization`` header
-    # gets full access, read and write, as a synthetic "anonymous" identity,
-    # so a private network needs no sign-in. A person id opens the viewer as
-    # that member, as if they signed in. The id must name a member in
-    # ``people`` (checked in ``JoshuaConfig._check_viewer``). ``false`` (the
-    # default) keeps sign-in required. A request that carries credentials is
-    # still checked against ``users``, so a member can sign in by password too.
+    # ``true`` opens the viewer: a request with no session cookie gets full
+    # access, read and write, as a synthetic "anonymous" identity, so a
+    # private network needs no sign-in. A person id opens the viewer as that
+    # member, as if they signed in. The id must name a member in ``people``
+    # (checked in ``JoshuaConfig._check_viewer``). ``false`` (the default)
+    # keeps sign-in required. A request that does carry a cookie is still
+    # checked, so a member can sign in on an open viewer too.
     anonymous: bool | str = False
     # How a person signs in. See ``ViewerAuth``.
     auth: ViewerAuth = ViewerAuth()
@@ -1628,7 +1642,7 @@ class JoshuaConfig(_Model):
             person = self.person(anonymous)
             if person is None:
                 raise ValueError(f"viewer.anonymous: unknown person id '{anonymous}'")
-            if person.role != "member":
+            if not is_member(person.role):
                 raise ValueError(
                     f"viewer.anonymous: '{anonymous}' is a {person.role}; it must name a member"
                 )
@@ -1935,6 +1949,20 @@ def reload(path: Path | str | None = None) -> JoshuaConfig:
 # --- CLI -------------------------------------------------------------------
 
 
+def _retired_viewer_passwords(config: JoshuaConfig) -> bool:
+    """True when a viewer password still lives in the config or the environment.
+
+    ``viewer.users`` is the config source, ``VIEWER_PASSWORDS`` and
+    ``VIEWER_PW_<ID>`` the two environment ones: the same three the one-time
+    import reads.
+    """
+    if config.viewer.users:
+        return True
+    if os.environ.get(VIEWER_PASSWORDS_ENV, "").strip():
+        return True
+    return any(name.startswith(VIEWER_PW_PREFIX) for name in os.environ)
+
+
 def _validate_cli(path: str) -> int:
     try:
         config = _read(Path(path))
@@ -1944,8 +1972,11 @@ def _validate_cli(path: str) -> int:
     channels = [
         name for name in ("telegram", "imessage") if getattr(config.channels, name) is not None
     ]
+    warnings = [*config.warnings]
+    if _retired_viewer_passwords(config):
+        warnings.append(RETIRED_VIEWER_WARNING)
     print(f"ok: {path}")
-    for warning in config.warnings:
+    for warning in warnings:
         print(f"  warning: {warning}")
     print(f"  people: {len(config.people)}")
     print(f"  channels enabled: {', '.join(channels) or 'none'}")

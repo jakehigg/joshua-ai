@@ -48,9 +48,8 @@ spec:
 {{- fail "viewer.ingress.enabled needs viewer.ingress.host" }}
 {{- end }}
 ---
-{{/* The viewer serves plain HTTP and holds every route behind HTTP basic. The
-     password crosses the wire on each request, so terminate TLS here and keep
-     the host off the public internet unless you mean it. */}}
+{{/* The viewer serves plain HTTP, and its session cookie crosses the wire with
+     it, so terminate TLS here and keep the host on a network you trust. */}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

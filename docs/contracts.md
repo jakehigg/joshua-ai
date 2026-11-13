@@ -140,6 +140,12 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/usage` | `usage.writers` (default `assignments`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment`, `413` over 1 MiB, `503` when the database fails. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
+| `POST /auth/verify` | `AUTH_CALLERS` (default `viewer`) | `{"person", "secret"}` | `{"ok": bool}`. `ok` is `false` for a wrong secret, for a person with no secret, and for a person who is not on the roster; the answer never says which of the three. |
+| `POST /auth/secret` | `AUTH_CALLERS` | `{"person", "secret", "new_secret"}` | `{"ok": true, "person"}`. A person changes their own secret and sends the current one: `403 {"error": "wrong secret"}` for a wrong one and for a person who has none yet, `404` for a person who is not on the roster. |
+| `POST /auth/secret/admin` | `AUTH_CALLERS` | `{"person", "new_secret"}` | `{"ok": true, "person"}`. The secret of a person without the current one, for a first sign-in or a reset. `404` for a person who is not on the roster. |
+| `DELETE /auth/secret/{person_id}` | `AUTH_CALLERS` | | `{"ok": true, "person", "deleted": bool}`. `deleted` is `false` when that person had no secret. `404` for a person who is not on the roster. |
+| `GET /auth/people` | `AUTH_CALLERS` | | `{"people": […]}`, the ids of the people who have a secret. A person with no secret is absent, and no row carries a time. |
+| `GET /auth/people/{person_id}` | `AUTH_CALLERS` | | `{"person", "updated_at"}`, when that person's secret last changed. `404 {"error": "no secret"}` for a person who has none, `404` for one who is not on the roster. |
 | `GET /admin/people` | `ADMIN_CALLERS` | | `{"people": […]}` |
 | `POST /admin/people` | `ADMIN_CALLERS` | `{"id", "name", "handle", "role"?}` | `201 {"person": …}`, `400 {"error": …}` |
 | `POST /admin/people/{id}/role` | `ADMIN_CALLERS` | `{"role"}` (`member`, `guest`, or `owner`) | `{"person": …}` with only the role changed, `400 {"error": …}` for another role, `404` for a person who is not on the roster |
@@ -353,6 +359,35 @@ server does not report the limits.
 
 Core keeps the last snapshot in the `limits_snapshot` table, so a restart
 keeps it.
+
+### The auth routes
+
+`/auth/*` holds the sign-in secret of a person. Core owns the roster and the
+database, so a secret lives here and nowhere else: one bcrypt hash per person
+in the `auth_secret` table. The viewer calls these routes to check a secret at
+sign-in, and to set, change, or drop one.
+
+`AUTH_CALLERS` (env, a comma list, default `viewer`) names the fleet
+identities that may call. It is checked on every route with no exception, the
+way `ADMIN_CALLERS` is checked on every admin route: a missing or invalid
+bearer is `401`, an identity outside the list is `403`, and an empty list
+turns the routes off, so every caller gets `403`.
+
+`person` is a person id of 1 to 64 characters, `secret` and `new_secret` are 1
+to 256 characters, and an unknown field is `422`. No answer and no log line
+ever carries a secret or a hash. `GET /auth/people` carries no time, because
+the viewer renders that list on a page with no session, and when each person
+last changed their secret stays out of it;
+`GET /auth/people/{person_id}` carries the time of one person, because the
+viewer stamps its session cookie with it, so a changed secret signs out every
+cookie that carries the old stamp.
+
+The roster routes are the admin ones: `POST /admin/people` adds a person,
+`POST /admin/people/{id}/role` changes a role to `member`, `guest`, or
+`owner`, and `POST /admin/people/{id}/remove` takes a person off the roster
+and drops their handles and their secret with them. The viewer's Admin → Users
+section calls those three and `POST /auth/secret/admin` for the owner, as the
+identity `viewer`, so core's `ADMIN_CALLERS` must name `viewer`.
 
 ### The stream
 

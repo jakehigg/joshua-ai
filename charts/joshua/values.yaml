@@ -81,9 +81,14 @@ secrets:
       JOSHUA_TOKEN_GATEWAY: {}
       JOSHUA_TOKEN_LAPTOP: {}
       JOSHUA_TOKEN_CI: {}
-      # The callers of POST /v1/memory/search. Core verifies them.
+      # The callers of POST /v1/memory/search and of /auth/*. Core verifies
+      # them.
       JOSHUA_TOKEN_VIEWER: {}
       JOSHUA_TOKEN_MCP: {}
+      # The old viewer passwords, for the one-time import of the sign-in
+      # secrets. Core reads them at the first start after the upgrade and
+      # never again. Drop the key afterwards.
+      VIEWER_PASSWORDS: {}
       # The assignments container: the model forwarder and POST /v1/usage.
       JOSHUA_TOKEN_ASSIGNMENTS: {}
       # The key of the model server in `inference.base_url`, and the key of
@@ -134,18 +139,20 @@ secrets:
       # gateway calls SearXNG, so only the gateway gets it.
       SEARXNG_API_KEY: {}
   # The viewer reads the volume. With JOSHUA_TOKEN_VIEWER it calls core (the
-  # search by meaning and the usage) and the assignments container (the
-  # assignments of a person and the comments on a definition). It holds its
-  # own fleet token and no other, and no upstream credential.
-  # VIEWER_PASSWORDS is every viewer password in one value, as
-  # `<person-id>=<bcrypt hash>` pairs, comma separated. Without
-  # JOSHUA_TOKEN_VIEWER, the viewer searches by words only, and the usage and
-  # assignments pages say that they are not configured.
+  # sign-in, the search by meaning and the usage) and the assignments
+  # container (the assignments of a person and the comments on a definition).
+  # It holds its own fleet token and no other, and no upstream credential: a
+  # sign-in secret lives in core. Without JOSHUA_TOKEN_VIEWER there is no
+  # sign-in, the viewer searches by words only, and the usage and assignments
+  # pages say that they are not configured.
+  # JOSHUA_VIEWER_SESSION_SECRET signs the session cookie. Without it each pod
+  # mints its own key at start, so a restart signs everybody out and two
+  # replicas do not share a session.
   viewer:
     name: joshua-viewer-secrets
     keys:
-      VIEWER_PASSWORDS: {}
       JOSHUA_TOKEN_VIEWER: {}
+      JOSHUA_VIEWER_SESSION_SECRET: {}
   # The assignments container holds no model credential and no upstream
   # credential. DATABASE_URL names the same database as core: the container
   # keeps its rows in the schema `assignments`. JOSHUA_TOKEN_ASSIGNMENTS is its
@@ -285,8 +292,10 @@ gateway:
 # The second is inside the joshua.yaml you pass as `config`. With only the
 # first, the container exits at once and says why in its log.
 #
-# Passwords come from secrets.viewer, never from this file. `viewer.users` in
-# your config says who may sign in. See docs/operations.md.
+# A sign-in secret lives in core, hashed, and never in this file or in
+# secrets.viewer. `viewer.auth.method` in your config says what the sign-in
+# page asks for, and `core.adminCallers` must name `viewer` for the owner's
+# Admin -> Users section. See docs/operations.md.
 viewer:
   enabled: false
   replicaCount: 1
@@ -303,9 +312,10 @@ viewer:
     limits:
       cpu: 500m
       memory: 512Mi
-  # The viewer serves plain HTTP behind HTTP basic, so the password crosses the
-  # wire on each request. Terminate TLS at the ingress, and keep the host off
-  # the public internet unless you mean to publish your notes.
+  # The viewer serves plain HTTP, and its session cookie crosses the wire with
+  # it. Terminate TLS at the ingress, and keep the host on a network you trust:
+  # this is the interface of one instance for the people of that instance, not
+  # a service to publish.
   ingress:
     enabled: false
     className: ""

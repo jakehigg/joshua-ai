@@ -679,55 +679,85 @@ The viewer is the web interface of Joshua: the wiki, which holds the journal
 and every profile, a person's own attachments, the documents, the
 assignments, the usage, and the chat. It is one React single-page app, built
 by the node stage of `gateway/Dockerfile` and carried in the gateway image,
-served at the root of the host behind HTTP basic (or `viewer.anonymous`).
+served at the root of the host behind its own sign-in page (or
+`viewer.anonymous`).
 Everything it shows comes from a JSON API under `/api/v1/`, with the same
 sign-in as the app.
 
 Everybody who signs in reads. A member also writes: they edit any wiki page,
 make a new one, correct a journal entry, move a page to the trash, comment on
-a document, and chat with Joshua. A guest reads and nothing more. A
+a document, and chat with Joshua. A guest reads and nothing more. The owner
+also keeps the roster, under Admin → Users. A
 signed-in person gets a profile link for a quick jump to their own page. It is
 off by default. To turn it on:
 
-1. Put every password in `VIEWER_PASSWORDS` in `.env`, as a comma-separated
-   list of `<person-id>=<value>` pairs. One variable carries all of them, so
-   no tracked file names a person.
-
-   ```
-   VIEWER_PASSWORDS=alex=a-long-random-password,mia=$2b$12$...
-   ```
-
-   A value that starts with `$2` is a bcrypt hash. Any other value is a
-   literal password, which cannot hold a comma. Make a hash with:
-
-   ```
-   docker compose run --rm --no-deps -T --entrypoint python core -c \
-     "import bcrypt,getpass;print(bcrypt.hashpw(getpass.getpass().encode(),bcrypt.gensalt()).decode())"
-   ```
-
-2. Turn the viewer on in `joshua.yaml` and list each person who may sign in.
-   Leave the value empty; the password comes from `.env`.
+1. Give one person `role: owner` in `joshua.yaml`, and turn the viewer on with
+   the method the people of this instance sign in with: `pin` asks for a PIN,
+   `password` asks for a person id and a password, and `anonymous` asks for
+   nothing and leaves `viewer.anonymous` in charge.
 
    ```yaml
+   people:
+     - id: sam
+       name: Sam
+       role: owner
+     - id: robin
+       name: Robin
+       role: member
    viewer:
      enabled: true
-     users:
-       alex: ""
+     auth:
+       method: pin
    ```
 
-   This list is what says who may sign in. A person who is not a key here
-   cannot sign in, whatever `VIEWER_PASSWORDS` holds.
+2. Let core serve the roster to the viewer. Core owns the roster, and it
+   admits an admin caller only from `ADMIN_CALLERS` (default `laptop,ci`), so
+   name `viewer` on the `core` service of `docker-compose.yml`:
+
+   ```yaml
+     core:
+       environment:
+         ADMIN_CALLERS: laptop,ci,viewer
+   ```
+
+   In the chart, that is `core.adminCallers` in your values. Without this
+   entry every write of Admin → Users shows core's refusal, and the rest of
+   the viewer is unaffected.
 
 3. Validate and start it:
 
    ```
    make validate
    docker compose --profile viewer up -d viewer
+   docker compose up -d core
    ```
 
+4. Give the first person their secret. A person with no secret is on the
+   roster and cannot sign in, so the owner needs one from the console:
+
+   ```
+   docker compose exec core python -m joshua_core people auth-reset \
+     --id sam --secret '<a long secret>'
+   ```
+
+   The command writes a bcrypt hash into core's `auth_secret` table and
+   prints no secret. After that, the owner sets the secret of everybody else
+   under Admin → Users, and each person changes their own.
+
+The secrets live in core and nowhere else: one salted bcrypt hash per person,
+reached only over core's `/auth/*` routes, which the viewer calls with its own
+fleet token (`JOSHUA_TOKEN_VIEWER`). No route gives a hash back. A sign-in
+answers with one signed session cookie: the browser drops it when it closes,
+or keeps it for 30 days when the person checks "remember this device".
+Changing a secret, a reset by the owner, and a removal all sign out every
+browser that holds the old one. Set `JOSHUA_VIEWER_SESSION_SECRET` on the
+viewer to keep a sign-in across a restart, and share it between replicas;
+with no such variable the viewer mints a key at start and a restart signs
+everybody out.
+
 The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
-`http://127.0.0.1:8082/` and sign in with the person id and the password.
-The address opens the wiki. The menu holds Wiki, Journal, Search, Usage,
+`http://127.0.0.1:8082/` and sign in. The address opens the wiki. The menu
+holds Wiki, Journal, Search, Usage,
 Assignments, Documents (members only) and Chat, and "Your page" at `/me`,
 which has the profile link and the recent attachments of the person who
 signed in. Every one of these is an address of the app's router, and the app
@@ -807,7 +837,7 @@ Without the token, the page finds pages by words only. `GET /readyz` on the
 viewer reports `core_search`.
 
 On Kubernetes the chart runs it as its own deployment, off by default, with
-the passwords in a Secret and an ingress of its own. See
+its fleet token in a Secret and an ingress of its own. See
 [the chart README](../charts/joshua/README.md#the-viewer).
 
 The viewer edits the wiki one page at a time, and it ships with Joshua. For a
@@ -817,8 +847,8 @@ Otter Wiki runs code from another project.
 
 ### Opening the viewer with no sign-in
 
-A household on a private network can skip the password. Set `viewer.anonymous`
-to `true` in `joshua.yaml`:
+A group on a private network can skip the sign-in. Set `viewer.anonymous`
+to `true` in `joshua.yaml`, and leave `viewer.auth.method` at `anonymous`:
 
 ```yaml
 viewer:
@@ -826,15 +856,13 @@ viewer:
   anonymous: true
 ```
 
-A request with no `Authorization` header now gets full access: it reads and
-also writes, the same as a signed-in member, with no password. To give the
-open viewer an owner, set `anonymous` to the id of a member, such as
-`anonymous: alex`. A request with no password is then served as that
-member, with their profile, attachments, and assignments. A member who
-still wants to sign in by password can, exactly as before. To add
-restrictions back, set `viewer.users` and list who may sign in; a household
-that wants read-only for everyone else keeps `anonymous` off and gives each
-person their own password.
+A request with no session cookie now gets full access: it reads and
+also writes, the same as a signed-in member, with no secret. To serve such a
+request as one person, set `anonymous` to the id of a member or of the owner,
+such as `anonymous: sam`. The request is then served as that person, with
+their profile, attachments, and assignments. A person who still wants to sign
+in can, and Admin → Users stays the owner's. To ask for a secret instead, set
+`viewer.auth.method` to `pin` or `password` and leave `anonymous` off.
 
 **The network is now the only boundary.** Anyone who can reach the viewer
 reads and edits the whole wiki: the journal and every profile. Use this only

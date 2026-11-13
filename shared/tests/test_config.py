@@ -103,6 +103,13 @@ def test_viewer_anonymous_a_guest_fails() -> None:
         config.parse(text, ENV, source="test.yaml")
 
 
+def test_viewer_anonymous_an_owner_is_a_member() -> None:
+    """An owner writes wherever a member writes, so an open viewer may be one."""
+    text = GOOD.replace("    name: Alex\n", "    name: Alex\n    role: owner\n")
+    cfg = config.parse(text + "\nviewer:\n  enabled: true\n  anonymous: alex\n", ENV)
+    assert cfg.viewer.anonymous == "alex"
+
+
 def test_viewer_auth_method_defaults_to_anonymous() -> None:
     """With no ``viewer.auth`` section the viewer asks for nothing."""
     assert config.parse(GOOD, ENV, source="test.yaml").viewer.auth.method == "anonymous"
@@ -139,6 +146,32 @@ def test_validate_prints_the_no_owner_warning(tmp_path: Path, capsys) -> None:
     file.write_text(
         "name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n    role: owner\n"
     )
+    assert config._validate_cli(str(file)) == 0
+    assert "warning:" not in capsys.readouterr().out
+
+
+def test_validate_warns_about_the_retired_viewer_passwords(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A password left in the config or the environment is a warning, and the
+    file still validates: core holds every sign-in secret now."""
+    owner = "name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n    role: owner\n"
+    file = tmp_path / "joshua.yaml"
+    file.write_text(owner + 'viewer:\n  enabled: true\n  users:\n    sam: ""\n')
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.RETIRED_VIEWER_WARNING}" in capsys.readouterr().out
+
+    file.write_text(owner)
+    monkeypatch.setenv(config.VIEWER_PASSWORDS_ENV, "sam=$2b$12$a-hash")
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.RETIRED_VIEWER_WARNING}" in capsys.readouterr().out
+
+    monkeypatch.delenv(config.VIEWER_PASSWORDS_ENV)
+    monkeypatch.setenv(f"{config.VIEWER_PW_PREFIX}SAM", "a password")
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.RETIRED_VIEWER_WARNING}" in capsys.readouterr().out
+
+    monkeypatch.delenv(f"{config.VIEWER_PW_PREFIX}SAM")
     assert config._validate_cli(str(file)) == 0
     assert "warning:" not in capsys.readouterr().out
 

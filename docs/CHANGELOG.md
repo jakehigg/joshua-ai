@@ -6,6 +6,45 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The viewer has a sign-in page, and the owner keeps the people.** A person
+  signs in on a page of the app and gets one signed session cookie:
+  30 days with "remember this device", and the browser drops it when it closes
+  without. `viewer.auth.method` picks the method of the instance: `anonymous`
+  (the default) asks for nothing and leaves `viewer.anonymous` in charge, `pin`
+  shows the people who can sign in and asks one of them for a PIN, and
+  `password` asks for a person id and a password. Core holds every secret,
+  hashed, in the new `auth_secret` table and answers the viewer over its
+  `/auth/*` routes, so the viewer holds no password and there is no HTTP basic.
+  The new role `owner` is a member who also keeps the roster: under Admin →
+  Users the owner adds a person, sets a secret, changes a role, and takes a
+  person off the roster. `make validate` warns when no person is the owner, and
+  the file is still valid. `viewer.users` and `VIEWER_PASSWORDS` are retired:
+  core reads them one time, at the first start after this version, and nothing
+  reads them again.
+- **Upgrade notes for the sign-in.**
+  - Give one person `role: owner` in `joshua.yaml`. Without an owner there is
+    no Admin → Users; everything else runs, and `make validate` prints
+    `warning: no person has role 'owner'` and still exits 0.
+  - Add `viewer` to `ADMIN_CALLERS` on the `core` service
+    (`ADMIN_CALLERS: laptop,ci,viewer`), because core owns the roster. Without
+    it the Users section shows core's refusal on every write.
+  - The first start after this version imports the viewer passwords into core,
+    once. It reads `viewer.users` from `joshua.yaml`, then `VIEWER_PASSWORDS`,
+    then `VIEWER_PW_<ID>` from core's environment, writes a hash for each
+    person who has no secret yet, and marks itself done. It overwrites nothing,
+    it never runs again, and nobody has to sign in again after the upgrade.
+    Pass `VIEWER_PASSWORDS` to the `core` service for that one start when your
+    passwords live in `.env` alone. Delete `viewer.users` and
+    `VIEWER_PASSWORDS` afterwards; `make validate` warns while either is there.
+  - A person with no secret is on the roster and cannot sign in. The owner sets
+    one under Admin → Users, or an operator runs
+    `docker compose exec core python -m joshua_core people auth-reset --id <id>
+    --secret <secret>`.
+  - `JOSHUA_VIEWER_SESSION_SECRET` on the viewer signs the cookies. With no
+    such variable the process mints a random key at start, so a restart signs
+    everybody out; set it to keep a sign-in across a restart, and share it
+    between replicas.
+  - The schema adds the tables `auth_secret` and `auth_import_marker`.
 - **Workspaces.** A workspace is a chat thread for one large piece of work,
   such as a trip, a house project, or a piece of code. It has a title, a goal,
   a model, the MCP servers that the person picked, notes, and a list of items.

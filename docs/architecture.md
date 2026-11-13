@@ -83,8 +83,12 @@ one wiki. Everyone reads it, a member writes it, a guest reads it only.
 
 The viewer runs from the same image, as its own service. It is one React
 single-page app (`gateway/frontend`), built by the node stage of
-`gateway/Dockerfile` and served at the root of the host behind HTTP basic and
-`viewer.anonymous`. Everything it shows comes from a JSON API under
+`gateway/Dockerfile` and served at the root of the host behind its own
+sign-in page and one signed session cookie, or behind `viewer.anonymous`,
+which serves a request with no cookie. Core checks each secret over its
+`/auth/*` routes, so the viewer holds no password. It serves plain HTTP on a
+network you trust, with a reverse proxy in front for TLS.
+Everything it shows comes from a JSON API under
 `/api/v1/`, which carries the wiki pages, the journal, the search, the usage,
 the links, the documents, the assignments, the chat and the workspaces. The
 chat reaches the `channels` container through `viewer_channels.py` and

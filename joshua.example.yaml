@@ -13,7 +13,8 @@ timezone: America/New_York
 people:
   - id: alex
     name: Alex
-    role: member
+    role: owner                   # owner | member | guest — one person is the owner, who
+                                  # writes what a member writes and manages the roster
     journal: auto                 # auto | ask | off — may Joshua's journal record this person (default auto)
     handles:
       telegram: "998877"
@@ -305,26 +306,30 @@ modules:                        # reserved; no code reads this list yet
   - scheduling
   - files
 
-viewer:                         # a read-only web viewer for the wiki and a
-                                # person's own files. Off by default.
+viewer:                         # the web interface for the wiki, a person's
+                                # own files, and the chat. Off by default.
   enabled: false
-  # One entry per person who may sign in, id -> password reference. A member can
-  # also delete a wiki page. This list says who may sign in; a person who is not
-  # a key here cannot sign in, whatever the environment holds. A key must name a
-  # person in `people`.
+  # How a person signs in. Core holds every sign-in secret, hashed, and the
+  # viewer answers a sign-in with one signed session cookie: a browser
+  # session, or 30 days when the person checks "remember this device".
   #
-  # Leave the value empty and put the password in `VIEWER_PASSWORDS` in `.env`,
-  # so no password is in this file. A `$2` value is a bcrypt hash; any other
-  # value is a literal password. Uncomment to add a person:
-  # users:
-  #   alex: ""
+  #   anonymous   ask for nothing; `anonymous` below decides who a request is
+  #   pin         show the people who can sign in, and ask one of them for a PIN
+  #   password    ask for a person id and a password
   #
-  # On a trusted private network, a household can skip sign-in entirely: a
-  # request with no password then gets full access, read and write, the same
-  # as a member. Add `users` above to bring restrictions back. `true` serves
-  # such a request as a synthetic "anonymous" identity, which has no profile,
-  # no attachments, and no assignments. A person id serves it as that member,
-  # as if they signed in; the id must name a member in `people`, not a guest.
+  # The owner sets each secret, adds a person, changes a role, and takes a
+  # person off the roster under Admin -> Users. Core serves that section only
+  # when its ADMIN_CALLERS names `viewer` (default `laptop,ci`).
+  auth:
+    method: anonymous           # anonymous | pin | password
+  #
+  # On a trusted private network, a group can skip sign-in entirely: a
+  # request with no cookie then gets full access, read and write, the same
+  # as a member. Set `auth.method` above to ask for a secret instead. `true`
+  # serves such a request as a synthetic "anonymous" identity, which has no
+  # profile, no attachments, and no assignments. A person id serves it as
+  # that member, as if they signed in; the id must name a member or the owner
+  # in `people`, not a guest.
   # Uncomment one to turn it on:
   # anonymous: true
   # anonymous: alex

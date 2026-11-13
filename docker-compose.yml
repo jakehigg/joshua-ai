@@ -119,6 +119,11 @@ services:
       AGENT_BACKEND: ${AGENT_BACKEND:-sdk}
       # Read-only token for the optional memos memory source.
       MEMOS_TOKEN: ${MEMOS_TOKEN:-}
+      # The old viewer passwords, for the one-time import of the sign-in
+      # secrets. Core reads them at the first start after the upgrade, writes
+      # a hash for each person who has none, and marks the import done. Delete
+      # the variable from `.env` afterwards.
+      VIEWER_PASSWORDS: ${VIEWER_PASSWORDS:-}
     volumes:
       - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
       - data:/data
@@ -160,11 +165,12 @@ services:
 
   # Read-only web viewer for the wiki and a person's own files. A second
   # entrypoint in the gateway image. Off by default; start it with
-  # `docker compose --profile viewer up`. Set `viewer.enabled: true` and a
-  # `viewer.users` entry per person in joshua.yaml first. Put a reverse proxy in
-  # front for TLS. It gets `/data` (read-write, for the delete), the viewer
-  # passwords, and its own fleet token, which it sends to core to search by
-  # meaning. It holds no other fleet token and no upstream credential.
+  # `docker compose --profile viewer up`. Set `viewer.enabled: true` and
+  # `viewer.auth.method` in joshua.yaml first. Put a reverse proxy in front for
+  # TLS. It gets `/data` (read-write, for the delete) and its own fleet token,
+  # which it sends to core to search by meaning and to check a sign-in. It
+  # holds no other fleet token, no upstream credential, and no password: core
+  # holds every sign-in secret, hashed.
   #
   # It is published on the loopback address, on its own port, so it starts
   # beside the rest of the stack and nothing off the host reaches it. Put the
@@ -179,12 +185,9 @@ services:
     environment:
       <<: *runtime-vars
       JOSHUA_CONFIG: /etc/joshua/joshua.yaml
-      # Every viewer password, in one variable, so no person id is named in
-      # this tracked file. Set it in `.env` as a comma-separated list of
-      # `<person-id>=<bcrypt hash>` pairs; `.env.example` has the format. An
-      # id must also be a key of `viewer.users` in joshua.yaml, which is what
-      # says who may sign in.
-      VIEWER_PASSWORDS: ${VIEWER_PASSWORDS:-}
+      # Signs the session cookie. Without it the process mints a key at each
+      # start, so a restart signs everybody out. Set it in `.env`.
+      JOSHUA_VIEWER_SESSION_SECRET: ${JOSHUA_VIEWER_SESSION_SECRET:-}
       # Search by meaning: /search asks core. Without the token, the viewer
       # searches by words only.
       CORE_URL: http://core:8000

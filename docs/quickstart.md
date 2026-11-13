@@ -70,12 +70,16 @@ timezone: America/New_York
 people:
   - id: sam
     name: Sam
-    role: member
+    role: owner
 ```
 
 `id` is the name you use when you talk to Joshua. Use lower-case letters,
-numbers, and hyphens only. `role` is `member` or `guest`. A member writes
-the wiki and can add people. A guest reads the wiki and cannot write it.
+numbers, and hyphens only. `role` is `owner`, `member`, or `guest`. A member
+writes the wiki and can add people. A guest reads the wiki and cannot write
+it. Give one person `role: owner`: the owner writes everything a member
+writes and manages the roster in the viewer, where they add a person, change
+a role, set a sign-in secret, and remove a person. `make validate` warns when
+no one is the owner, and the file is still valid.
 
 Leave the `channels` section as it is. A channel with no credential is off.
 Telegram and iMessage stay off until you add their tokens.
@@ -148,6 +152,21 @@ next message reaches Joshua, and nothing restarts.
 
 `member` sees everything and can add people. `guest` sees less. See
 [channels.md](channels.md#adding-someone-from-chat).
+
+The owner does the same in the viewer, under Admin → Users: add a person,
+change a role, set a sign-in secret, and take a person off the roster. Core
+owns the roster, so it serves that section only to callers in its
+`ADMIN_CALLERS` (`laptop` and `ci` by default). Add `viewer` to the list in
+the `core` service of `docker-compose.yml`:
+
+```yaml
+  core:
+    environment:
+      ADMIN_CALLERS: laptop,ci,viewer
+```
+
+Then run `docker compose up -d core`. Without this, the Users section shows
+core's refusal, and the rest of the viewer works as before.
 
 ## 8. Give Joshua a new capability
 
