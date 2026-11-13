@@ -40,7 +40,9 @@ function refused(label: SecretLabel): string {
  * `label` is what the method calls the secret. With `onBack` the person came
  * from the list of a pin instance, so the id is already filled in and "Not
  * you?" goes back to the list; without it the person types the id, as the
- * password method asks them to.
+ * password method asks them to. The id stays editable in both cases: a
+ * password manager can write its own username into the field, and the person
+ * must be able to correct it.
  */
 function CredentialForm({
   label,
@@ -85,7 +87,6 @@ function CredentialForm({
             autoCorrect="off"
             autoComplete="username"
             spellCheck={false}
-            readOnly={onBack !== null}
             required
             onChange={(event) => onPerson(event.target.value)}
           />
@@ -132,12 +133,33 @@ function CredentialForm({
 }
 
 /**
+ * What a pin instance shows while no person has a secret. The list holds only
+ * the people who have one, so an empty list means that the secrets are not
+ * set yet. The page says so, and says how the first one is set.
+ */
+function NoSecrets({ label }: { label: SecretLabel }) {
+  return (
+    <div className="j-stack">
+      <p>Nobody can sign in yet, because nobody has a {label}.</p>
+      <p className="j-meta">Set a {label} for the owner first. Run this command in the core container:</p>
+      <pre>
+        <code>{`python -m joshua_core people auth-reset --id <owner id> --secret '<${label}>'`}</code>
+      </pre>
+      <p className="j-meta">
+        Then the owner signs in and sets a {label} for each other person under Admin → Users.
+      </p>
+    </div>
+  );
+}
+
+/**
  * `/sign-in`: the one page of the viewer that needs no session.
  *
  * `GET /api/v1/auth-method` says what to draw. The `password` method draws
  * the credential form at once, because the person types their own id. The
  * `pin` method draws the people of `GET /api/v1/sign-in/people` first, and a
- * tap on a name opens the same form with the id filled in. The `anonymous`
+ * tap on a name opens the same form with the id filled in. The person can
+ * still change the id. The `anonymous`
  * method asks for nothing at all: the app never sends anybody here, because
  * every request of such an instance is served as the anonymous identity.
  *
@@ -262,7 +284,7 @@ export default function SignIn() {
       <div className="j-stack">
         <p className="j-meta">Who are you?</p>
         {people.length === 0 ? (
-          <p className="j-empty">nobody can sign in yet.</p>
+          <NoSecrets label={label} />
         ) : (
           people.map((one) => (
             <button

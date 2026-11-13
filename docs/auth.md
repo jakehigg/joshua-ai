@@ -44,8 +44,12 @@ identity, and a person who signs in is served as themselves. See
 1. The page shows the people who can sign in, under "Who are you?": Sam,
    Robin, Theo. The list comes from core, and it holds only the people who
    have a secret.
-2. Theo taps his name. The id field is filled in with `theo` and is read
-   only.
+   While nobody has a secret, the list is empty. The page then says that
+   nobody can sign in yet, and shows the `auth-reset` command that sets the
+   first PIN.
+2. Theo taps his name. The id field is filled in with `theo`. Theo can still
+   change it, for example when a password manager writes its own username
+   into the field.
 3. Theo types his PIN and taps `Sign in`.
 4. "Not you?" goes back to the list and clears the field.
 

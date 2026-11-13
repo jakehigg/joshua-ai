@@ -23,14 +23,18 @@ function json(body: unknown, status = 200): Response {
  * a pin instance, and the sign-in itself. The list it gives back holds the
  * body of each sign-in the page posted.
  */
-function stubRoutes(method: AuthMethod["method"], signedIn: () => Response) {
+function stubRoutes(
+  method: AuthMethod["method"],
+  signedIn: () => Response,
+  people: SignInPeople = PEOPLE,
+) {
   const sent: unknown[] = [];
   vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
     if (path === "/api/v1/auth-method") {
       return Promise.resolve(json({ method, anonymous: method === "anonymous" }));
     }
     if (path === "/api/v1/sign-in/people") {
-      return Promise.resolve(json(PEOPLE));
+      return Promise.resolve(json(people));
     }
     if (path === "/api/v1/session/sign-in") {
       sent.push(JSON.parse(String(init?.body)));
@@ -83,7 +87,9 @@ describe("the sign-in page", () => {
     fireEvent.click(screen.getByText("Sam"));
 
     expect(field("person")?.value).toEqual("sam");
-    expect(field("person")?.readOnly).toBe(true);
+    // The id stays editable, so the person can undo a password manager that
+    // wrote its own username into the field.
+    expect(field("person")?.readOnly).toBe(false);
     expect(screen.getByText("your PIN")).toBeDefined();
     type("secret", "4321");
     fireEvent.click(field("remember") as HTMLInputElement);
@@ -91,6 +97,32 @@ describe("the sign-in page", () => {
 
     expect(await screen.findByText("the wiki")).toBeDefined();
     expect(sent).toEqual([{ person: "sam", secret: "4321", remember: true }]);
+  });
+
+  it("signs in with the id the person corrected on a pin instance", async () => {
+    const sent = stubRoutes("pin", () => json({ ok: true }));
+
+    page();
+
+    fireEvent.click(await screen.findByText("Sam"));
+    type("person", "someone@example.com");
+    type("person", "alex");
+    type("secret", "4321");
+    submit();
+
+    expect(await screen.findByText("the wiki")).toBeDefined();
+    expect(sent).toEqual([{ person: "alex", secret: "4321", remember: false }]);
+  });
+
+  it("says how to set the first PIN when nobody has one", async () => {
+    stubRoutes("pin", () => json({ ok: true }), { people: [] });
+
+    page();
+
+    expect(await screen.findByText("Nobody can sign in yet, because nobody has a PIN.")).toBeDefined();
+    expect(screen.getByText(/people auth-reset --id <owner id>/)).toBeDefined();
+    expect(screen.getByText(/under Admin → Users/)).toBeDefined();
+    expect(field("secret")).toBeNull();
   });
 
   it("goes back to the list from the form of a pin instance", async () => {
