@@ -42,6 +42,19 @@ whole app. On a slow network the shell comes from the cache and the page is
 there at once; the data behind it still comes from the network, because no
 answer under `/api/v1/` is ever cached.
 
+A new build reaches an installed app on its own. The build writes an id into
+`dist/sw.js` in place of `__BUILD_ID__` (`src/buildStamp.ts`). The id is
+`BUILD_ID` when that variable is set, else a hash of the built `index.html`,
+which names every hashed asset. Every build has a different worker, so the
+browser installs it and its activate drops the cache of every older build.
+
+The page asks for a new worker (`src/pwa.ts`) when it turns visible, on
+focus, when the network returns, and every 30 minutes while it is visible.
+When a new worker takes over a page that already had one, a hidden page
+reloads at once. A visible page shows the toast "Joshua was updated" with a
+Reload button, and reloads the next time it turns visible. A page reloads at
+most once for a new worker, and not while a chat send is uploading.
+
 The manifest declares `logo-192.png` and `logo-512.png`, both `purpose:
 "any"`. It declares no maskable icon: the mark fills the square to its edges,
 so a circular mask would cut the ear and the tusk.

@@ -6,6 +6,11 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The installed app picks up a new build.** The service worker now carries
+  an id of the build, so each deploy installs a new worker and drops the old
+  cache. The app checks for it on resume, on focus, when the network returns,
+  and every 30 minutes. A hidden app reloads at once; a visible one shows a
+  "Joshua was updated" toast. You no longer need to reinstall the app.
 - **The viewer installs as an app.** Add to Home Screen puts a Joshua icon on
   the phone; it opens the whole viewer at the wiki, with no browser chrome,
   and the shell comes from the cache of its service worker when the network

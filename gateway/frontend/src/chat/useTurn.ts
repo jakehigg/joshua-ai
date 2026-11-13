@@ -44,6 +44,7 @@
 // workspace, and without it in the main thread.
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { holdReload } from "../pwa";
 import { ApiError, ConnectionLost, postTurn } from "../api/client";
 import { clearDraft, saveDraft } from "./draft";
 import { parseArtifact } from "./ArtifactCard";
@@ -141,6 +142,9 @@ export function useTurn(
   // While the file is going out, closing the page loses it: ask the browser to
   // warn. A page that is hidden may be thrown away, so the draft is saved again.
   const uploading = upload?.phase === "uploading";
+  // A new build of the app does not reload the page while a file is going out.
+  const outgoing = upload !== null && upload !== undefined && upload.phase !== "sent";
+  useEffect(() => (outgoing ? holdReload() : undefined), [outgoing]);
   useEffect(() => {
     if (!uploading) return undefined;
     const warn = (e: BeforeUnloadEvent) => {

@@ -1636,3 +1636,32 @@ html.vv-fit .chat-screen .ws-overlay {
   outline: 1px solid var(--j-line-soft);
   outline-offset: -1px;
 }
+
+/* The toast that says a new build is ready (pwa.ts). */
+.update-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 16px);
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(92vw, 520px);
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--j-text);
+  color: var(--j-bg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  font-size: 0.9rem;
+}
+.update-toast button {
+  font: inherit;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--j-bg);
+  color: var(--j-text);
+  cursor: pointer;
+}

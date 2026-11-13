@@ -1,11 +1,13 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
+import { buildStamp } from "./src/buildStamp";
+
 // The app is the installed progressive web app of the viewer, scoped to `/`,
 // so it is served from the root and never from a subfolder.
 export default defineConfig({
   base: "/",
-  plugins: [react()],
+  plugins: [react(), buildStamp()],
   server: {
     port: 5173,
     // `npm run dev` serves the app and sends the JSON routes (every one of

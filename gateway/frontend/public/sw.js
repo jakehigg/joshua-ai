@@ -5,7 +5,7 @@
  * the build, so the worker is served from `/sw.js` and its scope is `/`, the
  * scope of the app.
  *
- * It keeps one cache per version. The install fills it with the shell (the
+ * It keeps one cache per build. The install fills it with the shell (the
  * entry page and the icons), the fetch of a hashed asset fills it further,
  * and the activate of a new version drops every older cache, so a new build
  * never meets an asset of an older one.
@@ -17,8 +17,11 @@
  * the cache either: only a GET of this origin that answered 200.
  */
 
-// Bump this when the shape of the cache changes; the activate drops the rest.
-const CACHE = "joshua-v1";
+// The build writes its id over the placeholder (see `buildStamp.ts`), so every
+// build has a worker that differs from the last one. The browser then installs
+// it, and its activate drops the cache of every older build. The shell and
+// the hashed assets of an old build never outlive it.
+const CACHE = "joshua-__BUILD_ID__";
 
 // The JSON space of the viewer. No answer under it is ever cached.
 const API = "/api/v1/";

@@ -11,7 +11,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { registerServiceWorker } from "./pwa";
+import { buildIdOf, stampWorker } from "./buildStamp";
+import { holdReload, registerServiceWorker, watchForUpdates } from "./pwa";
 
 // The two files of `public/`, which the build copies to the root as they are.
 import manifestSource from "../public/manifest.webmanifest?raw";
@@ -67,7 +68,7 @@ function load(fetchStub: (target: FakeRequest | string) => Promise<FakeResponse>
   const caches = {
     open: async () => cache,
     match: async (target: FakeRequest | string) => cache.match(target),
-    keys: async () => ["joshua-v1", "joshua-v0"],
+    keys: async () => ["joshua-test", "joshua-v0"],
     delete: async (name: string) => {
       deleted.push(name);
       return true;
@@ -79,7 +80,7 @@ function load(fetchStub: (target: FakeRequest | string) => Promise<FakeResponse>
     skipWaiting: async () => undefined,
     clients: { claim: async () => undefined },
   };
-  const run = new Function("self", "caches", "fetch", workerSource) as (
+  const run = new Function("self", "caches", "fetch", stampWorker(workerSource, "test")) as (
     s: unknown,
     c: unknown,
     f: unknown,
@@ -222,5 +223,116 @@ describe("the service worker", () => {
     const worker = load(async () => answer("sign in", { ok: false }));
     await worker.fetch(request("/assets/main-abc123.js"));
     expect(worker.store.size).toBe(0);
+  });
+});
+
+describe("the build stamp", () => {
+  it("replaces the placeholder of the worker", () => {
+    expect(workerSource).toContain("joshua-__BUILD_ID__");
+    const stamped = stampWorker(workerSource, "abc123");
+    expect(stamped).toContain('"joshua-abc123"');
+    expect(stamped).not.toContain("__BUILD_ID__");
+  });
+
+  it("takes BUILD_ID when set, else a hash of the index page", async () => {
+    expect(await buildIdOf("<html>", "sha-1")).toBe("sha-1");
+    const a = await buildIdOf("<html>a</html>", undefined);
+    expect(a).toMatch(/^[0-9a-f]{12}$/);
+    expect(await buildIdOf("<html>b</html>", "")).not.toBe(a);
+    expect(await buildIdOf("<html>a</html>", " ")).toBe(a);
+  });
+});
+
+describe("the update of the page", () => {
+  function setup(hadController: boolean) {
+    const listeners: Record<string, () => void> = {};
+    const update = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "serviceWorker", {
+      value: {
+        controller: hadController ? {} : null,
+        addEventListener: (name: string, fn: () => void) => (listeners[name] = fn),
+      },
+      configurable: true,
+    });
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload },
+      configurable: true,
+    });
+    let state: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", { get: () => state, configurable: true });
+    const setState = (next: DocumentVisibilityState) => {
+      state = next;
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    vi.useFakeTimers();
+    watchForUpdates({ update } as unknown as ServiceWorkerRegistration);
+    return { listeners, update, reload, setState };
+  }
+
+  afterEach(() => {
+    document.getElementById("update-toast")?.remove();
+  });
+
+  it("asks for a new worker on visible, focus, online and every 30 minutes", () => {
+    const { update, setState } = setup(true);
+    setState("hidden");
+    expect(update).not.toHaveBeenCalled();
+    setState("visible");
+    expect(update).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("online"));
+    expect(update).toHaveBeenCalledTimes(3);
+    vi.advanceTimersByTime(30 * 60 * 1000);
+    expect(update).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not reload on the first claim of a page", () => {
+    const { listeners, reload } = setup(false);
+    listeners.controllerchange?.();
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.getElementById("update-toast")).toBeNull();
+  });
+
+  it("reloads at once when the page is hidden, and only once", () => {
+    const { listeners, reload, setState } = setup(true);
+    setState("hidden");
+    listeners.controllerchange?.();
+    listeners.controllerchange?.();
+    expect(reload).toHaveBeenCalledTimes(1);
+    setState("visible");
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a toast when visible, and reloads on its button or on the next visible", () => {
+    const { listeners, reload, setState } = setup(true);
+    listeners.controllerchange?.();
+    const toast = document.getElementById("update-toast");
+    expect(toast?.textContent).toContain("Joshua was updated");
+    expect(reload).not.toHaveBeenCalled();
+    toast?.querySelector("button")?.click();
+    expect(reload).toHaveBeenCalledTimes(1);
+    // A second path: back from the background.
+    setState("hidden");
+    setState("visible");
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads on the next visible when the page was visible at the change", () => {
+    const { listeners, reload, setState } = setup(true);
+    listeners.controllerchange?.();
+    setState("hidden");
+    setState("visible");
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the reload while a send is going out", () => {
+    const { listeners, reload, setState } = setup(true);
+    const release = holdReload();
+    setState("hidden");
+    listeners.controllerchange?.();
+    expect(reload).not.toHaveBeenCalled();
+    release();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });
