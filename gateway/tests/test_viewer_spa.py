@@ -1,6 +1,6 @@
 """Offline tests for the mount of the React app: the fallback to
 ``index.html``, the paths that keep their 404, the cache headers, and the
-sign-in in front of the app."""
+app that opens with no cookie so the sign-in form can load."""
 
 from __future__ import annotations
 
@@ -121,11 +121,21 @@ def test_the_installed_app_gets_its_manifest_and_its_worker(client) -> None:
     assert client.get("/", auth=ALEX).headers["cache-control"] == "no-cache"
 
 
-def test_the_app_needs_the_same_sign_in_as_a_page(client) -> None:
-    response = client.get("/me")
-    assert response.status_code == 401
-    assert "WWW-Authenticate" not in response.headers
-    assert client.get("/me", auth=bad_cookie()).status_code == 401
+def test_the_app_opens_with_no_cookie_so_the_sign_in_form_can_load(client) -> None:
+    """The sign-in form is a page of the app, so the files of the app need no
+    cookie. With ``anonymous`` off, a browser with no cookie still gets the
+    shell, the code, and the worker. The data stays behind the sign-in."""
+    for path in ("/", "/sign-in", "/me", "/assets/main-abc123.js", "/sw.js"):
+        assert client.get(path).status_code == 200, path
+    assert client.get("/sign-in").text == INDEX
+    refused = client.get("/api/v1/wiki")
+    assert refused.status_code == 401
+    assert "WWW-Authenticate" not in refused.headers
+    assert client.get("/api/v1/me", auth=bad_cookie()).status_code == 401
+
+
+def test_the_sign_in_routes_need_no_cookie(client) -> None:
+    assert client.get("/api/v1/auth-method").status_code == 200
 
 
 def test_with_anonymous_the_app_opens(monkeypatch, tmp_path) -> None:

@@ -27,10 +27,12 @@ service worker of the installed app, ``sw.js``, is never cached either: the
 browser reads it again to find a new version, and a stale copy would keep an
 old shell alive.
 
-The mount is behind the sign-in of a page: a request with no session cookie
-and no ``viewer.anonymous`` gets the same 401 as a page. With no build in the
-image, ``mount`` returns None and the viewer serves its JSON API only, so a
-bare checkout and the test suite still work.
+The mount needs no session cookie. The build holds no data, only the code of
+the app, and the sign-in form is a page of that app: a browser with no cookie
+must load it to sign in. The app asks ``/api/v1/session``, gets a 401, and goes
+to ``/sign-in``. Every JSON route and both document routes keep the sign-in.
+With no build in the image, ``mount`` returns None and the viewer serves its
+JSON API only, so a bare checkout and the test suite still work.
 """
 
 from __future__ import annotations
@@ -38,11 +40,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from starlette.exceptions import HTTPException
-from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
-from starlette.types import Receive, Scope, Send
+from starlette.types import Scope
 
 # The folder of the build, inside the package, and its entry file.
 STATIC_DIR = "static"
@@ -111,24 +112,9 @@ class SpaStaticFiles(StaticFiles):
         return response
 
 
-class SignedIn:
-    """An ASGI app behind the sign-in of a page."""
-
-    def __init__(self, app: StaticFiles) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        from joshua_gateway import viewer  # ``viewer`` imports this module
-
-        if await viewer._authenticate(Request(scope, receive)) is None:
-            await viewer._unauthorized()(scope, receive, send)
-            return
-        await self.app(scope, receive, send)
-
-
 def mount() -> Mount | None:
     """The mount of the built app, or None when the image holds no build."""
     base = static_dir()
     if not (base / INDEX).is_file():
         return None
-    return Mount("/", app=SignedIn(SpaStaticFiles(directory=base, html=True)))
+    return Mount("/", app=SpaStaticFiles(directory=base, html=True))

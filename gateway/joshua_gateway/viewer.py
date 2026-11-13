@@ -71,8 +71,9 @@ too.
 
 Start it with ``python -m joshua_gateway.viewer``. It refuses to start when
 ``viewer.enabled`` is false. Put a reverse proxy in front for TLS; the viewer
-serves plain HTTP and binds every route behind the cookie except the probes
-and the four routes of the sign-in itself.
+serves plain HTTP and binds every route behind the cookie except the probes,
+the four routes of the sign-in itself, and the files of the app, which hold
+no data and carry the sign-in form.
 """
 
 from __future__ import annotations
