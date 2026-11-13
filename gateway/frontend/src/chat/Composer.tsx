@@ -1,8 +1,10 @@
 // The text box and the Send button, in one rounded pill: the paperclip inside
 // at the left, the round send button (an up arrow) inside at the right.
 //
-// Enter sends and Shift+Enter adds a new line, on every device, a touch
-// screen too. Enter does not send while an IME composition is in progress.
+// With a mouse or trackpad (a fine pointer), Enter sends and Shift+Enter adds
+// a new line. On a touch screen a keyboard has no Shift+Enter, so Enter adds a
+// new line there and the send button sends. Enter does not send while an IME
+// composition is in progress.
 // The box is one line when empty and grows to MAX_ROWS rows, then scrolls. The hidden file input is out of the tab order, so the keyboard's
 // "next field" arrow on a phone does not stop at it. A text
 // over MAX_CHARS characters cannot be sent; the counter shows past
@@ -24,6 +26,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+
+import { useMedia } from "./viewport";
 
 export const MAX_CHARS = 8000;
 export const COUNTER_FROM = 7000;
@@ -157,6 +161,8 @@ export function Composer({ onSend, busy }: Props) {
     ref.current?.focus();
   };
 
+  const finePointer = useMedia("(pointer: fine)");
+
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     submit();
@@ -164,6 +170,7 @@ export function Composer({ onSend, busy }: Props) {
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter" || e.shiftKey) return;
+    if (!finePointer) return;
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     e.preventDefault();
     submit();
@@ -189,7 +196,7 @@ export function Composer({ onSend, busy }: Props) {
           aria-label="Message to Joshua"
           aria-invalid={tooLong || undefined}
           aria-describedby={count > COUNTER_FROM ? "composer-count" : undefined}
-          enterKeyHint="send"
+          enterKeyHint={finePointer ? "send" : "enter"}
         />
         <button type="submit" className="send" disabled={!canSend} aria-label="Send">
           <SendIcon />

@@ -39,11 +39,21 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("sends on Enter with a coarse pointer too", () => {
+  it("adds a new line on Enter with a coarse pointer: no send, no prevented default", () => {
     pointer(false);
     const { onSend, box } = setup();
     fireEvent.change(box, { target: { value: "hello" } });
-    fireEvent.keyDown(box, { key: "Enter" });
+    const notPrevented = fireEvent.keyDown(box, { key: "Enter" });
+    expect(notPrevented).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(box.getAttribute("enterkeyhint")).toBe("enter");
+  });
+
+  it("sends with the button on a coarse pointer", () => {
+    pointer(false);
+    const { onSend, box, send } = setup();
+    fireEvent.change(box, { target: { value: "hello" } });
+    fireEvent.click(send);
     expect(onSend).toHaveBeenCalledWith("hello", null);
   });
 
