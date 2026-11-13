@@ -84,6 +84,70 @@ def test_post_people_bad_body_is_400(client) -> None:
     assert resp.status_code == 400
 
 
+def test_post_role_requires_admin(client) -> None:
+    resp = client.post("/admin/people/alex/role", json={"role": "owner"})
+    assert resp.status_code == 401
+    resp = client.post(
+        "/admin/people/alex/role",
+        headers={"Authorization": f"Bearer {CHANNELS}"},
+        json={"role": "owner"},
+    )
+    assert resp.status_code == 403
+    assert client.repo.people["alex"].role == "member"
+
+
+def test_post_role_changes_only_the_role(client) -> None:
+    resp = client.post("/admin/people/alex/role", headers=_laptop(), json={"role": "owner"})
+    assert resp.status_code == 200
+    assert resp.json()["person"] == {"id": "alex", "name": "Alex", "role": "owner"}
+    assert client.repo.people["alex"].role == "owner"
+    assert client.repo.people["alex"].display_name == "Alex"
+    assert client.repo.handles == {("telegram", "9"): "alex"}
+    people = config_module.read_people_file(client.data_dir / "people.yaml")
+    assert people == [{"id": "alex", "role": "owner"}]
+
+
+def test_post_role_bad_role_is_400(client) -> None:
+    resp = client.post("/admin/people/alex/role", headers=_laptop(), json={"role": "admin"})
+    assert resp.status_code == 400
+    assert client.repo.people["alex"].role == "member"
+
+
+def test_post_role_bad_body_is_400(client) -> None:
+    resp = client.post("/admin/people/alex/role", headers=_laptop(), json=["owner"])
+    assert resp.status_code == 400
+
+
+def test_post_role_unknown_person_is_404(client) -> None:
+    resp = client.post("/admin/people/ghost/role", headers=_laptop(), json={"role": "owner"})
+    assert resp.status_code == 404
+
+
+def test_post_remove_requires_admin(client) -> None:
+    resp = client.post("/admin/people/alex/remove")
+    assert resp.status_code == 401
+    resp = client.post("/admin/people/alex/remove", headers={"Authorization": f"Bearer {CHANNELS}"})
+    assert resp.status_code == 403
+    assert client.repo.people["alex"].role == "member"
+
+
+def test_post_remove_drops_the_handles_and_the_secret(client) -> None:
+    client.repo.secrets["alex"] = "$2b$04$hash"
+    resp = client.post("/admin/people/alex/remove", headers=_laptop())
+    assert resp.status_code == 200
+    assert resp.json() == {"removed": True, "id": "alex"}
+    assert client.repo.people["alex"].role == "removed"
+    assert client.repo.handles == {}
+    assert client.repo.secrets == {}
+    people = config_module.read_people_file(client.data_dir / "people.yaml")
+    assert people == [{"id": "alex", "role": "removed"}]
+
+
+def test_post_remove_unknown_person_is_404(client) -> None:
+    resp = client.post("/admin/people/ghost/remove", headers=_laptop())
+    assert resp.status_code == 404
+
+
 def test_get_people_lists_every_handle_of_a_person(client) -> None:
     client.repo.handles[("telegram", "10")] = "alex"
     client.repo.handles[("imessage", "+15550001111")] = "alex"

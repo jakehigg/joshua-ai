@@ -7,6 +7,10 @@ bearer is 401; a valid identity outside the allowlist is 403.
 Routes:
 
 - ``GET /admin/people`` / ``POST /admin/people`` — read and extend the roster.
+- ``POST /admin/people/{id}/role`` — change the role of a person (body
+  ``{role}``). Only the role changes.
+- ``POST /admin/people/{id}/remove`` — mark a person removed, drop their
+  handles and their sign-in secret. The data dirs and the transcripts stay.
 - ``GET /admin/pool`` — the warm session pool.
 - ``POST /admin/sessions/flush`` — drop every pooled session so the next turn
   reconnects with the current gateway toolset.
@@ -180,6 +184,42 @@ def build_admin_router() -> APIRouter:
         except people.PeopleError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse({"person": result}, status_code=201)
+
+    @router.post("/admin/people/{person_id}/role")
+    async def post_person_role(person_id: str, request: Request):  # type: ignore[no-untyped-def]
+        denied = authorize_admin(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 — a bad body is a 400, not a 500
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
+        try:
+            result = await people.set_role(
+                request.app.state.ctx.repo,
+                _data_dir(),
+                person_id=person_id,
+                role=str(body.get("role") or ""),
+            )
+        except people.PeopleError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        if result is None:
+            return JSONResponse({"error": f"unknown person {person_id}"}, status_code=404)
+        return JSONResponse({"person": result})
+
+    @router.post("/admin/people/{person_id}/remove")
+    async def post_person_remove(person_id: str, request: Request):  # type: ignore[no-untyped-def]
+        denied = authorize_admin(request)
+        if denied is not None:
+            return denied
+        removed = await people.remove_person(
+            request.app.state.ctx.repo, _data_dir(), person_id=person_id
+        )
+        if not removed:
+            return JSONResponse({"error": f"unknown person {person_id}"}, status_code=404)
+        return JSONResponse({"removed": True, "id": person_id})
 
     @router.get("/admin/pool")
     async def get_pool(request: Request):  # type: ignore[no-untyped-def]

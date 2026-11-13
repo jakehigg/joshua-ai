@@ -25,7 +25,8 @@ _E164_RE = re.compile(r"^\+[1-9]\d{1,14}$")
 _DIGITS_RE = re.compile(r"^\d{3,}$")
 _NON_ID_RE = re.compile(r"[^a-z0-9]+")
 
-VALID_ROLES = ("member", "guest")
+VALID_ROLES = ("member", "guest", "owner")
+_ROLE_WORDS = ", ".join(repr(role) for role in VALID_ROLES)
 
 
 class PeopleError(Exception):
@@ -117,7 +118,7 @@ async def add_person(
         raise PeopleError("name is required")
     role = (role or "member").strip().lower()
     if role not in VALID_ROLES:
-        raise PeopleError("role must be 'member' or 'guest'")
+        raise PeopleError(f"role must be one of {_ROLE_WORDS}")
 
     ctype, raw = split_handle(handle)
     norm = normalize_handle(ctype, raw)
@@ -136,15 +137,38 @@ async def add_person(
     return {"id": person_id, "name": name, "role": role, "handles": {ctype: norm}}
 
 
+async def set_role(
+    repo: Repo, data_dir: Path | str, *, person_id: str, role: str
+) -> dict[str, Any] | None:
+    """Change the role of a person. Only the role changes.
+
+    The display name and the handles stay as they are, in the DB and in the
+    people file. Raises ``PeopleError`` on a role that is not in
+    ``VALID_ROLES``, and returns None when no such person is on the roster.
+    """
+    person_id = person_id.strip()
+    role = (role or "").strip().lower()
+    if role not in VALID_ROLES:
+        raise PeopleError(f"role must be one of {_ROLE_WORDS}")
+    person = await repo.get_person(person_id)
+    if person is None or person.role == "removed":
+        return None
+    await repo.upsert_person(person_id, person.display_name, role)
+    people_file.set_role(Path(data_dir) / "people.yaml", person_id, role)
+    return {"id": person_id, "name": person.display_name, "role": role}
+
+
 async def remove_person(repo: Repo, data_dir: Path | str, *, person_id: str) -> bool:
     """Mark a person removed and drop their handles. Data dirs and transcripts stay.
 
-    Returns False when no such person exists.
+    The sign-in secret goes with the handles: a person who is off the roster
+    must not keep a way in. Returns False when no such person exists.
     """
     person_id = person_id.strip()
     ok = await repo.remove_person(person_id)
     if not ok:
         return False
+    await repo.delete_auth_secret(person_id)
     people_file.mark_removed(Path(data_dir) / "people.yaml", person_id)
     return True
 

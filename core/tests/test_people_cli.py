@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from joshua_core import people, people_cli
+import pytest
+from joshua_core import auth_api, people, people_cli
 from joshua_core.store.models import Person
 from people_fakes import PeopleFakeRepo
+
+
+@pytest.fixture(autouse=True)
+def cheap_hashes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The lowest bcrypt cost. ``auth-reset`` hashes, and no test checks timing."""
+    monkeypatch.setattr(auth_api, "BCRYPT_ROUNDS", 4)
 
 
 def _run_cli(monkeypatch, repo: PeopleFakeRepo, argv: list[str], data_dir: Path) -> int:
@@ -79,6 +86,26 @@ def test_cli_remove_missing_returns_1(monkeypatch, tmp_path, capsys) -> None:
     repo = PeopleFakeRepo()
     rc = _run_cli(monkeypatch, repo, ["remove", "--id", "ghost"], tmp_path)
     assert rc == 1
+    assert "no such person" in capsys.readouterr().err
+
+
+def test_cli_auth_reset(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="alex", display_name="Alex", role="member")])
+    rc = _run_cli(
+        monkeypatch, repo, ["auth-reset", "--id", "alex", "--secret", "open sesame"], tmp_path
+    )
+    assert rc == 0
+    # The CLI writes the hash itself: the secret is never stored as it is.
+    assert repo.secrets["alex"].startswith("$2")
+    assert auth_api.verify_secret("open sesame", repo.secrets["alex"])
+    assert "auth secret set for alex" in capsys.readouterr().out
+
+
+def test_cli_auth_reset_refuses_a_person_off_the_roster(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="ghost", display_name="Ghost", role="removed")])
+    assert _run_cli(monkeypatch, repo, ["auth-reset", "--id", "nobody", "--secret", "s"], tmp_path)
+    assert _run_cli(monkeypatch, repo, ["auth-reset", "--id", "ghost", "--secret", "s"], tmp_path)
+    assert repo.secrets == {}
     assert "no such person" in capsys.readouterr().err
 
 

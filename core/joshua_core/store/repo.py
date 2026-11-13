@@ -9,7 +9,8 @@ channel adapters own the platform-specific policy.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection
+from collections.abc import AsyncIterator, Collection
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -353,23 +354,50 @@ class Repo:
 
     # --- auth secrets ------------------------------------------------------
 
-    async def get_auth_secret(self, person_id: str) -> str | None:
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[psycopg.AsyncConnection]:
+        """One connection and one transaction, for a caller that writes several
+        rows all or none.
+
+        Pass the connection to each method that takes ``conn``; a method called
+        without one takes its own connection and commits on its own. An error
+        inside the block rolls the whole block back.
+        """
+        async with self._pool.connection() as conn, conn.transaction():
+            yield conn
+
+    @asynccontextmanager
+    async def _connection(
+        self, conn: psycopg.AsyncConnection | None
+    ) -> AsyncIterator[psycopg.AsyncConnection]:
+        """The caller's connection, or one of our own."""
+        if conn is not None:
+            yield conn
+            return
+        async with self._pool.connection() as own:
+            yield own
+
+    async def get_auth_secret(
+        self, person_id: str, *, conn: psycopg.AsyncConnection | None = None
+    ) -> str | None:
         """The bcrypt hash of a person's secret, or None when they have none.
 
         This is the one method that reads a hash. Nothing puts it in an answer:
         ``joshua_core.auth_api`` compares it and returns a boolean.
         """
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
+        async with self._connection(conn) as c:
+            cur = await c.execute(
                 "SELECT secret_hash FROM auth_secret WHERE person_id = %s", (person_id,)
             )
             row = await cur.fetchone()
         return row["secret_hash"] if row else None
 
-    async def set_auth_secret(self, person_id: str, secret_hash: str) -> None:
+    async def set_auth_secret(
+        self, person_id: str, secret_hash: str, *, conn: psycopg.AsyncConnection | None = None
+    ) -> None:
         """Store the hash of a person's secret, and bump ``updated_at``."""
-        async with self._pool.connection() as conn:
-            await conn.execute(
+        async with self._connection(conn) as c:
+            await c.execute(
                 """
                 INSERT INTO auth_secret (person_id, secret_hash)
                 VALUES (%s, %s)
@@ -394,19 +422,23 @@ class Repo:
             rows = await cur.fetchall()
         return [r["person_id"] for r in rows]
 
-    async def get_auth_import_marker(self) -> dict[str, Any] | None:
+    async def get_auth_import_marker(
+        self, *, conn: psycopg.AsyncConnection | None = None
+    ) -> dict[str, Any] | None:
         """The marker row of the one-time import of the secrets, or None when
         the import has not run."""
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
+        async with self._connection(conn) as c:
+            cur = await c.execute(
                 "SELECT * FROM auth_import_marker WHERE id = %s", (AUTH_IMPORT_MARKER_ID,)
             )
             return await cur.fetchone()
 
-    async def set_auth_import_marker(self, rows_written: int) -> None:
+    async def set_auth_import_marker(
+        self, rows_written: int, *, conn: psycopg.AsyncConnection | None = None
+    ) -> None:
         """Mark the one-time import done, with the number of rows it wrote."""
-        async with self._pool.connection() as conn:
-            await conn.execute(
+        async with self._connection(conn) as c:
+            await c.execute(
                 """
                 INSERT INTO auth_import_marker (id, rows_written)
                 VALUES (%s, %s)

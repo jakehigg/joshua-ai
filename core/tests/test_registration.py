@@ -212,6 +212,65 @@ async def test_operator_remove_missing(tmp_path: Path) -> None:
     assert await people.remove_person(repo, tmp_path, person_id="nobody") is False
 
 
+async def test_operator_remove_person_drops_the_auth_secret(tmp_path: Path) -> None:
+    """A person off the roster keeps no way in."""
+    repo = _member_repo()
+    repo.secrets["alex"] = "$2b$04$hash"
+
+    assert await people.remove_person(repo, tmp_path, person_id="alex") is True
+
+    assert repo.secrets == {}
+
+
+async def test_operator_remove_missing_keeps_the_secrets(tmp_path: Path) -> None:
+    repo = _member_repo()
+    repo.secrets["alex"] = "$2b$04$hash"
+    assert await people.remove_person(repo, tmp_path, person_id="nobody") is False
+    assert repo.secrets == {"alex": "$2b$04$hash"}
+
+
+async def test_operator_set_role(tmp_path: Path) -> None:
+    repo = _member_repo()
+    repo.handles[("telegram", "999")] = "alex"
+
+    result = await people.set_role(repo, tmp_path, person_id="alex", role="owner")
+
+    assert result == {"id": "alex", "name": "Alex", "role": "owner"}
+    # The name and the handles stay; only the role moves.
+    assert repo.people["alex"].display_name == "Alex"
+    assert repo.handles == {("telegram", "999"): "alex"}
+    assert repo.people["alex"].role == "owner"
+    assert config_module.read_people_file(tmp_path / "people.yaml") == [
+        {"id": "alex", "role": "owner"}
+    ]
+
+
+async def test_operator_set_role_keeps_the_people_file_entry(tmp_path: Path) -> None:
+    repo = _member_repo()
+    await people.add_person(
+        repo, tmp_path, person_id="sam", name="Sam", handle="telegram:1", role="guest"
+    )
+
+    await people.set_role(repo, tmp_path, person_id="sam", role="member")
+
+    entry = config_module.read_people_file(tmp_path / "people.yaml")[0]
+    assert entry == {"id": "sam", "name": "Sam", "role": "member", "handles": {"telegram": "1"}}
+
+
+async def test_operator_set_role_bad_role(tmp_path: Path) -> None:
+    repo = _member_repo()
+    with pytest.raises(people.PeopleError):
+        await people.set_role(repo, tmp_path, person_id="alex", role="admin")
+
+
+async def test_operator_set_role_unknown_person(tmp_path: Path) -> None:
+    repo = _member_repo()
+    repo.people["ghost"] = Person(id="ghost", display_name="Ghost", role="removed")
+    assert await people.set_role(repo, tmp_path, person_id="nobody", role="owner") is None
+    assert await people.set_role(repo, tmp_path, person_id="ghost", role="owner") is None
+    assert not (tmp_path / "people.yaml").exists()
+
+
 async def test_operator_roster_excludes_removed(tmp_path: Path) -> None:
     repo = _member_repo()
     repo.people["ghost"] = Person(id="ghost", display_name="Ghost", role="removed")
@@ -234,6 +293,12 @@ def test_people_file_upsert_merges_handles(tmp_path: Path) -> None:
 
     entry = config_module.read_people_file(path)[0]
     assert entry["handles"] == {"telegram": "1", "imessage": "+15551234567"}
+
+
+def test_people_file_set_role_writes_a_role_only_entry(tmp_path: Path) -> None:
+    path = tmp_path / "people.yaml"
+    people_file.set_role(path, "sam", "owner")
+    assert config_module.read_people_file(path) == [{"id": "sam", "role": "owner"}]
 
 
 def test_people_file_mark_removed_clears_on_readd(tmp_path: Path) -> None:

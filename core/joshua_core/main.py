@@ -24,6 +24,7 @@ from joshua_shared.log import get_logger, install_healthcheck_filter
 from joshua_core import limits as limits_module
 from joshua_core.admin import build_admin_router
 from joshua_core.auth_api import build_auth_router
+from joshua_core.auth_import import import_once
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
 from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import injection, taught_skills, workspace_awareness
@@ -173,6 +174,10 @@ async def lifespan(app: FastAPI):
     repo = Repo(db)
     await _backfill_usage(repo)
     await seed_people(repo, settings)
+    # After the seed, because a secret references a person row: on a first
+    # start the roster reaches the database here. It runs once ever, guarded by
+    # its own marker, and never stops the start.
+    await import_once(repo, settings)
     _bootstrap_layout(settings)
 
     limits_tracker = await _build_limits(settings, repo)

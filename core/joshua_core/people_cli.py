@@ -1,9 +1,14 @@
-"""``python -m joshua_core people {add,list,remove}`` — operator roster management.
+"""``python -m joshua_core people {add,list,remove,auth-reset}`` — operator roster
+management.
 
 Runs with ``DATABASE_URL`` set. Writes the DB roster cache and the
 ``/data/people.yaml`` people file the loader merges over ``joshua.yaml``. ``remove``
 marks a person removed and drops their handles; it keeps the data dirs and the
 transcripts, so removal of data stays a human action.
+
+``auth-reset`` sets the sign-in secret of a person who is locked out. It writes
+the hash to the database itself, with no HTTP hop, so an operator at the
+console needs no token and no running viewer.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from joshua_core import people
+from joshua_core.auth_api import hash_secret
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
 
@@ -73,6 +79,21 @@ async def _remove(repo: Repo, args: argparse.Namespace) -> int:
     return 1
 
 
+async def _auth_reset(repo: Repo, args: argparse.Namespace) -> int:
+    """Set the sign-in secret of a person on the live roster.
+
+    A person who was never added, or who was removed, gets nothing: a secret
+    without a person is a way in that no roster shows.
+    """
+    person = await repo.get_person(args.id)
+    if person is None or person.role == "removed":
+        print(f"no such person: {args.id}", file=sys.stderr)
+        return 1
+    await repo.set_auth_secret(args.id, hash_secret(args.secret))
+    print(f"auth secret set for {args.id}")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m joshua_core people")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -84,6 +105,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="list the roster")
     remove = sub.add_parser("remove", help="mark a person removed and drop handles")
     remove.add_argument("--id", required=True)
+    auth_reset = sub.add_parser("auth-reset", help="set the sign-in secret of a person")
+    auth_reset.add_argument("--id", required=True)
+    auth_reset.add_argument("--secret", required=True)
     return parser
 
 
@@ -93,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         "add": _add,
         "list": _list,
         "remove": _remove,
+        "auth-reset": _auth_reset,
     }
     handler = handlers[args.command]
     try:

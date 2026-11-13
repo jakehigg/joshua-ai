@@ -3,8 +3,9 @@
 The people file holds runtime people additions in the same schema as
 ``people``. The config loader merges it over ``joshua.yaml`` at load
 time (``joshua_shared.config.read_people_file``); this module writes it.
-``upsert_person`` adds or replaces a person; ``mark_removed`` writes a
-``role: removed`` tombstone that drops the person from the merged roster.
+``upsert_person`` adds or replaces a person; ``set_role`` writes the role of a
+person and nothing else; ``mark_removed`` writes a ``role: removed`` tombstone
+that drops the person from the merged roster.
 """
 
 from __future__ import annotations
@@ -64,6 +65,27 @@ def upsert_person(path: Path, entry: dict[str, Any]) -> None:
         merged = True
     if not merged:
         out.append(entry)
+    write_people_file(path, out)
+
+
+def set_role(path: Path, person_id: str, role: str) -> None:
+    """Write the role of ``person_id`` to the people file, and nothing else.
+
+    An entry already in the file keeps its name and its handles and takes the
+    new role. A person who is only in ``joshua.yaml`` gets a role-only entry,
+    so the merged roster carries the new role.
+    """
+    people = read_people_file(path)
+    out: list[dict[str, Any]] = []
+    found = False
+    for person in people:
+        if person.get("id") == person_id:
+            out.append({**person, "role": role})
+            found = True
+        else:
+            out.append(person)
+    if not found:
+        out.append({"id": person_id, "role": role})
     write_people_file(path, out)
 
 
