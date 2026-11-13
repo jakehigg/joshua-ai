@@ -103,6 +103,53 @@ def test_viewer_anonymous_a_guest_fails() -> None:
         config.parse(text, ENV, source="test.yaml")
 
 
+def test_viewer_auth_method_defaults_to_anonymous() -> None:
+    """With no ``viewer.auth`` section the viewer asks for nothing."""
+    assert config.parse(GOOD, ENV, source="test.yaml").viewer.auth.method == "anonymous"
+    text = GOOD + "\nviewer:\n  enabled: true\n"
+    assert config.parse(text, ENV, source="test.yaml").viewer.auth.method == "anonymous"
+
+
+def test_viewer_auth_method_words() -> None:
+    """``anonymous``, ``pin``, and ``password`` are the methods; nothing else is."""
+    def with_method(method: str) -> str:
+        return GOOD + "\nviewer:\n  enabled: true\n  auth:\n    method: " + method + "\n"
+
+    for method in ("anonymous", "pin", "password"):
+        cfg = config.parse(with_method(method), ENV, source="test.yaml")
+        assert cfg.viewer.auth.method == method
+    with pytest.raises(config.ConfigError, match="viewer.auth.method"):
+        config.parse(with_method("magic-link"), ENV, source="test.yaml")
+
+
+def test_a_roster_with_no_owner_warns_and_loads() -> None:
+    """No owner is a warning, never a refusal: the instance still runs."""
+    cfg = config.parse(GOOD, ENV, source="test.yaml")
+    assert cfg.warnings == [config.NO_OWNER_WARNING]
+    owned = config.parse(GOOD.replace("    name: Alex\n", "    name: Alex\n    role: owner\n"), ENV)
+    assert owned.warnings == []
+
+
+def test_validate_prints_the_no_owner_warning(tmp_path: Path, capsys) -> None:
+    file = tmp_path / "joshua.yaml"
+    file.write_text("name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n")
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.NO_OWNER_WARNING}" in capsys.readouterr().out
+    file.write_text(
+        "name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n    role: owner\n"
+    )
+    assert config._validate_cli(str(file)) == 0
+    assert "warning:" not in capsys.readouterr().out
+
+
+def test_is_member_admits_an_owner() -> None:
+    """An owner writes wherever a member writes. A guest still reads only."""
+    assert config.is_member("member")
+    assert config.is_member("owner")
+    assert not config.is_member("guest")
+    assert not config.is_member(None)
+
+
 def test_happy_path_and_defaults() -> None:
     cfg = config.parse(GOOD, ENV, source="test.yaml")
     assert cfg.name == "Home"
