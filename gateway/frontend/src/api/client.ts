@@ -1,10 +1,12 @@
 /**
  * The JSON API of the viewer: every route is under `/api/v1/`.
  *
- * A call carries the cookies and the basic credentials of the page
- * (`same-origin`), because the viewer signs a person in with HTTP basic. A
- * status that is not 2xx throws an `ApiError`, which carries the status and
- * the `error` string of the body, so a page shows what the viewer said.
+ * A call carries the cookies of the page (`same-origin`), because the viewer
+ * signs a person in with one signed session cookie, which the sign-in page
+ * gets from `POST /api/v1/session/sign-in`. A status that is not 2xx throws
+ * an `ApiError`, which carries the status and the `error` string of the
+ * body, so a page shows what the viewer said. A 401 is the one every page
+ * shares: nobody is signed in, and the app sends the browser to `/sign-in`.
  */
 
 import { SseParser } from "./sse";
