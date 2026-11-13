@@ -1155,12 +1155,15 @@ the sign-in and the owner rule of the page, so a document of another member,
 a document that is not there, and a Markdown document, which has no frame,
 are all 404. The address has a content policy of its own:
 `default-src 'none'; img-src 'self'; style-src 'unsafe-inline';
-form-action 'none'; frame-src 'none'; frame-ancestors 'self'; sandbox`, and
-`script-src 'unsafe-inline'` only with `scripts: true`. So a `<style>`
-element and a `style` attribute of the document render, and the document
-loads nothing from the network, submits no form, and opens no frame. The
-`sandbox` directive never has `allow-same-origin`, so the document has an
-opaque origin, also when a browser opens the address alone.
+form-action 'none'; frame-src 'none'; frame-ancestors 'self'`, then the
+`sandbox` directive. So a `<style>` element and a `style` attribute of the
+document render, and the document loads nothing from the network, submits
+no form, and opens no frame. A document with no scripts gets
+`sandbox allow-same-origin` and no script runs, so the viewer can read its
+size and fit the frame. A document with `scripts: true` gets
+`script-src 'unsafe-inline'` and `sandbox allow-scripts`, and never
+`allow-same-origin`, so it has an opaque origin. The directive also holds
+when a browser opens the address alone.
 
 To comment on a document, use the `+` of a block, a card, a heading, or a line
 of `Source`, as on a definition (see

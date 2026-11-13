@@ -6,353 +6,357 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
-- **The viewer has a sign-in page.** `viewer.auth.method` sets one method for
-  the instance. `anonymous` is the default. It asks for nothing, and
-  `viewer.anonymous` decides who a request is. `pin` shows the people who
-  have a secret and asks the person for a PIN. `password` asks for a person
-  id and a password. A PIN and a password are the same thing, one secret that
-  can be any string. "Remember this device" keeps the session cookie for 30
-  days. Without it, the browser drops the cookie when it closes. The files of
-  the app load with no cookie, because the sign-in form is a page of the app.
-  Every JSON route still needs the sign-in. See [auth.md](auth.md).
-- **Core keeps the secrets.** Core stores one salted hash for each person in
-  the new `auth_secret` table. The viewer calls six new routes of core:
-  `POST /auth/verify`, `POST /auth/secret`, `POST /auth/secret/admin`,
-  `DELETE /auth/secret/<id>`, `GET /auth/people`, and `GET /auth/people/<id>`.
-  The viewer holds no password. HTTP basic is gone, and no answer carries
-  `WWW-Authenticate`. A change of a secret, a reset, and a removal sign out
-  every other browser of that person within a minute.
-- **The owner keeps the roster.** `owner` is a new role. An owner is a member
-  everywhere, including every MCP server behind the gateway. The owner also
-  gets "Admin" in the navigation. Under Admin → Users the owner adds a person
-  with a secret, sets a secret, promotes or demotes a person, and removes a
-  person. Core serves three new roster routes: `POST /admin/people`,
-  `POST /admin/people/<id>/role`, and `POST /admin/people/<id>/remove`.
-  `make validate` warns when no person is the owner, and the file is still
-  valid.
-- **The roster always keeps an owner.** Core refuses, with `409`, a change
-  that demotes or removes the only owner. The Users page turns off `Demote`
-  and `Remove` on that row. Only three things make a person the owner:
-  `role: owner` in `joshua.yaml`, another owner, or an operator with
+## 0.3.0 - 2026-11-13
+
+Joshua now has workspaces: a chat thread for one large piece of work, with
+its goal, notes, and items. The chat is a screen of the viewer, for the
+normal chat and for each workspace. The viewer is one React app, and a phone
+installs it as an app. The viewer has a sign-in page, and core keeps the
+secrets. An owner keeps the roster under Admin → Users.
+
+### Upgrading from 0.2.1
+
+Your `joshua.yaml` from 0.2.1 loads as it is. At start, the schema adds the
+tables `auth_secret`, `auth_import_marker`, `workspaces`, and
+`workspace_items`. Then:
+
+1. Give one person `role: owner` in `joshua.yaml`. `make validate` warns
+   while no person is the owner.
+2. If people signed in to the viewer with a password, set
+   `viewer.auth.method` to `pin` or `password`. The default, `anonymous`,
+   shows no sign-in form. An open viewer (`viewer.anonymous`) needs no
+   change. See [auth.md](auth.md).
+3. Make sure that no person has the id `w`. The chat reserves it.
+4. If `joshua.yaml` lists `channels.webhooks.allowed_callers`, add `viewer`.
+   The default is now `laptop`, `ci`, and `viewer`.
+5. Add the session key. In docker compose, run `make init-env` again. It
+   adds `JOSHUA_VIEWER_SESSION_SECRET` to `.env` and changes nothing else.
+   In the chart, add `JOSHUA_VIEWER_SESSION_SECRET` to the viewer Secret.
+   Without the key, the viewer makes a new key at each start. Then a restart
+   signs everybody out.
+6. Give the chat its token. The viewer calls channels at `CHANNELS_URL` with
+   `JOSHUA_TOKEN_VIEWER`, and the channels container must hold the same
+   token. Docker compose and the chart set `CHANNELS_URL`, and compose gives
+   the token from `.env`. In the chart, add `JOSHUA_TOKEN_VIEWER` to the
+   channels Secret, with the value of the viewer Secret. Without the URL and
+   the token, the chat routes answer `503`, and `/readyz` shows
+   `"chat": false`.
+7. Keep the old viewer passwords for the first start. Core then imports
+   them one time. It reads `viewer.users` in `joshua.yaml`, then
+   `VIEWER_PASSWORDS` and `VIEWER_PW_<ID>` in its environment. Docker
+   compose gives core `VIEWER_PASSWORDS` from `.env`. In the chart, put
+   `VIEWER_PASSWORDS` in the core Secret for that one start. The import
+   writes a hash for each person who has no secret yet. It overwrites
+   nothing. The `auth_import_marker` table records the import, so it never
+   runs again.
+8. Upgrade and start the instance.
+9. Delete `viewer.users` and `VIEWER_PASSWORDS`. Nothing reads them again,
+   and `make validate` warns while either one is there.
+10. Give the first secret if necessary. A person with no secret is on the
+    roster and cannot sign in. On a `pin` instance with no secret, the
+    sign-in page shows the command. Run it in the core container:
+    `python -m joshua_core people auth-reset --id <id> --secret '<secret>'`.
+    Then the owner sets the other secrets under Admin → Users.
+11. Retire the separate chat app. The viewer serves `/chat` now. A
+    deployment that routes `/chat` to the old app keeps that app until you
+    remove the route.
+12. Install the app on each phone again. An installed app (PWA) needs one
+    reinstall after the upgrade to this version.
+
+### Sign-in and people
+
+- **The viewer has a sign-in page (#149).** `viewer.auth.method` sets one
+  method for the instance. `anonymous` is the default. It asks for nothing,
+  and `viewer.anonymous` decides who a request is. `pin` shows the people who
+  have a secret and asks for a PIN. `password` asks for a person id and a
+  password. A PIN and a password are the same thing: one secret that can be
+  any string. "Remember this device" keeps the session cookie for 30 days.
+  Without it, the browser drops the cookie when it closes. The files of the
+  app load with no cookie, because the sign-in form is a page of the app.
+  Every JSON route needs the sign-in. HTTP basic, `viewer.users`, and
+  `VIEWER_PASSWORDS` no longer sign a person in. See [auth.md](auth.md).
+- **Core keeps the secrets (#149).** Core stores one salted hash for each
+  person in the table `auth_secret`. The viewer holds no password. It calls
+  six routes of core: `POST /auth/verify`, `POST /auth/secret`,
+  `POST /auth/secret/admin`, `DELETE /auth/secret/<id>`, `GET /auth/people`,
+  and `GET /auth/people/<id>`. No answer carries `WWW-Authenticate`. A
+  change of a secret, a reset, and a removal sign out every other browser of
+  that person within a minute.
+- **The owner keeps the roster (#149).** `owner` is a new role. An owner is
+  a member everywhere, also on each MCP server behind the gateway. The
+  owner also gets "Admin" in the navigation. Under Admin → Users, the owner
+  adds a person with a secret, sets a secret, promotes or demotes a person,
+  and removes a person. Core serves three roster routes:
+  `POST /admin/people`, `POST /admin/people/<id>/role`, and
+  `POST /admin/people/<id>/remove`.
+- **The roster always keeps an owner (#149).** Core refuses with `409` a
+  change that demotes or removes the only owner. The Users page disables
+  `Demote` and `Remove` on that row. Only three things make a person the
+  owner: `role: owner` in `joshua.yaml`, another owner, or an operator with
   `python -m joshua_core people role --id <id> --role owner`.
-- **The viewer reaches the roster routes as an auth caller.** Core admits the
-  callers of `AUTH_CALLERS` (default `viewer`) on its four roster routes. The
-  viewer gets no other admin route, and it serves the roster to the owner
-  alone. You no longer add `viewer` to `ADMIN_CALLERS`.
-- **A person needs no handle.** `Add a person`, `POST /admin/people`, and
-  `people add` take the handle as optional, so you can add a person who uses
-  only the viewer and the terminal.
-- **Profile.** "Your page" is now "Profile", at `/me`. There a person changes
-  their own PIN or password, their instructions to Joshua, and their journal
-  consent. Core serves `GET` and `POST /people/<id>/profile`, and the viewer
+- **The viewer reaches the roster routes as an auth caller (#149).** Core
+  admits the callers of `AUTH_CALLERS` (default `viewer`) on its four roster
+  routes. The viewer gets no other admin route, and it serves the roster to
+  the owner only. The viewer does not need a place in `ADMIN_CALLERS`.
+- **A person needs no handle (#149).** `Add a person`, `POST /admin/people`,
+  and `people add` take the handle as optional. So you can add a person who
+  uses only the viewer and the terminal.
+- **Profile (#149).** "Profile" at `/me` shows your name, your settings, the
+  link to the journal, your recent attachments, and the wiki tree. There a
+  person changes their own PIN or password, their instructions to Joshua,
+  and their journal consent. A person cannot change their own name, role, or
+  handles. Core serves `GET` and `POST /people/<id>/profile`, and the viewer
   serves `GET` and `POST /api/v1/profile`. Core writes the instructions to
   `/data/people/<id>/prompt.md` and puts the path of that file in the
-  `prompt` of the person. A person cannot change their own name, role, or
-  handles.
-- **The people file overlays fields.** An entry of `/data/people.yaml`
-  changes only the keys that it holds on the same person in `joshua.yaml`.
-  The handles of the two are the union. Before, the entry replaced the whole
-  person, so one role change hid every later change of that person in
-  `joshua.yaml`. A `role: removed` entry still removes the person.
-- **A change of a person applies on the next turn.** Core reads the `prompt`
-  and the `journal` of a person from the current config on each turn. Before,
-  core read them one time, at start.
-- **A text field shows one focus ring.** The wrapper of a field draws the
-  ring, and the control inside it draws none.
-- **`GET /readyz` of the viewer reports `auth`.** The field holds the sign-in
-  method. The `users` count of the retired `viewer.users` is gone.
-- **`make up` starts the viewer and the assignments container** when
-  `joshua.yaml` sets `viewer.enabled: true` or `assignments.enabled: true`,
-  and `make down` stops them. You do not name a compose profile.
-- **`make init-env` writes `JOSHUA_VIEWER_SESSION_SECRET`**, so a restart of
-  the viewer keeps everybody signed in.
-- **`make validate` names only the channels that start.** It runs a new
-  one-shot `validate` service with the channel credentials and no network, so
-  a channel with an empty credential no longer shows as enabled.
-  `make validate-dev` runs the same check on your own build.
-- **`make restart` restarts every container that runs.** It keeps each
-  image, so it works for a release and for your own build.
-- **Upgrade notes for the sign-in.**
-  - Give one person `role: owner` in `joshua.yaml`.
-  - In docker compose, run `make init-env` again. It adds
-    `JOSHUA_VIEWER_SESSION_SECRET` to `.env` and changes nothing else. In the
-    chart, add `JOSHUA_VIEWER_SESSION_SECRET` to the viewer Secret. With no
-    such key, the viewer makes a new key at each start, so a restart signs
-    everybody out.
-  - The first start of core after the upgrade imports the old viewer
-    passwords one time. It reads `viewer.users` in `joshua.yaml`, then
-    `VIEWER_PASSWORDS` and `VIEWER_PW_<ID>` in the environment of core. It
-    writes a hash for each person who has no secret yet, and it overwrites
-    nothing. The `auth_import_marker` table records that the import ran, so
-    it never runs again. Docker compose gives core `VIEWER_PASSWORDS` from
-    `.env`. In the chart, put it in the core Secret for that one start. Then
-    delete `viewer.users` and `VIEWER_PASSWORDS`. `make validate` warns while
-    either one is there.
-  - A person with no secret is on the roster and cannot sign in. On a `pin`
-    instance with no secret at all, the sign-in page shows the command that
-    sets the first one:
-    `python -m joshua_core people auth-reset --id <id> --secret '<secret>'`.
-    Run it in the core container. After that, the owner sets the other
-    secrets under Admin → Users.
-  - The schema adds the tables `auth_secret` and `auth_import_marker`.
-- **Workspaces.** A workspace is a chat thread for one large piece of work,
-  such as a trip, a house project, or a piece of code. It has a title, a goal,
-  a model, the MCP servers that the person picked, notes, and a list of items.
-  An item is a document, an artifact, a wiki page, a pull request, an
-  assignment, a developer task, a tasks project, a link, or a file. Core runs
-  each workspace thread as the full Joshua and adds a workspace block to each
-  message. The block holds the goal, the notes, the items, the jobs that the
-  workspace started, and the next steps of a linked tasks project. A reply
-  stays in the thread and does not go to the phone. The agent sends one
-  message to the normal chat with `send_to_normal_chat`. A workspace belongs
-  to the member who made it. See [workspaces.md](workspaces.md).
-- **Workspace items are added for you.** A workspace session sends
+  `prompt` of the person.
+- **The people file overlays fields (#149).** An entry of
+  `/data/people.yaml` changes only its own keys on the same person in
+  `joshua.yaml`. The handles of the two are the union. Before, the entry
+  replaced the whole person, so one role change hid every later change of
+  that person in `joshua.yaml`. A `role: removed` entry still removes the
+  person.
+- **A change of a person applies on the next turn (#149).** Core reads the
+  `prompt` and the `journal` of a person from the current config on each
+  turn. Before, core read them one time, at start.
+
+### Workspaces
+
+- **Workspaces (#148).** A workspace is a chat thread for one large piece of
+  work, such as a trip, a house project, or a piece of code. It has a title,
+  a goal, a model, the MCP servers that the person picked, notes, and a list
+  of items. An item is a document, an artifact, a wiki page, a pull request,
+  an assignment, a developer task, a tasks project, a link, or a file. A
+  workspace belongs to the member who made it. Core runs each workspace
+  thread as the full Joshua and adds a workspace block to each message. The
+  block holds the goal, the notes, the items, the jobs that the workspace
+  started, and the next steps of a linked tasks project. A reply stays in the
+  thread and does not go to the phone. The agent sends one message to the
+  normal chat with `send_to_normal_chat`. `workspaces.allowed_callers`
+  defaults to `viewer` and `gateway`. See [workspaces.md](workspaces.md).
+- **Joshua adds the items for you (#148).** A workspace session sends
   `X-Joshua-Workspace` to the gateway. The gateway puts
   `_meta["joshua/workspace"]` on each tool call. After a successful call, it
   adds items from a map of known tools and from each MCP `resource_link` in
   the result. It posts them to `POST /v1/workspaces/by-id/<id>/items`. A file
-  that the person sends in a workspace thread is also an item. Channels
-  `POST /v1/events` takes `workspace`, so an event runs in that thread. With
-  `verbatim`, the event is only recorded there. The assignments container
-  keeps the workspace of a start and reports to that thread.
-- **Normal chat knows the workspaces.** The direct chat of a member lists the
-  active workspaces, at most 10. A message that matches a workspace above
-  `workspaces.hint_sim` (default 0.70) gets the line "May relate to workspace
-  X". The new tools `send_to_workspace`, `tell_workspace`, `list_workspaces`,
-  and `workspace_status` move work between the normal chat and a workspace.
-- **The chat is a screen of the viewer.** `/chat/<person>` shows the normal
-  chat, and `/chat/w/<slug>` shows a workspace. The screen has a rail with the
-  workspaces, a dialog for a new workspace, a header with an edit drawer, and
-  an items panel. A document, a page, or a photo opens in a panel next to the
-  chat. A turn streams as it arrives. A message can carry one photo or one
-  PDF, and the composer shows the upload progress. Events show as short lines
-  that open to the full text. A silent reply (`[IGNORE]`) never shows. Voice
-  is not part of this screen.
-- **The chat works on a phone.** The rail and the panels open as sheets, one
-  at a time, and a tap outside or Escape closes them. The app menu is a left
-  drawer. The composer is one line when empty and grows to five lines. With a
-  mouse or a trackpad, Enter sends and Shift+Enter adds a new line. On a touch
-  screen, Enter adds a new line and the button sends. The composer stays above
-  the on-screen keyboard. On iOS it keeps at least 44px free, and `?kbpad=<n>`
-  sets another value. `?debug=vv` shows the viewport numbers on the screen.
-- **Focus mode on a desktop.** Each side panel collapses, and focus mode
-  collapses all of them. Ctrl+\ or Cmd+\ toggles focus mode. The browser keeps
-  the choice.
-- **Normal chat is one thread.** A turn from the viewer or the terminal runs in
-  the main conversation of the person. That is the most recent direct
-  conversation that is not a workspace, `cli`, or voice thread. Reminders and
-  event replies still go to the phone. With no such conversation, the `cli:`
-  conversation is used. Old `cli:` history stays in the database. A turn on a
-  shared thread names its channel, so guidance for one channel does not apply
-  to another. The `TurnEvent` has a new optional field, `thread`.
-- **A turn survives the client that sent it.** Core runs a streamed turn in a
-  task of its own. Channels and the viewer read the stream in their own tasks.
-  A closed tab, a locked phone, or a dropped signal no longer stops the turn,
-  and the reply goes into the transcript. The stream sends `accepted`,
-  `status`, `delta`, `done`, and `error` events.
-- **Every device sees a turn in progress.** `GET /v1/transcript` gives
-  `pending`, with the state (`queued` or `running`), the turn id, the start
-  time, and the text. The viewer shows "Joshua is working" and reloads the
-  history until the answer arrives. A page that comes back after a sleep finds
-  the turn again. The browser keeps an unsent message and its file, and the
-  next visit offers to send them again.
-- **Files stay with their message.** The transcript row of a message keeps its
-  files in `meta.attachments`. The chat shows a photo as a thumbnail and a PDF
-  as a chip, in a new message and in the history.
-- **A long chat starts a new session at a size limit.** A turn whose input is
-  over `core.context_cap` (default 150000 tokens) ends the SDK session. The
-  next turn starts a new session and gets the last 10 rows of the thread. `0`
-  turns the limit off. A workspace uses `workspaces.context_cap` (default
-  150000).
-- **The viewer is one React app.** The gateway renders no page in Python. It
-  serves the app from `gateway/frontend` and a JSON API under `/api/v1/` for
-  the wiki, the journal, search, usage, links, documents, assignments, the
-  chat, and the workspaces. The report showcase and the saved assignments are
-  React pages. Search has its own page, and the app bar has no search field.
-  `/style.css` and `/ui/<file>` are removed. An image with no build of the app
-  serves the JSON API only.
-- **An HTML document fits the screen.** The frame is as tall as its content,
-  and a wide document scales to the width of the panel. "Actual size" and "Fit
-  width" switch the view, and the browser keeps the choice for each document.
-  A document without scripts has `sandbox allow-same-origin` with no
-  `allow-scripts`, so the page can read its size. A document with
-  `scripts: true` keeps an opaque origin.
-- **The viewer installs as an app.** Add to Home Screen opens the viewer with no
-  browser chrome. The service worker keeps the shell for a slow network. It
-  never handles a request under `/api/v1/`. Each build stamps its id into the
-  service worker, so a deploy replaces the old cache. The app checks for a new
-  build when it opens, on focus, when the network returns, and every 30
-  minutes. A hidden app reloads. A visible app shows "Joshua was updated" with
-  a Reload button. A reinstall is necessary one time, after the upgrade to this
-  version.
-- **Upgrade notes.**
-  - The viewer calls channels at `CHANNELS_URL` with `JOSHUA_TOKEN_VIEWER`. The
-    chart and docker compose set the URL. The channels container must also hold
-    `JOSHUA_TOKEN_VIEWER`. Without both, the chat routes answer 503 and
-    `/readyz` shows `"chat": false`.
-  - The default of `channels.webhooks.allowed_callers` is now `laptop`, `ci`,
-    and `viewer`. An instance that lists the callers in `joshua.yaml` must add
-    `viewer`.
-  - The default of `workspaces.allowed_callers` is `viewer` and `gateway`. An
-    instance that lists the callers must add `gateway`.
-  - The gateway reaches core at `CORE_URL`. The default is the core service of
-    the platform.
-  - The app now serves `/chat`. A deployment that routes `/chat` to the old
-    separate chat app keeps that app until the route is removed.
-  - The person id `w` is reserved.
-  - The schema adds the tables `workspaces` and `workspace_items`. Nothing
-    changes until a workspace exists.
-- **The assignments in the viewer are React pages.** The list at
-  `/assignments` and one assignment at `/assignments/<id>` are the app now.
-  The state pills write the address (`?state=draft`), so a bookmark of a state
-  opens the same rows. An assignment shows its definition as a document: each
-  field of the specification is a property, the goal is blocks, and each part
-  takes a comment on its first line, with the `Source` fold for one exact
-  line. The plan shows its task boxes as a checklist with the steps that are
-  done and the next step. An assignment in progress reads itself again every
-  20 seconds and stops when it finishes. The report shows in blocks for now.
-  The app reads and writes JSON addresses with the sign-in of a page:
-  `GET /api/v1/assignments`, `GET /api/v1/assignments/<id>`,
-  `POST /api/v1/assignments/<id>/comments` and
-  `POST /api/v1/assignments/<id>/comments/<id>/delete`. The saved assignments
-  at `/assignments/saved` are the same pages as before. With
-  `ASSIGNMENTS_URL` or `JOSHUA_TOKEN_VIEWER` unset, both pages say that the
-  assignments manager is not configured and select no state.
-- **The documents in the viewer are React pages.** The list at `/documents`
-  and one document at `/documents/<owner>/<slug>` are the app now. The status
-  tabs and the kind chips write the address (`?status=draft&kind=plan`), so a
-  bookmark of a list opens the same rows. A Markdown document shows in
-  blocks, each block takes a comment on its first line, the `Source` fold
-  takes a comment on one exact line, and the `Versions` fold opens an older
-  version at `?rev=<sha>`, which is read-only. An HTML document still shows in
-  its sandboxed frame. The app reads and writes JSON addresses with the
-  sign-in of a page: `GET /api/v1/documents`,
-  `GET /api/v1/documents/<owner>/<slug>`,
-  `POST /api/v1/documents/<owner>/<slug>/comments`, and
-  `POST /api/v1/documents/<owner>/<slug>/comments/<id>/delete`.
-  `/documents/<owner>/<slug>.json` and `/documents/<owner>/<slug>/artifact`
-  answer as before, because the chat calls both. In a frame, the app draws no
-  sidebar, no app bar and no tabs, so the artifact panel of the chat shows the
-  document alone. A document with the headings of an assignment report shows
-  in blocks for now.
-- **The links in the viewer are a React page.** `/links` is the app now, and
-  the "Links" group of the sidebar shows on every page of the app. A member
-  adds a link, changes it, moves it, and removes it under "Edit links", then
-  saves the whole list with one commit on `wiki/.viewer/links.yaml`. A guest
-  sees the list and no editor. The app reads and writes one JSON address with
-  the sign-in of a page: `GET /api/v1/links` and `POST /api/v1/links`. That
-  address is the one source of the list, so `GET /api/v1/session` no longer
-  carries it.
-- **The usage in the viewer is a React page.** `/usage` is the app now: the
-  two subscription meters, the stacked bar chart of the tokens of each day,
-  and the four tables. The day range writes the address (`?days=90`), so a
-  bookmark of a range opens the same window. With `CORE_URL` or
-  `JOSHUA_TOKEN_VIEWER` unset, or with a core that does not answer, the page
-  says which half is missing and shows the other one. The app reads one JSON
-  address with the sign-in of a page: `GET /api/v1/usage?days=<n>`, which
-  makes both calls to core at the same time and derives every number of a
-  meter.
-- **The search in the viewer is a React page.** The field in the app bar now
-  goes to `/search?q=<query>` inside the app, so no page loads, and a
-  bookmark of a search opens the same hits. The page keeps both halves: the
-  search by meaning through core first, then the search by words over the
-  Markdown you can read, at most 50 hits. With `CORE_URL` or
-  `JOSHUA_TOKEN_VIEWER` unset, or with a core that does not answer, the page
-  shows the words half alone. The app reads one JSON address with the sign-in
-  of a page: `GET /api/v1/search?q=<query>`.
-- **The journal in the viewer is a React page.** The feed of one month at
-  `/journal` and one day at `/journal/<year>/<month>/<day>` are the app now.
-  The feed opens the newest month that holds an entry, newest day first. The
-  month picker and the person filter write the address (`?month=2026-11`,
-  `?person=alex`), so a bookmark of a month, of a person, or of both opens the
-  same thing. A day page links the day before and the day after that hold an
-  entry. A member still edits an entry from the entry, and lands back on the
-  day at that entry. The app reads two JSON addresses with the sign-in of a
-  page: `GET /api/v1/journal?month=&person=` and
-  `GET /api/v1/journal/<year>/<month>/<day>`.
-- **The writes on the wiki are React pages.** The editor of a page, the
-  editor of a journal entry, the new page, and the trash are all the app now.
-  Edit a page, save it, and the page comes back with your change committed;
-  start a page in a folder from "new page in …"; the trash asks first and
-  moves the page under `wiki/.trash/`. The app writes through four JSON
-  addresses with the sign-in of a page: `GET /api/v1/edit?path=`,
-  `GET /api/v1/new?folder=`, `POST /api/v1/save`, and
-  `POST /api/v1/delete`. Each write keeps the checks it had: a member only, a
-  token of the person and the page, an origin of the host, the 256 KB cap, and
-  one commit of the wiki. A guest still reads.
-- **The wiki in the viewer is a React page.** A page, a folder, the front
-  page at `/wiki/`, a file under `/shared/` and one of your own attachments
-  are all the app now. A page shows the crumbs, the frontmatter, the
-  Markdown, and the other pages of its folder, and a member still gets the
-  edit and the trash. The app reads one JSON address,
-  `GET /api/v1/wiki?path=<path>`, which answers a page, a folder, or a file,
-  and `GET /api/v1/files/<root>/<path>` delivers the bytes of a file: an
-  image shows inline, anything else downloads with its name. Every address
-  you have in a bookmark still opens the same thing, and a page you wrote
-  before does not change.
-- **Your own page in the viewer is a React page.** The viewer now ships a
-  JavaScript app beside the pages it renders in Python, and `/me` is the
-  first page of it: your name, your profile, the journal, your recent
-  attachments, and the wiki tree, as before. The navigation reaches every
-  other section, which the server still renders. The app reads JSON
-  addresses under `/api/v1/`: `/api/v1/session`, `/api/v1/me`, and
-  `/api/v1/wiki/tree`, each with the sign-in of a page. The content policy of
-  the viewer now allows a script from the viewer itself (`script-src
-  'self'`); no inline script runs. See
-  [security.md](security.md#the-headers-of-the-viewer).
-- **An HTML artifact shows with its own styles (#123).** The viewer serves
-  the body of an HTML document from an address of its own,
-  `/documents/<owner>/<slug>/artifact`, and the frame of the document page
-  loads it. The address has a content policy of its own: the styles of the
-  document render, an image comes from the viewer, and the document reaches
-  no network, submits no form, and opens no frame. A script runs only with
-  `scripts: true` in the frontmatter. The frame keeps its `sandbox` and never
-  gets `allow-same-origin`, so the document still cannot reach the viewer or
-  your sign-in. The address has the sign-in and the owner rule of the page. A
-  Markdown document does not change. See
-  [documents.md](documents.md#artifacts) and
-  [security.md](security.md#the-headers-of-the-viewer).
-- **A small JSON address for the head of a document.**
-  `GET /documents/<owner>/<slug>.json` in the viewer gives the title, the
-  kind, the status, and the time of the last change of one document, and no
-  part of the body. The chat shows the title of an artifact card from it, and
-  reads it again while the panel is open to see a change that no turn made.
-  It has the same sign-in and the same owner rule as the document page, and
-  the answer is never cached. A document slug now never ends in `.json`. See
-  [documents.md](documents.md#the-documents-section-of-the-viewer).
-- **A page of the viewer can frame a document page.** The content policy of
-  the viewer now has `frame-ancestors 'self'`, and the viewer sends
-  `X-Frame-Options: SAMEORIGIN`. So the chat shows a document in an artifact
-  panel, which is the document page of the viewer itself. Only the same
-  origin can frame the viewer: no other site can. An HTML document still
-  shows in a sandboxed frame with no access to the viewer. See
-  [security.md](security.md#the-headers-of-the-viewer).
-- **A terminal turn can carry a file.** `POST /v1/cli/turns/stream` now also
-  takes `multipart/form-data` with `person`, `text`, and one `file` part for
-  each file. Channels runs the same attachment pipeline every other channel
-  runs: it reads the type from the bytes, stores an image, a PDF, or a text
-  file under `people/<id>/attachments/YYYY/MM/`, and skips any other type. The
-  turn carries the stored paths. A JSON body works as before, so `make chat`
-  does not change. See [channels.md](channels.md#the-terminal).
-- **A Chat entry in the viewer navigation.** The sidebar and the phone tabs
-  have a Chat item. It opens `/chat/<your id>`, the chat on the same host as
-  the viewer. The viewer only links to the chat; it serves no chat page.
-- **A chat client can read a conversation back (#54).** Core has a new route,
+  that the person sends in a workspace thread is also an item.
+- **Events and assignments reach a workspace (#148).** `POST /v1/events` of
+  channels takes `workspace`, so an event runs in that thread. With
+  `verbatim`, channels only records the event there. The assignments
+  container keeps the workspace of a start and reports to that thread.
+- **The normal chat knows the workspaces (#148).** The direct chat of a
+  member lists the active workspaces, at most 10. A message that matches a
+  workspace above `workspaces.hint_sim` (default 0.70) gets the line "May
+  relate to workspace X". The tools `send_to_workspace`, `tell_workspace`,
+  `list_workspaces`, and `workspace_status` move work between the normal
+  chat and a workspace.
+
+### Chat
+
+- **The chat is a screen of the viewer (#148).** `/chat/<person>` shows the
+  normal chat, and `/chat/w/<slug>` shows a workspace. The navigation has a
+  Chat item. The screen has a rail with the workspaces, a dialog for a new
+  workspace, a header with an edit drawer, and an items panel. A document, a
+  page, or a photo opens in a panel next to the chat. A turn streams as it
+  arrives. A message can carry one photo or one PDF, and the composer shows
+  the upload progress. A photo shows as a thumbnail and a PDF as a chip, in
+  a new message and in the history. Events show as short lines that open to
+  the full text. A silent reply (`[IGNORE]`) never shows. Voice is not part
+  of this screen.
+- **The chat works on a phone (#148).** The rail and the panels open as
+  sheets, one at a time. A tap outside or Escape closes them. The app menu
+  is a left drawer. The composer is one line when empty and grows to five
+  lines. With a mouse or a trackpad, Enter sends and Shift+Enter adds a new
+  line. On a touch screen, Enter adds a new line and the button sends. The
+  composer stays above the on-screen keyboard. On iOS it keeps at least
+  44px free, and `?kbpad=<n>` sets another value. `?debug=vv` shows the
+  viewport numbers on the screen.
+- **Focus mode on a desktop (#148).** Each side panel collapses, and focus
+  mode collapses all of them. Ctrl+\ or Cmd+\ toggles focus mode. The
+  browser keeps the choice.
+- **The normal chat is one thread (#148).** A turn from the viewer or the
+  terminal runs in the main conversation of the person. That is the most
+  recent direct conversation that is not a workspace, `cli`, or voice
+  thread. Reminders and event replies still go to the phone. With no such
+  conversation, core uses the `cli:` conversation. Old `cli:` history
+  stays in the database. A turn on a shared thread names its channel, so
+  guidance for one channel does not apply to another. `TurnEvent` has a new
+  optional field, `thread`.
+- **A turn survives the client that sent it (#148).** Core runs a streamed
+  turn in a task of its own. Channels and the viewer read the stream in
+  their own tasks. A closed tab, a locked phone, or a lost signal does not
+  stop the turn, and the reply goes into the transcript. The stream sends
+  `accepted`, `status`, `delta`, `done`, and `error` events.
+- **Every device sees a turn in progress (#148).** `GET /v1/transcript`
+  gives `pending`, with the state (`queued` or `running`), the turn id, the
+  start time, and the text. The viewer shows "Joshua is working" and reloads
+  the history until the answer arrives. A page that wakes after a sleep finds
+  the turn again. The browser keeps an unsent message and its file,
+  and the next visit offers to send them again.
+- **A chat client can read a conversation back (#142).** Core has the route
   `GET /v1/transcript`, for `channels` and `laptop`. It returns the messages
   of one conversation, oldest first, a page at a time. Channels has
   `GET /v1/cli/transcript?person=<id>` for the terminal conversation. Each
-  message carries only safe `meta` keys, such as the turn id and the tools
-  the turn used. An unknown conversation returns no messages.
-- **The worker and Joshua write in Simplified Technical English (#140).**
-  The worker prompt and the documents skill page have the same section, "How
-  you write": one idea in each sentence, the present tense and the active
-  voice, names instead of adjectives, no hedges, and "Not verified:" for what
-  was not checked. The report shape and the plan shape do not change. See
-  [documents.md](documents.md#versions).
-- **A document states what is true now (#136).** The documents skill page,
+  message carries only safe `meta` keys, such as the turn id, the tools of
+  the turn, and its files in `meta.attachments`. An unknown conversation
+  returns no messages.
+- **A terminal turn can carry a file (#142).** `POST /v1/cli/turns/stream`
+  also takes `multipart/form-data`, with `person`, `text`, and one `file`
+  part for each file. Channels runs the same attachment pipeline as every
+  other channel. It reads the type from the bytes and stores an image, a
+  PDF, or a text file under `people/<id>/attachments/YYYY/MM/`. It skips any
+  other type. The turn carries the stored paths. A JSON body works as
+  before, so `make chat` does not change. See
+  [channels.md](channels.md#the-terminal).
+- **A long chat starts a new session at a size limit (#148).** A turn whose
+  input is over `core.context_cap` (default 150000 tokens) ends the SDK
+  session. The next turn starts a new session and gets the last 10 rows of
+  the thread. `0` disables the limit. A workspace uses
+  `workspaces.context_cap` (default 150000).
+
+### Viewer
+
+- **The viewer is one React app (#142, #148).** The gateway renders no page
+  in Python. It serves the app from `gateway/frontend` and a JSON API under
+  `/api/v1/`. Each JSON address needs the sign-in of a page. `/style.css`
+  and `/ui/<file>` are removed. An image with no build of the app serves the
+  JSON API only. The content policy of the viewer
+  allows a script from the viewer itself (`script-src 'self'`). No inline
+  script runs. See [security.md](security.md#the-headers-of-the-viewer).
+- **The viewer installs as an app (#148).** Add to Home Screen opens the
+  viewer with no browser chrome. The service worker keeps the shell for a
+  slow network. It never handles a request under `/api/v1/`. Each build
+  stamps its id into the service worker, so a deploy replaces the old cache.
+  The app checks for a new build when it opens, on focus, when the network
+  returns, and every 30 minutes. A hidden app reloads. A visible app shows
+  "Joshua was updated" with a Reload button.
+- **The wiki (#142).** A page, a folder, the front page at `/wiki/`, a file
+  under `/shared/`, and your own attachments are pages of the app. A page
+  shows the crumbs, the frontmatter, the Markdown, and the other pages of
+  its folder. `GET /api/v1/wiki?path=<path>` answers a page, a folder, or a
+  file. `GET /api/v1/files/<root>/<path>` gives the bytes of a file. An
+  image shows inline, and any other file downloads with its name. Every
+  wiki address in a bookmark opens the same thing as before, and a page you
+  wrote does not change.
+- **The writes on the wiki (#142).** The page editor, the journal entry
+  editor, the new page, and the trash are pages of the app. A save commits
+  your change and shows the page again. "new page in …" starts a page in a
+  folder. The trash asks first and moves the page under `wiki/.trash/`. The
+  app writes through `GET /api/v1/edit?path=`, `GET /api/v1/new?folder=`,
+  `POST /api/v1/save`, and `POST /api/v1/delete`. Each write keeps its
+  checks: a member only, a token of the person and the page, an origin of
+  the host, the 256 KB cap, and one commit of the wiki. A guest reads.
+- **The journal (#142).** `/journal` shows the feed of one month, and
+  `/journal/<year>/<month>/<day>` shows one day. The feed opens the newest
+  month that holds an entry, newest day first. The month picker and the
+  person filter write the address (`?month=2026-11`, `?person=alex`), so a
+  bookmark opens the same feed. A day page links the previous and the next
+  day that hold an entry. A member edits an entry from the entry and
+  returns to the day at that entry. The app reads
+  `GET /api/v1/journal?month=&person=` and
+  `GET /api/v1/journal/<year>/<month>/<day>`.
+- **Search is its own page (#142, #148).** The app bar has no search field.
+  `/search?q=<query>` shows the hits, so a bookmark of a search opens the
+  same hits. The page searches by meaning through core first, then by words
+  over the Markdown you can read, at most 50 hits. With `CORE_URL` or
+  `JOSHUA_TOKEN_VIEWER` unset, or with no answer from core, the page shows
+  the word hits only. The app reads `GET /api/v1/search?q=<query>`.
+- **The usage (#142).** `/usage` shows the two subscription meters, a
+  stacked bar chart of the tokens of each day, and four tables. The day
+  range writes the address (`?days=90`), so a bookmark opens the same
+  window. With `CORE_URL` or `JOSHUA_TOKEN_VIEWER` unset, or with no answer
+  from core, the page says which half is missing and shows the other half.
+  The app reads `GET /api/v1/usage?days=<n>`, which makes both calls to core
+  at the same time and calculates each number of a meter.
+- **The links (#142).** `/links` is a page of the app, and the "Links" group
+  of the sidebar shows on every page. Under "Edit links", a member adds,
+  changes, moves, and removes a link. A save writes the whole list in one
+  commit on `wiki/.viewer/links.yaml`. A guest sees the list and no editor.
+  `GET /api/v1/links` and `POST /api/v1/links` are the one source of the
+  list.
+- **The documents (#142).** `/documents` lists the documents, and
+  `/documents/<owner>/<slug>` shows one. The status tabs and the kind chips
+  write the address (`?status=draft&kind=plan`), so a bookmark opens the
+  same rows. A Markdown document shows in blocks, and each block takes a
+  comment on its first line. The `Source` fold takes a comment on one exact
+  line. The `Versions` fold opens an older version at `?rev=<sha>`, which is
+  read-only. In a frame, the app draws no sidebar, no app bar, and no tabs.
+  So the artifact panel of the chat shows the document only. The app reads
+  and writes `GET /api/v1/documents`, `GET /api/v1/documents/<owner>/<slug>`,
+  `POST /api/v1/documents/<owner>/<slug>/comments`, and
+  `POST /api/v1/documents/<owner>/<slug>/comments/<id>/delete`.
+- **An HTML document shows with its own styles and fits the screen (#123,
+  #148).** The viewer serves the body of an HTML document from
+  `/documents/<owner>/<slug>/artifact`, and the frame of the document page
+  loads it. That address has its own content policy. The styles of the
+  document render, and an image comes from the viewer only. The document
+  reaches no network, submits no form, and opens no frame. A script runs
+  only with `scripts: true` in the frontmatter. A document with scripts has
+  an opaque origin, so it cannot reach the viewer or your sign-in. A
+  document without scripts has `sandbox allow-same-origin` with no
+  `allow-scripts`, so the page can read its size. The frame is as tall as
+  its content, and a wide document scales to the width of the panel.
+  "Actual size" and "Fit width" change the view, and the browser keeps the
+  choice for each document. The address has the sign-in and the owner rule
+  of the page. See [documents.md](documents.md#artifacts) and
+  [security.md](security.md#the-headers-of-the-viewer).
+- **A small JSON address for the head of a document (#142).**
+  `GET /documents/<owner>/<slug>.json` gives the title, the kind, the
+  status, and the time of the last change of one document. It gives no part
+  of the body. The chat shows the title of an artifact card from it. It
+  reads the address again while the panel is open, to see a change that no
+  turn made. It has the sign-in and the owner rule of the document page, and
+  the answer is never cached. A document slug never ends in `.json`. See
+  [documents.md](documents.md#the-documents-section-of-the-viewer).
+- **A page of the viewer can frame a document page (#142).** The content
+  policy of the viewer has `frame-ancestors 'self'`, and the viewer sends
+  `X-Frame-Options: SAMEORIGIN`. So the chat shows the document page of the
+  viewer in an artifact panel. Only the same origin can frame the viewer.
+- **The assignments (#142, #148).** `/assignments` lists the assignments,
+  and `/assignments/<id>` shows one. The saved assignments at
+  `/assignments/saved` and the report showcase are pages of the app too. The
+  state pills write the address (`?state=draft`), so a bookmark opens the
+  same rows. A definition shows as a document. Each field of the
+  specification is a property, and the goal is blocks. Each part takes a
+  comment on its first line, and the `Source` fold takes a comment on one
+  exact line. The plan shows its task boxes as a checklist, with the steps
+  that are done and the next step. An assignment in progress reads itself
+  again every 20 seconds and stops when it finishes. The app reads and
+  writes `GET /api/v1/assignments`, `GET /api/v1/assignments/<id>`,
+  `POST /api/v1/assignments/<id>/comments`, and
+  `POST /api/v1/assignments/<id>/comments/<id>/delete`. With
+  `ASSIGNMENTS_URL` or `JOSHUA_TOKEN_VIEWER` unset, both pages say that the
+  assignments manager is not configured.
+- **A text field shows one focus ring (#149).** The wrapper of a field draws
+  the ring, and the control inside it draws none.
+- **`GET /readyz` of the viewer reports `auth` (#149).** The field holds the
+  sign-in method. The `users` count of `viewer.users` is gone.
+
+### Setup
+
+- **`make up` starts the viewer and the assignments container (#149)** when
+  `joshua.yaml` sets `viewer.enabled: true` or `assignments.enabled: true`.
+  `make down` stops them. You do not name a compose profile.
+- **`make init-env` writes `JOSHUA_VIEWER_SESSION_SECRET` (#149).** So a
+  restart of the viewer keeps everybody signed in.
+- **`make validate` names only the channels that start (#149).** It runs a
+  new one-shot `validate` service with the channel credentials and no
+  network. So a channel with an empty credential does not show as enabled.
+  `make validate-dev` runs the same check on your own build.
+- **`make restart` restarts every container that runs (#149).** It keeps
+  each image, so it works for a release and for your own build.
+
+### Prompts
+
+- **The worker and Joshua write in Simplified Technical English (#141).**
+  The worker prompt and the documents skill page have the same section,
+  "How you write". It asks for one idea in each sentence, the present tense
+  and the active voice, names instead of adjectives, and no hedges. It asks
+  for "Not verified:" before a fact that nobody checked. The report shape
+  and the plan shape do not change. See [documents.md](documents.md#versions).
+- **A document states what is true now (#137).** The documents skill page,
   the assignments skill page, and the worker prompt tell Joshua and a worker
-  to write a plan, a spec, or a definition in the present tense, as fact,
-  with no "decision made" or "previously" section. The versions and the
+  to write a plan, a spec, or a definition in the present tense, as fact.
+  There is no "decision made" or "previously" section. The versions and the
   comment resolutions hold what changed. See
   [documents.md](documents.md#versions).
 
