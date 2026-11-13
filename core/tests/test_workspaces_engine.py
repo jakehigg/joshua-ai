@@ -26,6 +26,7 @@ from joshua_core.engine.manager import ConversationManager, TurnCtx
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.tools import workspace as ws_tools
+from joshua_core.engine.types import HANDOFF_PROMPT
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.store.models import Channel, Conversation, Person, Workspace, WorkspaceItem
@@ -89,6 +90,7 @@ class WsRepo(FakeRepo):
         self.items: list[WorkspaceItem] = list(items or [])
         self.tail: list[dict[str, Any]] = []
         self.cleared: list[str] = []
+        self.handoffs: dict[str, str] = {}
         self.seen: list[str] = []
         self.added: list[dict[str, Any]] = []
         self.notes: list[str] = []
@@ -123,6 +125,12 @@ class WsRepo(FakeRepo):
 
     async def clear_sdk_session(self, conversation_id: str):
         self.cleared.append(conversation_id)
+
+    async def set_handoff(self, conversation_id: str, text: str):
+        self.handoffs[conversation_id] = text
+
+    async def conversation_handoff(self, conversation_id: str):
+        return self.handoffs.get(conversation_id)
 
     async def add_workspace_item(self, workspace_id, kind, ref, title, **kw):
         self.added.append({"workspace_id": workspace_id, "kind": kind, "ref": ref, **kw})
@@ -547,9 +555,62 @@ async def test_the_fresh_session_gets_the_last_rows(tmp_path, monkeypatch):
     assert "The last rows of this thread" not in prompts[0]
     assert manager._pool["c-ws"].carry_recent
     await manager.run_turn(_CLI, _conversation(), "next")
-    assert "The last rows of this thread" in prompts[1]
-    assert "- alex: the garden plan" in prompts[1]
-    assert "- you: ok, noted" in prompts[1]
+    # The old session wrote the handoff before the fresh session started.
+    assert prompts[1] == HANDOFF_PROMPT
+    handoff = repo.handoffs["c-ws"]
+    fresh = prompts[2]
+    assert "The handoff that the last session wrote before it ended:" in fresh
+    assert handoff in fresh
+    assert "The last rows of this thread" in fresh
+    assert "- alex: the garden plan" in fresh
+    assert "- you: ok, noted" in fresh
+    assert ws.HISTORY_HINT in fresh
+    # The handoff is not a row of the thread: two turns, four rows.
+    assert [t["direction"] for t in repo.transcripts] == ["in", "out", "in", "out"]
+
+
+async def test_a_failed_handoff_leaves_the_last_rows(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    prompts: list[str] = []
+
+    class Client(_client_with_context(900_000)):
+        async def query(self, prompt):
+            prompts.append(prompt)
+            if prompt == HANDOFF_PROMPT:
+                raise RuntimeError("the session is gone")
+
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", Client)
+    repo = WsRepo(_ws())
+    repo.tail = [{"direction": "in", "content": "the garden plan", "status": "ok"}]
+    manager = _general_manager(repo, tmp_path)
+    await manager.run_turn(_CLI, _conversation(), "big turn")
+    await manager.run_turn(_CLI, _conversation(), "next")
+    assert repo.handoffs == {}
+    fresh = prompts[-1]
+    assert "The handoff that" not in fresh
+    assert "- alex: the garden plan" in fresh
+    assert ws.HISTORY_HINT in fresh
+
+
+def test_the_fresh_block_holds_the_handoff_rows_and_history_hint() -> None:
+    long_ask = "please " * 200
+    rows = [
+        {"direction": "in", "content": long_ask, "status": "ok"},
+        {"direction": "out", "content": "a" * 1000, "status": "ok"},
+    ]
+    recent = ws.recent_lines(rows, "alex")
+    text = ws.render_block(_ws(), [], recent=recent, handoff="Open questions: which repo?")
+    assert "Open questions: which repo?" in text
+    # The person's words stay whole; Joshua's own rows are cut short.
+    assert " ".join(long_ask.split()) in text
+    assert "a" * 1000 not in text
+    assert text.rstrip().endswith(ws.HISTORY_HINT)
+
+
+def test_a_block_with_no_fresh_rows_has_no_history_hint() -> None:
+    assert ws.HISTORY_HINT not in ws.render_block(_ws(), [])
 
 
 # --- RAG ---------------------------------------------------------------------------------

@@ -17,6 +17,37 @@ OnDelta = Callable[[str], Awaitable[None]]
 # name a host, so it never reaches a person.
 FAILED_REPLY = "Sorry, something went wrong on my end. Please try again."
 
+# The ``error`` label of a turn that used all of its ``max_turns``. The SDK
+# session still holds the tool work of that turn.
+MAX_TURNS_ERROR = "error_max_turns"
+
+# The message that the manager sends to a session that passed the context cap,
+# before the session ends. The reply is the handoff for the fresh session.
+HANDOFF_PROMPT = (
+    "[system] This session passed its context limit and ends now. The next "
+    "session sees only what you write here, the last rows of the thread, and "
+    "(in a workspace) the workspace block. Do not call a tool. Write a handoff "
+    "for that session, under 500 words, with these headings:\n"
+    "Open questions: each question you asked the person that has no answer "
+    'yet, in the words you used, so a short answer such as "yes" or "the '
+    'second one" makes sense.\n'
+    "Waiting on the person: what the person must do, and why.\n"
+    "Waiting on you: what you must do next.\n"
+    "Decisions: each decision made, with its reason.\n"
+    "Running work: each developer task, assignment, or scheduled check, its "
+    "id, and what to do when it ends.\n"
+    "Last request: what the person last asked for, in their words.\n"
+    "Write only the handoff. Leave out a heading that has nothing."
+)
+
+# The message that the manager sends after a turn reaches ``max_turns``, so the
+# person gets a reply from the work the turn did, not the failure reply.
+WRAP_UP_PROMPT = (
+    "[system] This turn used all of its tool calls. Do not call a tool now. "
+    "Reply to the person from what you already have: say what you found, what "
+    "is still open, and what you would do next. Then ask whether to continue."
+)
+
 
 @dataclass(frozen=True)
 class Attachment:

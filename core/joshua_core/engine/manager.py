@@ -39,7 +39,15 @@ from joshua_core.engine.describe import (
 )
 from joshua_core.engine.mcp import allowed_gateway_servers, gateway_servers
 from joshua_core.engine.tools import ToolDeps
-from joshua_core.engine.types import FAILED_REPLY, Attachment, OnDelta, TurnResult
+from joshua_core.engine.types import (
+    FAILED_REPLY,
+    HANDOFF_PROMPT,
+    MAX_TURNS_ERROR,
+    WRAP_UP_PROMPT,
+    Attachment,
+    OnDelta,
+    TurnResult,
+)
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.engine.usage import Usage
 from joshua_core.memory import prompt as memory_prompt
@@ -133,6 +141,9 @@ class _Managed:
     # next turn gets a new session. ``replaced_at`` limits it to one per
     # ``core.mcp_replace_seconds``.
     replace_pending: bool = False
+    # The task that writes the handoff after the context cap. The next turn
+    # waits for it before the session is rebuilt.
+    handoff_task: asyncio.Task[None] | None = None
     replaced_at: float | None = None
     # Why the session is marked for replacement, for the log line.
     replace_reason: str = "mcp server failed"
@@ -533,7 +544,7 @@ class ConversationManager:
             mcp_servers=mcp,
             model=resolved.model,
             env=resolved.env,
-            max_turns=getattr(profile, "max_turns", 0) or self._settings.core.max_turns,
+            max_turns=self._max_turns(profile, channel),
             resume=resume,
             tool_search=resolved.tool_search,
         )
@@ -585,6 +596,11 @@ class ConversationManager:
         return self._settings.groups_by_chat(channel.channel_type, _chat_id(channel.id))
 
     async def _get_or_create(self, channel: Channel, conversation: Conversation) -> _Managed:
+        # A handoff in progress holds the old session. Wait for it outside the
+        # pool lock, so other conversations do not wait too.
+        pending = self._pool.get(conversation.id)
+        if pending is not None and pending.handoff_task is not None:
+            await asyncio.shield(pending.handoff_task)
         async with self._pool_lock:
             mc = self._pool.get(conversation.id)
             if mc is not None:
@@ -1065,6 +1081,9 @@ class ConversationManager:
                 )
                 raise
 
+            if result.is_error and result.error == MAX_TURNS_ERROR:
+                result = await self._wrap_up(mc, result, _timed_delta)
+
             mc.had_success = True
             if not result.is_error:
                 mc.has_history = True
@@ -1220,23 +1239,82 @@ class ConversationManager:
                 "cap": cap,
             }
         )
+        mc.handoff_task = asyncio.create_task(
+            self._write_handoff(mc), name=f"handoff-{mc.conversation.id}"
+        )
+
+    async def _write_handoff(self, mc: _Managed) -> None:
+        """Ask the old session for a handoff, and keep it for the fresh one.
+
+        It runs after the turn that passed the cap, under the lock of the
+        conversation, so the person gets that reply first. The reply streams
+        nowhere and is not a row of the thread. Its usage is recorded. A
+        failure leaves the fresh session with the last rows only.
+        """
+        conversation_id = mc.conversation.id
+        try:
+            async with mc.lock:
+
+                async def quiet(_chunk: str) -> None:
+                    return None
+
+                result = await self._run_session(mc, HANDOFF_PROMPT, quiet)
+                text = (result.text or "").strip()
+                resolved = mc.inference or inference_plan.resolve(self._settings, "chat")
+                if isinstance(result.usage, dict):
+                    await record_usage(
+                        self._repo,
+                        "chat",
+                        [Usage.from_sdk(result.usage)],
+                        model=resolved.model,
+                        endpoint=resolved.endpoint,
+                        person_id=mc.conversation.person_id,
+                        conversation_id=conversation_id,
+                        ref=f"handoff:{conversation_id}",
+                    )
+                if result.is_error or not text:
+                    logger.warning(
+                        {
+                            "message": "handoff failed",
+                            "conversation_id": conversation_id,
+                            "error": result.error or "empty reply",
+                        }
+                    )
+                    return
+                await self._repo.set_handoff(conversation_id, text)
+                logger.info(
+                    {
+                        "message": "handoff written",
+                        "conversation_id": conversation_id,
+                        "chars": len(text),
+                    }
+                )
+        except Exception as e:  # noqa: BLE001 — a handoff never fails a turn
+            logger.warning(
+                {
+                    "message": "handoff failed",
+                    "conversation_id": conversation_id,
+                    "error": type(e).__name__,
+                }
+            )
+        finally:
+            mc.handoff_task = None
 
     async def _carried_rows_note(self, mc: _Managed, ctx: TurnCtx) -> str | None:
-        """For the first turn after the context cap: the last rows of the
-        thread, because the new session has no history. A workspace block
-        carries its own rows, so a workspace never takes this note."""
+        """For the first turn after the context cap: the handoff of the last
+        session and the last rows of the thread, because the new session has
+        no history. A workspace block carries its own, so a workspace never
+        takes this note."""
         if not mc.carry_recent:
             return None
         mc.carry_recent = False
         rows = await self._repo.transcript_tail(
             ctx.conversation.id, workspace_engine.BLOCK_RECENT_ROWS
         )
-        lines = workspace_engine.recent_lines(rows, ctx.person_id)
-        if not lines:
-            return None
-        return "\n".join(
-            ["The last rows of this thread, because the session starts fresh:", *lines]
-        )
+        recent = workspace_engine.recent_lines(rows, ctx.person_id)
+        handoff = await self._repo.conversation_handoff(ctx.conversation.id)
+        lines = workspace_engine.fresh_lines(handoff, recent)
+        return "\n".join(lines) if lines else None
 
     async def _run_with_resume_retry(
         self,
@@ -1266,6 +1344,54 @@ class ConversationManager:
             if mc.deps is not None:
                 mc.deps.channel = channel
             return await self._run_session(mc, prompt, on_delta)
+
+    def _max_turns(self, profile: Any, channel: Channel) -> int:
+        """The ``max_turns`` of a session: the profile's, else ``core.max_turns``.
+        A workspace session gets at least ``workspaces.max_turns``."""
+        turns = getattr(profile, "max_turns", 0) or self._settings.core.max_turns
+        if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+            turns = max(turns, self._settings.workspaces.max_turns)
+        return turns
+
+    async def _wrap_up(self, mc: _Managed, first: TurnResult, on_delta: OnDelta) -> TurnResult:
+        """Get a reply for a turn that used all of its ``max_turns``.
+
+        The SDK session keeps the tool work of that turn. One more message,
+        ``WRAP_UP_PROMPT``, asks for a reply from that work with no tool call.
+        The result holds the tool calls and the usage of both calls. When the
+        second call fails too, the first result stands, and the person gets
+        the failure reply.
+        """
+        logger.info(
+            {
+                "message": "turn reached max_turns; asking for a reply",
+                "conversation_id": mc.conversation.id,
+                "call_count": len(first.tool_calls),
+            }
+        )
+        try:
+            wrap = await self._run_session(mc, WRAP_UP_PROMPT, on_delta)
+        except Exception as e:  # noqa: BLE001 — the first result stands
+            logger.warning({"message": "wrap-up failed", "error": type(e).__name__})
+            return first
+        if wrap.is_error or not wrap.text.strip():
+            logger.warning({"message": "wrap-up failed", "error": wrap.error or "empty reply"})
+            return first
+        calls = [*first.tool_calls, *wrap.tool_calls]
+        seen: set[str] = set()
+        return replace(
+            wrap,
+            usage=_sum_usage(first.usage, wrap.usage),
+            cost_usd=(
+                None
+                if first.cost_usd is None and wrap.cost_usd is None
+                else (first.cost_usd or 0.0) + (wrap.cost_usd or 0.0)
+            ),
+            tool_calls=calls,
+            tools_used=[
+                n for n in [*first.tools_used, *wrap.tools_used] if not (n in seen or seen.add(n))
+            ],
+        )
 
     async def _run_session(self, mc: _Managed, prompt: str, on_delta: OnDelta) -> TurnResult:
         """Run one turn on ``mc.session`` inside ``inference.timeout_seconds``.
@@ -1449,3 +1575,20 @@ class ConversationManager:
         if self._teardowns:
             await asyncio.gather(*self._teardowns, return_exceptions=True)
         logger.info({"message": "manager shut down"})
+
+
+def _sum_usage(a: Any, b: Any) -> Any:
+    """Add two SDK usage records: numbers add, lists join, dicts add by key."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if isinstance(a, dict) and isinstance(b, dict):
+        return {k: _sum_usage(a.get(k), b.get(k)) for k in {**a, **b}}
+    if isinstance(a, list) and isinstance(b, list):
+        return [*a, *b]
+    if isinstance(a, bool) or isinstance(b, bool):
+        return b
+    if isinstance(a, int | float) and isinstance(b, int | float):
+        return a + b
+    return b

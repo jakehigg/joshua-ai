@@ -102,9 +102,20 @@ because the block holds them already. It keeps everything else.
 ## The context cap
 
 When the input of a workspace turn is over `workspaces.context_cap` (default
-150000 tokens), core forgets the SDK session after the turn. The next turn
-starts new, from the block and the last 10 rows. The input is the size of the
-last model call of the turn.
+150000 tokens), core forgets the SDK session after the turn. The input is the
+size of the last model call of the turn.
+
+Before the old session ends, core asks it for a handoff, after the reply has
+reached the person. The handoff names the open questions in the words Joshua
+used, what waits on the person, what waits on Joshua, the decisions with
+their reasons, the running work, and the last request. Core keeps it on the
+conversation. The handoff is not a row of the thread.
+
+The next turn waits for the handoff, then starts new, from the block, the
+handoff, and the last 10 rows. A row of the person is shown whole up to 2000
+characters, and a row of Joshua is cut at 300. A line tells the session to use
+`search_history` or `read_history` for the exact words of an earlier message.
+When the handoff fails, the session starts from the block and the rows.
 
 Every other conversation has the same cap in `core.context_cap`. See
 [config.md](config.md#context-cap). A workspace keeps its own setting, so each can
@@ -376,6 +387,7 @@ session.
 | `workspaces.allowed_callers` | `viewer`, `gateway` | Fleet identities that may call `/v1/workspaces`. |
 | `workspaces.models` | empty | The models a workspace may pick. Empty accepts any text. |
 | `workspaces.context_cap` | `150000` | Input tokens over which a workspace turn ends its session. |
+| `workspaces.max_turns` | `50` | The least number of agent turns that a workspace turn gets. |
 | `workspaces.tool_search_max_servers` | `3` | Servers up to which a workspace runs with tool search off. |
 | `workspaces.viewer_url` | none | The public address of the viewer, for the link in `send_to_normal_chat`. |
 | `workspaces.hint_sim` | `0.70` | The similarity over which normal chat gets the line "May relate to workspace X". |

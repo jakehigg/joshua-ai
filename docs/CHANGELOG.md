@@ -6,6 +6,26 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Chat
+
+- A turn that uses all of its agent turns now gets a reply. Before, the
+  person got "Sorry, something went wrong on my end" and lost the work of
+  the turn. Now core asks the same session for a reply with no tool call:
+  what it found, what is still open, and what it would do next.
+- A workspace turn gets at least 50 agent turns, set by the new
+  `workspaces.max_turns`. Other conversations keep `core.max_turns`.
+- Before the context cap ends a session, the session writes a handoff: the
+  open questions, what waits on the person and on Joshua, the decisions, the
+  running work, and the last request. The fresh session starts from it, so a
+  short answer to an open question still makes sense. The schema adds the
+  column `conversations.handoff`.
+- After a reset, the rows of the person are shown whole up to 2000
+  characters, and the session is told to use `search_history` and
+  `read_history` for the exact words of an earlier message.
+- The workspace prompt asks for direct replies. Joshua writes for a person
+  who did not watch the work, explains a name the person may not know, says
+  whose each step is, and checks with a tool before it asks the person.
+
 ## 0.3.0 - 2026-11-13
 
 Joshua now has workspaces: a chat thread for one large piece of work, with
