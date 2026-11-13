@@ -173,6 +173,40 @@ export interface PlanData {
   progress: PlanProgress;
 }
 
+/**
+ * One item of a section of a report: a highlight, a decision, or a
+ * follow-up. `line` is its line in the section, and `first_line` and
+ * `last_line` are the lines of the whole text it holds, so the card is a
+ * unit of the comment gutter.
+ */
+export interface ReportItem {
+  number: number;
+  text: string;
+  lead: string;
+  body: string;
+  line: number;
+  first_line: number;
+  last_line: number;
+  question: string;
+  context: string;
+  /** The text a person copies for Joshua, on a decision of a document. */
+  copy: string;
+}
+
+/** One line of the Outputs section, as a card. */
+export interface ReportOutput {
+  kind: string;
+  /** The name of the icon of the kind: `page`, `issue`, …, `other`. */
+  icon: string;
+  ref: string;
+  title: string;
+  note: string;
+  url: string | null;
+  line: number;
+  first_line: number;
+  last_line: number;
+}
+
 /** One section of a report, by its normalized title. */
 export interface ReportSection {
   key: string;
@@ -181,19 +215,53 @@ export interface ReportSection {
   line: number;
   start: number;
   end: number;
+  empty: boolean;
+  items: ReportItem[];
+  outputs: ReportOutput[];
+  rest: string;
+  blocks: DocBlock[];
 }
 
-/** The report, when the assignment wrote one. */
-export interface ReportData {
+/** The text of a report before its first heading, after the lede. */
+export interface ReportPreamble {
+  markdown: string;
+  line: number;
+  blocks: DocBlock[];
+}
+
+/**
+ * A text of the report shape, as the showcase reads it
+ * (`viewer_api.assignments.report_json`). With `structured` false the text
+ * has none of the headings, and the page shows its blocks.
+ */
+export interface ShowcaseData {
+  structured: boolean;
+  title: string;
+  lede: string;
+  generated: boolean;
+  first_section: number;
+  preamble: ReportPreamble | null;
+  sections: Record<string, ReportSection>;
+  extra: ReportSection[];
+  turns: number | null;
+}
+
+/** The report, when the assignment wrote one, with the text itself. */
+export interface ReportData extends ShowcaseData {
   markdown: string;
   lines: string[];
   blocks: DocBlock[];
   updated: string;
-  title: string;
-  lede: string;
-  structured: boolean;
-  sections: Record<string, ReportSection>;
 }
+
+/** The headings of the report shape, as `viewer_report` normalizes them. */
+export const HIGHLIGHTS = "highlights";
+export const ASKED = "what was asked";
+export const DONE = "what was done";
+export const OUTPUTS = "outputs";
+export const DECISIONS = "decisions for you";
+export const FOLLOW_UPS = "follow-ups";
+export const COST = "cost";
 
 /** The comments of the assignment, by the text each one is on. */
 export interface CommentSet {
@@ -223,3 +291,55 @@ export const TARGETS: readonly (keyof CommentSet)[] = ["definition", "plan", "re
 
 /** No comment on any text, which a page with no assignment holds. */
 export const NO_COMMENTS: CommentSet = { definition: [], plan: [], report: [] };
+
+/** The last run of a saved assignment, when it ran once. */
+export interface LastRun {
+  id: number;
+  url: string;
+  status: string;
+  status_label: string;
+  when: string;
+}
+
+/** One row of `GET /api/v1/assignments/saved`. */
+export interface SavedRow {
+  id: number;
+  url: string;
+  name: string;
+  title: string;
+  schedule: string;
+  last_run: LastRun | null;
+  run_count: number;
+  open_comments: number;
+}
+
+/** The answer of `GET /api/v1/assignments/saved`. */
+export interface SavedList {
+  configured: boolean;
+  available: boolean;
+  items: SavedRow[];
+  empty: string;
+  timezone: string;
+  now: string;
+}
+
+/** One run of a saved assignment, with its number of that saved one. */
+export interface SavedRun extends AssignmentRow {
+  number: number;
+}
+
+/** The answer of `GET /api/v1/assignments/saved/<id>`. */
+export interface SavedData {
+  configured: boolean;
+  available: boolean;
+  not_found: boolean;
+  item: (SavedRow & { updated: string }) | null;
+  definition: DefinitionData | null;
+  runs: SavedRun[];
+  comments: DocComment[];
+  /** What takes a comment: the definition, and nothing else. */
+  targets: string[];
+  csrf: string | null;
+  timezone: string;
+  now: string;
+}

@@ -196,6 +196,46 @@ CREATE TABLE IF NOT EXISTS limits_snapshot (
     saved_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     body      JSONB NOT NULL
 );
+
+-- Workspaces: a place in Chat for one large piece of work. The thread of a
+-- workspace is the conversation of the channel `workspace:<id>`. Nothing reads
+-- these tables until a row exists.
+CREATE TABLE IF NOT EXISTS workspaces (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug        TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    owner       TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    goal        TEXT NOT NULL DEFAULT '',
+    notes       TEXT NOT NULL DEFAULT '',
+    servers     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    model       TEXT,
+    notify      TEXT NOT NULL DEFAULT 'none'
+                CHECK (notify IN ('none', 'questions', 'questions+finishes')),
+    status      TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'paused', 'archived')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (owner, slug)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_items (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL
+                 CHECK (kind IN ('document', 'artifact', 'plan', 'wiki', 'tasks_project',
+                                 'task', 'assignment', 'developer_task', 'pr', 'link',
+                                 'file')),
+    ref          TEXT NOT NULL,
+    title        TEXT NOT NULL DEFAULT '',
+    url          TEXT,
+    added_by     TEXT NOT NULL DEFAULT 'agent',
+    added_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    pinned       BOOLEAN NOT NULL DEFAULT FALSE,
+    seen         BOOLEAN NOT NULL DEFAULT TRUE
+);
+-- Adding an item again updates the row.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workspace_items_ref
+    ON workspace_items (workspace_id, kind, ref);
 """
 
 

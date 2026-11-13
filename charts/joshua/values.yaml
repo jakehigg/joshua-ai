@@ -109,6 +109,8 @@ secrets:
       JOSHUA_TOKEN_GATEWAY: {}
       JOSHUA_TOKEN_LAPTOP: {}
       JOSHUA_TOKEN_CI: {}
+      # The viewer, whose chat calls the /v1/cli/ routes. Channels verifies it.
+      JOSHUA_TOKEN_VIEWER: {}
       # The assignments container, when channels.webhooks.allowed_callers names it.
       JOSHUA_TOKEN_ASSIGNMENTS: {}
   # The database password. It is separate, so an instance can hold the database

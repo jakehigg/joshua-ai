@@ -55,7 +55,7 @@ Every route has an allowlist of fleet identities. The list is in
   no exception.
 - `gateway` admits only the identities in `gateway.person_header_callers` on
   its MCP routes (default `core` and `assignments`), and trusts the
-  `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, and
+  `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, `X-Joshua-Workspace`, and
   `X-Joshua-Conversation` headers only from them. The list must hold `core`.
   Every other caller gets `403` on an MCP route, and a test proves it for
   `viewer`. The assignments container acts for the person who started an
@@ -243,31 +243,47 @@ comes from the person in the viewer, and Joshua only resolves one.
 
 ### The headers of the viewer
 
-Every response of the viewer carries the same headers, and only the artifact
-address of an HTML document has a policy of its own:
+Every response of the viewer carries the same headers. The only exception is
+the artifact address of an HTML document, which still sets a policy of its
+own, stricter on the network:
 
 - `Content-Security-Policy: default-src 'none'; img-src 'self'; style-src
-  'self'; script-src 'self' '<hash of the copy script>'; connect-src 'self';
-  frame-src 'self'; frame-ancestors 'self'`. The page loads its stylesheets,
-  its images, its scripts and its data from the viewer itself. The viewer
-  serves a JavaScript bundle of its own, so `script-src` holds `'self'`, and
-  the hash of the copy script of a report beside it. No inline script runs:
-  `'self'` allows a file of this origin, never a `<script>` with a body and
-  never an event attribute. Where the bundle renders Markdown, the
-  sanitizer runs before the highlighter and raw HTML is not rendered, so
-  text from the wiki or from a document cannot become an element.
+  'self'; script-src 'self'; connect-src 'self'; manifest-src 'self';
+  worker-src 'self'; frame-src 'self'; frame-ancestors 'self'`. The app loads
+  its stylesheet, its images, its script and its data from the viewer itself.
+  `manifest-src 'self'` and `worker-src 'self'` are the installed app: the
+  manifest at `/manifest.webmanifest` and the service worker at `/sw.js` are
+  files of the build, of this origin, and no other origin can give the viewer
+  either of them. `script-src` is `'self'`
+  because the one script is the app's own bundle, which the gateway image
+  carries. No inline script runs, and no hash is allowed: `'self'` admits a
+  file of this origin, never a `<script>` with a body and never an event
+  attribute. Where the app renders Markdown, the sanitizer (`rehype-sanitize`)
+  runs before the highlighter (`rehype-highlight`) and there is no
+  `rehype-raw`, so raw HTML is never rendered and text from the wiki, a
+  document or a chat turn cannot become an element.
 - `X-Frame-Options: SAMEORIGIN`, for a browser that reads no
   `frame-ancestors`.
 - `X-Content-Type-Options: nosniff`.
+
+The service worker caches the shell of the app and its hashed assets, so an
+installed app opens on a slow network. It never takes a request under
+`/api/v1/`: the chat stream, the workspace routes and every other JSON answer
+go to the network, and no answer that names a person is ever written to the
+cache of the browser. It writes nothing else either: only a GET of this
+origin that answered 200, so a 401 of the sign-in is never kept.
 
 `frame-ancestors 'self'` lets one page of the viewer frame another: the chat
 shows a document page in its artifact panel, so there is no second renderer
 and no second comment surface. The value is always `'self'`, never `*` and
 never a host, so no page off the origin can frame the viewer.
 
-An HTML document is different. The page shows it in a `sandbox` frame with
-no `allow-same-origin`, so the document has an opaque origin and cannot
-reach the viewer, its sign-in, or a form of the viewer. The frame loads
+An HTML document is different. The page shows it in a `sandbox` frame. A
+document with `scripts: true` has an opaque origin (no `allow-same-origin`), so
+it cannot reach the viewer, its sign-in, or a form of the viewer. A document
+with no scripts has `allow-same-origin` and no `allow-scripts`: nothing in it
+can run, so the same origin only lets the page read the height and the width of
+the frame, to fit the frame to its content. The frame loads
 `/documents/<owner>/<slug>/artifact`, which serves the body of the document
 with its own policy:
 
@@ -282,10 +298,10 @@ with its own policy:
   form and opens no frame of its own.
 - `script-src 'unsafe-inline'` only when the frontmatter of the document says
   `scripts: true`. Without it, no script runs.
-- `sandbox`, and `sandbox allow-scripts` with `scripts: true`. The directive
-  repeats the sandbox of the frame on the response, so the document has an
-  opaque origin also when a browser opens the address alone. It never has
-  `allow-same-origin`.
+- `sandbox allow-same-origin` with no scripts, and `sandbox allow-scripts` with
+  `scripts: true`. The directive repeats the sandbox of the frame on the
+  response, so the document is sandboxed also when a browser opens the address
+  alone. A document that can run scripts never has `allow-same-origin`.
 
 The address has the sign-in, the owner rule, and the guest rule of the
 document page. The chat frames the document page itself, with no `sandbox` on

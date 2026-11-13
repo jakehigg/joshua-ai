@@ -235,6 +235,31 @@
       "default": "",
       "title": "Text",
       "type": "string"
+    },
+    "thread": {
+      "anyOf": [
+        {
+          "const": "main",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Thread"
+    },
+    "workspace": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workspace"
     }
   },
   "required": [

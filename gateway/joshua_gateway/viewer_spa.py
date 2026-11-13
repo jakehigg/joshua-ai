@@ -8,10 +8,10 @@ rest reaches the app.
 An address of the app is a path of its router, not a file, so an unknown path
 gets ``index.html`` and the router reads the address. Three kinds of path
 keep their 404 instead, because the app never claims them: a path whose last
-segment holds a dot names a file, so a missing asset never arrives as HTML; a
-path under ``api/`` is the JSON space of the viewer, which covers
-``api/v1/…``; and ``chat`` is the separate chat app, which the cluster routes
-on its own path and docker compose does not serve at all.
+segment holds a dot names a file, so a missing asset never arrives as HTML; and
+a path under ``api/`` is the JSON space of the viewer, which covers
+``api/v1/…``. The chat is a screen of the app, at ``/chat`` and
+``/chat/<person>``, so it falls back like any other page.
 
 The content sections of the viewer and the editor (``CONTENT``) are the
 exception to the dot: a wiki page ends in ``.md``, an attachment keeps the
@@ -22,12 +22,15 @@ answers itself (``<slug>.json`` and ``<slug>/artifact``) come before this
 mount, so they win.
 
 A built asset carries a content hash in its name, so it is immutable;
-``index.html`` is never cached, because a new build writes a new one.
+``index.html`` is never cached, because a new build writes a new one. The
+service worker of the installed app, ``sw.js``, is never cached either: the
+browser reads it again to find a new version, and a stale copy would keep an
+old shell alive.
 
 The mount is behind the sign-in of a page: a request with no credentials and
 no ``viewer.anonymous`` gets the same 401 as a page. With no build in the
-image, ``mount`` returns None and the viewer serves its server-rendered pages
-only, so a bare checkout and the test suite still work.
+image, ``mount`` returns None and the viewer serves its JSON API only, so a
+bare checkout and the test suite still work.
 """
 
 from __future__ import annotations
@@ -45,15 +48,24 @@ from starlette.types import Receive, Scope, Send
 STATIC_DIR = "static"
 INDEX = "index.html"
 
+# The service worker of the installed app, at the root so its scope is ``/``.
+WORKER = "sw.js"
+
+# The files a browser must read again on every visit, and the two spellings
+# of the root, which answers with the entry file.
+FRESH = frozenset({INDEX, WORKER})
+ROOT = frozenset({"", "."})
+
 # The first segment of a path the app never claims.
-NO_FALLBACK = frozenset({"api", "chat"})
+NO_FALLBACK = frozenset({"api"})
 
 # The first segment of a path the app always claims, dot or no dot: the
 # content of the viewer, which the app reads from the JSON routes, and the
 # editor of one page of it.
 CONTENT = frozenset({"wiki", "shared", "attachments", "edit", "documents"})
 
-# The cache headers: a hashed asset forever, the entry file never.
+# The cache headers: a hashed asset forever, the entry file and the worker
+# never.
 _IMMUTABLE = "public, max-age=31536000, immutable"
 _NO_CACHE = "no-cache"
 
@@ -86,7 +98,13 @@ class SpaStaticFiles(StaticFiles):
             response = await super().get_response(INDEX, scope)
             response.headers["Cache-Control"] = _NO_CACHE
             return response
-        if path.strip("/") == INDEX:
+        # The root answers with the entry file, and it is the address the
+        # installed app starts at, so it must never come from a stale cache.
+        # Starlette normalises the root to ``.``.
+        name = path.strip("/")
+        if name in ROOT:
+            name = INDEX
+        if name in FRESH:
             response.headers["Cache-Control"] = _NO_CACHE
         elif path.startswith("assets/"):
             response.headers["Cache-Control"] = _IMMUTABLE

@@ -1,18 +1,12 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 
 import { getJson, type Person } from "../api/client";
-import Icon from "./Icon";
-import LinksNav from "./LinksNav";
-import SearchField from "./SearchField";
-import { LINKS_PATH, LINKS_SECTION, ME_ICON, SECTIONS, section as sectionOf } from "./sections";
+import { usePanels } from "./panels";
+import AppNav, { ME_SECTION, NavContext, type SessionSection } from "./AppNav";
+import { LINKS_SECTION, SECTIONS } from "./sections";
 
-/** One section of the navigation, as `GET /api/v1/session` sends it. */
-export interface SessionSection {
-  key: string;
-  label: string;
-  path: string;
-}
+export { ME_SECTION, type SessionSection };
 
 /** The answer of `GET /api/v1/session`. */
 export interface Session {
@@ -22,9 +16,6 @@ export interface Session {
   chat_url: string;
   timezone: string;
 }
-
-/** The key of the item of "Your page". */
-export const ME_SECTION = "me";
 
 const LABELS: Record<string, string> = Object.fromEntries(
   SECTIONS.map((item) => [item.key, item.label]),
@@ -38,50 +29,6 @@ function title(section: string): string {
     return "Links";
   }
   return LABELS[section] ?? "Home";
-}
-
-function current(key: string, section: string): "page" | undefined {
-  return key === section ? "page" : undefined;
-}
-
-/**
- * One item of the navigation. A section this app renders is a router link; a
- * section the server still renders is a plain link, so the browser loads the
- * page.
- */
-function NavItem({
-  path,
-  migrated,
-  className,
-  mark,
-  children,
-}: {
-  path: string;
-  migrated: boolean;
-  className: string;
-  mark: "page" | undefined;
-  children: ReactNode;
-}) {
-  if (migrated) {
-    return (
-      <Link className={className} to={path} aria-current={mark}>
-        {children}
-      </Link>
-    );
-  }
-  return (
-    <a className={className} href={path} aria-current={mark}>
-      {children}
-    </a>
-  );
-}
-
-function isMigrated(key: string): boolean {
-  return sectionOf(key)?.migrated ?? false;
-}
-
-function iconOf(key: string): string {
-  return sectionOf(key)?.icon ?? "";
 }
 
 /**
@@ -103,27 +50,74 @@ export function embedded(view: Window = window): boolean {
   }
 }
 
+/** The class of the content column: the usage page is wide, the chat fills. */
+function contentClass(section: string): string {
+  if (section === "usage") {
+    return "j-content wide";
+  }
+  return section === "chat" ? "j-content fill" : "j-content";
+}
+
 /**
- * The shell of every page: the sidebar on a wide screen, the app bar and the
- * tabs on a phone. `section` marks the current item. The search field is in
- * the app bar, so it shows on every screen; it goes to `/search`, a page of
- * this app. `query` is what the field holds, which the search page passes.
+ * The shell of every page: the sidebar on a wide screen; on a phone one
+ * compact app bar (hamburger, logo, page title) and the same navigation as a
+ * drawer on the left. The hamburger opens the drawer over a dimmed backdrop.
+ * A tap on the backdrop, the x, Escape and any navigation close it; while it
+ * is open the page behind does not scroll, focus goes into it, and comes back
+ * to the hamburger when it closes. `section` marks the current item.
  *
- * In a frame there is no navigation at all: no sidebar, no app bar and no
- * tabs, so the page of the frame is the content and the person navigates in
- * the app that holds the frame.
+ * On a desktop the sidebar can be collapsed with « and opened again with »
+ * in the app bar (panels.ts keeps the choice per browser, for every page).
+ * There is no search field in the app bar: the Search link of the navigation
+ * opens the search page, which holds the field.
+ *
+ * The chat has its own compact top bar on a phone (the chat header, with the
+ * hamburger of its rail, which holds the workspaces and these same links), so
+ * the app bar is not drawn on the chat page at any width, and on a phone
+ * there is one toggle.
+ *
+ * In a frame there is no navigation at all: no sidebar and no app bar, so the
+ * page of the frame is the content and the person navigates in the app that
+ * holds the frame.
  */
 export default function Shell({
   section = "",
-  query = "",
   children,
 }: {
   section?: string;
-  query?: string;
   children: ReactNode;
 }) {
   const [session, setSession] = useState<Session | null>(null);
   const frame = embedded();
+  const [open, setOpen] = useState(false);
+  const panels = usePanels();
+  const navCollapsed = panels.collapsed.nav;
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  const { pathname } = useLocation();
+
+  // A route change closes the drawer.
+  useEffect(() => setOpen(false), [pathname]);
+  useEffect(() => {
+    if (open) {
+      closeRef.current?.focus();
+      wasOpen.current = true;
+    } else if (wasOpen.current) {
+      wasOpen.current = false;
+      toggleRef.current?.focus();
+    }
+    if (!open) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.documentElement.classList.add("j-lock");
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.documentElement.classList.remove("j-lock");
+    };
+  }, [open]);
 
   useEffect(() => {
     if (frame) {
@@ -156,63 +150,83 @@ export default function Shell({
   }
 
   const sections = session?.sections ?? [];
+  // The chat fills the screen: its own column scrolls, and the page does not.
+  const fill = section === "chat";
   return (
-    <div className="j-shell has-sidebar">
-      <aside className="j-sidebar">
-        <a className="j-brand" href="/">
-          <img className="j-logo" src="/logo-64.png" alt="" />
-          Joshua
-        </a>
-        <nav className="v-sections" aria-label="Sections">
-          {sections.map((item) => (
-            <NavItem
-              key={item.key}
-              path={item.path}
-              migrated={isMigrated(item.key)}
-              className="j-nav-item"
-              mark={current(item.key, section)}
+    <NavContext.Provider value={{ sections, section }}>
+      <div
+        className={`j-shell has-sidebar${fill ? " fill" : ""}${navCollapsed ? " nav-collapsed" : ""}`}
+      >
+        <aside
+          className={open ? "j-sidebar open" : "j-sidebar"}
+          id="app-nav"
+          aria-label="Navigation"
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest("a")) setOpen(false);
+          }}
+        >
+          <div className="j-sidebar-head">
+            <a className="j-brand" href="/">
+              <img className="j-logo" src="/logo-64.png" alt="" />
+              Joshua
+            </a>
+            <button
+              type="button"
+              ref={closeRef}
+              className="j-nav-close"
+              aria-label="Close the navigation"
+              onClick={() => setOpen(false)}
             >
-              <Icon paths={iconOf(item.key)} />
-              {item.label}
-            </NavItem>
-          ))}
-        </nav>
-        <LinksNav section={section} />
-        <nav className="v-sections v-you" aria-label="You">
-          <Link className="j-nav-item" to="/me" aria-current={current(ME_SECTION, section)}>
-            <Icon paths={ME_ICON} />
-            Your page
-          </Link>
-        </nav>
-      </aside>
-      <div className="j-main">
-        <header className="j-appbar">
-          <img className="j-logo" src="/logo-64.png" alt="" />
-          <a className="j-appbar-title" href="/">
-            <small>Joshua</small>
-            <strong>{title(section)}</strong>
-          </a>
-          <span className="j-spacer"></span>
-          <SearchField query={query} />
-        </header>
-        <nav className="j-tabs mobile-only" aria-label="Sections">
-          {sections.map((item) => (
-            <NavItem
-              key={item.key}
-              path={item.path}
-              migrated={isMigrated(item.key)}
-              className="j-tab"
-              mark={current(item.key, section)}
+              ✕
+            </button>
+            <button
+              type="button"
+              className="j-nav-collapse"
+              aria-label="Hide the navigation"
+              aria-expanded={!navCollapsed}
+              aria-controls="app-nav"
+              onClick={() => panels.set("nav", true)}
             >
-              {item.label}
-            </NavItem>
-          ))}
-          <Link className="j-tab" to={LINKS_PATH} aria-current={current(LINKS_SECTION, section)}>
-            Links
-          </Link>
-        </nav>
-        <main className={section === "usage" ? "j-content wide" : "j-content"}>{children}</main>
+              «
+            </button>
+          </div>
+          <AppNav sections={sections} section={section} />
+        </aside>
+        {open && <div className="j-scrim" data-testid="nav-backdrop" onClick={() => setOpen(false)} />}
+        <div className="j-main">
+          <header className="j-appbar">
+            {!fill && (
+              <button
+                type="button"
+                ref={toggleRef}
+                className="j-nav-toggle"
+                aria-label="Show the navigation"
+                aria-expanded={open}
+                aria-controls="app-nav"
+                onClick={() => setOpen((o) => !o)}
+              >
+                ☰
+              </button>
+            )}
+            <button
+              type="button"
+              className="j-nav-expand"
+              aria-label="Open the navigation column"
+              aria-expanded={!navCollapsed}
+              aria-controls="app-nav"
+              onClick={() => panels.set("nav", false)}
+            >
+              »
+            </button>
+            <img className="j-logo" src="/logo-64.png" alt="" />
+            <a className="j-appbar-title" href="/">
+              <small>Joshua</small>
+              <strong>{title(section)}</strong>
+            </a>
+          </header>
+          <main className={contentClass(section)}>{children}</main>
+        </div>
       </div>
-    </div>
+    </NavContext.Provider>
   );
 }

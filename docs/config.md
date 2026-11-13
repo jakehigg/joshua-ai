@@ -631,6 +631,9 @@ refuses it. Everyone in the chat uses the server through the same credential.
 person comes from the `X-Joshua-Person` header, which the gateway trusts only from
 the identities in [`gateway.person_header_callers`](#gateway).
 
+`description` is one line (200 characters at most) that says what the server is
+for. The new workspace dialog of the viewer shows it beside the name.
+
 `tools` filters the tool list. `allow` and `deny` are `fnmatch` globs matched
 against the tool name. `deny` beats `allow`. An absent `tools` block means every
 tool. A user server without a filter exposes every tool, so set `allow`.
@@ -1142,12 +1145,14 @@ has no effect. The loader accepts it and validates its shape.
 
 ## viewer
 
-`viewer` runs a web viewer for the wiki and a person's own files. A person
-opens a browser, signs in with a password, and reads the wiki, their own
-profile, the journal, their own attachments, and the shared profile. A member
-also writes: they edit any wiki page, make a new one, correct a journal entry,
-and delete a page, which moves it to `wiki/.trash/`. A guest reads and nothing
-more. The agent never reaches the viewer. The viewer calls core for two
+`viewer` runs the web interface of Joshua: one React single-page app in the
+gateway image, served at the root of the host, with a JSON API under
+`/api/v1/` behind the same sign-in. A person opens a browser, signs in with a
+password, and reads the wiki, their own profile, the journal, their own
+attachments, the shared profile, their documents and their assignments, and
+chats with Joshua. A member also writes: they edit any wiki page, make a new
+one, correct a journal entry, and delete a page, which moves it to
+`wiki/.trash/`. A guest reads and nothing more. The agent never reaches the viewer. The viewer calls core for two
 things, with the `viewer` fleet token: its search page asks core to search by
 meaning, and its usage page reads the tokens of each day (see [usage](#usage)).
 The usage page also reads the subscription limits from core's open
@@ -1224,13 +1229,48 @@ these lists. The usage page always shows the `assignment` group, with zero
 counts when it has no row. See [contracts.md](contracts.md#the-usage-route)
 and [the usage write route](contracts.md#the-usage-write-route).
 
+## Context cap
+
+A long conversation makes every model call read its whole history. The cap ends the SDK session after a turn whose input went over the limit.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `core.context_cap` | `150000` | Input tokens over which a turn in a conversation that is not a workspace ends its SDK session. The next turn starts a new session and gets the last 10 rows of the thread. `0` turns the cap off. A workspace uses `workspaces.context_cap`. |
+
+## workspaces
+
+`workspaces` controls core's `/v1/workspaces` routes and the sessions of
+workspace threads. See [workspaces.md](workspaces.md). Nothing changes until a
+person makes a workspace.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `allowed_callers` | `viewer`, `gateway` | The fleet identities that may call `/v1/workspaces`. The viewer acts for a person; the gateway records the items of a tool call at `POST /v1/workspaces/by-id/<id>/items`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the routes off, and every caller gets 403. |
+| `models` | empty | The models that a workspace may pick. An empty list accepts any name. |
+| `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. The next turn starts from the workspace block and the last 10 rows of the thread. At least 1000. |
+| `tool_search_max_servers` | `3` | A workspace that picks this many servers or fewer runs with tool search off. More servers turn it on. |
+| `viewer_url` | none | The public address of the viewer. `send_to_normal_chat` adds the link `<viewer_url>/chat/w/<slug>`. Without it, the message has the path only. |
+| `hint_sim` | `0.70` | The similarity over which normal chat gets the line "May relate to workspace X", from the `workspaces` record of the index. Between 0 and 1. |
+| `tasks_url` | none | The address of the tasks addon (`http` or `https`). With it, the block of a workspace with a `tasks_project` item lists up to 3 next steps from `GET <tasks_url>/api/next-steps`, with a 2 second timeout. Without it, the section is off. |
+
+```yaml
+workspaces:
+  allowed_callers:
+    - viewer
+  context_cap: 150000
+  tool_search_max_servers: 3
+  viewer_url: https://joshua.example.org
+  hint_sim: 0.70
+  tasks_url: http://tasks:8000
+```
+
 ## gateway
 
 `gateway` holds the settings of the gateway itself.
 
 | Knob | Default | Effect |
 |---|---|---|
-| `person_header_callers` | `core`, `assignments` | The fleet identities that may call the MCP routes and say which person, role, group, and conversation a call is for, with the `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, and `X-Joshua-Conversation` headers. Every other identity gets 403 on an MCP route. The list must hold `core`, or the load fails. |
+| `person_header_callers` | `core`, `assignments` | The fleet identities that may call the MCP routes and say which person, role, group, and conversation a call is for, with the `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, `X-Joshua-Workspace`, and `X-Joshua-Conversation` headers. Every other identity gets 403 on an MCP route. The list must hold `core`, or the load fails. |
 
 ```yaml
 gateway:

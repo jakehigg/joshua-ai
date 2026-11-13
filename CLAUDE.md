@@ -74,6 +74,7 @@ shared/                  package joshua_shared: config, layout, contracts, fleet
 channels/                package joshua_channels
 core/                    package joshua_core
 gateway/                 package joshua_gateway
+gateway/frontend/        the React app of the viewer; the node stage of gateway/Dockerfile builds it
 assignments/             package joshua_assignments: the optional fourth container
 docs/                    the product documentation; core ships it into the wiki
 scripts/                 backup, restore, chat, check_test_policy, ci-local
@@ -98,7 +99,7 @@ that is not on the route's allowlist gets 403. There is no other bearer path.
 Identities: `channels`, `core`, `gateway`, plus `laptop` and `ci` for
 operators, and `viewer` and `mcp`, which call core's search by meaning. The
 `viewer` also reads core's usage by day, and the assignments of a person from
-the assignments container. `assignments` is the assignments
+the assignments container, and calls channels for its chat: `POST /api/v1/chat/<person>/turns` (streams one turn as server-sent events) and `GET /api/v1/chat/<person>/history`. The chat screen is a section of the React viewer (`gateway/frontend/src/chat/`, routes `/chat`, `/chat/:person` and `/chat/w/:slug`; the id `w` is reserved). The viewer also proxies core's `/v1/workspaces` as nine `/api/v1/workspaces` routes. `assignments` is the assignments
 container: core's model forwarder and usage write, the gateway MCP routes for
 a person, and channels events.
 `make init-env` mints the tokens into `.env`. Each of the three containers gets
@@ -124,6 +125,33 @@ Route allowlists, by default:
 - core `POST /v1/usage`: `usage.writers` (default `assignments`). An empty
   list turns it off. It accepts rows of kind `assignment` only (400
   otherwise), and stores each `ref` as `<writer>:<ref>`.
+- core `GET /v1/usage?group=conversation&person=<id>`: the same callers as `GET /v1/usage`; it needs `person` and lists only that person's conversations.
+  It returns the totals of each conversation, with the workspace slug and title.
+- core `/v1/workspaces`: `workspaces.allowed_callers` (default `viewer`, `gateway`). An
+  empty list turns it off. The caller names the person with `person`, and every
+  route is scoped to that person: another person's workspace is 404. A turn
+  on `workspace:<id or slug>` runs only for the owner, and core never creates a
+  `workspace:` channel from a turn. A workspace reply is transcript-only:
+  `workspace_delivery_target` drops it. `docs/workspaces.md` has the design.
+  `GET /v1/workspaces/options` gives the servers and models a person may pick.
+  Normal chat gets the list of active workspaces and a hint line from the
+  `workspaces` KB source (`engine/workspace_awareness.py`, `workspaces.hint_sim`),
+  and the `send_to_workspace`, `tell_workspace`, `list_workspaces` and
+  `workspace_status` tools. A row from normal chat is a `inject` transcript row
+  with `meta.source` `normal_chat` and `meta.seen`; the block shows it once.
+  `workspaces.tasks_url` (no default) turns on "Next steps" in the block.
+  `POST /v1/workspaces/by-id/{id}/items` takes no person: the gateway records
+  the items of a tool call from a workspace there (`added_by` `tool:<server>`).
+  A workspace session sends `X-Joshua-Workspace`; the gateway stamps
+  `_meta["joshua/workspace"]` on each tool call and keeps the per-tool item map
+  in `gateway/joshua_gateway/workspace_items.py`. A `workspace` on channels
+  `POST /v1/events` (UUID, with `text`, no `destination`) runs in that
+  workspace thread, or with `verbatim` is only recorded there; core answers
+  404 `unknown_workspace`. Item urls are `http(s)` or a path that starts
+  with `/` (`joshua_shared.item_url`).
+  A viewer or terminal turn with `thread: "main"` runs in the person's main
+  conversation (`Repo.main_conversation`, never `cli`), pull-only: it never
+  sets `last_channel_id`.
 - core `ANY /v1/model/{path}`: `inference.forwarder.allowed_callers` (default
   `assignments`). The model forwarder: core puts the credential of the
   inference job `assignment` on a Claude API call, so the model credential
@@ -132,7 +160,7 @@ Route allowlists, by default:
   otherwise). `api/hello` (GET, HEAD) is open. An empty list is 404.
 - channels `POST /v1/deliver`, `GET /v1/channels/resolve`: `core`.
 - channels `POST /v1/events`, `POST /v1/cli/*`, `GET /v1/cli/*`:
-  `channels.webhooks.allowed_callers` (default `laptop`, `ci`).
+  `channels.webhooks.allowed_callers` (default `laptop`, `ci`, `viewer`).
 - channels `POST /v1/voice/chat/completions`, `GET /v1/models`:
   `channels.voice.allowed_callers` (default `voice`). Both answer 404 with no
   `channels.voice` section.
@@ -141,7 +169,7 @@ Route allowlists, by default:
   200 fast, because BlueBubbles never retries.
 - gateway MCP routes: `gateway.person_header_callers` (default `core`,
   `assignments`; it must hold `core`). `X-Joshua-Person`, `X-Joshua-Role`,
-  `X-Joshua-Group`, and `X-Joshua-Conversation` are trusted only from them.
+  `X-Joshua-Group`, `X-Joshua-Workspace`, and `X-Joshua-Conversation` are trusted only from them.
 - gateway `POST /v1/snapshots/{name}`: `core` only. The body is empty: the
   gateway reads the tool and the arguments from `memory.snapshots`, so the
   config is the allowlist.
@@ -322,6 +350,28 @@ drives the internet agent. Do not use it for the internet agent.
 - Security-relevant behavior gets a test that proves the negative: a denied
   path, a 403, a missing tool. If a doc says "cannot", a test tries.
 
+## Frontend rules
+
+The viewer is one React single-page app in `gateway/frontend/`. There is no
+server-rendered page: `joshua_gateway/viewer.py` holds the probes, the JSON
+API (`viewer_api.routes()`), the two document routes the chat calls, and the
+mount of the build.
+
+- React 18 and `react-router-dom` 6. TypeScript in strict mode. No UI
+  framework and no component library.
+- The router has no `basename`: the app is served at the root of the host.
+- `src/shell/sections.ts` is the one source of the navigation.
+  `src/shell/AppNav.tsx` draws it (a drawer on a phone), and
+  `src/shell/panels.ts` keeps the folds of the desktop.
+- The design system is the `.j-*` classes of
+  `gateway/joshua_gateway/ui/joshua-ui.css`, with `gateway/frontend/src/viewer.css`
+  on top. `joshua-ui.css` is the master copy of the shared Joshua look: change
+  it there, never in a copy, and bump the version in its header.
+- Markdown runs `rehype-sanitize` and then `rehype-highlight`, in that order,
+  and never `rehype-raw`. Raw HTML is not rendered.
+- The checks are `npm run typecheck`, `npm test` and `npm run build`, in
+  `gateway/frontend/`.
+
 ## Documentation rules
 
 - **Simplified Technical English.** Docs, READMEs, docstrings, comments, PR
@@ -362,6 +412,15 @@ make lint
 make test
 make test-dates
 uv run python scripts/check_test_policy.py
+```
+
+The React app of the viewer has its own checks. Run them in
+`gateway/frontend/` when you change it:
+
+```
+npm run typecheck
+npm test
+npm run build
 ```
 
 `make smoke` boots Postgres in compose and runs the integration suite against

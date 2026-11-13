@@ -34,6 +34,20 @@ DRY_RUN_ENV = "DELIVER_DRY_RUN"
 IGNORE_MARKER = "[IGNORE]"
 
 VOICE_CHANNEL_TYPE = "voice"
+WORKSPACE_CHANNEL_TYPE = "workspace"
+
+
+def workspace_delivery_target(*, channel_type: str, target: str) -> str | None:
+    """Where a reply to ``target`` goes, once a workspace is handled.
+
+    A workspace thread is transcript-only: the viewer reads the reply from the
+    transcript, and channels has no ``workspace:`` channel to post to. A
+    reply on a workspace channel returns None, so nothing is delivered. The
+    agent sends a message to the person's normal chat with the
+    ``send_to_normal_chat`` tool. Any other channel type returns ``target``
+    unchanged.
+    """
+    return None if channel_type == WORKSPACE_CHANNEL_TYPE else target
 
 
 def voice_delivery_target(

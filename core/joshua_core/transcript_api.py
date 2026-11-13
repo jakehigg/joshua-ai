@@ -2,7 +2,8 @@
 
 A chat client calls this route to show the messages of a conversation. The
 callers are ``channels`` and ``laptop``. The query names the channel and, for a
-conversation with one person, the person. The route never creates a
+conversation with one person, the person. A workspace thread is the channel
+``workspace:<id or slug>`` with its owner as the person. The route never creates a
 conversation: an unknown one answers ``200`` with no messages.
 
 Each message carries only the ``meta`` keys in ``SAFE_META_KEYS``:
@@ -12,9 +13,20 @@ Each message carries only the ``meta`` keys in ``SAFE_META_KEYS``:
 - ``call_count``: how many tool calls the turn made.
 - ``duration_ms``: how long the turn took.
 - ``first_output_ms``: the time to the first streamed text.
+- ``attachments``: the files of a person's message, each with ``path`` (where
+  the file is filed, relative to the data volume), ``mime``, ``name`` (the name
+  the sender gave it), and ``size`` in bytes.
 
 Every other key is dropped, for example the token usage, the cost, a speaker's
 handle, and the paths that the turn wrote. The route never logs a message.
+
+The answer also has ``pending``: ``null`` when no turn of the conversation is
+in flight, or ``{turn_id, state, since, text}``. ``state`` is ``queued`` while
+the turn waits for another turn of the conversation, and ``running`` after
+that. ``text`` is the message of the person, and it is empty for a turn that is
+not from a person. A client that sees ``pending`` knows that a reply is coming,
+whatever device sent the message. The turns in flight live in memory, so a
+restart of core clears them.
 """
 
 from __future__ import annotations
@@ -32,7 +44,14 @@ TRANSCRIPT_PATH = "/v1/transcript"
 DEFAULT_LIMIT = 50
 
 # The meta keys a chat client may see. A key that is not here is dropped.
-SAFE_META_KEYS = ("turn_id", "tools", "call_count", "duration_ms", "first_output_ms")
+SAFE_META_KEYS = (
+    "turn_id",
+    "tools",
+    "call_count",
+    "duration_ms",
+    "first_output_ms",
+    "attachments",
+)
 
 
 def safe_meta(meta: Any) -> dict[str, Any]:
@@ -74,6 +93,7 @@ def build_transcript_router() -> APIRouter:
         person: str | None = None,
         limit: int = Query(DEFAULT_LIMIT, ge=1, le=TRANSCRIPT_PAGE_MAX),
         before: int | None = Query(None, ge=1),
+        thread: str | None = None,
         _identity: str = Depends(require_identity(["channels", "laptop"])),
     ):
         channel_id = (channel or "").strip()
@@ -82,16 +102,39 @@ def build_transcript_router() -> APIRouter:
         person_id = (person or "").strip() or None
 
         repo = request.app.state.ctx.repo
-        conversation = await repo.find_conversation(channel_id, person_id)
+        if channel_id.startswith("workspace:"):
+            # The name after the colon is the id or the slug of a workspace of
+            # the person. Another person's workspace is as good as none.
+            workspace = (
+                await repo.find_workspace(person_id, channel_id.split(":", 1)[1])
+                if person_id
+                else None
+            )
+            if workspace is None:
+                return JSONResponse(
+                    {"conversation_id": None, "messages": [], "next_before": None, "pending": None}
+                )
+            channel_id = workspace.channel_id
+        conversation = None
+        if thread == "main" and channel_id.startswith("cli:") and person_id:
+            # The terminal and the viewer read the person's main thread.
+            conversation = await repo.main_conversation(person_id)
         if conversation is None:
-            return JSONResponse({"conversation_id": None, "messages": [], "next_before": None})
+            conversation = await repo.find_conversation(channel_id, person_id)
+        if conversation is None:
+            return JSONResponse(
+                {"conversation_id": None, "messages": [], "next_before": None, "pending": None}
+            )
 
         rows, next_before = await repo.transcript_page(conversation.id, limit, before)
+        manager = getattr(request.app.state.ctx, "manager", None)
+        pending = manager.pending_for(str(conversation.id)) if manager is not None else None
         return JSONResponse(
             {
                 "conversation_id": str(conversation.id),
                 "messages": [message(r) for r in rows],
                 "next_before": next_before,
+                "pending": pending,
             }
         )
 

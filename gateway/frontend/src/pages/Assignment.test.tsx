@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Assignment from "./Assignment";
 import { NOT_CONFIGURED } from "./Assignments";
-import type { AssignmentData } from "../assignments/data";
+import type { AssignmentData, ReportData } from "../assignments/data";
+import { SEND } from "../showcase/DecisionCard";
 import type { Session } from "../shell/Shell";
 
 const SESSION: Session = {
@@ -160,6 +161,144 @@ const DRAFT: AssignmentData = {
   refresh_seconds: null,
 };
 
+/** The report of the run, with the headings of the report shape. */
+const REPORT: ReportData = {
+  structured: true,
+  title: "Clean up the docs",
+  lede: "The docs read well now.",
+  generated: false,
+  first_section: 5,
+  preamble: null,
+  turns: 14,
+  extra: [],
+  sections: {
+    highlights: {
+      key: "highlights",
+      title: "Highlights",
+      body: "- **The links work.** Every page is reachable.",
+      line: 5,
+      start: 7,
+      end: 8,
+      empty: false,
+      items: [
+        {
+          number: 1,
+          text: "**The links work.** Every page is reachable.",
+          lead: "The links work.",
+          body: "Every page is reachable.",
+          line: 0,
+          first_line: 7,
+          last_line: 8,
+          question: "The links work.",
+          context: "Every page is reachable.",
+          copy: "",
+        },
+      ],
+      outputs: [],
+      rest: "",
+      blocks: [
+        {
+          id: "R7",
+          kind: "li",
+          depth: 0,
+          markdown: "- **The links work.** Every page is reachable.",
+          first_line: 7,
+          last_line: 7,
+        },
+      ],
+    },
+    "decisions for you": {
+      key: "decisions for you",
+      title: "Decisions for you",
+      body: "1. **Drop the old page?** Nobody reads it.",
+      line: 9,
+      start: 11,
+      end: 12,
+      empty: false,
+      items: [
+        {
+          number: 1,
+          text: "**Drop the old page?** Nobody reads it.",
+          lead: "Drop the old page?",
+          body: "Nobody reads it.",
+          line: 0,
+          first_line: 11,
+          last_line: 12,
+          question: "Drop the old page?",
+          context: "Nobody reads it.",
+          copy: "Assignment 7, decision 1: Drop the old page?",
+        },
+      ],
+      outputs: [],
+      rest: "",
+      blocks: [
+        {
+          id: "R11",
+          kind: "li",
+          depth: 0,
+          markdown: "1. **Drop the old page?** Nobody reads it.",
+          first_line: 11,
+          last_line: 11,
+        },
+      ],
+    },
+    cost: {
+      key: "cost",
+      title: "Cost",
+      body: "12,000 tokens over 14 turns.",
+      line: 13,
+      start: 15,
+      end: 16,
+      empty: false,
+      items: [],
+      outputs: [],
+      rest: "12,000 tokens over 14 turns.",
+      blocks: [
+        {
+          id: "R15",
+          kind: "p",
+          depth: 0,
+          markdown: "12,000 tokens over 14 turns.",
+          first_line: 15,
+          last_line: 15,
+        },
+      ],
+    },
+  },
+  markdown: "",
+  lines: [
+    "# Clean up the docs",
+    "",
+    "The docs read well now.",
+    "",
+    "## Highlights",
+    "",
+    "- **The links work.** Every page is reachable.",
+    "",
+    "## Decisions for you",
+    "",
+    "1. **Drop the old page?** Nobody reads it.",
+    "",
+    "## Cost",
+    "",
+    "12,000 tokens over 14 turns.",
+    "",
+  ],
+  blocks: [],
+  updated: "2m ago",
+};
+
+const DONE: AssignmentData = {
+  ...DATA,
+  item: {
+    ...(DATA.item as NonNullable<AssignmentData["item"]>),
+    state: "completed",
+    status: "done",
+    status_label: "done",
+  },
+  report: REPORT,
+};
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -219,7 +358,7 @@ describe("the head of an assignment", () => {
       "14",
       "sonnet",
     ]);
-    expect(document.title).toEqual("Clean up the docs");
+    await waitFor(() => expect(document.title).toEqual("Clean up the docs"));
   });
 
   it("names the assignments in the crumbs", async () => {
@@ -281,6 +420,59 @@ describe("the body of an assignment", () => {
     expect(await screen.findByText("It is done.")).toBeDefined();
     expect(document.querySelector("#report .j-meta")?.textContent).toEqual("updated 2m ago");
     expect(screen.getByTitle("Comment on the paragraph at line 1")).toBeDefined();
+  });
+
+  it("shows a report with the headings of the shape as the showcase", async () => {
+    stubOne(json(DONE));
+
+    page();
+
+    expect(await screen.findByText("The links work.")).toBeDefined();
+    const report = document.querySelector("#report") as HTMLElement;
+    expect(report.querySelector(".a-cards.a-hls .a-hl")?.id).toEqual("R7");
+    const decision = report.querySelector("ol.a-decisions > li") as HTMLElement;
+    expect(decision.id).toEqual("R11");
+    expect(decision.querySelector(".a-n")?.textContent).toEqual("1");
+    expect(decision.querySelector(".a-q")?.textContent).toEqual("Drop the old page?");
+    expect(report.textContent).toContain("12,000 tokens over 14 turns.");
+    // The showcase replaces the plain blocks of the text.
+    expect(report.querySelector(".a-blocks.d-body")).toBeNull();
+  });
+
+  it("answers a decision with a comment on the first line of it", async () => {
+    const sent: { path: string; body: unknown }[] = [];
+    vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        sent.push({ path, body: JSON.parse(String(init.body)) });
+        return Promise.resolve(json({ ok: true }));
+      }
+      if (path.startsWith("/api/v1/assignments/")) {
+        return Promise.resolve(json(DONE));
+      }
+      return Promise.resolve(json(SESSION));
+    });
+
+    page();
+
+    await screen.findByText("Drop the old page?");
+    fireEvent.change(screen.getByLabelText("Your answer to decision 1"), {
+      target: { value: "Yes, drop it." },
+    });
+    fireEvent.click(screen.getByText(SEND));
+
+    await waitFor(() => {
+      expect(sent.length).toEqual(1);
+    });
+    expect(sent[0]).toEqual({
+      path: "/api/v1/assignments/7/comments",
+      body: {
+        target: "report",
+        csrf: "a-token",
+        line_no: 11,
+        line_text: "1. **Drop the old page?** Nobody reads it.",
+        body: "Yes, drop it.",
+      },
+    });
   });
 
   it("shows a draft with its definition open, and nothing of a run", async () => {

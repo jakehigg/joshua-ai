@@ -24,7 +24,7 @@ function input(): HTMLInputElement {
 }
 
 describe("the search field of the app bar", () => {
-  it("keeps the markup of the app bar the server renders", () => {
+  it("keeps the markup of the search form", () => {
     field();
 
     const form = document.querySelector("form.v-search");

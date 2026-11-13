@@ -1,56 +1,47 @@
-"""Web viewer for the wiki, the journal, and a person's own attachments.
+"""The viewer: one React app in the gateway image, and the JSON API it reads.
 
-A person opens a browser, signs in with HTTP basic, and reads the one wiki
-(which carries Joshua's own journal and its profile of each person), their own
-attachments, and the shared attachments. ``/journal`` shows the journal as a
-feed, newest day first, because the wiki tree is the wrong shape for reading
-what happened. The agent never calls the viewer. The viewer calls core for two
-things, when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set: the search asks
-core to search by meaning (``viewer_search``), and the usage page shows the
-tokens of each group by day (``viewer_usage``) under the subscription limits
-(``viewer_limits``). The limits need ``CORE_URL`` only, because core's
-``GET /v1/limits`` has no bearer. ``/assignments`` shows the assignments of
-the person who signed in, read from the assignments manager when
-``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER`` are set
-(``viewer_assignments``); ``/assignments/saved`` and
-``/assignments/saved/<id>`` are the last pages of that section the server
-still renders. ``/documents`` shows the documents of the member
-who signed in and the shared ones, read from ``/data/documents``
-(``viewer_api.documents``); a guest has no such section. The two routes of a
-document that the chat calls stay here: ``<slug>.json`` for the head of an
-artifact card, and ``<slug>/artifact`` for the frame of an HTML document,
-which gets its own content policy (``viewer_documents.artifact_policy``). The navigation also holds
-a Chat item at ``/chat/<person id>`` for the person who signed in. The chat is
-another app on the same host, so the viewer only links to it. The viewer reads
-the data volume through the same resolver as the files MCP
-(``files_mcp.paths``), so the two never drift on who reads what.
+A person opens a browser, signs in with HTTP basic, and gets the React app
+(``gateway/frontend``), which the node stage of ``gateway/Dockerfile`` builds
+and ``viewer_spa`` mounts at ``/``, behind the same sign-in as every other
+route. Every screen is an address of its router: the one wiki (which carries
+Joshua's own journal and its profile of each person) at ``/`` and
+``/wiki/…``, a person's own attachments at ``/attachments/…`` and the shared
+ones at ``/shared/…``, their own page at ``/me``, the journal as a feed at
+``/journal`` and a day at ``/journal/<year>/<month>/<day>``, the search at
+``/search``, the usage at ``/usage``, the links at ``/links``, the documents
+at ``/documents`` and ``/documents/<owner>/<slug>``, the assignments at
+``/assignments``, ``/assignments/<id>``, ``/assignments/saved`` and
+``/assignments/saved/<id>``, the editor at ``/edit/…`` and ``/new``, and the
+chat at ``/chat/<person id>`` with a workspace at ``/chat/w/<slug>``. The
+agent never calls the viewer.
 
-The wiki, the shared attachments, a person's own attachments, the journal, the
-search, the usage, the links, the documents and the editor are the React app:
-``/``, ``/wiki/…``, ``/shared/…``, ``/attachments/…``, ``/journal``,
-``/journal/<year>/<month>/<day>``, ``/search``, ``/usage``, ``/links``,
-``/documents``, ``/documents/<owner>/<slug>``, ``/assignments``,
-``/assignments/<id>``, ``/edit/…`` and ``/new`` are
-addresses of its router (``viewer_spa``), and it
-reads ``GET /api/v1/wiki`` for a page, a folder or a file,
-``GET /api/v1/files/<root>/<path>`` for the bytes,
-``GET /api/v1/journal`` for a month of the feed,
-``GET /api/v1/journal/<year>/<month>/<day>`` for a day,
-``GET /api/v1/search`` for both halves of the search,
-``GET /api/v1/usage`` for the limits and the tokens by day,
-``GET /api/v1/links`` for the links of the sidebar and of the page,
-``POST /api/v1/links`` for the list a member saves,
-``GET /api/v1/documents`` for the list of the documents,
-``GET /api/v1/documents/<owner>/<slug>`` for one document, its blocks and its
-comments, ``POST /api/v1/documents/<owner>/<slug>/comments`` and
-``POST /api/v1/documents/<owner>/<slug>/comments/<id>/delete`` for a comment,
-``GET /api/v1/assignments`` for the list of the assignments of one state,
-``GET /api/v1/assignments/<id>`` for one assignment, its definition, its
-plan and its comments,
-``POST /api/v1/assignments/<id>/comments`` and
-``POST /api/v1/assignments/<id>/comments/<id>/delete`` for a comment on it,
-and ``GET /api/v1/edit``, ``GET /api/v1/new``, ``POST /api/v1/save`` and
-``POST /api/v1/delete`` for a write (``viewer_api``).
+The app reads and writes one JSON API under ``/api/v1/``, and
+``viewer_api.routes`` is the one list of its routes: the session, ``/me``,
+the wiki, the file bytes, the journal, the search, the usage, the links, the
+documents with their comments, the assignments and the saved ones with
+theirs, the edit, the new page, the save and the delete, the chat
+(``chat/<person>/turns``, which streams one turn, and
+``chat/<person>/history``), and the nine workspace routes. The chat and the
+workspaces are routes of the viewer, not another app: the chat reaches the
+channels container through ``viewer_channels`` and ``viewer_multipart``, and
+the workspaces proxy core's ``/v1/workspaces`` through
+``viewer_api.workspaces`` and ``workspace_items``. The viewer also calls core
+for the search by meaning (``viewer_search``) and the tokens of each group by
+day (``viewer_usage``), both when ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER``
+are set, and for the subscription limits (``viewer_limits``), which need
+``CORE_URL`` only, because core's ``GET /v1/limits`` has no bearer.
+``/assignments`` shows the assignments of the person who signed in, read from
+the assignments manager when ``ASSIGNMENTS_URL`` and ``JOSHUA_TOKEN_VIEWER``
+are set (``viewer_assignments``). ``/documents`` shows the documents of the
+member who signed in and the shared ones, read from ``/data/documents``
+(``viewer_api.documents``); a guest has no such section.
+
+Two routes of a document are the only ones outside ``/api/v1/``, because the
+chat calls both: ``<slug>.json`` for the head of an artifact card, and
+``<slug>/artifact`` for the frame of an HTML document, which gets its own
+content policy (``viewer_documents.artifact_policy``). The viewer reads the
+data volume through the same resolver as the files MCP (``files_mcp.paths``),
+so the two never drift on who reads what.
 
 A member has three write actions, all human actions in a browser that the
 agent never gets: an edit of a wiki page or a journal entry, a new wiki page,
@@ -85,11 +76,7 @@ import hmac
 import os
 import sys
 from collections.abc import Iterator
-from contextvars import ContextVar
 from datetime import datetime, tzinfo
-from functools import cache
-from html import escape
-from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -99,28 +86,25 @@ import yaml
 from joshua_shared import config, log
 from joshua_shared.config import Person
 from joshua_shared.layout import is_hidden
-from joshua_shared.layout import wiki_root as wiki_dir
 from joshua_shared.log import get_logger, install_healthcheck_filter
-from markdown_it import MarkdownIt
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 
-from joshua_gateway import viewer_api, viewer_spa
+from joshua_gateway import viewer_api, viewer_channels, viewer_spa
 from joshua_gateway import viewer_assignments as assignments_mod
-from joshua_gateway import viewer_comments as comments_mod
 from joshua_gateway import viewer_docstore as docstore
 from joshua_gateway import viewer_documents as documents_mod
 from joshua_gateway import viewer_limits as limits_mod
-from joshua_gateway import viewer_links as links_mod
 from joshua_gateway import viewer_search as search_mod
-from joshua_gateway import viewer_showcase as showcase_mod
 from joshua_gateway.files_mcp.paths import Root
 from joshua_gateway.files_mcp.server import data_root
-from joshua_gateway.viewer_api.edit import _csrf_token, _csrf_valid, _origin_ok
+from joshua_gateway.viewer_api.edit import (
+    _csrf_token,  # noqa: F401 — the token of a scope, which the tests of a write mint
+)
 
 logger = get_logger("viewer")
 
@@ -147,26 +131,8 @@ _META_SUFFIX = ".meta.json"
 ANONYMOUS_PERSON_ID = "anonymous"
 _ANONYMOUS_PERSON = Person(id=ANONYMOUS_PERSON_ID, name="Anonymous", role="member")
 
-# Raw HTML is disabled, so a ``<script>`` in a markdown file renders as text.
-# The commonmark preset has no tables; the table and strikethrough rules are
-# turned on, with no new dependency.
-_MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table", "strikethrough"])
-
 # A JSON answer a client polls is never cached.
 _NO_STORE = {"Cache-Control": "no-store"}
-
-# The stylesheets and images the pages load. The shared Joshua stylesheet and
-# its images are in ``ui/``, and ``viewer.css`` holds what only the viewer
-# needs. Each is served from the package, behind the same sign-in as a page.
-_UI_DIR = "ui"
-_UI_FILES = {
-    "joshua-ui.css": "text/css",
-    "logo-512.png": "image/png",
-    "logo-64.png": "image/png",
-    "apple-touch-icon.png": "image/png",
-    "favicon-32.png": "image/png",
-}
-_VIEWER_CSS = "viewer.css"
 
 
 # -- auth -------------------------------------------------------------------
@@ -286,10 +252,6 @@ def _unauthorized() -> Response:
     )
 
 
-# The person of the request that is served now, for the navigation.
-_REQUEST_PERSON: ContextVar[Person | None] = ContextVar("viewer_person", default=None)
-
-
 def _require_auth(handler: Any) -> Any:
     """Wrap a handler so it runs only for a signed-in person, else returns 401."""
 
@@ -297,11 +259,7 @@ def _require_auth(handler: Any) -> Any:
         person = _authenticate(request)
         if person is None:
             return _unauthorized()
-        token = _REQUEST_PERSON.set(person)
-        try:
-            return await handler(request, person)
-        finally:
-            _REQUEST_PERSON.reset(token)
+        return await handler(request, person)
 
     return wrapper
 
@@ -328,7 +286,7 @@ def _roots_for(person: Person) -> dict[str, Root]:
     }
 
 
-# -- rendering --------------------------------------------------------------
+# -- reading ----------------------------------------------------------------
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any] | None, str]:
@@ -351,186 +309,6 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any] | None, str]:
     return None, text
 
 
-def _fmt_value(value: Any) -> str:
-    if isinstance(value, list):
-        return ", ".join(str(item) for item in value)
-    return str(value)
-
-
-def _frontmatter_html(front: dict[str, Any] | None) -> str:
-    if not front:
-        return ""
-    rows = "".join(
-        f"<div><span class=k>{escape(str(key))}:</span> "
-        f"<span class=v>{escape(_fmt_value(value))}</span></div>"
-        for key, value in front.items()
-    )
-    return f'<header class="frontmatter">{rows}</header>'
-
-
-# The sections of the navigation: (key, label, URL, icon path data).
-_SECTIONS = (
-    (
-        "wiki",
-        "Wiki",
-        "/wiki/",
-        '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/>'
-        '<path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
-    ),
-    (
-        "journal",
-        "Journal",
-        "/journal",
-        '<path d="M5 4h14a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>'
-        '<path d="M8 2v4M16 2v4M3 10h18"/>',
-    ),
-    (
-        "search",
-        "Search",
-        "/search",
-        '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
-    ),
-    ("usage", "Usage", "/usage", '<path d="M4 20V11M10 20V4M16 20v-8M21 20H3"/>'),
-    (
-        "assignments",
-        "Assignments",
-        "/assignments",
-        '<path d="M9 4h6v3H9z"/>'
-        '<path d="M9 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3"/>'
-        '<path d="m9 14 2 2 4-4"/>',
-    ),
-    (
-        "documents",
-        "Documents",
-        "/documents",
-        '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
-        '<path d="M14 3v5h5M9 13h6M9 17h6"/>',
-    ),
-    ("chat", "Chat", "/chat", links_mod.ICONS["chat"]),
-)
-# The sections that a guest does not get.
-_MEMBER_SECTIONS = frozenset({"documents"})
-# The sections whose URL ends with the id of the person of the request. The
-# chat answers at ``/chat/<person id>``, so the item follows the identity of
-# the person who reads the viewer.
-_PERSON_SECTIONS = frozenset({"chat"})
-_SECTION_LABEL = {key: label for key, label, _, _ in _SECTIONS} | {"links": "Links", "me": "You"}
-_SEARCH_ICON = _SECTIONS[2][3]
-_ME_ICON = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'
-
-
-def _icon(paths: str) -> str:
-    return f'<svg class="j-icon" viewBox="0 0 24 24" aria-hidden="true">{paths}</svg>'
-
-
-def _current(key: str, section: str) -> str:
-    return ' aria-current="page"' if key == section else ""
-
-
-def _sections() -> list[tuple[str, str, str, str]]:
-    """The sections of the person of this request: a guest gets no Documents.
-
-    A section of ``_PERSON_SECTIONS`` gets the id of the person on its URL, and
-    a request with no person does not get it at all.
-    """
-    person = _REQUEST_PERSON.get()
-    member = person is not None and person.role == "member"
-    sections: list[tuple[str, str, str, str]] = []
-    for key, label, url, icon in _SECTIONS:
-        if not member and key in _MEMBER_SECTIONS:
-            continue
-        if key in _PERSON_SECTIONS:
-            if person is None:
-                continue
-            url = f"{url}/{person.id}"
-        sections.append((key, label, url, icon))
-    return sections
-
-
-def _shell(body: str, *, section: str) -> str:
-    """The page shell: the sidebar on a wide screen; the app bar and the tabs
-    on a phone. ``section`` marks the current item. The search field is in the
-    app bar, so it shows on every screen; it loads ``/search``, which the
-    React app renders."""
-    sections = _sections()
-    items = "".join(
-        f'<a class="j-nav-item" href="{url}"{_current(key, section)}>{_icon(icon)}{label}</a>'
-        for key, label, url, icon in sections
-    )
-    tabs = (
-        "".join(
-            f'<a class="j-tab" href="{url}"{_current(key, section)}>{label}</a>'
-            for key, label, url, _ in sections
-        )
-        + f'<a class="j-tab" href="/links"{_current("links", section)}>Links</a>'
-    )
-    links_nav = links_mod.nav_html(
-        links_mod.load(wiki_dir(data_root())), current=section == "links"
-    )
-    here = _SECTION_LABEL.get(section, "Home")
-    return (
-        '<div class="j-shell has-sidebar">'
-        '<aside class="j-sidebar">'
-        '<a class="j-brand" href="/"><img class="j-logo" src="/ui/logo-64.png" alt="">Joshua</a>'
-        f'<nav class="v-sections" aria-label="Sections">{items}</nav>'
-        f"{links_nav}"
-        '<nav class="v-sections v-you" aria-label="You">'
-        f'<a class="j-nav-item" href="/me"{_current("me", section)}>{_icon(_ME_ICON)}Your page</a>'
-        "</nav>"
-        "</aside>"
-        '<div class="j-main">'
-        '<header class="j-appbar">'
-        '<img class="j-logo" src="/ui/logo-64.png" alt="">'
-        f'<a class="j-appbar-title" href="/"><small>Joshua</small><strong>{here}</strong></a>'
-        '<span class="j-spacer"></span>'
-        '<form class="v-search" action="/search" method="get" role="search">'
-        f'<label class="j-field">{_icon(_SEARCH_ICON)}'
-        '<input type="search" name="q" placeholder="Search" aria-label="Search">'
-        "</label></form>"
-        "</header>"
-        f'<nav class="j-tabs mobile-only" aria-label="Sections">{tabs}</nav>'
-        f'<main class="j-content">{body}</main>'
-        "</div></div>"
-    )
-
-
-def _page(
-    title: str,
-    body: str,
-    *,
-    status: int = 200,
-    nav: bool = True,
-    section: str = "",
-    head: str = "",
-) -> HTMLResponse:
-    """A full page. ``section`` is the key of the current section in the
-    navigation (``wiki``, ``journal``, ``search``, ``usage``,
-    ``assignments``, ``documents``, ``chat``), or "" for the home page. ``nav`` False gives the bare
-    content with no navigation. ``head`` is more HTML for the ``<head>``,
-    such as a ``<meta>`` refresh."""
-    main = _shell(body, section=section) if nav else f'<main class="j-content">{body}</main>'
-    html = (
-        "<!doctype html><html lang=en><head><meta charset=utf-8>"
-        '<meta name=viewport content="width=device-width, initial-scale=1">'
-        '<meta name="theme-color" content="#080d17">'
-        f"<title>{escape(title)}</title>{head}"
-        '<link rel=icon type="image/png" href="/ui/favicon-32.png">'
-        '<link rel=apple-touch-icon href="/ui/apple-touch-icon.png">'
-        '<link rel=stylesheet href="/ui/joshua-ui.css">'
-        '<link rel=stylesheet href="/style.css"></head><body>'
-        f"{main}</body></html>"
-    )
-    return HTMLResponse(html, status_code=status)
-
-
-def _not_found() -> HTMLResponse:
-    return _page("not found", '<h1 class="j-doc-title">not found</h1>', status=404, nav=False)
-
-
-def _forbidden() -> HTMLResponse:
-    return _page("forbidden", '<h1 class="j-doc-title">forbidden</h1>', status=403, nav=False)
-
-
 def _read_text(abs_path: Path) -> str | None:
     try:
         return abs_path.read_text(encoding="utf-8")
@@ -550,10 +328,6 @@ def _iter_markdown(root: Root) -> Iterator[tuple[Path, str]]:
         if not item.is_file() or is_hidden(item, root.base):
             continue
         yield item, item.relative_to(root.base).as_posix()
-
-
-def _list_markdown(root: Root) -> list[str]:
-    return [rel for _, rel in _iter_markdown(root)]
 
 
 def _list_attachments(root: Root) -> list[str]:
@@ -580,96 +354,6 @@ def _clock() -> tuple[tzinfo, datetime]:
     return tz, _now(tz)
 
 
-async def saved_list(request: Request, person: Person) -> Response:
-    """The saved assignments of the person who signed in."""
-    client = assignments_mod.from_env(os.environ)
-    body = await client.saved(person.id) if client is not None else None
-    tz, now = _clock()
-    html = assignments_mod.saved_list_html(body, configured=client is not None, tz=tz, now=now)
-    return _page("saved assignments", html, section="assignments")
-
-
-async def saved_page(request: Request, person: Person) -> Response:
-    """One saved assignment of the person who signed in, with its runs."""
-    client = assignments_mod.from_env(os.environ)
-    title = "saved assignment"
-    if client is None:
-        html = assignments_mod.saved_unavailable_html(title, configured=False)
-        return _page(title, html, section="assignments")
-    saved = await client.saved_detail(person.id, request.path_params["id"])
-    if saved is assignments_mod.NOT_FOUND:
-        return _not_found()
-    if not isinstance(saved, assignments_mod.SavedDetail):
-        html = assignments_mod.saved_unavailable_html(title, configured=True)
-        return _page(title, html, section="assignments")
-    tz, now = _clock()
-    forms = comments_mod.CommentForms(
-        action=f"/assignments/saved/{saved.id}/comments",
-        csrf=_csrf_token(person.id, saved_scope(saved.id)),
-    )
-    return _page(
-        saved.name,
-        assignments_mod.saved_detail_html(saved, tz=tz, now=now, forms=forms),
-        section="assignments",
-    )
-
-
-def saved_scope(saved_id: int) -> str:
-    """The CSRF scope of a comment on a saved assignment."""
-    return f"comments:/assignments/saved/{saved_id}"
-
-
-async def comment_on_saved(request: Request, person: Person) -> Response:
-    """Send one comment write of the person on a saved assignment to the
-    manager, then go back to the line.
-
-    The form carries the CSRF token of the saved assignment, and a cross-site
-    ``Origin`` is refused. A saved assignment has a definition only. The
-    manager writes the comment as the person who signed in, on their own row
-    only, and a row of another person is 404."""
-    client = assignments_mod.from_env(os.environ)
-    if client is None:
-        return _not_found()
-    saved_id = int(request.path_params["id"])
-    base = f"/assignments/saved/{saved_id}"
-    form = await request.form()
-    token = str(form.get("csrf", ""))
-    if not _csrf_valid(person.id, saved_scope(saved_id), token) or not _origin_ok(request):
-        return _forbidden()
-    comment_id = request.path_params.get("cid")
-    if comment_id is not None:
-        written = await client.delete_comment(person.id, "saved", saved_id, int(comment_id))
-        anchor = "definition"
-    else:
-        try:
-            line_no = int(str(form.get("line_no", "")))
-        except ValueError:
-            line_no = 0
-        written = await client.add_comment(
-            person.id,
-            "saved",
-            saved_id,
-            line_no=line_no,
-            line_text=str(form.get("line_text", "")),
-            body=str(form.get("body", "")),
-            target="definition",
-        )
-        anchor = f"L{line_no}"
-    if written is not None and written.status == 404:
-        return _not_found()
-    if written is None or not written.ok:
-        reason = written.error if written is not None else "the manager did not answer"
-        body = (
-            f'<nav class="j-crumbs"><a href="/assignments">assignments</a></nav>'
-            f'<h1 class="j-doc-title">comment not stored</h1>'
-            f'<p class="j-error">{escape(reason or "The manager refused the comment.")}</p>'
-            f'<p><a href="{escape(base)}">Back</a></p>'
-        )
-        return _page("comment not stored", body, status=400, section="assignments")
-    logger.info({"message": "viewer comment", "kind": "saved", "delete": comment_id is not None})
-    return RedirectResponse(f"{base}#{anchor}", status_code=303)
-
-
 # -- documents --------------------------------------------------------------
 #
 # A member reads their own documents and the shared ones; a guest gets none.
@@ -677,6 +361,16 @@ async def comment_on_saved(request: Request, person: Person) -> Response:
 # ``viewer_api.documents``. Two routes stay here, because the chat calls
 # both: the frontmatter of a document, and the body of an HTML document for
 # the frame of its page.
+
+
+def _artifact_not_found() -> Response:
+    """The 404 of the artifact route: plain text, never a page.
+
+    The frame that loads this address shows the document and nothing else,
+    and every page of the viewer is the React app, so the module renders no
+    HTML of its own.
+    """
+    return Response("not found", status_code=404, media_type="text/plain")
 
 
 def _document(request: Request, person: Person) -> docstore.Document | None:
@@ -724,12 +418,12 @@ async def document_artifact(request: Request, person: Person) -> Response:
     document, which has no frame."""
     doc = _document(request, person)
     if doc is None or doc.format != "html":
-        return _not_found()
+        return _artifact_not_found()
     rev = request.query_params.get("rev")
     if rev:
         found = docstore.at_version(docstore.root(), doc, rev)
         if found is None:
-            return _not_found()
+            return _artifact_not_found()
         doc = found[1]
     return HTMLResponse(
         doc.body,
@@ -743,27 +437,6 @@ async def document_artifact(request: Request, person: Person) -> Response:
 def _now(tz: tzinfo) -> datetime:
     """The time now in ``tz``. A test replaces it to fix the clock."""
     return datetime.now(tz)
-
-
-@cache
-def _package_file(*parts: str) -> bytes:
-    """A file of this package, read once."""
-    return resources.files("joshua_gateway").joinpath(*parts).read_bytes()
-
-
-async def style(request: Request, person: Person) -> Response:
-    """The viewer's own stylesheet, which loads after the shared one."""
-    return Response(_package_file(_VIEWER_CSS), media_type="text/css")
-
-
-async def ui_file(request: Request, person: Person) -> Response:
-    """One file of the shared Joshua look: the stylesheet or an image. A name
-    that is not in ``_UI_FILES`` is 404."""
-    name = request.path_params["name"]
-    media_type = _UI_FILES.get(name)
-    if media_type is None:
-        return _not_found()
-    return Response(_package_file(_UI_DIR, name), media_type=media_type)
 
 
 async def healthz(request: Request) -> JSONResponse:
@@ -782,6 +455,10 @@ async def readyz(request: Request) -> JSONResponse:
             "data": data_root().is_dir(),
             "core_search": search_mod.from_env(os.environ) is not None,
             "assignments": assignments_mod.from_env(os.environ) is not None,
+            "chat": bool(
+                os.environ.get(viewer_channels.CHANNELS_URL_ENV)
+                and os.environ.get(viewer_channels.VIEWER_TOKEN_ENV)
+            ),
         }
     )
 
@@ -792,8 +469,11 @@ class SecurityHeaders(BaseHTTPMiddleware):
     ``default-src 'none'`` blocks every sub-resource; the page loads its
     stylesheets, its images, its scripts and its data from ``'self'``. The
     viewer serves a JavaScript bundle of its own, so ``script-src`` holds
-    ``'self'``, and the hash of the copy script of a server-rendered report
-    beside it. No inline script runs.
+    ``'self'`` alone. No inline script runs, and no hash is allowed.
+
+    The viewer is an installable app: ``manifest-src 'self'`` allows its
+    manifest and ``worker-src 'self'`` allows its service worker, both files
+    of this origin and of no other.
 
     ``frame-ancestors 'self'`` lets a page of the viewer, the chat and its
     artifact panel, frame a document page of the same origin. No other
@@ -811,7 +491,8 @@ class SecurityHeaders(BaseHTTPMiddleware):
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'none'; img-src 'self'; style-src 'self'; "
-            f"script-src 'self' '{showcase_mod.COPY_SCRIPT_HASH}'; connect-src 'self'; "
+            "script-src 'self'; connect-src 'self'; "
+            "manifest-src 'self'; worker-src 'self'; "
             "frame-src 'self'; frame-ancestors 'self'",
         )
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -824,28 +505,14 @@ def build_app() -> Starlette:
 
     The JSON routes of ``viewer_api`` come after the probes, and the mount of
     the React app is the last route, so every explicit route wins over it.
-    The wiki, the attachments and ``/`` are routes of the app, so they are
-    not here: with no build in the image, they are 404 and the pages the
-    server still renders answer as always.
+    Every page, the stylesheets and the images are files of the app, so they
+    are not here: with no build in the image, the viewer serves the JSON API
+    and nothing else.
     """
     routes: list[BaseRoute] = [
         Route("/healthz", healthz),
         Route("/readyz", readyz),
         *viewer_api.routes(),
-        Route("/style.css", _require_auth(style)),
-        Route("/ui/{name}", _require_auth(ui_file)),
-        Route("/assignments/saved", _require_auth(saved_list)),
-        Route("/assignments/saved/{id:int}", _require_auth(saved_page)),
-        Route(
-            "/assignments/saved/{id:int}/comments",
-            _require_auth(comment_on_saved),
-            methods=["POST"],
-        ),
-        Route(
-            "/assignments/saved/{id:int}/comments/{cid:int}/delete",
-            _require_auth(comment_on_saved),
-            methods=["POST"],
-        ),
         # The two routes of a document that the chat calls. The page itself
         # is the React app, and a slug never ends in ``.json``, so these two
         # and an address of the app can never name the same file.

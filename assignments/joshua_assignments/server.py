@@ -26,6 +26,7 @@ import hmac
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
+from uuid import UUID
 
 from joshua_shared.log import get_logger
 from mcp import types
@@ -42,6 +43,9 @@ from joshua_assignments.settings import Caller, Settings
 from joshua_assignments.store import Store
 
 logger = get_logger("joshua_assignments")
+
+# The key the gateway puts in ``params._meta`` of a call from a workspace thread.
+WORKSPACE_META_KEY = "joshua/workspace"
 
 OPEN_PATHS = frozenset({"/healthz", "/readyz"})
 _BEARER = "Bearer "
@@ -133,6 +137,53 @@ def _caller(ctx: Context) -> Caller:
     return caller
 
 
+def origin_of(ctx: Context) -> str | None:
+    """The workspace id in the ``_meta`` of this call, or None.
+
+    The request context holds ``_meta`` as ``ctx.request_context.meta``. A call
+    from any other chat has no ``joshua/workspace`` key, and a value that is not
+    a UUID is no workspace."""
+    try:
+        meta = ctx.request_context.meta
+    except ValueError:
+        return None
+    value = meta.get(WORKSPACE_META_KEY) if meta else None
+    if not isinstance(value, str):
+        return None
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return None
+
+
+def with_link(
+    result: dict[str, Any], assignment_id: Any, workspace: str | None
+) -> dict[str, Any] | types.CallToolResult:
+    """``result`` as it is, or, for a call from a workspace, with a
+    ``resource_link`` to the viewer page of the assignment after its text.
+
+    A refusal has no assignment and gets none. The address is under
+    ``workspaces.viewer_url`` when that is set, else the path ``/assignments/<id>``."""
+    if not workspace or isinstance(assignment_id, bool) or not isinstance(assignment_id, int):
+        return result
+    if result.get("status") == "rejected":
+        return result
+    path = f"/assignments/{assignment_id}"
+    base = get_manager().load_config().workspaces.viewer_url
+    uri = f"{base.rstrip('/')}{path}" if base else path
+    title = str(result.get("title") or "").strip()
+    link = types.ResourceLink(
+        uri=uri,
+        name=f"Assignment {assignment_id}: {title}" if title else f"Assignment {assignment_id}",
+        description="The page of the assignment in the viewer",
+        mime_type="text/html",
+    )
+    return types.CallToolResult(
+        content=[types.TextContent(text=json.dumps(result, indent=2, default=str)), link],
+        structured_content=json.loads(json.dumps(result, default=str)),
+    )
+
+
 def _person(ctx: Context) -> str:
     caller = _caller(ctx)
     if caller.person is None:
@@ -205,14 +256,24 @@ async def start_assignment(
     """
     person = _person(ctx)
     conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
+    workspace = origin_of(ctx)
     if id is not None:
         if spec is not None or saved is not None or rerun is not None or note is not None:
             return with_hint(rejected("invalid_arguments", "give one of spec, id, saved, or rerun"))
         row = await _own(Caller(person=person), id, deleted=True)
-        return await get_manager().start(person, draft=row)
-    return await get_manager().start(
-        person, spec, conversation, saved=saved, new=new, rerun=rerun, note=note
-    )
+        started = await get_manager().start(person, draft=row, workspace=workspace)
+    else:
+        started = await get_manager().start(
+            person,
+            spec,
+            conversation,
+            saved=saved,
+            new=new,
+            rerun=rerun,
+            note=note,
+            workspace=workspace,
+        )
+    return with_link(started, started.get("id"), workspace)
 
 
 @mcp.tool()
@@ -341,7 +402,8 @@ async def assignment_status(id: int, ctx: Context) -> dict:
     Read the report here.
     """
     caller = _caller(ctx)
-    return await get_manager().status(await _own(caller, id))
+    row = await _own(caller, id)
+    return with_link(await get_manager().status(row), row["id"], origin_of(ctx))
 
 
 @mcp.tool()

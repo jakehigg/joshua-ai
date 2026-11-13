@@ -298,7 +298,7 @@ def test_no_credentials_reads_the_members_assignments(member_client, monkeypatch
         lambda env: am.AssignmentsClient("http://assignments", "token", transport=transport),
     )
     assert member_client.get("/api/v1/assignments").status_code == 200
-    assert member_client.get("/assignments/saved").status_code == 200
+    assert member_client.get("/api/v1/assignments/saved").status_code == 200
     assert people and set(people) == {"alex"}
 
 

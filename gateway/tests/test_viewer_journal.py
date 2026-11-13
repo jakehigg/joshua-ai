@@ -164,8 +164,7 @@ def test_the_days_of_a_month_and_the_addresses_of_the_feed(tmp_path):
     assert viewer_journal.month_url((2026, 9), "mia") == "/journal?month=2026-09&person=mia"
 
 
-def test_the_nav_of_a_page_and_of_the_app_links_to_the_journal(client):
-    assert 'href="/journal"' in client.get("/assignments/saved", auth=ALEX).text
+def test_the_nav_of_the_app_links_to_the_journal(client):
     sections = client.get("/api/v1/session", auth=ALEX).json()["sections"]
     assert "/journal" in [section["path"] for section in sections]
 

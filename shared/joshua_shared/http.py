@@ -73,6 +73,10 @@ class FleetClient:
         """GET a URL and return the response."""
         return await self._request("GET", url, **kwargs)
 
+    async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Send a request with any method and return the response."""
+        return await self._request(method, url, **kwargs)
+
     async def delete(self, url: str, **kwargs: Any) -> httpx.Response:
         """DELETE a URL and return the response."""
         return await self._request("DELETE", url, **kwargs)

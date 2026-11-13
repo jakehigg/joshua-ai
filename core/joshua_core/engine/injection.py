@@ -28,7 +28,7 @@ warning. The provider is registered on the manager's context-provider hook.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
@@ -37,6 +37,7 @@ from joshua_shared.attachments import is_no_caption
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 
+from joshua_core.engine import workspace as workspace_engine
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.search import document_reader, search
@@ -189,8 +190,13 @@ async def kb_context(
     timezone: str = "UTC",
     exclude_folders: Sequence[str] = (),
     people: Sequence[Any] = (),
+    exclude_paths: Collection[str] = (),
 ) -> str | None:
     """Build the per-turn injection note for one ``TurnCtx``, or None.
+
+    A chunk whose path is in ``exclude_paths`` is dropped. A workspace turn
+    passes the documents and the wiki pages that are items of the workspace,
+    because its block already holds them.
 
     A snapshot line shows the time of the latest good fetch in ``timezone``,
     read once for the turn; a snapshot chunk with no good fetch is dropped.
@@ -240,6 +246,8 @@ async def kb_context(
         logger.warning({"message": "kb inject skipped: retrieval failed", "error": str(exc)})
         return None
 
+    if exclude_paths:
+        ranked = [c for c in ranked if c.path not in exclude_paths]
     labels = await snapshot_labels(store, ranked, timezone)
     ranked = shown(ranked, labels)
     # A snapshot chunk takes a slot of `top_k` and is always a short line. The
@@ -312,6 +320,7 @@ def register(manager: Any, store: MemoryStore, settings: JoshuaConfig, repo: Rep
             timezone=getattr(settings, "timezone", "UTC"),
             exclude_folders=memory.exclude_folders,
             people=settings.people,
+            exclude_paths=await workspace_engine.rag_exclude_paths(repo, ctx),
         )
 
     manager.add_context_provider(provider)

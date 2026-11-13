@@ -31,7 +31,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 
-from joshua_gateway import mcp_store
+from joshua_gateway import mcp_store, workspace_items
 from joshua_gateway.catalog import ServerSpec
 from joshua_gateway.observability import (
     CALL_LOG,
@@ -356,6 +356,10 @@ class Upstream:
         CALLERS.record_call(identity)
         logger.info({"message": "tool call", **entry})
 
+    def _record_items(self, tool: str, args: dict[str, Any], res: Any, workspace: str) -> None:
+        """``on_workspace_result`` hook: record the items of a call from a workspace."""
+        workspace_items.on_result(self.label, tool, args, res, workspace)
+
     def _record_refusal(self, tool: str, reason: str) -> None:
         """``on_refusal`` hook: one log line for a tool call whose result is a
         refusal. It names the tool, the person, the server, and the reason,
@@ -468,7 +472,12 @@ class Upstream:
         if self.mgr is not None and self._mgr_caps == key:
             return
         server = build_upstream_server(
-            self.name, self, caps, on_call=self._record_call, on_refusal=self._record_refusal
+            self.name,
+            self,
+            caps,
+            on_call=self._record_call,
+            on_refusal=self._record_refusal,
+            on_workspace_result=self._record_items,
         )
         mgr = StreamableHTTPSessionManager(app=server, stateless=True, json_response=False)
         ready, stop = asyncio.Event(), asyncio.Event()

@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { ApiError, getJson } from "./api/client";
 import Assignment from "./pages/Assignment";
+import { ChatPage, WorkspacePage } from "./chat/ChatPage";
+import { ChatHome } from "./chat/Home";
 import Assignments from "./pages/Assignments";
 import Document from "./pages/Document";
 import Documents from "./pages/Documents";
@@ -13,6 +15,8 @@ import JournalDay from "./pages/JournalDay";
 import Links from "./pages/Links";
 import Me from "./pages/Me";
 import New from "./pages/New";
+import Saved from "./pages/Saved";
+import SavedAssignment from "./pages/SavedAssignment";
 import Search from "./pages/Search";
 import Usage from "./pages/Usage";
 import WikiFolder, { type WikiFolderData } from "./pages/WikiFolder";
@@ -82,9 +86,9 @@ function Content({ root }: { root: string }) {
 }
 
 /**
- * The routes of the app. Only a page that is migrated is here: every other
- * address of the viewer is still a page of the server renderer, so there is
- * no catch-all route that would swallow it.
+ * The routes of the app. Every screen of the viewer is here: there is no
+ * other renderer. An address that no route claims renders an empty page,
+ * because the server has no page of its own behind this app.
  */
 export default function App() {
   return (
@@ -94,6 +98,8 @@ export default function App() {
       <Route path="/shared/*" element={<Content root="shared" />} />
       <Route path="/attachments/*" element={<Content root="attachments" />} />
       <Route path="/assignments" element={<Assignments />} />
+      <Route path="/assignments/saved" element={<Saved />} />
+      <Route path="/assignments/saved/:id" element={<SavedAssignment />} />
       <Route path="/assignments/:id" element={<Assignment />} />
       <Route path="/documents" element={<Documents />} />
       <Route path="/documents/:owner/:slug" element={<Document />} />
@@ -104,6 +110,9 @@ export default function App() {
       <Route path="/links" element={<Links />} />
       <Route path="/edit/*" element={<Edit />} />
       <Route path="/new" element={<New />} />
+      <Route path="/chat" element={<ChatHome />} />
+      <Route path="/chat/w/:slug" element={<WorkspacePage />} />
+      <Route path="/chat/:person" element={<ChatPage />} />
       <Route path="/me" element={<Me />} />
     </Routes>
   );

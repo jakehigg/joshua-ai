@@ -41,6 +41,7 @@ from joshua_gateway.observability import (
     now_iso,
     person_ctx,
     role_ctx,
+    workspace_ctx,
 )
 from joshua_gateway.upstream import Upstream
 
@@ -132,6 +133,7 @@ async def _authenticate(scope, allowed: Callers, name: str, send: Send):
             headers.get("x-joshua-group"),
             _known_groups(),
             trusted,
+            headers.get("x-joshua-workspace"),
         )
     except person_policy.PersonError as exc:
         await _reject(send, 400, exc.message.encode())
@@ -161,6 +163,7 @@ async def _forward(up: Upstream, identity: str, attr, scope, receive, send) -> N
         conversation_ctx.set(attr.conversation),
         role_ctx.set(attr.role),
         group_ctx.set(attr.group),
+        workspace_ctx.set(attr.workspace),
     )
     try:
         # During a reconnect the request goes on: the handler waits for the
@@ -177,6 +180,7 @@ async def _forward(up: Upstream, identity: str, attr, scope, receive, send) -> N
         conversation_ctx.reset(tokens[2])
         role_ctx.reset(tokens[3])
         group_ctx.reset(tokens[4])
+        workspace_ctx.reset(tokens[5])
 
 
 def make_asgi(up: Upstream, allowed: Callers):

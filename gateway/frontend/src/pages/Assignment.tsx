@@ -6,6 +6,12 @@
  * with its progress, the outputs and the checkpoints, and the report. A
  * draft shows its definition open and nothing of a run.
  *
+ * A report with the headings of the report shape is the showcase
+ * (`src/showcase/`): the highlights as cards, the decisions as numbered
+ * cards that take an answer, the outputs by kind, what was asked as a quote,
+ * what was done as prose, and the follow-ups as a checklist. Any other
+ * report shows as its blocks.
+ *
  * A comment on a line of the definition, the plan or the report goes to the
  * manager, which stores it; the viewer keeps nothing. The manager sends no
  * comment back in the answer of a write, so the page reads itself again.
@@ -21,13 +27,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { ApiError, getJson } from "../api/client";
-import Blocks, { spans } from "../blocks/Blocks";
 import Definition from "../assignments/Definition";
 import Plan from "../assignments/Plan";
 import Progress, { Notice } from "../assignments/Progress";
-import { NO_COMMENTS, type AssignmentData, type AssignmentItem, type CommentSet } from "../assignments/data";
+import {
+  NO_COMMENTS,
+  type AssignmentData,
+  type AssignmentItem,
+  type CommentSet,
+  type ReportData,
+} from "../assignments/data";
 import type { DocComment } from "../comments/CommentCard";
 import { Orphans, Resolved, useGutter } from "../comments/Gutter";
+import HeroHead from "../showcase/Hero";
+import Showcase, { decisions, outputs, showcaseSpans } from "../showcase/Showcase";
+import type { TileData } from "../showcase/Tiles";
 import Shell, { type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Fold from "../ui/Fold";
@@ -35,48 +49,62 @@ import Spinner from "../ui/Spinner";
 import { CommentsBadge } from "./Documents";
 import { StatusChip, Unavailable } from "./Assignments";
 
-/** One number of the hero, with its label. */
-function Tile({ value, label, title, text }: { value: string; label: string; title?: string; text?: boolean }) {
-  if (value === "") {
-    return null;
-  }
-  return (
-    <div className={text === true ? "j-stat a-stat-text" : "j-stat"} title={title}>
-      <b>{value}</b>
-      <span>{label}</span>
-    </div>
-  );
+/**
+ * The numbers of the hero: what the run cost and what it made. The report
+ * counts the decisions and the outputs, so a run with none shows neither.
+ */
+function tiles(item: AssignmentItem, report: ReportData | null): TileData[] {
+  const made = outputs(report).length;
+  const asks = decisions(report).length;
+  return [
+    { value: item.cost, label: "cost", title: item.cost_title },
+    { value: item.duration, label: "working time" },
+    { value: item.turns === null ? "" : String(item.turns), label: "turns" },
+    { value: item.model, label: "model", text: true },
+    { value: made === 0 ? "" : String(made), label: made === 1 ? "output" : "outputs" },
+    { value: asks === 0 ? "" : String(asks), label: asks === 1 ? "decision" : "decisions" },
+  ];
 }
 
 /** The head of the page: the marks, the title, and the numbers. */
-function Hero({ item, open }: { item: AssignmentItem; open: number }) {
+function Hero({
+  item,
+  open,
+  report,
+}: {
+  item: AssignmentItem;
+  open: number;
+  report: ReportData | null;
+}) {
   return (
-    <header className="a-hero">
-      <div className="a-chips">
-        <StatusChip status={item.status} label={item.status_label} />
-        {item.saved_ref !== null && (
-          <a className="j-chip a-saved" href={`/assignments/saved/${String(item.saved_ref.id)}`}>
-            {`saved: ${item.saved_ref.name}`}
-          </a>
-        )}
-        {item.run_number !== null && (
-          <a className="j-chip a-run" href="#lineage">
-            {`run ${String(item.run_number.run)} of assignment ${String(item.run_number.root)}`}
-          </a>
-        )}
-        <CommentsBadge open={open} />
-        {item.when !== "" && <span className="j-meta">{item.when}</span>}
-      </div>
-      <h1 className="j-doc-title">{item.title}</h1>
-      {item.start_phrase !== "" && <p className="a-lede a-start-line">{item.start_phrase}</p>}
-      {item.draft_line !== "" && <p className="a-lede a-draft-line">{item.draft_line}</p>}
-      <div className="j-stats a-stats" role="group" aria-label="Numbers">
-        <Tile value={item.cost} label="cost" title={item.cost_title} />
-        <Tile value={item.duration} label="working time" />
-        <Tile value={item.turns === null ? "" : String(item.turns)} label="turns" />
-        <Tile value={item.model} label="model" text />
-      </div>
-    </header>
+    <HeroHead
+      title={item.title}
+      lede={report === null ? "" : report.lede}
+      tiles={tiles(item, report)}
+      chips={
+        <>
+          <StatusChip status={item.status} label={item.status_label} />
+          {item.saved_ref !== null && (
+            <Link className="j-chip a-saved" to={`/assignments/saved/${String(item.saved_ref.id)}`}>
+              {`saved: ${item.saved_ref.name}`}
+            </Link>
+          )}
+          {item.run_number !== null && (
+            <a className="j-chip a-run" href="#lineage">
+              {`run ${String(item.run_number.run)} of assignment ${String(item.run_number.root)}`}
+            </a>
+          )}
+          <CommentsBadge open={open} />
+          {item.when !== "" && <span className="j-meta">{item.when}</span>}
+        </>
+      }
+      sub={
+        <>
+          {item.start_phrase !== "" && <p className="a-lede a-start-line">{item.start_phrase}</p>}
+          {item.draft_line !== "" && <p className="a-lede a-draft-line">{item.draft_line}</p>}
+        </>
+      }
+    />
   );
 }
 
@@ -188,7 +216,7 @@ export default function Assignment() {
   }
 
   const report = data?.report ?? null;
-  const reportUnits = useMemo(() => spans(report?.blocks ?? []), [report]);
+  const reportUnits = useMemo(() => showcaseSpans(report, report?.blocks ?? []), [report]);
   const reportGutter = useGutter({
     url: path,
     lines: report?.lines ?? [],
@@ -234,7 +262,7 @@ export default function Assignment() {
       <nav className="j-crumbs">
         <Link to="/assignments">assignments</Link>
       </nav>
-      <Hero item={item} open={item.open_comments} />
+      <Hero item={item} open={item.open_comments} report={report} />
       <Notice notice={item.notice} />
       <Definition
         url={path}
@@ -273,7 +301,12 @@ export default function Assignment() {
               <p className="j-faint">No report yet.</p>
             ) : (
               <>
-                <Blocks blocks={report.blocks} gutter={reportGutter} />
+                <Showcase
+                  report={report}
+                  blocks={report.blocks}
+                  gutter={reportGutter}
+                  answers
+                />
                 {reportGutter.error !== "" && <ErrorLine text={reportGutter.error} />}
                 <Orphans gutter={reportGutter} />
                 <Resolved gutter={reportGutter} />

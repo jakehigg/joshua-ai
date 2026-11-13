@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, Request
@@ -221,6 +221,22 @@ def _pipeline_target(
     return resolved.person_id, None
 
 
+def _workspace_of(body: dict) -> str | None:
+    """The ``workspace`` of an event as a canonical UUID, or None when it is
+    absent. Raises ``EventValidationError`` for a value that is not a UUID."""
+    raw = body.get("workspace")
+    if raw is None or raw == "":
+        return None
+    try:
+        if not isinstance(raw, str):
+            raise ValueError
+        return str(UUID(raw))
+    except ValueError:
+        raise EventValidationError(
+            "invalid_workspace", "workspace must be a workspace id (a UUID)"
+        ) from None
+
+
 def _chat_for(resolved: Resolved | None) -> Chat:
     """Build the ``Chat`` for the turn. Core ignores it for events, but the shape
     requires one; a destination-less event carries an empty group chat."""
@@ -308,27 +324,40 @@ async def _handle_event(ctx: ChannelsContext, identity: str, body: dict) -> JSON
     if payload is not None and not isinstance(payload, dict):
         raise EventValidationError("invalid_payload", "payload must be an object")
     source = body.get("source")
+    workspace = _workspace_of(body)
 
-    # A valid event is either a named event (event_type) or a channel-addressed
-    # message (destination + text).
-    if not event_type and not (destination and text):
-        raise EventValidationError("invalid_event", "provide event_type, or destination and text")
+    # A valid event is a named event (event_type), a channel-addressed message
+    # (destination + text), or a message for a workspace (workspace + text).
+    if not event_type and not (destination and text) and not (workspace and text):
+        raise EventValidationError(
+            "invalid_event", "provide event_type, or destination and text, or workspace and text"
+        )
 
     urls = validate_image_urls(body["image_urls"]) if body.get("image_urls") is not None else []
 
+    # A workspace event goes to the thread of the workspace and to no adapter:
+    # a destination that comes with it is not resolved and not used.
     resolved = (
-        destinations.resolve(ctx.registry, ctx.settings, destination) if destination else None
+        destinations.resolve(ctx.registry, ctx.settings, destination)
+        if destination and not workspace
+        else None
     )
-    if destination and resolved is None:
+    if destination and not workspace and resolved is None:
         return JSONResponse({"reason": "unknown_channel"}, status_code=404)
-    if verbatim and resolved is None:
+    if verbatim and resolved is None and not workspace:
         raise EventValidationError("verbatim_needs_destination", "verbatim needs a destination")
 
     attachments, skipped = await _land_images(ctx, urls, resolved) if urls else ([], [])
     event_text = text + _skip_note(skipped)
 
     event = TurnEvent(
-        channel=resolved.channel if resolved is not None else "",
+        channel=(
+            f"workspace:{workspace}"
+            if workspace
+            else resolved.channel
+            if resolved is not None
+            else ""
+        ),
         chat=_chat_for(resolved),
         handle=Handle(type=WEBHOOK_HANDLE_TYPE, id=identity),
         kind="event",
@@ -337,12 +366,14 @@ async def _handle_event(ctx: ChannelsContext, identity: str, body: dict) -> JSON
         event_type=event_type,
         payload=payload,
         options=EventOptions(verbatim=verbatim),
+        workspace=workspace,
     )
     logger.info(
         {
             "message": "event received",
             "caller": identity,
             "destination": destination or None,
+            "workspace": workspace,
             "event_type": event_type,
             "verbatim": verbatim,
             "source": source,
@@ -351,6 +382,8 @@ async def _handle_event(ctx: ChannelsContext, identity: str, body: dict) -> JSON
         }
     )
 
+    if verbatim and workspace:
+        return await _record_verbatim(ctx, event)
     if verbatim:
         assert resolved is not None  # guarded above
         return await _deliver_verbatim(ctx, resolved, text, attachments, event)
@@ -381,6 +414,23 @@ async def _deliver_verbatim(
         except Exception:  # noqa: BLE001 — the record is best effort; delivery already succeeded
             logger.warning({"message": "verbatim record failed", "channel": resolved.channel})
     return JSONResponse({"accepted": True, "verbatim": True}, status_code=202)
+
+
+async def _record_verbatim(ctx: ChannelsContext, event: TurnEvent) -> JSONResponse:
+    """A verbatim event for a workspace: no adapter gets it. Core records the
+    text in the thread of the workspace, and that record is the whole event, so
+    a failure to record is an error here."""
+    if ctx.core_client is None:
+        logger.warning({"message": "no core client; event dropped", "channel": event.channel})
+        return JSONResponse({"reason": "core_unavailable"}, status_code=503)
+    try:
+        ack = await ctx.core_client.submit_turn(event)
+    except Exception as exc:  # noqa: BLE001 — a core outage is a 502 for the caller
+        logger.warning({"message": "verbatim record failed", "channel": event.channel})
+        return JSONResponse({"reason": "core_error", "detail": str(exc)}, status_code=502)
+    if ack.status in (200, 202):
+        return JSONResponse({"accepted": True, "verbatim": True}, status_code=202)
+    return JSONResponse({"accepted": False, "reason": ack.reason}, status_code=ack.status or 502)
 
 
 async def _forward(ctx: ChannelsContext, event: TurnEvent) -> JSONResponse:

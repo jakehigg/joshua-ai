@@ -17,6 +17,7 @@ from joshua_shared.log import get_logger
 from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.cron import compute_next_cron, now_in, parse_when
 from joshua_core.engine.tools import ToolDeps
+from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE
 
 logger = get_logger("tools.scheduling")
 
@@ -199,7 +200,13 @@ def build_scheduling_server(deps: ToolDeps) -> Any:
     @tool(
         "schedule_task",
         "Schedule an instruction to run later, once or on a cron schedule. Give a "
-        "'prompt' and exactly one of 'when', 'in_seconds', or 'cron'.",
+        "'prompt' and exactly one of 'when', 'in_seconds', or 'cron'."
+        + (
+            " In a workspace the task runs in the workspace, and nothing it writes reaches "
+            "the person. Tell it to call send_to_normal_chat if the person should see the result."
+            if deps.channel.channel_type == WORKSPACE_CHANNEL_TYPE
+            else ""
+        ),
         _SCHEDULE_SCHEMA,
     )
     async def schedule_task(args: dict[str, Any]) -> dict[str, Any]:

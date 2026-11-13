@@ -81,7 +81,7 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `POST /v1/deliver` | `core` | DeliverRequest | `200 {"delivered": true, "parts": n}`, `400 bad_request` or `invalid_attachment`, `404 unknown_channel`, `502 send_failed` |
 | `GET /v1/channels/resolve?ref=` | `core` | | `200` ResolveResponse, `404 unknown_channel` |
 | `GET /v1/channels/refusals?limit=` | `core` | | `200 {"refusals": [{"channel_type", "address", "chat_id", "reason", "at"}]}`. The handle and the channel, never a message body. |
-| `POST /v1/events` | `channels.webhooks.allowed_callers` | see `channels.md` | `202 {"accepted": true}`, `200 {"ignored": true}`, `400`, `404 unknown_channel`, `502`, `503 core_unavailable` |
+| `POST /v1/events` | `channels.webhooks.allowed_callers` | see `channels.md` | `202 {"accepted": true}`, `200 {"ignored": true}`, `400` (also `invalid_workspace`), `404 unknown_channel`, `404 unknown_workspace` (core's reason, for a `workspace` core does not have), `502`, `503 core_unavailable`. The optional `workspace` (a UUID) with `text` sends the event to the thread of that workspace and to no adapter; with `verbatim` core records the text there. |
 | `POST /webhook/imessage/{secret}` | none, the path secret | BlueBubbles payload | always `200`. A wrong secret gets `404`. |
 | `POST /v1/cli/turns/stream` | `channels.webhooks.allowed_callers` | `{"person": id, "text": str}`, or `multipart/form-data` (below) | SSE, or `400`, `403 {"reason": <guard reason>}`, `503 core_unavailable`, `503 pipeline_unavailable` |
 | `GET /v1/cli/outbox?person=&ack=true` | `channels.webhooks.allowed_callers` | | `{"messages": [{"ts", "text", "attachments"}]}`, `403 unknown_person` |
@@ -135,6 +135,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /v1/transcript?channel=&person=&limit=&before=` | `channels`, `laptop` | | `{"conversation_id", "messages", "next_before"}` (below), `400 bad_request` with no `channel`, `422` for a bad `limit` or `before` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?, "source"?, "person"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
+| `GET /v1/usage?group=conversation&person=` | `usage.allowed_callers` (default `viewer`) | | `{"days", "conversations": [{"conversation_id", "workspace": {"slug", "title"} or null, "calls", "input", "output", "cache_read", "cache_write"}]}`, largest first. Only the conversations of `person`. A row with no conversation is not listed. `422` for another `group` or no `person`; `403` for a person who is not a member. |
+| `/v1/workspaces` | `workspaces.allowed_callers` (default `viewer`, `gateway`) | `person` query parameter | See [workspaces.md](workspaces.md#routes). |
 | `POST /v1/usage` | `usage.writers` (default `assignments`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment`, `413` over 1 MiB, `503` when the database fails. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
@@ -357,9 +359,19 @@ keeps it.
 
 | Event | Data |
 |---|---|
+| `accepted` | `{"turn_id"}`, sent first: core has the turn and will finish it |
+| `status` | `{"state": "queued"}` while another turn of the conversation runs, then `{"state": "running"}` |
 | `delta` | `{"text": "<chunk>"}` |
 | `done` | `{"turn_id", "text", "tools"}`, the full text and the tools used |
 | `error` | `{"message": "<what failed>"}` |
+
+A closed stream does not stop the turn. Core runs the turn in a task of its
+own, and `channels` and the viewer read the stream in a task of their own, so
+a phone that locks or a tab that closes leaves the turn to finish. The reply
+lands in the transcript as the reply of any other turn, and the same delivery
+rules apply: a viewer, terminal, or workspace turn is only pulled, so nothing
+is pushed to another channel. Only a shutdown of core cancels a turn. The
+inference timeout still ends a turn that runs too long.
 
 The `delta` frames carry only the answer, and together they are the text of
 `done`. The text that the model writes before it calls a tool, such as "Not
@@ -383,9 +395,18 @@ messages.
     {"id": 41, "direction": "in", "text": "<the message>", "status": "ok",
      "at": "2026-03-04T12:00:01+00:00", "meta": {"turn_id": "t-…"}}
   ],
-  "next_before": 41
+  "next_before": 41,
+  "pending": null
 }
 ```
+
+`pending` is null when no turn of the conversation is in flight. Otherwise it
+is `{"turn_id", "state", "since", "text"}`: `state` is `queued` while the turn
+waits for another turn of the conversation, and `running` after that. `since`
+is when core took the turn, and `text` is the message of the person (empty for
+a turn that is not from a person). A client that sees it knows that a reply is
+coming, whichever device sent the message. Core keeps the list in memory, so
+a restart clears it.
 
 The messages are oldest first. `direction` is the stored value: `in` for a
 person's message, `out` for Joshua's reply, `task` for a scheduled task, and
@@ -398,7 +419,10 @@ when older rows exist, else null. Send it as `before` to get the page before
 this one.
 
 `meta` holds only these keys: `turn_id`, `tools` (the tool names the turn
-used), `call_count`, `duration_ms`, and `first_output_ms`. Core drops every
+used), `call_count`, `duration_ms`, `first_output_ms`, and `attachments` (on
+the row of a message that came with files: a list of `{path, mime, name,
+size}`, where `path` is the filed path under the data volume and `name` is
+the name the sender gave). Core drops every
 other key, for example the token usage, the cost, the speaker, and the paths
 the turn wrote. Core never logs a message.
 
@@ -540,6 +564,7 @@ sends them for the person who started the assignment:
 | `X-Joshua-Conversation` | the conversation id |
 | `X-Joshua-Role` | `member` or `guest` |
 | `X-Joshua-Group` | the group id, only for a group chat in `groups` |
+| `X-Joshua-Workspace` | the workspace id (a UUID), only for a workspace thread. The gateway sends it upstream as `_meta["joshua/workspace"]` of each tool call and records the items of the call. |
 
 The gateway trusts these headers only from the identities in
 `gateway.person_header_callers` (default `core` and `assignments`). Every other
@@ -603,7 +628,7 @@ bearer):
 
 | Route | When | Body |
 |---|---|---|
-| channels `POST /v1/events` | the report, the question, or the request of an assignment, and the comments of the person on the plan or the report of a completed one | `{"destination": str, "text": str}`. Channels accepts it only when `assignments` is in `channels.webhooks.allowed_callers`. |
+| channels `POST /v1/events` | the report, the question, or the request of an assignment, and the comments of the person on the plan or the report of a completed one | `{"destination": str, "text": str}`, and `"workspace": <id>` for an assignment that a workspace started (the `destination` is then optional). Channels accepts it only when `assignments` is in `channels.webhooks.allowed_callers`. |
 | core `GET /v1/limits` | before each slice, and at `start_assignment` when `when_unknown` is `refuse` and the spec has no `budget.tokens` | none |
 | core `POST /v1/usage` | after each slice that used tokens | one row: kind and name `assignment`, `worker` the model name of the spec, `run_id` the id, `person_id`, `model`, `calls`, `usage`, and `ref` `<id>:slice:<n>` |
 | core `ANY /v1/model/{path}` | each model call of a session, from the Claude CLI | a Claude API request |

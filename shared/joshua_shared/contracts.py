@@ -114,6 +114,12 @@ class TurnEvent(_Model):
     payload: dict | None = None
     options: EventOptions | None = None
     framing: str | None = None
+    # "main": a terminal or viewer turn that runs in the person's main thread.
+    thread: Literal["main"] | None = None
+    # An event only: the id (a UUID) of the workspace whose thread runs the
+    # turn, or records the text when ``options.verbatim`` is set. Nothing is
+    # delivered to a phone for it.
+    workspace: str | None = None
 
 
 class TurnAck(_Model):

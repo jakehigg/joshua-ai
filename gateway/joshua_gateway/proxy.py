@@ -34,13 +34,16 @@ from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 
 from joshua_gateway.catalog import ServerSpec, permits
-from joshua_gateway.observability import group_ctx, person_ctx
+from joshua_gateway.observability import group_ctx, person_ctx, workspace_ctx
+from joshua_gateway.workspace_items import WORKSPACE_META_KEY
 
 log = get_logger("gateway.proxy")
 
 OnCall = Callable[[str, float, str, str | None], None]
 # ``(tool, reason)`` of a tool result that is a refusal.
 OnRefusal = Callable[[str, str], None]
+# ``(tool, arguments, result, workspace)`` of a successful call from a workspace.
+OnWorkspaceResult = Callable[[str, dict[str, Any], Any, str], None]
 
 # A reason of a refusal is a fixed word, such as ``busy``. Any other text in
 # ``reason`` is logged as :data:`OTHER_REASON`, so a log line never holds text
@@ -230,6 +233,7 @@ def build_upstream_server(
     caps: Any,
     on_call: OnCall | None = None,
     on_refusal: OnRefusal | None = None,
+    on_workspace_result: OnWorkspaceResult | None = None,
 ) -> Server:
     """Build a low-level ``Server`` that forwards to the live session of ``link``.
 
@@ -246,6 +250,11 @@ def build_upstream_server(
     duration_ms, status, error)`` for the call log; status is ``"success"``,
     ``"error"`` or ``"denied"``. ``on_refusal`` is invoked with ``(tool,
     reason)`` for a result that is a refusal (:func:`refusal_reason`).
+
+    A call from a workspace thread (``workspace_ctx``) is sent upstream with
+    ``_meta["joshua/workspace"]`` set to the workspace id, and a call that
+    succeeds is handed to ``on_workspace_result``. A call from any other chat
+    carries no such key.
     """
 
     async def forward(fn: Callable[[ClientSession], Awaitable[Any]]) -> Any:
@@ -272,9 +281,12 @@ def build_upstream_server(
                 on_call(tool, 0.0, "denied", "tool not permitted")
             return _tool_error(f"tool not permitted: {tool}")
         start = time.perf_counter()
+        workspace = workspace_ctx.get()
+        meta = {WORKSPACE_META_KEY: workspace} if workspace else None
         try:
             res = await link.forward(
-                lambda session: session.call_tool(tool, params.arguments or {}), repeatable=False
+                lambda session: session.call_tool(tool, params.arguments or {}, meta=meta),
+                repeatable=False,
             )
         except ValidationError:
             raise
@@ -294,6 +306,11 @@ def build_upstream_server(
             reason = refusal_reason(res)
             if reason is not None:
                 on_refusal(tool, reason)
+        if workspace and on_workspace_result is not None and not res.is_error:
+            try:
+                on_workspace_result(tool, params.arguments or {}, res, workspace)
+            except Exception as exc:  # noqa: BLE001 — recording never fails a tool call
+                log.warning({"message": "workspace items hook failed", "error": type(exc).__name__})
         return res
 
     async def on_list_resources(ctx, params):

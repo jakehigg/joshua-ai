@@ -6,6 +6,113 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **Workspaces.** A workspace is a chat thread for one large piece of work,
+  such as a trip, a house project, or a piece of code. It has a title, a goal,
+  a model, the MCP servers that the person picked, notes, and a list of items.
+  An item is a document, an artifact, a wiki page, a pull request, an
+  assignment, a developer task, a tasks project, a link, or a file. Core runs
+  each workspace thread as the full Joshua and adds a workspace block to each
+  message. The block holds the goal, the notes, the items, the jobs that the
+  workspace started, and the next steps of a linked tasks project. A reply
+  stays in the thread and does not go to the phone. The agent sends one
+  message to the normal chat with `send_to_normal_chat`. A workspace belongs
+  to the member who made it. See [workspaces.md](workspaces.md).
+- **Workspace items are added for you.** A workspace session sends
+  `X-Joshua-Workspace` to the gateway. The gateway puts
+  `_meta["joshua/workspace"]` on each tool call. After a successful call, it
+  adds items from a map of known tools and from each MCP `resource_link` in
+  the result. It posts them to `POST /v1/workspaces/by-id/<id>/items`. A file
+  that the person sends in a workspace thread is also an item. Channels
+  `POST /v1/events` takes `workspace`, so an event runs in that thread. With
+  `verbatim`, the event is only recorded there. The assignments container
+  keeps the workspace of a start and reports to that thread.
+- **Normal chat knows the workspaces.** The direct chat of a member lists the
+  active workspaces, at most 10. A message that matches a workspace above
+  `workspaces.hint_sim` (default 0.70) gets the line "May relate to workspace
+  X". The new tools `send_to_workspace`, `tell_workspace`, `list_workspaces`,
+  and `workspace_status` move work between the normal chat and a workspace.
+- **The chat is a screen of the viewer.** `/chat/<person>` shows the normal
+  chat, and `/chat/w/<slug>` shows a workspace. The screen has a rail with the
+  workspaces, a dialog for a new workspace, a header with an edit drawer, and
+  an items panel. A document, a page, or a photo opens in a panel next to the
+  chat. A turn streams as it arrives. A message can carry one photo or one
+  PDF, and the composer shows the upload progress. Events show as short lines
+  that open to the full text. A silent reply (`[IGNORE]`) never shows. Voice
+  is not part of this screen.
+- **The chat works on a phone.** The rail and the panels open as sheets, one
+  at a time, and a tap outside or Escape closes them. The app menu is a left
+  drawer. The composer is one line when empty and grows to five lines. With a
+  mouse or a trackpad, Enter sends and Shift+Enter adds a new line. On a touch
+  screen, Enter adds a new line and the button sends. The composer stays above
+  the on-screen keyboard. On iOS it keeps at least 44px free, and `?kbpad=<n>`
+  sets another value. `?debug=vv` shows the viewport numbers on the screen.
+- **Focus mode on a desktop.** Each side panel collapses, and focus mode
+  collapses all of them. Ctrl+\ or Cmd+\ toggles focus mode. The browser keeps
+  the choice.
+- **Normal chat is one thread.** A turn from the viewer or the terminal runs in
+  the main conversation of the person. That is the most recent direct
+  conversation that is not a workspace, `cli`, or voice thread. Reminders and
+  event replies still go to the phone. With no such conversation, the `cli:`
+  conversation is used. Old `cli:` history stays in the database. A turn on a
+  shared thread names its channel, so guidance for one channel does not apply
+  to another. The `TurnEvent` has a new optional field, `thread`.
+- **A turn survives the client that sent it.** Core runs a streamed turn in a
+  task of its own. Channels and the viewer read the stream in their own tasks.
+  A closed tab, a locked phone, or a dropped signal no longer stops the turn,
+  and the reply goes into the transcript. The stream sends `accepted`,
+  `status`, `delta`, `done`, and `error` events.
+- **Every device sees a turn in progress.** `GET /v1/transcript` gives
+  `pending`, with the state (`queued` or `running`), the turn id, the start
+  time, and the text. The viewer shows "Joshua is working" and reloads the
+  history until the answer arrives. A page that comes back after a sleep finds
+  the turn again. The browser keeps an unsent message and its file, and the
+  next visit offers to send them again.
+- **Files stay with their message.** The transcript row of a message keeps its
+  files in `meta.attachments`. The chat shows a photo as a thumbnail and a PDF
+  as a chip, in a new message and in the history.
+- **A long chat starts a new session at a size limit.** A turn whose input is
+  over `core.context_cap` (default 150000 tokens) ends the SDK session. The
+  next turn starts a new session and gets the last 10 rows of the thread. `0`
+  turns the limit off. A workspace uses `workspaces.context_cap` (default
+  150000).
+- **The viewer is one React app.** The gateway renders no page in Python. It
+  serves the app from `gateway/frontend` and a JSON API under `/api/v1/` for
+  the wiki, the journal, search, usage, links, documents, assignments, the
+  chat, and the workspaces. The report showcase and the saved assignments are
+  React pages. Search has its own page, and the app bar has no search field.
+  `/style.css` and `/ui/<file>` are removed. An image with no build of the app
+  serves the JSON API only.
+- **An HTML document fits the screen.** The frame is as tall as its content,
+  and a wide document scales to the width of the panel. "Actual size" and "Fit
+  width" switch the view, and the browser keeps the choice for each document.
+  A document without scripts has `sandbox allow-same-origin` with no
+  `allow-scripts`, so the page can read its size. A document with
+  `scripts: true` keeps an opaque origin.
+- **The viewer installs as an app.** Add to Home Screen opens the viewer with no
+  browser chrome. The service worker keeps the shell for a slow network. It
+  never handles a request under `/api/v1/`. Each build stamps its id into the
+  service worker, so a deploy replaces the old cache. The app checks for a new
+  build when it opens, on focus, when the network returns, and every 30
+  minutes. A hidden app reloads. A visible app shows "Joshua was updated" with
+  a Reload button. A reinstall is necessary one time, after the upgrade to this
+  version.
+- **Upgrade notes.**
+  - The viewer calls channels at `CHANNELS_URL` with `JOSHUA_TOKEN_VIEWER`. The
+    chart and docker compose set the URL. The channels container must also hold
+    `JOSHUA_TOKEN_VIEWER`. Without both, the chat routes answer 503 and
+    `/readyz` shows `"chat": false`.
+  - The default of `channels.webhooks.allowed_callers` is now `laptop`, `ci`,
+    and `viewer`. An instance that lists the callers in `joshua.yaml` must add
+    `viewer`.
+  - The default of `workspaces.allowed_callers` is `viewer` and `gateway`. An
+    instance that lists the callers must add `gateway`.
+  - The gateway reaches core at `CORE_URL`. The default is the core service of
+    the platform.
+  - The app now serves `/chat`. A deployment that routes `/chat` to the old
+    separate chat app keeps that app until the route is removed.
+  - The person id `w` is reserved.
+  - The schema adds the tables `workspaces` and `workspace_items`. Nothing
+    changes until a workspace exists.
 - **The assignments in the viewer are React pages.** The list at
   `/assignments` and one assignment at `/assignments/<id>` are the app now.
   The state pills write the address (`?state=draft`), so a bookmark of a state

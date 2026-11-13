@@ -39,6 +39,9 @@ class TurnResult:
     session_id: str | None = None
     is_error: bool = False
     usage: dict[str, Any] | None = None
+    # The input of the last model call of the turn, which is the size of the
+    # context the session holds. None when the backend does not report it.
+    context_tokens: int | None = None
     cost_usd: float | None = None
     # De-duped names of the tools the agent invoked this turn, first-seen order.
     tools_used: list[str] = field(default_factory=list)

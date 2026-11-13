@@ -33,8 +33,8 @@ const APP_PATH = /^\/(?:(?:wiki|shared|attachments)\/.*)?$/;
 
 /**
  * One address of the viewer. An address of this app is a router link, so the
- * browser loads no page; every other one is a plain link, which the server
- * renderer answers.
+ * browser loads no page; every other one is a plain link, which the browser
+ * loads.
  */
 export function HopLink({ to, children }: { to: string; children: ReactNode }) {
   if (APP_PATH.test(to)) {

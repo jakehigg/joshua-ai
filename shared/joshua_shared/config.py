@@ -278,7 +278,7 @@ class VoiceChannel(_Model):
 
 
 class Webhooks(_Model):
-    allowed_callers: list[str] = ["laptop", "ci"]
+    allowed_callers: list[str] = ["laptop", "ci", "viewer"]
 
 
 class Limits(_Model):
@@ -309,6 +309,11 @@ class Core(_Model):
     # many seconds at most, so a server that keeps failing cannot cause a
     # reconnect storm. 0 or less turns the replacement off.
     mcp_replace_seconds: int = 300
+    # Input tokens over which a turn in a conversation that is not a workspace
+    # ends its SDK session. The next turn starts a new session from the last
+    # rows of the thread. 0 turns the cap off. A workspace uses
+    # ``workspaces.context_cap``.
+    context_cap: int = Field(default=150_000, ge=0)
     # None uses the prompts packaged in the image. Set a path only to read a
     # prompts directory mounted into the container.
     prompts_dir: str | None = None
@@ -809,6 +814,9 @@ class McpServer(_Model):
     tools: McpToolPolicy | None = None
     identities: dict[str, McpIdentity] = {}
     options: dict[str, Any] = {}
+    # One line that says what the server is for. The workspace dialog of the
+    # viewer shows it beside the name. Empty shows the name alone.
+    description: str | None = Field(default=None, max_length=200)
     # Reserved for the trust policy: none | grant-required (default grant-required).
     url_args: str = "grant-required"
 
@@ -920,6 +928,66 @@ class UsageConfig(_Model):
     @classmethod
     def _lower_writers(cls, value: list[str]) -> list[str]:
         return _callers(value)
+
+
+class WorkspacesConfig(_Model):
+    """Workspaces: a place in Chat for one large piece of work (see
+    ``docs/workspaces.md``). Core serves ``/v1/workspaces`` and runs each
+    workspace thread. Nothing changes until a workspace exists.
+
+    ``allowed_callers`` names the fleet identities that may call
+    ``/v1/workspaces``. The caller vouches for the person with the ``person``
+    query parameter. The ``gateway`` records the items of a tool call on
+    ``POST /v1/workspaces/by-id/<id>/items``, which takes no person. An empty
+    list turns the routes off. ``models`` is the
+    list of models a workspace may pick; an empty list accepts any name.
+    ``context_cap`` is the input size, in tokens, over which a workspace turn
+    ends its SDK session: the next turn starts from the workspace block and
+    the last rows of the thread. ``tool_search_max_servers`` is the number of
+    picked servers up to which a workspace turn runs with tool search off.
+    ``viewer_url`` is the public address of the viewer, for the link that
+    ``send_to_normal_chat`` adds. ``hint_sim`` is the similarity over which
+    normal chat gets the line "May relate to workspace X". ``tasks_url`` is
+    the address of the tasks addon: with it, the block of a workspace that
+    links a tasks project lists the next steps. Without it, the section is
+    off.
+    """
+
+    allowed_callers: list[str] = ["viewer", "gateway"]
+    models: list[str] = []
+    context_cap: int = Field(default=150_000, ge=1_000)
+    tool_search_max_servers: int = Field(default=3, ge=0)
+    viewer_url: str | None = None
+    hint_sim: float = Field(default=0.70, ge=0.0, le=1.0)
+    tasks_url: str | None = None
+
+    @field_validator("tasks_url", mode="before")
+    @classmethod
+    def _check_tasks_url(cls, value: Any) -> Any:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        if not isinstance(value, str) or not value.strip().startswith(("http://", "https://")):
+            raise ValueError("tasks_url must be an http or https address")
+        return value.strip().rstrip("/")
+
+    @field_validator("allowed_callers", "models", mode="before")
+    @classmethod
+    def _empty_is_none(cls, value: Any) -> Any:
+        return _empty_list(value)
+
+    @field_validator("allowed_callers")
+    @classmethod
+    def _lower_callers(cls, value: list[str]) -> list[str]:
+        return _callers(value)
+
+    @field_validator("viewer_url", mode="before")
+    @classmethod
+    def _check_viewer_url(cls, value: Any) -> Any:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        if not isinstance(value, str):
+            raise ValueError("viewer_url must be text")
+        return _check_base_url(value.strip())
 
 
 class LimitsConfig(_Model):
@@ -1368,12 +1436,13 @@ class JoshuaConfig(_Model):
     modules: list[str] = []
     viewer: Viewer = Viewer()
     usage: UsageConfig = UsageConfig()
+    workspaces: WorkspacesConfig = WorkspacesConfig()
     limits: LimitsConfig = LimitsConfig()
     inference: Inference = Inference()
     gateway: GatewayConfig = GatewayConfig()
     assignments: Assignments = Assignments()
 
-    @field_validator("limits", "gateway", "assignments", mode="before")
+    @field_validator("limits", "gateway", "assignments", "workspaces", mode="before")
     @classmethod
     def _empty_limits(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.

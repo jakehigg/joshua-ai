@@ -61,6 +61,11 @@ pipeline every other channel runs, so it stores the file under
 "Attachments" below for what the pipeline accepts. `make chat` sends JSON and
 no file.
 
+A client that closes its connection does not stop the turn. Channels reads the
+stream from core in a task of its own, so core never sees a closed stream, and
+the reply is in the transcript when the client comes back. `GET
+/v1/cli/transcript` says which turn is still `pending`.
+
 ## Telegram
 
 ### Make a bot
@@ -417,7 +422,7 @@ through that instead.
 
 An external system can send Joshua an event. `channels` accepts it at
 `POST /v1/events` from the identities in `channels.webhooks.allowed_callers`
-(default `laptop` and `ci`). Each caller needs its own `JOSHUA_TOKEN_<NAME>`.
+(default `laptop`, `ci` and `viewer`; the viewer calls the `/v1/cli/` routes for its chat). Each caller needs its own `JOSHUA_TOKEN_<NAME>`.
 
 The assignments container sends its reports, its questions, and the comments
 of a person on the plan or the report of a completed assignment as events. To
@@ -436,6 +441,10 @@ Two shapes exist:
 
 - A **named event** carries `event_type` and an optional `payload`. Core runs
   the skill file `skills/<event_type>.md`. See `events.md`.
+- A **workspace message** carries `workspace` (a workspace id) and `text`. Core
+  runs the text as a turn in the thread of that workspace, and nothing goes to
+  an adapter. With `verbatim: true`, core only records the text there. A
+  `destination` beside it is not used. See `workspaces.md`.
 - A **message** carries `destination` and `text`. Core runs the text as one
   turn and delivers the reply to the destination. With `verbatim: true`,
   channels sends the text as it is and no model runs.

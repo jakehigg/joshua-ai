@@ -1,14 +1,16 @@
 # Joshua UI
 
 The shared look of Joshua's own interfaces: the viewer and the addons that
-ship with Joshua. This folder holds the master copy.
+ship with Joshua. This folder holds the master copy of the stylesheet.
 
 | File | What it is |
 | --- | --- |
 | `joshua-ui.css` | Design tokens (`--j-*`) and components (`.j-*`). Dark only. |
-| `logo-512.png`, `logo-64.png` | The logo, for app bars and sidebars. |
-| `apple-touch-icon.png` | 180px icon for a phone home screen. |
-| `favicon-32.png` | Browser tab icon. |
+
+The images of the look are the ones the viewer serves,
+`gateway/frontend/public/`: `logo-512.png` and `logo-64.png` (the logo, for
+app bars and sidebars), `apple-touch-icon.png` (180px, for a phone home
+screen) and `favicon-32.png` (the browser tab icon).
 
 ## Using it in an addon
 
@@ -16,7 +18,9 @@ Using this stylesheet is optional. An addon written by someone else can look
 however its author wants.
 
 An app that does use it keeps its own copy of these files and does not edit
-that copy. To change the look, change the master here, bump the version in
+that copy: the React app of the viewer imports this master from
+`gateway/frontend/src/index.css` and copies the images into its own
+`public/`. To change the look, change the master here, bump the version in
 the header comment of `joshua-ui.css`, and copy the files into each app again.
 Each copy has the version in its header, so you can see which copies are out
 of date.

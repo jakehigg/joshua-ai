@@ -9,9 +9,27 @@
  * with its own "+", and the `Versions` fold lists the commits of the file;
  * `?rev=<sha>` opens an older version, which is read-only.
  *
+ * A body with the headings of a report shows as the same showcase as the
+ * report of an assignment (`src/showcase/`): its lede goes in the head, which
+ * then holds the lines of the title and the lede, and each card takes a
+ * comment. A decision has a copy button there, because a document is not a
+ * run a person answers.
+ *
+ * Embed mode (`?embed=1`, or any page in a frame, which is how the chat panel
+ * loads it; `?rev=` works with it): only the body. There is no app shell, no
+ * breadcrumb and no head card. The comment gutter works as on the full page.
+ * The head, the Source fold and the Versions fold are in one closed `Details`
+ * fold at the bottom, so nothing is lost. A body that is one code block with
+ * a little prose around it (`codeFirst`) shows the code first, full width,
+ * with its copy button, and the prose in a closed `Notes` fold below it. This
+ * is a way to show a document; the stored document does not change. Code is
+ * highlighted on every page, as in the chat (index.css).
+ *
  * An HTML document shows in an `<iframe sandbox>` that loads
- * `/documents/<owner>/<slug>/artifact`, a route of the server: the frame has
- * an opaque origin, and that route sends the content policy of the document.
+ * `/documents/<owner>/<slug>/artifact`, a route of the server that sends the
+ * content policy of the document. ArtifactFrame.tsx sizes the frame to its
+ * content and fits it to the width. The note on scripts is in the Details fold
+ * of the embed page, and the ⓘ of the bar on the full page.
  *
  * A document of another member and one that is not there are both 404, so
  * the page says what the viewer said.
@@ -21,7 +39,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import { ApiError, getJson } from "../api/client";
-import Blocks, { spans, type DocBlock } from "../blocks/Blocks";
+import Blocks, { span, what, type DocBlock } from "../blocks/Blocks";
+import type { ShowcaseData } from "../assignments/data";
+import Markdown from "../md/Markdown";
 import { When, type DocComment } from "../comments/CommentCard";
 import {
   Cards,
@@ -29,12 +49,17 @@ import {
   Plus,
   Resolved,
   SourceLines,
+  Unit,
   useGutter,
   type Span,
 } from "../comments/Gutter";
-import Shell, { type Session } from "../shell/Shell";
+import Hero from "../showcase/Hero";
+import Showcase, { decisions, outputs, showcaseSpans } from "../showcase/Showcase";
+import type { TileData } from "../showcase/Tiles";
+import Shell, { embedded, type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Fold from "../ui/Fold";
+import { ArtifactFrame, scriptsNote } from "./ArtifactFrame";
 import Spinner from "../ui/Spinner";
 import { CommentsBadge, KindChip, StatusChip } from "./Documents";
 
@@ -60,7 +85,7 @@ export interface DocumentData {
   frontmatter: Record<string, unknown>;
   artifact_url: string | null;
   blocks: DocBlock[];
-  report: unknown;
+  report: ShowcaseData | null;
   lines: string[];
   preamble: string[];
   comments: DocComment[];
@@ -69,8 +94,27 @@ export interface DocumentData {
   csrf: string | null;
 }
 
-/** The unit of the head: line 0, the document as a whole. */
-const HEAD: Span = { first: 0, last: 0 };
+/**
+ * The unit of the head: line 0, the document as a whole, and, in a showcase,
+ * the lines of the title and the lede, which the head shows itself.
+ */
+export function headSpan(report: ShowcaseData | null): Span {
+  if (report === null || !report.structured) {
+    return { first: 0, last: 0 };
+  }
+  const line = report.preamble?.line ?? report.first_section;
+  return { first: 0, last: Math.max(0, line - 1) };
+}
+
+/** The numbers of a showcase document: what it asks and what it names. */
+export function tiles(report: ShowcaseData | null): TileData[] {
+  const asks = decisions(report).length;
+  const made = outputs(report).length;
+  return [
+    { value: asks === 0 ? "" : String(asks), label: asks === 1 ? "decision" : "decisions" },
+    { value: made === 0 ? "" : String(made), label: made === 1 ? "output" : "outputs" },
+  ];
+}
 
 /** The properties the chips of the head already give. */
 const CHIPPED = new Set(["title", "kind", "status", "updated"]);
@@ -107,6 +151,22 @@ function bodyHasTitle(lines: string[]): boolean {
 /** The `title:` line of the frontmatter, which the "+" of line 0 anchors to. */
 function titleLine(preamble: string[]): string {
   return preamble.find((line) => line.startsWith("title:")) ?? "";
+}
+
+/**
+ * The one code block of a body that is mostly code: the document has exactly
+ * one code block, and its lines are at least half of the lines of all the
+ * blocks. Otherwise null, and the body shows as it is.
+ */
+export function codeFirst(blocks: DocBlock[]): DocBlock | null {
+  const code = blocks.filter((block) => block.kind === "code");
+  const only = code[0];
+  if (code.length !== 1 || only === undefined) {
+    return null;
+  }
+  const size = (block: DocBlock) => block.last_line - block.first_line + 1;
+  const total = blocks.reduce((sum, block) => sum + size(block), 0);
+  return size(only) * 2 >= total ? only : null;
 }
 
 /** The links of a document: its assignment, and the page it was promoted to. */
@@ -152,23 +212,15 @@ function Props({ front }: { front: Record<string, unknown> }) {
 }
 
 /** An HTML document, in the sandboxed frame of the artifact route. */
-function Frame({ doc }: { doc: DocumentData }) {
-  const scripts = doc.frontmatter["scripts"] === true;
-  const note = scripts
-    ? "Scripts of this document run in a sandbox, apart from the viewer."
-    : "Scripts of this document do not run.";
+function Frame({ doc, info }: { doc: DocumentData; info: boolean }) {
   return (
-    <section className="d-artifact">
-      <iframe
-        className="d-frame"
-        sandbox={scripts ? "allow-scripts" : ""}
-        src={doc.artifact_url ?? ""}
-        title={doc.title}
-        referrerPolicy="no-referrer"
-        loading="lazy"
-      />
-      <p className="j-faint d-frame-note">{note}</p>
-    </section>
+    <ArtifactFrame
+      url={doc.url}
+      artifactUrl={doc.artifact_url ?? ""}
+      title={doc.title}
+      scripts={doc.frontmatter["scripts"] === true}
+      info={info}
+    />
   );
 }
 
@@ -222,6 +274,7 @@ export default function Document() {
   const { owner = "", slug = "" } = useParams();
   const [params] = useSearchParams();
   const rev = params.get("rev") ?? "";
+  const embed = params.get("embed") === "1" || embedded();
   const [doc, setDoc] = useState<DocumentData | null>(null);
   const [comments, setComments] = useState<DocComment[]>([]);
   const [person, setPerson] = useState<string>("");
@@ -270,7 +323,12 @@ export default function Document() {
     document.title = doc === null ? "document" : doc.title;
   }, [doc]);
 
-  const units = useMemo(() => [HEAD, ...spans(doc?.blocks ?? [])], [doc]);
+  const report = doc?.report ?? null;
+  const headUnit = useMemo(() => headSpan(report), [report]);
+  const units = useMemo(
+    () => [headUnit, ...showcaseSpans(report, doc?.blocks ?? [])],
+    [headUnit, report, doc],
+  );
   const gutter = useGutter({
     url: path,
     lines: doc?.lines ?? [],
@@ -295,16 +353,20 @@ export default function Document() {
       </Shell>
     );
   }
+  const showcase = report !== null && report.structured;
   const headCards = gutter.cards.get(0) ?? [];
   const classes = ["a-hero", "d-hero", "d-unit", headCards.length > 0 ? "has-comments" : ""];
-  return (
-    <Shell section="documents">
-      <nav className="j-crumbs">
-        <Link to="/documents">documents</Link> <span aria-hidden="true">/</span>{" "}
-        {doc.owner_label}
-      </nav>
-      <header className={classes.filter((part) => part !== "").join(" ")} id="L0">
-        <div className="a-chips">
+  // A showcase gives the title of the document once: its own title line is
+  // the lede of the head, not a block of the body.
+  const head = (
+    <Hero
+      className={classes.filter((part) => part !== "").join(" ")}
+      id="L0"
+      title={showcase || !bodyHasTitle(doc.lines) ? doc.title : ""}
+      lede={showcase ? report.lede : ""}
+      tiles={showcase ? tiles(report) : []}
+      chips={
+        <>
           <StatusChip status={doc.status} />
           <KindChip kind={doc.kind} />
           <Links front={doc.frontmatter} />
@@ -314,22 +376,87 @@ export default function Document() {
               updated <When at={doc.updated} />
             </span>
           )}
+        </>
+      }
+      sub={<Props front={doc.frontmatter} />}
+    >
+      <Plus gutter={gutter} line={0} text={titleLine(doc.preamble)} what="the document" />
+      <Cards gutter={gutter} unit={headUnit} />
+    </Hero>
+  );
+  const folds = (
+    <div className="a-folds">
+      <Orphans gutter={gutter} />
+      <Fold title="Source" hint={count(doc.lines.length, "line")}>
+        <SourceLines gutter={gutter} preamble={doc.preamble} />
+      </Fold>
+      <Resolved gutter={gutter} />
+      <Versions doc={doc} />
+    </div>
+  );
+
+  if (embed) {
+    const code = doc.format === "html" || showcase ? null : codeFirst(doc.blocks);
+    const rest = code === null ? [] : doc.blocks.filter((block) => block !== code);
+    let body;
+    if (doc.format === "html") {
+      body = <Frame doc={doc} info={false} />;
+    } else if (code !== null) {
+      body = (
+        <>
+          <div className="a-blocks d-body d-codefirst">
+            <Unit
+              gutter={gutter}
+              unit={span(code)}
+              className="a-block code d0"
+              what={what(code)}
+            >
+              <Markdown text={code.markdown} />
+            </Unit>
+          </div>
+          {rest.length > 0 && (
+            <Fold title="Notes" hint={count(rest.length, "block")}>
+              <Blocks blocks={rest} gutter={gutter} />
+            </Fold>
+          )}
+        </>
+      );
+    } else {
+      body = <Showcase report={report} blocks={doc.blocks} gutter={gutter} />;
+    }
+    return (
+      <Shell section="documents">
+        <div className="d-embed">
+          <Older doc={doc} />
+          {body}
+          <Fold
+            title="Details"
+            hint={gutter.open > 0 ? `${count(gutter.open, "open comment")}` : doc.status}
+          >
+            {doc.format === "html" && (
+              <p className="j-faint d-frame-note">{scriptsNote(doc.frontmatter["scripts"] === true)}</p>
+            )}
+            {head}
+            {folds}
+          </Fold>
         </div>
-        {!bodyHasTitle(doc.lines) && <h1 className="j-doc-title">{doc.title}</h1>}
-        <Props front={doc.frontmatter} />
-        <Plus gutter={gutter} line={0} text={titleLine(doc.preamble)} what="the document" />
-        <Cards gutter={gutter} unit={HEAD} />
-      </header>
+      </Shell>
+    );
+  }
+  return (
+    <Shell section="documents">
+      <nav className="j-crumbs">
+        <Link to="/documents">documents</Link> <span aria-hidden="true">/</span>{" "}
+        {doc.owner_label}
+      </nav>
+      {head}
       <Older doc={doc} />
-      {doc.format === "html" ? <Frame doc={doc} /> : <Blocks blocks={doc.blocks} gutter={gutter} />}
-      <div className="a-folds">
-        <Orphans gutter={gutter} />
-        <Fold title="Source" hint={count(doc.lines.length, "line")}>
-          <SourceLines gutter={gutter} preamble={doc.preamble} />
-        </Fold>
-        <Resolved gutter={gutter} />
-        <Versions doc={doc} />
-      </div>
+      {doc.format === "html" ? (
+        <Frame doc={doc} info />
+      ) : (
+        <Showcase report={report} blocks={doc.blocks} gutter={gutter} />
+      )}
+      {folds}
     </Shell>
   );
 }

@@ -16,7 +16,6 @@ this module reads, checks and writes the file.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from html import escape
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -89,12 +88,6 @@ class Link:
 
 def links_path(wiki_base: Path) -> Path:
     return wiki_base / LINKS_DIR / LINKS_FILE
-
-
-def icon_svg(name: str) -> str:
-    """The inline SVG of a built-in icon. An unknown name draws the link icon."""
-    paths = ICONS.get(name, ICONS[DEFAULT_ICON])
-    return f'<svg class="j-icon" viewBox="0 0 24 24" aria-hidden="true">{paths}</svg>'
 
 
 def check_url(raw: str) -> str:
@@ -213,32 +206,3 @@ def from_rows(rows: Any) -> list[Link]:
     if len(links) > MAX_LINKS:
         raise LinkError(f"keep at most {MAX_LINKS} links")
     return links
-
-
-# -- HTML ---------------------------------------------------------------------
-#
-# The server-rendered shell (``viewer._shell``) draws the sidebar of the pages
-# the server still renders, and ``nav_html`` is its links group. The React app
-# draws its own list (``shell/LinksNav.tsx``), so this builder goes away with
-# ``_shell``, when the last page of the viewer is a page of the app.
-
-
-def _anchor(link: Link, cls: str) -> str:
-    return (
-        f'<a class="{cls}" href="{escape(link.url, quote=True)}" '
-        'target="_blank" rel="noopener noreferrer">'
-        f"{icon_svg(link.icon)}<span>{escape(link.title)}</span></a>"
-    )
-
-
-def nav_html(links: list[Link], *, current: bool) -> str:
-    """The "Links" group of the sidebar: each link, then the way to edit them."""
-    items = "".join(_anchor(link, "j-nav-item") for link in links)
-    mark = ' aria-current="page"' if current else ""
-    manage = "Edit links" if links else "Add links"
-    return (
-        '<div class="j-label">Links</div>'
-        f'<nav class="v-sections v-links" aria-label="Links">{items}'
-        f'<a class="j-nav-item sub v-links-edit" href="/links"{mark}>{manage}</a>'
-        "</nav>"
-    )

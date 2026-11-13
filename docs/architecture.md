@@ -81,6 +81,18 @@ The `files` MCP runs inside `gateway`. It is the only path that writes the
 wiki and a person's journal, and it confines every path to its root. There is
 one wiki. Everyone reads it, a member writes it, a guest reads it only.
 
+The viewer runs from the same image, as its own service. It is one React
+single-page app (`gateway/frontend`), built by the node stage of
+`gateway/Dockerfile` and served at the root of the host behind HTTP basic and
+`viewer.anonymous`. Everything it shows comes from a JSON API under
+`/api/v1/`, which carries the wiki pages, the journal, the search, the usage,
+the links, the documents, the assignments, the chat and the workspaces. The
+chat reaches the `channels` container through `viewer_channels.py` and
+`viewer_multipart.py`; the workspaces proxy core's `/v1/workspaces` through
+`viewer_api/workspaces.py` and `workspace_items.py`. The viewer holds one
+fleet token, its own, and no upstream credential.
+[operations.md](operations.md#the-viewer) says how to turn it on.
+
 ## assignments
 
 `assignments` is a fourth container, optional and off by default. It runs long
@@ -122,9 +134,10 @@ gets 403.
 | core `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) |
 | core `GET /v1/usage` | `usage.allowed_callers` (default `viewer`) |
 | core `POST /v1/usage` | `usage.writers` (default `assignments`), rows of kind `assignment` only |
+| core `/v1/workspaces` (list, create, read, change, items, block) | `workspaces.allowed_callers` (default `viewer`, `gateway`); the caller names the person, and every route is scoped to that person. `POST /v1/workspaces/by-id/{id}/items` is for the gateway and takes no person |
 | core `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`), and any other token gets 401 |
 | channels `POST /v1/deliver`, `GET /v1/channels/resolve` | `core` |
-| channels `POST /v1/events` | `channels.webhooks.allowed_callers` (default `laptop`, `ci`) |
+| channels `POST /v1/events` | `channels.webhooks.allowed_callers` (default `laptop`, `ci`, `viewer`) |
 | channels `POST /v1/cli/turns/stream`, `GET /v1/cli/outbox`, `GET /v1/cli/transcript` | `channels.webhooks.allowed_callers` |
 | channels `POST /webhook/imessage/{secret}` | no bearer; the path secret is the credential |
 | gateway MCP routes | `gateway.person_header_callers` (default `core`, `assignments`) |

@@ -21,7 +21,7 @@ from joshua_gateway import viewer
 from joshua_gateway import viewer_comments as vc
 from joshua_gateway import viewer_docstore as ds
 from joshua_gateway import viewer_documents as dm
-from joshua_gateway import viewer_showcase as sc
+from joshua_gateway.viewer_api import assignments as api
 from joshua_shared import config, wikigit
 from starlette.testclient import TestClient
 
@@ -146,17 +146,10 @@ def _get(path: str, auth=ALEX, **params):
     return client().get(path, params=params, auth=auth)
 
 
-# -- the nav and access -----------------------------------------------------
+# -- access -----------------------------------------------------------------
 
 
-def test_the_nav_has_documents_for_a_member(data) -> None:
-    html = _get("/assignments/saved").text
-    assert 'href="/documents">' in html and ">Documents</a>" in html
-
-
-def test_a_guest_has_no_documents_section(docs) -> None:
-    html = _get("/assignments/saved", auth=GUEST).text
-    assert 'href="/documents"' not in html
+def test_a_guest_reaches_no_document(docs) -> None:
     assert _get("/documents/shared/meals.json", auth=GUEST).status_code == 404
     assert _get("/documents/shared/meals/artifact", auth=GUEST).status_code == 404
 
@@ -278,12 +271,13 @@ def test_the_artifact_route_serves_the_body_with_its_own_policy(docs) -> None:
     policy = response.headers["content-security-policy"]
     assert policy == (
         "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
-        "form-action 'none'; frame-src 'none'; frame-ancestors 'self'; sandbox"
+        "form-action 'none'; frame-src 'none'; frame-ancestors 'self'; sandbox allow-same-origin"
     )
     # Styles render, and nothing else loads: no script, no network, no form.
+    # The same origin is only so the page can read the height of the frame.
     assert "script-src" not in policy
     assert "connect-src" not in policy
-    assert "allow-same-origin" not in policy
+    assert "allow-scripts" not in policy
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["cache-control"] == "no-store"
 
@@ -307,9 +301,13 @@ def test_the_artifact_route_has_the_rules_of_the_page(docs) -> None:
     assert client().get("/documents/alex/mockup/artifact").status_code == 401
     assert _get("/documents/mia/private/artifact").status_code == 404
     assert _get("/documents/alex/mockup/artifact", auth=GUEST).status_code == 404
-    assert _get("/documents/alex/none/artifact").status_code == 404
+    missing = _get("/documents/alex/none/artifact")
+    assert missing.status_code == 404
     # A Markdown document has no frame, so it has no artifact.
     assert _get("/documents/alex/party/artifact").status_code == 404
+    # The 404 is plain text: the viewer renders no page of its own.
+    assert missing.headers["content-type"].startswith("text/plain")
+    assert "<" not in missing.text
 
 
 @NEEDS_GIT
@@ -329,12 +327,9 @@ def test_the_artifact_route_serves_an_older_version(docs) -> None:
 
 
 def test_an_output_of_kind_document_links_to_its_page() -> None:
-    card = sc.output_card(sc.Card("document", "documents/alex/party.md", "Party plan"))
-    assert '<a class="a-out-title" href="/documents/alex/party">Party plan</a>' in card
-    other = sc.output_card(sc.Card("document", "documents/../wiki/x.md", "Bad"))
-    assert "href=" not in other
-    page = sc.output_card(sc.Card("page", "documents/alex/party.md", "Not a document"))
-    assert "href=" not in page
+    assert api._output_url("document", "documents/alex/party.md") == "/documents/alex/party"
+    assert api._output_url("document", "documents/../wiki/x.md") is None
+    assert api._output_url("page", "documents/alex/party.md") is None
 
 
 @pytest.mark.parametrize(
@@ -402,7 +397,7 @@ def test_the_marks_of_a_document(docs) -> None:
 
 
 def test_the_documents_fit_a_phone() -> None:
-    css = (Path(viewer.__file__).parent / "viewer.css").read_text()
+    css = (Path(viewer.__file__).parent.parent / "frontend" / "src" / "viewer.css").read_text()
     rule = css[css.index("iframe.d-frame {") :][:300]
     assert "width: 100%" in rule and "max-width: 100%" in rule
     assert ".a-card-unit > details.a-add[open], .a-card-unit > .a-comment" in css

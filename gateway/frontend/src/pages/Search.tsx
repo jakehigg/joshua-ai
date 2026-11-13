@@ -7,14 +7,15 @@
  * half always shows, so the page works when core is down or not configured;
  * then the meaning half is absent and the page says nothing about it.
  *
- * A hit links the page it names, which can be a page of this app or one the
- * server renders, so it is a plain link and the browser loads the address.
+ * A hit links the page it names, which can also be a file of the data
+ * volume, so it is a plain link and the browser loads the address.
  */
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { ApiError, getJson } from "../api/client";
+import SearchField from "../shell/SearchField";
 import Shell from "../shell/Shell";
 import Empty from "../ui/Empty";
 import ErrorLine from "../ui/ErrorLine";
@@ -99,6 +100,7 @@ export default function Search() {
   if (query === "") {
     return (
       <Shell section="search">
+        <SearchField query={query} />
         <Page title="search">
           <Empty text={ASK_TEXT} />
         </Page>
@@ -107,14 +109,16 @@ export default function Search() {
   }
   if (error !== "") {
     return (
-      <Shell section="search" query={query}>
+      <Shell section="search">
+        <SearchField query={query} />
         <ErrorLine text={error} />
       </Shell>
     );
   }
   if (answer === null) {
     return (
-      <Shell section="search" query={query}>
+      <Shell section="search">
+        <SearchField query={query} />
         <Spinner label="Searching" />
       </Shell>
     );
@@ -126,7 +130,8 @@ export default function Search() {
       <Hits hits={answer.words} />
     );
   return (
-    <Shell section="search" query={query}>
+    <Shell section="search">
+      <SearchField query={query} />
       <Page title="search">
         {answer.meaning !== null && (
           <section className="meaning">

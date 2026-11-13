@@ -1,9 +1,10 @@
-/* The two stylesheets of the viewer are the master copies: the shared Joshua
-   look, then what only the viewer needs. Neither is copied into this
-   workspace, and the app adds no class that is already in them. Anything the
+/* The two stylesheets of the viewer: the shared Joshua look, whose master
+   copy lives beside the Python code (`joshua_gateway/ui/joshua-ui.css`) and
+   is never edited in a copy, then `viewer.css`, which holds what only the
+   viewer needs. The app adds no class that is already in them. Anything the
    app adds goes under these two imports. */
 @import "../../joshua_gateway/ui/joshua-ui.css";
-@import "../../joshua_gateway/viewer.css";
+@import "./viewer.css";
 
 /* A code block of a page, with the button that copies its text. The button
    shows on hover and on focus, so it never covers the first line. */
@@ -15,8 +16,8 @@
 .v-link-actions { display: flex; align-items: center; gap: 6px; }
 
 /* The "+" of a unit and of a line of the source, which opens the form of a
-   comment. The server renderer draws it as the summary of a <details>; here
-   it is a button, so it takes the place and the look of that summary. */
+   comment. It is a button in the place of the summary of a <details>, so it
+   takes the look of one. */
 .v-plus {
   position: absolute; left: 40px; top: 0; width: 18px; height: 1.6em;
   padding: 0; background: none; border: 0; cursor: pointer; text-align: center;
@@ -33,4 +34,1641 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 @media (max-width: 560px) {
   .v-plus { left: 30px; opacity: 0.6; }
   .a-unit > .v-plus { left: 4px; }
+}
+
+/* The chat screen, at /chat/:person. Every rule is under .chat-screen, so the
+   plain class names of the chat (.list, .column, .count, .msg) never reach
+   another page of the viewer. The colors are the --j-* tokens of the master
+   stylesheet; the two values below have no token there. */
+
+/* The shell gives the chat the whole height: the page does not scroll, the
+   message list does. */
+.j-shell.fill { height: 100vh; height: 100dvh; grid-template-rows: minmax(0, 1fr); }
+.j-shell.fill .j-main { min-height: 0; }
+.j-content.fill {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+:root,
+.chat-screen {
+  --chat-width: 860px; /* the reading width of the message column */
+  --chat-shadow: 0 2px 12px rgb(0 0 0 / 0.5);
+
+  /* Code highlight, after the GitHub dark palette. */
+  --hl-comment: #8b949e;
+  --hl-keyword: #ff7b72;
+  --hl-string: #a5d6ff;
+  --hl-number: #79c0ff;
+  --hl-title: #d2a8ff;
+  --hl-type: #ffa657;
+  --hl-attr: #79c0ff;
+  --hl-tag: #7ee787;
+  --hl-meta: #e3b341;
+  --hl-deletion-bg: #490202;
+  --hl-addition-bg: #04260f;
+
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* The bare controls of the chat take the look the stand-alone chat gave every
+   button; the viewer does not style a bare button. */
+.chat-screen button {
+  cursor: pointer;
+  border: 1px solid var(--j-line);
+  background: var(--j-surface-2);
+  border-radius: 10px;
+  padding: 6px 12px;
+  min-height: 36px;
+  font: inherit;
+  color: inherit;
+}
+
+.chat-screen button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.chat-screen textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.chat-screen .send {
+  background: var(--j-accent);
+  color: var(--j-accent-ink);
+  border-color: var(--j-accent);
+  font-weight: 600;
+  padding: 6px 16px;
+}
+
+/* The picker at /chat. */
+.chat-home { display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
+.chat-home-row { display: flex; gap: 8px; }
+.chat-home-row .j-field { flex: 1; min-width: 0; }
+
+/* The chat screen: header, list, composer, one column of the viewport. */
+.chat-screen .chat {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-screen .chat-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px
+    max(16px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--j-line);
+  background: var(--j-bg);
+}
+.chat-screen .title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+.chat-screen .title h1 {
+  margin: 0;
+  font-size: 1.125rem;
+}
+.chat-screen .subtitle {
+  color: var(--j-muted);
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-screen .list-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.chat-screen .list {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.chat-screen .column {
+  max-width: var(--chat-width);
+  margin: 0 auto;
+  padding: 16px max(16px, env(safe-area-inset-right)) 24px max(16px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.chat-screen .empty {
+  color: var(--j-muted);
+  text-align: center;
+  margin: 20vh 0 0;
+}
+.chat-screen .new-below {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  background: var(--j-accent);
+  color: var(--j-accent-ink);
+  border-color: var(--j-accent);
+  border-radius: 999px;
+  box-shadow: var(--chat-shadow);
+  font-size: 0.875rem;
+}
+
+
+/* Messages. */
+.chat-screen .msg {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-screen .msg-person {
+  align-items: flex-end;
+}
+.chat-screen .bubble {
+  max-width: min(85%, 600px);
+  padding: 8px 14px;
+  border-radius: var(--j-radius);
+  border-bottom-right-radius: 4px;
+  background: var(--j-surface-2);
+  white-space: pre-wrap;
+}
+.chat-screen .reading {
+  width: 100%;
+  min-width: 0;
+}
+
+
+/* A time line before the first message of a run: centered, quiet, and always
+   present, so nothing moves on hover or tap. */
+.chat-screen .stamp {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 4px;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  color: var(--j-muted);
+  user-select: none;
+}
+.chat-screen .stamp:first-child {
+  margin-top: 4px;
+}
+
+
+/* A task prompt or an event: one quiet line at the left, like a note in a
+   timeline. It opens to the text, which scrolls inside a box. */
+.chat-screen .msg-system {
+  align-items: stretch;
+}
+.chat-screen .event-line {
+  min-width: 0;
+  color: var(--j-muted);
+  font-size: 0.8125rem;
+}
+.chat-screen .event-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.chat-screen .event-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.chat-screen .event-head:hover { color: var(--j-text); }
+.chat-screen .event-icon { flex: none; }
+.chat-screen .event-title { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-screen .event-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--j-text);
+}
+.chat-screen .event-badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--j-accent);
+  color: var(--j-accent-ink);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.chat-screen .event-chip {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--j-line);
+  border-radius: 999px;
+  background: var(--j-surface-2);
+  color: var(--j-accent);
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+.chat-screen .event-body {
+  max-height: 40vh;
+  margin: 4px 0 0 4px;
+  padding: 8px 12px;
+  overflow: auto;
+  border-left: 2px solid var(--j-line);
+  color: var(--j-text);
+}
+.chat-screen .event-raw { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.75rem var(--j-mono); }
+.chat-screen .event-raw-toggle { min-height: 32px; margin-top: 6px; font-size: 0.75rem; }
+@media (max-width: 759px) {
+  /* The preview takes its own line, so the headline and badge stay readable. */
+  .chat-screen .event-head { flex-wrap: wrap; }
+  .chat-screen .event-preview { flex-basis: 100%; white-space: normal; }
+}
+
+
+/* The document a turn wrote: a card under the answer. */
+.chat-screen .artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--j-line);
+  border-radius: var(--j-radius);
+  background: var(--j-surface-2);
+}
+.chat-screen .artifact-icon {
+  font-size: 1.125rem;
+  line-height: 1;
+}
+.chat-screen .artifact-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.chat-screen .artifact-slug,
+.chat-screen .artifact-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-screen .artifact-slug {
+  font-size: 0.9375rem;
+}
+.chat-screen .artifact-path {
+  color: var(--j-muted);
+  font-family: var(--j-mono);
+  font-size: 0.75rem;
+}
+.chat-screen .artifact-open {
+  min-height: 30px;
+  padding: 2px 12px;
+  font-size: 0.8125rem;
+}
+
+
+/* A path that is not a document path: one quiet line, never a broken card. */
+.chat-screen .artifact-missing {
+  margin: 8px 0 0;
+  color: var(--j-muted);
+  font-size: 0.8125rem;
+}
+
+
+/* The document panel: the viewer's own page in a frame. On a phone it is a
+   sheet over the conversation, not a squeezed column; the conversation stays
+   mounted behind it and keeps its scroll position. */
+.chat-screen .doc-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: var(--j-bg);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.chat-screen .doc-panel-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px
+    max(12px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--j-line);
+  background: var(--j-surface-2);
+}
+.chat-screen .doc-panel-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--j-muted);
+  font-family: var(--j-mono);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-screen .doc-panel-close {
+  min-height: 32px;
+  padding: 2px 12px;
+}
+
+
+/* The one line of affordance: what the + in the gutter is for. */
+.chat-screen .doc-panel-hint {
+  flex: none;
+  margin: 0;
+  padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--j-line);
+  color: var(--j-muted);
+  font-size: 0.75rem;
+}
+.chat-screen .doc-panel-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: var(--j-bg);
+}
+
+
+/* Wide enough for two columns: the panel stands beside the conversation
+   instead of over it. */
+@media (min-width: 900px) {
+.chat-screen .doc-panel {
+    position: relative;
+    inset: auto;
+    flex: 0 0 min(45%, 44rem);
+    min-width: 0;
+    border-left: 1px solid var(--j-line);
+  }
+
+}
+.chat-screen .failed-row {
+  margin-top: 0;
+  white-space: pre-wrap;
+}
+.chat-screen .load-earlier {
+  align-self: center;
+  background: transparent;
+  font-size: 0.875rem;
+}
+.chat-screen .history-state {
+  color: var(--j-muted);
+  text-align: center;
+  font-size: 0.875rem;
+  margin: 8px 0 0;
+}
+.chat-screen .msg-error.history-state {
+  justify-content: center;
+  color: var(--j-bad);
+}
+.chat-screen .msg-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--j-bad);
+  font-size: 0.875rem;
+}
+.chat-screen .retry {
+  min-height: 30px;
+  padding: 2px 10px;
+  font-size: 0.8125rem;
+}
+.chat-screen .working {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--j-muted);
+  font-size: 0.875rem;
+  margin-top: 4px;
+}
+.chat-screen .elapsed {
+  font-variant-numeric: tabular-nums;
+}
+.chat-screen .dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.chat-screen .dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--j-muted);
+  animation: chat-pulse 1.2s infinite ease-in-out;
+}
+.chat-screen .dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.chat-screen .dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes chat-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+
+/* Markdown. */
+.chat-screen .markdown > :first-child {
+  margin-top: 0;
+}
+.chat-screen .markdown > :last-child {
+  margin-bottom: 0;
+}
+.chat-screen .markdown p,
+.chat-screen .markdown ul,
+.chat-screen .markdown ol,
+.chat-screen .markdown blockquote,
+.chat-screen .markdown .table-wrap,
+.chat-screen .markdown .code-block {
+  margin: 0 0 0.75em;
+}
+.chat-screen .markdown h1,
+.chat-screen .markdown h2,
+.chat-screen .markdown h3,
+.chat-screen .markdown h4 {
+  line-height: 1.3;
+  margin: 1em 0 0.5em;
+}
+.chat-screen .markdown h1 {
+  font-size: 1.35rem;
+}
+.chat-screen .markdown h2 {
+  font-size: 1.2rem;
+}
+.chat-screen .markdown h3,
+.chat-screen .markdown h4 {
+  font-size: 1.05rem;
+}
+.chat-screen .markdown ul,
+.chat-screen .markdown ol {
+  padding-left: 1.5em;
+}
+.chat-screen .markdown li + li {
+  margin-top: 0.2em;
+}
+.chat-screen .markdown li.task-list-item {
+  list-style: none;
+  margin-left: -1.3em;
+}
+.chat-screen .markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--j-line);
+  color: var(--j-muted);
+}
+.chat-screen .markdown hr {
+  border: 0;
+  border-top: 1px solid var(--j-line);
+  margin: 1em 0;
+}
+.chat-screen .markdown img {
+  max-width: 100%;
+}
+.chat-screen .markdown :not(pre) > code {
+  background: var(--j-surface);
+  border: 1px solid var(--j-line);
+  border-radius: 5px;
+  padding: 0.05em 0.3em;
+  font-size: 0.875em;
+}
+.chat-screen .code-block {
+  position: relative;
+}
+.chat-screen .code-block pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--j-surface);
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.chat-screen .code-block pre code {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.chat-screen .copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-height: 26px;
+  padding: 1px 8px;
+  font-size: 0.75rem;
+  background: var(--j-surface-2);
+  opacity: 0.85;
+}
+.chat-screen .table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.chat-screen .markdown table {
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.chat-screen .markdown th,
+.chat-screen .markdown td {
+  border: 1px solid var(--j-line);
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+}
+.chat-screen .markdown th {
+  background: var(--j-surface-2);
+}
+
+
+/* highlight.js classes, colored by the variables above. */
+.hljs-comment,
+.hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-template-tag {
+  color: var(--hl-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-template-variable {
+  color: var(--hl-string);
+}
+.hljs-number,
+.hljs-variable,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: var(--hl-number);
+}
+.hljs-title,
+.hljs-section,
+.hljs-function .hljs-title {
+  color: var(--hl-title);
+}
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title,
+.hljs-params {
+  color: var(--hl-type);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--hl-attr);
+}
+.hljs-name,
+.hljs-tag,
+.hljs-selector-pseudo {
+  color: var(--hl-tag);
+}
+.hljs-meta {
+  color: var(--hl-meta);
+}
+.hljs-deletion {
+  background: var(--hl-deletion-bg);
+}
+.hljs-addition {
+  background: var(--hl-addition-bg);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+
+
+/* The composer, at the bottom, above the home indicator. */
+.chat-screen .composer {
+  border-top: 1px solid var(--j-line);
+  background: var(--j-bg);
+  padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+}
+.chat-screen .composer-inner {
+  max-width: var(--chat-width);
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.chat-screen .composer-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  padding: 8px 12px;
+  border: 1px solid var(--j-line);
+  border-radius: 12px;
+  background: var(--j-surface-2);
+  font-size: 16px; /* 16 px keeps iOS Safari from zooming in. */
+  line-height: 1.5;
+  /* 8 rows of 1.5em, plus the padding and the border. */
+  max-height: calc(8 * 1.5em + 18px);
+  overflow-y: auto;
+}
+.chat-screen .send {
+  min-height: 42px;
+}
+
+
+/* The paperclip: the file input itself is the control, hidden behind it. */
+.chat-screen .attach {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 42px;
+  min-height: 42px;
+  border: 1px solid var(--j-line);
+  border-radius: 12px;
+  background: var(--j-surface-2);
+  color: var(--j-text);
+  cursor: pointer;
+}
+.chat-screen .attach input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.chat-screen .attach:focus-within {
+  outline: 2px solid var(--j-accent);
+  outline-offset: 2px;
+}
+.chat-screen .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+
+/* The chip of the file on the composer and on the message that carried it. */
+.chat-screen .attached {
+  max-width: var(--chat-width);
+  margin: 0 auto 6px;
+}
+.chat-screen .file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--j-line);
+  border-radius: 999px;
+  background: var(--j-surface-2);
+  font-size: 0.8125rem;
+}
+.chat-screen .file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-screen .file-chip.sent {
+  display: flex;
+  margin-bottom: 4px;
+  background: transparent;
+}
+.chat-screen .chip-remove {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--j-muted);
+  line-height: 1;
+}
+.chat-screen .count {
+  max-width: var(--chat-width);
+  margin: 4px auto 0;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--j-muted);
+  font-variant-numeric: tabular-nums;
+}
+.chat-screen .count.over {
+  color: var(--j-bad);
+}
+.chat-screen .toast-progress {
+  top: calc(env(safe-area-inset-top) + 112px);
+}
+.chat-screen .draft-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: var(--chat-width);
+  margin: 0 auto 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  background: var(--j-surface-2);
+  font-size: 0.875rem;
+}
+.chat-screen .draft-banner span {
+  flex: 1 1 12rem;
+}
+.chat-screen .thumb-link {
+  display: block;
+  margin-bottom: 4px;
+}
+.chat-screen .thumb {
+  display: block;
+  max-width: min(100%, 260px);
+  max-height: 260px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.chat-screen .thumb-link .thumb {
+  margin-bottom: 0;
+}
+.chat-screen .toast {
+  position: fixed;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 64px);
+  transform: translateX(-50%);
+  z-index: 10;
+  max-width: min(92vw, 520px);
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--j-text);
+  color: var(--j-bg);
+  box-shadow: var(--chat-shadow);
+  font-size: 0.9rem;
+}
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-screen *,
+  .chat-screen *::before,
+  .chat-screen *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  .chat-screen .dots span {
+    opacity: 0.6;
+  }
+}
+
+/* The rail, the item panel, and the workspace dialogs of the chat screen. On a
+   phone the rail and the item panel are drawers over the chat; from 900px the
+   rail stands at the left, and from 1100px the item panel at the right. */
+.chat-screen .rail,
+.chat-screen .items {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  width: min(18rem, 85vw);
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  padding: max(12px, env(safe-area-inset-top)) 12px 12px;
+  background: var(--j-bg);
+}
+.chat-screen .rail { left: 0; border-right: 1px solid var(--j-line); }
+.chat-screen .items { right: 0; border-left: 1px solid var(--j-line); }
+.chat-screen .rail.open,
+.chat-screen .items.open { display: flex; }
+.chat-screen .rail ul,
+.chat-screen .items ul { list-style: none; margin: 0; padding: 0; }
+.chat-screen .rail a:not(.j-nav-item) {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 7px 10px;
+  border-radius: var(--j-radius-sm);
+  color: var(--j-muted);
+  font-size: 14px;
+  text-decoration: none;
+}
+/* The current thread and the current app link look the same. */
+.chat-screen .rail a[aria-current="page"],
+.j-nav-item[aria-current="page"] {
+  color: var(--j-text);
+  background: var(--j-surface-2);
+  font-weight: 600;
+}
+.chat-screen .rail a:not(.j-nav-item):hover { color: var(--j-text); background: var(--j-surface); }
+.chat-screen .rail a[aria-current="page"]:hover { background: var(--j-surface-2); }
+.j-nav-item { min-height: 40px; }
+.j-nav-item .j-icon { flex: none; width: 18px; height: 18px; }
+/* A finger leaves no hover behind: only the current item is lit. */
+@media (hover: none) {
+  .j-nav-item:hover:not([aria-current]),
+  .chat-screen .rail a:not(.j-nav-item):hover:not([aria-current]) {
+    background: none;
+    color: var(--j-muted);
+  }
+}
+.chat-screen .rail-label {
+  margin: 12px 0 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--j-muted);
+}
+.chat-screen .rail-new { margin-top: 8px; text-align: left; }
+.chat-screen .rail-toggle { flex: none; }
+.chat-screen .ws-title { flex: 1; min-width: 0; }
+.chat-screen .ws-goal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-screen .ws-header-actions { display: flex; flex: none; gap: 8px; }
+.chat-screen .items-header { display: flex; align-items: center; justify-content: space-between; }
+.chat-screen .items-header h2 { margin: 0; font-size: 1rem; }
+.chat-screen .item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--j-line);
+}
+.chat-screen .item a,
+.chat-screen .item-text,
+.chat-screen .item-open { min-width: 0; overflow-wrap: anywhere; }
+.chat-screen .item-open { border: 0; background: none; padding: 0; min-height: 0; text-align: left; color: var(--j-accent); }
+.chat-screen .item-actions { display: flex; gap: 4px; }
+.chat-screen .item-actions button { min-height: 28px; padding: 0 8px; font-size: 0.75rem; }
+.chat-screen .item-add { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.chat-screen .ws-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.5);
+}
+.chat-screen .ws-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(32rem, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--j-line);
+  border-radius: var(--j-radius);
+  background: var(--j-bg);
+}
+.chat-screen .ws-dialog h2 { margin: 0 0 4px; font-size: 1.125rem; }
+.chat-screen .ws-dialog input:not([type="checkbox"]),
+.chat-screen .ws-dialog textarea,
+.chat-screen .ws-dialog select { font: inherit; color: inherit; background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: 8px; padding: 6px 8px; }
+.chat-screen .ws-servers { display: flex; flex-direction: column; gap: 4px; border: 0; padding: 0; margin: 4px 0; }
+.chat-screen .ws-server { display: flex; align-items: flex-start; gap: 8px; }
+.chat-screen .ws-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.chat-screen .item-add input { font: inherit; color: inherit; background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: 8px; padding: 6px 8px; }
+
+@media (min-width: 900px) {
+  .chat-screen .rail { position: static; display: flex; flex: 0 0 14rem; width: auto; }
+  .chat-screen .rail-toggle { display: none; }
+}
+@media (min-width: 1100px) {
+  .chat-screen .items { position: static; display: flex; flex: 0 0 18rem; width: auto; }
+  .chat-screen .items-toggle,
+  .chat-screen .items-close { display: none; }
+}
+
+/* Sheets on a phone. The rail and the item list are drawers with a dimmed
+   backdrop; a tap on it closes them. The document panel is a full-height
+   sheet with a fixed header, and its frame scrolls inside it. While a sheet
+   is open the page behind it does not scroll. */
+.chat-screen .scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  background: rgb(0 0 0 / 0.5);
+}
+.chat-screen .rail-header { display: flex; align-items: center; justify-content: space-between; }
+.chat-screen .rail-title { font-weight: 600; }
+.chat-screen .rail-close,
+.chat-screen .items-close { min-height: 32px; padding: 2px 12px; }
+.chat-screen .doc-panel { height: 100dvh; max-width: 100vw; overflow: hidden; }
+.chat-screen .doc-panel-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-screen .doc-panel-frame { max-width: 100%; }
+.chat-screen .item-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 16px max(12px, env(safe-area-inset-right)) 16px max(12px, env(safe-area-inset-left));
+  overflow-y: auto;
+}
+.chat-screen .item-card-kind { color: var(--j-muted); font-size: 0.75rem; text-transform: uppercase; }
+.chat-screen .item-card-title { margin: 0; font-size: 1.125rem; overflow-wrap: anywhere; }
+.chat-screen .item-card-address {
+  margin: 0;
+  color: var(--j-muted);
+  font-family: var(--j-mono);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.chat-screen .item-card-open {
+  padding: 8px 14px;
+  border: 1px solid var(--j-line);
+  border-radius: 8px;
+  background: var(--j-surface-2);
+  color: inherit;
+  text-decoration: none;
+}
+@media (max-width: 899px) {
+  body:has(.chat-screen.sheet-open),
+  html:has(.chat-screen.sheet-open) { overflow: hidden; }
+}
+@media (min-width: 900px) {
+  .chat-screen .rail-close,
+  .chat-screen .scrim-rail { display: none; }
+  .chat-screen .doc-panel { height: auto; max-width: none; }
+}
+@media (min-width: 1100px) {
+  .chat-screen .scrim-items { display: none; }
+}
+
+/* Form controls, everywhere. Text is 16px, so iOS Safari does not zoom in on
+   focus. No fixed height: padding and line-height centre the text, so it is
+   never cut off, and 44px is a tap target. A control never grows wider than
+   its container. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+textarea,
+select {
+  box-sizing: border-box;
+  max-width: 100%;
+  font-size: 16px;
+  line-height: 1.4;
+  min-height: 44px;
+  padding-block: 10px;
+  touch-action: manipulation;
+}
+textarea { min-height: 0; resize: vertical; }
+textarea.grow { resize: none; overflow-y: hidden; field-sizing: content; min-height: 4.5em; }
+select { text-overflow: ellipsis; }
+.chat-screen select { appearance: auto; }
+.j-field.mono input,
+.j-field.mono textarea { font-size: 16px; }
+.j-field input,
+.j-field select { padding-block: 0; }
+.chat-screen .ws-dialog input:not([type="checkbox"]),
+.chat-screen .ws-dialog textarea,
+.chat-screen .ws-dialog select,
+.chat-screen .item-add input { width: 100%; padding: 10px 12px; }
+.chat-screen .composer-input { padding: 10px 12px; min-height: 44px; }
+button,
+.j-btn,
+summary,
+label.attach { touch-action: manipulation; }
+.chat-screen button { min-height: 44px; }
+.chat-screen .item-actions button { min-height: 36px; padding: 0 10px; }
+
+/* A focus ring that no overflow:hidden parent cuts off, and a pressed state. */
+:is(button, a, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--j-accent);
+  outline-offset: -2px;
+}
+.chat-screen button:active:not(:disabled),
+.j-btn:active:not(:disabled) { transform: scale(0.97); filter: brightness(0.9); }
+
+/* Nothing is wider than the phone. */
+html, body { max-width: 100%; overflow-x: clip; }
+.j-appbar { min-width: 0; }
+.v-search .j-field { min-width: 0; }
+.v-search input { width: 100%; min-width: 0; }
+.chat-screen .chat,
+.chat-screen .ws-dialog,
+.chat-screen .ws-server span { min-width: 0; }
+.chat-screen .ws-server span { overflow-wrap: anywhere; }
+.chat-screen .ws-actions { flex-wrap: wrap; }
+
+/* The dialogs: the fields scroll in the body, the buttons stay in a footer. */
+.chat-screen .ws-dialog { overflow: hidden; gap: 0; padding: 0; }
+.chat-screen .ws-dialog > h2 { flex: none; margin: 0; padding: 16px 16px 8px; }
+.chat-screen .ws-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 16px 16px;
+}
+.chat-screen .ws-dialog .ws-actions {
+  flex: none;
+  margin: 0;
+  padding: 10px 16px max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--j-line);
+  background: var(--j-bg);
+}
+@media (max-width: 899px) {
+  .chat-screen .ws-overlay { padding: 0; align-items: stretch; }
+  .chat-screen .ws-dialog {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+/* The app navigation as a drawer on a phone. From 760px the sidebar is a
+   column (the master stylesheet). Below that it is off-canvas on the left,
+   and the hamburger of the app bar slides it over the content, above a dimmed
+   backdrop. The rail of the chat repeats the same links on a phone, and
+   hides them where the sidebar shows. */
+.j-nav-toggle,
+.j-nav-close {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  background: var(--j-surface-2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.j-sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+html.j-lock,
+html.j-lock body { overflow: hidden; }
+.j-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgb(0 0 0 / 0.5);
+}
+@media (max-width: 759px) {
+  .j-shell.has-sidebar .j-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(18rem, 85vw);
+    overflow-y: auto;
+    padding: max(14px, env(safe-area-inset-top)) 10px 14px max(10px, env(safe-area-inset-left));
+    border-right: 1px solid var(--j-line-soft);
+    background: var(--j-bg);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .j-shell.has-sidebar .j-sidebar.open {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease;
+  }
+  .chat-screen .rail-appnav { display: flex; flex-direction: column; gap: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .j-shell.has-sidebar .j-sidebar,
+  .j-shell.has-sidebar .j-sidebar.open { transition: none; }
+}
+@media (min-width: 760px) {
+  .j-nav-toggle,
+  .j-nav-close,
+  .j-scrim,
+  .chat-screen .rail-appnav { display: none; }
+}
+@media (max-width: 759px) {
+  .chat-screen .rail-appnav { display: flex; }
+}
+
+/* One compact top bar on a phone. Other pages: hamburger, logo and title in
+   one row. The chat: its own header (hamburger, thread title, items button)
+   and no app bar. Both honour the top safe area. The sheets sit above the
+   bars. */
+.chat-screen .rail-title { display: flex; align-items: center; gap: 10px; }
+.chat-screen .rail-title .j-logo { width: 28px; height: 28px; border-radius: var(--j-radius-sm); }
+.v-search { width: 100%; max-width: 32rem; flex: none; }
+@media (max-width: 759px) {
+  .j-appbar { padding-block: calc(6px + env(safe-area-inset-top, 0px)) 6px; min-height: 48px; box-sizing: border-box; }
+  .j-appbar .j-appbar-title small { display: none; }
+  .chat-screen .chat-header {
+    justify-content: flex-start;
+    min-height: 48px;
+    box-sizing: border-box;
+    padding-block: max(6px, env(safe-area-inset-top)) 6px;
+  }
+  .chat-screen .chat-header .title { flex: 1; }
+  .chat-screen .chat-header .title:not(.ws-title) .subtitle,
+  .chat-screen .chat-header .ws-goal { display: none; }
+  .chat-screen .ws-header-actions button { min-height: 40px; }
+}
+@media (max-width: 899px) {
+  .chat-screen .rail,
+  .chat-screen .items { z-index: 31; }
+  .chat-screen .scrim { z-index: 30; }
+  .chat-screen .doc-panel { z-index: 32; }
+}
+
+/* Desktop: every side column folds away, so the person can focus. The app
+   sidebar folds from 760px, the rail from 900px, the item column from
+   1100px, the widths where each is a column. The state is in panels.ts. The
+   conversation takes the freed room, and its message column stays at the
+   reading width, centred. The chat has no app bar: its own header says where
+   you are. The fold is animated, and not for a person who asked for less
+   motion. */
+.j-shell.fill .j-appbar { display: none; }
+.j-nav-collapse,
+.j-nav-expand,
+.chat-screen .nav-expand,
+.chat-screen .rail-expand,
+.chat-screen .focus-toggle,
+.chat-screen .rail-collapse,
+.chat-screen .items-collapse { display: none; }
+.j-nav-collapse,
+.j-nav-expand {
+  flex: none;
+  min-height: 36px;
+  min-width: 36px;
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  background: var(--j-surface-2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+@media (min-width: 760px) {
+  .j-shell.has-sidebar { transition: grid-template-columns 0.2s ease; }
+  .j-shell.has-sidebar .j-sidebar { transition: padding 0.2s ease, visibility 0s linear 0s; }
+  .j-shell.has-sidebar.nav-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+  .j-shell.has-sidebar.nav-collapsed .j-sidebar {
+    visibility: hidden;
+    overflow: hidden;
+    padding-inline: 0;
+    border-right-width: 0;
+    transition: padding 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .j-nav-collapse { display: inline-grid; place-items: center; }
+  .j-sidebar-head { align-items: center; }
+  .j-shell.nav-collapsed .j-nav-expand { display: inline-grid; place-items: center; }
+  .j-shell.nav-collapsed .chat-screen .nav-expand { display: inline-grid; place-items: center; }
+}
+@media (min-width: 900px) {
+  .chat-screen .rail { transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0s; }
+  .chat-screen .rail.collapsed {
+    flex-basis: 0;
+    padding-inline: 0;
+    border-right-width: 0;
+    overflow: hidden;
+    visibility: hidden;
+    transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .chat-screen .rail-title { display: none; }
+  .chat-screen .rail-header { justify-content: flex-end; }
+  .chat-screen .rail-collapse,
+  .chat-screen .focus-toggle { display: inline-grid; place-items: center; }
+  .chat-screen .rail.collapsed ~ .chat .rail-expand { display: inline-grid; place-items: center; }
+  .chat-screen .chat-header .focus-toggle { margin-left: auto; }
+}
+@media (min-width: 1100px) {
+  .chat-screen .items { transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0s; }
+  .chat-screen .items.collapsed {
+    flex-basis: 0;
+    padding-inline: 0;
+    border-left-width: 0;
+    overflow: hidden;
+    visibility: hidden;
+    transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .chat-screen .items-collapse { display: inline-grid; place-items: center; }
+  .chat-screen.items-collapsed .items-toggle { display: inline-block; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .j-shell.has-sidebar,
+  .j-shell.has-sidebar .j-sidebar,
+  .j-shell.has-sidebar.nav-collapsed .j-sidebar,
+  .chat-screen .rail,
+  .chat-screen .rail.collapsed,
+  .chat-screen .items,
+  .chat-screen .items.collapsed { transition: none; }
+}
+
+/* The document page: highlighted code that looks like the chat's, a visible
+   copy button on a touch screen, and the embed mode of the chat panel
+   (pages/Document.tsx). */
+.v-code pre {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  background: var(--j-surface);
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.v-code pre code { background: none; padding: 0; white-space: pre; overflow-wrap: normal; font-size: inherit; }
+@media (hover: none) {
+  .v-code-copy { opacity: 1; }
+}
+.d-embed { display: flex; flex-direction: column; gap: var(--j-gap); min-width: 0; }
+.d-embed .d-codefirst .v-code pre { font-size: 0.9rem; }
+.d-embed .d-codefirst { max-width: none; }
+.chat-screen .doc-panel-full {
+  flex: none;
+  font-size: 0.8125rem;
+  color: var(--j-accent);
+  white-space: nowrap;
+}
+
+/* The item list: one line per item. The title is cut with an ellipsis, a "..."
+   button opens the menu of the row, a group folds with its header, and the
+   row of the item open in the panel is marked. */
+.chat-screen .item {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 2px 6px;
+  border-bottom: 0;
+  border-radius: var(--j-radius-sm);
+}
+.chat-screen .item.active { background: var(--j-surface-2); }
+.chat-screen .item.active .item-open { color: var(--j-text); font-weight: 600; }
+.chat-screen .item-icon { flex: none; width: 1.25rem; text-align: center; }
+.chat-screen .item .item-open,
+.chat-screen .item .item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.chat-screen .item-pin { flex: none; font-size: 0.75rem; }
+.chat-screen .item-menu-wrap { position: relative; flex: none; }
+.chat-screen .item-more { min-height: 32px; min-width: 32px; padding: 0; }
+.chat-screen .item-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 7rem;
+  padding: 4px;
+  border: 1px solid var(--j-line);
+  border-radius: var(--j-radius-sm);
+  background: var(--j-bg);
+  box-shadow: var(--chat-shadow);
+}
+.chat-screen .item-menu button { min-height: 36px; text-align: left; border: 0; background: none; }
+.chat-screen .item-menu button:hover { background: var(--j-surface-2); }
+.chat-screen .item-group { margin: 12px 0 2px; }
+.chat-screen .item-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-transform: inherit;
+}
+.chat-screen .item-count { margin-left: auto; color: var(--j-faint); font-weight: 500; }
+.chat-screen .item-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--j-line);
+  border-radius: var(--j-radius-sm);
+  background: var(--j-surface-2);
+  font-size: 0.8125rem;
+}
+.chat-screen .item-undo button { min-height: 32px; }
+.chat-screen .item-add-open { margin-top: 8px; align-self: flex-start; }
+.chat-screen .item-add-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+
+/* The composer as one rounded pill: the paperclip inside at the left, the
+   growing text box, and the round send button inside at the right. */
+.chat-screen .composer-inner {
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--j-line);
+  border-radius: 24px;
+  background: var(--j-surface-2);
+}
+.chat-screen .composer-inner:focus-within {
+  border-color: var(--j-accent);
+}
+.chat-screen .composer .attach {
+  flex: none;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--j-muted);
+}
+.chat-screen .composer .composer-input {
+  flex: 1;
+  /* One line when empty: 40px, whatever the browser sizes a textarea to. */
+  height: 40px;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1.5;
+  /* MAX_ROWS (5) lines of 1.5em plus the padding, then it scrolls. */
+  max-height: calc(5 * 1.5em + 16px);
+  outline: none;
+}
+.chat-screen .composer .send {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 50%;
+}
+.chat-screen .composer .send:disabled {
+  background: var(--j-line);
+  border-color: var(--j-line);
+  color: var(--j-muted);
+  opacity: 1;
+}
+.chat-screen .composer .send svg {
+  display: block;
+}
+/* The keyboard stands where the home indicator was: no safe-area gap. */
+html.kb-open .chat-screen .composer {
+  padding-bottom: 8px;
+}
+
+/* The shell follows the visible part of the page while the hook of
+   viewport.ts runs: the keyboard of a phone never covers the composer, and the
+   document under it cannot scroll. */
+html.vv-fit,
+html.vv-fit body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html.vv-fit .j-shell.fill {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--vv-top, 0px);
+  height: var(--vvh);
+}
+html.vv-fit.kb-open .j-shell.fill {
+  box-sizing: border-box;
+  padding-bottom: var(--kb-extra, 0px);
+}
+html.vv-fit .chat-screen .ws-overlay {
+  inset: auto;
+  top: var(--vv-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--vvh);
+}
+@media (max-width: 899px) {
+  html.vv-fit .chat-screen .ws-dialog {
+    height: 100%;
+  }
+  html.vv-fit .chat-screen .rail {
+    bottom: auto;
+    top: var(--vv-top, 0px);
+    height: var(--vvh);
+  }
+}
+@media (max-width: 1099px) {
+  html.vv-fit .chat-screen .items {
+    bottom: auto;
+    top: var(--vv-top, 0px);
+    height: var(--vvh);
+  }
+}
+
+
+/* Attachments. A photo has no frame of its own: it sits above the bubble, at
+   the right, with the radius of the bubble and a hairline that only shows
+   against a background of the same color. A file is a quiet row like an item. */
+.chat-screen .msg-person {
+  gap: 4px;
+}
+.chat-screen .msg-media {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: min(85%, 600px);
+}
+.chat-screen .thumb-link {
+  display: block;
+  margin: 0;
+  line-height: 0;
+  border-radius: var(--j-radius);
+  border-bottom-right-radius: 4px;
+  overflow: hidden;
+}
+.chat-screen .thumb {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(100%, 240px);
+  max-height: 240px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--j-radius);
+  border-bottom-right-radius: 4px;
+  object-fit: cover;
+  outline: 1px solid var(--j-line-soft);
+  outline-offset: -1px;
+}
+.chat-screen .thumb-link .thumb {
+  border-radius: 0;
+}
+.chat-screen .file-chip,
+.chat-screen .file-chip.sent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--j-radius-sm);
+  background: var(--j-surface-2);
+  color: inherit;
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+.chat-screen .file-chip .chip-remove {
+  min-width: 24px;
+  min-height: 24px;
+}
+.chat-screen .attached {
+  max-width: var(--chat-width);
+  margin: 0 auto 6px;
+}
+.chat-screen .preview-thumb {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+.chat-screen .preview-thumb img {
+  display: block;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--j-radius-sm);
+  object-fit: cover;
+  outline: 1px solid var(--j-line-soft);
+  outline-offset: -1px;
+}
+.chat-screen .preview-thumb .chip-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 2px solid var(--j-bg);
+  border-radius: 50%;
+  background: var(--j-text);
+  color: var(--j-bg);
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+
+/* The image view of the panel, and the thumbnail of an item. */
+.chat-screen .image-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px max(12px, env(safe-area-inset-right)) 16px max(12px, env(safe-area-inset-left));
+  overflow: auto;
+}
+.chat-screen .image-view img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--j-radius-sm);
+}
+.chat-screen .item-thumb {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+  outline: 1px solid var(--j-line-soft);
+  outline-offset: -1px;
+}
+
+/* The toast that says a new build is ready (pwa.ts). */
+.update-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 16px);
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(92vw, 520px);
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--j-text);
+  color: var(--j-bg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  font-size: 0.9rem;
+}
+.update-toast button {
+  font: inherit;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--j-bg);
+  color: var(--j-text);
+  cursor: pointer;
 }

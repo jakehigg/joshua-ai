@@ -193,10 +193,21 @@ def summary_view(row: dict[str, Any], names: Mapping[int, str] | None = None) ->
     }
 
 
+def stamp_workspace(spec: dict[str, Any], workspace: str | None) -> None:
+    """Put ``workspace`` in the resolved ``spec`` of a run that starts now. A run
+    that starts outside a workspace has no ``workspace`` key."""
+    if workspace:
+        spec["workspace"] = workspace
+    else:
+        spec.pop("workspace", None)
+
+
 def rerun_spec(spec: Mapping[str, Any], note: str | None) -> dict[str, Any]:
     """The spec of a re-run: ``spec`` with no ``rerun_note``, and its goal with
     the note of the earlier re-run taken off and ``note`` put at the start."""
     out = dict(spec)
+    # The run starts where the re-run starts, so it takes no workspace along.
+    out.pop("workspace", None)
     old = out.pop("rerun_note", None)
     goal = str(out.get("goal") or "")
     if old:
@@ -250,6 +261,7 @@ def full_view(
             else None
         ),
         "rerun_note": spec.get("rerun_note"),
+        "workspace": spec.get("workspace"),
         "goal": spec.get("goal"),
         "model_id": row.get("model"),
         "budget": spec.get("budget"),
@@ -507,14 +519,15 @@ class Manager:
             return False
         found = self.section.people.get(person)
         destination = found.notify if found else None
-        if not destination:
+        workspace = notify.workspace_of(row)
+        if not destination and not workspace:
             logger.info(
                 {"message": "comments not sent: no destination", "assignment_id": assignment_id}
             )
             return False
         shown = comments[: notify.MAX_EVENT_COMMENTS]
         text = notify.comments_text(row, shown, len(comments) - len(shown))
-        if not await notify.send_event(self.settings, destination, text, assignment_id):
+        if not await notify.send_event(self.settings, destination, text, assignment_id, workspace):
             return False
         await self.store.mark_comments_sent([int(c["id"]) for c in comments])
         return True
@@ -592,6 +605,7 @@ class Manager:
         new: bool = False,
         rerun: Any = None,
         note: Any = None,
+        workspace: str | None = None,
     ) -> dict[str, Any]:
         """Start an assignment now: the draft ``draft`` (a row of ``person``), a
         new one from the saved assignment ``saved``, a re-run of the run
@@ -603,19 +617,33 @@ class Manager:
         ``new`` is true. ``note`` goes only with ``rerun``. When every slot is
         taken, the start is refused with ``busy`` and nothing is stored.
         Every refusal has a ``hint``.
+
+        ``workspace`` is the id from the ``_meta`` of the call, when the start
+        came from a workspace thread. It is stored in ``workspace`` of the spec,
+        and the report and the question go back to that thread. A caller cannot
+        set it in a spec: the spec refuses the field.
         """
         if rerun is not None or note is not None:
             if raw_spec is not None or saved is not None or draft is not None or rerun is None:
                 return with_hint(
                     rejected("invalid_arguments", "note goes only with rerun, and alone")
                 )
-            return with_hint(await self._start_rerun(person, rerun, note, conversation_id))
+            return with_hint(
+                await self._start_rerun(person, rerun, note, conversation_id, workspace)
+            )
         return with_hint(
-            await self._start(person, raw_spec, conversation_id, saved, draft, new=new)
+            await self._start(
+                person, raw_spec, conversation_id, saved, draft, new=new, workspace=workspace
+            )
         )
 
     async def _start_rerun(
-        self, person: str, raw_id: Any, raw_note: Any, conversation_id: str | None
+        self,
+        person: str,
+        raw_id: Any,
+        raw_note: Any,
+        conversation_id: str | None,
+        workspace: str | None = None,
     ) -> dict[str, Any]:
         """Start a new run with the spec of the run ``raw_id`` of ``person``.
 
@@ -658,6 +686,7 @@ class Manager:
         _, resolved = checked
         if note:
             resolved.spec["rerun_note"] = note
+        stamp_workspace(resolved.spec, workspace)
         refused = await self._refuse_unknown_limits(resolved.spec)
         if refused is not None:
             return refused
@@ -707,13 +736,14 @@ class Manager:
         draft: dict[str, Any] | None,
         *,
         new: bool,
+        workspace: str | None = None,
     ) -> dict[str, Any]:
         if not self.section.enabled:
             return rejected("disabled", "assignments.enabled is false in joshua.yaml")
         if draft is not None:
             if raw_spec is not None or saved is not None:
                 return rejected("invalid_arguments", "give one of spec, id, or saved")
-            return await self._start_draft(person, draft)
+            return await self._start_draft(person, draft, workspace)
         if saved is None and raw_spec is not None and not new:
             refused = await self._drafts_open(person)
             if refused is not None:
@@ -726,6 +756,7 @@ class Manager:
         if isinstance(checked, dict):
             return checked
         _, resolved = checked
+        stamp_workspace(resolved.spec, workspace)
         refused = await self._refuse_unknown_limits(resolved.spec)
         if refused is not None:
             return refused
@@ -773,7 +804,9 @@ class Manager:
             drafts=drafts,
         )
 
-    async def _start_draft(self, person: str, row: dict[str, Any]) -> dict[str, Any]:
+    async def _start_draft(
+        self, person: str, row: dict[str, Any], workspace: str | None = None
+    ) -> dict[str, Any]:
         """Start the draft ``row`` as itself: the run keeps the id of the draft.
 
         Its spec is checked again, as the config can change."""
@@ -790,6 +823,7 @@ class Manager:
         if isinstance(checked, dict):
             return checked
         _, resolved = checked
+        stamp_workspace(resolved.spec, workspace)
         refused = await self._refuse_unknown_limits(resolved.spec)
         if refused is not None:
             return refused

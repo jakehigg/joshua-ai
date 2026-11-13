@@ -25,8 +25,10 @@ logger = get_logger("memory.store")
 SNAPSHOT_KIND = "snapshot"
 # The kind of a row from the `documents` source.
 DOCUMENT_KIND = "document"
+# The kind of a row from the `workspaces` source.
+WORKSPACE_KIND = "workspace"
 # The kinds whose row of one person only a search for that person finds.
-PERSON_KINDS = (SNAPSHOT_KIND, DOCUMENT_KIND)
+PERSON_KINDS = (SNAPSHOT_KIND, DOCUMENT_KIND, WORKSPACE_KIND)
 
 
 def _vec_literal(embedding: list[float]) -> str:

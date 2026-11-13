@@ -12,8 +12,9 @@ from pathlib import Path
 
 import bcrypt
 import pytest
-from joshua_gateway import viewer
+from joshua_gateway import viewer, viewer_api
 from joshua_shared import config
+from starlette.routing import Route
 from starlette.testclient import TestClient
 
 ALEX_PW = "alex-secret"
@@ -236,11 +237,13 @@ def test_image_attachment_renders_inline(client):
 
 def test_security_headers_on_every_response(client):
     response = client.get("/assignments", auth=("alex", ALEX_PW))
-    # The policy allows the bundle of the React app, from this origin, and the
-    # copy script of a server-rendered report, by its hash. No inline script.
+    # The policy allows the bundle of the React app, the manifest and the
+    # service worker of the installed app, all from this origin, and nothing
+    # else. No inline script, so no hash.
     assert response.headers["content-security-policy"] == (
         "default-src 'none'; img-src 'self'; style-src 'self'; "
-        f"script-src 'self' '{viewer.showcase_mod.COPY_SCRIPT_HASH}'; connect-src 'self'; "
+        "script-src 'self'; connect-src 'self'; "
+        "manifest-src 'self'; worker-src 'self'; "
         "frame-src 'self'; frame-ancestors 'self'"
     )
     assert "unsafe-inline" not in response.headers["content-security-policy"]
@@ -256,95 +259,73 @@ def test_only_the_same_origin_may_frame_the_viewer(client):
     assert "autrui.net" not in policy
 
 
-# -- the shared look ---------------------------------------------------------
+# -- the route table ---------------------------------------------------------
 
-UI_FILES = {
-    "/ui/joshua-ui.css": "text/css",
-    "/ui/logo-512.png": "image/png",
-    "/ui/logo-64.png": "image/png",
-    "/ui/apple-touch-icon.png": "image/png",
-    "/ui/favicon-32.png": "image/png",
-    "/style.css": "text/css",
+
+def test_the_route_table_is_the_probes_the_api_and_the_two_documents(client):
+    """The two probes, every JSON route of ``viewer_api``, and the two routes
+    of a document the chat calls. The mount of the React app is last, and an
+    image with no build has none."""
+    routes = [route for route in viewer.build_app().routes if isinstance(route, Route)]
+    assert [route.path for route in routes[:2]] == ["/healthz", "/readyz"]
+    api = [route.path for route in viewer_api.routes()]
+    assert [route.path for route in routes[2 : 2 + len(api)]] == api
+    assert [route.path for route in routes[2 + len(api) :]] == [
+        "/documents/{owner}/{slug}.json",
+        "/documents/{owner}/{slug}/artifact",
+    ]
+
+
+# A value for each path parameter of the JSON routes, so an address can be
+# built from the table itself and no route is forgotten.
+PATH_SAMPLES = {
+    "year": "2026",
+    "month": "8",
+    "day": "20",
+    "owner": "alex",
+    "slug": "party",
+    "person": "alex",
+    "root": "wiki",
+    "path": "pizza.md",
+    "cid": "1",
+    "id": "1",
 }
 
 
-def test_the_shared_files_are_served(client):
-    for path, media_type in UI_FILES.items():
-        response = client.get(path, auth=("alex", ALEX_PW))
-        assert response.status_code == 200, path
-        assert response.headers["content-type"].split(";")[0] == media_type, path
-        assert response.content, path
-    css = client.get("/ui/joshua-ui.css", auth=MIA).text
-    assert "--j-bg" in css and ".j-shell" in css
-    assert client.get("/ui/logo-64.png", auth=MIA).content.startswith(b"\x89PNG")
+def _an_address_of(path: str) -> str:
+    """One address of a route of the table, with every parameter filled in."""
+    for name, value in PATH_SAMPLES.items():
+        for spec in (f"{{{name}}}", f"{{{name}:int}}", f"{{{name}:path}}"):
+            path = path.replace(spec, value)
+    assert "{" not in path, path
+    return path
 
 
-def test_the_shared_files_need_auth(client):
-    for path in UI_FILES:
-        response = client.get(path)
-        assert response.status_code == 401, path
-        assert response.headers["WWW-Authenticate"].startswith("Basic"), path
-        assert client.get(path, auth=("alex", "wrong")).status_code == 401, path
+def test_every_json_route_answers_for_a_signed_in_person(client, monkeypatch):
+    """Every route of ``viewer_api.routes()`` reaches its own handler.
+
+    The answer is JSON, or the bytes of a file, never the plain ``Not Found``
+    of an address that no route matches. A 404 here is a handler saying that
+    a document or an assignment is not there, which each suite covers on its
+    own. Nothing upstream is set, so the chat and the workspaces answer
+    without a call.
+    """
+    for name in ("CHANNELS_URL", "CORE_URL", "ASSIGNMENTS_URL"):
+        monkeypatch.delenv(name, raising=False)
+    for route in viewer_api.routes():
+        address = _an_address_of(route.path)
+        method = sorted(route.methods - {"HEAD", "OPTIONS"})[0]
+        response = client.request(method, address, auth=("alex", ALEX_PW), json={})
+        assert response.status_code != 405, address
+        assert response.text != "Not Found", address
+        kind = response.headers["content-type"]
+        assert kind.startswith(("application/json", "application/octet-stream")), address
 
 
-def test_only_the_named_shared_files_are_served(client):
-    for path in ("/ui/README.md", "/ui/nope.css", "/ui/..%2fviewer.py", "/ui/%2e%2e"):
+def test_the_viewer_serves_no_stylesheet_and_no_image_of_its_own(client):
+    """Every stylesheet and every image is a file of the React app now."""
+    for path in ("/style.css", "/ui/joshua-ui.css", "/ui/logo-64.png"):
         assert client.get(path, auth=("alex", ALEX_PW)).status_code == 404, path
-
-
-def test_the_viewer_stylesheet_uses_the_shared_tokens(client):
-    css = client.get("/style.css", auth=("alex", ALEX_PW)).text
-    assert "var(--j-" in css
-    assert "prefers-color-scheme" not in css  # dark only, like the shared file
-
-
-def test_a_page_has_the_shared_shell(client):
-    html = client.get("/assignments/saved", auth=("alex", ALEX_PW)).text
-    assert '<link rel=stylesheet href="/ui/joshua-ui.css">' in html
-    assert html.index("/ui/joshua-ui.css") < html.index("/style.css")
-    assert 'href="/ui/favicon-32.png"' in html
-    assert 'href="/ui/apple-touch-icon.png"' in html
-    assert '<meta name="theme-color" content="#080d17">' in html
-    assert '<div class="j-shell has-sidebar">' in html
-    assert '<aside class="j-sidebar">' in html and '<header class="j-appbar">' in html
-    assert '<nav class="j-tabs mobile-only"' in html
-    assert '<main class="j-content">' in html
-    # The search field is in the app bar, so a phone has it too. A page the
-    # server renders loads ``/search``, which the React app renders.
-    appbar = html[html.index('<header class="j-appbar">') : html.index("</header>")]
-    assert 'action="/search"' in appbar and 'name="q"' in appbar
-
-
-def test_the_current_section_is_marked(client):
-    html = client.get("/assignments/saved", auth=("alex", ALEX_PW)).text
-    assert 'class="j-nav-item" href="/assignments" aria-current="page"' in html
-    assert 'class="j-tab" href="/assignments" aria-current="page"' in html
-    assert html.count('aria-current="page"') == 2
-    # Every server-rendered page still reaches the person's own page, which
-    # the React app serves.
-    assert 'class="j-nav-item" href="/me"' in html
-
-
-def test_the_chat_entry_names_the_person_of_the_request(client):
-    for creds, person in ((("alex", ALEX_PW), "alex"), (MIA, "mia")):
-        html = client.get("/assignments/saved", auth=creds).text
-        link = f'href="/chat/{person}"'
-        assert f'<a class="j-nav-item" {link}>' in html, person
-        assert f'<a class="j-tab" {link}>Chat</a>' in html, person
-        assert "/chat/jake" not in html, person
-
-
-def test_the_chat_section_is_marked_current(client):
-    person = config.load().person("alex")
-    token = viewer._REQUEST_PERSON.set(person)
-    try:
-        html = viewer._shell("", section="chat")
-    finally:
-        viewer._REQUEST_PERSON.reset(token)
-    assert '<a class="j-nav-item" href="/chat/alex" aria-current="page">' in html
-    assert '<a class="j-tab" href="/chat/alex" aria-current="page">Chat</a>' in html
-    assert html.count('aria-current="page"') == 2
-    assert "<strong>Chat</strong>" in html
 
 
 # -- search -----------------------------------------------------------------

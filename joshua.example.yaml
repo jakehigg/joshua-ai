@@ -68,6 +68,7 @@ channels:
     allowed_callers:
       - laptop
       - ci
+      - viewer                 # the viewer sends the turns of its chat
       - assignments            # the assignments container sends its reports and questions
   destinations:
     everyone: imessage:group:everyone
@@ -83,6 +84,7 @@ core:
   max_turns: 20
   session_idle_seconds: 1800
   pool_max: 20
+  context_cap: 150000          # input tokens over which a turn ends its session (not a workspace); 0 is off
   mcp_replace_seconds: 300     # replace a session whose client marked a gateway server failed, at most once in this time
   reflection_model: claude-sonnet-5
   scheduler_tick_seconds: 15   # how often the scheduler checks for due tasks
@@ -340,6 +342,21 @@ usage:
   # empty value turns the write off.
   writers:
     - assignments              # the assignments container
+
+# workspaces:
+#   # Core's /v1/workspaces: a place in Chat for one large piece of work. The
+#   # viewer calls it; the gateway records the items of a tool call from a
+#   # workspace. An empty allowed_callers turns the routes off.
+#   allowed_callers:
+#     - viewer
+#     - gateway
+#   # The models a workspace may pick. Empty accepts any name.
+#   # models:
+#   #   - claude-opus-5
+#   context_cap: 150000            # input tokens over which a workspace turn ends its session
+#   tool_search_max_servers: 3     # servers up to which a workspace runs with tool search off
+#   # The public address of the viewer, for the link that send_to_normal_chat adds.
+#   # viewer_url: https://joshua.example.org
 
 # gateway:
 #   # The fleet identities that may call the gateway MCP routes and say which

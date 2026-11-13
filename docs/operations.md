@@ -675,10 +675,17 @@ the process; the day folders on the volume are the record that survives.
 
 ## The viewer
 
-The viewer is a web page for the wiki, which holds the journal and every
-profile, and a person's own attachments. Everybody who signs in reads. A
-member also writes: they edit any wiki page, make a new one, correct a journal
-entry, and move a page to the trash. A guest reads and nothing more. A
+The viewer is the web interface of Joshua: the wiki, which holds the journal
+and every profile, a person's own attachments, the documents, the
+assignments, the usage, and the chat. It is one React single-page app, built
+by the node stage of `gateway/Dockerfile` and carried in the gateway image,
+served at the root of the host behind HTTP basic (or `viewer.anonymous`).
+Everything it shows comes from a JSON API under `/api/v1/`, with the same
+sign-in as the app.
+
+Everybody who signs in reads. A member also writes: they edit any wiki page,
+make a new one, correct a journal entry, move a page to the trash, comment on
+a document, and chat with Joshua. A guest reads and nothing more. A
 signed-in person gets a profile link for a quick jump to their own page. It is
 off by default. To turn it on:
 
@@ -720,13 +727,15 @@ off by default. To turn it on:
 
 The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
 `http://127.0.0.1:8082/` and sign in with the person id and the password.
-The address opens the wiki. "Your page" in the menu, at `/me`, has the profile
-link and the recent attachments of the person who signed in. That page is a
-JavaScript app, which the gateway image carries beside the pages it renders in
-Python. It reads JSON addresses under `/api/v1/`, with the same sign-in as a
-page. An image with no build of the app logs `no frontend build; the React
-pages are off` at start, and `/me` answers 404; the rest of the viewer does
-not change.
+The address opens the wiki. The menu holds Wiki, Journal, Search, Usage,
+Assignments, Documents (members only) and Chat, and "Your page" at `/me`,
+which has the profile link and the recent attachments of the person who
+signed in. Every one of these is an address of the app's router, and the app
+reads them from `/api/v1/`. The chat is a screen of the same app, at
+`/chat/<person id>`, with a workspace at `/chat/w/<slug>`; it reaches the
+`channels` container through the viewer. An image with no build of the app
+logs `no frontend build; the React pages are off` at start and serves the
+JSON API alone, so every address answers 404 until the image carries a build.
 Nothing off the host reaches it: put a reverse proxy in front, for TLS, before
 you expose it.
 
@@ -735,12 +744,32 @@ page to `wiki/.trash/` and drops it from the search index at the next index run.
 A guest reads the wiki but cannot delete. To restore a page, move it back from
 `wiki/.trash/<timestamp>/` with a shell.
 
+### Install the viewer on a phone
+
+The viewer is an installable app, scoped to the whole viewer and not to the
+chat alone. Open it over HTTPS and use "Add to Home Screen" (Safari) or
+"Install app" (Chrome). The phone keeps a Joshua icon, the elephant on the
+dark square. Tapping it opens the wiki with no address bar and no browser
+chrome, on the dark background of the look, and every screen of the viewer is
+in it: the wiki, the journal, the search, the usage, the assignments, the
+documents and the chat.
+
+The app signs in as the browser does, so set up the sign-in, and the TLS in
+front of it, first: a browser installs no app from a plain `http://` address
+other than `localhost`.
+
+A service worker keeps the shell of the app and its assets, so the app opens
+on a slow network and shows its frame at once. Nothing under `/api/v1/` is
+kept: the chat, the wiki pages, the documents and the workspaces always come
+from the instance, and no answer of a person sits in the cache of the phone.
+An update arrives on the next visit with a network.
+
 ### Links in the menu
 
 The menu has a "Links" group: links to the addons and other tools that the
 people of an instance use beside Joshua, for example the pantry or the tasks
-page. Each link opens in a new tab. On a phone, the "Links" tab opens the
-list.
+page. Each link opens in a new tab. On a phone, the menu is a drawer: the
+hamburger opens it, and the links are at its foot.
 
 A member keeps the list at `/links`, under "Edit links": one row per link,
 with a title, a URL, and an icon from a small built-in set. A URL must start
@@ -781,10 +810,10 @@ On Kubernetes the chart runs it as its own deployment, off by default, with
 the passwords in a Secret and an ingress of its own. See
 [the chart README](../charts/joshua/README.md#the-viewer).
 
-The viewer is read-only, and it ships with Joshua. For a browser editor that
-can also change the wiki, see the Otter Wiki enhancement in
-[docs/enhancements.md](enhancements.md). Unlike the viewer, Otter Wiki runs
-code from another project.
+The viewer edits the wiki one page at a time, and it ships with Joshua. For a
+browser editor with its own search and page history, see the Otter Wiki
+enhancement in [docs/enhancements.md](enhancements.md). Unlike the viewer,
+Otter Wiki runs code from another project.
 
 ### Opening the viewer with no sign-in
 

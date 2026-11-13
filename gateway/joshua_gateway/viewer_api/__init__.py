@@ -8,6 +8,13 @@ off. Each handler takes ``(request, person)``.
 A write route takes a JSON body, and the body carries the CSRF token of its
 scope. Every write also checks the ``Origin`` header (``viewer_api.edit``).
 
+The chat has two routes: ``POST /api/v1/chat/<person>/turns`` streams one turn
+as server-sent events, and ``GET /api/v1/chat/<person>/history`` gives a page
+of the conversation. Both go to the channels container (``CHANNELS_URL``).
+
+The workspaces have nine routes under ``/api/v1/workspaces``, which proxy
+core (``CORE_URL``). See ``viewer_api.workspaces``.
+
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
 
@@ -21,6 +28,7 @@ from starlette.routing import Route
 
 from joshua_gateway.viewer_api import (
     assignments,
+    chat,
     documents,
     edit,
     files,
@@ -31,6 +39,7 @@ from joshua_gateway.viewer_api import (
     session,
     usage,
     wiki,
+    workspaces,
 )
 
 # Every JSON route of the viewer is under this prefix, from the first one.
@@ -72,6 +81,19 @@ def routes() -> list[Route]:
             methods=["POST"],
         ),
         Route(api_path("assignments"), _require_auth(assignments.assignments)),
+        # The saved routes come first: ``saved`` is a name, not an id.
+        Route(api_path("assignments/saved"), _require_auth(assignments.saved)),
+        Route(api_path("assignments/saved/{id:int}"), _require_auth(assignments.saved_assignment)),
+        Route(
+            api_path("assignments/saved/{id:int}/comments"),
+            _require_auth(assignments.add_saved_comment),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("assignments/saved/{id:int}/comments/{cid:int}/delete"),
+            _require_auth(assignments.delete_saved_comment),
+            methods=["POST"],
+        ),
         Route(api_path("assignments/{id:int}"), _require_auth(assignments.assignment)),
         Route(
             api_path("assignments/{id:int}/comments"),
@@ -82,6 +104,29 @@ def routes() -> list[Route]:
             api_path("assignments/{id:int}/comments/{cid:int}/delete"),
             _require_auth(assignments.delete_comment),
             methods=["POST"],
+        ),
+        Route(api_path("chat/{person}/turns"), _require_auth(chat.turns), methods=["POST"]),
+        Route(api_path("chat/{person}/history"), _require_auth(chat.history)),
+        Route(api_path("workspaces"), _require_auth(workspaces.list_workspaces)),
+        Route(api_path("workspaces"), _require_auth(workspaces.create), methods=["POST"]),
+        Route(api_path("workspaces/options"), _require_auth(workspaces.options)),
+        Route(api_path("workspaces/{slug}"), _require_auth(workspaces.read)),
+        Route(api_path("workspaces/{slug}"), _require_auth(workspaces.change), methods=["PATCH"]),
+        Route(api_path("workspaces/{slug}/items"), _require_auth(workspaces.list_items)),
+        Route(
+            api_path("workspaces/{slug}/items"),
+            _require_auth(workspaces.add_item),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("workspaces/{slug}/items/{id}"),
+            _require_auth(workspaces.change_item),
+            methods=["PATCH"],
+        ),
+        Route(
+            api_path("workspaces/{slug}/items/{id}"),
+            _require_auth(workspaces.delete_item),
+            methods=["DELETE"],
         ),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),

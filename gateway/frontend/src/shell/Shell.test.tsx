@@ -1,7 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { reloadPanels, STORAGE_KEY } from "./panels";
 import Shell, { embedded, type Session } from "./Shell";
 import { SECTIONS } from "./sections";
 
@@ -59,7 +60,7 @@ afterEach(() => {
 });
 
 describe("the shell", () => {
-  it("draws the sidebar, the app bar, the tabs and the body", async () => {
+  it("draws the sidebar, the app bar and the body", async () => {
     stubSession();
 
     shell();
@@ -68,24 +69,36 @@ describe("the shell", () => {
     expect(document.querySelector(".j-shell.has-sidebar")).not.toBeNull();
     expect(document.querySelector(".j-sidebar .j-brand")).not.toBeNull();
     expect(document.querySelector(".j-main header.j-appbar")).not.toBeNull();
-    expect(document.querySelector("nav.j-tabs.mobile-only")).not.toBeNull();
+    expect(document.querySelector("nav.j-tabs")).toBeNull();
     expect(document.querySelector("main.j-content")).not.toBeNull();
-    expect((await screen.findAllByText("Wiki")).length).toEqual(2);
+    expect((await screen.findAllByText("Wiki")).length).toEqual(1);
     expect(document.querySelectorAll("nav.v-sections").length).toEqual(3);
     expect(document.querySelector("nav.v-sections.v-you")).not.toBeNull();
     expect(screen.getByText("Your page")).toBeDefined();
   });
 
-  it("holds the search field of the app bar", () => {
+  it("has no search field in the app bar", () => {
     stubSession();
 
     shell();
 
-    expect(document.querySelector("header.j-appbar form.v-search")).not.toBeNull();
-    expect(document.querySelector('form.v-search input[name="q"]')).not.toBeNull();
+    expect(document.querySelector("header.j-appbar")).not.toBeNull();
+    expect(document.querySelector("header.j-appbar form")).toBeNull();
+    expect(document.querySelector("header.j-appbar input")).toBeNull();
+    expect(document.querySelector('input[name="q"]')).toBeNull();
   });
 
-  it("gives a migrated section a router link and the rest a plain link", async () => {
+  it("lights up only the current section", async () => {
+    stubSession();
+
+    shell("journal");
+
+    await screen.findAllByText("Journal");
+    const lit = [...document.querySelectorAll(".j-sidebar [aria-current]")].map((el) => el.textContent);
+    expect(lit).toEqual(["Journal"]);
+  });
+
+  it("gives a migrated section a router link", async () => {
     expect(SECTIONS.filter((item) => item.migrated).map((item) => item.key)).toEqual([
       "wiki",
       "journal",
@@ -93,6 +106,7 @@ describe("the shell", () => {
       "usage",
       "assignments",
       "documents",
+      "chat",
     ]);
     stubSession();
 
@@ -105,6 +119,16 @@ describe("the shell", () => {
     expect(journal?.getAttribute("href")).toEqual("/journal");
     const chat = screen.getAllByText("Chat")[0];
     expect(chat?.getAttribute("href")).toEqual("/chat/alex");
+  });
+
+  it("lets the chat fill the content area", async () => {
+    stubSession();
+
+    shell("chat");
+
+    expect(document.querySelector("main.j-content.fill")).not.toBeNull();
+    expect(document.querySelector(".j-shell.fill")).not.toBeNull();
+    await screen.findAllByText("Wiki");
   });
 
   it("marks the current item, and the wide content of the usage section", async () => {
@@ -120,16 +144,12 @@ describe("the shell", () => {
     expect(usage.getAttribute("aria-current")).toEqual("page");
   });
 
-  it("holds the links group of the sidebar and the links tab of a phone", async () => {
+  it("holds the links group of the sidebar", async () => {
     stubSession();
 
     shell();
 
     expect(document.querySelector("nav.v-sections.v-links")).not.toBeNull();
-    const tab = [...document.querySelectorAll("nav.j-tabs a")].find(
-      (item) => item.textContent === "Links",
-    );
-    expect(tab?.getAttribute("href")).toEqual("/links");
     expect(await screen.findByText("Add links")).toBeDefined();
   });
 
@@ -181,5 +201,114 @@ describe("the shell", () => {
 
     expect(screen.getByText("the body")).toBeDefined();
     expect(await screen.findByText("Your page")).toBeDefined();
+  });
+});
+
+function Go() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate("/usage")}>
+      go
+    </button>
+  );
+}
+
+describe("the navigation drawer", () => {
+  function drawer() {
+    stubSession();
+    render(
+      <MemoryRouter>
+        <Shell section="me">
+          <Go />
+        </Shell>
+      </MemoryRouter>,
+    );
+    return screen.getByRole("button", { name: "Show the navigation" });
+  }
+  const isOpen = () => document.querySelector(".j-sidebar.open") !== null;
+
+  it("opens from the hamburger, with its aria state, focus and a locked page", () => {
+    const toggle = drawer();
+    expect(toggle.getAttribute("aria-controls")).toBe("app-nav");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(isOpen()).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close the navigation" }));
+    expect(document.documentElement.classList.contains("j-lock")).toBe(true);
+  });
+
+  it("closes on the backdrop, the close button and Escape, and gives the focus back", () => {
+    const toggle = drawer();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId("nav-backdrop"));
+    expect(isOpen()).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+    expect(document.documentElement.classList.contains("j-lock")).toBe(false);
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Close the navigation" }));
+    expect(isOpen()).toBe(false);
+
+    fireEvent.click(toggle);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(isOpen()).toBe(false);
+  });
+
+  it("closes on a click on a link and on a route change", async () => {
+    const toggle = drawer();
+    fireEvent.click(toggle);
+    fireEvent.click(await screen.findByText("Journal"));
+    expect(isOpen()).toBe(false);
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "go" }));
+    expect(isOpen()).toBe(false);
+  });
+
+  it("has no hamburger in the chat, where the rail is the menu", () => {
+    stubSession();
+    render(
+      <MemoryRouter>
+        <Shell section="chat">
+          <p>chat</p>
+        </Shell>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button", { name: "Show the navigation" })).toBeNull();
+  });
+});
+
+describe("the sidebar on a desktop", () => {
+  const shellEl = () => document.querySelector(".j-shell") as HTMLElement;
+
+  afterEach(() => {
+    window.localStorage.clear();
+    reloadPanels();
+  });
+
+  it("folds with « and opens with », on any page, and remembers it", async () => {
+    stubSession();
+    shell("journal");
+    const hide = screen.getByRole("button", { name: "Hide the navigation" });
+    expect(hide.getAttribute("aria-controls")).toBe("app-nav");
+    fireEvent.click(hide);
+    expect(shellEl().className).toContain("nav-collapsed");
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}")).toMatchObject({ nav: true });
+    cleanup();
+    reloadPanels();
+    shell("usage");
+    expect(shellEl().className).toContain("nav-collapsed");
+    fireEvent.click(screen.getByRole("button", { name: "Open the navigation column" }));
+    expect(shellEl().className).not.toContain("nav-collapsed");
+  });
+
+  it("does not touch the phone drawer", () => {
+    stubSession();
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ nav: true }));
+    reloadPanels();
+    shell("journal");
+    fireEvent.click(screen.getByRole("button", { name: "Show the navigation" }));
+    expect(document.querySelector(".j-sidebar.open")).not.toBeNull();
   });
 });

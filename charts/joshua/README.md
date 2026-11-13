@@ -224,10 +224,10 @@ SearXNG must allow the `json` format. `docs/operations.md` has the recipe.
 
 ## The viewer
 
-The chart can also run the read-only web viewer, which is the gateway image
-with a second entrypoint. It is off by default. A person signs in with HTTP
-basic and reads the wiki, their own profile, their own journal, their own
-attachments, and the shared profile. A member can move a wiki page to the
+The chart can also run the web viewer, one React app that the gateway image
+carries and a second entrypoint serves. It is off by default. A person signs
+in with HTTP basic and reads the wiki, their own profile, the journal, their
+own attachments, and the shared profile. A member can move a wiki page to the
 trash. The viewer holds one fleet token, `JOSHUA_TOKEN_VIEWER`, and no
 upstream credential. It reads the volume, calls core to search by meaning
 and to read the usage by day, and calls the assignments container to read the

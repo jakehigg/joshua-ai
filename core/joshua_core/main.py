@@ -25,15 +25,24 @@ from joshua_core import limits as limits_module
 from joshua_core.admin import build_admin_router
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
 from joshua_core.engine import inference as inference_plan
-from joshua_core.engine import injection, taught_skills
+from joshua_core.engine import injection, taught_skills, workspace_awareness
 from joshua_core.engine import internet as internet_agent
+from joshua_core.engine import workspace as workspace_engine
 from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.prompts import PromptComposer
 from joshua_core.engine.stub_agent import StubOneshot
-from joshua_core.engine.tools import history, internet, recall, registration, scheduling
+from joshua_core.engine.tools import (
+    history,
+    internet,
+    recall,
+    registration,
+    scheduling,
+)
 from joshua_core.engine.tools import limits as limits_tool
+from joshua_core.engine.tools import workspace as workspace_tool
 from joshua_core.engine.url_grants import UrlGrants
+from joshua_core.engine.workspace import WorkspaceBlock
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
 from joshua_core.limits import LimitsTracker
 from joshua_core.limits_api import build_limits_router
@@ -45,6 +54,7 @@ from joshua_core.memory.sources.files import FilesSource
 from joshua_core.memory.sources.memos import build_memos_source, schedule_seconds
 from joshua_core.memory.sources.snapshots import SOURCE_NAME as SNAPSHOTS_SOURCE
 from joshua_core.memory.sources.snapshots import SnapshotsSource
+from joshua_core.memory.sources.workspaces import WORKSPACES_SOURCE, WorkspacesSource
 from joshua_core.memory.store import MemoryStore
 from joshua_core.migrate_links import migrate_page_links
 from joshua_core.model_forwarder import ModelForwarder
@@ -57,6 +67,7 @@ from joshua_core.store.seed import seed_people
 from joshua_core.transcript_api import build_transcript_router
 from joshua_core.turns import TurnService, build_router
 from joshua_core.usage_api import build_usage_router
+from joshua_core.workspaces_api import build_workspaces_router
 
 logger = get_logger("core")
 
@@ -164,14 +175,14 @@ async def lifespan(app: FastAPI):
     _bootstrap_layout(settings)
 
     limits_tracker = await _build_limits(settings, repo)
-    manager = _build_manager(settings, repo, agent_backend, limits_tracker)
+    deliverer = build_deliverer()
+    manager = _build_manager(settings, repo, agent_backend, limits_tracker, deliverer)
     memory_store = MemoryStore(db.pool)
     indexer, indexer_loop = _build_memory(settings, memory_store, manager, repo)
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     reflector = NightlyReflector(
         repo=repo, indexer=indexer, manager=manager, settings=settings, data_dir=data_dir
     )
-    deliverer = build_deliverer()
     events = EventService(
         repo=repo,
         registry=SkillRegistry(settings.core.prompts_dir),
@@ -306,12 +317,13 @@ def _build_manager(
     repo: Repo,
     agent_backend: str,
     limits_tracker: LimitsTracker | None = None,
+    deliverer: Deliverer | None = None,
 ) -> ConversationManager:
     """Wire the conversation manager from config and the fleet environment.
 
     The gateway url and the core fleet token route the agent's MCP servers
     through the gateway. The ``registration``, ``scheduling``, ``history``,
-    and ``limits`` builtins register here. ``limits`` goes only to the jobs
+    ``limits``, and ``workspace`` builtins register here. ``limits`` goes only to the jobs
     that ``limits.chat_tool`` and ``limits.voice_tool`` name.
     """
     person_prompts = {p.id: p.prompt for p in settings.people if p.prompt}
@@ -336,10 +348,21 @@ def _build_manager(
         data_dir=data_dir,
         url_grants=url_grants,
     )
+    # The workspace block comes first, ahead of the memory notes. The manager
+    # keeps it for the block route, and for the sections that later phases add.
+    manager.workspace_block = WorkspaceBlock(repo)
+    manager.add_context_provider(manager.workspace_block)
+    # The sections of the block that need no network, and the next steps of a
+    # linked tasks project when ``workspaces.tasks_url`` is set.
+    manager.workspace_block.add_section(workspace_engine.jobs_section(repo))
+    next_steps = workspace_engine.next_steps_section(repo, settings.workspaces.tasks_url)
+    if next_steps is not None:
+        manager.workspace_block.add_section(next_steps)
     registration.register(manager, data_dir)
     scheduling.register(manager)
     history.register(manager)
     limits_tool.register(manager, limits_tracker, settings)
+    workspace_tool.register(manager, settings, deliverer)
     return manager
 
 
@@ -369,6 +392,9 @@ def _build_memory(
             data_dir, members=[p.id for p in settings.people if p.role == "member"]
         )
         intervals[DOCUMENTS_SOURCE] = float(memory.index_interval_s)
+    # One record for each active workspace, for the hint in normal chat.
+    sources[WORKSPACES_SOURCE] = WorkspacesSource(repo)
+    intervals[WORKSPACES_SOURCE] = float(memory.index_interval_s)
     for name, options in memory.sources.items():
         if name == "files":
             continue
@@ -403,6 +429,7 @@ def _build_memory(
         )
         internet.register(manager, settings, manager.url_grants, searcher)
     injection.register(manager, store, settings, repo)
+    workspace_awareness.register(manager, store, settings, repo)
     taught_skills.register(manager, store, settings, repo, indexer.skills)
     return indexer, IndexerLoop(indexer, intervals)
 
@@ -502,6 +529,7 @@ def build_app() -> FastAPI:
     app.include_router(build_search_router())
     app.include_router(build_transcript_router())
     app.include_router(build_usage_router())
+    app.include_router(build_workspaces_router())
     app.include_router(build_limits_router())
     app.state.forwarder = ModelForwarder()
     app.include_router(app.state.forwarder.router)

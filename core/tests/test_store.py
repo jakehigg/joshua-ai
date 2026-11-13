@@ -272,3 +272,30 @@ async def test_latest_conversation_for_member(repo) -> None:
 
     assert await repo.latest_conversation_for("alex") == conv.id
     assert await repo.latest_conversation_for("alex", channel_like="telegram") == conv.id
+
+
+async def test_transcript_page_leaves_out_a_silent_reply(repo) -> None:
+    """A workspace thread (or any thread) never lists an `[IGNORE]` reply.
+
+    Delivery drops the marker, so the viewer must not show it. The row stays
+    stored; a failed reply and an event line are still listed.
+    """
+    await repo.upsert_person("alex", "Alex")
+    await repo.upsert_channel("viewer:alex:workspace:w1", "viewer")
+    conv = await repo.get_or_create_conversation("viewer:alex:workspace:w1", "alex")
+    await repo.add_transcript(conv.id, "in", "hello")
+    await repo.add_transcript(conv.id, "inject", "Developer task d335c034 has a question")
+    await repo.add_transcript(conv.id, "out", "[IGNORE]")
+    await repo.add_transcript(conv.id, "out", "  \n[IGNORE]\n ")
+    await repo.add_transcript(conv.id, "out", "   ")
+    await repo.add_transcript(conv.id, "out", "a real answer")
+    await repo.add_transcript(conv.id, "out", "boom", status="failed")
+
+    page, _ = await repo.transcript_page(conv.id)
+
+    assert [r["content"] for r in page] == [
+        "hello",
+        "Developer task d335c034 has a question",
+        "a real answer",
+        "boom",
+    ]

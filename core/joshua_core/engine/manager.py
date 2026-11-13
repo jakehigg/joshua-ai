@@ -14,10 +14,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,7 @@ from joshua_shared.log import get_logger
 
 from joshua_core.attachments import file_attachment
 from joshua_core.engine import inference as inference_plan
+from joshua_core.engine import workspace as workspace_engine
 from joshua_core.engine.describe import (
     attachment_note,
     describe_attachment,
@@ -42,7 +44,7 @@ from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.engine.usage import Usage
 from joshua_core.memory import prompt as memory_prompt
 from joshua_core.store.models import Channel, Conversation
-from joshua_core.store.repo import Repo
+from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE, Repo
 from joshua_core.store.usage_events import record_usage
 
 logger = get_logger("engine.manager")
@@ -50,6 +52,13 @@ logger = get_logger("engine.manager")
 # A per-conversation callback that returns extra prompt context for a turn, or
 # None. Phase 4 re-adds memory and kb injection through this hook; it is empty now.
 BuiltinFactory = Callable[[ToolDeps], Any]
+
+# The first line of a scheduled or event turn in a workspace: the reply does not
+# reach the person, so the agent must say how to reach them.
+WORKSPACE_UNATTENDED_NOTE = (
+    "[This is a scheduled task in a workspace. Nothing you write here reaches the "
+    "person. If the person should see it, call send_to_normal_chat.]"
+)
 
 
 @dataclass
@@ -69,9 +78,38 @@ class TurnCtx:
     # The message embedding, computed once and shared between providers (the
     # injection provider fills it; the taught-skill provider reuses it).
     embedding: list[float] | None = None
+    # True when the session has no history of its own: a first turn, a start
+    # after a reset, the context cap, or a restart that could not resume. A
+    # workspace block then adds the last rows of the thread.
+    fresh_session: bool = False
+    # Calls that run after the turn succeeded. A provider adds one to settle
+    # what it showed, such as marking workspace items seen.
+    after_turn: list[Callable[[], Awaitable[None]]] = field(default_factory=list)
 
 
 ContextProvider = Callable[[TurnCtx], Awaitable[str | None]]
+
+
+# What a turn tells its caller about where it is: "queued" while it waits for
+# the conversation lock, "running" once it holds the lock.
+StateHook = Callable[[str], Awaitable[None]]
+
+
+@dataclass
+class PendingTurn:
+    """One turn that has been accepted and has not finished.
+
+    The manager keeps one per turn in flight, so a client that was not on the
+    stream (a second device, or the same one after a reload) can still see that
+    Joshua is working. ``text`` is the person's message and is empty for a turn
+    that is not from a person (a task or an event).
+    """
+
+    turn_id: str
+    direction: str
+    text: str
+    since: datetime
+    state: str = "running"
 
 
 @dataclass
@@ -98,8 +136,22 @@ class _Managed:
     replaced_at: float | None = None
     # Why the session is marked for replacement, for the log line.
     replace_reason: str = "mcp server failed"
+    # Set by the context cap on a conversation that is not a workspace. The
+    # next turn adds the last rows of the thread to its prompt, then clears it.
+    carry_recent: bool = False
     # The model, the server, and the environment the session was built with.
     inference: ResolvedInference | None = None
+    # True while the SDK session holds the history of the thread: it resumed
+    # one, or a turn has run in it.
+    has_history: bool = False
+    # For a workspace: the model and the servers it was built from. A change
+    # rebuilds the session on the next turn.
+    workspace_sig: tuple[Any, ...] | None = None
+    # The channel the system prompt was built for, and the channel of the last
+    # turn. A thread that several channels share (the main thread) gets a note
+    # in the turn when its channel is not the one the prompt names.
+    built_channel: str = ""
+    last_turn_channel: str = ""
 
 
 @dataclass
@@ -119,6 +171,8 @@ class _Built:
     memory_paths: list[Path]
     memory_mtime: float
     inference: ResolvedInference
+    resumed: bool = False
+    workspace_sig: tuple[Any, ...] | None = None
 
     def apply(self, mc: _Managed) -> None:
         """Put this session and its fields on ``mc``."""
@@ -128,6 +182,8 @@ class _Built:
         mc.idle_ttl_s = getattr(self.profile, "idle_ttl_s", None)
         mc.memory_paths = self.memory_paths
         mc.memory_mtime = self.memory_mtime
+        mc.has_history = self.resumed
+        mc.workspace_sig = self.workspace_sig
         mc.inference = self.inference
 
 
@@ -229,6 +285,30 @@ def _new_turn_id() -> str:
     return "t-" + uuid4().hex[:12]
 
 
+def _file_url(path: str) -> str | None:
+    """The address of a filed attachment in the viewer (``/api/v1/files``), or
+    None for a path the viewer does not serve. A person's own folder is the
+    ``attachments`` root of the person who signed in."""
+    parts = path.split("/")
+    if ".." in parts or "" in parts:
+        return None
+    if len(parts) >= 3 and parts[0] in ("wiki", "shared"):
+        return "/api/v1/files/" + quote("/".join(parts))
+    if len(parts) >= 4 and parts[0] == "people" and parts[2] == "attachments":
+        return "/api/v1/files/attachments/" + quote("/".join(parts[3:]))
+    return None
+
+
+async def _tell(hook: StateHook | None, state: str) -> None:
+    """Tell the caller where the turn is. A hook that fails never fails the turn."""
+    if hook is None:
+        return
+    try:
+        await hook(state)
+    except Exception as exc:  # noqa: BLE001 — a status line is not worth a turn
+        logger.warning({"message": "turn state hook failed", "error": str(exc)})
+
+
 def _chat_id(channel_id: str) -> str:
     """The platform chat id inside a namespaced channel id.
 
@@ -273,10 +353,15 @@ class ConversationManager:
         self._builtin_jobs: dict[str, frozenset[str]] = {}
         # Iterated before assembling each turn's prompt; empty until phase 4.
         self._context_providers: list[ContextProvider] = []
+        # The workspace block provider, when main wires one. The workspaces
+        # route renders the same block, and later phases add sections to it.
+        self.workspace_block: Any = None
         self._pool: dict[str, _Managed] = {}
         self._pool_lock = asyncio.Lock()
         # The teardowns of abandoned clients, kept until they finish.
         self._teardowns: set[asyncio.Task[None]] = set()
+        # The turns in flight, by conversation id, oldest first.
+        self._pending: dict[str, list[PendingTurn]] = {}
         self._reaper: asyncio.Task[None] | None = None
 
     @property
@@ -362,12 +447,30 @@ class ConversationManager:
         )
         profile = self._derive_profile(person, channel)
         resolved = inference_plan.resolve(self._settings, inference_plan.turn_job(profile))
-        resume = self._resume_on(conversation, resume, resolved)
-        memory = self._memory_block(person, channel)
         role = self._conversation_role(channel, conversation)
         group = self._conversation_group(channel, conversation)
         group_id = group.id if group is not None else None
         gateway_names = allowed_gateway_servers(self._settings, conversation.person_id, group_id)
+        workspace_sig = None
+        workspace_id: str | None = None
+        if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+            # A workspace thread: the model of the workspace, the servers it
+            # picked among the ones the person may use, and tool search by the
+            # number of servers. A missing row builds a normal direct session.
+            workspace = await self._workspace_of(channel)
+            if workspace is not None:
+                gateway_names = workspace_engine.picked_servers(gateway_names, workspace)
+                resolved = workspace_engine.with_workspace(
+                    resolved,
+                    workspace,
+                    tool_search=workspace_engine.tool_search_for(
+                        gateway_names, self._settings.workspaces.tool_search_max_servers
+                    ),
+                )
+                workspace_sig = workspace_engine.signature(workspace)
+                workspace_id = workspace.id
+        resume = self._resume_on(conversation, resume, resolved)
+        memory = self._memory_block(person, channel)
         system_prompt = self._composer.compose(
             profile, person, channel, memory, servers=gateway_names
         )
@@ -390,7 +493,16 @@ class ConversationManager:
                 wiki_git=wikigit.is_enabled(self._settings),
                 inference=resolved,
             )
-            return _Built(session, None, profile, mem_paths, mem_mtime, resolved)
+            return _Built(
+                session,
+                None,
+                profile,
+                mem_paths,
+                mem_mtime,
+                resolved,
+                resumed=resume is not None,
+                workspace_sig=workspace_sig,
+            )
 
         from joshua_core.engine.agent import AgentSession, build_options
 
@@ -402,6 +514,7 @@ class ConversationManager:
             conversation.id,
             role,
             group_id,
+            workspace_id,
         )
         deps = ToolDeps(
             repo=self._repo,
@@ -411,7 +524,9 @@ class ConversationManager:
             person_id=conversation.person_id,
         )
         for name, factory in builtins.items():
-            mcp[name] = factory(deps)
+            server = factory(deps)
+            if server is not None:  # a factory may decline for this conversation
+                mcp[name] = server
         options = build_options(
             system_prompt=system_prompt,
             cwd=cwd,
@@ -422,7 +537,21 @@ class ConversationManager:
             resume=resume,
             tool_search=resolved.tool_search,
         )
-        return _Built(AgentSession(options), deps, profile, mem_paths, mem_mtime, resolved)
+        return _Built(
+            AgentSession(options),
+            deps,
+            profile,
+            mem_paths,
+            mem_mtime,
+            resolved,
+            resumed=resume is not None,
+            workspace_sig=workspace_sig,
+        )
+
+    async def _workspace_of(self, channel: Channel) -> Any:
+        """The workspace row of a ``workspace:<id>`` channel, or None."""
+        workspace_id = workspace_engine.workspace_id_of(channel.id)
+        return await self._repo.get_workspace(workspace_id) if workspace_id else None
 
     def _conversation_role(self, channel: Channel, conversation: Conversation) -> str:
         """The role this conversation carries, for the gateway file policy.
@@ -468,6 +597,7 @@ class ConversationManager:
                 lock=asyncio.Lock(),
                 last_used=monotonic(),
                 built_at=monotonic(),
+                built_channel=channel.id,
             )
             built.apply(mc)
             self._pool[conversation.id] = mc
@@ -487,6 +617,11 @@ class ConversationManager:
         if mc.replace_pending:
             await self._rebuild_locked(mc, channel, f"session rebuilt ({mc.replace_reason})")
             return
+        if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+            workspace = await self._workspace_of(channel)
+            if workspace is not None and workspace_engine.signature(workspace) != mc.workspace_sig:
+                await self._rebuild_locked(mc, channel, "session rebuilt (workspace changed)")
+                return
         if memory_prompt.newest_mtime(mc.memory_paths) <= mc.memory_mtime:
             return
         await self._rebuild_locked(mc, channel, "session rebuilt (memory changed)")
@@ -496,6 +631,7 @@ class ConversationManager:
         old = mc.session
         built = await self._build_session(channel, mc.conversation, mc.conversation.sdk_session_id)
         built.apply(mc)
+        mc.built_channel = channel.id
         mc.built_at = monotonic()
         mc.replace_pending = False
         await old.close()
@@ -603,6 +739,62 @@ class ConversationManager:
             "by its full path."
         )
 
+    def _attachment_meta(self, attachments: list[Attachment]) -> list[dict[str, Any]]:
+        """What the inbound row keeps of each file: where it is filed, its type,
+        the name the sender gave it, and its size. A history client shows the
+        file from this."""
+        kept: list[dict[str, Any]] = []
+        for a in attachments:
+            try:
+                size = (self._data_dir / a.path).stat().st_size
+            except OSError:
+                size = None
+            kept.append(
+                {
+                    "path": a.path,
+                    "mime": a.mime,
+                    "name": a.original_name or Path(a.path).name,
+                    "size": size,
+                }
+            )
+        return kept
+
+    async def _record_workspace_files(
+        self,
+        channel: Channel,
+        attachments: list[Attachment],
+        described: dict[str, AttachmentMeta],
+    ) -> None:
+        """On a workspace thread, record each filed attachment as a ``file``
+        item, so the photos of the thread are in its Items.
+
+        The title is what the describer says the file is, else the name the
+        sender gave. An item with the same ref (the agent added the file
+        first, or this is a retry) is the same item, and keeps its title. A
+        turn that is not on a workspace adds nothing. A failure never fails
+        the turn.
+        """
+        workspace_id = workspace_engine.workspace_id_of(channel.id)
+        if workspace_id is None:
+            return
+        for a in attachments:
+            meta = described.get(a.path)
+            subject = meta.description.subject if meta and meta.description else ""
+            title = (subject or a.original_name or Path(a.path).name).strip()[:120]
+            url = _file_url(a.path)
+            try:
+                await self._repo.add_workspace_item(
+                    workspace_id,
+                    "file",
+                    a.path,
+                    title or Path(a.path).name,
+                    url=url,
+                    added_by="person",
+                    rename=False,
+                )
+            except Exception as exc:  # noqa: BLE001 — an item never fails a turn
+                logger.warning({"message": "workspace file not recorded", "error": str(exc)})
+
     async def _prepare_attachments(
         self,
         attachments: list[Attachment] | None,
@@ -679,20 +871,80 @@ class ConversationManager:
             )
         return prepared, described
 
+    def pending_for(self, conversation_id: str) -> dict[str, Any] | None:
+        """The turn of a conversation that has not finished, or None.
+
+        A turn from a person wins over one that is not (the last one, when
+        several wait). Otherwise the oldest turn in flight is the answer. The
+        text of a turn that is not from a person is never given out.
+        """
+        turns = self._pending.get(conversation_id)
+        if not turns:
+            return None
+        from_people = [t for t in turns if t.direction == "in"]
+        turn = from_people[-1] if from_people else turns[0]
+        return {
+            "turn_id": turn.turn_id,
+            "state": turn.state,
+            "since": turn.since.isoformat(),
+            "text": turn.text if turn.direction == "in" else "",
+        }
+
     async def run_turn(
         self,
         channel: Channel,
         conversation: Conversation,
         text: str,
         *,
+        turn_id: str | None = None,
+        on_state: StateHook | None = None,
+        **kwargs: Any,
+    ) -> TurnResult:
+        """Run one turn, and keep it in the pending list until it ends.
+
+        ``turn_id`` names the turn when the caller already told someone its id.
+        ``on_state`` hears ``"queued"`` when the turn has to wait for another
+        turn of the conversation, then ``"running"``. The other arguments are
+        those of ``_run_turn``.
+        """
+        pending = PendingTurn(
+            turn_id=turn_id or _new_turn_id(),
+            direction=kwargs.get("direction", "in"),
+            text=text,
+            since=datetime.now(UTC),
+        )
+        self._pending.setdefault(conversation.id, []).append(pending)
+        try:
+            return await self._run_turn(
+                channel, conversation, text, pending=pending, on_state=on_state, **kwargs
+            )
+        finally:
+            turns = self._pending.get(conversation.id, [])
+            if pending in turns:
+                turns.remove(pending)
+            if not turns:
+                self._pending.pop(conversation.id, None)
+
+    async def _run_turn(
+        self,
+        channel: Channel,
+        conversation: Conversation,
+        text: str,
+        *,
+        pending: PendingTurn,
+        on_state: StateHook | None = None,
         on_delta: OnDelta | None = None,
         framing: str | None = None,
         direction: str = "in",
         speaker: str | None = None,
         person_id: str | None = None,
         attachments: list[Attachment] | None = None,
+        pull_only: bool = False,
     ) -> TurnResult:
-        turn_id = _new_turn_id()
+        """Run one turn. ``pull_only`` marks a turn from a channel that only
+        pulls (the viewer) on a thread that another channel owns: the turn must
+        not move ``last_channel_id``, so a reminder still goes to the phone."""
+        turn_id = pending.turn_id
         t_start = monotonic()
         mc = await self._get_or_create(channel, conversation)
         # The current turn's speaker. A per-person session carries a fixed
@@ -701,6 +953,9 @@ class ConversationManager:
         # A fresh local-time header each turn — the CLI injects the date, not the
         # clock time. Cheap and always current, unlike the cached system prompt.
         preamble = f"[Current local time: {self._now_str()}]"
+        if channel.channel_type == WORKSPACE_CHANNEL_TYPE and direction in ("task", "inject"):
+            # The delivery gate keeps a workspace reply in the transcript.
+            preamble += "\n" + WORKSPACE_UNATTENDED_NOTE
         # A shared conversation labels the message with who sent it.
         body = f"{speaker}: {text}" if speaker else text
         role = self._conversation_role(channel, conversation)
@@ -725,14 +980,34 @@ class ConversationManager:
             turn_id=turn_id,
             profile=mc.profile,
             role=role,
+            fresh_session=not mc.has_history,
         )
         provider_notes: list[str] = []
         for provider in self._context_providers:
-            note = await provider(ctx)
+            try:
+                note = await provider(ctx)
+            except Exception as e:  # noqa: BLE001 — a provider never fails a turn
+                logger.warning(
+                    {
+                        "message": "context provider failed",
+                        "provider": getattr(provider, "__qualname__", type(provider).__name__),
+                        "error": f"{type(e).__name__}: {e}",
+                    }
+                )
+                continue
             if note:
                 provider_notes.append(note)
+        if channel.channel_type != WORKSPACE_CHANNEL_TYPE:
+            try:
+                carried = await self._carried_rows_note(mc, ctx)
+            except Exception as e:  # noqa: BLE001 — carrying rows never fails a turn
+                logger.warning({"message": "carry rows failed", "error": str(e)})
+                carried = None
+            if carried:
+                provider_notes.append(carried)
+        channel_note = self._channel_note(mc, channel)
         prompt = "\n\n".join(
-            p for p in (preamble, framing, *provider_notes, attach_note, body) if p
+            p for p in (preamble, framing, channel_note, *provider_notes, attach_note, body) if p
         )
 
         # Time-to-first-output: stamp the first streamed delta even when the
@@ -746,7 +1021,12 @@ class ConversationManager:
                 await on_delta(chunk)
 
         t_lock = monotonic()
+        if mc.lock.locked():
+            pending.state = "queued"
+            await _tell(on_state, "queued")
         async with mc.lock:
+            pending.state = "running"
+            await _tell(on_state, "running")
             lock_wait_ms = round((monotonic() - t_lock) * 1000)
             mc.last_used = monotonic()
             # Bind the in-process tools to THIS turn's channel and speaker. Safe
@@ -762,6 +1042,10 @@ class ConversationManager:
             in_meta: dict[str, Any] = {"turn_id": turn_id}
             if speaker:
                 in_meta["speaker"] = speaker
+            if attachments:
+                in_meta["attachments"] = self._attachment_meta(attachments)
+                if direction == "in":
+                    await self._record_workspace_files(channel, attachments, described)
             await self._repo.add_transcript(conversation.id, direction, text, meta=in_meta)
             try:
                 result = await self._run_with_resume_retry(
@@ -782,6 +1066,8 @@ class ConversationManager:
                 raise
 
             mc.had_success = True
+            if not result.is_error:
+                mc.has_history = True
             mc.last_used = monotonic()
             resolved = mc.inference or inference_plan.resolve(self._settings, "chat")
             if result.is_error:
@@ -801,7 +1087,7 @@ class ConversationManager:
                 await self._repo.set_sdk_session(
                     conversation.id,
                     result.session_id,
-                    last_channel_id=channel.id,
+                    last_channel_id=None if pull_only else channel.id,
                     inference_endpoint=resolved.endpoint,
                 )
                 mc.conversation = replace(
@@ -810,7 +1096,9 @@ class ConversationManager:
                     inference_endpoint=resolved.endpoint,
                 )
             else:
-                await self._repo.touch_conversation(conversation.id, last_channel_id=channel.id)
+                await self._repo.touch_conversation(
+                    conversation.id, last_channel_id=None if pull_only else channel.id
+                )
 
             metrics = {
                 "turn_id": turn_id,
@@ -865,8 +1153,90 @@ class ConversationManager:
                     **metrics,
                 }
             )
+            if not result.is_error:
+                for settle in ctx.after_turn:
+                    try:
+                        await settle()
+                    except Exception as e:  # noqa: BLE001 — a settle never fails a turn
+                        logger.warning({"message": "after-turn step failed", "error": str(e)})
+                await self._apply_context_cap(mc, channel, result)
             await self._check_mcp_failed(mc)
             return result
+
+    @staticmethod
+    def _channel_note(mc: _Managed, channel: Channel) -> str | None:
+        """A note for a turn whose channel is not the one the system prompt names.
+
+        The prompt names the channel of the turn that built the session, and
+        the snippets of ``user/`` apply to every turn. When one thread takes
+        turns from several channels, this note says which channel speaks now,
+        on a switch and on each turn off the built channel, so the guidance for
+        that channel applies and the guidance for another channel does not.
+        """
+        switched = bool(mc.last_turn_channel) and mc.last_turn_channel != channel.id
+        mc.last_turn_channel = channel.id
+        if channel.id == mc.built_channel and not switched:
+            return None
+        return (
+            f"[This message arrives on channel `{channel.id}`. It replaces the channel "
+            "named in the system prompt. Pass this channel id to tools that ask for one. "
+            "Follow the guidance for this channel only. A format rule for another "
+            "channel does not apply to this reply.]"
+        )
+
+    async def _apply_context_cap(self, mc: _Managed, channel: Channel, result: TurnResult) -> None:
+        """After a turn whose input went over the context cap, forget the SDK
+        session. The next turn starts a new one. A workspace uses
+        ``workspaces.context_cap`` and restarts from the workspace block and the
+        last rows of the thread. Any other conversation uses ``core.context_cap``
+        (0 is off) and restarts from the last rows of the thread."""
+        is_workspace = channel.channel_type == WORKSPACE_CHANNEL_TYPE
+        cap = (
+            self._settings.workspaces.context_cap
+            if is_workspace
+            else self._settings.core.context_cap
+        )
+        # Without the size of the last call, the summed usage would count the
+        # cache reads of every call of the turn again. Do not guess: keep the
+        # session.
+        used = result.context_tokens
+        if cap <= 0 or used is None or used <= cap:
+            return
+        await self._repo.clear_sdk_session(mc.conversation.id)
+        mc.conversation = replace(mc.conversation, sdk_session_id=None)
+        mc.replace_pending = True
+        if is_workspace:
+            mc.replace_reason = "workspace context cap"
+            message = "workspace context cap reached; next turn starts fresh"
+        else:
+            mc.replace_reason = "context cap"
+            mc.carry_recent = True
+            message = "context cap reached; next turn starts fresh"
+        logger.info(
+            {
+                "message": message,
+                "conversation_id": mc.conversation.id,
+                "input_tokens": used,
+                "cap": cap,
+            }
+        )
+
+    async def _carried_rows_note(self, mc: _Managed, ctx: TurnCtx) -> str | None:
+        """For the first turn after the context cap: the last rows of the
+        thread, because the new session has no history. A workspace block
+        carries its own rows, so a workspace never takes this note."""
+        if not mc.carry_recent:
+            return None
+        mc.carry_recent = False
+        rows = await self._repo.transcript_tail(
+            ctx.conversation.id, workspace_engine.BLOCK_RECENT_ROWS
+        )
+        lines = workspace_engine.recent_lines(rows, ctx.person_id)
+        if not lines:
+            return None
+        return "\n".join(
+            ["The last rows of this thread, because the session starts fresh:", *lines]
+        )
 
     async def _run_with_resume_retry(
         self,
