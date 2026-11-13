@@ -21,6 +21,10 @@ def _member_repo() -> PeopleFakeRepo:
     return PeopleFakeRepo([Person(id="alex", display_name="Alex", role="member")])
 
 
+def _owner_repo() -> PeopleFakeRepo:
+    return PeopleFakeRepo([Person(id="robin", display_name="Robin", role="owner")])
+
+
 # --- handle helpers --------------------------------------------------------
 
 
@@ -90,6 +94,17 @@ async def test_add_user_member_creates_person(tmp_path: Path) -> None:
     assert (tmp_path / "people" / "sam" / "attachments").is_dir()
 
 
+async def test_add_user_owner_creates_person(tmp_path: Path) -> None:
+    """An owner speaks for the roster, so the member gate of the tool admits one."""
+    repo = _owner_repo()
+    deps = make_deps(repo, person_id="robin")
+
+    result = await registration.do_add_user(deps, name="Sam", handle="998877", data_dir=tmp_path)
+
+    assert "Added Sam" in _text(result)
+    assert repo.people["sam"].role == "member"
+
+
 async def test_add_user_conflict_changes_nothing(tmp_path: Path) -> None:
     repo = _member_repo()
     repo.people["mia"] = Person(id="mia", display_name="Mia", role="member")
@@ -148,6 +163,16 @@ async def test_list_users_member(tmp_path: Path) -> None:
     assert "alex" in _text(result)
     assert "telegram:111" in _text(result)
     assert "ghost" not in _text(result)
+
+
+async def test_list_users_owner() -> None:
+    repo = _owner_repo()
+    repo.handles[("telegram", "111")] = "robin"
+    deps = make_deps(repo, person_id="robin")
+
+    result = await registration.do_list_users(deps)
+
+    assert "robin" in _text(result)
 
 
 async def test_list_users_guest_denied() -> None:
@@ -212,6 +237,65 @@ async def test_operator_remove_missing(tmp_path: Path) -> None:
     assert await people.remove_person(repo, tmp_path, person_id="nobody") is False
 
 
+async def test_operator_remove_person_drops_the_auth_secret(tmp_path: Path) -> None:
+    """A person off the roster keeps no way in."""
+    repo = _member_repo()
+    repo.secrets["alex"] = "$2b$04$hash"
+
+    assert await people.remove_person(repo, tmp_path, person_id="alex") is True
+
+    assert repo.secrets == {}
+
+
+async def test_operator_remove_missing_keeps_the_secrets(tmp_path: Path) -> None:
+    repo = _member_repo()
+    repo.secrets["alex"] = "$2b$04$hash"
+    assert await people.remove_person(repo, tmp_path, person_id="nobody") is False
+    assert repo.secrets == {"alex": "$2b$04$hash"}
+
+
+async def test_operator_set_role(tmp_path: Path) -> None:
+    repo = _member_repo()
+    repo.handles[("telegram", "999")] = "alex"
+
+    result = await people.set_role(repo, tmp_path, person_id="alex", role="owner")
+
+    assert result == {"id": "alex", "name": "Alex", "role": "owner"}
+    # The name and the handles stay; only the role moves.
+    assert repo.people["alex"].display_name == "Alex"
+    assert repo.handles == {("telegram", "999"): "alex"}
+    assert repo.people["alex"].role == "owner"
+    assert config_module.read_people_file(tmp_path / "people.yaml") == [
+        {"id": "alex", "role": "owner"}
+    ]
+
+
+async def test_operator_set_role_keeps_the_people_file_entry(tmp_path: Path) -> None:
+    repo = _member_repo()
+    await people.add_person(
+        repo, tmp_path, person_id="sam", name="Sam", handle="telegram:1", role="guest"
+    )
+
+    await people.set_role(repo, tmp_path, person_id="sam", role="member")
+
+    entry = config_module.read_people_file(tmp_path / "people.yaml")[0]
+    assert entry == {"id": "sam", "name": "Sam", "role": "member", "handles": {"telegram": "1"}}
+
+
+async def test_operator_set_role_bad_role(tmp_path: Path) -> None:
+    repo = _member_repo()
+    with pytest.raises(people.PeopleError):
+        await people.set_role(repo, tmp_path, person_id="alex", role="admin")
+
+
+async def test_operator_set_role_unknown_person(tmp_path: Path) -> None:
+    repo = _member_repo()
+    repo.people["ghost"] = Person(id="ghost", display_name="Ghost", role="removed")
+    assert await people.set_role(repo, tmp_path, person_id="nobody", role="owner") is None
+    assert await people.set_role(repo, tmp_path, person_id="ghost", role="owner") is None
+    assert not (tmp_path / "people.yaml").exists()
+
+
 async def test_operator_roster_excludes_removed(tmp_path: Path) -> None:
     repo = _member_repo()
     repo.people["ghost"] = Person(id="ghost", display_name="Ghost", role="removed")
@@ -234,6 +318,43 @@ def test_people_file_upsert_merges_handles(tmp_path: Path) -> None:
 
     entry = config_module.read_people_file(path)[0]
     assert entry["handles"] == {"telegram": "1", "imessage": "+15551234567"}
+
+
+def test_people_file_set_role_keeps_everything_of_a_configured_person(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A person from ``joshua.yaml`` keeps their name and their handles.
+
+    A people file entry replaces the configured one whole, so a role-only entry
+    would drop both and the config would no longer load.
+    """
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    config_path = tmp_path / "joshua.yaml"
+    config_path.write_text(
+        "name: Test House\ntimezone: UTC\npeople:\n"
+        "  - id: robin\n    name: Robin\n    role: member\n    journal: ask\n"
+        '    handles:\n      telegram: "112233"\n'
+    )
+    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("JOSHUA_CONFIG", str(config_path))
+    monkeypatch.setattr(config_module, "_cache", None)
+    monkeypatch.setattr(config_module, "_cache_path", None)
+
+    people_file.set_role(data_dir / "people.yaml", "robin", "owner")
+
+    robin = config_module.reload(config_path).person("robin")
+    assert robin.role == "owner"
+    assert robin.name == "Robin"
+    assert robin.handles == {"telegram": ["112233"]}
+    assert robin.journal == "ask"
+
+
+def test_people_file_set_role_of_a_person_the_loader_does_not_know(tmp_path: Path) -> None:
+    """Nothing to keep: the entry is the id and the role."""
+    path = tmp_path / "people.yaml"
+    people_file.set_role(path, "nova", "owner")
+    assert config_module.read_people_file(path) == [{"id": "nova", "role": "owner"}]
 
 
 def test_people_file_mark_removed_clears_on_readd(tmp_path: Path) -> None:
@@ -274,3 +395,63 @@ async def test_add_user_keeps_the_handle_the_person_already_has(tmp_path: Path) 
     )
     assert cfg.people_by_handle("imessage", "sam@example.com").id == "sam"
     assert cfg.people_by_handle("imessage", "+15550001111").id == "sam"
+
+
+def _roster_config(tmp_path: Path, monkeypatch) -> Path:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    config_path = tmp_path / "joshua.yaml"
+    config_path.write_text(
+        "name: T\ntimezone: UTC\npeople:\n  - id: robin\n    name: Robin\n    journal: ask\n"
+        '    handles:\n      telegram: "112233"\n'
+    )
+    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("JOSHUA_CONFIG", str(config_path))
+    monkeypatch.setattr(config_module, "_cache", None)
+    monkeypatch.setattr(config_module, "_cache_path", None)
+    return data_dir
+
+
+def test_set_role_writes_only_the_id_and_the_role(tmp_path: Path, monkeypatch) -> None:
+    data_dir = _roster_config(tmp_path, monkeypatch)
+    people_file.set_role(data_dir / "people.yaml", "robin", "owner")
+    assert config_module.read_people_file(data_dir / "people.yaml") == [
+        {"id": "robin", "role": "owner"}
+    ]
+
+
+def test_set_role_clears_a_tombstone(tmp_path: Path, monkeypatch) -> None:
+    data_dir = _roster_config(tmp_path, monkeypatch)
+    path = data_dir / "people.yaml"
+    people_file.mark_removed(path, "robin")
+    people_file.set_role(path, "robin", "guest")
+    assert config_module.read_people_file(path) == [{"id": "robin", "role": "guest"}]
+
+
+def test_set_profile_writes_only_prompt_and_journal_and_keeps_a_role(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_dir = _roster_config(tmp_path, monkeypatch)
+    path = data_dir / "people.yaml"
+    people_file.set_role(path, "robin", "owner")
+    people_file.set_profile(path, "robin", prompt="/data/people/robin/prompt.md", journal="off")
+    assert config_module.read_people_file(path) == [
+        {
+            "id": "robin",
+            "role": "owner",
+            "prompt": "/data/people/robin/prompt.md",
+            "journal": "off",
+        }
+    ]
+    people_file.set_profile(path, "robin", prompt="", journal="auto")
+    entry = config_module.read_people_file(path)[0]
+    assert entry["prompt"] == "" and entry["journal"] == "auto" and entry["role"] == "owner"
+
+
+def test_set_profile_of_an_unknown_person_writes_nothing(tmp_path: Path, monkeypatch) -> None:
+    data_dir = _roster_config(tmp_path, monkeypatch)
+    assert (
+        people_file.set_profile(data_dir / "people.yaml", "nobody", prompt="", journal="off")
+        is None
+    )
+    assert not (data_dir / "people.yaml").exists()

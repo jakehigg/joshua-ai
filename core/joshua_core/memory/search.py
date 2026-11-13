@@ -18,6 +18,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from joshua_shared.config import is_member
+
 from joshua_core.memory.models import KbChunk
 from joshua_core.memory.ranking import PER_DOC_CAP, rank_chunks
 from joshua_core.memory.store import DOCUMENT_KIND, WORKSPACE_KIND, MemoryStore
@@ -47,7 +49,7 @@ def document_reader(people: Sequence[Any], person_id: str | None) -> str | None:
         return None
     for person in people:
         if person.id == person_id:
-            return person_id if person.role == "member" else None
+            return person_id if is_member(person.role) else None
     return None
 
 

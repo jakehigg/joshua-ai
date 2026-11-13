@@ -42,6 +42,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from joshua_shared.config import is_member
 from joshua_shared.contracts import (
     USAGE_DEFAULT_DAYS,
     USAGE_WRITE_MAX_BYTES,
@@ -185,7 +186,7 @@ async def _answer(request: Request, clock: Clock) -> JSONResponse:
                 status_code=422,
             )
         person = ctx.settings.person(name)
-        if person is None or person.role != "member":
+        if person is None or not is_member(person.role):
             return JSONResponse({"error": "unknown person"}, status_code=403)
         return JSONResponse(await _by_conversation(ctx.repo, since, days, person.id))
     if group:

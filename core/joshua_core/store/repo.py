@@ -9,7 +9,8 @@ channel adapters own the platform-specific policy.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection
+from collections.abc import AsyncIterator, Collection
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -59,6 +60,10 @@ _SLUG_MAX = 48
 
 # Slugs that a route of /v1/workspaces uses.
 RESERVED_SLUGS = frozenset({"options"})
+
+# The id of the only row of ``auth_import_marker``: the one-time import of the
+# viewer passwords into ``auth_secret``.
+AUTH_IMPORT_MARKER_ID = "viewer_passwords"
 
 
 def slugify(title: str) -> str:
@@ -346,6 +351,116 @@ class Repo:
                 return False
             await conn.execute("DELETE FROM person_handles WHERE person_id = %s", (person_id,))
         return True
+
+    # --- auth secrets ------------------------------------------------------
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[psycopg.AsyncConnection]:
+        """One connection and one transaction, for a caller that writes several
+        rows all or none.
+
+        Pass the connection to each method that takes ``conn``; a method called
+        without one takes its own connection and commits on its own. An error
+        inside the block rolls the whole block back.
+        """
+        async with self._pool.connection() as conn, conn.transaction():
+            yield conn
+
+    @asynccontextmanager
+    async def _connection(
+        self, conn: psycopg.AsyncConnection | None
+    ) -> AsyncIterator[psycopg.AsyncConnection]:
+        """The caller's connection, or one of our own."""
+        if conn is not None:
+            yield conn
+            return
+        async with self._pool.connection() as own:
+            yield own
+
+    async def get_auth_secret(
+        self, person_id: str, *, conn: psycopg.AsyncConnection | None = None
+    ) -> str | None:
+        """The bcrypt hash of a person's secret, or None when they have none.
+
+        This is the one method that reads a hash. Nothing puts it in an answer:
+        ``joshua_core.auth_api`` compares it and returns a boolean.
+        """
+        async with self._connection(conn) as c:
+            cur = await c.execute(
+                "SELECT secret_hash FROM auth_secret WHERE person_id = %s", (person_id,)
+            )
+            row = await cur.fetchone()
+        return row["secret_hash"] if row else None
+
+    async def set_auth_secret(
+        self, person_id: str, secret_hash: str, *, conn: psycopg.AsyncConnection | None = None
+    ) -> None:
+        """Store the hash of a person's secret, and bump ``updated_at``."""
+        async with self._connection(conn) as c:
+            await c.execute(
+                """
+                INSERT INTO auth_secret (person_id, secret_hash)
+                VALUES (%s, %s)
+                ON CONFLICT (person_id) DO UPDATE SET
+                    secret_hash = EXCLUDED.secret_hash,
+                    updated_at = now()
+                """,
+                (person_id, secret_hash),
+            )
+
+    async def delete_auth_secret(self, person_id: str) -> bool:
+        """Drop a person's secret. False when they had none."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("DELETE FROM auth_secret WHERE person_id = %s", (person_id,))
+        return cur.rowcount > 0
+
+    async def list_auth_person_ids(self) -> list[str]:
+        """The ids of the people who have a secret, ordered. A person with no
+        secret is absent."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT person_id FROM auth_secret ORDER BY person_id")
+            rows = await cur.fetchall()
+        return [r["person_id"] for r in rows]
+
+    async def get_auth_updated_at(self, person_id: str) -> datetime | None:
+        """When a person's secret last changed, or None when they have none.
+
+        The viewer stamps its session cookie with this time, so a changed
+        secret signs out every cookie that carries the old one.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT updated_at FROM auth_secret WHERE person_id = %s", (person_id,)
+            )
+            row = await cur.fetchone()
+        return row["updated_at"] if row else None
+
+    async def get_auth_import_marker(
+        self, *, conn: psycopg.AsyncConnection | None = None
+    ) -> dict[str, Any] | None:
+        """The marker row of the one-time import of the secrets, or None when
+        the import has not run."""
+        async with self._connection(conn) as c:
+            cur = await c.execute(
+                "SELECT * FROM auth_import_marker WHERE id = %s", (AUTH_IMPORT_MARKER_ID,)
+            )
+            return await cur.fetchone()
+
+    async def set_auth_import_marker(
+        self, rows_written: int, *, conn: psycopg.AsyncConnection | None = None
+    ) -> None:
+        """Mark the one-time import done, with the number of rows it wrote."""
+        async with self._connection(conn) as c:
+            await c.execute(
+                """
+                INSERT INTO auth_import_marker (id, rows_written)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    done_at = now(),
+                    rows_written = EXCLUDED.rows_written
+                """,
+                (AUTH_IMPORT_MARKER_ID, rows_written),
+            )
 
     # --- conversations -----------------------------------------------------
 

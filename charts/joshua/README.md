@@ -13,7 +13,7 @@ The chart ships as a package on each release. Take it from the release page,
 then install it:
 
 ```
-VERSION=0.0.6
+VERSION=<the newest release, without the v>
 curl -LO https://github.com/jakehigg/joshua-ai/releases/download/v$VERSION/joshua-$VERSION.tgz
 helm install joshua ./joshua-$VERSION.tgz \
   --namespace joshua --create-namespace \
@@ -226,11 +226,12 @@ SearXNG must allow the `json` format. `docs/operations.md` has the recipe.
 
 The chart can also run the web viewer, one React app that the gateway image
 carries and a second entrypoint serves. It is off by default. A person signs
-in with HTTP basic and reads the wiki, their own profile, the journal, their
-own attachments, and the shared profile. A member can move a wiki page to the
-trash. The viewer holds one fleet token, `JOSHUA_TOKEN_VIEWER`, and no
-upstream credential. It reads the volume, calls core to search by meaning
-and to read the usage by day, and calls the assignments container to read the
+in on the viewer's own page and reads the wiki, their own profile, the
+journal, their own attachments, and the shared profile. A member can move a
+wiki page to the trash. The viewer holds one fleet token,
+`JOSHUA_TOKEN_VIEWER`, and no upstream credential. It reads the volume, calls
+core to check a sign-in, to search by meaning and to read the usage by day,
+and calls the assignments container to read the
 assignments of the person who signed in. Put the same `JOSHUA_TOKEN_VIEWER`
 value in the viewer Secret and in the core Secret. Without it, the viewer
 searches by words only and the usage page says that it is not configured.
@@ -258,29 +259,48 @@ config: |
   ...
   viewer:
     enabled: true
-    users:
-      <person-id>: ""
+    auth:
+      method: pin
 ```
 
 With only the first, the container exits at once and its log says why.
 
-The passwords are a Secret, named by `secrets.viewer` and made outside the
-chart like every other. It holds two keys. `VIEWER_PASSWORDS` is
-`<person-id>=<bcrypt hash>` pairs, comma separated. `JOSHUA_TOKEN_VIEWER` is
-the viewer's fleet token, the same value as in the core Secret:
+`viewer.auth.method` is `anonymous`, `pin`, or `password`, and it holds for
+the whole instance. The viewer's Secret, named by `secrets.viewer` and made
+outside the chart like every other, holds no password. `JOSHUA_TOKEN_VIEWER`
+is the viewer's fleet token, the same value as in the core Secret.
+`JOSHUA_VIEWER_SESSION_SECRET` signs the session cookie; without it each pod
+mints its own key at start, so a restart signs everybody out:
 
 ```
 kubectl -n <namespace> create secret generic joshua-viewer-secrets \
-  --from-literal=VIEWER_PASSWORDS='alice=$2b$12$...,bob=$2b$12$...' \
-  --from-literal=JOSHUA_TOKEN_VIEWER="$JOSHUA_TOKEN_VIEWER"
+  --from-literal=JOSHUA_TOKEN_VIEWER="$JOSHUA_TOKEN_VIEWER" \
+  --from-literal=JOSHUA_VIEWER_SESSION_SECRET="$(openssl rand -base64 33)"
 ```
 
-`viewer.users` in your config is the authorization: a person who is not a key
-there cannot sign in, whatever the Secret holds.
+Core holds every sign-in secret, as a salted hash in its `auth_secret` table,
+and the viewer reaches it only through core's `/auth/*` routes with that fleet
+token. A sign-in answers with one signed cookie: the browser session, or 30
+days when the person checks "remember this device". The person who has
+`role: owner` sets a secret, adds a person, changes a role, and takes a person
+off the roster under Admin -> Users, with no setting in your values. The
+owner's own first secret comes from the core pod:
 
-The viewer serves plain HTTP and puts every route behind HTTP basic, so the
-password crosses the wire on each request. Terminate TLS at the ingress, and
-keep the host off the public internet unless you mean to publish your notes.
+```
+kubectl -n <namespace> exec deploy/joshua-core -- \
+  python -m joshua_core people auth-reset --id sam --secret '<a long secret>'
+```
+
+If you signed in with the viewer passwords before, core imports them once, at
+its first start with the new sign-in. It reads `viewer.users` in your config
+and `VIEWER_PASSWORDS` in the core Secret, writes a hash for each person who
+has none, and marks the import done. Nothing is overwritten and it never runs
+again. Delete both afterwards.
+
+The viewer serves plain HTTP, and its session cookie crosses the wire with it.
+Terminate TLS at the ingress, and keep the host on a network you trust: this
+is the interface of one instance for the people of that instance, not a
+service to publish.
 
 ## Assignments
 

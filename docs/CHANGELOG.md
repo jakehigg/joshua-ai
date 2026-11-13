@@ -6,6 +6,95 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **The viewer has a sign-in page.** `viewer.auth.method` sets one method for
+  the instance. `anonymous` is the default. It asks for nothing, and
+  `viewer.anonymous` decides who a request is. `pin` shows the people who
+  have a secret and asks the person for a PIN. `password` asks for a person
+  id and a password. A PIN and a password are the same thing, one secret that
+  can be any string. "Remember this device" keeps the session cookie for 30
+  days. Without it, the browser drops the cookie when it closes. The files of
+  the app load with no cookie, because the sign-in form is a page of the app.
+  Every JSON route still needs the sign-in. See [auth.md](auth.md).
+- **Core keeps the secrets.** Core stores one salted hash for each person in
+  the new `auth_secret` table. The viewer calls six new routes of core:
+  `POST /auth/verify`, `POST /auth/secret`, `POST /auth/secret/admin`,
+  `DELETE /auth/secret/<id>`, `GET /auth/people`, and `GET /auth/people/<id>`.
+  The viewer holds no password. HTTP basic is gone, and no answer carries
+  `WWW-Authenticate`. A change of a secret, a reset, and a removal sign out
+  every other browser of that person within a minute.
+- **The owner keeps the roster.** `owner` is a new role. An owner is a member
+  everywhere, including every MCP server behind the gateway. The owner also
+  gets "Admin" in the navigation. Under Admin → Users the owner adds a person
+  with a secret, sets a secret, promotes or demotes a person, and removes a
+  person. Core serves three new roster routes: `POST /admin/people`,
+  `POST /admin/people/<id>/role`, and `POST /admin/people/<id>/remove`.
+  `make validate` warns when no person is the owner, and the file is still
+  valid.
+- **The roster always keeps an owner.** Core refuses, with `409`, a change
+  that demotes or removes the only owner. The Users page turns off `Demote`
+  and `Remove` on that row. Only three things make a person the owner:
+  `role: owner` in `joshua.yaml`, another owner, or an operator with
+  `python -m joshua_core people role --id <id> --role owner`.
+- **The viewer reaches the roster routes as an auth caller.** Core admits the
+  callers of `AUTH_CALLERS` (default `viewer`) on its four roster routes. The
+  viewer gets no other admin route, and it serves the roster to the owner
+  alone. You no longer add `viewer` to `ADMIN_CALLERS`.
+- **A person needs no handle.** `Add a person`, `POST /admin/people`, and
+  `people add` take the handle as optional, so you can add a person who uses
+  only the viewer and the terminal.
+- **Profile.** "Your page" is now "Profile", at `/me`. There a person changes
+  their own PIN or password, their instructions to Joshua, and their journal
+  consent. Core serves `GET` and `POST /people/<id>/profile`, and the viewer
+  serves `GET` and `POST /api/v1/profile`. Core writes the instructions to
+  `/data/people/<id>/prompt.md` and puts the path of that file in the
+  `prompt` of the person. A person cannot change their own name, role, or
+  handles.
+- **The people file overlays fields.** An entry of `/data/people.yaml`
+  changes only the keys that it holds on the same person in `joshua.yaml`.
+  The handles of the two are the union. Before, the entry replaced the whole
+  person, so one role change hid every later change of that person in
+  `joshua.yaml`. A `role: removed` entry still removes the person.
+- **A change of a person applies on the next turn.** Core reads the `prompt`
+  and the `journal` of a person from the current config on each turn. Before,
+  core read them one time, at start.
+- **A text field shows one focus ring.** The wrapper of a field draws the
+  ring, and the control inside it draws none.
+- **`GET /readyz` of the viewer reports `auth`.** The field holds the sign-in
+  method. The `users` count of the retired `viewer.users` is gone.
+- **`make up` starts the viewer and the assignments container** when
+  `joshua.yaml` sets `viewer.enabled: true` or `assignments.enabled: true`,
+  and `make down` stops them. You do not name a compose profile.
+- **`make init-env` writes `JOSHUA_VIEWER_SESSION_SECRET`**, so a restart of
+  the viewer keeps everybody signed in.
+- **`make validate` names only the channels that start.** It runs a new
+  one-shot `validate` service with the channel credentials and no network, so
+  a channel with an empty credential no longer shows as enabled.
+  `make validate-dev` runs the same check on your own build.
+- **`make restart` restarts every container that runs.** It keeps each
+  image, so it works for a release and for your own build.
+- **Upgrade notes for the sign-in.**
+  - Give one person `role: owner` in `joshua.yaml`.
+  - In docker compose, run `make init-env` again. It adds
+    `JOSHUA_VIEWER_SESSION_SECRET` to `.env` and changes nothing else. In the
+    chart, add `JOSHUA_VIEWER_SESSION_SECRET` to the viewer Secret. With no
+    such key, the viewer makes a new key at each start, so a restart signs
+    everybody out.
+  - The first start of core after the upgrade imports the old viewer
+    passwords one time. It reads `viewer.users` in `joshua.yaml`, then
+    `VIEWER_PASSWORDS` and `VIEWER_PW_<ID>` in the environment of core. It
+    writes a hash for each person who has no secret yet, and it overwrites
+    nothing. The `auth_import_marker` table records that the import ran, so
+    it never runs again. Docker compose gives core `VIEWER_PASSWORDS` from
+    `.env`. In the chart, put it in the core Secret for that one start. Then
+    delete `viewer.users` and `VIEWER_PASSWORDS`. `make validate` warns while
+    either one is there.
+  - A person with no secret is on the roster and cannot sign in. On a `pin`
+    instance with no secret at all, the sign-in page shows the command that
+    sets the first one:
+    `python -m joshua_core people auth-reset --id <id> --secret '<secret>'`.
+    Run it in the core container. After that, the owner sets the other
+    secrets under Admin → Users.
+  - The schema adds the tables `auth_secret` and `auth_import_marker`.
 - **Workspaces.** A workspace is a chat thread for one large piece of work,
   such as a trip, a house project, or a piece of code. It has a title, a goal,
   a model, the MCP servers that the person picked, notes, and a list of items.

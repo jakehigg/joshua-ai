@@ -1,10 +1,10 @@
 {{- if .Values.viewer.enabled }}
 {{/* The read-only web viewer. It is the gateway image with the second
      entrypoint, and it is not the gateway: it holds only its own fleet token
-     and no upstream credential. It calls core to search by meaning and to
-     read the usage, and the assignments container to read the assignments
-     of a person. A person signs in with
-     HTTP basic and reads the wiki, their own profile, their own journal,
+     and no upstream credential. It calls core to check a sign-in, to search
+     by meaning and to read the usage, and the assignments container to read
+     the assignments of a person. A person signs in on the viewer's own page
+     and reads the wiki, their own profile, their own journal,
      their own attachments, and the shared profile.
 
      Two switches turn it on, and both are needed. This one puts the pod in

@@ -341,12 +341,12 @@ To read a failure:
 
 ### What was tested
 
-These setups were tested before this release. A setup that is not in this
-list can work, but nobody has tested it.
+These setups were tested. A setup that is not in this list can work, but
+nobody has tested it.
 
 | Setup | Result |
 |---|---|
-| The Claude subscription, no `inference` section | Works as in the release before. |
+| The Claude subscription, no `inference` section | Works. |
 | LiteLLM in front of Bedrock, Claude Opus, Sonnet, and Haiku 5.5 | Works. A conversation turn, a resumed session, a one-shot call, structured output, an image, a PDF, MCP tools, and `WebFetch` were tested with a test script. Then one instance ran on it for several days, with one LiteLLM key for each job: chat, voice, the nightly reflection, the description of attachments, and the internet agent. `POST /admin/inference/check` gave `ok` for each job. |
 | Web search through LiteLLM | Does not work. LiteLLM does not send Anthropic's `WebSearch` to Bedrock. Use SearXNG (see the next section). |
 | SearXNG for the internet agent, on Bedrock through LiteLLM | Works. The internet agent searched, read pages, and answered with sources. |
@@ -431,13 +431,15 @@ Every container mounts `joshua.yaml` read-only. After an edit:
 
 ```
 make validate
-docker compose restart core channels gateway
+make restart
 ```
 
-`make validate` runs in the core image. Compose passes the secrets from
-`.env`, because the file refers to them by name.
-A change to `mcp:` alone needs only `POST /admin/reload` on the gateway and a
-restart of `core`.
+`make validate` runs the core image once, with no network, and stops. It gets
+the channel credentials from `.env`, so its summary names only the channels
+that start. `make restart` restarts every container that runs. After a change
+to `viewer.enabled` or `assignments.enabled`, run `make up` instead: it
+starts or stops that container. A change to `mcp:` alone needs only
+`POST /admin/reload` on the gateway and a restart of `core`.
 
 Every refusal writes one line, so a dropped message is not silent to you:
 
@@ -465,7 +467,10 @@ it only when you change the code. A build is tagged
 `joshua-ai-<component>:dev`, so it never replaces a release on your machine.
 
 Both use the same containers and the same volumes. `make down`, `make logs`,
-`make ps`, `make backup`, and `make restore` work for either.
+`make ps`, `make restart`, `make backup`, and `make restore` work for either.
+On your own build, use `make up-dev` where a page says `make up`, and
+`make validate-dev` where it says `make validate`: each one checks or starts
+the images of your checkout.
 
 ## The version you run
 
@@ -491,13 +496,16 @@ make up
 
 `make pull` gets the images of that release and `make up` restarts the
 containers. The releases are at
-<https://github.com/jakehigg/joshua-ai/releases>. Read `CHANGELOG.md` first.
-The database schema is additive. A new version adds tables and columns and never removes one, so
-an update needs no migration step. The documentation in `wiki/joshua-docs/`
-is replaced at each start.
+<https://github.com/jakehigg/joshua-ai/releases>. Read `CHANGELOG.md` before
+an update. It names every change that a person who runs Joshua can see.
 
-Read `CHANGELOG.md` before an update. It names every change that a person who
-runs Joshua can see.
+Run `make init-env` again after an update. It adds each secret that a newer
+`.env.example` names and your `.env` does not have yet, and changes nothing
+else.
+
+The database schema is additive. A new version adds tables and columns and
+never removes one, so an update needs no migration step. The documentation in
+`wiki/joshua-docs/` is replaced at each start.
 
 ### Run the newest main
 
@@ -679,58 +687,79 @@ The viewer is the web interface of Joshua: the wiki, which holds the journal
 and every profile, a person's own attachments, the documents, the
 assignments, the usage, and the chat. It is one React single-page app, built
 by the node stage of `gateway/Dockerfile` and carried in the gateway image,
-served at the root of the host behind HTTP basic (or `viewer.anonymous`).
+served at the root of the host behind its own sign-in page (or
+`viewer.anonymous`).
 Everything it shows comes from a JSON API under `/api/v1/`, with the same
-sign-in as the app.
+sign-in as the app. [auth.md](auth.md) opens with a guide to the sign-in:
+what a person sees on each method, what the owner does under Admin → Users,
+and what the sign-in does not do.
 
 Everybody who signs in reads. A member also writes: they edit any wiki page,
 make a new one, correct a journal entry, move a page to the trash, comment on
-a document, and chat with Joshua. A guest reads and nothing more. A
+a document, and chat with Joshua. A guest reads and nothing more. The owner
+also keeps the roster, under Admin → Users. A
 signed-in person gets a profile link for a quick jump to their own page. It is
 off by default. To turn it on:
 
-1. Put every password in `VIEWER_PASSWORDS` in `.env`, as a comma-separated
-   list of `<person-id>=<value>` pairs. One variable carries all of them, so
-   no tracked file names a person.
-
-   ```
-   VIEWER_PASSWORDS=alex=a-long-random-password,mia=$2b$12$...
-   ```
-
-   A value that starts with `$2` is a bcrypt hash. Any other value is a
-   literal password, which cannot hold a comma. Make a hash with:
-
-   ```
-   docker compose run --rm --no-deps -T --entrypoint python core -c \
-     "import bcrypt,getpass;print(bcrypt.hashpw(getpass.getpass().encode(),bcrypt.gensalt()).decode())"
-   ```
-
-2. Turn the viewer on in `joshua.yaml` and list each person who may sign in.
-   Leave the value empty; the password comes from `.env`.
+1. Give one person `role: owner` in `joshua.yaml`, and turn the viewer on with
+   the method the people of this instance sign in with: `pin` asks for a PIN,
+   `password` asks for a person id and a password, and `anonymous` asks for
+   nothing and leaves `viewer.anonymous` in charge.
 
    ```yaml
+   people:
+     - id: sam
+       name: Sam
+       role: owner
+     - id: robin
+       name: Robin
+       role: member
    viewer:
      enabled: true
-     users:
-       alex: ""
+     auth:
+       method: pin
    ```
 
-   This list is what says who may sign in. A person who is not a key here
-   cannot sign in, whatever `VIEWER_PASSWORDS` holds.
-
-3. Validate and start it:
+2. Validate and start it:
 
    ```
    make validate
-   docker compose --profile viewer up -d viewer
+   make up
    ```
 
+   `make up` starts the viewer because `viewer.enabled` is `true`, and
+   `make down` stops it with the rest.
+
+3. Give the first person their secret. A person with no secret is on the
+   roster and cannot sign in, so the owner needs one from the console:
+
+   ```
+   docker compose exec core python -m joshua_core people auth-reset \
+     --id sam --secret '<a long secret>'
+   ```
+
+   The command writes a bcrypt hash into core's `auth_secret` table and
+   prints no secret. After that, the owner sets the secret of everybody else
+   under Admin → Users, and each person changes their own.
+
+The secrets live in core and nowhere else: one salted bcrypt hash per person,
+reached only over core's `/auth/*` routes, which the viewer calls with its own
+fleet token (`JOSHUA_TOKEN_VIEWER`). No route gives a hash back. A sign-in
+answers with one signed session cookie: the browser drops it when it closes,
+or keeps it for 30 days when the person checks "remember this device".
+Changing a secret, a reset by the owner, and a removal all sign out every
+browser that holds the old one. `JOSHUA_VIEWER_SESSION_SECRET` signs the
+cookie, so a sign-in survives a restart; `make init-env` writes it into
+`.env`. Core serves the roster to the viewer, because `viewer` is one of
+core's `AUTH_CALLERS`, so Admin → Users needs no setting of its own.
+
 The viewer listens on `127.0.0.1:8082`, beside the rest of the stack. Open
-`http://127.0.0.1:8082/` and sign in with the person id and the password.
-The address opens the wiki. The menu holds Wiki, Journal, Search, Usage,
-Assignments, Documents (members only) and Chat, and "Your page" at `/me`,
-which has the profile link and the recent attachments of the person who
-signed in. Every one of these is an address of the app's router, and the app
+`http://127.0.0.1:8082/` and sign in. The address opens the wiki. The menu
+holds Wiki, Journal, Search, Usage,
+Assignments, Documents (members only) and Chat. At the bottom, "Profile" at
+`/me` has the settings of the person who signed in (their secret, their
+instructions to Joshua, and their journal consent), the profile link, and
+their recent attachments. The owner also gets "Admin" under it. Every one of these is an address of the app's router, and the app
 reads them from `/api/v1/`. The chat is a screen of the same app, at
 `/chat/<person id>`, with a workspace at `/chat/w/<slug>`; it reaches the
 `channels` container through the viewer. An image with no build of the app
@@ -807,7 +836,7 @@ Without the token, the page finds pages by words only. `GET /readyz` on the
 viewer reports `core_search`.
 
 On Kubernetes the chart runs it as its own deployment, off by default, with
-the passwords in a Secret and an ingress of its own. See
+its fleet token in a Secret and an ingress of its own. See
 [the chart README](../charts/joshua/README.md#the-viewer).
 
 The viewer edits the wiki one page at a time, and it ships with Joshua. For a
@@ -817,8 +846,8 @@ Otter Wiki runs code from another project.
 
 ### Opening the viewer with no sign-in
 
-A household on a private network can skip the password. Set `viewer.anonymous`
-to `true` in `joshua.yaml`:
+A group on a private network can skip the sign-in. Set `viewer.anonymous`
+to `true` in `joshua.yaml`, and leave `viewer.auth.method` at `anonymous`:
 
 ```yaml
 viewer:
@@ -826,15 +855,13 @@ viewer:
   anonymous: true
 ```
 
-A request with no `Authorization` header now gets full access: it reads and
-also writes, the same as a signed-in member, with no password. To give the
-open viewer an owner, set `anonymous` to the id of a member, such as
-`anonymous: alex`. A request with no password is then served as that
-member, with their profile, attachments, and assignments. A member who
-still wants to sign in by password can, exactly as before. To add
-restrictions back, set `viewer.users` and list who may sign in; a household
-that wants read-only for everyone else keeps `anonymous` off and gives each
-person their own password.
+A request with no session cookie now gets full access: it reads and
+also writes, the same as a signed-in member, with no secret. To serve such a
+request as one person, set `anonymous` to the id of a member or of the owner,
+such as `anonymous: sam`. The request is then served as that person, with
+their profile, attachments, and assignments. A person who still wants to sign
+in can, and Admin → Users stays the owner's. To ask for a secret instead, set
+`viewer.auth.method` to `pin` or `password` and leave `anonymous` off.
 
 **The network is now the only boundary.** Anyone who can reach the viewer
 reads and edits the whole wiki: the journal and every profile. Use this only

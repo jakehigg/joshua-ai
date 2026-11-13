@@ -41,7 +41,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Any
 
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from joshua_shared.log import get_logger
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -143,7 +143,7 @@ async def documents(request: Request, person: Person) -> JSONResponse:
     404, and with no documents folder the list is empty and nothing is
     created.
     """
-    if person.role != "member":
+    if not is_member(person.role):
         return _not_found()
     status = documents_mod.parse_status(request.query_params.get("status"))
     kind = documents_mod.parse_kind(request.query_params.get("kind"))

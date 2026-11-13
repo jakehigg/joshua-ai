@@ -22,7 +22,15 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import strictyaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from joshua_shared.ids import PERSON_ID_PATTERN, PERSON_ID_RE
 from joshua_shared.log import CREDENTIAL_PREFIXES
@@ -83,6 +91,33 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# What ``JoshuaConfig._check_owner`` says about a roster with no owner.
+NO_OWNER_WARNING = "no person has role 'owner'"
+
+# What ``_validate_cli`` says about a sign-in password that is still in the
+# config or the environment. Core holds every secret now, so these are read
+# once by the import and never again.
+RETIRED_VIEWER_WARNING = (
+    "viewer.users, VIEWER_PASSWORDS and VIEWER_PW_* are retired: core holds "
+    "every sign-in secret, and the viewer ignores these. Delete them once the "
+    "one-time import has run."
+)
+
+# The two environment sources of the retired viewer passwords.
+VIEWER_PASSWORDS_ENV = "VIEWER_PASSWORDS"
+VIEWER_PW_PREFIX = "VIEWER_PW_"
+
+# The roles that write. An ``owner`` is a member with the authority to manage
+# the roster, so every check of "is this person a member" admits one. A
+# ``guest`` reads.
+MEMBER_ROLES = frozenset({"member", "owner"})
+
+
+def is_member(role: str | None) -> bool:
+    """True when ``role`` writes: ``member`` or ``owner``, never ``guest``."""
+    return role in MEMBER_ROLES
+
+
 class Person(_Model):
     id: str
     name: str
@@ -115,8 +150,8 @@ class Person(_Model):
     @field_validator("role")
     @classmethod
     def _check_role(cls, value: str) -> str:
-        if value not in ("member", "guest"):
-            raise ValueError("role must be 'member' or 'guest'")
+        if value not in ("member", "guest", "owner"):
+            raise ValueError("role must be 'member', 'guest', or 'owner'")
         return value
 
     @field_validator("handles", mode="before")
@@ -1228,22 +1263,42 @@ _TRUE_WORDS = frozenset({"1", "on", "t", "true", "y", "yes"})
 _FALSE_WORDS = frozenset({"0", "off", "f", "false", "n", "no"})
 
 
+class ViewerAuth(_Model):
+    """How the viewer asks a person to prove who they are.
+
+    ``anonymous`` (the default) asks for nothing: the viewer keeps the
+    behaviour of ``viewer.anonymous`` and ``viewer.users``. ``pin`` and
+    ``password`` ask the person for the secret core holds for them.
+    """
+
+    method: Literal["anonymous", "pin", "password"] = "anonymous"
+
+
 class Viewer(_Model):
-    # The read-only web viewer. ``users`` maps a person id to a password
-    # reference: a ``$2`` bcrypt hash, or a literal password, normally injected
-    # from ``VIEWER_PW_<ID>`` through ``${VIEWER_PW_ALEX:-}``. A key must name a
-    # person in ``people`` (checked in ``JoshuaConfig._check_viewer``). A person
-    # with no entry, or an empty value, cannot sign in.
+    # The web viewer. ``users`` is retired: core holds every sign-in secret,
+    # and the viewer ignores this map. It stays loadable so core's one-time
+    # import can read a password reference out of it — a ``$2`` bcrypt hash,
+    # or a literal password — and ``_validate_cli`` warns while it is here. A
+    # key must name a person in ``people`` (checked in
+    # ``JoshuaConfig._check_viewer``).
     enabled: bool = False
     users: dict[str, str] = {}
-    # ``true`` opens the viewer: a request with no ``Authorization`` header
-    # gets full access, read and write, as a synthetic "anonymous" identity,
-    # so a private network needs no sign-in. A person id opens the viewer as
-    # that member, as if they signed in. The id must name a member in
-    # ``people`` (checked in ``JoshuaConfig._check_viewer``). ``false`` (the
-    # default) keeps sign-in required. A request that carries credentials is
-    # still checked against ``users``, so a member can sign in by password too.
+    # ``true`` opens the viewer: a request with no session cookie gets full
+    # access, read and write, as a synthetic "anonymous" identity, so a
+    # private network needs no sign-in. A person id opens the viewer as that
+    # member, as if they signed in. The id must name a member in ``people``
+    # (checked in ``JoshuaConfig._check_viewer``). ``false`` (the default)
+    # keeps sign-in required. A request that does carry a cookie is still
+    # checked, so a member can sign in on an open viewer too.
     anonymous: bool | str = False
+    # How a person signs in. See ``ViewerAuth``.
+    auth: ViewerAuth = ViewerAuth()
+
+    @field_validator("auth", mode="before")
+    @classmethod
+    def _empty_auth(cls, value: Any) -> Any:
+        # strictyaml reads a key with no value as an empty string.
+        return {} if value in (None, "") else value
 
     @field_validator("anonymous", mode="before")
     @classmethod
@@ -1442,11 +1497,34 @@ class JoshuaConfig(_Model):
     gateway: GatewayConfig = GatewayConfig()
     assignments: Assignments = Assignments()
 
+    # What is worth saying about this config without refusing to load it. The
+    # validate command prints each line; a container reads the config and runs.
+    _warnings: list[str] = PrivateAttr(default_factory=list)
+
     @field_validator("limits", "gateway", "assignments", "workspaces", mode="before")
     @classmethod
     def _empty_limits(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.
         return {} if value in (None, "") else value
+
+    @property
+    def warnings(self) -> list[str]:
+        """The warnings this config raised while it was validated."""
+        return list(self._warnings)
+
+    @model_validator(mode="after")
+    def _check_owner(self) -> JoshuaConfig:
+        """Warn, and never raise, when no person on the roster is the owner.
+
+        An instance with no owner runs: an owner passes every check a member
+        passes, so what is missing is the person who manages the roster, not a
+        capability. Raising here would stop every container of an instance
+        written before the role existed.
+        """
+        self._warnings = (
+            [] if any(person.role == "owner" for person in self.people) else [NO_OWNER_WARNING]
+        )
+        return self
 
     @model_validator(mode="after")
     def _check_unique(self) -> JoshuaConfig:
@@ -1564,7 +1642,7 @@ class JoshuaConfig(_Model):
             person = self.person(anonymous)
             if person is None:
                 raise ValueError(f"viewer.anonymous: unknown person id '{anonymous}'")
-            if person.role != "member":
+            if not is_member(person.role):
                 raise ValueError(
                     f"viewer.anonymous: '{anonymous}' is a {person.role}; it must name a member"
                 )
@@ -1602,9 +1680,10 @@ class JoshuaConfig(_Model):
         """The role of a group chat, and the handle that lowered it.
 
         A group is a ``member`` chat only when ``members`` is not empty and every
-        handle in it names a person whose role is ``member``. Anything else is a
-        ``guest`` chat: an empty list admits anybody, and a handle that names
-        nobody carries no role to trust.
+        handle in it names a person who writes, a ``member`` or an ``owner``.
+        Anything else is a ``guest`` chat: an empty list admits anybody, and a
+        handle that names nobody carries no role to trust. A ``member`` chat is
+        never an ``owner`` chat: the roster belongs to one person, not to a chat.
 
         The whole chat carries one role, because a session cannot change its role
         for one turn. So one guest in a family chat stops Joshua writing for the
@@ -1616,7 +1695,7 @@ class JoshuaConfig(_Model):
             return "guest", None
         for handle in group.members:
             person = self.people_by_handle(group.channel, handle)
-            if person is None or person.role != "member":
+            if person is None or not is_member(person.role):
                 return "guest", handle
         return "member", None
 
@@ -1773,13 +1852,34 @@ def read_people_file(path: Path) -> list[dict[str, Any]]:
     return people if isinstance(people, list) else []
 
 
+def _union_handles(base: Any, extra: Any) -> dict[str, Any]:
+    """Union two raw handle maps, one channel type at a time.
+
+    A value is one handle or a list. Base handles come first, the others are
+    appended, and no handle repeats.
+    """
+    base = base if isinstance(base, dict) else {}
+    extra = extra if isinstance(extra, dict) else {}
+    merged: dict[str, Any] = {}
+    for handle_type in [*base, *(t for t in extra if t not in base)]:
+        ids: list[str] = []
+        for source in (base.get(handle_type), extra.get(handle_type)):
+            values = [source] if isinstance(source, str) else list(source or [])
+            ids.extend(v for v in values if v not in ids)
+        merged[handle_type] = ids[0] if len(ids) == 1 else ids
+    return merged
+
+
 def _apply_people_file(
     base: list[dict[str, Any]], people: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Merge ``people file`` people over ``base`` by id.
 
-    A people file entry replaces the base entry with the same id, or appends a new
-    one. An entry with ``role: removed`` drops that id from the roster.
+    A people file entry overlays the base entry with the same id: each key it
+    holds wins, and the keys it leaves out stay as the base has them. The
+    ``handles`` of the two are the union, per channel type. A new id is
+    appended as it is. An entry with ``role: removed`` drops that id from the
+    roster.
     """
     result: list[dict[str, Any] | None] = [dict(person) for person in base]
     index = {p["id"]: i for i, p in enumerate(result) if isinstance(p, dict) and "id" in p}
@@ -1789,7 +1889,16 @@ def _apply_people_file(
             continue
         removed = str(entry.get("role", "")).strip().lower() == "removed"
         if pid in index:
-            result[index[pid]] = None if removed else entry
+            current = result[index[pid]]
+            if removed:
+                result[index[pid]] = None
+            elif current is None:
+                result[index[pid]] = entry
+            else:
+                merged = {**current, **entry}
+                if "handles" in current or "handles" in entry:
+                    merged["handles"] = _union_handles(current.get("handles"), entry.get("handles"))
+                result[index[pid]] = merged
         elif not removed:
             index[pid] = len(result)
             result.append(entry)
@@ -1870,16 +1979,53 @@ def reload(path: Path | str | None = None) -> JoshuaConfig:
 # --- CLI -------------------------------------------------------------------
 
 
+def _retired_viewer_passwords(config: JoshuaConfig) -> bool:
+    """True when a viewer password still lives in the config or the environment.
+
+    ``viewer.users`` is the config source, ``VIEWER_PASSWORDS`` and
+    ``VIEWER_PW_<ID>`` the two environment ones: the same three the one-time
+    import reads.
+    """
+    if config.viewer.users:
+        return True
+    if os.environ.get(VIEWER_PASSWORDS_ENV, "").strip():
+        return True
+    return any(name.startswith(VIEWER_PW_PREFIX) for name in os.environ)
+
+
+def telegram_enabled(config: JoshuaConfig) -> bool:
+    """True when the telegram section is present and its bot token is set."""
+    telegram = config.channels.telegram
+    return telegram is not None and bool(telegram.bot_token.strip())
+
+
+def imessage_enabled(config: JoshuaConfig) -> bool:
+    """True when the imessage section is present and its credentials are set."""
+    imessage = config.channels.imessage
+    if imessage is None:
+        return False
+    return bool(imessage.bluebubbles_password.strip() and imessage.webhook_path_secret.strip())
+
+
 def _validate_cli(path: str) -> int:
     try:
         config = _read(Path(path))
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    # A section with an empty credential is off, so the summary names only
+    # the channels that start. `make validate` passes the channel credentials.
     channels = [
-        name for name in ("telegram", "imessage") if getattr(config.channels, name) is not None
+        name
+        for name, enabled in (("telegram", telegram_enabled), ("imessage", imessage_enabled))
+        if enabled(config)
     ]
+    warnings = [*config.warnings]
+    if _retired_viewer_passwords(config):
+        warnings.append(RETIRED_VIEWER_WARNING)
     print(f"ok: {path}")
+    for warning in warnings:
+        print(f"  warning: {warning}")
     print(f"  people: {len(config.people)}")
     print(f"  channels enabled: {', '.join(channels) or 'none'}")
     print(f"  mcp servers: {', '.join(config.mcp) or 'none'}")

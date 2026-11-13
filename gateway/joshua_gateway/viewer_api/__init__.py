@@ -2,8 +2,13 @@
 
 Every route of this package answers ``application/json``, never caches, and
 sits behind the sign-in of a page (``viewer._require_auth``), so a request
-with no credentials gets the same 401 as a page when ``viewer.anonymous`` is
-off. Each handler takes ``(request, person)``.
+with no session cookie gets the same 401 as a page when ``viewer.anonymous``
+is off. Each handler takes ``(request, person)``.
+
+Four routes are the exception, because the sign-in page calls them before
+there is a session: ``POST session/sign-in``, ``POST session/sign-out``,
+``GET auth-method``, and ``GET sign-in/people`` for the ``pin`` method. Their
+handlers take the request alone (``viewer_api.session``).
 
 A write route takes a JSON body, and the body carries the CSRF token of its
 scope. Every write also checks the ``Origin`` header (``viewer_api.edit``).
@@ -14,6 +19,10 @@ of the conversation. Both go to the channels container (``CHANNELS_URL``).
 
 The workspaces have nine routes under ``/api/v1/workspaces``, which proxy
 core (``CORE_URL``). See ``viewer_api.workspaces``.
+
+The Users section has five routes under ``/api/v1/admin/users``, which proxy
+core's people and secret routes. They are the owner's alone: a member and a
+guest get 403. See ``viewer_api.admin``.
 
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
@@ -27,6 +36,7 @@ from __future__ import annotations
 from starlette.routing import Route
 
 from joshua_gateway.viewer_api import (
+    admin,
     assignments,
     chat,
     documents,
@@ -61,7 +71,16 @@ def routes() -> list[Route]:
 
     return [
         Route(api_path("session"), _require_auth(session.session)),
+        # The five routes of the sign-in. Four of them answer with no session,
+        # because the sign-in page is what calls them.
+        Route(api_path("session/sign-in"), session.sign_in, methods=["POST"]),
+        Route(api_path("session/sign-out"), session.sign_out, methods=["POST"]),
+        Route(api_path("session/secret"), _require_auth(session.change_secret), methods=["POST"]),
+        Route(api_path("auth-method"), session.auth_method),
+        Route(api_path("sign-in/people"), session.sign_in_people),
         Route(api_path("me"), _require_auth(me.me)),
+        Route(api_path("profile"), _require_auth(me.profile)),
+        Route(api_path("profile"), _require_auth(me.save_profile), methods=["POST"]),
         Route(api_path("journal"), _require_auth(journal.feed)),
         Route(api_path("journal/{year:int}/{month:int}/{day:int}"), _require_auth(journal.day)),
         Route(api_path("search"), _require_auth(search.search)),
@@ -127,6 +146,24 @@ def routes() -> list[Route]:
             api_path("workspaces/{slug}/items/{id}"),
             _require_auth(workspaces.delete_item),
             methods=["DELETE"],
+        ),
+        # The Users section: the owner's alone, whatever a route looks like.
+        Route(api_path("admin/users"), _require_auth(admin.users)),
+        Route(api_path("admin/users"), _require_auth(admin.add), methods=["POST"]),
+        Route(
+            api_path("admin/users/{id}/secret"),
+            _require_auth(admin.set_secret),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("admin/users/{id}/role"),
+            _require_auth(admin.set_role),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("admin/users/{id}/remove"),
+            _require_auth(admin.remove),
+            methods=["POST"],
         ),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),

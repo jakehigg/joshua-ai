@@ -91,6 +91,12 @@ async def test_the_list_names_active_workspaces_and_the_instruction() -> None:
     assert "send_to_workspace" in note and "say so in one line" in note
 
 
+async def test_an_owner_gets_the_list_as_a_member_does() -> None:
+    """The member gate of the block admits the owner role."""
+    note = await aware.build_provider(_repo(), None, make_settings())(_turn(role="owner"))
+    assert note is not None and "Solar install - Go solar" in note
+
+
 async def test_the_list_is_cut_to_ten_and_stays_short() -> None:
     repo = WsRepo(_ws(goal="g" * 500))
     repo.others = [_ws(id=str(i), slug=f"w{i}", title="T" * 200, goal="g" * 500) for i in range(15)]

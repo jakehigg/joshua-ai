@@ -33,7 +33,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -130,7 +130,7 @@ def page_json(root: Root, abs_path: Path, rel: str, person: Person, text: str) -
         folder_rel = under.rsplit("/", 1)[0] if "/" in under else ""
         crumbs = wiki_mod.crumbs(root.base, folder_rel, leaf=title)
         siblings = wiki_mod.siblings(root.base, under)
-    can_edit = in_wiki and person.role == "member"
+    can_edit = in_wiki and is_member(person.role)
     return {
         "kind": "page",
         "root": root.name,
@@ -180,7 +180,7 @@ def folder_json(root: Root, rel: str, person: Person) -> dict[str, Any] | None:
         "folders": folders,
         "pages": [{"title": page.title, "url": page.url} for page in folder.pages],
         "files": [{"name": f.name, "url": file_url(root.name, f.rel)} for f in folder.files],
-        "can_create": person.role == "member",
+        "can_create": is_member(person.role),
         "new_url": new_url(folder.rel),
     }
 

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from joshua_shared import config
-from joshua_shared.config import PERSON_ID_RE, GatewayConfig
+from joshua_shared.config import MEMBER_ROLES, PERSON_ID_RE, GatewayConfig
 
 _PERSON_RE = PERSON_ID_RE
 
@@ -38,8 +38,10 @@ UNKNOWN = "unknown"
 # config is given: the default of ``gateway.person_header_callers``.
 DEFAULT_TRUSTED = frozenset(GatewayConfig().person_header_callers)
 
-# The roles core may assert. A guest reads; a member also writes.
-_ROLES = frozenset({"member", "guest"})
+# The roles core may assert: the roles of the roster. A guest reads. A member
+# and an owner also write. The list comes from the shared config, so a role
+# the roster admits is never an "unknown role" here.
+_ROLES = MEMBER_ROLES | {"guest"}
 
 
 class PersonError(Exception):

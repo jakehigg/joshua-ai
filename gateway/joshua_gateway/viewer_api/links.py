@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from joshua_shared.layout import wiki_root as wiki_dir
 from joshua_shared.log import get_logger
 from starlette.requests import Request
@@ -61,7 +61,7 @@ def _rows(links: list[links_mod.Link]) -> list[dict[str, str]]:
 async def links(request: Request, person: Person) -> JSONResponse:
     """The saved links, the built-in icons, and the write of a member."""
     saved = links_mod.load(wiki_dir(data_root()))
-    can_edit = person.role == "member"
+    can_edit = is_member(person.role)
     return _answer(
         {
             "links": _rows(saved),
@@ -81,7 +81,7 @@ async def save(request: Request, person: Person) -> JSONResponse:
     """
     from joshua_gateway import viewer  # ``viewer`` imports this package
 
-    if person.role != "member":
+    if not is_member(person.role):
         return _refused(403)
     fields: dict[str, Any] | None = await _fields(request)
     if fields is None:

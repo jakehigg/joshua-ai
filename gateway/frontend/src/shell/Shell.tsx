@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 
 import { getJson, type Person } from "../api/client";
@@ -17,16 +17,31 @@ export interface Session {
   timezone: string;
 }
 
+/**
+ * The session the app has already read, for the shell under it.
+ *
+ * `App` reads `GET /api/v1/session` once, to know whether anybody is signed
+ * in at all, and puts the answer here, so the shell draws the navigation
+ * without asking a second time. Null means that nobody read it, and the
+ * shell then reads it itself.
+ */
+export const SessionContext = createContext<Session | null>(null);
+
 const LABELS: Record<string, string> = Object.fromEntries(
   SECTIONS.map((item) => [item.key, item.label]),
 );
 
 function title(section: string): string {
   if (section === ME_SECTION) {
-    return "You";
+    return "Profile";
   }
   if (section === LINKS_SECTION) {
     return "Links";
+  }
+  // The admin area is no section of the session: the owner reaches it by its
+  // address, and the app bar names it all the same.
+  if (section === "admin") {
+    return "Admin";
   }
   return LABELS[section] ?? "Home";
 }
@@ -87,7 +102,9 @@ export default function Shell({
   section?: string;
   children: ReactNode;
 }) {
-  const [session, setSession] = useState<Session | null>(null);
+  const given = useContext(SessionContext);
+  const [read, setRead] = useState<Session | null>(null);
+  const session = given ?? read;
   const frame = embedded();
   const [open, setOpen] = useState(false);
   const panels = usePanels();
@@ -120,14 +137,14 @@ export default function Shell({
   }, [open]);
 
   useEffect(() => {
-    if (frame) {
+    if (frame || given !== null) {
       return;
     }
     let live = true;
     getJson<Session>("/session")
       .then((answer) => {
         if (live) {
-          setSession(answer);
+          setRead(answer);
         }
       })
       .catch(() => {
@@ -137,7 +154,7 @@ export default function Shell({
     return () => {
       live = false;
     };
-  }, [frame]);
+  }, [frame, given]);
 
   if (frame) {
     return (
@@ -150,10 +167,11 @@ export default function Shell({
   }
 
   const sections = session?.sections ?? [];
+  const owner = session?.person.role === "owner";
   // The chat fills the screen: its own column scrolls, and the page does not.
   const fill = section === "chat";
   return (
-    <NavContext.Provider value={{ sections, section }}>
+    <NavContext.Provider value={{ sections, section, owner }}>
       <div
         className={`j-shell has-sidebar${fill ? " fill" : ""}${navCollapsed ? " nav-collapsed" : ""}`}
       >
@@ -190,7 +208,7 @@ export default function Shell({
               «
             </button>
           </div>
-          <AppNav sections={sections} section={section} />
+          <AppNav sections={sections} section={section} owner={owner} />
         </aside>
         {open && <div className="j-scrim" data-testid="nav-backdrop" onClick={() => setOpen(false)} />}
         <div className="j-main">

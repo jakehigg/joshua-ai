@@ -22,7 +22,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from joshua_shared import config
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -97,7 +97,7 @@ async def feed(request: Request, person: Person) -> JSONResponse:
             "available": [_month_name(item) for item in available],
             "people": people,
             "person": person_id,
-            "can_edit": person.role == "member",
+            "can_edit": is_member(person.role),
             "entries": [entry_json(entry, names) for entry in journal.for_month(scoped, month)],
         }
     )
@@ -120,7 +120,7 @@ async def day(request: Request, person: Person) -> JSONResponse:
     return _answer(
         {
             "day": wanted.isoformat(),
-            "can_edit": person.role == "member",
+            "can_edit": is_member(person.role),
             "entries": [entry_json(entry, names) for entry in journal.for_day(entries, wanted)],
             "older": _hop(next((item for item in all_days if item < wanted), None)),
             "newer": _hop(next((item for item in reversed(all_days) if item > wanted), None)),

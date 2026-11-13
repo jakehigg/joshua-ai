@@ -14,6 +14,7 @@ class PeopleFakeRepo:
     def __init__(self, people: list[Person] | None = None) -> None:
         self.people: dict[str, Person] = {p.id: p for p in (people or [])}
         self.handles: dict[tuple[str, str], str] = {}
+        self.secrets: dict[str, str] = {}
 
     async def get_person(self, person_id: str) -> Person | None:
         return self.people.get(person_id)
@@ -43,6 +44,12 @@ class PeopleFakeRepo:
         )
         self.handles = {k: v for k, v in self.handles.items() if v != person_id}
         return True
+
+    async def set_auth_secret(self, person_id: str, secret_hash: str) -> None:
+        self.secrets[person_id] = secret_hash
+
+    async def delete_auth_secret(self, person_id: str) -> bool:
+        return self.secrets.pop(person_id, None) is not None
 
 
 def make_deps(

@@ -387,3 +387,72 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         assert banned not in rest, banned
     for banned in ("write_file", "wiki", "page_path", "plan page", "developer"):
         assert banned not in lowered, banned
+
+
+def test_an_empty_prompt_path_is_no_snippet(caplog) -> None:
+    composer = PromptComposer(person_prompts={"alex": ""})
+    prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+    assert "### About Alex" not in prompt
+    assert "prompt file missing" not in caplog.text
+
+
+def _live_config(tmp_path: Path, monkeypatch, prompt_line: str = "") -> Path:
+    from joshua_shared import config as config_module
+
+    data = tmp_path / "data"
+    data.mkdir()
+    cfg = tmp_path / "joshua.yaml"
+    cfg.write_text(
+        "name: T\ntimezone: UTC\npeople:\n  - id: alex\n    name: Alex\n"
+        f"{prompt_line}"
+        '    handles:\n      telegram: "1"\n'
+    )
+    monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
+    monkeypatch.setenv("JOSHUA_CONFIG", str(cfg))
+    monkeypatch.setattr(config_module, "_cache", None)
+    monkeypatch.setattr(config_module, "_cache_path", None)
+    monkeypatch.setattr(config_module, "_cache_people_file_mtime", None)
+    return data
+
+
+def test_the_composer_reads_people_live_without_a_restart(tmp_path: Path, monkeypatch) -> None:
+    import os
+
+    from joshua_core.store import people_file
+
+    snippet = tmp_path / "alex.md"
+    snippet.write_text("Alex wants terse alerts.")
+    data = _live_config(tmp_path, monkeypatch)
+    composer = PromptComposer()
+
+    def compose() -> str:
+        return composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+
+    assert "### About Alex" not in compose()
+
+    path = data / "people.yaml"
+    people_file.write_people_file(path, [{"id": "alex", "prompt": str(snippet), "journal": "off"}])
+    # A people file written in the same instant may keep the same mtime.
+    os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 5))
+    prompt = compose()
+    assert "Alex wants terse alerts." in prompt
+
+    people_file.write_people_file(path, [{"id": "alex", "prompt": "", "journal": "auto"}])
+    os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 10))
+    assert "### About Alex" not in compose()
+
+
+def test_a_live_person_with_no_prompt_path_gets_no_snippet(tmp_path: Path, monkeypatch) -> None:
+    _live_config(tmp_path, monkeypatch)
+    prompt = PromptComposer().compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+    assert "### About Alex" not in prompt
+
+
+def test_a_live_journal_setting_shows_in_the_prompt(tmp_path: Path, monkeypatch) -> None:
+    from joshua_core.store import people_file
+
+    data = _live_config(tmp_path, monkeypatch)
+    people_file.write_people_file(data / "people.yaml", [{"id": "alex", "journal": "off"}])
+    off = PromptComposer().compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+    auto = PromptComposer(person_journal={}).compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+    assert off != auto

@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from joshua_core import people, people_cli
+import pytest
+from joshua_core import auth_api, people, people_cli
 from joshua_core.store.models import Person
 from people_fakes import PeopleFakeRepo
+
+
+@pytest.fixture(autouse=True)
+def cheap_hashes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The lowest bcrypt cost. ``auth-reset`` hashes, and no test checks timing."""
+    monkeypatch.setattr(auth_api, "BCRYPT_ROUNDS", 4)
 
 
 def _run_cli(monkeypatch, repo: PeopleFakeRepo, argv: list[str], data_dir: Path) -> int:
@@ -82,6 +89,26 @@ def test_cli_remove_missing_returns_1(monkeypatch, tmp_path, capsys) -> None:
     assert "no such person" in capsys.readouterr().err
 
 
+def test_cli_auth_reset(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="alex", display_name="Alex", role="member")])
+    rc = _run_cli(
+        monkeypatch, repo, ["auth-reset", "--id", "alex", "--secret", "open sesame"], tmp_path
+    )
+    assert rc == 0
+    # The CLI writes the hash itself: the secret is never stored as it is.
+    assert repo.secrets["alex"].startswith("$2")
+    assert auth_api.verify_secret("open sesame", repo.secrets["alex"])
+    assert "auth secret set for alex" in capsys.readouterr().out
+
+
+def test_cli_auth_reset_refuses_a_person_off_the_roster(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="ghost", display_name="Ghost", role="removed")])
+    assert _run_cli(monkeypatch, repo, ["auth-reset", "--id", "nobody", "--secret", "s"], tmp_path)
+    assert _run_cli(monkeypatch, repo, ["auth-reset", "--id", "ghost", "--secret", "s"], tmp_path)
+    assert repo.secrets == {}
+    assert "no such person" in capsys.readouterr().err
+
+
 async def test_run_without_database_url(monkeypatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
@@ -104,3 +131,51 @@ def test_cli_list_shows_every_handle(monkeypatch, tmp_path, capsys) -> None:
     assert rc == 0
     out = capsys.readouterr().out
     assert "telegram:10" in out and "telegram:9" in out
+
+
+def test_cli_add_with_no_handle(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo()
+    rc = _run_cli(monkeypatch, repo, ["add", "--id", "iris", "--name", "Iris"], tmp_path)
+    assert rc == 0
+    assert repo.people["iris"].role == "member"
+    assert repo.handles == {}
+    assert "added iris (member) no handles" in capsys.readouterr().out
+
+
+def test_cli_add_an_owner(monkeypatch, tmp_path) -> None:
+    repo = PeopleFakeRepo()
+    argv = ["add", "--id", "sam", "--name", "Sam", "--role", "owner"]
+    assert _run_cli(monkeypatch, repo, argv, tmp_path) == 0
+    assert repo.people["sam"].role == "owner"
+
+
+def test_cli_role_makes_an_owner(monkeypatch, tmp_path, capsys) -> None:
+    """The console way to name an owner, for a roster that has lost its own."""
+    repo = PeopleFakeRepo([Person(id="sam", display_name="Sam", role="member")])
+    rc = _run_cli(monkeypatch, repo, ["role", "--id", "sam", "--role", "owner"], tmp_path)
+    assert rc == 0
+    assert repo.people["sam"].role == "owner"
+    assert "sam is now owner" in capsys.readouterr().out
+
+
+def test_cli_role_unknown_person_returns_1(monkeypatch, tmp_path, capsys) -> None:
+    rc = _run_cli(
+        monkeypatch, PeopleFakeRepo(), ["role", "--id", "ghost", "--role", "owner"], tmp_path
+    )
+    assert rc == 1
+    assert "no such person: ghost" in capsys.readouterr().err
+
+
+def test_cli_role_refuses_to_demote_the_only_owner(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="sam", display_name="Sam", role="owner")])
+    rc = _run_cli(monkeypatch, repo, ["role", "--id", "sam", "--role", "member"], tmp_path)
+    assert rc == 1
+    assert repo.people["sam"].role == "owner"
+    assert "only owner" in capsys.readouterr().err
+
+
+def test_cli_remove_refuses_the_only_owner(monkeypatch, tmp_path, capsys) -> None:
+    repo = PeopleFakeRepo([Person(id="sam", display_name="Sam", role="owner")])
+    assert _run_cli(monkeypatch, repo, ["remove", "--id", "sam"], tmp_path) == 1
+    assert repo.people["sam"].role == "owner"
+    assert "only owner" in capsys.readouterr().err

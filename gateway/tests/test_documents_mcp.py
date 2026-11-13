@@ -452,6 +452,20 @@ async def test_a_guest_has_no_documents_tools(gateway, data_root, config_path, m
     }
 
 
+async def test_an_owner_has_the_documents_tools_of_a_member(gateway, data_root):
+    app = gateway(both_yaml())
+    owner = {"X-Joshua-Person": "alex", "X-Joshua-Role": "owner"}
+    async with lifespan(app):
+        async with gateway_session(app, "/documents", "core", owner) as s:
+            listed = await s.list_tools()
+            res = await s.call_tool(
+                "write_document", {"path": "documents/alex/plan.md", "body": "x", "title": "Plan"}
+            )
+    assert "write_document" in {tool.name for tool in listed.tools}
+    assert res.is_error is False
+    assert (docs(data_root) / "alex" / "plan.md").is_file()
+
+
 async def test_a_member_group_chat_reaches_the_shared_folder_only(gateway, data_root):
     app = gateway(both_yaml())
     group = {"X-Joshua-Person": "unknown", "X-Joshua-Role": "member"}

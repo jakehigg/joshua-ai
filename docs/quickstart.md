@@ -32,11 +32,12 @@ make init-env
 ```
 
 This command copies `.env.example` to `.env`. It writes a database password,
-one token for each container, and the version of Joshua you run. Keep this
-file. Do not commit it.
+one token for each container, the key that signs a sign-in to the viewer, and
+the newest release of Joshua. Keep this file. Do not commit it.
 
-Your installation stays on that version until you change `JOSHUA_VERSION` in
+Your installation stays on that release until you change `JOSHUA_VERSION` in
 `.env`. A later `git pull` does not move it.
+[operations.md](operations.md#update-joshua) explains an update.
 
 ## 3. Add your Claude token
 
@@ -70,12 +71,16 @@ timezone: America/New_York
 people:
   - id: sam
     name: Sam
-    role: member
+    role: owner
 ```
 
 `id` is the name you use when you talk to Joshua. Use lower-case letters,
-numbers, and hyphens only. `role` is `member` or `guest`. A member writes
-the wiki and can add people. A guest reads the wiki and cannot write it.
+numbers, and hyphens only. `role` is `owner`, `member`, or `guest`. A member
+writes the wiki and can add people. A guest reads the wiki and cannot write
+it. Give one person `role: owner`: the owner writes everything a member
+writes and manages the roster in the viewer, where they add a person, change
+a role, set a sign-in secret, and remove a person. `make validate` warns when
+no one is the owner, and the file is still valid.
 
 Leave the `channels` section as it is. A channel with no credential is off.
 Telegram and iMessage stay off until you add their tokens.
@@ -149,7 +154,50 @@ next message reaches Joshua, and nothing restarts.
 `member` sees everything and can add people. `guest` sees less. See
 [channels.md](channels.md#adding-someone-from-chat).
 
-## 8. Give Joshua a new capability
+The owner also keeps the people in the viewer, under Admin → Users. The next
+step turns the viewer on.
+
+## 8. Open the viewer
+
+The viewer is the web app of Joshua: the wiki, the journal, your profile,
+your attachments, your documents, and a chat with Joshua. It is off until you
+turn it on, and it listens on the loopback address only.
+
+Open `joshua.yaml`, find the `viewer` section, and set two lines:
+
+```yaml
+viewer:
+  enabled: true
+  auth:
+    method: pin
+```
+
+`pin` asks each person for a PIN. `password` asks for an id and a password.
+[auth.md](auth.md) explains each method.
+
+Start it:
+
+```
+make validate
+make up
+```
+
+`make up` starts the viewer because `viewer.enabled` is `true`. The containers
+that did not change keep running.
+
+Nobody can sign in until they have a secret. Give yourself the first one:
+
+```
+docker compose exec core python -m joshua_core people auth-reset \
+  --id sam --secret '<your PIN>'
+```
+
+Open <http://127.0.0.1:8082/>, choose your name, and type your PIN. As the
+owner, you have Admin → Users, under Profile at the bottom of the navigation.
+There you add a person, set their secret, change a role, and take a person
+off the roster.
+
+## 9. Give Joshua a new capability
 
 Joshua starts with your notes, your files, and the open web. It can search
 for a recipe or an opening time, and read a link you send it, because
@@ -180,7 +228,7 @@ You choose the servers. Joshua cannot add one.
 [mcp-servers.md](mcp-servers.md) has the steps, and a tested entry for Home
 Assistant.
 
-## 9. Ask Joshua what to do next
+## 10. Ask Joshua what to do next
 
 Joshua holds its own documentation and can search it. Ask it:
 
@@ -207,6 +255,8 @@ find under `docs/`:
   background, and what to say to Joshua for each step.
 - [documents.md](documents.md): plans, reports, and artifacts that Joshua
   makes for you, and how you comment on them.
+- [auth.md](auth.md): how you sign in to the viewer, what the owner does, and
+  what to set up for it.
 - [operations.md](operations.md): logs, health, updates, backup, and the
   viewer, which is the web app for your notes.
 - [architecture.md](architecture.md) and [security.md](security.md): how the
@@ -224,12 +274,9 @@ make nuke           stop, and delete the data (it asks first)
 
 `make down` keeps your database and your files. `make nuke` deletes them.
 
-To read your notes in a browser instead of the terminal, turn on the viewer.
-It shows the wiki, your profile, the journal, your attachments, your
-documents and your assignments, and it chats with Joshua. A member can edit a
-page or write a new one. It is off until you turn it on, and
-it listens on the loopback address only. See
-[operations.md](operations.md#the-viewer).
+To read your notes in a browser instead of the terminal, use the viewer
+(step 8). A member can edit a page or write a new one.
+[operations.md](operations.md#the-viewer) has the rest.
 
 ## If something is wrong
 

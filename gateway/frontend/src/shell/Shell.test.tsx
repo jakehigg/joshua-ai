@@ -74,7 +74,21 @@ describe("the shell", () => {
     expect((await screen.findAllByText("Wiki")).length).toEqual(1);
     expect(document.querySelectorAll("nav.v-sections").length).toEqual(3);
     expect(document.querySelector("nav.v-sections.v-you")).not.toBeNull();
-    expect(screen.getByText("Your page")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Profile" })).toBeDefined();
+    // A member gets no admin link.
+    expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
+  });
+
+  it("puts Admin under Profile for the owner", async () => {
+    stubSession({ ...SESSION, person: { ...SESSION.person, role: "owner" } });
+
+    shell();
+
+    const admin = await screen.findByRole("link", { name: "Admin" });
+    expect(admin.getAttribute("href")).toEqual("/admin");
+    const you = document.querySelector("nav.v-you") as HTMLElement;
+    const links = [...you.querySelectorAll("a")].map((link) => link.textContent);
+    expect(links).toEqual(["Profile", "Admin"]);
   });
 
   it("has no search field in the app bar", () => {
@@ -200,7 +214,7 @@ describe("the shell", () => {
     shell();
 
     expect(screen.getByText("the body")).toBeDefined();
-    expect(await screen.findByText("Your page")).toBeDefined();
+    expect(await screen.findByRole("link", { name: "Profile" })).toBeDefined();
   });
 });
 

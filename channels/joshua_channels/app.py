@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from joshua_shared import config as config_module
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import JoshuaConfig, imessage_enabled, telegram_enabled
 from joshua_shared.log import get_logger, install_healthcheck_filter
 
 from joshua_channels import deliver, webhooks
@@ -35,20 +35,6 @@ from joshua_channels.voice_routes import build_voice_router
 logger = get_logger("channels")
 
 DATA_DIR_ENV = "JOSHUA_DATA_DIR"
-
-
-def telegram_enabled(settings: JoshuaConfig) -> bool:
-    """True when the telegram section is present and its bot token is set."""
-    telegram = settings.channels.telegram
-    return telegram is not None and bool(telegram.bot_token.strip())
-
-
-def imessage_enabled(settings: JoshuaConfig) -> bool:
-    """True when the imessage section is present and its credentials are set."""
-    imessage = settings.channels.imessage
-    if imessage is None:
-        return False
-    return bool(imessage.bluebubbles_password.strip() and imessage.webhook_path_secret.strip())
 
 
 def voice_enabled(settings: JoshuaConfig) -> bool:

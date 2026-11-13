@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import ViewerSession, signed_in
 from joshua_gateway import viewer
 from joshua_gateway import viewer_links as links_mod
 from joshua_gateway.viewer_api import links as links_api
@@ -23,8 +24,9 @@ from starlette.testclient import TestClient
 
 _GIT_MISSING = shutil.which("git") is None
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -35,11 +37,15 @@ CONFIG = textwrap.dedent("""\
       - id: mia
         name: Mia
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 PANTRY = "https://pantry.example.test/"
@@ -55,8 +61,6 @@ def data(monkeypatch, tmp_path) -> Path:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     return data
 
 
@@ -86,11 +90,11 @@ def _token(person_id: str = "alex") -> str:
 def _post(
     client: TestClient,
     rows: list[dict[str, str]],
-    auth: tuple[str, str] = ALEX,
+    auth: ViewerSession = ALEX,
     csrf: str | None = None,
     headers: dict[str, str] | None = None,
 ) -> Any:
-    body = {"csrf": _token(auth[0]) if csrf is None else csrf, "links": rows}
+    body = {"csrf": _token(auth.person) if csrf is None else csrf, "links": rows}
     return client.post("/api/v1/links", json=body, auth=auth, headers=headers)
 
 
@@ -105,6 +109,17 @@ def test_a_member_gets_the_list_the_icons_and_the_token(client, data) -> None:
     assert body["icons"][0] == links_mod.DEFAULT_ICON
     assert body["can_edit"] is True
     assert body["csrf"] == _token()
+
+
+def test_an_owner_gets_the_token_and_writes(client, data) -> None:
+    """The owner role passes the member gate of the read and of the write."""
+    _one_link(data)
+    body = client.get("/api/v1/links", auth=SAM).json()
+    assert body["can_edit"] is True
+    assert body["csrf"] == _token("sam")
+    response = _post(client, [{"title": "Vinyl", "url": VINYL, "icon": "music"}], auth=SAM)
+    assert response.status_code == 200
+    assert links_mod.load(data / "wiki") == [links_mod.Link("Vinyl", VINYL, "music")]
 
 
 def test_a_guest_gets_the_list_and_no_token(client, data) -> None:

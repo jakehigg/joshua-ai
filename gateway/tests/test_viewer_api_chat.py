@@ -14,12 +14,13 @@ import textwrap
 
 import httpx
 import pytest
+from conftest import bad_cookie, signed_in
 from joshua_gateway import viewer, viewer_channels
 from joshua_gateway.viewer_api import chat
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
+ALEX = signed_in("alex")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -83,7 +84,6 @@ def client(monkeypatch, tmp_path, channels) -> TestClient:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.setenv("CHANNELS_URL", "http://channels.test")
     monkeypatch.setenv("JOSHUA_TOKEN_VIEWER", "viewer-token")
     monkeypatch.setenv("SSE_KEEPALIVE_S", "0.05")
@@ -253,9 +253,9 @@ def test_a_turn_from_the_same_origin_passes(client) -> None:
 
 
 def test_the_routes_need_the_sign_in(client, monkeypatch) -> None:
-    anonymous = client.post(TURNS, json={"text": "hi"}, auth=("alex", "wrong"))
+    anonymous = client.post(TURNS, json={"text": "hi"}, auth=bad_cookie())
     assert anonymous.status_code == 401
-    assert client.get(HISTORY, auth=("alex", "wrong")).status_code == 401
+    assert client.get(HISTORY, auth=bad_cookie()).status_code == 401
 
 
 # -- workspace ----------------------------------------------------------------

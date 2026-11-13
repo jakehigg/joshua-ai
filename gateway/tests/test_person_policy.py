@@ -74,6 +74,18 @@ def test_resolve_allows_literal_unknown():
     assert resolve("core", "unknown", None, {"alex"}).person == "unknown"
 
 
+def test_resolve_admits_every_role_of_the_roster():
+    """An owner is a member who keeps the roster. Core sends ``owner`` for one,
+    and the gateway must not answer that with "unknown role"."""
+    for role in ("member", "owner", "guest"):
+        assert resolve("core", "alex", "c1", {"alex"}, role_header=role).role == role
+
+
+def test_resolve_rejects_a_role_the_roster_does_not_know():
+    with pytest.raises(PersonError):
+        resolve("core", "alex", "c1", {"alex"}, role_header="admin")
+
+
 def test_resolve_rejects_unknown_person():
     with pytest.raises(PersonError):
         resolve("core", "ghost", None, {"alex"})
@@ -209,6 +221,15 @@ def test_malformed_person_is_400(gateway):
     with TestClient(gateway(two_servers())) as client:
         resp = client.get("/a", headers={**bearer("core"), **person_header("Bad Name!")})
     assert resp.status_code == 400
+
+
+async def test_an_owner_connects_and_lists_tools(gateway):
+    """Core sends ``X-Joshua-Role: owner`` for the owner. The route connects."""
+    app = gateway(two_servers())
+    owner = {**person_header("alex"), "X-Joshua-Role": "owner"}
+    async with lifespan(app):
+        async with gateway_session(app, "/a", "core", owner) as session:
+            assert [t.name for t in (await session.list_tools()).tools] == ["echo"]
 
 
 def test_unknown_person_id_is_400(gateway):

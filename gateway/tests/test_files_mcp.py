@@ -214,6 +214,13 @@ def test_a_request_with_no_role_writes_nothing(data_root):
         assert all(root.can_write is False for root in r.values())
 
 
+def test_an_owner_writes_the_wiki_as_a_member_does(data_root):
+    r = paths.roots(data_root, role="owner")
+    assert r["wiki"].can_write is True
+    assert r["people"].can_write is False
+    assert r["shared"].can_write is False
+
+
 def test_a_member_writes_the_wiki_only(data_root):
     """``people`` and ``shared`` are read-only through this server for every role."""
     r = roots(data_root)

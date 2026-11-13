@@ -19,13 +19,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import ViewerSession, signed_in
 from joshua_gateway import viewer
 from joshua_gateway.viewer_api import journal as journal_api
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
 
 # The day the clock says, for the month an empty journal falls back to.
 TODAY = date(2027, 3, 14)
@@ -39,11 +41,15 @@ CONFIG = textwrap.dedent("""\
       - id: mia
         name: Mia
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 DAY_PAGE = textwrap.dedent("""\
@@ -103,20 +109,18 @@ def client(monkeypatch, tmp_path) -> TestClient:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     # The clock never comes from the day the test runs.
     monkeypatch.setattr(journal_api, "_today", lambda: TODAY)
     return TestClient(viewer.build_app())
 
 
-def _feed(client: TestClient, query: str = "", auth: tuple[str, str] = ALEX) -> Any:
+def _feed(client: TestClient, query: str = "", auth: ViewerSession = ALEX) -> Any:
     response = client.get("/api/v1/journal" + query, auth=auth)
     assert response.status_code == 200, response.text
     return response.json()
 
 
-def _day(client: TestClient, path: str, auth: tuple[str, str] = ALEX) -> Any:
+def _day(client: TestClient, path: str, auth: ViewerSession = ALEX) -> Any:
     response = client.get("/api/v1/journal/" + path, auth=auth)
     assert response.status_code == 200, response.text
     return response.json()
@@ -203,6 +207,7 @@ def test_the_people_of_the_instance_come_with_the_feed(client) -> None:
     assert _feed(client)["people"] == [
         {"id": "alex", "name": "Alex"},
         {"id": "mia", "name": "Mia"},
+        {"id": "sam", "name": "Sam"},
     ]
 
 
@@ -211,6 +216,11 @@ def test_a_member_may_edit_and_a_guest_may_not(client) -> None:
     assert _feed(client, auth=MIA)["can_edit"] is False
     assert _day(client, "2026/09/04")["can_edit"] is True
     assert _day(client, "2026/09/04", auth=MIA)["can_edit"] is False
+
+
+def test_an_owner_may_edit_as_a_member_does(client) -> None:
+    assert _feed(client, auth=SAM)["can_edit"] is True
+    assert _day(client, "2026/09/04", auth=SAM)["can_edit"] is True
 
 
 # -- one day ----------------------------------------------------------------

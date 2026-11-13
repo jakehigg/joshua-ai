@@ -178,7 +178,9 @@ Route allowlists, by default:
   `format=json`), not an MCP upstream. The URL, the parameters, and the
   optional key come from the config, and only the gateway holds the key.
 - `/admin/*` on every container: `ADMIN_CALLERS` (default `laptop,ci`), checked
-  on every admin route with no exception.
+  on every admin route with no exception. Core's roster routes
+  (`/admin/people` and below) also admit `AUTH_CALLERS` (default `viewer`),
+  and refuse with 409 a change that leaves no owner.
 - `/healthz`: open, `{"ok": true}`. `/readyz`: open, booleans and counts, no
   names and no secrets.
 - core `GET /v1/limits`: open, the percent used of the subscription limits

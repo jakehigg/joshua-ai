@@ -50,6 +50,8 @@ subscription. You do not need Python, and you do not need a Telegram bot.
   the background. The guide is at the top.
 - [docs/documents.md](docs/documents.md): plans, reports, and artifacts that
   you read and comment on.
+- [docs/auth.md](docs/auth.md): how a person signs in to the viewer, and how
+  the owner keeps the people.
 - [docs/operations.md](docs/operations.md): health, logs, updates, backup, the viewer.
 - [docs/architecture.md](docs/architecture.md): the three containers.
 - [docs/security.md](docs/security.md): what the agent can and cannot reach.
@@ -119,17 +121,14 @@ when you change from one to the other.
 Joshua writes Markdown to a volume, so a text editor is enough to read it. The
 optional **viewer** is a web app for the same files: the wiki, which holds the
 journal and every profile, your attachments, your documents, your assignments,
-the usage, and a chat with Joshua. A person signs in with a password and
-reads. A member also writes: they edit any wiki page, make a new one, correct
-a journal entry, and move a page to the trash, which is the only way to delete
-a page, because the agent has no delete tool.
+the usage, and a chat with Joshua. A person signs in on the viewer's own
+sign-in page and reads. A member also writes: they edit any wiki page, make a
+new one, correct a journal entry, and move a page to the trash, which is the
+only way to delete a page, because the agent has no delete tool.
 
-It is off by default, and it holds no credential of its own. To turn it on,
-see [docs/operations.md](docs/operations.md#the-viewer).
-
-```
-docker compose --profile viewer up -d viewer   # then http://127.0.0.1:8082/
-```
+It is off by default, and it holds no credential of its own. Step 8 of
+[docs/quickstart.md](docs/quickstart.md) turns it on: set `viewer.enabled:
+true` in `joshua.yaml`, run `make up`, and open <http://127.0.0.1:8082/>.
 
 ## Enhancements
 

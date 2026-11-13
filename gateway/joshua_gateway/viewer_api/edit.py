@@ -39,7 +39,7 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 from joshua_shared import config
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from joshua_shared.layout import journal_day_from_path, journal_root
 from joshua_shared.log import get_logger
 from starlette.requests import Request
@@ -115,7 +115,7 @@ def _edit_target(person: Person, rel: str, *, create: bool) -> tuple[Root, Path,
     """
     from joshua_gateway import viewer  # ``viewer`` imports this package
 
-    if person.role != "member":
+    if not is_member(person.role):
         return 403
     try:
         root, abs_path = resolve("wiki/" + rel, viewer._roots_for(person), write=True)
@@ -278,7 +278,7 @@ async def new_page(request: Request, person: Person) -> JSONResponse:
     """The empty editor of a new page in a wiki folder, and its token."""
     from joshua_gateway import viewer  # ``viewer`` imports this package
 
-    if person.role != "member":
+    if not is_member(person.role):
         return _refused(403)
     folder = (request.query_params.get("folder") or "").strip("/")
     try:
@@ -308,7 +308,7 @@ async def save(request: Request, person: Person) -> JSONResponse:
     """
     from joshua_gateway import viewer  # ``viewer`` imports this package
 
-    if person.role != "member":
+    if not is_member(person.role):
         return _refused(403)
     fields = await _fields(request)
     if fields is None:
@@ -367,7 +367,7 @@ async def delete(request: Request, person: Person) -> JSONResponse:
     """
     from joshua_gateway import viewer  # ``viewer`` imports this package
 
-    if person.role != "member":
+    if not is_member(person.role):
         return _refused(403)
     fields = await _fields(request)
     if fields is None:

@@ -34,7 +34,7 @@ from time import monotonic
 from typing import Any
 
 from joshua_shared.attachments import is_no_caption
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import JoshuaConfig, is_member
 from joshua_shared.log import get_logger
 
 from joshua_core.engine import workspace as workspace_engine
@@ -238,7 +238,7 @@ async def kb_context(
             exclude_folders=exclude_folders,
             document_reader=(
                 document_reader(people, ctx.conversation.person_id)
-                if getattr(ctx, "role", "guest") == "member"
+                if is_member(getattr(ctx, "role", "guest"))
                 else None
             ),
         )

@@ -233,6 +233,8 @@ h1, h2, h3 { line-height: 1.25; text-wrap: balance; }
   border: 1px solid var(--j-line); border-radius: var(--j-radius-sm);
 }
 .j-field:focus-within { border-color: var(--j-accent); outline: 2px solid var(--j-accent-soft); outline-offset: 0; }
+/* The wrapper draws the focus ring, so the control inside draws none of its own. */
+.j-field input:focus-visible, .j-field select:focus-visible, .j-field textarea:focus-visible { outline: none; }
 .j-field input, .j-field select, .j-field textarea {
   flex: 1; min-width: 0;
   font: inherit; font-size: 16px; /* 16px stops iOS zooming on focus */

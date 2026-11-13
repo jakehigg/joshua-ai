@@ -18,11 +18,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from joshua_shared import config as config_module
 from joshua_shared import layout, wikigit
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import JoshuaConfig, is_member
 from joshua_shared.log import get_logger, install_healthcheck_filter
 
 from joshua_core import limits as limits_module
 from joshua_core.admin import build_admin_router
+from joshua_core.auth_api import build_auth_router
+from joshua_core.auth_import import import_once
 from joshua_core.delivery import CORE_TOKEN_ENV, Deliverer, build_deliverer
 from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import injection, taught_skills, workspace_awareness
@@ -58,6 +60,7 @@ from joshua_core.memory.sources.workspaces import WORKSPACES_SOURCE, WorkspacesS
 from joshua_core.memory.store import MemoryStore
 from joshua_core.migrate_links import migrate_page_links
 from joshua_core.model_forwarder import ModelForwarder
+from joshua_core.profile_api import build_profile_router
 from joshua_core.scheduler import Scheduler
 from joshua_core.search_api import build_search_router
 from joshua_core.snapshots import SnapshotRunner, build_runner
@@ -172,6 +175,10 @@ async def lifespan(app: FastAPI):
     repo = Repo(db)
     await _backfill_usage(repo)
     await seed_people(repo, settings)
+    # After the seed, because a secret references a person row: on a first
+    # start the roster reaches the database here. It runs once ever, guarded by
+    # its own marker, and never stops the start.
+    await import_once(repo, settings)
     _bootstrap_layout(settings)
 
     limits_tracker = await _build_limits(settings, repo)
@@ -326,13 +333,7 @@ def _build_manager(
     ``limits``, and ``workspace`` builtins register here. ``limits`` goes only to the jobs
     that ``limits.chat_tool`` and ``limits.voice_tool`` name.
     """
-    person_prompts = {p.id: p.prompt for p in settings.people if p.prompt}
-    person_journal = {p.id: p.journal for p in settings.people if p.journal != "auto"}
-    composer = PromptComposer(
-        settings.core.prompts_dir,
-        person_prompts=person_prompts,
-        person_journal=person_journal,
-    )
+    composer = PromptComposer(settings.core.prompts_dir)
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     # A URL a person writes is granted for that conversation, so the agent may
     # hand it to the internet agent. See ``engine/url_grants.py``.
@@ -389,7 +390,7 @@ def _build_memory(
     intervals: dict[str, float] = {"files": float(memory.index_interval_s)}
     if memory.documents.enabled:
         sources[DOCUMENTS_SOURCE] = DocumentsSource(
-            data_dir, members=[p.id for p in settings.people if p.role == "member"]
+            data_dir, members=[p.id for p in settings.people if is_member(p.role)]
         )
         intervals[DOCUMENTS_SOURCE] = float(memory.index_interval_s)
     # One record for each active workspace, for the hint in normal chat.
@@ -526,6 +527,8 @@ def build_app() -> FastAPI:
     app.add_api_route("/readyz", readyz, methods=["GET"])
     app.include_router(build_router())
     app.include_router(build_admin_router())
+    app.include_router(build_auth_router())
+    app.include_router(build_profile_router())
     app.include_router(build_search_router())
     app.include_router(build_transcript_router())
     app.include_router(build_usage_router())

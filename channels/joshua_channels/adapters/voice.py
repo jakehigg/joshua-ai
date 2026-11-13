@@ -27,7 +27,7 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 
-from joshua_shared.config import JoshuaConfig, Person, VoiceChannel
+from joshua_shared.config import JoshuaConfig, Person, VoiceChannel, is_member
 
 CHANNEL_TYPE = "voice"
 
@@ -271,7 +271,7 @@ def conversation_key(voice: VoiceChannel, speaker: Speaker) -> tuple[str, str]:
     speak. Everybody else stays on the device, so two guests in two rooms do not
     share a conversation.
     """
-    if voice.thread == "person" and speaker.person is not None and speaker.person.role == "member":
+    if voice.thread == "person" and speaker.person is not None and is_member(speaker.person.role):
         return ROAMING_CHANNEL, ROAMING_CHAT_ID
     return f"{CHANNEL_TYPE}:{speaker.device}", speaker.device
 

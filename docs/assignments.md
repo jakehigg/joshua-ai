@@ -1151,8 +1151,9 @@ sent before the slice ended is stored.
    `.env.assignments`, under the name that its `token_env` gives, for
    example `ASSIGNMENTS_GITLAB_TOKEN=<token>`. Only this container reads the
    file.
-8. Start the container: `docker compose --profile assignments up -d`.
-9. Restart the gateway, so it reads the new server.
+8. Start the container: `make up`. It starts the assignments container
+   because `assignments.enabled` is `true`.
+9. Run `make restart`, so the gateway reads the new server.
 
 An assignment needs no `files` server: the plan and the report are in the
 store. Compose sets `CORE_URL` and `GATEWAY_URL` for the container. The container

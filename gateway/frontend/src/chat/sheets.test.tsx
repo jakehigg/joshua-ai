@@ -120,7 +120,7 @@ describe("sheets on the chat screen", () => {
     expect(within(rail).getByRole("link", { name: "Solar install", hidden: true })).toBeTruthy();
     expect(within(rail).getByRole("button", { name: "+ New workspace", hidden: true })).toBeTruthy();
     expect(await within(rail).findByRole("link", { name: "Wiki", hidden: true })).toBeTruthy();
-    expect(within(rail).getByRole("link", { name: "Your page", hidden: true })).toBeTruthy();
+    expect(within(rail).getByRole("link", { name: "Profile", hidden: true })).toBeTruthy();
     // Chat is the first entry of the rail, so the app links do not repeat it,
     // and only the thread on screen is lit.
     expect(within(rail).getAllByRole("link", { name: "Chat", hidden: true })).toHaveLength(1);

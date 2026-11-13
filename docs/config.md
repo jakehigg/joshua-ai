@@ -34,12 +34,24 @@ Each `people[]` entry takes:
 
 - `id`: the person slug (`^[a-z0-9][a-z0-9-]{0,31}$`).
 - `name`: the display name.
-- `role`: `member` (default) or `guest`.
+- `role`: `member` (default), `owner`, or `guest`. An `owner` is a member who
+  also manages the roster: in the viewer, under Admin → Users, the owner adds
+  a person, changes a role, sets a sign-in secret, and takes a person off the
+  roster. Every check that asks "is this person a member" admits an owner, so
+  an owner writes the wiki, a journal entry, and their own profile. Give one
+  person the role. `validate` prints `warning: no person has role 'owner'` when
+  nobody is, and the file still loads: an instance with no owner runs, and
+  nobody manages the roster from the viewer. See
+  [auth.md](auth.md#the-owner).
 - `handles`: a map of channel to handle. A value is one handle or a list of
   handles, because a person often has an email address and a phone number on
   iMessage. Every handle in the list names the person. The first one is the
   handle Joshua uses to address them.
-- `prompt`: a path to an extra prompt snippet for this person.
+- `prompt`: a path to an extra prompt snippet for this person. An empty string
+  means no snippet. Core reads the person on each turn, so a change in the
+  people file applies with no restart. The viewer's Profile page writes the
+  text of the person to `<data_dir>/people/<id>/prompt.md` and sets `prompt` to
+  that path in the people file.
 - `journal`: whether Joshua's own journal may record this person's life
   updates: `auto` (default, write an entry on its own), `ask` (offer first), or
   `off` (write an entry only when asked). It does not give the person a
@@ -67,13 +79,16 @@ A runtime change is written to two places:
   the same schema as `people`.
 
 The loader reads the people file and merges it over `people` at load time. An
-entry with the same id as a `joshua.yaml` person replaces that person. A
-new id is appended. An entry with `role: removed` drops that id from the merged
+entry with the same id as a `joshua.yaml` person overlays that person field by
+field: each key the entry holds wins, and each key it leaves out stays as
+`joshua.yaml` has it. The `handles` of the two are the union, per channel type,
+with the `joshua.yaml` handles first. A new id is appended. An entry with `role: removed` drops that id from the merged
 roster. This is how a removed person's handle stops resolving.
 
 **The people file wins, so `joshua.yaml` is a starting point and not a control
 panel.** Once a person is enrolled, an edit to that person in `joshua.yaml`
-changes nothing: the people file entry replaces it at every load. Change an
+changes nothing for the keys the people file entry holds, because those win at
+every load. A key the entry leaves out still comes from `joshua.yaml`. Change an
 enrolled person the same way you added them, with the agent tool, the CLI, or
 the admin route below. This holds for a deployment that renders `joshua.yaml`
 from a git repository too: the merge request is reviewed, merged and synced,
@@ -85,15 +100,31 @@ people file. The next load reads `joshua.yaml` for that id again.
 The data dir comes from `JOSHUA_DATA_DIR` (default `/data`), the same variable all
 three containers read.
 
-Three paths write the people file:
+The viewer's Profile page also writes the people file. It sets only `prompt`
+and `journal` on the entry of the person who signed in, through core's
+`POST /people/<id>/profile`. A `prompt` of `""` clears the snippet and
+overrides a path that `joshua.yaml` names.
+
+Three other paths write the people file:
 
 - The agent's `registration` tool (`add_user`, `list_users`). Only a
-  member can add people. A guest or an unidentified caller gets "not available".
-- The CLI `python -m joshua_core people {add,list,remove}`. `add` takes
-  `--id --name --handle <type>:<value> --role member|guest`. It runs with
-  `DATABASE_URL` set.
-- The core admin API `GET /admin/people` and `POST /admin/people` (gated by
-  `ADMIN_CALLERS`). `POST` takes the same fields as the CLI `add`.
+  member or the owner can add people. A guest or an unidentified caller gets
+  "not available".
+- The CLI `python -m joshua_core people {add,list,role,remove,auth-reset}`.
+  `add` takes `--id --name`, and optionally `--handle <type>:<value>` and
+  `--role member|guest|owner`. `role --id <id> --role <role>` changes one
+  role. `auth-reset --id <id> --secret <secret>` sets the sign-in secret of a
+  person who is locked out of the viewer; it writes the hash to the database
+  with no HTTP hop, so an operator at the console needs no token. Each one
+  runs with `DATABASE_URL` set.
+- The core admin API `GET /admin/people`, `POST /admin/people`,
+  `POST /admin/people/<id>/role`, and `POST /admin/people/<id>/remove`, for
+  the callers of `ADMIN_CALLERS` and of `AUTH_CALLERS`. `POST /admin/people`
+  takes the same fields as the CLI `add`. The viewer calls these four for the
+  owner, as the identity `viewer` (see [viewer](#viewer)).
+
+The roster keeps an owner. Each path refuses to demote or remove the only
+owner: promote another person to owner first.
 
 `remove` marks the person `removed` and drops their handles. It keeps the data dirs
 and the transcripts, so removal of data stays a human action.
@@ -1147,64 +1178,87 @@ has no effect. The loader accepts it and validates its shape.
 
 `viewer` runs the web interface of Joshua: one React single-page app in the
 gateway image, served at the root of the host, with a JSON API under
-`/api/v1/` behind the same sign-in. A person opens a browser, signs in with a
-password, and reads the wiki, their own profile, the journal, their own
+`/api/v1/` behind the same sign-in. A person opens a browser, signs in on the
+sign-in page, and reads the wiki, their own profile, the journal, their own
 attachments, the shared profile, their documents and their assignments, and
 chats with Joshua. A member also writes: they edit any wiki page, make a new
 one, correct a journal entry, and delete a page, which moves it to
-`wiki/.trash/`. A guest reads and nothing more. The agent never reaches the viewer. The viewer calls core for two
-things, with the `viewer` fleet token: its search page asks core to search by
-meaning, and its usage page reads the tokens of each day (see [usage](#usage)).
-The usage page also reads the subscription limits from core's open
-`GET /v1/limits`, with no token (see [limits](#limits)).
+`wiki/.trash/`. A guest reads and nothing more. The agent never reaches the
+viewer. The viewer calls core for three things, with the `viewer` fleet token:
+its sign-in page asks core to check a secret, its search page asks core to
+search by meaning, and its usage page reads the tokens of each day (see
+[usage](#usage)). The usage page also reads the subscription limits from
+core's open `GET /v1/limits`, with no token (see [limits](#limits)).
 
-The viewer is off by default. Start it with `docker compose --profile viewer
-up`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
-reverse proxy in front for TLS.
+The viewer is off by default. `make up` starts it when `viewer.enabled` is
+`true`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
+reverse proxy in front for TLS, and keep the address on a network you trust.
 
 - `viewer.enabled`: `false` by default. The viewer refuses to start when it is
   false.
-- `viewer.users`: a map of person id to a password reference. A key must name a
-  person in `people`, or the config fails to load. A person with no entry, or
-  an empty value, cannot sign in.
-
-Set each password through the environment, never a literal in `joshua.yaml`:
+- `viewer.auth.method`: `anonymous` (default), `pin`, or `password`. It is the
+  method of the whole instance, not of one person. [auth.md](auth.md) is the
+  guide: what each method shows a person, and what an operator sets up for it.
 
 ```yaml
 viewer:
   enabled: true
-  users:
-    alex: ""
+  auth:
+    method: pin
 ```
 
-The password comes from `VIEWER_PASSWORDS` in `.env`, one variable that holds
-every one of them as `<person-id>=<value>` pairs, comma separated. A value
-that starts with `$2` is a bcrypt hash and is checked with bcrypt. Any other
-value is a literal password, which cannot hold a comma. See `.env.example`.
+- `anonymous` asks for nothing, so `viewer.anonymous` below decides who a
+  request with no cookie is.
+- `pin` shows the people who can sign in, and asks the one who is chosen for
+  their PIN. The list comes from core: a person with no secret is not on it.
+- `password` asks for a person id and a password, and names nobody.
 
-The list in `viewer.users` is the authorization: a person who is not a key
-there cannot sign in, whatever the environment holds. An entry with a value
-still works, so an installation that puts the reference in `joshua.yaml`
-keeps working.
+The secret itself lives in core, hashed with bcrypt in the `auth_secret`
+table, and the viewer reads it through core's `/auth/*` routes with the
+`viewer` fleet token (see [contracts.md](contracts.md#core)). A sign-in
+answers with one signed session cookie, `joshua_session`: the browser drops it
+when it closes, or keeps it for 30 days when the person checks "remember this
+device". A person changes their own secret with
+`POST /api/v1/session/secret`, the current secret beside the new one, and the
+change signs out every other browser of that person.
 
-The role, member or guest, comes from `people`. It is never set in `viewer`.
+The role, member, owner, or guest, comes from `people`. It is never set in
+`viewer`.
+
+**The admin interface.** The owner gets an Admin area, at `/admin/users`: the
+roster with the role of each person and whether they can sign in, and four
+writes — add a person, set their secret, change a role, and take a person off
+the roster. A member and a guest get 403 on every route under
+`/api/v1/admin/`. Core owns the roster, so the viewer calls core's
+`/admin/people` routes as the identity `viewer`. Core admits it there because
+`viewer` is one of its `AUTH_CALLERS`; the viewer gets no other admin route.
+An operator who is locked out sets a secret from the console with
+`python -m joshua_core people auth-reset`.
+
+**`viewer.users` and `VIEWER_PASSWORDS` are retired.** Core holds every
+sign-in secret now. The loader still accepts `viewer.users`, and core reads it
+once, with `VIEWER_PASSWORDS` and `VIEWER_PW_<ID>`, in a one-time import (see
+[auth.md](auth.md#if-you-signed-in-with-the-viewer-passwords-before)). After that the viewer ignores
+all three: they authorize nobody and they refuse nobody. `validate` prints a
+warning while any of them is still there, and the file is still valid. Delete
+them.
 
 - `viewer.anonymous`: `false` by default. It takes `false`, `true`, or a
   person id.
-  - `true` opens the viewer: a request with no `Authorization` header gets
-    full access, read and write, the same as a member, with no password. The
+  - `true` opens the viewer: a request with no session cookie gets
+    full access, read and write, the same as a member, with no sign-in. The
     identity is `anonymous`. It is not a person, so the home page has no
     profile and no attachments, and the assignments section is empty.
-  - A person id, such as `alex`, opens the viewer as that member. A request
-    with no `Authorization` header is served exactly as if that member
+  - A person id, such as `sam`, opens the viewer as that member. A request
+    with no session cookie is served exactly as if that member
     signed in: the profile link, the attachments, the assignments, the saved
-    assignments, and each write as that member. The id must name a member in
-    `people`. A guest or an unknown id stops the config load with an error
-    that names `viewer.anonymous`.
+    assignments, and each write as that member. The id must name a member or
+    the owner in `people`. A guest or an unknown id stops the config load with
+    an error that names `viewer.anonymous`.
 
-  In both forms, a request that carries credentials is still checked against
-  `viewer.users`, so a member can sign in by password too. `viewer.users` is
-  how a household adds restrictions back on top of an open viewer.
+  In both forms, a request that does carry a session cookie is still checked,
+  so a person can sign in on an open viewer too, and the Admin area is the
+  owner's there as everywhere else.
 
 ## usage
 

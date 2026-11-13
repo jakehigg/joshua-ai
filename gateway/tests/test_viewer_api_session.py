@@ -8,13 +8,15 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from conftest import bad_cookie, signed_in
 from joshua_gateway import viewer, viewer_api
 from joshua_gateway.viewer_api import session as session_api
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -25,11 +27,15 @@ CONFIG = textwrap.dedent("""\
       - id: mia
         name: Mia
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 # ``dedent`` already took the indent off, so the line of the viewer block
@@ -45,8 +51,6 @@ def _data(monkeypatch, tmp_path: Path, text: str) -> Path:
     cfg_path.write_text(text)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     return data
 
 
@@ -96,6 +100,15 @@ def test_a_guest_has_no_documents_section(client) -> None:
     assert body["chat_url"] == "/chat/mia"
 
 
+def test_an_owner_holds_every_section_a_member_holds(client) -> None:
+    """An owner is a member with the roster in hand, so no section is missing."""
+    body = client.get("/api/v1/session", auth=SAM).json()
+    assert body["person"] == {"id": "sam", "name": "Sam", "role": "owner"}
+    assert [item["key"] for item in body["sections"]] == [
+        item["key"] for item in client.get("/api/v1/session", auth=ALEX).json()["sections"]
+    ]
+
+
 def test_the_anonymous_person_is_named_as_such(anon_client) -> None:
     body = anon_client.get("/api/v1/session").json()
     assert body["person"] == {"id": "anonymous", "name": "Anonymous", "role": "member"}
@@ -121,8 +134,8 @@ def test_the_session_is_json_and_never_cached(client) -> None:
 def test_the_session_needs_a_sign_in(client) -> None:
     response = client.get("/api/v1/session")
     assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Basic")
-    assert client.get("/api/v1/session", auth=("alex", "wrong")).status_code == 401
+    assert "WWW-Authenticate" not in response.headers
+    assert client.get("/api/v1/session", auth=bad_cookie()).status_code == 401
 
 
 def test_every_json_route_is_under_api_v1(data) -> None:

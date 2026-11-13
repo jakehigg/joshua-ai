@@ -39,6 +39,7 @@ PEOPLE = [
     Person(id="alex", name="Alex"),
     Person(id="mia", name="Mia"),
     Person(id="sam", name="Sam", role="guest"),
+    Person(id="robin", name="Robin", role="owner"),
 ]
 SECRET_BODY = "The body sentence that must never reach the index."
 
@@ -269,6 +270,7 @@ class FakeStore:
 
 def test_the_reader_is_a_member_only() -> None:
     assert document_reader(PEOPLE, "alex") == "alex"
+    assert document_reader(PEOPLE, "robin") == "robin"  # an owner reads as a member
     assert document_reader(PEOPLE, "sam") is None  # a guest
     assert document_reader(PEOPLE, "nobody") is None
     assert document_reader(PEOPLE, None) is None  # a group conversation
@@ -393,6 +395,13 @@ async def test_injection_hint_note_shows_the_pointer() -> None:
     note = await _inject(_ctx("alex", "member"), [_document("alex")], full_sim=0.99)
     assert note is not None
     assert "document: alex plan (documents/alex/plan.md, plan, active)" in note
+
+
+async def test_injection_shows_a_document_to_an_owner() -> None:
+    """An owner reads documents as a member does, so the injection names one."""
+    note = await _inject(_ctx("robin", "owner"), [_document("robin")], full_sim=0.8)
+    assert note is not None
+    assert "document: robin plan (documents/robin/plan.md, plan, active)" in note
 
 
 async def test_injection_shows_no_document_to_a_guest() -> None:

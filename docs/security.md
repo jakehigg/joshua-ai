@@ -183,12 +183,25 @@ writes none of it. Put nothing in the corpus that a guest must not see. Tool
 access is per person id, not per role: a guest with `allow: all` on a server
 gets that server.
 
-An `owner` role arrives later, and it will be the only role that adds a person.
+The `owner` is the third role, and there is normally one. An owner is a member
+everywhere a member writes: the wiki, a journal entry, their own profile, the
+shared profile from group chats. The owner alone manages the roster in the
+viewer: add a person, set a sign-in secret, change a role, and take a person
+off the roster. Those four are the `/api/v1/admin/*` routes, which refuse a
+member and a guest before any call to core, and which reach core's
+`/admin/people` routes with the `viewer` fleet token. Core admits `viewer`
+there, and on no other admin route, because it is one of `AUTH_CALLERS`: the
+viewer already sets the secret of any person, so the roster gives it no new
+reach. Core keeps one owner: it refuses to demote or remove the only one. A
+member still adds a person from chat, as the table says.
 
 ### What decides a write
 
 The gateway acts on the `X-Joshua-Role` header, which only the identities in
-`gateway.person_header_callers` may assert.
+`gateway.person_header_callers` may assert. The header holds one of the roles
+of the roster: `member`, `owner`, or `guest`. An `owner` writes exactly where
+a `member` writes, through every MCP server. The owner's extra authority is
+the roster under Admin → Users, and nothing else. Any other value is a 400.
 `X-Joshua-Person` rides along for the audit trail and decides nothing about a
 file.
 
@@ -240,6 +253,42 @@ subfolder, a hidden entry, the comments file, and a symlink out of the root
 are refused before any file operation. The server alone sets `author`,
 `created`, `updated`, and `promoted_to`. The tools add no comment: a comment
 comes from the person in the viewer, and Joshua only resolves one.
+
+### The sign-in of the viewer
+
+[auth.md](auth.md) is the guide: what a person sees, what the owner does, and
+what the sign-in does not do.
+
+A person signs in on a page of the app, and the viewer holds no password of
+its own. Core owns the roster and every secret: a secret is a bcrypt hash in
+the `auth_secret` table, and the viewer checks one with
+`POST /auth/verify`, over core's `/auth/*` routes, with its own fleet token.
+Core answers `{"ok": false}` for a wrong secret, for a person with no secret,
+and for a person who is not on the roster, so the page tells nobody which of
+the three it was. No answer and no log line carries a secret or a hash.
+`viewer.auth.method` is the method of the instance: `anonymous`, `pin`, or
+`password`. There is no HTTP basic path and no `WWW-Authenticate` header.
+
+A sign-in answers with one signed cookie, `joshua_session`. The payload is the
+person id, the expiry, "remember this device", and the stamp of that person's
+secret; the signature is HMAC-SHA256 under `JOSHUA_VIEWER_SESSION_SECRET`.
+With no such variable the process mints a random key at start, so a restart
+signs everybody out. The cookie is `HttpOnly`, `SameSite=Lax`, on `Path=/`,
+and `Secure` when the proxy in front says the request came over https.
+"Remember this device" gives it 30 days; without it the browser drops it when
+it closes, and the signature expires a day later whatever the browser kept.
+
+The stamp is what ends a session. The viewer reads
+`GET /auth/people/<id>` from core and refuses a cookie whose stamp is not the
+one core holds, so a changed secret, a reset by the owner, and a person taken
+off the roster sign out every outstanding cookie of that person within the
+minute. Core that answers 404 or cannot answer refuses the cookie too, and a
+failure is never cached. Every write of the viewer checks the `Origin` header,
+the sign-in and the change of a secret among them.
+
+The viewer serves plain HTTP. Terminate TLS at a reverse proxy, and keep the
+address on a network you trust: this is the interface of one instance for the
+people of that instance, not a service to publish.
 
 ### The headers of the viewer
 

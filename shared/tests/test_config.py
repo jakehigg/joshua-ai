@@ -103,6 +103,87 @@ def test_viewer_anonymous_a_guest_fails() -> None:
         config.parse(text, ENV, source="test.yaml")
 
 
+def test_viewer_anonymous_an_owner_is_a_member() -> None:
+    """An owner writes wherever a member writes, so an open viewer may be one."""
+    text = GOOD.replace("    name: Alex\n", "    name: Alex\n    role: owner\n")
+    cfg = config.parse(text + "\nviewer:\n  enabled: true\n  anonymous: alex\n", ENV)
+    assert cfg.viewer.anonymous == "alex"
+
+
+def test_viewer_auth_method_defaults_to_anonymous() -> None:
+    """With no ``viewer.auth`` section the viewer asks for nothing."""
+    assert config.parse(GOOD, ENV, source="test.yaml").viewer.auth.method == "anonymous"
+    text = GOOD + "\nviewer:\n  enabled: true\n"
+    assert config.parse(text, ENV, source="test.yaml").viewer.auth.method == "anonymous"
+
+
+def test_viewer_auth_method_words() -> None:
+    """``anonymous``, ``pin``, and ``password`` are the methods; nothing else is."""
+
+    def with_method(method: str) -> str:
+        return GOOD + "\nviewer:\n  enabled: true\n  auth:\n    method: " + method + "\n"
+
+    for method in ("anonymous", "pin", "password"):
+        cfg = config.parse(with_method(method), ENV, source="test.yaml")
+        assert cfg.viewer.auth.method == method
+    with pytest.raises(config.ConfigError, match="viewer.auth.method"):
+        config.parse(with_method("magic-link"), ENV, source="test.yaml")
+
+
+def test_a_roster_with_no_owner_warns_and_loads() -> None:
+    """No owner is a warning, never a refusal: the instance still runs."""
+    cfg = config.parse(GOOD, ENV, source="test.yaml")
+    assert cfg.warnings == [config.NO_OWNER_WARNING]
+    owned = config.parse(GOOD.replace("    name: Alex\n", "    name: Alex\n    role: owner\n"), ENV)
+    assert owned.warnings == []
+
+
+def test_validate_prints_the_no_owner_warning(tmp_path: Path, capsys) -> None:
+    file = tmp_path / "joshua.yaml"
+    file.write_text("name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n")
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.NO_OWNER_WARNING}" in capsys.readouterr().out
+    file.write_text(
+        "name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n    role: owner\n"
+    )
+    assert config._validate_cli(str(file)) == 0
+    assert "warning:" not in capsys.readouterr().out
+
+
+def test_validate_warns_about_the_retired_viewer_passwords(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A password left in the config or the environment is a warning, and the
+    file still validates: core holds every sign-in secret now."""
+    owner = "name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n    role: owner\n"
+    file = tmp_path / "joshua.yaml"
+    file.write_text(owner + 'viewer:\n  enabled: true\n  users:\n    sam: ""\n')
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.RETIRED_VIEWER_WARNING}" in capsys.readouterr().out
+
+    file.write_text(owner)
+    monkeypatch.setenv(config.VIEWER_PASSWORDS_ENV, "sam=$2b$12$a-hash")
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.RETIRED_VIEWER_WARNING}" in capsys.readouterr().out
+
+    monkeypatch.delenv(config.VIEWER_PASSWORDS_ENV)
+    monkeypatch.setenv(f"{config.VIEWER_PW_PREFIX}SAM", "a password")
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.RETIRED_VIEWER_WARNING}" in capsys.readouterr().out
+
+    monkeypatch.delenv(f"{config.VIEWER_PW_PREFIX}SAM")
+    assert config._validate_cli(str(file)) == 0
+    assert "warning:" not in capsys.readouterr().out
+
+
+def test_is_member_admits_an_owner() -> None:
+    """An owner writes wherever a member writes. A guest still reads only."""
+    assert config.is_member("member")
+    assert config.is_member("owner")
+    assert not config.is_member("guest")
+    assert not config.is_member(None)
+
+
 def test_happy_path_and_defaults() -> None:
     cfg = config.parse(GOOD, ENV, source="test.yaml")
     assert cfg.name == "Home"
@@ -217,6 +298,15 @@ def test_person_and_destination() -> None:
         cfg.destination("missing")
 
 
+def test_person_role_words() -> None:
+    """``owner`` is a role beside ``member`` and ``guest``; nothing else is."""
+    text = "name: T\ntimezone: UTC\npeople:\n  - id: robin\n    name: Robin\n    role: {role}\n"
+    for role in ("member", "guest", "owner"):
+        assert config.parse(text.format(role=role)).person("robin").role == role
+    with pytest.raises(config.ConfigError, match="role must be"):
+        config.parse(text.format(role="admin"))
+
+
 def test_group_lookup() -> None:
     cfg = config.parse(GOOD, ENV, source="test.yaml")
     group = cfg.groups_by_chat("imessage", "iMessage;+;chat100000000000000001")
@@ -328,6 +418,11 @@ people:
     role: guest
     handles:
       telegram: "222"
+  - id: robin
+    name: Robin
+    role: owner
+    handles:
+      telegram: "333"
 groups:
   - id: all-members
     channel: telegram
@@ -340,6 +435,12 @@ groups:
     members:
       - "111"
       - "222"
+  - id: with-owner
+    channel: telegram
+    chat_id: "-1005"
+    members:
+      - "111"
+      - "333"
   - id: open
     channel: telegram
     chat_id: "-1003"
@@ -363,6 +464,12 @@ def _group(cfg, group_id: str):
 def test_a_group_of_members_derives_member() -> None:
     cfg = _roles_cfg()
     assert cfg.group_role(_group(cfg, "all-members")) == ("member", None)
+
+
+def test_a_group_holding_an_owner_derives_member() -> None:
+    """An owner writes as a member does, so the chat is a member chat."""
+    cfg = _roles_cfg()
+    assert cfg.group_role(_group(cfg, "with-owner")) == ("member", None)
 
 
 def test_a_group_holding_a_guest_derives_guest() -> None:
@@ -557,3 +664,33 @@ def test_voice_deliver_via_defaults_to_unset() -> None:
 def test_voice_deliver_via_rejects_an_unknown_channel_type() -> None:
     with pytest.raises(config.ConfigError, match="deliver_via must be one of"):
         config.parse(_with_voice_deliver_via("webhook"), ENV, source="<test>")
+
+
+def test_validate_names_only_the_channels_with_a_credential(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A section with an empty credential is off, and the summary says so."""
+    file = tmp_path / "joshua.yaml"
+    file.write_text(
+        "name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n    role: owner\n"
+        "channels:\n  telegram:\n    bot_token: ${TELEGRAM_BOT_TOKEN:-}\n"
+        "  imessage:\n    bluebubbles_url: http://bluebubbles.local:1234\n"
+        "    bluebubbles_password: ${BLUEBUBBLES_PASSWORD:-}\n"
+        "    webhook_path_secret: ${IMESSAGE_WEBHOOK_SECRET:-}\n"
+    )
+    for name in ("TELEGRAM_BOT_TOKEN", "BLUEBUBBLES_PASSWORD", "IMESSAGE_WEBHOOK_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    assert config._validate_cli(str(file)) == 0
+    assert "channels enabled: none" in capsys.readouterr().out
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    assert config._validate_cli(str(file)) == 0
+    assert "channels enabled: telegram\n" in capsys.readouterr().out
+
+    monkeypatch.setenv("BLUEBUBBLES_PASSWORD", "pw")
+    assert config._validate_cli(str(file)) == 0
+    assert "channels enabled: telegram\n" in capsys.readouterr().out
+
+    monkeypatch.setenv("IMESSAGE_WEBHOOK_SECRET", "s")
+    assert config._validate_cli(str(file)) == 0
+    assert "channels enabled: telegram, imessage" in capsys.readouterr().out

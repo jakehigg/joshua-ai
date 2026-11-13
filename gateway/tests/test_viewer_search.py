@@ -18,8 +18,6 @@ from joshua_gateway import viewer_search as search_mod
 from joshua_shared import config
 from starlette.testclient import TestClient
 
-ALEX_PW = "alex-secret"
-
 CONFIG = textwrap.dedent("""\
     name: Test
     timezone: America/New_York
@@ -54,7 +52,6 @@ def data(monkeypatch, tmp_path) -> Path:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(root))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX_PW)
     monkeypatch.delenv(search_mod.CORE_URL_ENV, raising=False)
     monkeypatch.delenv(search_mod.VIEWER_TOKEN_ENV, raising=False)
     monkeypatch.setattr(config, "_cache", None)

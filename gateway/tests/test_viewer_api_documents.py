@@ -21,15 +21,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import signed_in
 from joshua_gateway import viewer
 from joshua_gateway import viewer_docstore as ds
 from joshua_gateway.viewer_api import documents as api
 from joshua_shared import config, wikigit
 from starlette.testclient import TestClient
 
-ALEX = ("alex", "alex-secret")
-MIA = ("mia", "mia-secret")
-GUEST = ("gus", "gus-secret")
+ALEX = signed_in("alex")
+MIA = signed_in("mia")
+SAM = signed_in("sam")
+GUEST = signed_in("gus")
 NOW = datetime(2026, 11, 9, 15, 0, tzinfo=UTC)
 NEEDS_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
@@ -44,12 +46,16 @@ CONFIG = textwrap.dedent("""\
       - id: gus
         name: Gus
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
         gus: ${VIEWER_PW_GUS:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 PLAN = textwrap.dedent("""\
@@ -108,9 +114,6 @@ def data(monkeypatch, tmp_path) -> Path:
     cfg_path.write_text(CONFIG)
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(root))
-    monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
-    monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
-    monkeypatch.setenv("VIEWER_PW_GUS", GUEST[1])
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)
@@ -164,14 +167,14 @@ def _token(owner: str, slug: str, person: str = "alex") -> str:
 
 
 def _add(owner: str, slug: str, *, auth=ALEX, c: TestClient | None = None, **fields) -> Any:
-    body = {"csrf": _token(owner, slug, auth[0]), **fields}
+    body = {"csrf": _token(owner, slug, auth.person), **fields}
     return (c or client()).post(f"/api/v1/documents/{owner}/{slug}/comments", json=body, auth=auth)
 
 
 def _remove(owner: str, slug: str, cid: str, *, auth=ALEX, c: TestClient | None = None) -> Any:
     return (c or client()).post(
         f"/api/v1/documents/{owner}/{slug}/comments/{cid}/delete",
-        json={"csrf": _token(owner, slug, auth[0])},
+        json={"csrf": _token(owner, slug, auth.person)},
         auth=auth,
     )
 
@@ -470,6 +473,15 @@ def test_a_guest_gets_404_on_every_documents_route(docs) -> None:
     assert _add("shared", "meals", auth=GUEST, line_no=1, body="hi").status_code == 404
     assert _remove("shared", "meals", "1", auth=GUEST).status_code == 404
     assert not (docs / "shared/meals.comments.jsonl").exists()
+
+
+def test_an_owner_reads_the_documents_as_a_member_does(docs) -> None:
+    """The member gate of the documents routes admits the owner role."""
+    body = _list(auth=SAM).json()
+    assert [row["title"] for row in body["documents"]] == ["Meal plan"]
+    response = _doc("shared", "meals", auth=SAM)
+    assert response.status_code == 200
+    assert response.json()["title"] == "Meal plan"
 
 
 def test_every_route_needs_a_sign_in(docs) -> None:

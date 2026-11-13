@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from joshua_shared.config import Person
+from joshua_shared.config import Person, is_member
 from joshua_shared.contracts import SearchResponse
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -130,7 +130,7 @@ async def search(request: Request, person: Person) -> JSONResponse:
         )
     meaning = None
     if core is not None:
-        reader = person.id if person.role == "member" else None
+        reader = person.id if is_member(person.role) else None
         response = await core.search(query, person=reader)
         if response is not None:
             meaning = meaning_json(response)

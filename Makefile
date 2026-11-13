@@ -1,4 +1,4 @@
-.PHONY: sync lint fmt test test-dates up up-dev pull down nuke logs ps shell-core psql init-env e2e smoke chat validate backup restore
+.PHONY: sync lint fmt test test-dates up up-dev pull down nuke logs ps shell-core psql init-env e2e smoke chat validate validate-dev restart backup restore
 
 MEMBERS := shared channels core gateway assignments
 
@@ -8,6 +8,11 @@ MEMBERS := shared channels core gateway assignments
 # Every target below runs $(COMPOSE), so `make down` also stops an enabled
 # choice.
 COMPOSE := docker compose -f docker-compose.yml $(shell sh scripts/enhancements.sh)
+
+# The optional containers that joshua.yaml turns on: `viewer` with
+# `viewer.enabled: true`, `assignments` with `assignments.enabled: true`.
+# Every target below then starts, lists, and stops them with the stack.
+export COMPOSE_PROFILES := $(shell sh scripts/profiles.sh)
 
 # The developer file pair: docker-compose.yml names the released images, and
 # docker-compose.dev.yml replaces them with a build of this checkout.
@@ -84,12 +89,18 @@ nuke:
 	read ans; [ "$$ans" = "y" ] || { echo aborted; exit 1; }; \
 	$(COMPOSE) down -v
 
-# Check joshua.yaml. The secrets in .env must be in the environment, because the
-# config file refers to them.
-# Runs in the core image, so the host needs no Python. The first run pulls the
-# image; `make up` reuses it. Compose passes the secrets from .env.
+# Check joshua.yaml. Runs the one-shot `validate` service of the core image, so
+# the host needs no Python. The first run pulls the image; `make up` reuses it.
+# Compose passes the channel credentials from .env, so the summary names only
+# the channels that start.
 validate: joshua.yaml
-	$(COMPOSE) run --rm --no-deps -T --entrypoint joshua-config core validate /etc/joshua/joshua.yaml
+	$(COMPOSE) run --rm -T validate
+
+# The same check with the core image of this checkout. It builds `core` first,
+# because `validate` runs that image.
+validate-dev: joshua.yaml
+	$(DEV) build core
+	$(DEV) run --rm -T validate
 
 # Talk to Joshua. Set AS to a person id from joshua.yaml.
 #   make chat AS=alex              open a session
@@ -101,6 +112,11 @@ chat:
 
 logs:
 	$(COMPOSE) logs -f
+
+# Restart every container that runs, for example after an edit of joshua.yaml.
+# It keeps each image, so it works for a release and for your own build.
+restart:
+	$(COMPOSE) restart
 
 ps:
 	$(COMPOSE) ps
@@ -126,6 +142,12 @@ init-env:
 		sed -i.bak '/^POSTGRES_PASSWORD=/d' .env && rm -f .env.bak; \
 		echo "POSTGRES_PASSWORD=$$pw" >> .env; \
 		echo "minted POSTGRES_PASSWORD"; \
+	fi
+	@if ! grep -q "^JOSHUA_VIEWER_SESSION_SECRET=." .env; then \
+		key=$$(openssl rand -base64 33 | tr '+/' '-_' | tr -d '='); \
+		sed -i.bak '/^JOSHUA_VIEWER_SESSION_SECRET=/d' .env && rm -f .env.bak; \
+		echo "JOSHUA_VIEWER_SESSION_SECRET=$$key" >> .env; \
+		echo "minted JOSHUA_VIEWER_SESSION_SECRET"; \
 	fi
 	@for name in CHANNELS CORE GATEWAY LAPTOP VIEWER MCP ASSIGNMENTS; do \
 		if ! grep -q "^JOSHUA_TOKEN_$$name=." .env; then \
