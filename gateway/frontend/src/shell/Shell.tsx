@@ -38,6 +38,11 @@ function title(section: string): string {
   if (section === LINKS_SECTION) {
     return "Links";
   }
+  // The admin area is no section of the session: the owner reaches it by its
+  // address, and the app bar names it all the same.
+  if (section === "admin") {
+    return "Admin";
+  }
   return LABELS[section] ?? "Home";
 }
 

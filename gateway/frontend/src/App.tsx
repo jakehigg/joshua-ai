@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useContext, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import { ApiError, getJson } from "./api/client";
+import Admin from "./pages/Admin";
 import Assignment from "./pages/Assignment";
 import { ChatPage, WorkspacePage } from "./chat/ChatPage";
 import { ChatHome } from "./chat/Home";
@@ -147,6 +148,26 @@ function SignedIn({ children }: { children: ReactNode }) {
   return <SessionContext.Provider value={gate.session}>{children}</SessionContext.Provider>;
 }
 
+/** The one role that may see the admin area. */
+const OWNER_ROLE = "owner";
+
+/**
+ * The admin area, for the owner and for nobody else.
+ *
+ * The role comes from the session the app already read. Another person gets
+ * what an address that no route claims gets — nothing — because the viewer
+ * does not tell a member that there is a page they may not see. The routes
+ * behind the page refuse them as well, so this is the sight of it and not
+ * the guard of it.
+ */
+function OwnerOnly({ children }: { children: ReactNode }) {
+  const session = useContext(SessionContext);
+  if (session?.person.role !== OWNER_ROLE) {
+    return null;
+  }
+  return <>{children}</>;
+}
+
 /**
  * The routes of the app. Every screen of the viewer is here: there is no
  * other renderer. An address that no route claims renders an empty page,
@@ -178,6 +199,22 @@ export default function App() {
         <Route path="/chat/w/:slug" element={<WorkspacePage />} />
         <Route path="/chat/:person" element={<ChatPage />} />
         <Route path="/me" element={<Me />} />
+        <Route
+          path="/admin"
+          element={
+            <OwnerOnly>
+              <Admin />
+            </OwnerOnly>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <OwnerOnly>
+              <Admin />
+            </OwnerOnly>
+          }
+        />
       </Routes>
     </SignedIn>
   );
