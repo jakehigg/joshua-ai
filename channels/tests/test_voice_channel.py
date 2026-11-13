@@ -40,6 +40,11 @@ people:
     role: guest
     handles:
       voice: gwen
+  - id: robin
+    name: Robin
+    role: owner
+    handles:
+      voice: robin
 channels:
   voice:
     allowed_callers:
@@ -332,6 +337,19 @@ async def test_a_member_roams_between_devices_on_one_conversation(tmp_path: Path
     # The room is not in the channel id, so it rides as framing.
     assert "office" in core.events[0].framing
     assert "kitchen" in core.events[1].framing
+
+
+@pytest.mark.asyncio
+async def test_an_owner_roams_as_a_member_does(tmp_path: Path) -> None:
+    """``thread: person`` follows every person who is a member, the owner too."""
+    app, core, _ = _make(tmp_path)
+    async with _client(app) as client:
+        await client.post(
+            COMPLETIONS,
+            json=_body("first", speaker="person:robin", user="voice:office"),
+            headers=_bearer(VOICE_TOKEN),
+        )
+    assert [event.channel for event in core.events] == [voice_adapter.ROAMING_CHANNEL]
 
 
 @pytest.mark.asyncio

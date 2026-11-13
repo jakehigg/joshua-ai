@@ -25,6 +25,7 @@ _GIT_MISSING = shutil.which("git") is None
 
 ALEX = ("alex", "alex-secret")
 MIA = ("mia", "mia-secret")
+SAM = ("sam", "sam-secret")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -35,11 +36,15 @@ CONFIG = textwrap.dedent("""\
       - id: mia
         name: Mia
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 PANTRY = "https://pantry.example.test/"
@@ -57,6 +62,7 @@ def data(monkeypatch, tmp_path) -> Path:
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     return data
 
 
@@ -105,6 +111,17 @@ def test_a_member_gets_the_list_the_icons_and_the_token(client, data) -> None:
     assert body["icons"][0] == links_mod.DEFAULT_ICON
     assert body["can_edit"] is True
     assert body["csrf"] == _token()
+
+
+def test_an_owner_gets_the_token_and_writes(client, data) -> None:
+    """The owner role passes the member gate of the read and of the write."""
+    _one_link(data)
+    body = client.get("/api/v1/links", auth=SAM).json()
+    assert body["can_edit"] is True
+    assert body["csrf"] == _token("sam")
+    response = _post(client, [{"title": "Vinyl", "url": VINYL, "icon": "music"}], auth=SAM)
+    assert response.status_code == 200
+    assert links_mod.load(data / "wiki") == [links_mod.Link("Vinyl", VINYL, "music")]
 
 
 def test_a_guest_gets_the_list_and_no_token(client, data) -> None:

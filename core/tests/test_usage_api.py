@@ -24,10 +24,15 @@ class FakeRepo:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.rows = rows
         self.calls: list[tuple[datetime, str]] = []
+        self.conversations: list[str] = []
 
     async def usage_rows(self, since: datetime, timezone: str) -> list[dict[str, Any]]:
         self.calls.append((since, timezone))
         return list(self.rows)
+
+    async def usage_by_conversation(self, since: datetime, person_id: str) -> list[dict[str, Any]]:
+        self.conversations.append(person_id)
+        return []
 
 
 ROWS = [
@@ -61,9 +66,15 @@ def _client(monkeypatch, *, allowed=("viewer",), rows=ROWS) -> TestClient:
     monkeypatch.setenv("JOSHUA_TOKEN_LAPTOP", LAPTOP)
     monkeypatch.delenv("ADMIN_CALLERS", raising=False)
     repo = FakeRepo(rows)
+    people = {
+        "alex": SimpleNamespace(id="alex", role="member"),
+        "robin": SimpleNamespace(id="robin", role="owner"),
+        "mia": SimpleNamespace(id="mia", role="guest"),
+    }
     settings = SimpleNamespace(
         timezone="America/New_York",
         usage=UsageConfig(allowed_callers=list(allowed)),
+        person=people.get,
     )
     app = FastAPI()
     app.state.ctx = SimpleNamespace(settings=settings, repo=repo)
@@ -148,3 +159,20 @@ def test_the_admin_route_takes_an_admin_caller_only(monkeypatch) -> None:
     response = _get(client, LAPTOP, ADMIN_USAGE_PATH, days=7)
     assert response.status_code == 200
     assert response.json()["days"] == 7
+
+
+def test_the_conversations_of_a_member_and_of_an_owner(monkeypatch) -> None:
+    """``group=conversation`` needs a person who writes. An owner is one."""
+    client = _client(monkeypatch)
+    for person in ("alex", "robin"):
+        response = _get(client, VIEWER, group="conversation", person=person)
+        assert response.status_code == 200, person
+        assert response.json() == {"days": 30, "conversations": []}
+    assert client.repo.conversations == ["alex", "robin"]  # type: ignore[attr-defined]
+
+
+def test_the_conversations_of_a_guest_or_of_nobody_are_403(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    assert _get(client, VIEWER, group="conversation", person="mia").status_code == 403
+    assert _get(client, VIEWER, group="conversation", person="ghost").status_code == 403
+    assert client.repo.conversations == []  # type: ignore[attr-defined]

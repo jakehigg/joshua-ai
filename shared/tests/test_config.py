@@ -112,6 +112,7 @@ def test_viewer_auth_method_defaults_to_anonymous() -> None:
 
 def test_viewer_auth_method_words() -> None:
     """``anonymous``, ``pin``, and ``password`` are the methods; nothing else is."""
+
     def with_method(method: str) -> str:
         return GOOD + "\nviewer:\n  enabled: true\n  auth:\n    method: " + method + "\n"
 

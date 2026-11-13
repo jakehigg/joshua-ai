@@ -90,3 +90,38 @@ def test_wiki_git_first_start_commits_everything_second_start_commits_nothing(
         ["git", "log", "--oneline"], cwd=wiki, capture_output=True, text=True, check=True
     ).stdout
     assert len(log_after_second.splitlines()) == commits_after_first
+
+
+def test_the_documents_source_indexes_for_a_member_and_an_owner(monkeypatch, tmp_path):
+    """``documents/<id>/`` is indexed for every person who writes. An owner
+    writes, a guest does not, so the owner's folder is in the list."""
+    import types
+
+    from joshua_core import main as main_module
+
+    captured: dict[str, list[str]] = {}
+
+    class FakeDocuments:
+        def __init__(self, data_dir, members):
+            captured["members"] = list(members)
+
+    fake_indexer = types.SimpleNamespace(skills=None)
+    monkeypatch.setenv(layout.DATA_DIR_ENV, str(tmp_path))
+    monkeypatch.setattr(main_module, "FilesSource", lambda *a, **k: None)
+    monkeypatch.setattr(main_module, "DocumentsSource", FakeDocuments)
+    monkeypatch.setattr(main_module, "WorkspacesSource", lambda *a, **k: None)
+    monkeypatch.setattr(main_module, "Indexer", lambda *a, **k: fake_indexer)
+    monkeypatch.setattr(main_module, "IndexerLoop", lambda *a, **k: None)
+    for module in ("recall", "internet", "injection", "workspace_awareness", "taught_skills"):
+        monkeypatch.setattr(getattr(main_module, module), "register", lambda *a, **k: None)
+    monkeypatch.setattr(main_module.internet_agent, "build_searcher", lambda *a, **k: None)
+
+    roster = CONFIG_YAML + (
+        "  - id: mia\n    name: Mia\n    role: guest\n"
+        "  - id: robin\n    name: Robin\n    role: owner\n"
+    )
+    settings = config_module.parse(roster, env={}, source="<test>")
+    manager = types.SimpleNamespace(url_grants=None)
+    main_module._build_memory(settings, None, manager, None)
+
+    assert captured["members"] == ["alex", "robin"]

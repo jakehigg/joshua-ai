@@ -15,6 +15,7 @@ from starlette.testclient import TestClient
 
 ALEX = ("alex", "alex-secret")
 MIA = ("mia", "mia-secret")
+SAM = ("sam", "sam-secret")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -25,11 +26,15 @@ CONFIG = textwrap.dedent("""\
       - id: mia
         name: Mia
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 # ``dedent`` already took the indent off, so the line of the viewer block
@@ -47,6 +52,7 @@ def _data(monkeypatch, tmp_path: Path, text: str) -> Path:
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     return data
 
 
@@ -94,6 +100,15 @@ def test_a_guest_has_no_documents_section(client) -> None:
     assert body["person"]["role"] == "guest"
     assert "documents" not in {item["key"] for item in body["sections"]}
     assert body["chat_url"] == "/chat/mia"
+
+
+def test_an_owner_holds_every_section_a_member_holds(client) -> None:
+    """An owner is a member with the roster in hand, so no section is missing."""
+    body = client.get("/api/v1/session", auth=SAM).json()
+    assert body["person"] == {"id": "sam", "name": "Sam", "role": "owner"}
+    assert [item["key"] for item in body["sections"]] == [
+        item["key"] for item in client.get("/api/v1/session", auth=ALEX).json()["sections"]
+    ]
 
 
 def test_the_anonymous_person_is_named_as_such(anon_client) -> None:

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import pytest
-from conftest import make_config, make_settings, spec
+from conftest import CONFIG_TEXT, make_config, make_settings, spec
 from fakes import FIXED_NOW, FakeStore
 from joshua_assignments.manager import Manager, full_view, summary_view
 
 
 def make_manager(
-    extra: str = "", delay: float | None = 0.0, store: FakeStore | None = None
+    extra: str = "",
+    delay: float | None = 0.0,
+    store: FakeStore | None = None,
+    text: str = CONFIG_TEXT,
 ) -> Manager:
-    cfg = make_config(extra)
+    cfg = make_config(extra, text=text)
     return Manager(
         make_settings(),
         store or FakeStore(),
@@ -292,6 +295,17 @@ def test_is_member() -> None:
     assert manager.is_member("alex") is True
     assert manager.is_member("sam") is False
     assert manager.is_member("nobody") is False
+
+
+def test_an_owner_is_a_member() -> None:
+    """An owner writes as a member does, so the tools of a member are theirs."""
+    manager = make_manager(
+        text=CONFIG_TEXT.replace(
+            "  - id: alex\n    name: Alex\n",
+            "  - id: alex\n    name: Alex\n  - id: robin\n    name: Robin\n    role: owner\n",
+        )
+    )
+    assert manager.is_member("robin") is True
 
 
 def test_the_views_of_a_bare_row() -> None:

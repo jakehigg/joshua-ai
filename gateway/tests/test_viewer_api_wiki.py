@@ -20,6 +20,7 @@ from starlette.testclient import TestClient
 
 ALEX = ("alex", "alex-secret")
 MIA = ("mia", "mia-secret")
+SAM = ("sam", "sam-secret")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -30,11 +31,15 @@ CONFIG = textwrap.dedent("""\
       - id: mia
         name: Mia
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 # A one-pixel PNG, for the file shape.
@@ -86,6 +91,7 @@ def client(monkeypatch, tmp_path) -> TestClient:
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     return TestClient(viewer.build_app())
 
@@ -153,6 +159,7 @@ def test_no_wiki_folder_gives_an_empty_tree(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(config.CONFIG_ENV_VAR, str(cfg_path))
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(tmp_path / "empty"))
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     client = TestClient(viewer.build_app())
     assert client.get("/api/v1/wiki/tree", auth=ALEX).json() == wiki_api.EMPTY_TREE
 
@@ -205,6 +212,14 @@ def test_a_member_gets_the_editor_and_the_token_of_the_delete(files) -> None:
     assert body["can_edit"] is True
     assert body["edit_url"] == "/edit/recipes/ponzu-sauce.md"
     assert body["delete_csrf"] == viewer._csrf_token("alex", "wiki/recipes/ponzu-sauce.md")
+
+
+def test_an_owner_gets_the_editor_and_creates_a_page(files) -> None:
+    """The owner role reads as a member does on the page and on the folder."""
+    page = _get(files, "wiki/recipes/ponzu-sauce.md", auth=SAM)
+    assert page["can_edit"] is True
+    assert page["delete_csrf"] == viewer._csrf_token("sam", "wiki/recipes/ponzu-sauce.md")
+    assert _get(files, "wiki/recipes/", auth=SAM)["can_create"] is True
 
 
 def test_a_guest_gets_no_edit_and_no_token(files) -> None:

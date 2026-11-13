@@ -21,6 +21,10 @@ def _member_repo() -> PeopleFakeRepo:
     return PeopleFakeRepo([Person(id="alex", display_name="Alex", role="member")])
 
 
+def _owner_repo() -> PeopleFakeRepo:
+    return PeopleFakeRepo([Person(id="robin", display_name="Robin", role="owner")])
+
+
 # --- handle helpers --------------------------------------------------------
 
 
@@ -90,6 +94,17 @@ async def test_add_user_member_creates_person(tmp_path: Path) -> None:
     assert (tmp_path / "people" / "sam" / "attachments").is_dir()
 
 
+async def test_add_user_owner_creates_person(tmp_path: Path) -> None:
+    """An owner speaks for the roster, so the member gate of the tool admits one."""
+    repo = _owner_repo()
+    deps = make_deps(repo, person_id="robin")
+
+    result = await registration.do_add_user(deps, name="Sam", handle="998877", data_dir=tmp_path)
+
+    assert "Added Sam" in _text(result)
+    assert repo.people["sam"].role == "member"
+
+
 async def test_add_user_conflict_changes_nothing(tmp_path: Path) -> None:
     repo = _member_repo()
     repo.people["mia"] = Person(id="mia", display_name="Mia", role="member")
@@ -148,6 +163,16 @@ async def test_list_users_member(tmp_path: Path) -> None:
     assert "alex" in _text(result)
     assert "telegram:111" in _text(result)
     assert "ghost" not in _text(result)
+
+
+async def test_list_users_owner() -> None:
+    repo = _owner_repo()
+    repo.handles[("telegram", "111")] = "robin"
+    deps = make_deps(repo, person_id="robin")
+
+    result = await registration.do_list_users(deps)
+
+    assert "robin" in _text(result)
 
 
 async def test_list_users_guest_denied() -> None:

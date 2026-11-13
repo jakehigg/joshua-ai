@@ -39,6 +39,9 @@ people:
   - id: gus
     name: Gus
     role: guest
+  - id: robin
+    name: Robin
+    role: owner
 mcp:
   tasks:
     type: http
@@ -266,6 +269,10 @@ async def test_the_bearer_the_list_and_the_person_are_checked(client) -> None:
     for person in ("nobody", "gus"):  # unknown, and a guest
         resp = await client.get("/v1/workspaces", params={"person": person}, headers=_h())
         assert resp.status_code == 403
+    # An owner writes as a member does, so the person gate admits one.
+    owned = await client.get("/v1/workspaces", params={"person": "robin"}, headers=_h())
+    assert owned.status_code == 200
+    assert owned.json() == {"workspaces": []}
 
 
 async def test_an_empty_allowed_callers_turns_the_routes_off(seeded) -> None:

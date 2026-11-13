@@ -25,6 +25,7 @@ _GIT_MISSING = shutil.which("git") is None
 
 ALEX = ("alex", "alex-secret")
 MIA = ("mia", "mia-secret")
+SAM = ("sam", "sam-secret")
 
 CONFIG = textwrap.dedent("""\
     name: Test
@@ -35,11 +36,15 @@ CONFIG = textwrap.dedent("""\
       - id: mia
         name: Mia
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 FRONT = '---\ntitle: Recipes\ntags: []\nupdated: "2026-09-03T15:57:47.978Z"\n---\n\n'
@@ -73,6 +78,7 @@ def client(monkeypatch, tmp_path) -> TestClient:
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(data))
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     return TestClient(viewer.build_app())
 
 
@@ -175,6 +181,16 @@ def test_a_guest_gets_403_on_every_write(client, tmp_path) -> None:
         assert response.status_code == 403
         assert response.json() == {"error": "forbidden"}
     assert (tmp_path / "data/wiki/recipes.md").read_text() == RECIPES
+
+
+def test_an_owner_writes_everywhere_a_member_writes(client, tmp_path) -> None:
+    """The owner role passes the member gate of every write route."""
+    assert _editor(client, "recipes.md", auth=SAM).status_code == 200
+    assert client.get("/api/v1/new", params={"folder": "recipes"}, auth=SAM).status_code == 200
+    assert _save(client, "recipes.md", "# Recipes\n\nSam cooks.\n", auth=SAM).status_code == 200
+    assert _create(client, "recipes", "soup", "# Soup\n\nHot.\n", auth=SAM).status_code == 200
+    assert _delete(client, "wiki/recipes/soup.md", auth=SAM).status_code == 200
+    assert (tmp_path / "data/wiki/recipes.md").read_text() == FRONT + "# Recipes\n\nSam cooks.\n"
 
 
 def test_every_write_needs_a_sign_in(client) -> None:

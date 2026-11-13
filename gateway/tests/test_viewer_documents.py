@@ -28,6 +28,7 @@ from starlette.testclient import TestClient
 ALEX = ("alex", "alex-secret")
 MIA = ("mia", "mia-secret")
 GUEST = ("gus", "gus-secret")
+SAM = ("sam", "sam-secret")
 NOW = datetime(2026, 11, 9, 15, 0, tzinfo=UTC)
 NEEDS_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
@@ -42,12 +43,16 @@ CONFIG = textwrap.dedent("""\
       - id: gus
         name: Gus
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
         gus: ${VIEWER_PW_GUS:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 PLAN = textwrap.dedent("""\
@@ -113,6 +118,7 @@ def data(monkeypatch, tmp_path) -> Path:
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
     monkeypatch.setenv("VIEWER_PW_GUS", GUEST[1])
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     monkeypatch.setattr(config, "_cache", None)
     monkeypatch.setattr(config, "_cache_path", None)
     monkeypatch.setattr(config, "_cache_people_file_mtime", None)
@@ -147,6 +153,14 @@ def _get(path: str, auth=ALEX, **params):
 
 
 # -- access -----------------------------------------------------------------
+
+
+def test_an_owner_reaches_a_shared_document(docs) -> None:
+    """The owner role passes the member gate of the document pages."""
+    response = _get("/documents/shared/meals.json", auth=SAM)
+    assert response.status_code == 200
+    assert response.json()["title"] == "Meal plan"
+    assert _get("/documents/alex/party.json", auth=SAM).status_code == 404
 
 
 def test_a_guest_reaches_no_document(docs) -> None:

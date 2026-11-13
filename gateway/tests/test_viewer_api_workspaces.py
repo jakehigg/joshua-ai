@@ -19,6 +19,7 @@ from starlette.testclient import TestClient
 
 ALEX = ("alex", "alex-secret")
 GUS = ("gus", "gus-secret")
+SAM = ("sam", "sam-secret")
 BASE = "/api/v1/workspaces"
 
 CONFIG = textwrap.dedent("""\
@@ -30,11 +31,15 @@ CONFIG = textwrap.dedent("""\
       - id: gus
         name: Gus
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         gus: ${VIEWER_PW_GUS:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 
@@ -65,6 +70,7 @@ def client(monkeypatch, tmp_path, core) -> TestClient:
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.setenv("VIEWER_PW_GUS", GUS[1])
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     monkeypatch.setenv("CORE_URL", "http://core.test")
     monkeypatch.setenv("JOSHUA_TOKEN_VIEWER", "viewer-token")
     monkeypatch.setattr(config, "_cache", None)
@@ -134,6 +140,12 @@ def test_core_status_and_body_pass_through_and_are_not_cached(client, core) -> N
 def test_the_status_filter_of_the_list_goes_to_core(client, core) -> None:
     client.get(BASE + "?status=paused", auth=ALEX)
     assert dict(core.requests[0].url.params) == {"person": "alex", "status": "paused"}
+
+
+def test_an_owner_reaches_core_as_a_member_does(client, core) -> None:
+    """The owner role passes the member gate, and core hears the owner's id."""
+    assert client.get(BASE, auth=SAM).status_code == 200
+    assert core.requests[-1].url.params["person"] == "sam"
 
 
 def test_a_guest_is_403_on_every_route_and_core_hears_nothing(client, core) -> None:

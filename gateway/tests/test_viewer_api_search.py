@@ -25,6 +25,7 @@ from starlette.testclient import TestClient
 
 ALEX = ("alex", "alex-secret")
 MIA = ("mia", "mia-secret")
+SAM = ("sam", "sam-secret")
 VIEWER_TOKEN = "viewer-token"
 
 CONFIG = textwrap.dedent("""\
@@ -36,11 +37,15 @@ CONFIG = textwrap.dedent("""\
       - id: mia
         name: Mia
         role: guest
+      - id: sam
+        name: Sam
+        role: owner
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
         mia: ${VIEWER_PW_MIA:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 
@@ -67,6 +72,7 @@ def data(monkeypatch, tmp_path) -> Path:
     monkeypatch.setenv("JOSHUA_DATA_DIR", str(root))
     monkeypatch.setenv("VIEWER_PW_ALEX", ALEX[1])
     monkeypatch.setenv("VIEWER_PW_MIA", MIA[1])
+    monkeypatch.setenv("VIEWER_PW_SAM", SAM[1])
     monkeypatch.delenv(search_mod.CORE_URL_ENV, raising=False)
     monkeypatch.delenv(search_mod.VIEWER_TOKEN_ENV, raising=False)
     monkeypatch.setattr(config, "_cache", None)
@@ -162,6 +168,20 @@ def test_a_member_names_no_person_for_the_wiki_and_the_member_for_the_documents(
     assert bodies["files"]["query"] == "oats"
     assert bodies["files"]["person"] is None
     assert bodies["documents"]["person"] == "alex"
+
+
+def test_an_owner_asks_for_the_documents_as_a_member_does(data, monkeypatch) -> None:
+    core = FakeCore([])
+    _with_core(monkeypatch, core)
+    _search("oats", auth=SAM)
+    sources = {json.loads(request.content)["source"] for request in core.requests}
+    assert sources == {"files", "documents"}
+    documents = next(
+        json.loads(request.content)
+        for request in core.requests
+        if json.loads(request.content)["source"] == "documents"
+    )
+    assert documents["person"] == "sam"
 
 
 def test_a_guest_names_no_person_and_asks_for_no_document(data, monkeypatch) -> None:
