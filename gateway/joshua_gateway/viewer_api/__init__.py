@@ -20,6 +20,10 @@ of the conversation. Both go to the channels container (``CHANNELS_URL``).
 The workspaces have nine routes under ``/api/v1/workspaces``, which proxy
 core (``CORE_URL``). See ``viewer_api.workspaces``.
 
+The Users section has five routes under ``/api/v1/admin/users``, which proxy
+core's people and secret routes. They are the owner's alone: a member and a
+guest get 403. See ``viewer_api.admin``.
+
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
 
@@ -32,6 +36,7 @@ from __future__ import annotations
 from starlette.routing import Route
 
 from joshua_gateway.viewer_api import (
+    admin,
     assignments,
     chat,
     documents,
@@ -139,6 +144,24 @@ def routes() -> list[Route]:
             api_path("workspaces/{slug}/items/{id}"),
             _require_auth(workspaces.delete_item),
             methods=["DELETE"],
+        ),
+        # The Users section: the owner's alone, whatever a route looks like.
+        Route(api_path("admin/users"), _require_auth(admin.users)),
+        Route(api_path("admin/users"), _require_auth(admin.add), methods=["POST"]),
+        Route(
+            api_path("admin/users/{id}/secret"),
+            _require_auth(admin.set_secret),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("admin/users/{id}/role"),
+            _require_auth(admin.set_role),
+            methods=["POST"],
+        ),
+        Route(
+            api_path("admin/users/{id}/remove"),
+            _require_auth(admin.remove),
+            methods=["POST"],
         ),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),
