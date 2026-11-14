@@ -29,16 +29,48 @@ function rows(list: Row[]) {
 // The document a card names, as the viewer's JSON route answers for it.
 const DOC = { title: "Pumpkin soup", kind: "artifact", status: "draft", updated: "2026-02-01T10:00:00Z" };
 
+// The hold of the thread, as the viewer's routes answer for it: list, add,
+// take (which empties it and joins the messages, one per line), and remove.
+function holdFake(initial: string[] = []) {
+  let held = initial.map((text, i) => ({ id: `h${i + 1}`, text, at: "2026-01-01T10:00:00Z" }));
+  let next = held.length;
+  return {
+    texts: () => held.map((m) => m.text),
+    handle(url: URL, init?: RequestInit) {
+      if (init?.method === "DELETE") {
+        const id = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
+        held = held.filter((m) => m.id !== id);
+      } else if (url.pathname.endsWith("/held/take")) {
+        const text = held.map((m) => m.text).join("\n");
+        held = [];
+        return json({ text, held: [] });
+      } else if (init?.method === "POST") {
+        next += 1;
+        const { text } = JSON.parse(String(init.body)) as { text: string };
+        held = [...held, { id: `h${next}`, text, at: "2026-01-01T10:00:00Z" }];
+      }
+      return json({ held });
+    },
+  };
+}
+
 // A fake backend. `history` answers each history call; `turn` holds the
 // turn stream open until release(), then ends with `answer` as done.text.
 // A `.json` path is the viewer's own route for a document, which a card
-// reads its title from and the open panel polls.
-function backend(history: (url: URL) => Response | Promise<Response>, answer = "the answer") {
+// reads its title from and the open panel polls. `held` is what the thread
+// holds when the screen opens.
+function backend(
+  history: (url: URL) => Response | Promise<Response>,
+  answer = "the answer",
+  held: string[] = [],
+) {
   const enc = new TextEncoder();
   let release: () => void = () => undefined;
+  const hold = holdFake(held);
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://test");
     if (url.pathname.endsWith("/history")) return history(url);
+    if (url.pathname.includes("/held")) return hold.handle(url, init);
     if (url.pathname.endsWith(".json")) return json(DOC);
     if (init?.method === "POST") {
       const body = new ReadableStream<Uint8Array>({
@@ -59,7 +91,11 @@ function backend(history: (url: URL) => Response | Promise<Response>, answer = "
     fetch.mock.calls
       .map(([input]) => new URL(String(input), "http://test"))
       .filter((u) => u.pathname.endsWith("/history"));
-  return { fetch, historyCalls, release: () => release() };
+  const turnBodies = () =>
+    fetch.mock.calls
+      .filter(([input]) => String(input).endsWith("/turns"))
+      .map(([, init]) => JSON.parse(String(init?.body)) as { text: string });
+  return { fetch, historyCalls, hold, turnBodies, release: () => release() };
 }
 
 function open(person = "alex") {
@@ -695,5 +731,99 @@ describe("ChatPage when the page comes back", () => {
     await advance(10);
     // Still streaming: the composer is busy.
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("ChatPage held messages", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const SINCE = new Date().toISOString();
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  const WAITING = "Waiting to go with the next turn";
+
+  function write(text: string) {
+    fireEvent.change(screen.getByLabelText("Message to Joshua"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  }
+
+  it("takes each message written while a turn runs, and sends them as one turn", async () => {
+    const empty = () => json({ messages: [], nextBefore: null, pending: null });
+    const { hold, turnBodies, release } = backend(empty);
+    open();
+    await advance(0);
+    write("first");
+    await advance(0);
+    expect(screen.getByText("work")).toBeTruthy();
+    write("second");
+    await advance(0);
+    write("third");
+    await advance(0);
+    // Both are on screen, marked as waiting, and no second turn went out.
+    expect(screen.getAllByText(WAITING)).toHaveLength(2);
+    expect(screen.getByText("second")).toBeTruthy();
+    expect(hold.texts()).toEqual(["second", "third"]);
+    expect(turnBodies()).toHaveLength(1);
+
+    await act(async () => release());
+    await advance(0);
+    // The turn is over: the two waiting messages go as one turn, one per line.
+    expect(turnBodies()).toEqual([{ text: "first" }, { text: "second\nthird" }]);
+    expect(screen.queryByText(WAITING)).toBeNull();
+    expect(hold.texts()).toEqual([]);
+  });
+
+  it("takes a waiting message back before it goes", async () => {
+    const { hold, turnBodies, release } = backend(() => json({ messages: [], nextBefore: null, pending: null }));
+    open();
+    await advance(0);
+    write("first");
+    await advance(0);
+    write("second");
+    await advance(0);
+    fireEvent.click(screen.getByRole("button", { name: "Remove the waiting message: second" }));
+    await advance(0);
+    expect(screen.queryByText(WAITING)).toBeNull();
+    expect(screen.queryByText("second")).toBeNull();
+    expect(hold.texts()).toEqual([]);
+
+    await act(async () => release());
+    await advance(0);
+    expect(turnBodies()).toEqual([{ text: "first" }]);
+  });
+
+  it("shows what the thread held when the page opens, and sends it when the turn ends", async () => {
+    let pending: unknown = { turnId: "t-1", state: "running", since: SINCE, text: "first" };
+    const { turnBodies, hold } = backend(
+      () => json({ messages: [], nextBefore: null, pending }),
+      "the answer",
+      ["second", "third"],
+    );
+    open();
+    await advance(0);
+    // The page is new, and the hold is the server's: both messages are there.
+    expect(screen.getAllByText(WAITING)).toHaveLength(2);
+    expect(screen.getByText("third")).toBeTruthy();
+    expect(turnBodies()).toHaveLength(0);
+
+    // A message written now joins them, and none of them goes yet.
+    write("fourth");
+    await advance(0);
+    expect(hold.texts()).toEqual(["second", "third", "fourth"]);
+    expect(turnBodies()).toHaveLength(0);
+
+    pending = null;
+    await advance(POLL_MS);
+    expect(turnBodies()).toEqual([{ text: "second\nthird\nfourth" }]);
+    expect(screen.queryByText(WAITING)).toBeNull();
   });
 });

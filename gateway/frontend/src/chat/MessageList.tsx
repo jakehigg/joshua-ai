@@ -7,11 +7,14 @@
 // `pending` is a turn that Joshua works on and this screen does not stream (a
 // message sent from another device): the list ends with the same working line,
 // and with the message of the person when the transcript does not hold it yet.
+//
+// `held` are the messages written while a turn runs. They end the list, each
+// marked as waiting, with a button that takes one back before it goes.
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Pending } from "../api/client";
-import type { ChatMessage } from "./store";
-import { Message, Working } from "./Message";
+import type { ChatMessage, HeldMessage } from "./store";
+import { Held, Message, Working } from "./Message";
 import { formatStamp, needsStamp } from "./stamps";
 import type { LoadStatus } from "./useHistory";
 
@@ -36,6 +39,8 @@ interface Props {
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
   pending?: Pending | null;
+  held?: HeldMessage[];
+  onDropHeld?: (id: string) => void;
 }
 
 export function MessageList({
@@ -49,6 +54,8 @@ export function MessageList({
   loadingEarlier = false,
   onLoadEarlier,
   pending = null,
+  held = [],
+  onDropHeld,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -78,7 +85,7 @@ export function MessageList({
   // The newest content: the last message and its text length. A page added
   // at the top does not change it.
   const last = messages[messages.length - 1];
-  const signature = `${last?.id ?? ""}:${last?.text.length ?? 0}:${last?.state ?? ""}:${pending?.turnId ?? ""}`;
+  const signature = `${last?.id ?? ""}:${last?.text.length ?? 0}:${last?.state ?? ""}:${pending?.turnId ?? ""}:${held.length}`;
   // The message of a queued turn is not in the transcript yet.
   const ghost: ChatMessage | null =
     pending && pending.text && !messages.some((m) => m.turnId === pending.turnId)
@@ -177,6 +184,9 @@ export function MessageList({
               <Working since={pending.since} waiting={pending.state === "queued"} />
             </div>
           )}
+          {held.map((m) => (
+            <Held key={m.id} message={m} onRemove={(id) => onDropHeld?.(id)} />
+          ))}
         </div>
       </div>
       {unseen && (

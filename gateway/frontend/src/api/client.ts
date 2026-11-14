@@ -145,6 +145,14 @@ export interface Pending {
   text: string;
 }
 
+// One message of the hold: written while a turn of the thread still ran, and
+// waiting on the server to go with the next turn.
+export interface Held {
+  id: string;
+  text: string;
+  at: string;
+}
+
 // One page, oldest first. `nextBefore` is the cursor of the page before, or null.
 export interface HistoryPage {
   messages: HistoryMessage[];
@@ -454,6 +462,59 @@ export async function getHistory(
       typeof page.nextBefore === "number" && Number.isInteger(page.nextBefore) ? page.nextBefore : null,
     pending: pendingOf(page.pending),
   };
+}
+
+// The hold of one thread: the messages written while a turn still ran.
+
+function heldList(raw: unknown): Held[] {
+  const list: Held[] = [];
+  for (const item of Array.isArray((raw as { held?: unknown })?.held) ? (raw as { held: unknown[] }).held : []) {
+    if (!item || typeof item !== "object") continue;
+    const m = item as Record<string, unknown>;
+    if (typeof m.id !== "string") continue;
+    list.push({
+      id: m.id,
+      text: typeof m.text === "string" ? m.text : "",
+      at: typeof m.at === "string" ? m.at : "",
+    });
+  }
+  return list;
+}
+
+// The path of the hold routes. `workspace` names the thread as a query value,
+// as it does for the history; a write sends it in the body instead.
+function heldPath(person: string, path = "", workspace?: string): string {
+  const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+  return `/chat/${encodeURIComponent(person)}/held${path}${query}`;
+}
+
+/** The messages this thread holds, oldest first. */
+export async function listHeld(person: string, workspace?: string): Promise<Held[]> {
+  return heldList(await getJson<unknown>(heldPath(person, "", workspace)));
+}
+
+/** Holds one message, written while a turn of this thread runs. */
+export async function addHeld(person: string, text: string, workspace?: string): Promise<Held[]> {
+  return heldList(await postJson<unknown>(heldPath(person), { text, ...(workspace ? { workspace } : {}) }));
+}
+
+/** Takes one held message back, before it goes. */
+export async function dropHeld(person: string, id: string, workspace?: string): Promise<Held[]> {
+  return heldList(await deleteJson<unknown>(heldPath(person, `/${encodeURIComponent(id)}`, workspace)));
+}
+
+/**
+ * Empties the hold and gives its messages as the text of one turn: in order,
+ * one per line. The server empties it in one step, so two screens never send
+ * the same held message twice.
+ */
+export async function takeHeld(
+  person: string,
+  workspace?: string,
+): Promise<{ text: string; held: Held[] }> {
+  const body = await postJson<unknown>(heldPath(person, "/take"), workspace ? { workspace } : {});
+  const text = (body as { text?: unknown })?.text;
+  return { text: typeof text === "string" ? text : "", held: heldList(body) };
 }
 
 // What the viewer knows about one document, with none of its body. It comes

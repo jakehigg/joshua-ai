@@ -25,6 +25,13 @@
 // Joshua leaves its draft in the browser (draft.ts); the next open offers to
 // send it again, and a send with a file shows a progress toast.
 //
+// A message written while a turn runs is taken and waits: the hold of the
+// thread, which lives on the server (useTurn.ts), so a reload or a closed tab
+// keeps it. The list ends with each waiting message, and each can be taken
+// back. As soon as no turn of the thread runs — the one this screen streams,
+// and the `pending` one of the history, which another device may have sent —
+// every waiting message goes as one turn, with no action from the person.
+//
 // The screen has a rail on the left (Rail.tsx): Chat, the workspaces, and
 // "+ New workspace". `/chat/:person` is the normal chat, the person's one main
 // thread. `/chat/w/:slug` (WorkspacePage) is a workspace of the person who
@@ -136,7 +143,18 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
   // The turn of a stream that broke after Joshua accepted it, until the
   // history shows it.
   const [detached, setDetached] = useState<string | null>(null);
-  const turn = useTurn(person, setMessages, showToast, onDone, panel.reload, workspace, setDetached);
+  // A turn the history names runs too: a message written now waits for it,
+  // as it waits for a turn this screen streams.
+  const turn = useTurn(
+    person,
+    setMessages,
+    showToast,
+    onDone,
+    panel.reload,
+    workspace,
+    setDetached,
+    view.pending !== null,
+  );
   const polling = !turn.running && (view.pending !== null || detached !== null);
   const history = useHistory(person, setView, turn.isRunning, showToast, workspace, polling);
   refreshRef.current = history.refresh;
@@ -156,6 +174,16 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
     const timer = setTimeout(() => setDetached(null), DETACHED_WAIT_MS);
     return () => clearTimeout(timer);
   }, [detached, view]);
+
+  // The messages written while a turn ran go as one turn as soon as no turn
+  // of the thread runs: the one this screen streams, and the one the history
+  // names, which another device may have sent. The hold lives on the server,
+  // so this also sends what a page that is gone left waiting.
+  const { held, flushHeld } = turn;
+  useEffect(() => {
+    if (turn.running || view.pending !== null || history.status !== "ready") return;
+    if (held.length > 0) flushHeld();
+  }, [turn.running, view.pending, history.status, held, flushHeld]);
 
   // A send that did not arrive, kept by the last visit. It is offered again
   // until it is sent, or thrown away, or a new message is sent.
@@ -340,6 +368,8 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
             loadingEarlier={history.loadingEarlier}
             onLoadEarlier={onLoadEarlier}
             pending={turn.running ? null : view.pending}
+            held={turn.held}
+            onDropHeld={turn.dropHeld}
           />
           {draft && (
             <div className="draft-banner" role="alert">
@@ -370,7 +400,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
               </button>
             </div>
           )}
-          <Composer onSend={turn.send} busy={turn.running} />
+          <Composer onSend={turn.send} busy={turn.running || view.pending !== null} />
           {turn.upload && (
             <div className="toast toast-progress" role="status">
               {uploadText(turn.upload)}

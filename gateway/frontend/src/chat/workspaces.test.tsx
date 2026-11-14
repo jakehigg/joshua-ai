@@ -431,6 +431,41 @@ describe("the routes", () => {
     expect(asked).toContain("workspace=solar");
   });
 
+  it("holds a message written while a turn of the workspace runs", async () => {
+    const { calls } = viewer({
+      "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/solar": ws(),
+      "GET /api/v1/workspaces": { workspaces: [ws()] },
+      "GET /api/v1/workspaces/solar/items": { items: [item()] },
+      "GET /api/v1/chat/alex/history": {
+        messages: [],
+        nextBefore: null,
+        pending: { turnId: "t-1", state: "running", since: new Date().toISOString(), text: "earlier" },
+      },
+      "GET /api/v1/chat/alex/held": { held: [] },
+      "POST /api/v1/chat/alex/held": { held: [{ id: "h1", text: "one more", at: "2026-01-01T10:00:00Z" }] },
+    });
+    render(
+      <MemoryRouter initialEntries={["/chat/w/solar"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/w/:slug" element={<WorkspacePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: "Solar install" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Message to Joshua"), { target: { value: "one more" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Waiting to go with the next turn")).toBeTruthy();
+    const add = calls.find((c) => c.method === "POST" && c.path === "/api/v1/chat/alex/held");
+    expect(add?.body).toEqual({ text: "one more", workspace: "solar" });
+    // The hold of the thread is asked for with the workspace, and no turn went out.
+    const asked = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .map(([u]) => String(u))
+      .find((u) => u.includes("/held"));
+    expect(asked).toBe("/api/v1/chat/alex/held?workspace=solar");
+    expect(calls.some((c) => c.path.endsWith("/turns"))).toBe(false);
+  });
+
   it("says so for a workspace that does not exist", async () => {
     viewer({ "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] } });
     render(

@@ -15,6 +15,11 @@
 // above the box, with a button to take it off. A file over MAX_FILE_BYTES
 // is not attached and says so; the backend holds the same limit. With a
 // file attached, a message with no text can be sent.
+//
+// A message can be written while Joshua is still working on a turn: it is
+// taken and waits for that turn (useTurn.ts), and the box is emptied as
+// usual. Only a file has to wait for Joshua: the paperclip is off while a
+// turn runs.
 
 import {
   useEffect,
@@ -116,7 +121,9 @@ export function Composer({ onSend, busy }: Props) {
 
   const count = charCount(text);
   const tooLong = count > MAX_CHARS;
-  const canSend = !busy && !tooLong && (count > 0 || file !== null);
+  // While Joshua works, a text message is still taken: it waits for the
+  // running turn (useTurn.ts). A file cannot wait, so it needs a free Joshua.
+  const canSend = !tooLong && (busy ? count > 0 && file === null : count > 0 || file !== null);
 
   useLayoutEffect(() => {
     const el = ref.current;
