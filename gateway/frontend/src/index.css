@@ -458,6 +458,19 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   padding: 2px 10px;
   font-size: 0.8125rem;
 }
+/* A message written while a turn runs: it waits for the turn to end. */
+.chat-screen .msg-held .bubble {
+  opacity: 0.7;
+}
+.chat-screen .held-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--j-muted);
+  font-size: 0.8125rem;
+}
 .chat-screen .working {
   display: flex;
   align-items: center;

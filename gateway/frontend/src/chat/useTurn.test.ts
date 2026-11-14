@@ -35,10 +35,47 @@ function sse(event: string, data: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-function fakeFetch(response: Response | (() => Promise<Response>)) {
-  const fn = vi.fn(typeof response === "function" ? response : async () => response);
+// The hold of the thread, as the viewer's routes answer for it: list, add,
+// take (which empties it and joins the messages, one per line), and remove.
+function holdFake(initial: string[] = []) {
+  let held = initial.map((text, i) => ({ id: `h${i + 1}`, text, at: "2026-01-01T10:00:00Z" }));
+  let next = held.length;
+  const answer = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  return {
+    texts: () => held.map((m) => m.text),
+    handle(url: URL, init?: RequestInit) {
+      if (init?.method === "DELETE") {
+        const id = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
+        held = held.filter((m) => m.id !== id);
+      } else if (url.pathname.endsWith("/held/take")) {
+        const text = held.map((m) => m.text).join("\n");
+        held = [];
+        return answer({ text, held: [] });
+      } else if (init?.method === "POST") {
+        next += 1;
+        const { text } = JSON.parse(String(init.body)) as { text: string };
+        held = [...held, { id: `h${next}`, text, at: "2026-01-01T10:00:00Z" }];
+      }
+      return answer({ held });
+    },
+  };
+}
+
+// The turn calls alone: the hook also asks for the hold when it opens.
+function turnCalls(fetch: { mock: { calls: unknown[][] } }) {
+  return fetch.mock.calls.filter(([input]) => String(input).endsWith("/turns"));
+}
+
+function fakeFetch(response: Response | (() => Promise<Response>), held: string[] = []) {
+  const turn = typeof response === "function" ? response : async () => response;
+  const hold = holdFake(held);
+  const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://test");
+    return url.pathname.includes("/held") ? hold.handle(url, init) : turn();
+  });
   vi.stubGlobal("fetch", fn);
-  return fn;
+  return Object.assign(fn, { hold });
 }
 
 function setup(workspace?: string) {
@@ -255,7 +292,7 @@ describe("useTurn", () => {
     expect(hook.result.current.messages[1]).toMatchObject({ state: "lost", error: "Joshua could not be reached" });
   });
 
-  it("runs one turn at a time", async () => {
+  it("runs one turn at a time, and holds what is written while it runs", async () => {
     const s = stream([], { hold: true });
     const fetch = fakeFetch(new Response(s.body, { status: 200 }));
     const { hook } = setup();
@@ -264,8 +301,10 @@ describe("useTurn", () => {
       hook.result.current.turn.send("one");
       second = hook.result.current.turn.send("two");
     });
-    expect(second).toBe(false);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    // The second message is taken, and waits for the turn that runs.
+    expect(second).toBe(true);
+    expect(turnCalls(fetch)).toHaveLength(1);
+    await waitFor(() => expect(fetch.hold.texts()).toEqual(["two"]));
     s.release();
     await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
   });
@@ -352,7 +391,7 @@ describe("useTurn", () => {
       sent = hook.result.current.turn.send("  ");
     });
     expect(sent).toBe(false);
-    expect(fetch).not.toHaveBeenCalled();
+    expect(turnCalls(fetch)).toHaveLength(0);
   });
 
   it("sends the workspace in the JSON body when there is one", async () => {
@@ -543,6 +582,122 @@ describe("useTurn", () => {
       await waitFor(() => expect(hook.result.current.messages[1]?.waiting).toBe(true));
       s.release();
       await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    });
+  });
+
+  describe("the hold", () => {
+    it("takes every message written while the turn runs, in order", async () => {
+      const s = stream([], { hold: true });
+      const fetch = fakeFetch(new Response(s.body, { status: 200 }));
+      const { hook } = setup();
+      act(() => {
+        hook.result.current.turn.send("first");
+      });
+      act(() => {
+        expect(hook.result.current.turn.send(" second ")).toBe(true);
+      });
+      // The message shows at once, before the server has answered.
+      expect(hook.result.current.turn.held.map((m) => m.text)).toEqual(["second"]);
+      await waitFor(() => expect(hook.result.current.turn.held[0]?.id).toBe("h1"));
+      act(() => {
+        hook.result.current.turn.send("third");
+      });
+      await waitFor(() => expect(fetch.hold.texts()).toEqual(["second", "third"]));
+      expect(hook.result.current.turn.held.map((m) => m.text)).toEqual(["second", "third"]);
+      expect(turnCalls(fetch)).toHaveLength(1);
+      s.release();
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    });
+
+    it("sends every held message as one turn, one per line", async () => {
+      const fetch = fakeFetch(
+        async () => new Response(stream([sse("done", { turn_id: "t1", text: "ok", tools: [] })]).body, { status: 200 }),
+        ["second", "third"],
+      );
+      const { hook } = setup();
+      await waitFor(() => expect(hook.result.current.turn.held).toHaveLength(2));
+      act(() => hook.result.current.turn.flushHeld());
+      await waitFor(() => expect(hook.result.current.turn.held).toHaveLength(0));
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+      expect(turnCalls(fetch)).toHaveLength(1);
+      expect(turnCalls(fetch)[0]?.[1]).toMatchObject({ body: JSON.stringify({ text: "second\nthird" }) });
+      expect(hook.result.current.messages[0]?.text).toBe("second\nthird");
+      expect(fetch.hold.texts()).toEqual([]);
+    });
+
+    it("keeps the hold until the running turn is over", async () => {
+      const s = stream([], { hold: true });
+      const fetch = fakeFetch(new Response(s.body, { status: 200 }), ["waiting"]);
+      const { hook } = setup();
+      await waitFor(() => expect(hook.result.current.turn.held).toHaveLength(1));
+      act(() => {
+        hook.result.current.turn.send("now");
+      });
+      act(() => hook.result.current.turn.flushHeld());
+      await new Promise((r) => setTimeout(r, 20));
+      expect(fetch.hold.texts()).toEqual(["waiting"]);
+      expect(turnCalls(fetch)).toHaveLength(1);
+      s.release();
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+      act(() => hook.result.current.turn.flushHeld());
+      await waitFor(() => expect(fetch.hold.texts()).toEqual([]));
+      await waitFor(() => expect(turnCalls(fetch)).toHaveLength(2));
+    });
+
+    it("takes one held message back before it goes", async () => {
+      const fetch = fakeFetch(new Response(null, { status: 200 }), ["keep", "drop"]);
+      const { hook } = setup();
+      await waitFor(() => expect(hook.result.current.turn.held).toHaveLength(2));
+      act(() => hook.result.current.turn.dropHeld("h2"));
+      expect(hook.result.current.turn.held.map((m) => m.text)).toEqual(["keep"]);
+      await waitFor(() => expect(fetch.hold.texts()).toEqual(["keep"]));
+    });
+
+    it("shows what the thread held when the screen opened", async () => {
+      const fetch = fakeFetch(new Response(null, { status: 200 }), ["from the last visit"]);
+      const { hook } = setup();
+      await waitFor(() =>
+        expect(hook.result.current.turn.held.map((m) => m.text)).toEqual(["from the last visit"]),
+      );
+      expect(String(fetch.mock.calls[0]?.[0])).toBe("/api/v1/chat/alex/held");
+      expect(turnCalls(fetch)).toHaveLength(0);
+    });
+
+    it("names the workspace of the thread on every hold call", async () => {
+      const s = stream([], { hold: true });
+      const fetch = fakeFetch(new Response(s.body, { status: 200 }), []);
+      const { hook } = setup("solar");
+      act(() => {
+        hook.result.current.turn.send("first");
+      });
+      act(() => {
+        hook.result.current.turn.send("second");
+      });
+      await waitFor(() => expect(fetch.hold.texts()).toEqual(["second"]));
+      expect(String(fetch.mock.calls[0]?.[0])).toBe("/api/v1/chat/alex/held?workspace=solar");
+      const add = fetch.mock.calls.find(([url, init]) => String(url).endsWith("/held") && init?.method === "POST");
+      expect(JSON.parse(String(add?.[1]?.body))).toEqual({ text: "second", workspace: "solar" });
+      s.release();
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    });
+
+    it("says in a toast that a message could not be held, and keeps none", async () => {
+      const s = stream([], { hold: true });
+      fakeFetch(new Response(s.body, { status: 200 }));
+      const { hook, onRefused } = setup();
+      act(() => {
+        hook.result.current.turn.send("first");
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({ error: "too many messages are waiting" }), { status: 429 })),
+      );
+      act(() => {
+        hook.result.current.turn.send("second");
+      });
+      await waitFor(() => expect(onRefused).toHaveBeenCalledWith("too many messages are waiting"));
+      expect(hook.result.current.turn.held).toEqual([]);
+      s.release();
     });
   });
 });

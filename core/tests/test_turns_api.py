@@ -19,7 +19,7 @@ from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.types import TurnResult
 from joshua_core.main import build_app
 from joshua_core.store.models import Channel, Conversation, Person
-from joshua_core.turns import TURN_FAILED, TurnService
+from joshua_core.turns import HOLD_MAX, TURN_FAILED, TurnService
 from joshua_shared import config as config_module
 from joshua_shared.http import FleetClient
 
@@ -375,3 +375,151 @@ async def test_laptop_stream_needs_cli_handle(tmp_path) -> None:
             "POST", "/v1/turns/stream", json=cli_event, headers=bearer(LAPTOP_TOKEN)
         ) as resp:
             assert resp.status_code == 200
+
+
+# --- the hold ---------------------------------------------------------------
+
+
+def hold_body(**overrides: Any) -> dict[str, Any]:
+    body = {"channel": "cli:alex", "person": "alex"}
+    body.update(overrides)
+    return body
+
+
+async def test_a_message_sent_while_a_turn_runs_is_held(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        added = await client.post(
+            "/v1/holds", json=hold_body(text="  and one more  "), headers=bearer(CHANNELS_TOKEN)
+        )
+        listed = await client.get(
+            "/v1/holds",
+            params={"channel": "cli:alex", "person": "alex"},
+            headers=bearer(CHANNELS_TOKEN),
+        )
+
+    assert added.status_code == 200
+    assert added.json()["message"]["text"] == "and one more"
+    held = listed.json()["held"]
+    assert [m["text"] for m in held] == ["and one more"]
+    assert held[0]["id"] == added.json()["message"]["id"]
+    assert held[0]["at"]
+
+
+async def test_take_gives_the_held_messages_as_one_turn_and_empties_the_hold(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        for text in ("first", "second", "third"):
+            await client.post(
+                "/v1/holds", json=hold_body(text=text), headers=bearer(CHANNELS_TOKEN)
+            )
+        taken = await client.post(
+            "/v1/holds/take", json=hold_body(), headers=bearer(CHANNELS_TOKEN)
+        )
+        again = await client.post(
+            "/v1/holds/take", json=hold_body(), headers=bearer(CHANNELS_TOKEN)
+        )
+
+    assert taken.json()["text"] == "first\nsecond\nthird"
+    assert [m["text"] for m in taken.json()["held"]] == ["first", "second", "third"]
+    # The second caller finds nothing: the messages go as one turn, once.
+    assert again.json() == {"text": "", "held": []}
+
+
+async def test_a_held_message_can_be_removed_before_it_goes(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        first = await client.post(
+            "/v1/holds", json=hold_body(text="keep"), headers=bearer(CHANNELS_TOKEN)
+        )
+        second = await client.post(
+            "/v1/holds", json=hold_body(text="drop"), headers=bearer(CHANNELS_TOKEN)
+        )
+        hold_id = second.json()["message"]["id"]
+        removed = await client.delete(
+            f"/v1/holds/{hold_id}",
+            params={"channel": "cli:alex", "person": "alex"},
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        missing = await client.delete(
+            f"/v1/holds/{hold_id}",
+            params={"channel": "cli:alex", "person": "alex"},
+            headers=bearer(CHANNELS_TOKEN),
+        )
+
+    assert removed.status_code == 200
+    assert [m["id"] for m in removed.json()["held"]] == [first.json()["message"]["id"]]
+    assert missing.status_code == 404
+    assert missing.json() == {"reason": "unknown_hold"}
+
+
+async def test_each_thread_holds_its_own_messages(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        await client.post("/v1/holds", json=hold_body(text="main"), headers=bearer(CHANNELS_TOKEN))
+        await client.post(
+            "/v1/holds",
+            json=hold_body(channel="workspace:solar", text="in the workspace"),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        main = await client.get(
+            "/v1/holds",
+            params={"channel": "cli:alex", "person": "alex"},
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        workspace = await client.get(
+            "/v1/holds",
+            params={"channel": "workspace:solar", "person": "alex"},
+            headers=bearer(CHANNELS_TOKEN),
+        )
+
+    assert [m["text"] for m in main.json()["held"]] == ["main"]
+    assert [m["text"] for m in workspace.json()["held"]] == ["in the workspace"]
+
+
+async def test_an_empty_message_is_not_held(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        resp = await client.post(
+            "/v1/holds", json=hold_body(text="   "), headers=bearer(CHANNELS_TOKEN)
+        )
+
+    assert resp.status_code == 400
+    assert resp.json() == {"reason": "bad_request"}
+
+
+async def test_a_full_hold_refuses_the_next_message(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        for index in range(HOLD_MAX):
+            ok = await client.post(
+                "/v1/holds", json=hold_body(text=f"m{index}"), headers=bearer(CHANNELS_TOKEN)
+            )
+            assert ok.status_code == 200
+        full = await client.post(
+            "/v1/holds", json=hold_body(text="one too many"), headers=bearer(CHANNELS_TOKEN)
+        )
+
+    assert full.status_code == 429
+    assert full.json() == {"reason": "hold_full"}
+
+
+async def test_holds_need_an_allowed_caller(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        nobody = await client.post("/v1/holds", json=hold_body(text="hi"))
+        core = await client.post("/v1/holds", json=hold_body(text="hi"), headers=bearer(CORE_TOKEN))
+        laptop = await client.post(
+            "/v1/holds", json=hold_body(text="hi"), headers=bearer(LAPTOP_TOKEN)
+        )
+
+    assert nobody.status_code == 401
+    assert core.status_code == 403
+    assert laptop.status_code == 200

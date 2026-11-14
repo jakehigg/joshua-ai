@@ -6,7 +6,7 @@
 // message of a turn and its Joshua answer while the answer streams, or a
 // person message that the backend refused.
 
-import type { FileRef, HistoryMessage, HistoryPage, Pending } from "../api/client";
+import type { FileRef, Held, HistoryMessage, HistoryPage, Pending } from "../api/client";
 import { isSilentReply } from "./silent";
 
 export type Role = "person" | "joshua" | "system";
@@ -50,6 +50,13 @@ export interface ChatMessage {
   // On a local Joshua message: the turn waits for another turn of the
   // conversation to end.
   waiting?: boolean;
+}
+
+// One held message on screen: a message written while a turn ran, which the
+// server holds for the next turn. `sending` is one the server has not
+// answered for yet.
+export interface HeldMessage extends Held {
+  sending?: boolean;
 }
 
 // The messages on screen and the cursor of the page before them.

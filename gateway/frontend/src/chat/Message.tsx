@@ -19,10 +19,12 @@
 // message that this screen just sent shows the file it holds; a message from
 // the history shows the files the transcript row names, from the viewer's
 // files route. A turn that waits for another turn of the conversation says so.
+// A message written while a turn runs (`Held`) is a person bubble that says
+// it waits, with a button to take it back.
 
 import { memo, useEffect, useMemo, useState } from "react";
 import type { FileRef } from "../api/client";
-import type { ChatMessage } from "./store";
+import type { ChatMessage, HeldMessage } from "./store";
 import { useDocumentPanel } from "./DocumentPanel";
 import { ARTIFACT_INFO, SPEECH_INFO, splitFence } from "./blocks";
 import { ArtifactCard } from "./ArtifactCard";
@@ -56,6 +58,34 @@ export function Working({ since, waiting = false }: { since: string; waiting?: b
       </span>
       {seconds >= ELAPSED_FROM_S && <span className="elapsed">{seconds} s</span>}
     </div>
+  );
+}
+
+// A message written while a turn ran. It waits in the hold of the thread,
+// on the server, and goes with every other waiting message as the next
+// turn. Remove takes it back before it goes.
+export function Held({
+  message,
+  onRemove,
+}: {
+  message: HeldMessage;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <article className="msg msg-person msg-held">
+      <div className="bubble">{message.text}</div>
+      <div className="held-note">
+        <span>Waiting to go with the next turn</span>
+        <button
+          type="button"
+          className="retry"
+          onClick={() => onRemove(message.id)}
+          aria-label={`Remove the waiting message: ${message.text}`}
+        >
+          Remove
+        </button>
+      </div>
+    </article>
   );
 }
 

@@ -8,6 +8,13 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- In the web chat, a message written while Joshua is still working is taken
+  and waits, instead of being refused until the turn ends. Each waiting
+  message shows under the conversation, and can be taken back before it
+  goes. When no turn of the thread runs any more, every waiting message goes
+  as one turn, in order, one per line. The messages wait on the server, so a
+  reload or a closed tab keeps them. The iMessage and Telegram paths do not
+  change.
 - A turn that uses all of its agent turns now gets a reply. Before, the
   person got "Sorry, something went wrong on my end" and lost the work of
   the turn. Now core asks the same session for a reply with no tool call:

@@ -42,15 +42,24 @@
 // start of the marker is held back, so "[IGN" never shows.
 // `workspace` is passed through to the turn body: the turn runs in that
 // workspace, and without it in the main thread.
+//
+// A message written while a turn runs is not refused: send() holds it on the
+// server (`held`, the hold of this thread) instead of starting a second turn,
+// and the screen shows it as waiting. The hold is the server's, so a reload
+// or a closed tab keeps it. dropHeld() takes one back before it goes.
+// flushHeld() empties the hold and sends every held message as one turn, in
+// order, one per line: the page calls it once no turn of the thread runs any
+// more. The server empties the hold in one step, so two screens never send
+// the same held message twice.
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { holdReload } from "../pwa";
-import { ApiError, ConnectionLost, postTurn } from "../api/client";
+import { addHeld, ApiError, ConnectionLost, dropHeld as dropHeldCall, listHeld, postTurn, takeHeld } from "../api/client";
 import { clearDraft, saveDraft } from "./draft";
 import { parseArtifact } from "./ArtifactCard";
 import { ARTIFACT_INFO, splitFence } from "./blocks";
 import { isSilentReply, maybeSilentReply } from "./silent";
-import { appendMessage, newId, updateMessage, type ChatMessage } from "./store";
+import { appendMessage, newId, updateMessage, type ChatMessage, type HeldMessage } from "./store";
 
 type SetMessages = Dispatch<SetStateAction<ChatMessage[]>>;
 
@@ -80,6 +89,17 @@ export interface Turn {
   isRunning: () => boolean;
   send: (text: string, file?: File | null) => boolean;
   retry: (message: ChatMessage) => void;
+  // The messages that wait for the running turn to end, oldest first.
+  held: HeldMessage[];
+  // Takes one held message back, before it goes.
+  dropHeld: (id: string) => void;
+  // Sends every held message as one turn. It does nothing while a turn of
+  // this screen runs, or while another flush is going out.
+  flushHeld: () => void;
+}
+
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 export function useTurn(
@@ -90,8 +110,16 @@ export function useTurn(
   onArtifact?: (path: string) => void,
   workspace?: string,
   onDetached?: (turnId: string) => void,
+  // A turn of this thread runs that this screen does not stream: the history
+  // says it is pending, because another screen or another device sent it.
+  otherTurn = false,
 ): Turn {
   const [running, setRunning] = useState(false);
+  const [held, setHeld] = useState<HeldMessage[]>([]);
+  const otherTurnRef = useRef(otherTurn);
+  otherTurnRef.current = otherTurn;
+  const flushingRef = useRef(false);
+  const sendRef = useRef<(text: string, file?: File | null) => boolean>(() => false);
   const [upload, setUpload] = useState<Upload | null>(null);
   const uploadRef = useRef<Upload | null>(null);
   const setUploadState = useCallback((next: Upload | null) => {
@@ -120,6 +148,65 @@ export function useTurn(
     },
     [],
   );
+
+  // What the thread held when this screen opened: the messages a page that
+  // is gone wrote while a turn ran.
+  useEffect(() => {
+    let live = true;
+    void listHeld(person, workspace)
+      .then((list) => {
+        if (live) setHeld((shown) => [...list, ...shown.filter((m) => m.sending)]);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [person, workspace]);
+
+  // One message that waits for the running turn. It shows at once, and the
+  // server's answer replaces it, so the hold on screen is the hold core has.
+  const holdMessage = useCallback(
+    async (text: string) => {
+      const localId = newId();
+      setHeld((list) => [...list, { id: localId, text, at: new Date().toISOString(), sending: true }]);
+      try {
+        const list = await addHeld(person, text, workspace);
+        setHeld((shown) => [...list, ...shown.filter((m) => m.sending && m.id !== localId)]);
+      } catch (err) {
+        setHeld((shown) => shown.filter((m) => m.id !== localId));
+        onRefusedRef.current?.(errorText(err, "the message could not be held"));
+      }
+    },
+    [person, workspace],
+  );
+
+  const dropHeld = useCallback(
+    (id: string) => {
+      setHeld((list) => list.filter((m) => m.id !== id));
+      void dropHeldCall(person, id, workspace)
+        .then((list) => setHeld((shown) => [...list, ...shown.filter((m) => m.sending)]))
+        .catch((err: unknown) => {
+          onRefusedRef.current?.(errorText(err, "the message could not be taken back"));
+        });
+    },
+    [person, workspace],
+  );
+
+  const flushHeld = useCallback(() => {
+    if (runningRef.current || flushingRef.current) return;
+    flushingRef.current = true;
+    void takeHeld(person, workspace)
+      .then(({ text }) => {
+        setHeld((shown) => shown.filter((m) => m.sending));
+        if (text) sendRef.current(text);
+      })
+      .catch((err: unknown) => {
+        onRefusedRef.current?.(errorText(err, "the waiting messages could not be sent"));
+      })
+      .finally(() => {
+        flushingRef.current = false;
+      });
+  }, [person, workspace]);
 
   // The page is back: a stream with no byte for STALE_MS is dead.
   useEffect(() => {
@@ -281,7 +368,15 @@ export function useTurn(
 
   const send = useCallback(
     (text: string, file?: File | null): boolean => {
-      if (runningRef.current || (!text.trim() && !file)) return false;
+      if (!text.trim() && !file) return false;
+      // A turn runs: the message waits for it in the hold, on the server, and
+      // keeps its place behind the messages that already wait. A file cannot
+      // wait, so a message that carries one is not held.
+      if (runningRef.current || otherTurnRef.current) {
+        if (file) return false;
+        void holdMessage(text.trim());
+        return true;
+      }
       runningRef.current = true;
       setRunning(true);
       draftRef.current = { text, file: file ?? null };
@@ -312,8 +407,9 @@ export function useTurn(
       void run(personMsg, reply.id);
       return true;
     },
-    [run, setMessages, setUploadState, person, workspaceKey],
+    [run, setMessages, setUploadState, person, workspaceKey, holdMessage],
   );
+  sendRef.current = send;
 
   // A refused person message is removed and sent again at the end. A failed
   // or lost answer stays on screen with its partial text; the same person
@@ -337,5 +433,5 @@ export function useTurn(
 
   const isRunning = useCallback(() => runningRef.current, []);
 
-  return { running, upload, isRunning, send, retry };
+  return { running, upload, isRunning, send, retry, held, dropHeld, flushHeld };
 }

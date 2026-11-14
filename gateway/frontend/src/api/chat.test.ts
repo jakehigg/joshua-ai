@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { repliesWith, stubXhr } from "../chat/fakeXhr";
-import { ApiError, ConnectionLost, getDocumentMeta, getHistory, postTurn, type TurnFrame } from "./client";
+import {
+  addHeld,
+  ApiError,
+  ConnectionLost,
+  dropHeld,
+  getDocumentMeta,
+  getHistory,
+  listHeld,
+  postTurn,
+  takeHeld,
+  type TurnFrame,
+} from "./client";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -264,5 +275,68 @@ describe("postTurn with a file", () => {
     controller.abort();
     await expect(result).rejects.toMatchObject({ name: "AbortError" });
     expect(sent[0]?.aborted).toBe(true);
+  });
+});
+
+describe("the hold", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const ROW = { id: "h1", text: "one more", at: "2026-01-01T10:00:00Z" };
+
+  it("lists the hold of the thread, and drops a row with no id", async () => {
+    const fetch = vi.fn(async () => json({ held: [ROW, { text: "no id" }, null, 7] }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await listHeld("alex")).toEqual([ROW]);
+    expect(fetch).toHaveBeenCalledWith("/api/v1/chat/alex/held", expect.anything());
+  });
+
+  it("names the workspace of the thread, as the history does", async () => {
+    const fetch = vi.fn(async () => json({ held: [] }));
+    vi.stubGlobal("fetch", fetch);
+    await listHeld("alex", "notes");
+    expect(fetch).toHaveBeenCalledWith("/api/v1/chat/alex/held?workspace=notes", expect.anything());
+    await dropHeld("alex", "h 1", "notes");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/held/h%201?workspace=notes",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("holds one message, with the workspace in the body", async () => {
+    const fetch = vi.fn(async () => json({ held: [ROW] }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await addHeld("alex", "one more")).toEqual([ROW]);
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/held",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ text: "one more" }) }),
+    );
+    await addHeld("alex", "one more", "notes");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/held",
+      expect.objectContaining({ body: JSON.stringify({ text: "one more", workspace: "notes" }) }),
+    );
+  });
+
+  it("takes the hold as the text of one turn", async () => {
+    const fetch = vi.fn(async () => json({ text: "one more\nand this", held: [ROW] }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await takeHeld("alex")).toEqual({ text: "one more\nand this", held: [ROW] });
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/held/take",
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
+  });
+
+  it("reads a take with no text as nothing to send", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ held: [] })));
+    expect(await takeHeld("alex")).toEqual({ text: "", held: [] });
+  });
+
+  it("throws ApiError with the message of a refusal", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ error: "too many messages are waiting" }, 429)));
+    await expect(addHeld("alex", "one more")).rejects.toMatchObject({
+      status: 429,
+      message: "too many messages are waiting",
+    });
   });
 });

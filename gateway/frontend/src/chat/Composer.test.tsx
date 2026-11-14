@@ -93,13 +93,21 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("does not send while a turn runs", () => {
+  it("sends a text message while a turn runs: it waits for the turn", () => {
     const { onSend, box, send } = setup(true);
     fireEvent.change(box, { target: { value: "hello" } });
+    expect(send.disabled).toBe(false);
     fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("hello", null);
+    expect(box.value).toBe("");
+  });
+
+  it("sends nothing with an empty box while a turn runs", () => {
+    const { onSend, box, send } = setup(true);
+    fireEvent.change(box, { target: { value: "  " } });
     expect(send.disabled).toBe(true);
+    fireEvent.keyDown(box, { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
-    expect(box.value).toBe("hello");
   });
 
   it("shows the counter past 7000 characters only", () => {
@@ -173,6 +181,12 @@ describe("Composer attachment", () => {
     fireEvent.change(box, { target: { value: "hello" } });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(onSend).toHaveBeenCalledWith("hello", null);
+  });
+
+  it("cannot attach a file while a turn runs: only text waits", () => {
+    setup(true);
+    const input = screen.getByLabelText("Attach a photo or a PDF") as HTMLInputElement;
+    expect(input.disabled).toBe(true);
   });
 
   it("only takes images and PDFs", () => {
