@@ -874,7 +874,7 @@ async def test_list_all_workspaces_filters_by_status(seeded) -> None:
     assert [w.title for w in await seeded.list_all_workspaces("active")] == ["Beta"]
 
 
-async def test_the_workspaces_source_is_indexed_for_its_owner_and_hidden_from_recall(
+async def test_the_workspaces_source_is_indexed_for_each_person_and_hidden_from_recall(
     seeded, monkeypatch
 ) -> None:
     from joshua_core.memory import embed as embed_module
@@ -895,14 +895,23 @@ async def test_the_workspaces_source_is_indexed_for_its_owner_and_hidden_from_re
     await indexer.reindex()
 
     hint = await search(store, "alex", vec, k=3, min_sim=0.5, kinds=("workspace",))
-    assert [c.path for c in hint] == [f"workspaces/{ws.id}"]
+    assert [c.path for c in hint] == [f"workspaces/{ws.id}/alex"]
     assert "Go solar" in hint[0].text and "Roof quote" in hint[0].text
     assert await search(store, "mia", vec, k=3, min_sim=0.5, kinds=("workspace",)) == []
     assert await search(store, "alex", vec, k=3, min_sim=0.5) == []
 
+    # A shared workspace holds one record for each of its people.
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    await indexer.reindex()
+    for person in ("alex", "mia"):
+        found = await search(store, person, vec, k=3, min_sim=0.5, kinds=("workspace",))
+        assert f"workspaces/{shared.id}/{person}" in [c.path for c in found]
+
     await seeded.update_workspace(ws.id, status="archived")
+    await seeded.update_workspace(shared.id, status="archived")
     await indexer.reindex()
     assert await search(store, "alex", vec, k=3, min_sim=0.5, kinds=("workspace",)) == []
+    assert await search(store, "mia", vec, k=3, min_sim=0.5, kinds=("workspace",)) == []
 
 
 async def test_a_file_item_added_twice_is_one_item_and_keeps_its_title(seeded) -> None:

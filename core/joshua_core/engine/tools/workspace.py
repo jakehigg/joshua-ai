@@ -14,8 +14,9 @@ turn whose reply stays in the thread), ``list_workspaces`` and
 ``workspace_status`` (the block as text). A workspace name is a slug or a title,
 matched with no regard to case among the workspaces of the person.
 
-Every tool acts for ``deps.person_id``. A workspace of another person is never
-found.
+Every tool acts for ``deps.person_id``, the person who wrote the turn: the
+workspaces they reach are their own and the shared ones they are in. A
+workspace they do not reach is never found.
 """
 
 from __future__ import annotations
@@ -62,30 +63,36 @@ def _in_workspace(deps: ToolDeps) -> bool:
 
 
 async def _current(deps: ToolDeps) -> Workspace | None:
+    """The workspace of this chat, for the person of the turn. A turn with no
+    person, a job event or a scheduled task, still gets it: the thread is the
+    workspace. A person who does not reach the workspace gets None."""
     workspace_id = workspace_id_of(deps.channel.id)
     found = await deps.repo.get_workspace(workspace_id) if workspace_id else None
-    return found if found is not None and found.owner == deps.person_id else None
+    if found is None:
+        return None
+    return found if deps.person_id is None or deps.person_id in found.people else None
 
 
 async def _named(deps: ToolDeps, name: str) -> Workspace | None:
-    """A workspace of the person by slug, id, or title (not case-sensitive).
-    An ambiguous title gives None."""
+    """A workspace the person reaches, by slug, id, or title (not
+    case-sensitive). An ambiguous title gives None."""
     found, _ = await _match(deps, name)
     return found
 
 
 async def _match(deps: ToolDeps, name: str) -> tuple[Workspace | None, list[Workspace]]:
-    """``(workspace, candidates)``. ``workspace`` is the one match. With no
-    match it is None and ``candidates`` is empty. With an ambiguous name it is
-    None and ``candidates`` lists the workspaces that match."""
+    """``(workspace, candidates)``. ``workspace`` is the one match among the
+    workspaces the person reaches, their own and the shared ones they are in.
+    With no match it is None and ``candidates`` is empty. With an ambiguous name
+    it is None and ``candidates`` lists the workspaces that match."""
     if not deps.person_id or not (name or "").strip():
         return None, []
     wanted = name.strip().casefold()
-    owned = await deps.repo.list_workspaces(deps.person_id)
-    exact = [w for w in owned if wanted in (w.slug.casefold(), w.id.casefold())]
+    reached = await deps.repo.list_workspaces(deps.person_id)
+    exact = [w for w in reached if wanted in (w.slug.casefold(), w.id.casefold())]
     if len(exact) == 1:
         return exact[0], []
-    by_title = [w for w in owned if w.title.strip().casefold() == wanted]
+    by_title = [w for w in reached if w.title.strip().casefold() == wanted]
     if len(by_title) == 1:
         return by_title[0], []
     if by_title:
@@ -177,18 +184,22 @@ def chat_link(settings: JoshuaConfig, workspace: Workspace) -> str:
 async def do_send_to_normal_chat(
     deps: ToolDeps, *, text: str, settings: JoshuaConfig, deliver: Deliver | None
 ) -> dict[str, Any]:
-    """Send ``text`` and a link to this workspace to the person's main chat."""
+    """Send ``text`` and a link to this workspace to the main chat of one
+    person: the one who wrote the turn. A turn with no person, a job event or a
+    scheduled task, sends to the owner, so the message reaches somebody. There
+    is no fan-out: to tell a whole shared workspace something, the agent writes
+    in the thread."""
     if not _in_workspace(deps):
         return _reply("This chat is not a workspace.")
     text = (text or "").strip()
     if not text:
         return _reply("Give the text to send.")
-    if deliver is None or not deps.person_id:
+    if deliver is None:
         return _reply("Sending to normal chat is not available here.")
     workspace = await _current(deps)
     if workspace is None:
         return _reply("The workspace of this chat was not found.")
-    main = await deps.repo.main_conversation(deps.person_id)
+    main = await deps.repo.main_conversation(deps.person_id or workspace.owner)
     if main is None:
         return _reply("The person has no normal chat to send to.")
     target = main.last_channel_id or main.channel_id
@@ -271,7 +282,7 @@ async def do_send_to_workspace(
         return _reply(problem)
     if target.status == "archived":
         return _reply(f"Workspace '{target.title}' is archived.")
-    conversation = await deps.repo.get_or_create_conversation(target.channel_id, target.owner)
+    conversation = await deps.repo.workspace_conversation(target)
     added, problems = await _items_in(deps, target, items)
     await deps.repo.add_chat_row(conversation.id, text)
     note = f" with {added} item(s)" if added else ""
@@ -538,7 +549,7 @@ def register(manager: Any, settings: JoshuaConfig, deliverer: Any = None, repo: 
         channel = await repo.get_channel(workspace.channel_id)
         if channel is None:
             return
-        conversation = await repo.get_or_create_conversation(channel.id, workspace.owner)
+        conversation = await repo.workspace_conversation(workspace)
 
         async def turn() -> None:
             try:
@@ -556,10 +567,8 @@ def register(manager: Any, settings: JoshuaConfig, deliverer: Any = None, repo: 
         block = getattr(manager, "workspace_block", None)
         if block is None:
             return "The workspace status is not available here."
-        conversation = await repo.find_conversation(workspace.channel_id, workspace.owner)
-        return await block.render(
-            workspace, conversation.id if conversation else "", fresh=False, mark_seen=None
-        )
+        conversation = await repo.workspace_conversation(workspace)
+        return await block.render(workspace, conversation.id, fresh=False, mark_seen=None)
 
     manager.register_builtin(
         SERVER_NAME,

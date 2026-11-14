@@ -105,8 +105,10 @@ class WsRepo(FakeRepo):
         self.added: list[dict[str, Any]] = []
         self.notes: list[str] = []
         self.main: Conversation | None = None
+        self.mains: list[str] = []
         self.others: list[Workspace] = []
         self.chat_rows: list[dict[str, Any]] = []
+        self.conversations: list[tuple[str, str | None]] = []
 
     async def get_workspace(self, workspace_id: str):
         return self.workspace if self.workspace and self.workspace.id == workspace_id else None
@@ -117,11 +119,15 @@ class WsRepo(FakeRepo):
                 return w
         return None
 
-    async def list_workspaces(self, owner: str, status: str | None = None):
+    async def list_workspaces(self, person_id: str, status: str | None = None):
+        """The workspaces the person reaches, as ``Repo.list_workspaces``: their
+        own and the shared ones they are in."""
         return [
             w
             for w in [self.workspace, *self.others]
-            if w and w.owner == owner and (status is None or w.status == status)
+            if w
+            and (w.owner == person_id or (w.shared and person_id in w.members))
+            and (status is None or w.status == status)
         ]
 
     async def list_workspace_items(self, workspace_id: str, *, unseen_only: bool = False):
@@ -149,6 +155,7 @@ class WsRepo(FakeRepo):
         self.notes.append(fields["notes"])
 
     async def main_conversation(self, person_id: str):
+        self.mains.append(person_id)
         return self.main
 
     async def unseen_chat_rows(self, conversation_id: str):
@@ -160,7 +167,13 @@ class WsRepo(FakeRepo):
                 row["seen"] = True
 
     async def get_or_create_conversation(self, channel_id, person_id=None):
+        self.conversations.append((channel_id, person_id))
         return Conversation(id="c-ws", channel_id=channel_id, person_id=person_id)
+
+    async def workspace_conversation(self, workspace: Workspace):
+        return await self.get_or_create_conversation(
+            workspace.channel_id, None if workspace.shared else workspace.owner
+        )
 
     async def add_chat_row(self, conversation_id, text):
         self.chat_rows.append({"id": len(self.chat_rows) + 1, "content": text, "seen": False})
@@ -795,13 +808,15 @@ def test_the_delivery_gate_drops_a_workspace_target_only() -> None:
 # --- the builtin tools ---------------------------------------------------------------------------
 
 
-def _deps(repo: WsRepo, channel: Channel | None = None) -> ToolDeps:
+def _deps(repo: WsRepo, channel: Channel | None = None, person_id: str | None = "alex") -> ToolDeps:
+    """``person_id`` is the person of the turn. None is an event turn: a job or
+    a scheduled task wrote it, and nobody spoke."""
     return ToolDeps(
         repo=repo,
         conversation=_conversation(),
         channel=channel or _channel(),
         tz="UTC",
-        person_id="alex",
+        person_id=person_id,
     )
 
 
@@ -936,6 +951,81 @@ async def test_send_to_normal_chat_falls_back_to_the_path_and_reports_failures()
     assert "not a workspace" in _text(
         await ws_tools.do_send_to_normal_chat(_deps(repo, normal), deliver=yes, **kwargs)
     )
+
+
+def _shared_ws() -> Workspace:
+    return _ws(shared=True, members=("mia",))
+
+
+async def _sent_to_normal_chat(repo: WsRepo, person_id: str | None) -> list[tuple[str, str]]:
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    reply = await ws_tools.do_send_to_normal_chat(
+        _deps(repo, _shared_channel(), person_id=person_id),
+        text="Done",
+        settings=make_settings(),
+        deliver=deliver,
+    )
+    assert "Sent" in _text(reply)
+    return sent
+
+
+async def test_send_to_normal_chat_of_a_shared_workspace_reaches_the_speaker_alone() -> None:
+    """One recipient, the person of the turn. Nobody else in the workspace
+    hears it: the agent writes in the thread to tell everybody."""
+    repo = WsRepo(_shared_ws())
+    repo.main = Conversation(id="m", channel_id="telegram:2", person_id="mia")
+
+    sent = await _sent_to_normal_chat(repo, "mia")
+
+    assert repo.mains == ["mia"]
+    assert sent == [("telegram:2", "Done\n\nSolar install: /chat/w/shared/solar")]
+
+
+async def test_send_to_normal_chat_of_an_event_turn_reaches_the_owner() -> None:
+    """A job event or a scheduled task has no speaker, so the owner gets it."""
+    repo = WsRepo(_shared_ws())
+    repo.main = Conversation(id="m", channel_id="telegram:1", person_id="alex")
+
+    sent = await _sent_to_normal_chat(repo, None)
+
+    assert repo.mains == ["alex"]
+    assert sent == [("telegram:1", "Done\n\nSolar install: /chat/w/shared/solar")]
+
+
+async def test_the_tools_of_a_shared_workspace_act_for_each_of_its_people() -> None:
+    repo = WsRepo(_shared_ws())
+    shared = _shared_channel()
+    for person in ("alex", "mia", None):
+        added = await ws_tools.do_add_to_workspace(
+            _deps(repo, shared, person_id=person), kind="link", ref="r", title="Spec"
+        )
+        assert "Added link" in _text(added)
+        assert "Notes updated" in _text(
+            await ws_tools.do_update_workspace_notes(
+                _deps(repo, shared, person_id=person), notes="n"
+            )
+        )
+    assert [a["workspace_id"] for a in repo.added] == [WS_ID] * 3
+    # A person who is not in the workspace reaches nothing in its thread.
+    outsider = _deps(repo, shared, person_id="sam")
+    assert "No such workspace" in _text(
+        await ws_tools.do_add_to_workspace(outsider, kind="link", ref="r", title="Spec")
+    )
+    assert "not found" in _text(await ws_tools.do_update_workspace_notes(outsider, notes="x"))
+    assert len(repo.added) == 3 and repo.notes == ["n"] * 3
+
+
+def test_a_shared_workspace_keeps_the_three_tools_of_a_workspace(listed_tools: None) -> None:
+    """The builder declines a shared chat that is not a workspace, not a shared
+    workspace."""
+    deps = _deps(WsRepo(_shared_ws()), _shared_channel(), person_id="mia")
+    server = ws_tools.build_workspace_server(deps, make_settings())
+    assert _names(server) == {"add_to_workspace", "update_workspace_notes", "send_to_normal_chat"}
 
 
 def test_the_server_has_three_tools_in_a_workspace_and_five_in_normal_chat(

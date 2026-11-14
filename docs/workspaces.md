@@ -132,11 +132,12 @@ The `workspace` builtin server has these tools.
 |---|---|---|
 | `add_to_workspace(kind, ref, title, url?, workspace?)` | every chat | Add an item. In a workspace, `workspace` defaults to this one. In a normal chat it is required: a slug or a title of one of the person's workspaces. An item added from another chat shows as new in the block. |
 | `update_workspace_notes(notes)` | workspace | Replace the notes. Keep them short, under 4000 characters. |
-| `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the person's main chat. |
+| `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the main chat of the person who wrote the turn. A turn with no person, a job event or a scheduled task, sends to the owner. One recipient, never the whole workspace. |
 
 A normal chat (a direct chat that is not a workspace) has four more tools.
 `workspace` takes a slug or a title, matched with no regard to case among the
-workspaces of the person. A name that matches none gets the slugs of the active
+workspaces the person reaches, their own and the shared ones they are in. A
+name that matches none gets the slugs of the active
 workspaces in the answer, and a title that two workspaces share is refused with
 their slugs.
 
@@ -166,15 +167,18 @@ A direct chat of a member that is not a workspace gets two things on each turn.
 A person with no active workspace gets neither. A guest, a group chat, and a
 workspace thread get neither.
 
-- **The list.** "Your workspaces:" and one line for each active workspace, at
+- **The list.** "Your workspaces:" and one line for each active workspace the
+  person reaches, their own and the shared ones they are in, at
   most 10: the title (60 characters) and the goal (90). A last line says to
   record what belongs to a workspace with `send_to_workspace` and to say so in
   one line.
 - **The hint.** Core indexes one record for each active workspace in the
   knowledge index, as the source `workspaces`. The record holds the title, the
   goal, the notes, and the item titles. The indexing cycle writes it again when
-  it changes (`memory.index_interval_s`). The record is for the owner only, and
-  it is never shown as text: recall and the RAG note never return it. When the
+  it changes (`memory.index_interval_s`). There is one record for each person
+  of the workspace, under the uri `workspaces/<id>/<person>`, so each of them
+  finds it. A record is never shown as text: recall and the RAG note never
+  return it. When the
   message matches a record with a similarity of `workspaces.hint_sim` or more
   (default 0.70, just under `memory.inject.full_sim`), the turn gets one line:
   "May relate to workspace *<title>*."

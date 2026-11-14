@@ -18,7 +18,13 @@ from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.tools import workspace as ws_tools
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
-from joshua_core.memory.sources.workspaces import WorkspacesSource, record_text
+from joshua_core.memory.sources.workspaces import (
+    WorkspacesSource,
+    person_of_uri,
+    record_text,
+    uri_of,
+    workspace_id_of_uri,
+)
 from joshua_core.store.models import Channel, Conversation
 from test_workspaces_engine import WS_ID, WsRepo, _channel, _item, _text, _ws
 
@@ -32,13 +38,13 @@ def _other(**fields: Any):
     return _ws(**base)
 
 
-def _deps(repo: WsRepo, channel: Channel = NORMAL) -> ToolDeps:
+def _deps(repo: WsRepo, channel: Channel = NORMAL, person_id: str = "alex") -> ToolDeps:
     return ToolDeps(
         repo=repo,
-        conversation=Conversation(id="main", channel_id=channel.id, person_id="alex"),
+        conversation=Conversation(id="main", channel_id=channel.id, person_id=person_id),
         channel=channel,
         tz="UTC",
-        person_id="alex",
+        person_id=person_id,
     )
 
 
@@ -51,10 +57,15 @@ def _repo() -> WsRepo:
 # --- the list and the hint ------------------------------------------------------------------
 
 
-def _turn(text: str = "hello there", channel: Channel = NORMAL, role: str = "member"):
+def _turn(
+    text: str = "hello there",
+    channel: Channel = NORMAL,
+    role: str = "member",
+    person: str = "alex",
+):
     return SimpleNamespace(
         channel=channel,
-        conversation=Conversation(id="main", channel_id=channel.id, person_id="alex"),
+        conversation=Conversation(id="main", channel_id=channel.id, person_id=person),
         text=text,
         role=role,
         embedding=[0.1] * 4,
@@ -71,12 +82,12 @@ class _Store:
         return [r for r in self.rows if (r.similarity or 0) >= min_sim]
 
 
-def _row(workspace_id: str, sim: float) -> KbChunk:
+def _row(workspace_id: str, sim: float, person: str = "alex") -> KbChunk:
     return KbChunk(
-        person_id="alex",
+        person_id=person,
         source="workspaces",
         kind="workspace",
-        path=f"workspaces/{workspace_id}",
+        path=f"workspaces/{workspace_id}/{person}",
         title="x",
         heading="active",
         text="t",
@@ -335,6 +346,69 @@ def test_a_group_chat_gets_none_of_the_tools() -> None:
     assert ws_tools.build_workspace_server(_deps(_repo(), group), make_settings()) is None
 
 
+# --- a shared workspace in normal chat ----------------------------------------------------
+
+
+SHARED_ID = "33333333-3333-3333-3333-333333333333"
+
+
+def _shared_repo() -> WsRepo:
+    """A repo whose only workspace is shared between alex (the owner) and mia."""
+    repo = WsRepo(None)
+    repo.others = [
+        _ws(
+            id=SHARED_ID,
+            slug="garden",
+            title="Garden plan",
+            goal="Dig the beds",
+            shared=True,
+            members=("mia",),
+        )
+    ]
+    return repo
+
+
+async def test_a_shared_workspace_is_in_the_normal_chat_of_everybody_in_it() -> None:
+    settings = make_settings()
+    for person in ("alex", "mia"):
+        store = _Store([_row(SHARED_ID, 0.9, person)])
+        note = await aware.build_provider(_shared_repo(), store, settings)(
+            _turn("the beds need compost", person=person)
+        )
+        assert note is not None and "Garden plan - Dig the beds" in note
+        # The record of that person points back at the workspace of its uri.
+        assert "May relate to workspace *Garden plan*." in note
+    nobody = aware.build_provider(_shared_repo(), None, settings)
+    assert await nobody(_turn(person="sam")) is None
+
+
+async def test_tell_and_send_reach_a_shared_workspace_for_each_of_its_people() -> None:
+    ran: list[tuple[str, str]] = []
+
+    async def run(workspace, text):
+        ran.append((workspace.slug, text))
+
+    for person in ("alex", "mia"):
+        repo = _shared_repo()
+        deps = _deps(repo, person_id=person)
+        told = await ws_tools.do_tell_workspace(
+            deps, workspace="garden", text="Order seed", run=run
+        )
+        assert "Told workspace 'Garden plan'" in _text(told)
+        sent = await ws_tools.do_send_to_workspace(deps, workspace="Garden PLAN", text="A quote")
+        assert "Recorded in workspace 'Garden plan'" in _text(sent)
+        # The row goes to the one thread of the workspace, which is nobody's.
+        assert repo.conversations == [(f"workspace:{SHARED_ID}", None)]
+        assert [r["content"] for r in repo.chat_rows] == ["A quote"]
+    assert ran == [("garden", "[From normal chat] Order seed")] * 2
+    outside = _text(
+        await ws_tools.do_send_to_workspace(
+            _deps(_shared_repo(), person_id="sam"), workspace="garden", text="x"
+        )
+    )
+    assert "No such workspace" in outside
+
+
 # --- next steps and jobs ------------------------------------------------------------------
 
 
@@ -446,13 +520,36 @@ async def test_the_source_has_one_record_per_active_workspace() -> None:
     repo.others = [_other(status="paused")]
     source = WorkspacesSource(repo)
     docs = [d async for d in source.list_documents()]
-    assert [d.uri for d in docs] == [f"workspaces/{WS_ID}"]
+    assert [d.uri for d in docs] == [f"workspaces/{WS_ID}/alex"]
     doc = docs[0]
     assert doc.person_id == "alex" and doc.title == "Solar install"
     assert "Goal: Go solar" in doc.text and "Notes: Budget 20k" in doc.text
     assert "Items: Roof quote; Panel spec" in doc.text
-    assert await source.fetch(f"workspaces/{OTHER_ID}") is None
-    assert (await source.fetch(f"workspaces/{WS_ID}")).rev == doc.rev
+    assert await source.fetch(f"workspaces/{OTHER_ID}/alex") is None
+    assert await source.fetch(f"workspaces/{WS_ID}/mia") is None
+    assert (await source.fetch(f"workspaces/{WS_ID}/alex")).rev == doc.rev
+
+
+async def test_the_source_has_one_record_for_each_person_of_a_shared_workspace() -> None:
+    repo = _SourceRepo(_ws(shared=True, members=("mia",)), [_item(title="Roof quote")])
+    source = WorkspacesSource(repo)
+
+    docs = [d async for d in source.list_documents()]
+
+    assert [d.uri for d in docs] == [f"workspaces/{WS_ID}/alex", f"workspaces/{WS_ID}/mia"]
+    assert [d.person_id for d in docs] == ["alex", "mia"]
+    assert docs[0].text == docs[1].text and docs[0].rev == docs[1].rev
+    assert (await source.fetch(f"workspaces/{WS_ID}/mia")).person_id == "mia"
+    assert await source.fetch(f"workspaces/{WS_ID}/sam") is None
+    assert await source.fetch(f"workspaces/{WS_ID}") is None
+
+
+def test_the_uri_names_the_workspace_and_the_person() -> None:
+    assert uri_of(WS_ID, "mia") == f"workspaces/{WS_ID}/mia"
+    assert workspace_id_of_uri(f"workspaces/{WS_ID}/mia") == WS_ID
+    assert person_of_uri(f"workspaces/{WS_ID}/mia") == "mia"
+    assert workspace_id_of_uri(f"wiki/{WS_ID}/mia") is None
+    assert person_of_uri(f"workspaces/{WS_ID}") is None
 
 
 async def test_the_record_revision_follows_the_content() -> None:
