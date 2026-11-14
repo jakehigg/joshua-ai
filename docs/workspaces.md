@@ -324,12 +324,18 @@ server behind the gateway and reads the stamp the way step 1 does.
 The chat screen of the viewer is the workspace UI. It works the same on docker
 compose and on Kubernetes, and it adds no container.
 
-- `/chat/<person>` is the normal chat. `/chat/w/<slug>` is a workspace of the
-  person who signed in. The id `w` is reserved, so no person can have it.
+- `/chat/<person>` is the normal chat. `/chat/w/<owner>/<slug>` is a
+  workspace, and `shared` stands for the owner of a shared one, so everyone in
+  it opens the same address. A link of one segment, `/chat/w/<ref>`, still
+  works: it finds the workspace and sends the browser to the two-segment
+  address. The id `w` is reserved, so no person can have it.
 - The left rail shows Chat, the active workspaces, the paused workspaces (folded),
   and "+ New workspace". On a phone it is a drawer.
-- The new workspace dialog asks for a title, a goal (optional), a model, and the
-  servers. It creates the workspace and opens it.
+- The new workspace dialog asks for a title, a goal (optional), a model, and
+  the servers. "Shared" offers the other people of the roster as checkboxes
+  and shows the address the workspace will take; Create waits until at least
+  one person is picked. A title whose shared slug is taken says so. The dialog
+  creates the workspace and opens it.
 - A workspace view has the chat in the centre, an item panel at the right, and
   a header with the title and the goal. The edit drawer changes the goal, the
   notes, the servers, the model, `notify`, and the status (pause, resume,

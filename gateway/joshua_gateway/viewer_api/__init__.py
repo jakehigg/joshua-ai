@@ -140,23 +140,29 @@ def routes() -> list[Route]:
         Route(api_path("workspaces"), _require_auth(workspaces.list_workspaces)),
         Route(api_path("workspaces"), _require_auth(workspaces.create), methods=["POST"]),
         Route(api_path("workspaces/options"), _require_auth(workspaces.options)),
-        Route(api_path("workspaces/{slug}"), _require_auth(workspaces.read)),
-        Route(api_path("workspaces/{slug}"), _require_auth(workspaces.change), methods=["PATCH"]),
-        Route(api_path("workspaces/{slug}/items"), _require_auth(workspaces.list_items)),
+        # ``{slug}`` is a ref: a slug, an id, or two segments
+        # (``shared/<slug>`` or ``<owner>/<slug>``), which reaches the route
+        # URL-encoded. The converter takes the slash, so it is greedy, and
+        # every longer path stands before the shorter one.
         Route(
-            api_path("workspaces/{slug}/items"),
-            _require_auth(workspaces.add_item),
-            methods=["POST"],
-        ),
-        Route(
-            api_path("workspaces/{slug}/items/{id}"),
+            api_path("workspaces/{slug:path}/items/{id}"),
             _require_auth(workspaces.change_item),
             methods=["PATCH"],
         ),
         Route(
-            api_path("workspaces/{slug}/items/{id}"),
+            api_path("workspaces/{slug:path}/items/{id}"),
             _require_auth(workspaces.delete_item),
             methods=["DELETE"],
+        ),
+        Route(api_path("workspaces/{slug:path}/items"), _require_auth(workspaces.list_items)),
+        Route(
+            api_path("workspaces/{slug:path}/items"),
+            _require_auth(workspaces.add_item),
+            methods=["POST"],
+        ),
+        Route(api_path("workspaces/{slug:path}"), _require_auth(workspaces.read)),
+        Route(
+            api_path("workspaces/{slug:path}"), _require_auth(workspaces.change), methods=["PATCH"]
         ),
         # The Users section: the owner's alone, whatever a route looks like.
         Route(api_path("admin/users"), _require_auth(admin.users)),

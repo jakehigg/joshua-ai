@@ -20,8 +20,10 @@ end of the stream. While channels is silent, a comment line goes out every
 ``SSE_KEEPALIVE_S`` seconds, so a proxy with a read timeout keeps the stream
 open through a long turn.
 
-A turn body and a history query take an optional ``workspace`` (the slug or
-the id). Without it, the turn runs in the main thread of the person.
+A turn body and a history query take an optional ``workspace``: a slug, an id,
+or a two-segment ref (``shared/<slug>`` for a shared workspace,
+``<owner>/<slug>`` for the workspace of a person). Without it, the turn runs in
+the main thread of the person.
 
 ``GET /api/v1/chat/<person>/history`` gives one page of the main thread of the
 person (or of the workspace), from the channels transcript, and ``pending``:
@@ -31,7 +33,8 @@ the turn in flight (``{turnId, state, since, text}``, ``state`` is ``queued`` or
 and it is missing when the person may not read the file through the viewer. ``in`` is the
 person, ``out`` is Joshua, and any other direction is ``system``. A person row
 that starts with the speech marker loses the marker and gets
-``"spoken": true``.
+``"spoken": true``. A person row of a shared workspace carries ``who``, the
+name of the person who wrote it.
 
 The hold is the messages the person wrote while a turn of the thread was
 still running. It lives in core, so a reload or a closed tab never loses one.
@@ -103,8 +106,11 @@ UNREACHABLE = "Joshua is unreachable"
 CROSS_SITE = "the request comes from another site"
 
 PERSON_ID = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-# The slug or the id of a workspace. Core finds it for the person.
-WORKSPACE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+# The ref of a workspace: a slug, an id, or two segments
+# (``shared/<slug>`` for a shared workspace, ``<owner>/<slug>`` for the
+# workspace of a person). Core finds it for the person.
+_REF_SEGMENT = r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}"
+WORKSPACE_REF = re.compile(rf"^{_REF_SEGMENT}(/{_REF_SEGMENT})?$")
 BAD_WORKSPACE = "workspace: not a workspace slug or id"
 
 DEFAULT_LIMIT = 50
@@ -679,6 +685,9 @@ def map_message(row: Any, person: str = "") -> dict[str, Any] | None:
     }
     if spoken:
         message["spoken"] = True
+    # The thread of a shared workspace names who wrote a person row.
+    if role == "person" and isinstance(meta.get("speaker"), str) and meta["speaker"]:
+        message["who"] = meta["speaker"]
     if isinstance(meta.get("turn_id"), str):
         message["turnId"] = meta["turn_id"]
     attachments = map_attachments(meta.get("attachments"), person)

@@ -1,10 +1,24 @@
-// The new workspace dialog: title, goal, model, and the servers. It creates
-// the workspace and hands it to onCreated, which opens it. On a phone it is a
+// The new workspace dialog: title, goal, model, the servers, and whether the
+// workspace is shared. Shared shows the other people of the roster: the ones
+// ticked write in the one thread of the workspace, which then lives at
+// `/chat/w/shared/<slug>`, one address for everyone. That slug is taken from
+// the title and is one for the whole instance, so a title whose slug is taken
+// is refused (409) and the dialog asks for another one. The people are set
+// here and never change. The dialog creates the workspace and hands it to
+// onCreated, which opens it. On a phone it is a
 // full-height sheet: the fields scroll in `ws-body`, and Cancel and Create
 // stay in a footer above the keyboard (index.css).
 
 import { useEffect, useState, type FormEvent } from "react";
-import { createWorkspace, getOptions, type Options, type Workspace } from "../api/workspaces";
+import { ApiError } from "../api/client";
+import {
+  createWorkspace,
+  getOptions,
+  SHARED,
+  slugOf,
+  type Options,
+  type Workspace,
+} from "../api/workspaces";
 import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
 import { ServerChecklist } from "./ServerChecklist";
 
@@ -20,6 +34,8 @@ export function NewWorkspace({
   const [goal, setGoal] = useState("");
   const [model, setModel] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+  const [shared, setShared] = useState(false);
+  const [members, setMembers] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -33,9 +49,16 @@ export function NewWorkspace({
     };
   }, []);
 
+  const slug = slugOf(title.trim());
+  // A shared workspace with nobody in it is a workspace of one person, so
+  // Create waits for at least one.
+  const ready = title.trim() !== "" && !busy && (!shared || members.length > 0);
+  const toggleMember = (id: string) =>
+    setMembers(members.includes(id) ? members.filter((m) => m !== id) : [...members, id]);
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (title.trim() === "" || busy) return;
+    if (!ready) return;
     setBusy(true);
     setError("");
     createWorkspace({
@@ -43,11 +66,18 @@ export function NewWorkspace({
       ...(goal.trim() ? { goal: goal.trim() } : {}),
       ...(model ? { model } : {}),
       servers: picked,
+      ...(shared ? { members } : {}),
     })
       .then(onCreated)
       .catch((err: unknown) => {
         setBusy(false);
-        setError(err instanceof Error ? err.message : "the workspace was not created");
+        setError(
+          err instanceof ApiError && err.status === 409
+            ? `A shared workspace called ${slug} exists. Pick another title.`
+            : err instanceof Error
+              ? err.message
+              : "the workspace was not created",
+        );
       });
   };
 
@@ -75,6 +105,38 @@ export function NewWorkspace({
             </option>
           ))}
         </select>
+        <label className="ws-person">
+          <input
+            type="checkbox"
+            checked={shared}
+            onChange={(e) => {
+              setShared(e.target.checked);
+              if (!e.target.checked) setMembers([]);
+            }}
+          />
+          <span>Shared</span>
+        </label>
+        {shared && (
+          <fieldset className="ws-people">
+            <legend className="j-field-label">People</legend>
+            {(options?.people ?? []).length === 0 && (
+              <p className="j-meta">Nobody else to share this with.</p>
+            )}
+            {(options?.people ?? []).map((person) => (
+              <label key={person.id} className="ws-person">
+                <input
+                  type="checkbox"
+                  checked={members.includes(person.id)}
+                  onChange={() => toggleMember(person.id)}
+                />
+                <span>{person.name}</span>
+              </label>
+            ))}
+            <p className="ws-link j-meta">
+              Everyone in it writes in one thread, at /chat/w/{SHARED}/{slug}
+            </p>
+          </fieldset>
+        )}
         <ServerChecklist servers={options?.servers ?? []} picked={picked} onChange={setPicked} />
         {error && (
           <p className="j-error" role="alert">
@@ -86,7 +148,7 @@ export function NewWorkspace({
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="send" disabled={title.trim() === "" || busy}>
+          <button type="submit" className="send" disabled={!ready}>
             Create
           </button>
         </div>

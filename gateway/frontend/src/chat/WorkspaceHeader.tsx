@@ -1,16 +1,20 @@
 // The header of a workspace: its title and goal, and an edit drawer for the
 // goal, the notes, the servers, the model, the notify setting and the status
-// (pause, resume, archive).
+// (pause, resume, archive). A shared workspace also names its people under
+// the title, "Jake, Mia". They are not in the drawer: they are set at the
+// create and never change.
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useContext, useEffect, useState, type FormEvent } from "react";
 import {
   changeWorkspace,
   getOptions,
+  refOf,
   type Notify,
   type Options,
   type Workspace,
   type WorkspaceStatus,
 } from "../api/workspaces";
+import { SessionContext } from "../shell/Shell";
 import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
 import { ServerChecklist } from "./ServerChecklist";
 
@@ -50,7 +54,7 @@ function EditDrawer({
 
   const save = (patch: Parameters<typeof changeWorkspace>[1], close: boolean) => {
     setError("");
-    changeWorkspace(workspace.slug, patch)
+    changeWorkspace(refOf(workspace), patch)
       .then((w) => {
         onSaved(w);
         if (close) onClose();
@@ -145,6 +149,30 @@ function EditDrawer({
   );
 }
 
+// The people of a shared workspace, named: the owner first, then the members.
+// The roster names them (`/workspaces/options`), and the session names the
+// person who signed in, whom that list leaves out. A person the viewer cannot
+// name is shown by their id.
+function People({ workspace }: { workspace: Workspace }) {
+  const session = useContext(SessionContext);
+  const [named, setNamed] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let live = true;
+    getOptions()
+      .then((o) => live && setNamed(Object.fromEntries(o.people.map((p) => [p.id, p.name]))))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const names = [workspace.owner, ...workspace.members].map((id) =>
+    id === session?.person.id ? session.person.name : (named[id] ?? id),
+  );
+  return <span className="subtitle ws-people-line">{names.join(", ")}</span>;
+}
+
 export function WorkspaceHeader({
   workspace,
   onChange,
@@ -159,6 +187,7 @@ export function WorkspaceHeader({
     <>
       <div className="title ws-title">
         <h1>{workspace.title}</h1>
+        {workspace.shared && <People workspace={workspace} />}
         {workspace.status !== "active" && <span className="subtitle">{workspace.status}</span>}
         {workspace.goal && <span className="subtitle ws-goal">{workspace.goal}</span>}
       </div>

@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workspace, WorkspaceItem } from "../api/workspaces";
-import { ChatPage, WorkspacePage } from "./ChatPage";
+import { SessionContext, type Session } from "../shell/Shell";
+import { ChatPage, WorkspaceLink, WorkspacePage } from "./ChatPage";
 import { DocumentPanelProvider, useDocumentPanelState } from "./DocumentPanel";
 import { GROUPS_KEY, ItemPanel, UNDO_MS } from "./ItemPanel";
 import { NewWorkspace } from "./NewWorkspace";
@@ -21,13 +22,26 @@ function ws(over: Partial<Workspace> = {}): Workspace {
     id: "w1",
     slug: "solar",
     title: "Solar install",
+    owner: "alex",
     goal: "Pick an installer",
     notes: "",
     servers: ["tasks"],
     model: null,
     notify: "none",
     status: "active",
+    shared: false,
+    members: [],
     ...over,
+  };
+}
+
+function session(id: string, name: string): Session {
+  return {
+    person: { id, name, role: "member" },
+    anonymous: false,
+    sections: [],
+    chat_url: `/chat/${id}`,
+    timezone: "America/New_York",
   };
 }
 
@@ -51,6 +65,8 @@ const OPTIONS = {
     { name: "github", description: "github" },
   ],
   models: ["model-a", "model-b"],
+  // The people the caller may share a workspace with; the caller is not here.
+  people: [{ id: "mia", name: "Mia" }],
 };
 
 type Call = { method: string; path: string; body: unknown };
@@ -95,7 +111,7 @@ describe("the rail", () => {
   it("lists Chat, the active workspaces and the paused ones in a fold", () => {
     show();
     expect(screen.getByRole("link", { name: "Chat" }).getAttribute("href")).toBe("/chat/alex");
-    expect(screen.getByRole("link", { name: "Solar install" }).getAttribute("href")).toBe("/chat/w/solar");
+    expect(screen.getByRole("link", { name: "Solar install" }).getAttribute("href")).toBe("/chat/w/alex/solar");
     expect(screen.queryByText("Old")).toBeNull();
     const fold = screen.getByText("Paused (1)").closest("details") as HTMLDetailsElement;
     expect(fold.open).toBe(false);
@@ -106,6 +122,24 @@ describe("the rail", () => {
     show("solar");
     expect(screen.getByRole("link", { name: "Solar install" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Chat" }).getAttribute("aria-current")).toBeNull();
+  });
+
+  it("marks a shared workspace and links it under the shared namespace", () => {
+    render(
+      <MemoryRouter future={FUTURE}>
+        <Rail
+          person="mia"
+          workspaces={[ws({ id: "s", slug: "thanksgiving", title: "Thanksgiving", owner: "alex", shared: true, members: ["mia"] })]}
+          open
+          onNew={vi.fn()}
+          onNavigate={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: /Thanksgiving/ });
+    expect(link.getAttribute("href")).toBe("/chat/w/shared/thanksgiving");
+    expect(link.querySelector(".rail-shared")?.textContent?.trim()).toBe("Shared");
   });
 
   it("opens the dialog from the new workspace button", () => {
@@ -150,6 +184,61 @@ describe("the new workspace dialog", () => {
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "X" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect((await screen.findByRole("alert")).textContent).toContain("not found");
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  it("shares a workspace with the people picked, and shows the address it takes", async () => {
+    const { calls } = viewer({
+      "GET /api/v1/workspaces/options": OPTIONS,
+      "POST /api/v1/workspaces": ws({ slug: "thanksgiving", title: "Thanksgiving", shared: true, members: ["mia"] }),
+    });
+    const onCreated = vi.fn();
+    render(<NewWorkspace onClose={vi.fn()} onCreated={onCreated} />);
+    await screen.findByText("Tasks and projects");
+
+    // The people and the address show only when the workspace is shared.
+    expect(screen.queryByLabelText("Mia")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Thanksgiving" } });
+    fireEvent.click(screen.getByLabelText("Shared"));
+    expect(screen.getByText(/\/chat\/w\/shared\/thanksgiving/)).toBeTruthy();
+
+    // Shared with nobody is not a workspace: Create waits for a person.
+    const create = screen.getByRole("button", { name: "Create" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText("Mia"));
+    expect(create.disabled).toBe(false);
+    fireEvent.click(create);
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      title: "Thanksgiving",
+      servers: [],
+      members: ["mia"],
+    });
+  });
+
+  it("says that the slug of a shared workspace is taken, and asks for another title", async () => {
+    viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://test");
+        if ((init?.method ?? "GET") === "POST") {
+          return json({ error: "the slug thanksgiving is taken", slug: "thanksgiving" }, 409);
+        }
+        return url.pathname.endsWith("/options") ? json(OPTIONS) : json({ error: "not found" }, 404);
+      }),
+    );
+    const onCreated = vi.fn();
+    render(<NewWorkspace onClose={vi.fn()} onCreated={onCreated} />);
+    await screen.findByText("Tasks and projects");
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Thanksgiving" } });
+    fireEvent.click(screen.getByLabelText("Shared"));
+    fireEvent.click(screen.getByLabelText("Mia"));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "A shared workspace called thanksgiving exists. Pick another title.",
+    );
     expect(onCreated).not.toHaveBeenCalled();
   });
 });
@@ -350,7 +439,7 @@ describe("the workspace header", () => {
   it("shows the title and the goal, and saves an edit", async () => {
     const { calls } = viewer({
       "GET /api/v1/workspaces/options": OPTIONS,
-      "PATCH /api/v1/workspaces/solar": ws({ title: "Solar 2" }),
+      "PATCH /api/v1/workspaces/alex%2Fsolar": ws({ title: "Solar 2" }),
     });
     const onChange = vi.fn();
     render(<WorkspaceHeader workspace={ws()} onChange={onChange} onItems={vi.fn()} />);
@@ -380,13 +469,41 @@ describe("the workspace header", () => {
   it("pauses, resumes and archives with a status change", async () => {
     const { calls } = viewer({
       "GET /api/v1/workspaces/options": OPTIONS,
-      "PATCH /api/v1/workspaces/solar": ws({ status: "paused" }),
+      "PATCH /api/v1/workspaces/alex%2Fsolar": ws({ status: "paused" }),
     });
     render(<WorkspaceHeader workspace={ws()} onChange={vi.fn()} onItems={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ status: "paused" });
+  });
+
+  it("names the people of a shared workspace under the title, and not in the drawer", async () => {
+    viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    render(
+      <SessionContext.Provider value={session("jake", "Jake")}>
+        <WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />
+      </SessionContext.Provider>,
+    );
+    expect((await screen.findByText("Jake, Mia")).className).toContain("subtitle");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Tasks and projects");
+    // The people never change, so the drawer has no field for them.
+    expect(within(document.querySelector(".ws-dialog") as HTMLElement).queryByText("People")).toBeNull();
+  });
+
+  it("changes a shared workspace by its two-segment ref", async () => {
+    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    const { calls } = viewer({
+      "GET /api/v1/workspaces/options": OPTIONS,
+      "PATCH /api/v1/workspaces/shared%2Fthanksgiving": shared,
+    });
+    render(<WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+    expect(calls.find((c) => c.method === "PATCH")?.path).toBe("/api/v1/workspaces/shared%2Fthanksgiving");
   });
 
   it("offers Resume for a paused workspace", async () => {
@@ -404,18 +521,18 @@ describe("the routes", () => {
     expect(validPerson("wendy")).toBe(true);
   });
 
-  it("opens a workspace at /chat/w/:slug with its chat on the workspace", async () => {
+  it("opens a workspace at /chat/w/:space/:slug with its chat on the workspace", async () => {
     const { calls } = viewer({
       "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
-      "GET /api/v1/workspaces/solar": ws(),
+      "GET /api/v1/workspaces/alex%2Fsolar": ws(),
       "GET /api/v1/workspaces": { workspaces: [ws()] },
-      "GET /api/v1/workspaces/solar/items": { items: [item()] },
+      "GET /api/v1/workspaces/alex%2Fsolar/items": { items: [item()] },
       "GET /api/v1/chat/alex/history": { messages: [], nextBefore: null },
     });
     render(
-      <MemoryRouter initialEntries={["/chat/w/solar"]} future={FUTURE}>
+      <MemoryRouter initialEntries={["/chat/w/alex/solar"]} future={FUTURE}>
         <Routes>
-          <Route path="/chat/w/:slug" element={<WorkspacePage />} />
+          <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
           <Route path="/chat/:person" element={<ChatPage />} />
         </Routes>
       </MemoryRouter>,
@@ -424,19 +541,35 @@ describe("the routes", () => {
     await screen.findByText("Quote");
     const history = calls.find((c) => c.path === "/api/v1/chat/alex/history");
     expect(history).toBeTruthy();
-    // The history call names the workspace.
+    // The history call names the workspace, by its two-segment ref.
     const asked = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
       .map(([u]) => String(u))
       .find((u) => u.includes("/history"));
-    expect(asked).toContain("workspace=solar");
+    expect(asked).toContain("workspace=alex%2Fsolar");
+  });
+
+  it("sends a one-segment link to the two-segment address of its workspace", async () => {
+    viewer({
+      "GET /api/v1/session": { person: { id: "mia", name: "Mia", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/thanksgiving": ws({ slug: "thanksgiving", owner: "alex", shared: true, members: ["mia"] }),
+    });
+    render(
+      <MemoryRouter initialEntries={["/chat/w/thanksgiving"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/w/:space/:slug" element={<Where />} />
+          <Route path="/chat/w/:ref" element={<WorkspaceLink />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect((await screen.findByTestId("where")).textContent).toBe("/chat/w/shared/thanksgiving");
   });
 
   it("holds a message written while a turn of the workspace runs", async () => {
     const { calls } = viewer({
       "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
-      "GET /api/v1/workspaces/solar": ws(),
+      "GET /api/v1/workspaces/alex%2Fsolar": ws(),
       "GET /api/v1/workspaces": { workspaces: [ws()] },
-      "GET /api/v1/workspaces/solar/items": { items: [item()] },
+      "GET /api/v1/workspaces/alex%2Fsolar/items": { items: [item()] },
       "GET /api/v1/chat/alex/history": {
         messages: [],
         nextBefore: null,
@@ -446,9 +579,9 @@ describe("the routes", () => {
       "POST /api/v1/chat/alex/held": { held: [{ id: "h1", text: "one more", at: "2026-01-01T10:00:00Z" }] },
     });
     render(
-      <MemoryRouter initialEntries={["/chat/w/solar"]} future={FUTURE}>
+      <MemoryRouter initialEntries={["/chat/w/alex/solar"]} future={FUTURE}>
         <Routes>
-          <Route path="/chat/w/:slug" element={<WorkspacePage />} />
+          <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -457,21 +590,21 @@ describe("the routes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("Waiting to go with the next turn")).toBeTruthy();
     const add = calls.find((c) => c.method === "POST" && c.path === "/api/v1/chat/alex/held");
-    expect(add?.body).toEqual({ text: "one more", workspace: "solar" });
+    expect(add?.body).toEqual({ text: "one more", workspace: "alex/solar" });
     // The hold of the thread is asked for with the workspace, and no turn went out.
     const asked = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
       .map(([u]) => String(u))
       .find((u) => u.includes("/held"));
-    expect(asked).toBe("/api/v1/chat/alex/held?workspace=solar");
+    expect(asked).toBe("/api/v1/chat/alex/held?workspace=alex%2Fsolar");
     expect(calls.some((c) => c.path.endsWith("/turns"))).toBe(false);
   });
 
   it("says so for a workspace that does not exist", async () => {
     viewer({ "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] } });
     render(
-      <MemoryRouter initialEntries={["/chat/w/nope"]} future={FUTURE}>
+      <MemoryRouter initialEntries={["/chat/w/alex/nope"]} future={FUTURE}>
         <Routes>
-          <Route path="/chat/w/:slug" element={<WorkspacePage />} />
+          <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -489,14 +622,14 @@ describe("the routes", () => {
       <MemoryRouter initialEntries={["/chat/alex"]} future={FUTURE}>
         <Routes>
           <Route path="/chat/:person" element={<ChatPage />} />
-          <Route path="/chat/w/:slug" element={<Where />} />
+          <Route path="/chat/w/:space/:slug" element={<Where />} />
         </Routes>
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByRole("button", { name: "+ New workspace" }));
     fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Trip" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    expect((await screen.findByTestId("where")).textContent).toBe("/chat/w/trip");
+    expect((await screen.findByTestId("where")).textContent).toBe("/chat/w/alex/trip");
   });
 });
 

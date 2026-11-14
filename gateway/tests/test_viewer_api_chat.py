@@ -280,7 +280,17 @@ def test_a_multipart_turn_passes_the_workspace_to_channels(client, channels) -> 
     assert b'name="workspace"' in channels.bodies[0] and b"solar" in channels.bodies[0]
 
 
-@pytest.mark.parametrize("workspace", ["../x", "a b", 7, "x" * 90])
+@pytest.mark.parametrize("workspace", ["shared/thanksgiving", "alex/thanksgiving"])
+def test_a_two_segment_workspace_ref_passes_to_channels(client, channels, workspace) -> None:
+    """A shared workspace is reached by namespace, in a turn and in a read."""
+    response = client.post(TURNS, json={"text": "hi", "workspace": workspace}, auth=ALEX)
+    assert response.status_code == 200
+    assert json.loads(channels.bodies[0])["workspace"] == workspace
+    client.get(HISTORY, params={"workspace": workspace}, auth=ALEX)
+    assert channels.requests[-1].url.params["workspace"] == workspace
+
+
+@pytest.mark.parametrize("workspace", ["../x", "a b", 7, "x" * 90, "a/b/c", "shared/"])
 def test_a_bad_workspace_is_422_and_never_reaches_channels(client, channels, workspace) -> None:
     response = client.post(TURNS, json={"text": "hi", "workspace": workspace}, auth=ALEX)
     assert response.status_code == 422
@@ -350,6 +360,26 @@ def test_history_maps_the_rows(client, channels) -> None:
     assert rows[9]["role"] == "system"
     assert "spoken" not in rows[10]
     assert rows[11]["text"] == ""
+
+
+def test_a_person_row_of_a_shared_thread_names_who_wrote_it(client, channels) -> None:
+    """``meta.speaker`` is the name of the person; Joshua's rows never get one."""
+    channels.transcript = httpx.Response(
+        200,
+        json={
+            "conversation_id": "c1",
+            "next_before": None,
+            "messages": [
+                {"id": 1, "direction": "in", "text": "hi", "at": "t1", "meta": {"speaker": "Mia"}},
+                {"id": 2, "direction": "out", "text": "ok", "at": "t2", "meta": {"speaker": "Mia"}},
+                {"id": 3, "direction": "in", "text": "mine", "at": "t3", "meta": {"speaker": ""}},
+                {"id": 4, "direction": "in", "text": "alone", "at": "t4"},
+            ],
+        },
+    )
+    rows = {m["id"]: m for m in client.get(HISTORY, auth=ALEX).json()["messages"]}
+    assert rows[1]["who"] == "Mia"
+    assert "who" not in rows[2] and "who" not in rows[3] and "who" not in rows[4]
 
 
 def test_history_asks_for_the_default_limit_and_passes_the_cursor(client, channels) -> None:

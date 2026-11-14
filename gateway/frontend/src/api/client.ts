@@ -122,6 +122,8 @@ export interface HistoryMessage {
   // A person row that was sent with Brief on, in the days of voice; the
   // route removed the marker.
   spoken?: boolean;
+  // The name of the person who wrote a row of a shared workspace thread.
+  who?: string;
   // The files the person sent with the message. `url` is missing when the
   // viewer cannot serve the file to this person.
   attachments?: FileRef[];
