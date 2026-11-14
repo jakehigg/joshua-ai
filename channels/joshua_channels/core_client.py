@@ -5,7 +5,9 @@ here. ``submit_turn`` posts to ``POST /v1/turns`` and expects 202; it never
 retries an unknown sender (403) and retries an overloaded core (429) once before
 it drops the turn. ``stream_turn`` runs a turn inline and yields core's SSE
 events; tests and the later voice path use it. ``read_transcript`` reads one
-page of a conversation from ``GET /v1/transcript``.
+page of a conversation from ``GET /v1/transcript``, and ``call_hold`` carries
+one of the ``/v1/holds`` calls: the messages a person wrote while a turn of
+the same thread ran.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ CHANNELS_TOKEN_ENV = "JOSHUA_TOKEN_CHANNELS"
 TURNS_PATH = "/v1/turns"
 STREAM_PATH = "/v1/turns/stream"
 TRANSCRIPT_PATH = "/v1/transcript"
+HOLDS_PATH = "/v1/holds"
 
 # One retry after core answers 429, then the turn is dropped.
 BUSY_RETRY_AFTER_S = 2.0
@@ -101,6 +104,27 @@ class CoreClient:
         raises ``httpx.HTTPError``.
         """
         response = await self._client.get_json(TRANSCRIPT_PATH, params=dict(params))
+        return response.status_code, _json(response)
+
+    async def call_hold(
+        self,
+        method: str,
+        path: str = "",
+        *,
+        params: Mapping[str, str] | None = None,
+        json: Mapping[str, str] | None = None,
+    ) -> tuple[int, dict]:
+        """Call one of core's ``/v1/holds`` routes and return its status and body.
+
+        ``path`` is what follows ``/v1/holds`` (``/take`` or ``/<hold id>``).
+        A connection failure raises ``httpx.HTTPError``.
+        """
+        response = await self._client.request(
+            method,
+            f"{HOLDS_PATH}{path}",
+            **({"params": dict(params)} if params else {}),
+            **({"json": dict(json)} if json else {}),
+        )
         return response.status_code, _json(response)
 
 

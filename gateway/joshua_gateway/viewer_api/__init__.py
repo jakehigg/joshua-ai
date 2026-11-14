@@ -13,9 +13,10 @@ handlers take the request alone (``viewer_api.session``).
 A write route takes a JSON body, and the body carries the CSRF token of its
 scope. Every write also checks the ``Origin`` header (``viewer_api.edit``).
 
-The chat has two routes: ``POST /api/v1/chat/<person>/turns`` streams one turn
-as server-sent events, and ``GET /api/v1/chat/<person>/history`` gives a page
-of the conversation. Both go to the channels container (``CHANNELS_URL``).
+The chat has six routes: ``POST /api/v1/chat/<person>/turns`` streams one turn
+as server-sent events, ``GET /api/v1/chat/<person>/history`` gives a page
+of the conversation, and four ``held`` routes hold the messages written while
+a turn still runs. They all go to the channels container (``CHANNELS_URL``).
 
 The workspaces have nine routes under ``/api/v1/workspaces``, which proxy
 core (``CORE_URL``). See ``viewer_api.workspaces``.
@@ -126,6 +127,16 @@ def routes() -> list[Route]:
         ),
         Route(api_path("chat/{person}/turns"), _require_auth(chat.turns), methods=["POST"]),
         Route(api_path("chat/{person}/history"), _require_auth(chat.history)),
+        # The hold: the messages written while a turn of the thread still runs.
+        # ``take`` comes first, because it is a name and not a hold id.
+        Route(api_path("chat/{person}/held/take"), _require_auth(chat.take_held), methods=["POST"]),
+        Route(api_path("chat/{person}/held"), _require_auth(chat.held)),
+        Route(api_path("chat/{person}/held"), _require_auth(chat.hold), methods=["POST"]),
+        Route(
+            api_path("chat/{person}/held/{id}"),
+            _require_auth(chat.drop_held),
+            methods=["DELETE"],
+        ),
         Route(api_path("workspaces"), _require_auth(workspaces.list_workspaces)),
         Route(api_path("workspaces"), _require_auth(workspaces.create), methods=["POST"]),
         Route(api_path("workspaces/options"), _require_auth(workspaces.options)),

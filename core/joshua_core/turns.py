@@ -17,6 +17,14 @@ any other turn. The turn is cancelled only when the process shuts down. The
 stream tells the client what happens, in these events: ``accepted`` (core has
 the turn and it will finish), ``status`` (``queued`` while another turn of the
 conversation runs, then ``running``), ``delta``, ``done``, and ``error``.
+
+``/v1/holds`` is the hold of a chat thread: the messages a person wrote while
+a turn of that thread was still running. The hold lives here and not in the
+page, so a reload or a closed tab never loses a message. ``POST`` adds one,
+``GET`` lists them, ``DELETE`` takes one back before it goes, and
+``POST /v1/holds/take`` empties the hold and returns its messages joined in
+order, one per line, for the client to send as one turn. The hold lives in
+memory, as the turns in flight do, so a restart of core clears it.
 """
 
 from __future__ import annotations
@@ -24,15 +32,17 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from joshua_shared.contracts import TurnEvent
 from joshua_shared.fleet_auth import require_identity
 from joshua_shared.log import get_logger
+from pydantic import BaseModel, ConfigDict, Field
 
 from joshua_core.delivery import Deliverer, is_ignore, workspace_delivery_target
 from joshua_core.engine.types import FAILED_REPLY
@@ -51,6 +61,10 @@ SEEN_TTL_SECONDS = 900
 
 # The reply core delivers when a turn raises. No detail leaks to the channel.
 TURN_FAILED = FAILED_REPLY
+
+# How many messages one thread may hold, and how long one of them may be.
+HOLD_MAX = 20
+HOLD_MAX_CHARS = 8000
 
 
 class SeenCache:
@@ -76,6 +90,69 @@ class SeenCache:
             return True
         self._seen[key] = now
         return False
+
+
+@dataclass
+class HeldMessage:
+    """One message that waits for the running turn of a thread to finish."""
+
+    id: str
+    text: str
+    at: str
+
+    def as_json(self) -> dict[str, str]:
+        return {"id": self.id, "text": self.text, "at": self.at}
+
+
+def hold_key(channel: str, person: str) -> str:
+    """The key of one thread's hold: its channel and the person who writes it."""
+    return f"{channel}\n{person}"
+
+
+class HoldStore:
+    """The messages a person wrote while a turn of the same thread ran.
+
+    Every client of a thread sees the same list, so a reload, a second tab, or
+    a tab that was closed finds the messages again. ``take`` empties the hold
+    and gives back what was in it, in order: the caller sends it as one turn,
+    and no two callers can send it twice.
+    """
+
+    def __init__(self, max_held: int = HOLD_MAX) -> None:
+        self._max = max_held
+        self._held: dict[str, list[HeldMessage]] = {}
+
+    def list(self, key: str) -> list[HeldMessage]:
+        return list(self._held.get(key, []))
+
+    def add(self, key: str, text: str) -> HeldMessage | None:
+        """Hold one message. None when the thread already holds ``max_held``."""
+        held = self._held.setdefault(key, [])
+        if len(held) >= self._max:
+            return None
+        message = HeldMessage(id=uuid4().hex[:12], text=text, at=datetime.now(UTC).isoformat())
+        held.append(message)
+        return message
+
+    def remove(self, key: str, hold_id: str) -> bool:
+        """Take one held message back. False when the hold has no such message."""
+        held = self._held.get(key, [])
+        for index, message in enumerate(held):
+            if message.id == hold_id:
+                del held[index]
+                if not held:
+                    self._held.pop(key, None)
+                return True
+        return False
+
+    def take(self, key: str) -> list[HeldMessage]:
+        """Empty the hold of a thread and return what was in it, in order."""
+        return self._held.pop(key, [])
+
+
+def joined(held: list[HeldMessage]) -> str:
+    """The held messages as the text of one turn: in order, one per line."""
+    return "\n".join(message.text for message in held)
 
 
 @dataclass
@@ -110,6 +187,7 @@ class TurnService:
         self._deliverer = deliverer
         self._events = events
         self._seen = SeenCache()
+        self._holds = HoldStore()
         self._background: set[asyncio.Task[None]] = set()
         # The tasks of streamed turns. A task stays here until it ends, so no
         # one drops it while the client is gone.
@@ -237,6 +315,26 @@ class TurnService:
             **({"pull_only": True} if resolution.pull_only else {}),
             **extra,
         )
+
+    # --- the hold ----------------------------------------------------------
+
+    def held(self, channel: str, person: str) -> list[dict[str, str]]:
+        """The messages a thread holds, oldest first."""
+        return [m.as_json() for m in self._holds.list(hold_key(channel, person))]
+
+    def hold(self, channel: str, person: str, text: str) -> dict[str, str] | None:
+        """Hold one message of a thread, or None when the hold is full."""
+        message = self._holds.add(hold_key(channel, person), text)
+        return message.as_json() if message is not None else None
+
+    def drop_held(self, channel: str, person: str, hold_id: str) -> bool:
+        """Take one held message back before it goes."""
+        return self._holds.remove(hold_key(channel, person), hold_id)
+
+    def take_held(self, channel: str, person: str) -> dict[str, Any]:
+        """Empty the hold of a thread: the messages and their text as one turn."""
+        held = self._holds.take(hold_key(channel, person))
+        return {"text": joined(held), "held": [m.as_json() for m in held]}
 
     # --- POST /v1/turns ----------------------------------------------------
 
@@ -390,9 +488,19 @@ def _service(request: Request) -> TurnService:
     return request.app.state.ctx.turns
 
 
+class HoldBody(BaseModel):
+    """The thread of a hold call, and the message a ``POST`` adds to it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: str = Field(min_length=1, max_length=200)
+    person: str = Field(min_length=1, max_length=64)
+    text: str = Field(default="", max_length=HOLD_MAX_CHARS)
+
+
 def build_router() -> APIRouter:
     """The turns router. ``/v1/turns`` is channels-only; ``/v1/turns/stream``
-    also accepts ``laptop`` for a ``cli`` handle."""
+    and the ``/v1/holds`` routes also accept ``laptop`` for a ``cli`` handle."""
     router = APIRouter()
 
     @router.post("/v1/turns")
@@ -412,5 +520,50 @@ def build_router() -> APIRouter:
         if identity == "laptop" and (event.handle is None or event.handle.type != "cli"):
             return JSONResponse({"reason": "forbidden"}, status_code=403)
         return await _service(request).stream(event)
+
+    @router.get("/v1/holds")
+    async def get_holds(  # type: ignore[no-untyped-def]
+        request: Request,
+        channel: str = Query(min_length=1, max_length=200),
+        person: str = Query(min_length=1, max_length=64),
+        _identity: str = Depends(require_identity(["channels", "laptop"])),
+    ):
+        return JSONResponse({"held": _service(request).held(channel, person)})
+
+    @router.post("/v1/holds")
+    async def post_hold(  # type: ignore[no-untyped-def]
+        body: HoldBody,
+        request: Request,
+        _identity: str = Depends(require_identity(["channels", "laptop"])),
+    ):
+        text = body.text.strip()
+        if not text:
+            return JSONResponse({"reason": "bad_request"}, status_code=400)
+        service = _service(request)
+        message = service.hold(body.channel, body.person, text)
+        if message is None:
+            return JSONResponse({"reason": "hold_full"}, status_code=429)
+        return JSONResponse({"message": message, "held": service.held(body.channel, body.person)})
+
+    @router.post("/v1/holds/take")
+    async def post_holds_take(  # type: ignore[no-untyped-def]
+        body: HoldBody,
+        request: Request,
+        _identity: str = Depends(require_identity(["channels", "laptop"])),
+    ):
+        return JSONResponse(_service(request).take_held(body.channel, body.person))
+
+    @router.delete("/v1/holds/{hold_id}")
+    async def delete_hold(  # type: ignore[no-untyped-def]
+        hold_id: str,
+        request: Request,
+        channel: str = Query(min_length=1, max_length=200),
+        person: str = Query(min_length=1, max_length=64),
+        _identity: str = Depends(require_identity(["channels", "laptop"])),
+    ):
+        service = _service(request)
+        if not service.drop_held(channel, person, hold_id):
+            return JSONResponse({"reason": "unknown_hold"}, status_code=404)
+        return JSONResponse({"held": service.held(channel, person)})
 
     return router

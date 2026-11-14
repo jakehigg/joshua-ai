@@ -8,7 +8,8 @@ can be set in the environment: ``CHANNELS_CONNECT_TIMEOUT_S``,
 
 One ``httpx.AsyncClient`` holds the base URL and the bearer token. A turn is
 ``POST /v1/cli/turns/stream``; the answer is ``text/event-stream``. The
-history is ``GET /v1/cli/transcript``. The stream
+history is ``GET /v1/cli/transcript``, and the hold of a thread (the messages
+written while a turn ran) is ``/v1/cli/held``. The stream
 has no read timeout, because a turn can take minutes. A refusal before the
 stream starts raises ``ChannelsError``; a connection failure raises
 ``ChannelsUnavailable``. Neither error carries the token.
@@ -33,6 +34,7 @@ CHANNELS_URL_ENV = "CHANNELS_URL"
 VIEWER_TOKEN_ENV = "JOSHUA_TOKEN_VIEWER"
 TURN_PATH = "/v1/cli/turns/stream"
 TRANSCRIPT_PATH = "/v1/cli/transcript"
+HELD_PATH = "/v1/cli/held"
 HEALTH_PATH = "/healthz"
 LINE_END = re.compile(r"[\r\n]")
 
@@ -307,6 +309,46 @@ class ChannelsClient:
         if not isinstance(page, dict):
             raise ChannelsError(response.status_code, "bad_answer")
         return page
+
+    async def held(
+        self,
+        method: str,
+        person: str,
+        *,
+        path: str = "",
+        text: str | None = None,
+        workspace: str = "",
+    ) -> dict[str, Any]:
+        """Call one of the hold routes of channels and return its answer.
+
+        ``path`` is what follows ``/v1/cli/held`` (``/take`` or ``/<hold id>``).
+        A read sends the person and the workspace as query values, a write
+        sends them in the body, as the turn route takes them. The call uses
+        the outbox timeout.
+        """
+        thread: dict[str, str] = {
+            "person": person,
+            **({"workspace": workspace} if workspace else {}),
+        }
+        body = {**thread, **({"text": text} if text is not None else {})}
+        try:
+            response = await self._client.request(
+                method,
+                f"{HELD_PATH}{path}",
+                timeout=self._outbox_timeout,
+                **({"json": body} if method == "POST" else {"params": thread}),
+            )
+        except httpx.HTTPError as exc:
+            raise ChannelsUnavailable(type(exc).__name__) from None
+        if not response.is_success:
+            raise _refusal(response, response.content)
+        try:
+            answer = response.json()
+        except ValueError:
+            raise ChannelsError(response.status_code, "bad_answer") from None
+        if not isinstance(answer, dict):
+            raise ChannelsError(response.status_code, "bad_answer")
+        return answer
 
     async def healthz(self) -> bool:
         """Return True when channels answers ``/healthz`` with 200 and ``{"ok": true}``."""

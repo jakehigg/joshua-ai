@@ -101,7 +101,14 @@ def _bearer(token: str) -> dict[str, str]:
 
 def test_the_router_serves_every_cli_route() -> None:
     paths = {r.path for r in build_cli_router().routes}
-    assert paths == {"/v1/cli/turns/stream", "/v1/cli/outbox", "/v1/cli/transcript"}
+    assert paths == {
+        "/v1/cli/turns/stream",
+        "/v1/cli/outbox",
+        "/v1/cli/transcript",
+        "/v1/cli/held",
+        "/v1/cli/held/take",
+        "/v1/cli/held/{hold_id}",
+    }
 
 
 # --- inbound ---------------------------------------------------------------
@@ -784,3 +791,107 @@ async def test_a_caller_that_leaves_does_not_close_the_stream_to_core(tmp_path: 
     await asyncio.wait_for(core.finished.wait(), 2)
     assert core.closed_early is False
     assert len(seen) == 2
+
+
+# --- the hold --------------------------------------------------------------
+
+HELD_BODY = {"held": [{"id": "h1", "text": "and one more", "at": "2026-11-14T10:00:00+00:00"}]}
+
+
+def _make_held(tmp_path: Path, core: TranscriptCore) -> Any:
+    app, _ = _make(tmp_path, core=core.client)
+    return app
+
+
+async def test_a_held_message_goes_to_core_with_the_channels_token(tmp_path: Path) -> None:
+    core = TranscriptCore(body=HELD_BODY)
+    async with _client(_make_held(tmp_path, core)) as client:
+        response = await client.post(
+            "/v1/cli/held",
+            json={"person": "alex", "text": "and one more"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert response.status_code == 200
+    assert response.json() == HELD_BODY
+    request = core.requests[0]
+    assert request.method == "POST"
+    assert request.url.path == "/v1/holds"
+    assert request.headers["authorization"] == f"Bearer {CHANNELS_TOKEN}"
+    assert json.loads(request.content) == {
+        "channel": "cli:alex",
+        "person": "alex",
+        "text": "and one more",
+    }
+
+
+async def test_a_workspace_message_is_held_for_that_thread(tmp_path: Path) -> None:
+    core = TranscriptCore(body=HELD_BODY)
+    async with _client(_make_held(tmp_path, core)) as client:
+        await client.post(
+            "/v1/cli/held",
+            json={"person": "alex", "text": "later", "workspace": "solar"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert json.loads(core.requests[0].content)["channel"] == "workspace:solar"
+
+
+async def test_the_hold_is_read_and_taken_and_one_message_removed(tmp_path: Path) -> None:
+    core = TranscriptCore(body=HELD_BODY)
+    async with _client(_make_held(tmp_path, core)) as client:
+        listed = await client.get(
+            "/v1/cli/held", params={"person": "alex"}, headers=_bearer(LAPTOP_TOKEN)
+        )
+        await client.post(
+            "/v1/cli/held/take", json={"person": "alex"}, headers=_bearer(LAPTOP_TOKEN)
+        )
+        await client.delete(
+            "/v1/cli/held/h1", params={"person": "alex"}, headers=_bearer(LAPTOP_TOKEN)
+        )
+    assert listed.json() == HELD_BODY
+    read, take, drop = core.requests
+    assert read.method == "GET"
+    assert dict(read.url.params) == {"channel": "cli:alex", "person": "alex"}
+    assert (take.method, take.url.path) == ("POST", "/v1/holds/take")
+    assert json.loads(take.content) == {"channel": "cli:alex", "person": "alex"}
+    assert (drop.method, drop.url.path) == ("DELETE", "/v1/holds/h1")
+    assert dict(drop.url.params) == {"channel": "cli:alex", "person": "alex"}
+
+
+async def test_an_empty_held_message_never_reaches_core(tmp_path: Path) -> None:
+    core = TranscriptCore(body=HELD_BODY)
+    async with _client(_make_held(tmp_path, core)) as client:
+        response = await client.post(
+            "/v1/cli/held", json={"person": "alex", "text": "   "}, headers=_bearer(LAPTOP_TOKEN)
+        )
+    assert response.status_code == 400
+    assert response.json() == {"reason": "bad_request"}
+    assert core.requests == []
+
+
+async def test_the_hold_refuses_an_unknown_person_and_a_caller_not_on_the_list(
+    tmp_path: Path,
+) -> None:
+    core = TranscriptCore(body=HELD_BODY)
+    async with _client(_make_held(tmp_path, core)) as client:
+        unknown = await client.get(
+            "/v1/cli/held", params={"person": "nobody"}, headers=_bearer(LAPTOP_TOKEN)
+        )
+        forbidden = await client.get(
+            "/v1/cli/held", params={"person": "alex"}, headers=_bearer(CORE_TOKEN)
+        )
+        nobody = await client.get("/v1/cli/held", params={"person": "alex"})
+    assert unknown.status_code == 403
+    assert unknown.json() == {"reason": "unknown_person"}
+    assert forbidden.status_code == 403
+    assert nobody.status_code == 401
+    assert core.requests == []
+
+
+async def test_the_hold_passes_a_core_refusal_through(tmp_path: Path) -> None:
+    core = TranscriptCore(status=404, body={"reason": "unknown_hold"})
+    async with _client(_make_held(tmp_path, core)) as client:
+        response = await client.delete(
+            "/v1/cli/held/gone", params={"person": "alex"}, headers=_bearer(LAPTOP_TOKEN)
+        )
+    assert response.status_code == 404
+    assert response.json() == {"reason": "unknown_hold"}

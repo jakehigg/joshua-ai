@@ -17,6 +17,13 @@ sees a closed stream and the turn finishes. See ``_relay``.
 ``GET /v1/cli/outbox`` returns what core sent to this person while they were
 away, and marks it read.
 
+The ``/v1/cli/held`` routes carry the hold of a chat thread, which core keeps
+(``/v1/holds``): the messages a person wrote while a turn of that thread was
+still running. ``GET`` lists them, ``POST`` adds one, ``DELETE
+/v1/cli/held/{id}`` takes one back, and ``POST /v1/cli/held/take`` empties the
+hold and returns its messages joined as the text of one turn. Each call names
+the person, and the optional ``workspace``, as a turn does.
+
 A turn or a transcript read may name a ``workspace`` (the slug or the id). The
 turn then goes to the channel ``workspace:<name>`` and the read gets the
 thread of that workspace. Core finds the workspace for the person and refuses
@@ -33,7 +40,7 @@ import asyncio
 import json
 import posixpath
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -308,6 +315,49 @@ def _auth(request: Request, ctx: ChannelsContext) -> JSONResponse | None:
     return None
 
 
+def _hold_thread(source: Mapping[str, Any], ctx: ChannelsContext) -> tuple[str, str] | JSONResponse:
+    """The channel and the person of a hold call, or the answer that refuses it.
+
+    ``source`` is the query of a read or the JSON body of a write. It names
+    the person and, for a workspace thread, the ``workspace``.
+    """
+    person_id = str(source.get("person") or "").strip()
+    if not person_id:
+        return JSONResponse({"reason": "bad_request"}, status_code=400)
+    if ctx.settings.person(person_id) is None:
+        return JSONResponse({"reason": "unknown_person"}, status_code=403)
+    if ctx.core_client is None:
+        return JSONResponse({"reason": "core_unavailable"}, status_code=503)
+    return _channel_id(person_id, _workspace_ref(source.get("workspace"))), person_id
+
+
+async def _hold_call(
+    ctx: ChannelsContext,
+    method: str,
+    path: str = "",
+    *,
+    params: Mapping[str, str] | None = None,
+    json_body: Mapping[str, str] | None = None,
+) -> JSONResponse:
+    """Pass one hold call on to core and answer with its status and body."""
+    assert ctx.core_client is not None
+    try:
+        status, body = await ctx.core_client.call_hold(method, path, params=params, json=json_body)
+    except httpx.HTTPError as exc:
+        logger.warning({"message": "cli hold: core unavailable", "error": type(exc).__name__})
+        return JSONResponse({"reason": "core_unavailable"}, status_code=503)
+    return JSONResponse(body, status_code=status)
+
+
+async def _hold_body(request: Request) -> dict[str, Any]:
+    """The JSON body of a hold write. A body that is not an object is empty."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 — a bad body is a 400, not a 500
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
 def build_cli_router() -> APIRouter:
     """The terminal channel routes."""
     router = APIRouter()
@@ -452,5 +502,63 @@ def build_cli_router() -> APIRouter:
             )
             return JSONResponse({"reason": "core_unavailable"}, status_code=503)
         return JSONResponse(body, status_code=status)
+
+    @router.get("/v1/cli/held")
+    async def get_cli_held(request: Request):  # type: ignore[no-untyped-def]
+        ctx = _context(request)
+        denied = _auth(request, ctx)
+        if denied is not None:
+            return denied
+        thread = _hold_thread(request.query_params, ctx)
+        if isinstance(thread, JSONResponse):
+            return thread
+        channel, person_id = thread
+        return await _hold_call(ctx, "GET", params={"channel": channel, "person": person_id})
+
+    @router.post("/v1/cli/held")
+    async def post_cli_held(request: Request):  # type: ignore[no-untyped-def]
+        ctx = _context(request)
+        denied = _auth(request, ctx)
+        if denied is not None:
+            return denied
+        body = await _hold_body(request)
+        thread = _hold_thread(body, ctx)
+        if isinstance(thread, JSONResponse):
+            return thread
+        channel, person_id = thread
+        text = str(body.get("text") or "")
+        if not text.strip():
+            return JSONResponse({"reason": "bad_request"}, status_code=400)
+        return await _hold_call(
+            ctx, "POST", json_body={"channel": channel, "person": person_id, "text": text}
+        )
+
+    @router.post("/v1/cli/held/take")
+    async def post_cli_held_take(request: Request):  # type: ignore[no-untyped-def]
+        ctx = _context(request)
+        denied = _auth(request, ctx)
+        if denied is not None:
+            return denied
+        thread = _hold_thread(await _hold_body(request), ctx)
+        if isinstance(thread, JSONResponse):
+            return thread
+        channel, person_id = thread
+        return await _hold_call(
+            ctx, "POST", "/take", json_body={"channel": channel, "person": person_id}
+        )
+
+    @router.delete("/v1/cli/held/{hold_id}")
+    async def delete_cli_held(hold_id: str, request: Request):  # type: ignore[no-untyped-def]
+        ctx = _context(request)
+        denied = _auth(request, ctx)
+        if denied is not None:
+            return denied
+        thread = _hold_thread(request.query_params, ctx)
+        if isinstance(thread, JSONResponse):
+            return thread
+        channel, person_id = thread
+        return await _hold_call(
+            ctx, "DELETE", f"/{hold_id}", params={"channel": channel, "person": person_id}
+        )
 
     return router

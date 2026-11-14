@@ -33,8 +33,17 @@ person, ``out`` is Joshua, and any other direction is ``system``. A person row
 that starts with the speech marker loses the marker and gets
 ``"spoken": true``.
 
+The hold is the messages the person wrote while a turn of the thread was
+still running. It lives in core, so a reload or a closed tab never loses one.
+``GET /api/v1/chat/<person>/held`` lists them (``{held: [{id, text, at}]}``),
+``POST`` adds one (``{"text", "workspace"}``), ``DELETE
+/api/v1/chat/<person>/held/<id>`` takes one back, and ``POST
+/api/v1/chat/<person>/held/take`` empties the hold and answers with ``text``:
+every held message in order, one per line, which the page then sends as one
+turn.
+
 The route serves any person id that ``joshua.yaml`` knows. With no
-``CHANNELS_URL`` or no viewer token, both routes answer 503.
+``CHANNELS_URL`` or no viewer token, every route answers 503.
 
 Every refusal is ``{"error": "<message>"}``, with a ``reason`` when the
 refusal came from channels.
@@ -107,6 +116,8 @@ REASONS: dict[str, tuple[int, str]] = {
     "unknown_sender": (404, UNKNOWN_PERSON),
     "unknown_person": (404, UNKNOWN_PERSON),
     "rate_limited": (429, "too many messages; wait a minute and try again"),
+    "unknown_hold": (404, "that message is not waiting any more"),
+    "hold_full": (429, "too many messages are waiting; wait for Joshua to finish one"),
     "core_unavailable": (503, "Joshua is not available right now"),
     "pipeline_unavailable": (
         503,
@@ -447,6 +458,132 @@ async def turns(request: Request, person: Person) -> JSONResponse | StreamingRes
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
+
+
+def map_held(value: Any) -> list[dict[str, Any]]:
+    """The held messages of a thread, each ``{id, text, at}``, in order."""
+    held: list[dict[str, Any]] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            continue
+        held.append(
+            {
+                "id": item["id"],
+                "text": item["text"] if isinstance(item.get("text"), str) else "",
+                "at": item["at"] if isinstance(item.get("at"), str) else "",
+            }
+        )
+    return held
+
+
+async def _hold_call(
+    request: Request,
+    method: str,
+    *,
+    path: str = "",
+    text: str | None = None,
+    workspace: str = "",
+) -> dict[str, Any] | JSONResponse:
+    """Call one hold route of channels for the person of the path.
+
+    The answer is the body of channels, or the refusal to send the browser.
+    """
+    who = request.path_params["person"]
+    if not _known(who):
+        return _json({"error": UNKNOWN_PERSON}, 404)
+    client = viewer_channels.from_env()
+    if client is None:
+        return _json({"error": NOT_CONFIGURED}, 503)
+    try:
+        return await client.held(method, who, path=path, text=text, workspace=workspace)
+    except ChannelsError as exc:
+        return channels_error(exc)
+    except ChannelsUnavailable:
+        return unreachable()
+    finally:
+        await client.aclose()
+
+
+async def _hold_body(request: Request) -> tuple[str, str] | JSONResponse:
+    """The ``text`` and the ``workspace`` of a hold write, or the refusal."""
+    try:
+        payload = json.loads(await request.body() or b"{}")
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        return _json({"error": BAD_BODY}, 422)
+    try:
+        workspace = _workspace_of(payload.get("workspace"))
+    except _Refused as exc:
+        return _json({"error": exc.message}, exc.status)
+    raw = payload.get("text")
+    return (raw if isinstance(raw, str) else ""), workspace
+
+
+async def held(request: Request, person: Person) -> JSONResponse:
+    """The messages this thread holds, oldest first."""
+    try:
+        workspace = _workspace_of(request.query_params.get("workspace"))
+    except _Refused as exc:
+        return _json({"error": exc.message}, exc.status)
+    answer = await _hold_call(request, "GET", workspace=workspace)
+    if isinstance(answer, JSONResponse):
+        return answer
+    return _json({"held": map_held(answer.get("held"))}, 200)
+
+
+async def hold(request: Request, person: Person) -> JSONResponse:
+    """Hold one message, written while a turn of this thread still runs."""
+    if not _origin_ok(request):
+        return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
+    body = await _hold_body(request)
+    if isinstance(body, JSONResponse):
+        return body
+    text, workspace = body
+    try:
+        checked = _checked_text(text, has_file=False)
+    except _Refused as exc:
+        return _json({"error": exc.message}, exc.status)
+    answer = await _hold_call(request, "POST", text=checked, workspace=workspace)
+    if isinstance(answer, JSONResponse):
+        return answer
+    return _json({"held": map_held(answer.get("held"))}, 200)
+
+
+async def take_held(request: Request, person: Person) -> JSONResponse:
+    """Empty the hold and answer with its messages as the text of one turn."""
+    if not _origin_ok(request):
+        return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
+    body = await _hold_body(request)
+    if isinstance(body, JSONResponse):
+        return body
+    answer = await _hold_call(request, "POST", path="/take", workspace=body[1])
+    if isinstance(answer, JSONResponse):
+        return answer
+    taken = map_held(answer.get("held"))
+    # Core joins the messages, one per line; the join here is only a fallback.
+    text = (
+        answer["text"]
+        if isinstance(answer.get("text"), str)
+        else "\n".join(m["text"] for m in taken)
+    )
+    return _json({"text": text, "held": taken}, 200)
+
+
+async def drop_held(request: Request, person: Person) -> JSONResponse:
+    """Take one held message back, before it goes."""
+    if not _origin_ok(request):
+        return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
+    try:
+        workspace = _workspace_of(request.query_params.get("workspace"))
+    except _Refused as exc:
+        return _json({"error": exc.message}, exc.status)
+    answer = await _hold_call(
+        request, "DELETE", path=f"/{request.path_params['id']}", workspace=workspace
+    )
+    if isinstance(answer, JSONResponse):
+        return answer
+    return _json({"held": map_held(answer.get("held"))}, 200)
 
 
 def _bad(message: str) -> JSONResponse:
