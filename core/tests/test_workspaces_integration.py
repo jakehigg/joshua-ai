@@ -1,21 +1,27 @@
 """Workspaces against the real Postgres repo and the real routes: the schema,
 the slugs, the scoping, the channel and conversation of a create, the items,
-the nightly skip, the main conversation, and the usage by conversation."""
+the nightly skip, the main conversation, the usage by conversation, and the
+two people of a shared workspace writing one thread."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
+from engine_fakes import FakeComposer, fake_derive_profile
 from fastapi import FastAPI
+from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.usage import Usage
 from joshua_core.engine.workspace import WorkspaceBlock
 from joshua_core.store.repo import SlugTaken
 from joshua_core.store.usage_events import UsageEvent
 from joshua_core.transcript_api import build_transcript_router
+from joshua_core.turns import TurnService
+from joshua_core.turns import build_router as build_turns_router
 from joshua_core.usage_api import build_usage_router
 from joshua_core.workspaces_api import build_workspaces_router
 from joshua_shared import config as config_module
@@ -81,17 +87,21 @@ async def seeded(repo):
         await conn.execute("TRUNCATE people, channels, usage_event RESTART IDENTITY CASCADE")
 
 
-def _app(repo, settings=None) -> FastAPI:
+def _app(repo, settings=None, turns=None) -> FastAPI:
     settings = settings or config_module.parse(CONFIG, env={}, source="<test>")
     app = FastAPI()
     app.state.ctx = SimpleNamespace(
         settings=settings,
         repo=repo,
         manager=SimpleNamespace(workspace_block=None, pending_for=lambda conversation_id: None),
+        # The turns and the holds, for the test that runs a turn. The other
+        # tests call no route of that router.
+        turns=turns,
     )
     app.include_router(build_workspaces_router())
     app.include_router(build_transcript_router())
     app.include_router(build_usage_router(clock=lambda: datetime.now(UTC)))
+    app.include_router(build_turns_router())
     return app
 
 
@@ -928,3 +938,134 @@ async def test_a_file_item_added_twice_is_one_item_and_keeps_its_title(seeded) -
     assert again.id == first.id
     items = await seeded.list_workspace_items(ws.id)
     assert [(i.title, i.url) for i in items] == [("a garden bed", url)]
+
+
+# --- two people in one shared thread ---------------------------------------
+
+
+class _Deliveries:
+    """A deliverer that records. A workspace reply reaches no channel."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    async def deliver(self, target: str, text: str, attachments: Any = ()) -> bool:
+        self.sent.append((target, text))
+        return True
+
+
+class _HeldOpenManager:
+    """The real manager, with each turn held open until the test lets it end.
+
+    A turn writes its rows, then waits, so the second person writes while the
+    turn of the first one still runs.
+    """
+
+    def __init__(self, inner: ConversationManager) -> None:
+        self._inner = inner
+        self.workspace_block = None
+        self.running = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def run_turn(self, *args: Any, **kwargs: Any) -> Any:
+        result = await self._inner.run_turn(*args, **kwargs)
+        self.running.set()
+        await self.release.wait()
+        return result
+
+
+def _turn_event(ref: str, person: str, text: str) -> dict[str, Any]:
+    """One terminal turn of a person on a workspace thread."""
+    return {
+        "channel": f"workspace:{ref}",
+        "chat": {"kind": "dm", "id": person},
+        "handle": {"type": "cli", "id": person},
+        "text": text,
+        "message_id": None,
+    }
+
+
+async def test_two_people_write_one_shared_thread_and_each_holds_their_own(
+    seeded, tmp_path
+) -> None:
+    """A shared workspace end to end: two people, one thread.
+
+    Alex makes it and writes. Mia writes while his turn still runs, so her
+    message waits in the hold of the thread under her name, and goes as her own
+    turn after his. Every row lands in the one conversation of the channel with
+    the name of the person who wrote it, nothing is delivered to a channel, and
+    both of them read the whole thread.
+    """
+    settings = config_module.parse(CONFIG, env={}, source="<test>")
+    manager = _HeldOpenManager(
+        ConversationManager(
+            repo=seeded,
+            settings=settings,
+            composer=FakeComposer(),
+            derive_profile=fake_derive_profile,
+            agent_backend="stub",
+            data_dir=tmp_path,
+        )
+    )
+    delivered = _Deliveries()
+    turns = TurnService(repo=seeded, settings=settings, manager=manager, deliverer=delivered)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_app(seeded, settings, turns)), base_url="http://core"
+    ) as c:
+        made = await _create(c, title="Thanksgiving", members=["mia"])
+        channel, hold = made["channel"], {"channel": made["channel"], "person": "mia"}
+
+        first = await c.post(
+            "/v1/turns",
+            json=_turn_event(made["slug"], "alex", "who brings the pie?"),
+            headers=_h(CHANNELS),
+        )
+        assert first.status_code == 202
+        await asyncio.wait_for(manager.running.wait(), 10)
+
+        # Mia writes while his turn runs. The hold is of the thread and of her:
+        # Alex, on the same channel, holds nothing.
+        added = await c.post("/v1/holds", json={**hold, "text": "I will"}, headers=_h(CHANNELS))
+        assert added.status_code == 200
+        his = await c.get(
+            "/v1/holds", params={"channel": channel, "person": "alex"}, headers=_h(CHANNELS)
+        )
+        assert his.json()["held"] == []
+        manager.release.set()
+        await turns.drain()
+
+        taken = await c.post("/v1/holds/take", json=hold, headers=_h(CHANNELS))
+        assert taken.json()["text"] == "I will"
+        second = await c.post(
+            "/v1/turns",
+            json=_turn_event(f"shared/{made['slug']}", "mia", taken.json()["text"]),
+            headers=_h(CHANNELS),
+        )
+        assert second.status_code == 202
+        await turns.drain()
+
+        # One thread for everyone: the conversation of the channel belongs to
+        # nobody, and neither person has one of their own.
+        conversation = await seeded.find_conversation(channel, None)
+        assert conversation is not None and conversation.person_id is None
+        for person in ("alex", "mia"):
+            assert await seeded.find_conversation(channel, person) is None
+
+        # Both of them read that thread, and each row names who wrote it.
+        for person in ("alex", "mia"):
+            body = (
+                await c.get(
+                    "/v1/transcript",
+                    params={"channel": f"workspace:shared/{made['slug']}", "person": person},
+                    headers=_h(CHANNELS),
+                )
+            ).json()
+            rows = [(m["direction"], m["text"], m["meta"].get("speaker")) for m in body["messages"]]
+            assert body["conversation_id"] == conversation.id, person
+            assert [r[0] for r in rows] == ["in", "out", "in", "out"], person
+            assert rows[0] == ("in", "who brings the pie?", "Alex"), person
+            assert rows[2] == ("in", "I will", "Mia"), person
+            # A reply of Joshua's names nobody.
+            assert [r[2] for r in rows[1::2]] == [None, None], person
+
+    assert delivered.sent == []  # a workspace reply reaches no channel
