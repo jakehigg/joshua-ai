@@ -81,6 +81,16 @@ def _channel(channel_type="workspace") -> Channel:
     )
 
 
+def _shared_channel() -> Channel:
+    """The channel of a shared workspace: one thread, several writers."""
+    return Channel(
+        id=f"workspace:{WS_ID}",
+        channel_type="workspace",
+        default_person_id="alex",
+        session_mode="shared",
+    )
+
+
 class WsRepo(FakeRepo):
     """The fake repo with the workspace calls the engine makes."""
 
@@ -180,6 +190,11 @@ def _conversation(sdk: str | None = None) -> Conversation:
     )
 
 
+def _shared_conversation() -> Conversation:
+    """The thread of a shared workspace belongs to nobody."""
+    return Conversation(id="c-ws", channel_id=f"workspace:{WS_ID}", person_id=None)
+
+
 # --- the profile --------------------------------------------------------------
 
 
@@ -190,6 +205,21 @@ def test_workspace_channel_adds_the_prompt_file_to_the_dm_profile() -> None:
     assert profile.name == "dm"
     assert profile.prompt_files == (*plain.prompt_files, "workspace.md")
     assert "workspace.md" not in plain.prompt_files
+
+
+def test_a_shared_workspace_takes_the_group_profile_and_the_shared_file() -> None:
+    profile = derive_profile(None, _shared_channel())
+    assert profile.name == "group"
+    assert profile.prompt_files == (
+        "base.md",
+        "people.md",
+        "chat.md",
+        "group.md",
+        "registration.md",
+        "speech.md",
+        "workspace.md",
+        "workspace_shared.md",
+    )
 
 
 # --- the session build ----------------------------------------------------------
@@ -230,6 +260,36 @@ async def test_more_servers_than_the_limit_turn_tool_search_on(tmp_path, monkeyp
     assert built.inference.tool_search is True
     # No model picked: the model of the chat job stays.
     assert built.inference.model == make_settings(mcp=MCP).core.model
+
+
+async def test_a_shared_workspace_session_takes_the_servers_of_the_row(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    # `secret` is mia's alone, and the thread belongs to nobody, so the filter
+    # by person would drop it. The create route stored what both people may use.
+    workspace = _ws(shared=True, members=("mia",), servers=("tasks", "secret"))
+    manager = make_manager(WsRepo(workspace), tmp_path)
+
+    built = await manager._build_session(_shared_channel(), _shared_conversation(), resume=None)
+
+    options = built.session._options
+    assert list(options.mcp_servers) == ["tasks", "secret"]
+    for server in options.mcp_servers.values():
+        headers = server["headers"]
+        assert headers["X-Joshua-Person"] == "unknown"
+        assert headers["X-Joshua-Role"] == "member"
+        assert headers["X-Joshua-Workspace"] == WS_ID
+        assert "X-Joshua-Group" not in headers
+
+
+def test_a_shared_workspace_is_a_guest_thread_when_one_person_is_not_a_member(tmp_path) -> None:
+    manager = make_manager(WsRepo(), tmp_path)
+    both_write = _ws(shared=True, members=("mia",))
+    stranger = _ws(shared=True, members=("mia", "ghost"))
+    channel, conversation = _shared_channel(), _shared_conversation()
+    assert manager._conversation_role(channel, conversation, both_write) == "member"
+    assert manager._conversation_role(channel, conversation, stranger) == "guest"
+    # A shared workspace is no group chat, so no group header goes out.
+    assert manager._conversation_group(channel, conversation) is None
 
 
 async def test_a_normal_chat_session_is_unchanged(tmp_path, monkeypatch):
@@ -317,6 +377,13 @@ def test_the_block_shows_unseen_items_and_recent_rows_after_the_items() -> None:
     assert "- link: Turkey recipe (recipe)" in text
 
 
+def test_the_block_of_a_shared_workspace_names_its_people_after_the_goal() -> None:
+    lines = ws.render_block(_ws(shared=True, members=("mia",)), []).splitlines()
+    assert lines[lines.index("Goal: Go solar") + 1] == "People: alex (owner), mia"
+    # A personal workspace has one person, and the block says nothing about it.
+    assert "People:" not in ws.render_block(_ws(), [])
+
+
 def test_the_block_without_items() -> None:
     assert "Items: none yet." in ws.render_block(_ws(), [])
 
@@ -334,6 +401,14 @@ def test_recent_lines_skip_failed_blank_and_silent_rows_and_cut_long_text() -> N
     assert len(lines) == 2
     assert lines[1].startswith("- you: xxx") and lines[1].endswith("...")
     assert len(lines[1]) < 320
+
+
+def test_recent_lines_label_a_row_with_its_speaker() -> None:
+    rows = [
+        {"direction": "in", "content": "my turn", "status": "ok", "meta": {"speaker": "Mia"}},
+        {"direction": "in", "content": "and mine", "status": "ok"},
+    ]
+    assert ws.recent_lines(rows, "alex") == ["- Mia: my turn", "- alex: and mine"]
 
 
 def _ctx(channel: Channel, *, fresh: bool = False) -> TurnCtx:
@@ -632,6 +707,14 @@ def test_exclude_paths_map_documents_and_wiki_pages() -> None:
         "documents/alex/from-url.md",
         "wiki/notes/solar.md",
         "wiki/garden.md",
+    }
+
+
+def test_exclude_paths_of_a_shared_workspace_are_shared_documents() -> None:
+    items = [_item(kind="document", ref="solar-quote"), _item(kind="wiki", ref="notes/solar.md")]
+    assert ws.exclude_paths(_ws(shared=True, members=("mia",)), items) == {
+        "documents/shared/solar-quote.md",
+        "wiki/notes/solar.md",
     }
 
 
