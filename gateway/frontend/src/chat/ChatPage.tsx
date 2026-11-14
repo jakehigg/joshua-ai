@@ -159,7 +159,16 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
     view.pending !== null,
   );
   const polling = !turn.running && (view.pending !== null || detached !== null);
-  const history = useHistory(person, setView, turn.isRunning, showToast, workspace, polling);
+  // A shared workspace has other writers: its history refreshes on its own.
+  const history = useHistory(
+    person,
+    setView,
+    turn.isRunning,
+    showToast,
+    workspace,
+    polling,
+    ws?.shared ?? false,
+  );
   refreshRef.current = history.refresh;
   // The stream is gone: look for the turn now, not at the first poll.
   const { refresh: refreshHistory } = history;
