@@ -49,7 +49,7 @@ from joshua_assignments.comments import (
     texts,
 )
 from joshua_assignments.digest import lede, next_step
-from joshua_assignments.manager import Manager, saved_ref
+from joshua_assignments.manager import Manager, may_read, saved_ref
 from joshua_assignments.settings import Settings
 from joshua_assignments.spec import assignment_title
 from joshua_assignments.store import (
@@ -206,8 +206,16 @@ def _not_found() -> JSONResponse:
 
 
 def _visible(row: dict[str, Any] | None, person: str) -> bool:
-    """True for a row of ``person`` that is not a deleted draft."""
-    return row is not None and row["person_id"] == person and row.get("deleted_at") is None
+    """True for a row that ``person`` may read (``may_read``: the owner, or a
+    person of the shared workspace that started it) and that is not a deleted
+    draft."""
+    return row is not None and may_read(row, person) and row.get("deleted_at") is None
+
+
+def _owned(row: dict[str, Any] | None, person: str) -> bool:
+    """True for a row of ``person`` that is not a deleted draft: only the
+    owner writes a comment on an assignment or deletes one."""
+    return _visible(row, person) and row is not None and row["person_id"] == person
 
 
 class ReadApi:
@@ -233,7 +241,7 @@ class ReadApi:
         except ValueError:
             return _error(400, f"limit is a number from 1 to {MAX_LIMIT}")
         statuses = statuses_of(state_name) if state_name is not None else None
-        rows = await self.manager.store.recent(person, limit, None, statuses)
+        rows = await self.manager.store.recent(person, limit, None, statuses, shared=True)
         names = await self._names(rows)
         return JSONResponse({"items": [item(row, names) for row in rows]})
 
@@ -287,11 +295,13 @@ class ReadApi:
     # --- comments -----------------------------------------------------------
 
     async def _parent(
-        self, request: Request, kind: str
+        self, request: Request, kind: str, *, write: bool = False
     ) -> tuple[str, Parent, dict[str, Any]] | JSONResponse:
         """The person, the parent, and its row, or the error.
 
-        A row of another person is 404, as a row that does not exist."""
+        A row of another person is 404, as a row that does not exist. A person
+        of a shared workspace reads the comments of a run that started there,
+        and a ``write`` is for the owner only: 403 for them."""
         person = _person(request)
         if person is None:
             return _error(400, "person is required: a person id")
@@ -305,12 +315,14 @@ class ReadApi:
         if not _visible(row, person):
             return _not_found()
         assert row is not None
+        if write and not _owned(row, person):
+            return _error(403, "only the person who started the assignment changes it")
         if kind == "saved":
             row = {"spec": row.get("spec")}
         return person, parent, row
 
     async def _comments(self, request: Request, kind: str) -> Response:
-        found = await self._parent(request, kind)
+        found = await self._parent(request, kind, write=request.method != "GET")
         if isinstance(found, JSONResponse):
             return found
         person, parent, row = found
@@ -344,7 +356,7 @@ class ReadApi:
         return JSONResponse(comment_view(comment, lines), status_code=201)
 
     async def _delete_comment(self, request: Request, kind: str) -> Response:
-        found = await self._parent(request, kind)
+        found = await self._parent(request, kind, write=True)
         if isinstance(found, JSONResponse):
             return found
         person, parent, _ = found

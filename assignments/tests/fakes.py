@@ -114,12 +114,17 @@ class FakeStore:
         status: str | None = None,
         statuses: Collection[str] | None = None,
         saved_id: int | None = None,
+        shared: bool = False,
     ) -> list[dict[str, Any]]:
         rows = [
             row
             for row in sorted(self.rows.values(), key=lambda r: r["id"], reverse=True)
             if row["deleted_at"] is None
-            and (person_id is None or row["person_id"] == person_id)
+            and (
+                person_id is None
+                or row["person_id"] == person_id
+                or (shared and person_id in (row["spec"] or {}).get("workspace_people", []))
+            )
             and (status is None or row["status"] == status)
             and (statuses is None or row["status"] in statuses)
             and (saved_id is None or row["saved_id"] == saved_id)

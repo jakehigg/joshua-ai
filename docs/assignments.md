@@ -328,7 +328,8 @@ start_assignment(rerun=12, note="I changed the plan: keep the redirects.")
 - A bearer in `ASSIGNMENTS_TOKENS` names one person. That person must be a
   member in `people`. A guest gets `403` on every tool.
 - A person sees only their own assignments. Another person's assignment is
-  `404 not found`, the same as an id that does not exist.
+  `404 not found`, the same as an id that does not exist. One exception: the
+  people of a shared workspace read a run that started there (see below).
 - `ADDON_TOKEN` names no person. It may use `assignment_status` and
   `list_assignments` for every assignment. Every other tool, also each
   comment tool, gives it `403`.
@@ -1040,6 +1041,17 @@ with no destination still gets them. A re-run takes the workspace of its own
 start. `start_assignment` and `assignment_status` return a `resource_link` to
 `/assignments/<id>` (under `workspaces.viewer_url` when it is set) on a call from
 a workspace.
+
+A run that a shared workspace started belongs to the person who started it,
+and the other people of that workspace read it. The gateway sets
+`_meta["joshua/workspace_people"]` beside the workspace, and the container keeps
+the list in `workspace_people` of the spec (the spec refuses the field, so a
+caller cannot add a person). Those people get the run from `assignment_status`
+and `list_assignments`, and from the viewer routes (the list, the detail, and
+the comments to read). Only the person who started it changes it: every other
+tool is `404` for the others, and a comment from them is `403`. A re-run takes
+no people along. The people of a shared workspace never change, so the list
+stays true.
 
 The report starts with fixed lines from the row:
 
