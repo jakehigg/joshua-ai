@@ -13,29 +13,36 @@ checked before the body is read. A ``person`` that is not a member of
 
 - ``GET /v1/workspaces?status=`` lists the workspaces.
 - ``POST /v1/workspaces`` creates one (``title``, ``goal``, ``model``,
-  ``servers``, ``notify``). The slug comes from the title. The create also
-  makes the channel ``workspace:<id>`` and its conversation.
+  ``servers``, ``notify``, ``members``). The slug comes from the title. The
+  create also makes the channel ``workspace:<id>`` and its conversation.
+  ``members`` makes it a shared workspace: one thread that the owner and the
+  members write in, with the slug ``shared_<slug>``. The slug of a shared
+  workspace is one for everyone, so a taken one answers 409 and names it. The
+  people are set here and never change: no body and no route adds or removes
+  one.
 - ``GET`` and ``PATCH /v1/workspaces/{slug}`` read and change one (``title``,
   ``goal``, ``notes``, ``servers``, ``model``, ``notify``, ``status``).
   ``{slug}`` may also be the id.
 - ``GET`` and ``POST /v1/workspaces/{slug}/items`` list and add items.
   ``DELETE /v1/workspaces/{slug}/items/{id}`` removes one and
   ``PATCH /v1/workspaces/{slug}/items/{id}`` changes ``pinned`` or ``seen``.
-- ``GET /v1/workspaces/options`` gives the servers and the models that the
-  person may pick.
+- ``GET /v1/workspaces/options`` gives the servers, the models, and the people
+  that the person may pick.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
 - ``POST /v1/workspaces/by-id/{id}/items`` is for the gateway, which records
   the items of a tool call from a workspace. It takes the id of the workspace
   and no ``person``: the caller is trusted, and the workspace is the one of the
   stamp. The body is an item and ``added_by`` (``tool:<server>``).
 
-``servers`` must be among the servers the person may use. ``model`` must be in
+``servers`` must be among the servers every person of the workspace may use,
+and every named person must be a member of the roster. ``model`` must be in
 ``workspaces.models`` when that list is not empty, and any text otherwise. The
 routes log the caller and the route, never a goal, a note, or a title.
 """
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any, Literal
 
 from fastapi import APIRouter, Request
@@ -55,6 +62,7 @@ from joshua_core.store.models import (
     Workspace,
     WorkspaceItem,
 )
+from joshua_core.store.repo import SlugTaken
 
 logger = get_logger("workspaces_api")
 
@@ -92,6 +100,9 @@ class CreateBody(_Body):
     model: str | None = Field(default=None, max_length=200)
     servers: list[str] = Field(default_factory=list, max_length=100)
     notify: Notify = "none"
+    # The other people of a shared workspace. They are set at the create and
+    # never change, so no body below holds them.
+    members: list[str] = Field(default_factory=list, max_length=100)
 
 
 class PatchBody(_Body):
@@ -170,6 +181,8 @@ def workspace_json(workspace: Workspace) -> dict[str, Any]:
         "model": workspace.model,
         "notify": workspace.notify,
         "status": workspace.status,
+        "shared": workspace.shared,
+        "members": list(workspace.members),
         "channel": workspace.channel_id,
         "created_at": _iso(workspace.created_at),
         "updated_at": _iso(workspace.updated_at),
@@ -190,13 +203,32 @@ def item_json(item: WorkspaceItem) -> dict[str, Any]:
     }
 
 
-def _check_servers(settings: Any, person_id: str, servers: list[str]) -> JSONResponse | None:
-    """422 when a server is not one the person may use."""
-    allowed = set(allowed_gateway_servers(settings, person_id))
-    unknown = sorted({s for s in servers if s not in allowed})
+def _check_servers(
+    settings: Any, people: Collection[str], servers: list[str]
+) -> JSONResponse | None:
+    """422 when a server is not one that every person of the workspace may
+    use: the servers are the intersection over all of them."""
+    allowed: set[str] | None = None
+    for person_id in people:
+        names = set(allowed_gateway_servers(settings, person_id))
+        allowed = names if allowed is None else allowed & names
+    unknown = sorted({s for s in servers if s not in (allowed or set())})
     if unknown:
         return JSONResponse(
             {"error": "invalid request", "detail": f"unknown servers: {', '.join(unknown)}"},
+            status_code=422,
+        )
+    return None
+
+
+def _check_people(settings: Any, members: list[str]) -> JSONResponse | None:
+    """422 when a named person is not on the roster or does not write."""
+    unknown = sorted(
+        m for m in members if (p := settings.person(m)) is None or not is_member(p.role)
+    )
+    if unknown:
+        return JSONResponse(
+            {"error": "invalid request", "detail": f"unknown people: {', '.join(unknown)}"},
             status_code=422,
         )
     return None
@@ -237,7 +269,7 @@ def build_workspaces_router() -> APIRouter:
         assert person_id is not None
         if slug is None:
             return None, person_id, None
-        workspace = await request.app.state.ctx.repo.find_workspace(person_id, slug)
+        workspace = await request.app.state.ctx.repo.find_workspace_for(person_id, slug)
         if workspace is None:
             return _not_found(), person_id, None
         return None, person_id, workspace
@@ -266,25 +298,37 @@ def build_workspaces_router() -> APIRouter:
             return _invalid(exc)
         settings = request.app.state.ctx.settings
         servers = _dedupe(body.servers)
-        refused = _check_servers(settings, person_id, servers) or _check_model(settings, body.model)
+        members = _dedupe(body.members)
+        refused = (
+            _check_people(settings, members)
+            or _check_servers(settings, [person_id, *members], servers)
+            or _check_model(settings, body.model)
+        )
         if refused is not None:
             return refused
-        workspace = await request.app.state.ctx.repo.create_workspace(
-            person_id,
-            body.title.strip(),
-            goal=body.goal.strip(),
-            model=(body.model or "").strip() or None,
-            servers=servers,
-            notify=body.notify,
-        )
+        try:
+            workspace = await request.app.state.ctx.repo.create_workspace(
+                person_id,
+                body.title.strip(),
+                goal=body.goal.strip(),
+                model=(body.model or "").strip() or None,
+                servers=servers,
+                notify=body.notify,
+                members=members,
+            )
+        except SlugTaken as taken:
+            # The slug of a shared workspace is one for everyone, and no number
+            # is added: the person picks another title.
+            return JSONResponse({"error": str(taken), "slug": taken.slug}, status_code=409)
         logger.info({"message": "workspace created", "workspace": workspace.id})
         return JSONResponse(workspace_json(workspace), status_code=201)
 
     @router.get(WORKSPACES_PATH + "/options")
     async def get_options(request: Request):  # type: ignore[no-untyped-def]
         """What a person may pick for a workspace: the servers they may use (a
-        name and one line) and the models in ``workspaces.models``. An empty
-        ``models`` means any text, and the list is empty."""
+        name and one line), the models in ``workspaces.models``, and the people
+        they may share a workspace with. An empty ``models`` means any text, and
+        the list is empty."""
         denied, person_id, _ = await _scope(request)
         if denied is not None:
             return denied
@@ -296,7 +340,16 @@ def build_workspaces_router() -> APIRouter:
             }
             for name in allowed_gateway_servers(settings, person_id)
         ]
-        return JSONResponse({"servers": servers, "models": list(settings.workspaces.models)})
+        # Everyone on the roster who writes, the caller apart: a guest never
+        # holds a workspace.
+        people = [
+            {"id": person.id, "name": person.name}
+            for person in settings.people
+            if person.id != person_id and is_member(person.role)
+        ]
+        return JSONResponse(
+            {"servers": servers, "models": list(settings.workspaces.models), "people": people}
+        )
 
     @router.get(WORKSPACES_PATH + "/{slug}")
     async def get_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]
@@ -325,7 +378,7 @@ def build_workspaces_router() -> APIRouter:
                 fields.pop(name)
         if "servers" in fields:
             fields["servers"] = _dedupe(fields["servers"])
-            refused = _check_servers(settings, person_id, fields["servers"])
+            refused = _check_servers(settings, workspace.people, fields["servers"])
             if refused is not None:
                 return refused
         if "model" in fields:
@@ -345,6 +398,9 @@ def build_workspaces_router() -> APIRouter:
                 "workspace",
                 display_name=updated.title,
                 default_person_id=updated.owner,
+                # The mode of the workspace, so a new title leaves a shared
+                # channel shared.
+                session_mode="shared" if updated.shared else "per_person",
             )
         return JSONResponse(workspace_json(updated))
 
@@ -435,12 +491,10 @@ def build_workspaces_router() -> APIRouter:
         assert workspace is not None
         ctx = request.app.state.ctx
         block = getattr(ctx.manager, "workspace_block", None) or WorkspaceBlock(ctx.repo)
-        conversation = await ctx.repo.find_conversation(workspace.channel_id, workspace.owner)
+        conversation = await ctx.repo.workspace_conversation(workspace)
         # The same text a turn gets, with no thread rows and no side effect:
         # nothing is marked seen.
-        text = await block.render(
-            workspace, conversation.id if conversation else "", fresh=False, mark_seen=None
-        )
+        text = await block.render(workspace, conversation.id, fresh=False, mark_seen=None)
         return PlainTextResponse(text)
 
     return router

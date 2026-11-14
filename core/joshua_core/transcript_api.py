@@ -3,8 +3,9 @@
 A chat client calls this route to show the messages of a conversation. The
 callers are ``channels`` and ``laptop``. The query names the channel and, for a
 conversation with one person, the person. A workspace thread is the channel
-``workspace:<id or slug>`` with its owner as the person. The route never creates a
-conversation: an unknown one answers ``200`` with no messages.
+``workspace:<id or slug>`` with a person who reaches it: its owner, or a member
+of a shared workspace, whose thread is one for everyone. The route never creates
+a conversation: an unknown one answers ``200`` with no messages.
 
 Each message carries only the ``meta`` keys in ``SAFE_META_KEYS``:
 
@@ -103,10 +104,10 @@ def build_transcript_router() -> APIRouter:
 
         repo = request.app.state.ctx.repo
         if channel_id.startswith("workspace:"):
-            # The name after the colon is the id or the slug of a workspace of
-            # the person. Another person's workspace is as good as none.
+            # The name after the colon is the id or the slug of a workspace the
+            # person reaches. Another person's workspace is as good as none.
             workspace = (
-                await repo.find_workspace(person_id, channel_id.split(":", 1)[1])
+                await repo.find_workspace_for(person_id, channel_id.split(":", 1)[1])
                 if person_id
                 else None
             )
@@ -115,6 +116,9 @@ def build_transcript_router() -> APIRouter:
                     {"conversation_id": None, "messages": [], "next_before": None, "pending": None}
                 )
             channel_id = workspace.channel_id
+            if workspace.shared:
+                # A shared workspace is one thread, and it belongs to nobody.
+                person_id = None
         conversation = None
         if thread == "main" and channel_id.startswith("cli:") and person_id:
             # The terminal and the viewer read the person's main thread.

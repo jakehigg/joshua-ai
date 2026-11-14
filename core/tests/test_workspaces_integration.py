@@ -13,6 +13,7 @@ import pytest
 from fastapi import FastAPI
 from joshua_core.engine.usage import Usage
 from joshua_core.engine.workspace import WorkspaceBlock
+from joshua_core.store.repo import SlugTaken
 from joshua_core.store.usage_events import UsageEvent
 from joshua_core.transcript_api import build_transcript_router
 from joshua_core.usage_api import build_usage_router
@@ -151,15 +152,56 @@ async def test_create_makes_the_channel_the_conversation_and_unique_slugs(seeded
     assert first.notify == "none" and first.status == "active" and first.servers == ()
 
 
-async def test_find_scopes_to_the_owner_and_takes_a_slug_or_an_id(seeded) -> None:
+async def test_find_scopes_to_the_people_and_takes_a_slug_or_an_id(seeded) -> None:
     ws = await seeded.create_workspace("alex", "Trip")
-    assert (await seeded.find_workspace("alex", "trip")).id == ws.id
-    assert (await seeded.find_workspace("alex", ws.id)).id == ws.id
-    assert await seeded.find_workspace("mia", "trip") is None
-    assert await seeded.find_workspace("mia", ws.id) is None
-    assert await seeded.find_workspace("alex", "") is None
-    assert await seeded.find_workspace("alex", "not-a-uuid-or-slug") is None
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    assert (await seeded.find_workspace_for("alex", "trip")).id == ws.id
+    assert (await seeded.find_workspace_for("alex", ws.id)).id == ws.id
+    assert await seeded.find_workspace_for("mia", "trip") is None
+    assert await seeded.find_workspace_for("mia", ws.id) is None
+    assert await seeded.find_workspace_for("alex", "") is None
+    assert await seeded.find_workspace_for("alex", "not-a-uuid-or-slug") is None
     assert await seeded.get_workspace("nonsense") is None
+    # A shared workspace reaches its members, by its slug and by its id.
+    assert (await seeded.find_workspace_for("mia", "shared_thanksgiving")).id == shared.id
+    assert (await seeded.find_workspace_for("mia", shared.id)).id == shared.id
+    assert await seeded.find_workspace_for("robin", "shared_thanksgiving") is None
+    assert await seeded.find_workspace_for("robin", shared.id) is None
+    # A turn runs in a workspace of its own person, so it asks for the owner.
+    assert (await seeded.find_workspace("alex", "shared_thanksgiving")).id == shared.id
+    assert await seeded.find_workspace("mia", "shared_thanksgiving") is None
+
+
+async def test_a_shared_create_makes_one_thread_for_everyone(seeded) -> None:
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+
+    assert shared.shared is True and shared.slug == "shared_thanksgiving"
+    assert shared.members == ("mia",) and shared.people == ("alex", "mia")
+    channel = await seeded.get_channel(shared.channel_id)
+    assert channel.session_mode == "shared" and channel.default_person_id == "alex"
+    conversation = await seeded.find_conversation(shared.channel_id, None)
+    assert conversation is not None and conversation.person_id is None
+    assert await seeded.find_conversation(shared.channel_id, "alex") is None
+    assert (await seeded.workspace_conversation(shared)).id == conversation.id
+    # The slug of a shared workspace is one for everyone, and takes no number.
+    with pytest.raises(SlugTaken) as taken:
+        await seeded.create_workspace("mia", "Thanksgiving!", members=["alex"])
+    assert taken.value.slug == "shared_thanksgiving"
+    # A personal workspace of the same title keeps the plain slug.
+    personal = await seeded.create_workspace("alex", "Thanksgiving")
+    assert personal.slug == "thanksgiving"
+    assert personal.shared is False and personal.members == ()
+    assert (await seeded.workspace_conversation(personal)).person_id == "alex"
+
+
+async def test_list_gives_a_person_their_own_and_the_shared_ones(seeded) -> None:
+    mine = await seeded.create_workspace("mia", "Trip")
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+
+    assert {w.id for w in await seeded.list_workspaces("mia")} == {mine.id, shared.id}
+    assert [w.id for w in await seeded.list_workspaces("alex")] == [shared.id]
+    await seeded.update_workspace(shared.id, status="paused")
+    assert [w.id for w in await seeded.list_workspaces("mia", "active")] == [mine.id]
 
 
 async def test_items_update_in_place_and_order_pinned_then_newest(seeded) -> None:
@@ -336,6 +378,65 @@ async def test_create_list_get_patch(client) -> None:
         "/v1/workspaces", params={"person": "alex", "status": "gone"}, headers=_h()
     )
     assert bad.status_code == 422
+
+
+async def test_a_shared_workspace_is_made_once_and_reaches_every_person(client, seeded) -> None:
+    made = await _create(client, title="Thanksgiving", members=["mia", "mia"])
+    assert made["slug"] == "shared_thanksgiving"
+    assert made["shared"] is True and made["members"] == ["mia"]
+    channel = await seeded.get_channel(made["channel"])
+    assert channel.session_mode == "shared"
+    assert (await seeded.find_conversation(made["channel"], None)) is not None
+
+    # A second shared workspace of that slug, by any person, is refused.
+    again = await client.post(
+        "/v1/workspaces",
+        params={"person": "mia"},
+        headers=_h(),
+        json={"title": "Thanksgiving", "members": ["alex"]},
+    )
+    assert again.status_code == 409 and again.json()["slug"] == "shared_thanksgiving"
+
+    # A personal workspace of the same title keeps the plain slug.
+    personal = await _create(client, title="Thanksgiving")
+    assert personal["slug"] == "thanksgiving" and personal["shared"] is False
+
+    mia = {"person": "mia"}
+    listing = (await client.get("/v1/workspaces", params=mia, headers=_h())).json()
+    assert [w["slug"] for w in listing["workspaces"]] == ["shared_thanksgiving"]
+    got = await client.get("/v1/workspaces/shared_thanksgiving", params=mia, headers=_h())
+    assert got.status_code == 200 and got.json()["id"] == made["id"]
+    block = await client.get("/v1/workspaces/shared_thanksgiving/block", params=mia, headers=_h())
+    assert block.status_code == 200 and "Thanksgiving" in block.text
+
+    # A new title leaves the channel shared, and no patch carries the people.
+    patched = await client.patch(
+        "/v1/workspaces/shared_thanksgiving",
+        params=mia,
+        headers=_h(),
+        json={"title": "Thanksgiving dinner"},
+    )
+    assert patched.status_code == 200 and patched.json()["members"] == ["mia"]
+    assert (await seeded.get_channel(made["channel"])).session_mode == "shared"
+    for body in ({"members": ["gus"]}, {"shared": False}):
+        refused = await client.patch(
+            "/v1/workspaces/shared_thanksgiving", params=mia, headers=_h(), json=body
+        )
+        assert refused.status_code == 422, body
+
+
+async def test_a_create_checks_every_person_and_their_servers(client) -> None:
+    post = lambda p, b: client.post("/v1/workspaces", params=p, json=b, headers=_h())  # noqa: E731
+    alex, mia = {"person": "alex"}, {"person": "mia"}
+    # A guest and an unknown person never hold a workspace.
+    for members in (["gus"], ["nobody"], ["mia", "gus"]):
+        resp = await post(alex, {"title": "T", "members": members})
+        assert resp.status_code == 422, members
+    # `private` is allowed for mia only, so a workspace of both may not use it.
+    refused = await post(mia, {"title": "P", "members": ["alex"], "servers": ["private"]})
+    assert refused.status_code == 422 and "private" in refused.json()["detail"]
+    allowed = await post(mia, {"title": "P", "members": ["alex"], "servers": ["tasks"]})
+    assert allowed.status_code == 201 and allowed.json()["servers"] == ["tasks"]
 
 
 async def test_another_owner_gets_404_on_every_route(client) -> None:
@@ -530,6 +631,23 @@ async def test_the_transcript_reads_a_workspace_by_slug_or_id_for_its_owner(clie
         }
 
 
+async def test_the_transcript_of_a_shared_workspace_reads_for_every_person(client, seeded) -> None:
+    made = await _create(client, title="Thanksgiving", members=["mia"])
+    conv = await seeded.find_conversation(made["channel"], None)
+    await seeded.add_transcript(conv.id, "in", "who brings the pie?")
+
+    for person in ("alex", "mia"):
+        body = (
+            await client.get(
+                "/v1/transcript",
+                params={"channel": f"workspace:{made['slug']}", "person": person},
+                headers=_h(CHANNELS),
+            )
+        ).json()
+        assert body["conversation_id"] == conv.id
+        assert [m["text"] for m in body["messages"]] == ["who brings the pie?"]
+
+
 # --- usage by conversation -------------------------------------------------------------------
 
 
@@ -593,8 +711,11 @@ async def test_options_list_the_servers_of_the_person_and_the_models(client) -> 
         {"name": "tasks", "description": "Tasks and projects"},
         {"name": "github", "description": "github"},
     ]
+    # Everyone on the roster who writes, the caller apart: never a guest.
+    assert body["people"] == [{"id": "mia", "name": "Mia"}, {"id": "robin", "name": "Robin"}]
     mia = await client.get("/v1/workspaces/options", params={"person": "mia"}, headers=_h())
     assert [s["name"] for s in mia.json()["servers"]] == ["tasks", "github", "private"]
+    assert [p["id"] for p in mia.json()["people"]] == ["alex", "robin"]
     assert (
         await client.get("/v1/workspaces/options", params={"person": "alex"})
     ).status_code == 401
