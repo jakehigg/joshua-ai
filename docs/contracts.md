@@ -86,6 +86,10 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `POST /v1/cli/turns/stream` | `channels.webhooks.allowed_callers` | `{"person": id, "text": str}`, or `multipart/form-data` (below) | SSE, or `400`, `403 {"reason": <guard reason>}`, `503 core_unavailable`, `503 pipeline_unavailable` |
 | `GET /v1/cli/outbox?person=&ack=true` | `channels.webhooks.allowed_callers` | | `{"messages": [{"ts", "text", "attachments"}]}`, `403 unknown_person` |
 | `GET /v1/cli/transcript?person=&limit=&before=` | `channels.webhooks.allowed_callers` | | core's `GET /v1/transcript` reply and status for `cli:<person>`, `400 bad_request`, `403 unknown_person`, `503 core_unavailable` |
+| `GET /v1/cli/held?person=&workspace=` | `channels.webhooks.allowed_callers` | | core's `GET /v1/holds` reply for `cli:<person>`, or for the workspace thread, `403 unknown_person`, `503 core_unavailable` |
+| `POST /v1/cli/held` | `channels.webhooks.allowed_callers` | `{"person", "text", "workspace"?}` | core's `POST /v1/holds` reply, `400 bad_request` for an empty text, `403 unknown_person`, `503 core_unavailable` |
+| `POST /v1/cli/held/take` | `channels.webhooks.allowed_callers` | `{"person", "workspace"?}` | core's `POST /v1/holds/take` reply, `403 unknown_person`, `503 core_unavailable` |
+| `DELETE /v1/cli/held/{hold_id}?person=&workspace=` | `channels.webhooks.allowed_callers` | | core's `DELETE /v1/holds/{hold_id}` reply, `403 unknown_person`, `503 core_unavailable` |
 | `POST /v1/voice/chat/completions` | `channels.voice.allowed_callers` | OpenAI chat completions, plus `speaker` and `speaker_confidence` | SSE of `chat.completion.chunk`, or one `chat.completion` for `stream: false`. `400 bad_request`, `404 not_found` with no voice section, `503 core_unavailable` |
 | `GET /v1/models` | `channels.voice.allowed_callers` | | `{"object": "list", "data": [{"id": "joshua", …}]}`, `404 not_found` with no voice section |
 | `GET /admin/guard/stats` | `ADMIN_CALLERS` | | counters: `unknown_sender`, `rate_limited`, `truncated`, `refused_total` |
@@ -133,6 +137,10 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `GET /v1/transcript?channel=&person=&limit=&before=` | `channels`, `laptop` | | `{"conversation_id", "messages", "next_before"}` (below), `400 bad_request` with no `channel`, `422` for a bad `limit` or `before` |
+| `GET /v1/holds?channel=&person=` | `channels`, `laptop` | | `{"held": [{"id", "text", "at"}]}`, oldest first |
+| `POST /v1/holds` | `channels`, `laptop` | `{"channel", "person", "text"}` | `{"held": [...]}`, `400` for an empty text, `429 {"reason": "hold_full"}` past 20 messages |
+| `POST /v1/holds/take` | `channels`, `laptop` | `{"channel", "person"}` | `{"text", "held": [...]}`. It empties the hold and joins the messages, in order, one per line. |
+| `DELETE /v1/holds/{hold_id}?channel=&person=` | `channels`, `laptop` | | `{"held": [...]}`, `404 {"reason": "unknown_hold"}` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?, "source"?, "person"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
 | `GET /v1/usage?group=conversation&person=` | `usage.allowed_callers` (default `viewer`) | | `{"days", "conversations": [{"conversation_id", "workspace": {"slug", "title"} or null, "calls", "input", "output", "cache_read", "cache_write"}]}`, largest first. Only the conversations of `person`. A row with no conversation is not listed. `422` for another `group` or no `person`; `403` for a person who is not a member. |
@@ -477,6 +485,29 @@ the turn wrote. Core never logs a message.
 
 `GET /v1/cli/transcript?person=` on channels asks core for `cli:<person>`
 with the channels token, and returns core's body and status as they are.
+
+### The hold of a chat thread
+
+A person in the web chat can write while a turn of that thread still runs.
+The message is not a second turn: it goes to the **hold** of the thread,
+which lives in core (`/v1/holds`), not in the page. A reload or a closed tab
+keeps it, and a second screen sees it.
+
+A hold is named by its channel and the person who writes it, so the normal
+chat (`cli:<person>`) and each workspace thread (`workspace:<slug>`) hold
+their own. `POST` adds one message (up to 20 per thread), `GET` lists them
+oldest first, `DELETE` takes one back before it goes, and `POST
+/v1/holds/take` empties the hold in one step and answers with `text`: every
+held message in order, one per line. The caller then sends that text as one
+turn, so the waiting messages are one turn and never several. Because `take`
+empties the hold as it reads it, two screens never send the same message
+twice. The hold is in memory, as the turns in flight are, so a restart of
+core clears it.
+
+Channels passes these through as `/v1/cli/held` for the person of the body
+or the query, and the viewer as `/api/v1/chat/<person>/held`. The iMessage
+and Telegram paths do not use the hold: they coalesce their own messages
+(`channels.imessage.coalesce_window_s`).
 
 ### The voice route
 
