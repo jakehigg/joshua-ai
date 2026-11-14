@@ -207,7 +207,7 @@ async def test_a_shared_create_makes_one_thread_for_everyone(seeded) -> None:
     personal = await seeded.create_workspace("mia", "Thanksgiving")
     assert personal.slug == "thanksgiving"
     assert personal.shared is False and personal.members == ()
-    assert (await seeded.workspace_conversation(personal)).person_id == "alex"
+    assert (await seeded.workspace_conversation(personal)).person_id == "mia"
 
 
 async def test_list_gives_a_person_their_own_and_the_shared_ones(seeded) -> None:
@@ -680,15 +680,21 @@ async def test_the_transcript_of_a_shared_workspace_reads_for_every_person(clien
     conv = await seeded.find_conversation(made["channel"], None)
     await seeded.add_transcript(conv.id, "in", "who brings the pie?")
 
-    for person in ("alex", "mia"):
+    # The shared namespace reads for every person; the one-segment slug is the
+    # owner's own.
+    for person, ref in (
+        ("alex", made["slug"]),
+        ("alex", f"shared/{made['slug']}"),
+        ("mia", f"shared/{made['slug']}"),
+    ):
         body = (
             await client.get(
                 "/v1/transcript",
-                params={"channel": f"workspace:{made['slug']}", "person": person},
+                params={"channel": f"workspace:{ref}", "person": person},
                 headers=_h(CHANNELS),
             )
         ).json()
-        assert body["conversation_id"] == conv.id
+        assert body["conversation_id"] == conv.id, (person, ref)
         assert [m["text"] for m in body["messages"]] == ["who brings the pie?"]
 
 
