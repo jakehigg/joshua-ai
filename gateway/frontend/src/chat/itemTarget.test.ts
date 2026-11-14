@@ -48,6 +48,15 @@ describe("itemTarget", () => {
     expect(target?.type).toBe("document");
   });
 
+  it("frames a wiki page from its ref, with or without the wiki root", () => {
+    for (const ref of ["wiki/recipes/turkey.md", "recipes/turkey.md"]) {
+      expect(itemTarget(item({ kind: "wiki", ref, title: "Turkey", url: null }))).toEqual({
+        type: "page",
+        page: { url: "/wiki/recipes/turkey.md", title: "Turkey", kindLabel: "Wiki page" },
+      });
+    }
+  });
+
   it("frames another viewer path as a page", () => {
     expect(itemTarget(item({ kind: "wiki", ref: "w", title: "Menu", url: "/wiki/menu.md" }))).toEqual({
       type: "page",
