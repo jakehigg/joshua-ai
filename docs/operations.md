@@ -761,7 +761,7 @@ Assignments, Documents (members only) and Chat. At the bottom, "Profile" at
 instructions to Joshua, and their journal consent), the profile link, and
 their recent attachments. The owner also gets "Admin" under it. Every one of these is an address of the app's router, and the app
 reads them from `/api/v1/`. The chat is a screen of the same app, at
-`/chat/<person id>`, with a workspace at `/chat/w/<slug>`; it reaches the
+`/chat/<person id>`, with a workspace at `/chat/w/<owner>/<slug>`; it reaches the
 `channels` container through the viewer. An image with no build of the app
 logs `no frontend build; the React pages are off` at start and serves the
 JSON API alone, so every address answers 404 until the image carries a build.

@@ -223,6 +223,25 @@ async def test_recent_filters_by_a_set_of_statuses(store) -> None:
     assert ids == [c["id"]]
 
 
+async def test_recent_with_shared_holds_the_runs_of_a_shared_workspace(store) -> None:
+    own = await create(store, "mia")
+
+    async def run_of(people: list[str]) -> dict:
+        return await store.create(
+            person_id="alex",
+            conversation_id=None,
+            spec={"goal": "G", "workspace": "w", "workspace_people": people},
+            model="claude-sonnet-5",
+        )
+
+    shared = await run_of(["alex", "mia"])
+    await run_of(["alex", "jo"])
+    ids = [r["id"] for r in await store.recent("mia", 10, shared=True)]
+    assert ids == [shared["id"], own["id"]]
+    # Without shared, only the rows of the person.
+    assert [r["id"] for r in await store.recent("mia", 10)] == [own["id"]]
+
+
 async def test_the_new_columns_are_added_to_an_older_table(store) -> None:
     row = await create(store)
     async with store.pool.connection() as conn:

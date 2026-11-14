@@ -38,6 +38,12 @@ conversation_ctx: ContextVar[str | None] = ContextVar("gateway_conversation", de
 # The workspace (a UUID) that core named for a workspace thread. None outside a
 # workspace. The tool-call hook stamps it into the ``_meta`` of the call.
 workspace_ctx: ContextVar[str | None] = ContextVar("gateway_workspace", default=None)
+# The people of a shared workspace (the owner first), that core named with the
+# workspace. Empty outside a shared workspace. The tool-call hook stamps them
+# into the ``_meta`` of the call beside the workspace.
+workspace_people_ctx: ContextVar[tuple[str, ...]] = ContextVar(
+    "gateway_workspace_people", default=()
+)
 
 # The role core asserted for this request. Unlike ``person_ctx``, this one IS
 # access control: the files server builds its root set from it. None means the

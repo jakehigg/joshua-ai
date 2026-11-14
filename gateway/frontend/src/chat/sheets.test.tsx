@@ -12,8 +12,8 @@ function json(body: unknown, status = 200) {
 }
 
 const WS = {
-  id: "w1", slug: "solar", title: "Solar install", goal: "", notes: "", servers: [],
-  model: null, notify: "none", status: "active",
+  id: "w1", slug: "solar", title: "Solar install", owner: "alex", goal: "", notes: "", servers: [],
+  model: null, notify: "none", status: "active", shared: false, members: [],
 };
 
 function item(over: Partial<WorkspaceItem>): WorkspaceItem {
@@ -37,9 +37,9 @@ function backend() {
     vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://test").pathname;
       if (path === "/api/v1/session") return json({ person: { id: "alex", name: "Alex", role: "member" }, sections: [{ key: "wiki", label: "Wiki", path: "/wiki/" }] });
-      if (path === "/api/v1/workspaces/solar") return json(WS);
+      if (path === "/api/v1/workspaces/alex%2Fsolar") return json(WS);
       if (path === "/api/v1/workspaces") return json({ workspaces: [WS] });
-      if (path === "/api/v1/workspaces/solar/items") return json({ items: ITEMS });
+      if (path === "/api/v1/workspaces/alex%2Fsolar/items") return json({ items: ITEMS });
       if (path.endsWith("/history")) return json({ messages: [], nextBefore: null });
       return json({ error: "not found" }, 404);
     }),
@@ -49,9 +49,9 @@ function backend() {
 async function open() {
   backend();
   render(
-    <MemoryRouter initialEntries={["/chat/w/solar"]} future={FUTURE}>
+    <MemoryRouter initialEntries={["/chat/w/alex/solar"]} future={FUTURE}>
       <Routes>
-        <Route path="/chat/w/:slug" element={<WorkspacePage />} />
+        <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
       </Routes>
     </MemoryRouter>,
   );

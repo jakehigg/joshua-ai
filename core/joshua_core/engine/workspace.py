@@ -3,8 +3,9 @@ every turn of it carries, and the paths that RAG skips.
 
 A workspace thread is a conversation of the channel ``workspace:<id>``. It is
 the full Joshua. Only four things differ from a normal direct chat: the model,
-the servers, one prompt file (``workspace.md``), and the workspace block. This
-module holds the pure parts of those. ``ConversationManager`` calls them.
+the servers, the prompt files (``workspace.md``, and ``workspace_shared.md``
+for a shared workspace), and the workspace block. This module holds the pure
+parts of those. ``ConversationManager`` calls them.
 
 Nothing here runs for a channel of another type.
 """
@@ -24,7 +25,12 @@ from joshua_shared.inference import (
 from joshua_shared.log import get_logger
 
 from joshua_core.store.models import Workspace, WorkspaceItem
-from joshua_core.store.repo import FROM_CHAT_SOURCE, WORKSPACE_CHANNEL_TYPE, Repo
+from joshua_core.store.repo import (
+    FROM_CHAT_SOURCE,
+    SHARED_NAMESPACE,
+    WORKSPACE_CHANNEL_TYPE,
+    Repo,
+)
 from joshua_core.store.transcript import FAILED_STATUS, SILENT_REPLY
 
 logger = get_logger("engine.workspace")
@@ -112,23 +118,37 @@ def _item_line(item: WorkspaceItem) -> str:
     return f"- {pin}{item.kind}: {item.title or item.ref}{ref}"
 
 
-def recent_lines(rows: list[dict[str, Any]], person: str | None) -> list[str]:
-    """One short line for each visible row of the thread, oldest first."""
+def recent_lines(rows: list[dict[str, Any]], default_name: str | None) -> list[str]:
+    """One short line for each visible row of the thread, oldest first.
+
+    A row that came in is labelled with its ``meta.speaker``, the person who
+    wrote it, because a shared thread holds the rows of several people. A row
+    that names nobody takes ``default_name``.
+    """
     lines = []
     for row in rows:
+        meta = row.get("meta") or {}
         text = (row.get("content") or "").strip()
         if not text or text == SILENT_REPLY or row.get("status") == FAILED_STATUS:
             continue
-        if (row.get("meta") or {}).get("source") == FROM_CHAT_SOURCE:
+        if meta.get("source") == FROM_CHAT_SOURCE:
             who, limit = "from normal chat", RECENT_ROW_CHARS
         elif row.get("direction") == "out":
             who, limit = "you", RECENT_ROW_CHARS
         elif row.get("direction") == "in":
-            who, limit = person or "person", PERSON_ROW_CHARS
+            who, limit = meta.get("speaker") or default_name or "person", PERSON_ROW_CHARS
         else:
-            who, limit = person or "person", RECENT_ROW_CHARS
+            who, limit = default_name or "person", RECENT_ROW_CHARS
         lines.append(f"- {who}: {_one_line(text, limit)}")
     return lines
+
+
+def _people_line(workspace: Workspace) -> str:
+    """Who writes in a shared workspace: the owner, marked, then the members."""
+    people = ", ".join(
+        f"{person} (owner)" if person == workspace.owner else person for person in workspace.people
+    )
+    return f"People: {people}"
 
 
 def render_block(
@@ -143,8 +163,9 @@ def render_block(
 ) -> str:
     """The workspace block as text.
 
-    It holds the title, the goal, the notes, the items (``BLOCK_MAX_ITEMS``,
-    pinned first, then newest), the items that came from normal chat and are
+    It holds the title, the goal, the people of a shared workspace, the notes,
+    the items (``BLOCK_MAX_ITEMS``, pinned first, then newest), the items that
+    came from normal chat and are
     not yet seen, and, for a fresh session, the handoff of the last session,
     the last rows of the thread, and the line that points at ``history``.
     ``chat_rows`` holds the text of the rows that normal chat sent to the
@@ -154,6 +175,8 @@ def render_block(
     lines = [f"[Workspace: {workspace.title} ({workspace.slug})]"]
     if workspace.goal:
         lines.append(f"Goal: {workspace.goal}")
+    if workspace.shared:
+        lines.append(_people_line(workspace))
     lines.append(f"Notify: {workspace.notify}")
     if workspace.notes:
         lines += ["Notes:", workspace.notes]
@@ -368,8 +391,10 @@ def exclude_paths(workspace: Workspace, items: Iterable[WorkspaceItem]) -> set[s
 
     A document maps to ``documents/<owner>/<slug>.md`` and a wiki page to its
     path under ``wiki/``. The ref or the url may be the slug, the path, or an
-    address that ends in either.
+    address that ends in either. The documents of a shared workspace stand
+    under ``documents/shared/``, because they belong to everybody in it.
     """
+    owner = SHARED_NAMESPACE if workspace.shared else workspace.owner
     paths: set[str] = set()
     for item in items:
         if item.kind not in ("document", "wiki"):
@@ -381,7 +406,7 @@ def exclude_paths(workspace: Workspace, items: Iterable[WorkspaceItem]) -> set[s
             if item.kind == "document":
                 slug = text.rsplit("/", 1)[-1].removesuffix(".md")
                 if slug:
-                    paths.add(f"documents/{workspace.owner}/{slug}.md")
+                    paths.add(f"documents/{owner}/{slug}.md")
             else:
                 path = text if text.startswith("wiki/") else f"wiki/{text}"
                 paths.add(path if path.endswith(".md") else f"{path}.md")

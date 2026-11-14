@@ -299,15 +299,16 @@ class EventService:
 
     async def _workspace_event(self, event: TurnEvent) -> JSONResponse:
         """An event for a workspace: the text runs as a turn in its thread, or
-        with ``verbatim`` is only recorded there. Nothing is delivered to a
-        phone: the gate keeps the reply in the transcript, and the agent uses
-        ``send_to_normal_chat`` when the person is to be told."""
+        with ``verbatim`` is only recorded there. The thread of a shared
+        workspace is the one thread of everyone, not the owner's. Nothing is
+        delivered to a phone: the gate keeps the reply in the transcript, and
+        the agent uses ``send_to_normal_chat`` when the person is to be told."""
         workspace = await self._repo.get_workspace(event.workspace or "")
         channel = await self._repo.get_channel(workspace.channel_id) if workspace else None
         if workspace is None or channel is None or channel.channel_type != WORKSPACE_CHANNEL_TYPE:
             logger.warning({"message": "workspace event: unknown workspace"})
             return JSONResponse({"accepted": False, "reason": "unknown_workspace"}, status_code=404)
-        conversation = await self._repo.get_or_create_conversation(channel.id, workspace.owner)
+        conversation = await self._repo.workspace_conversation(workspace)
         if event.options and event.options.verbatim:
             await self._repo.add_transcript(
                 conversation.id, "inject", event.text, meta={"event": True}

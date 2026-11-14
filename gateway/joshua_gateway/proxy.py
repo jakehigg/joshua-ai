@@ -34,8 +34,13 @@ from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 
 from joshua_gateway.catalog import ServerSpec, permits
-from joshua_gateway.observability import group_ctx, person_ctx, workspace_ctx
-from joshua_gateway.workspace_items import WORKSPACE_META_KEY
+from joshua_gateway.observability import (
+    group_ctx,
+    person_ctx,
+    workspace_ctx,
+    workspace_people_ctx,
+)
+from joshua_gateway.workspace_items import WORKSPACE_META_KEY, WORKSPACE_PEOPLE_META_KEY
 
 log = get_logger("gateway.proxy")
 
@@ -252,7 +257,8 @@ def build_upstream_server(
     reason)`` for a result that is a refusal (:func:`refusal_reason`).
 
     A call from a workspace thread (``workspace_ctx``) is sent upstream with
-    ``_meta["joshua/workspace"]`` set to the workspace id, and a call that
+    ``_meta["joshua/workspace"]`` set to the workspace id (and, for a shared
+    workspace, ``_meta["joshua/workspace_people"]`` set to its people), and a call that
     succeeds is handed to ``on_workspace_result``. A call from any other chat
     carries no such key.
     """
@@ -282,7 +288,12 @@ def build_upstream_server(
             return _tool_error(f"tool not permitted: {tool}")
         start = time.perf_counter()
         workspace = workspace_ctx.get()
-        meta = {WORKSPACE_META_KEY: workspace} if workspace else None
+        meta: dict[str, Any] | None = None
+        if workspace:
+            meta = {WORKSPACE_META_KEY: workspace}
+            people = workspace_people_ctx.get()
+            if people:
+                meta[WORKSPACE_PEOPLE_META_KEY] = list(people)
         try:
             res = await link.forward(
                 lambda session: session.call_tool(tool, params.arguments or {}, meta=meta),

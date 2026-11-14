@@ -323,6 +323,7 @@ class Store(Protocol):
         status: str | None = None,
         statuses: Collection[str] | None = None,
         saved_id: int | None = None,
+        shared: bool = False,
     ) -> list[dict[str, Any]]: ...
 
     async def update(self, assignment_id: int, **fields: Any) -> dict[str, Any] | None: ...
@@ -603,12 +604,18 @@ class PgStore:
         status: str | None = None,
         statuses: Collection[str] | None = None,
         saved_id: int | None = None,
+        shared: bool = False,
     ) -> list[dict[str, Any]]:
         """The newest rows that are not deleted. ``status``, ``statuses``, and
-        ``saved_id`` filter, and all apply."""
+        ``saved_id`` filter, and all apply. With ``shared``, the rows of
+        ``person_id`` also hold the runs of a shared workspace that names
+        that person in ``workspace_people``."""
         clauses: list[str] = ["deleted_at IS NULL"]
         params: list[Any] = []
-        if person_id is not None:
+        if person_id is not None and shared:
+            clauses.append("(person_id = %s OR spec->'workspace_people' ? %s)")
+            params.extend([person_id, person_id])
+        elif person_id is not None:
             clauses.append("person_id = %s")
             params.append(person_id)
         if status is not None:

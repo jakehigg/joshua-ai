@@ -476,11 +476,13 @@ when older rows exist, else null. Send it as `before` to get the page before
 this one.
 
 `meta` holds only these keys: `turn_id`, `tools` (the tool names the turn
-used), `call_count`, `duration_ms`, `first_output_ms`, and `attachments` (on
+used), `call_count`, `duration_ms`, `first_output_ms`, `attachments` (on
 the row of a message that came with files: a list of `{path, mime, name,
 size}`, where `path` is the filed path under the data volume and `name` is
-the name the sender gave). Core drops every
-other key, for example the token usage, the cost, the speaker, and the paths
+the name the sender gave), and `speaker` (on the row of a thread several
+people write in, a group chat or a shared workspace: the name of the person
+who wrote it). Core drops every
+other key, for example the token usage, the cost, and the paths
 the turn wrote. Core never logs a message.
 
 `GET /v1/cli/transcript?person=` on channels asks core for `cli:<person>`
@@ -645,6 +647,7 @@ sends them for the person who started the assignment:
 | `X-Joshua-Role` | `member`, `owner`, or `guest`. Any other value is a 400. |
 | `X-Joshua-Group` | the group id, only for a group chat in `groups` |
 | `X-Joshua-Workspace` | the workspace id (a UUID), only for a workspace thread. The gateway sends it upstream as `_meta["joshua/workspace"]` of each tool call and records the items of the call. |
+| `X-Joshua-Workspace-People` | the people of a shared workspace, the owner first, comma separated; only with `X-Joshua-Workspace`. Each must be in `people`, else 400. The gateway sends them upstream as `_meta["joshua/workspace_people"]`. |
 
 The gateway trusts these headers only from the identities in
 `gateway.person_header_callers` (default `core` and `assignments`). Every other

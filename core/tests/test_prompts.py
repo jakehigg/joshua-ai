@@ -28,6 +28,8 @@ _MEMBER = Person(id="alex", display_name="Alex", role="member")
 _GUEST = Person(id="sam", display_name="Sam", role="guest")
 _DM = Channel(id="telegram:1", channel_type="telegram", session_mode="per_person")
 _SHARED = Channel(id="telegram:g", channel_type="telegram", session_mode="shared")
+_WORKSPACE = Channel(id="workspace:w1", channel_type="workspace", session_mode="per_person")
+_SHARED_WORKSPACE = Channel(id="workspace:w2", channel_type="workspace", session_mode="shared")
 
 
 def test_trust_preamble_byte_identical() -> None:
@@ -191,6 +193,34 @@ def test_default_prompts_dir_resolves_to_the_packaged_files() -> None:
     for name, files in _PROMPT_FILES.items():
         for rel in files:
             assert composer._read(rel), f"{name}: {rel} is empty"
+
+
+def test_a_shared_workspace_prompt_holds_the_group_and_both_workspace_pages() -> None:
+    composer = PromptComposer()
+    prompt = composer.compose(derive_profile(None, _SHARED_WORKSPACE), None, _SHARED_WORKSPACE)
+    assert "This is a group conversation with several people." in prompt
+    assert "You are in a workspace" in prompt
+    assert "Several people share this workspace." in prompt
+    # A personal workspace keeps the shared page out.
+    personal = composer.compose(derive_profile(_MEMBER, _WORKSPACE), _MEMBER, _WORKSPACE)
+    assert "You are in a workspace" in personal
+    assert "Several people share this workspace." not in personal
+
+
+def test_the_shared_workspace_page_says_who_reads_it_and_where_a_document_goes() -> None:
+    page = (
+        Path(__file__).parents[1] / "joshua_core" / "prompts" / "builtin" / "workspace_shared.md"
+    ).read_text()
+    for words in (
+        "carries the name of the\nperson who wrote it",
+        "address people by name",
+        "read by everybody",
+        "There is no\nprivate aside",
+        "`documents/shared/`",
+        "`send_to_normal_chat` reaches the person who asked for it and nobody else",
+        "write it in this thread",
+    ):
+        assert words in page, words
 
 
 def test_the_assignments_skill_goes_only_to_a_session_that_holds_the_server() -> None:

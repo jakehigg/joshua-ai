@@ -339,6 +339,42 @@ def test_an_untrusted_caller_has_no_workspace():
     assert attr.workspace is None
 
 
+def test_a_trusted_caller_may_name_the_people_of_a_shared_workspace():
+    ws = "11111111-1111-4111-8111-111111111111"
+    known = {"alex", "mia"}
+    attr = resolve(
+        "core", "alex", "c1", known, None, None, (), DEFAULT_TRUSTED, ws, " alex, mia ,mia"
+    )
+    assert attr.workspace_people == ("alex", "mia")
+    # From an untrusted caller the header is ignored, as every other one.
+    attr = resolve("laptop", "alex", "c1", known, None, None, (), DEFAULT_TRUSTED, ws, "mia")
+    assert attr.workspace_people == ()
+
+
+@pytest.mark.parametrize(
+    ("workspace", "people"),
+    [
+        ("11111111-1111-4111-8111-111111111111", "alex,nobody"),
+        ("11111111-1111-4111-8111-111111111111", "alex,../x"),
+        (None, "alex,mia"),
+    ],
+)
+def test_workspace_people_must_be_known_and_go_with_a_workspace(workspace, people):
+    with pytest.raises(PersonError):
+        resolve(
+            "core",
+            "alex",
+            "c1",
+            {"alex", "mia"},
+            None,
+            None,
+            (),
+            DEFAULT_TRUSTED,
+            workspace,
+            people,
+        )
+
+
 def test_a_workspace_that_is_not_a_uuid_is_refused():
     with pytest.raises(PersonError):
         resolve("core", "alex", "c1", {"alex"}, None, None, (), DEFAULT_TRUSTED, "../etc")

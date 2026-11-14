@@ -28,6 +28,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
+from joshua_shared.config import PERSON_ID_RE
 from joshua_shared.log import get_logger
 from mcp import types
 from mcp.server.mcpserver import Context, MCPServer
@@ -37,7 +38,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from joshua_assignments.manager import Manager, rejected, with_hint
+from joshua_assignments.manager import Manager, may_read, rejected, with_hint
 from joshua_assignments.read_api import READ_PREFIX, ReadApi, read_caller
 from joshua_assignments.settings import Caller, Settings
 from joshua_assignments.store import Store
@@ -46,6 +47,7 @@ logger = get_logger("joshua_assignments")
 
 # The key the gateway puts in ``params._meta`` of a call from a workspace thread.
 WORKSPACE_META_KEY = "joshua/workspace"
+WORKSPACE_PEOPLE_META_KEY = "joshua/workspace_people"
 
 OPEN_PATHS = frozenset({"/healthz", "/readyz"})
 _BEARER = "Bearer "
@@ -156,6 +158,23 @@ def origin_of(ctx: Context) -> str | None:
         return None
 
 
+def people_of(ctx: Context) -> tuple[str, ...]:
+    """The people of a shared workspace in the ``_meta`` of this call, or none.
+
+    The gateway sets ``joshua/workspace_people`` beside ``joshua/workspace``
+    for a call from a shared workspace, from the headers of core. A value that
+    is not a list of person ids is none."""
+    try:
+        meta = ctx.request_context.meta
+    except ValueError:
+        return ()
+    value = meta.get(WORKSPACE_PEOPLE_META_KEY) if meta else None
+    if not isinstance(value, list):
+        return ()
+    people = [p for p in value if isinstance(p, str) and PERSON_ID_RE.match(p)]
+    return tuple(dict.fromkeys(people)) if len(people) == len(value) else ()
+
+
 def with_link(
     result: dict[str, Any], assignment_id: Any, workspace: str | None
 ) -> dict[str, Any] | types.CallToolResult:
@@ -193,13 +212,25 @@ def _person(ctx: Context) -> str:
 
 
 async def _own(caller: Caller, assignment_id: int, *, deleted: bool = False) -> dict[str, Any]:
-    """The assignment, when the caller may see it. Another person's is "not found".
+    """The assignment, when the caller owns it. Another person's is "not found",
+    and so is one that the caller only reads (``_readable``): every tool that
+    changes an assignment takes this one.
 
     A deleted draft is "not found" too, unless ``deleted`` is true."""
+    row = await _readable(caller, assignment_id, deleted=deleted)
+    if caller.person is not None and row["person_id"] != caller.person:
+        raise ToolError(f"404 not found: no assignment {assignment_id}")
+    return row
+
+
+async def _readable(caller: Caller, assignment_id: int, *, deleted: bool = False) -> dict[str, Any]:
+    """The assignment, when the caller may read it: its owner, or a person of
+    the shared workspace that started it (``may_read``). The caller with no
+    person (``ADDON_TOKEN``) reads every one."""
     row = await get_manager().store.get(int(assignment_id))
     if (
         row is None
-        or (caller.person is not None and row["person_id"] != caller.person)
+        or (caller.person is not None and not may_read(row, caller.person))
         or (row.get("deleted_at") is not None and not deleted)
     ):
         raise ToolError(f"404 not found: no assignment {assignment_id}")
@@ -257,11 +288,14 @@ async def start_assignment(
     person = _person(ctx)
     conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
     workspace = origin_of(ctx)
+    people = people_of(ctx) if workspace else ()
     if id is not None:
         if spec is not None or saved is not None or rerun is not None or note is not None:
             return with_hint(rejected("invalid_arguments", "give one of spec, id, saved, or rerun"))
         row = await _own(Caller(person=person), id, deleted=True)
-        started = await get_manager().start(person, draft=row, workspace=workspace)
+        started = await get_manager().start(
+            person, draft=row, workspace=workspace, workspace_people=people
+        )
     else:
         started = await get_manager().start(
             person,
@@ -272,6 +306,7 @@ async def start_assignment(
             rerun=rerun,
             note=note,
             workspace=workspace,
+            workspace_people=people,
         )
     return with_link(started, started.get("id"), workspace)
 
@@ -402,7 +437,7 @@ async def assignment_status(id: int, ctx: Context) -> dict:
     Read the report here.
     """
     caller = _caller(ctx)
-    row = await _own(caller, id)
+    row = await _readable(caller, id)
     return with_link(await get_manager().status(row), row["id"], origin_of(ctx))
 
 
@@ -411,12 +446,14 @@ async def list_assignments(
     ctx: Context, limit: int = 10, status: str | None = None, state: str | None = None
 ) -> dict:
     """The person's assignments, the newest first, each with its title, state, and saved.
+    They include the runs that another person started in a shared workspace of
+    this person; ``person`` names who started each one.
 
     limit is 1 to 100. status filters by status. state filters by state:
     draft, in_progress, or completed.
     """
     caller = _caller(ctx)
-    return await get_manager().recent(caller.person, limit, status, state)
+    return await get_manager().recent(caller.person, limit, status, state, shared=True)
 
 
 @mcp.tool()

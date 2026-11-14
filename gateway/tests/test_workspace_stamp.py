@@ -38,7 +38,10 @@ def _upstream() -> MCPServer:
     def seen_meta(ctx: Context) -> dict:
         """What an addon author reads: the workspace id in the request meta."""
         meta = ctx.request_context.meta
-        return {"workspace": meta.get("joshua/workspace") if meta else None}
+        return {
+            "workspace": meta.get("joshua/workspace") if meta else None,
+            "people": meta.get("joshua/workspace_people") if meta else None,
+        }
 
     @app.tool()
     def write_document(path: str, body: str, title: str | None = None) -> dict:
@@ -112,6 +115,33 @@ async def test_the_assignments_container_is_trusted_with_the_header_too(app, pos
         async with gateway_session(app, "/documents", "assignments", STAMPED) as session:
             result = await session.call_tool("seen_meta", {})
     assert _seen(result) == WORKSPACE
+
+
+async def _people_seen(app, headers) -> list[str] | None:
+    async with lifespan(app):
+        async with gateway_session(app, "/documents", "core", headers) as session:
+            result = await session.call_tool("seen_meta", {})
+    return json.loads(result.content[0].text)["people"]
+
+
+async def test_the_upstream_sees_the_people_of_a_shared_workspace(app, posted):
+    shared = {**STAMPED, "X-Joshua-Workspace-People": "alex,mia"}
+    assert await _people_seen(app, shared) == ["alex", "mia"]
+
+
+async def test_a_personal_workspace_carries_no_people(app, posted):
+    assert await _people_seen(app, STAMPED) is None
+
+
+async def test_bad_workspace_people_are_refused(app, posted):
+    async with lifespan(app):
+        for headers in (
+            {**STAMPED, "X-Joshua-Workspace-People": "alex,nobody"},
+            {**PLAIN, "X-Joshua-Workspace-People": "alex,mia"},
+        ):
+            with pytest.raises(Exception):  # noqa: B017 — the 400 ends the session start
+                async with gateway_session(app, "/documents", "core", headers):
+                    pass
 
 
 async def test_a_bad_workspace_header_is_refused(app, posted):

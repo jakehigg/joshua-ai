@@ -4,9 +4,10 @@ import type { ChatMessage } from "./store";
 import { DocumentPanelProvider } from "./DocumentPanel";
 import { Message } from "./Message";
 
-function show(extra: Partial<ChatMessage>) {
+function show({ showWho, ...extra }: Partial<ChatMessage> & { showWho?: boolean }) {
   const message: ChatMessage = { id: "m1", role: "joshua", text: "", ts: "2026-01-01T10:00:00Z", state: "ok", ...extra };
-  return render(<Message message={message} canRetry onRetry={() => undefined} />).container;
+  return render(<Message message={message} canRetry onRetry={() => undefined} showWho={showWho} />)
+    .container;
 }
 
 const ANSWER = "Payback is about **11 years**.\n\n```speech\nAbout eleven years at today's rates.\n```";
@@ -75,6 +76,15 @@ describe("Message", () => {
     expect(c.querySelector(".file-chip")?.textContent).toBe("📎photo.png");
     expect(c.querySelector(".bubble")?.textContent).toContain("what is on this?");
     expect(show({ role: "person", text: "no file" }).querySelector(".file-chip")).toBeNull();
+  });
+
+  it("names who wrote a person message when the list asks for the name", () => {
+    const named = show({ role: "person", text: "I'll bring pie", who: "Mia", showWho: true });
+    expect(named.querySelector(".msg-who")?.textContent).toBe("Mia");
+    // The rest of a run from the same person has no line of its own.
+    expect(show({ role: "person", text: "and cider", who: "Mia" }).querySelector(".msg-who")).toBeNull();
+    // A thread of one person carries no name at all.
+    expect(show({ role: "person", text: "hi", showWho: true }).querySelector(".msg-who")).toBeNull();
   });
 
   it("prints a person message's text as plain text", () => {

@@ -1,12 +1,17 @@
 """The JSON routes of the workspaces: they proxy core's ``/v1/workspaces``.
 
 - ``GET`` and ``POST /api/v1/workspaces`` list and create.
-- ``GET /api/v1/workspaces/options`` gives the servers (a name and one line)
-  and the models that the person may pick.
+- ``GET /api/v1/workspaces/options`` gives the servers (a name and one line),
+  the models, and the people that the person may pick.
 - ``GET`` and ``PATCH /api/v1/workspaces/{slug}`` read and change one.
 - ``GET`` and ``POST /api/v1/workspaces/{slug}/items`` list and add items.
 - ``PATCH`` and ``DELETE /api/v1/workspaces/{slug}/items/{id}`` change
   (``pinned``) or remove an item.
+
+``{slug}`` is a ref: a slug, an id, or two segments (``shared/<slug>`` for a
+shared workspace, ``<owner>/<slug>`` for the workspace of a person). The
+browser sends a two-segment ref URL-encoded, and it goes to core as it is:
+core resolves it for the person.
 
 Each route calls core with ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` and names
 the signed-in person in the ``person`` query parameter. A guest gets 403. Every

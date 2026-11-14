@@ -213,6 +213,14 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   width: 100%;
   min-width: 0;
 }
+/* Who wrote the message, in the thread of a shared workspace: one quiet line
+   above the first bubble of their run. */
+.chat-screen .msg-who {
+  padding: 0 2px;
+  color: var(--j-muted);
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
 
 
 /* A time line before the first message of a run: centered, quiet, and always
@@ -928,6 +936,14 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   text-transform: uppercase;
   color: var(--j-muted);
 }
+/* The mark of a shared workspace in the rail: quiet, after the title. */
+.chat-screen .rail-shared {
+  margin-left: 6px;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
 .chat-screen .rail-new { margin-top: 8px; text-align: left; }
 .chat-screen .rail-toggle { flex: none; }
 .chat-screen .ws-title { flex: 1; min-width: 0; }
@@ -983,6 +999,9 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 .chat-screen .ws-dialog select { font: inherit; color: inherit; background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: 8px; padding: 6px 8px; }
 .chat-screen .ws-servers { display: flex; flex-direction: column; gap: 4px; border: 0; padding: 0; margin: 4px 0; }
 .chat-screen .ws-server { display: flex; align-items: flex-start; gap: 8px; }
+.chat-screen .ws-people { display: flex; flex-direction: column; gap: 4px; border: 0; padding: 0; margin: 4px 0; }
+.chat-screen .ws-person { display: flex; align-items: flex-start; gap: 8px; }
+.chat-screen .ws-link { margin: 4px 0 0; }
 .chat-screen .ws-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .chat-screen .item-add input { font: inherit; color: inherit; background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: 8px; padding: 6px 8px; }
 

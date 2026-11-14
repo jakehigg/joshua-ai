@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from joshua_core.main import build_app
-from joshua_core.store.models import Conversation
+from joshua_core.store.models import Conversation, Workspace
 from joshua_core.store.repo import TRANSCRIPT_PAGE_MAX
 from joshua_core.transcript_api import (
     SAFE_META_KEYS,
@@ -118,6 +118,83 @@ def test_the_main_thread_reads_the_main_conversation(client: TestClient) -> None
 
 async def _none() -> None:
     return None
+
+
+# --- a workspace thread ------------------------------------------------------
+
+EMPTY = {"conversation_id": None, "messages": [], "next_before": None, "pending": None}
+
+SHARED = Workspace(
+    id="11111111-1111-4111-8111-111111111111",
+    slug="thanksgiving",
+    title="Thanksgiving",
+    owner="alex",
+    shared=True,
+    members=("mia",),
+)
+PERSONAL = Workspace(
+    id="22222222-2222-4222-8222-222222222222", slug="solar", title="Solar", owner="alex"
+)
+
+
+def _workspaces(client: TestClient) -> None:
+    """Give the fake repo the two workspaces and the thread each one has."""
+    threads = {
+        SHARED.id: Conversation(id="ws-shared", channel_id=SHARED.channel_id, person_id=None),
+        PERSONAL.id: Conversation(id="ws-solar", channel_id=PERSONAL.channel_id, person_id="alex"),
+    }
+
+    async def find_workspace_for(person_id: str, ref: str) -> Any:
+        for workspace in (SHARED, PERSONAL):
+            if person_id in workspace.people and ref in (workspace.id, workspace.slug):
+                return workspace
+        return None
+
+    async def workspace_conversation(workspace: Workspace) -> Conversation:
+        return threads[workspace.id]
+
+    client.repo.find_workspace_for = find_workspace_for
+    client.repo.workspace_conversation = workspace_conversation
+
+
+def test_a_member_reads_the_whole_shared_thread(client: TestClient) -> None:
+    _workspaces(client)
+    client.repo.rows[0]["meta"] = {"turn_id": "t1", "speaker": "Mia"}
+
+    body = _get(client, channel=f"workspace:{SHARED.id}", person="mia").json()
+
+    assert body["conversation_id"] == "ws-shared"
+    assert [m["id"] for m in body["messages"]] == [1, 2, 3, 4, 5]
+    assert body["messages"][0]["meta"] == {"turn_id": "t1", "speaker": "Mia"}
+    # The thread of everyone, not a conversation of the person who reads it.
+    assert client.repo.lookups == []
+
+
+def test_the_owner_reads_the_shared_thread_by_its_slug(client: TestClient) -> None:
+    _workspaces(client)
+    body = _get(client, channel="workspace:thanksgiving", person="alex").json()
+    assert body["conversation_id"] == "ws-shared"
+
+
+def test_a_personal_workspace_reads_the_owner_thread(client: TestClient) -> None:
+    _workspaces(client)
+    body = _get(client, channel="workspace:solar", person="alex").json()
+    assert body["conversation_id"] == "ws-solar"
+
+
+def test_a_workspace_the_person_does_not_reach_is_empty(client: TestClient) -> None:
+    _workspaces(client)
+    for channel, person in (
+        (f"workspace:{SHARED.id}", "robin"),  # not one of its people
+        ("workspace:solar", "mia"),  # alex's own workspace
+        ("workspace:nothing", "alex"),  # no such workspace
+        (f"workspace:{SHARED.id}", None),  # no person at all
+    ):
+        params = {"channel": channel, "person": person} if person else {"channel": channel}
+        response = client.get(TRANSCRIPT_PATH, params=params, headers=_bearer(CHANNELS))
+        assert response.status_code == 200
+        assert response.json() == EMPTY, channel
+    assert client.repo.lookups == [] and client.repo.created == 0
 
 
 # --- auth ------------------------------------------------------------------
@@ -231,10 +308,11 @@ def test_the_route_drops_a_meta_key_that_is_not_safe(client: TestClient) -> None
         "cost_usd": 0.12,
         "usage": {"input_tokens": 10},
         "written": ["wiki/journal/2026/03/04/entry.md"],
-        "speaker": "998877",
+        "speaker": "Mia",
     }
     meta = _get(client).json()["messages"][0]["meta"]
-    assert meta == {"turn_id": "t1", "tools": ["search_memory"]}
+    # The speaker stays: it is the name the people of the thread see anyway.
+    assert meta == {"turn_id": "t1", "tools": ["search_memory"], "speaker": "Mia"}
 
 
 # --- helpers ---------------------------------------------------------------

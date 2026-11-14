@@ -109,12 +109,21 @@ class Workspace:
     model: str | None = None
     notify: str = "none"
     status: str = "active"
+    # A shared workspace is one thread that several people write in. ``members``
+    # holds the ids beside the owner, and they never change after the create.
+    shared: bool = False
+    members: tuple[str, ...] = ()
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
     @property
     def channel_id(self) -> str:
         return f"workspace:{self.id}"
+
+    @property
+    def people(self) -> tuple[str, ...]:
+        """Everyone who reaches this workspace: the owner, then the members."""
+        return (self.owner, *self.members)
 
 
 @dataclass(frozen=True)

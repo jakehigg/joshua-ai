@@ -269,24 +269,33 @@ class TurnService:
     ) -> Resolution | None:
         """Resolve a turn on ``workspace:<id or slug>``.
 
-        The workspace must exist, and its owner must be the person of the turn.
-        Any other turn is refused: None, and the caller answers 403. A turn
-        never creates a ``workspace:`` channel. The ``workspaces`` routes
-        create it with the workspace.
+        The workspace must exist, and the person of the turn must reach it: its
+        owner, or a member of a shared one. Any other turn is refused: None,
+        and the caller answers 403. A turn never creates a ``workspace:``
+        channel. The ``workspaces`` routes create it with the workspace.
+
+        A shared workspace is one thread that several people write in, so the
+        turn runs as a group turn and carries the speaker: the message says who
+        wrote it, and so does the transcript row.
         """
         if person is None or event.chat.kind == "group":
             return None
         ref = event.channel[len(WORKSPACE_PREFIX) :]
-        workspace = await self._repo.find_workspace(person.id, ref)
+        workspace = await self._repo.find_workspace_for(person.id, ref)
         if workspace is None:
             logger.warning({"message": "workspace turn refused", "reason": "no such workspace"})
             return None
         channel = await self._repo.get_channel(workspace.channel_id)
         if channel is None:
             return None
-        conversation = await self._repo.get_or_create_conversation(channel.id, person.id)
+        conversation = await self._repo.workspace_conversation(workspace)
+        speaker = person.display_name if workspace.shared else None
         return Resolution(
-            channel=channel, conversation=conversation, person=person, is_group=False, speaker=None
+            channel=channel,
+            conversation=conversation,
+            person=person,
+            is_group=workspace.shared,
+            speaker=speaker,
         )
 
     # --- run helpers -------------------------------------------------------

@@ -2,7 +2,9 @@
 // message or new text scrolls into view. When the reader has scrolled up,
 // the list stays put and a "new" button appears instead. "Load earlier"
 // at the top adds the page before; the rows on screen do not move. A time
-// line stands before the first message of a run (see stamps.ts).
+// line stands before the first message of a run (see stamps.ts), and in a
+// shared workspace the name of the person stands above the first message of
+// their run (`who`).
 //
 // `pending` is a turn that Joshua works on and this screen does not stream (a
 // message sent from another device): the list ends with the same working line,
@@ -20,6 +22,12 @@ import type { LoadStatus } from "./useHistory";
 
 // Pixels from the bottom that still count as "at the bottom".
 const NEAR_BOTTOM_PX = 48;
+
+// A person row of a shared workspace names who wrote it. The name stands
+// above the first message of a run from that person, and not above the rest.
+function namesWho(before: ChatMessage | undefined, message: ChatMessage): boolean {
+  return !!message.who && (before?.role !== "person" || before.who !== message.who);
+}
 
 function reducedMotion(): boolean {
   return (
@@ -175,7 +183,12 @@ export function MessageList({
                   <time dateTime={m.ts}>{formatStamp(m.ts)}</time>
                 </div>
               )}
-              <Message message={m} canRetry={canRetry} onRetry={onRetry} />
+              <Message
+                message={m}
+                canRetry={canRetry}
+                onRetry={onRetry}
+                showWho={namesWho(messages[i - 1], m)}
+              />
             </Fragment>
           ))}
           {ghost && <Message message={ghost} canRetry={false} onRetry={onRetry} />}

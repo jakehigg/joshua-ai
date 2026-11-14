@@ -56,7 +56,7 @@ no id), or ``drafts``.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -193,13 +193,33 @@ def summary_view(row: dict[str, Any], names: Mapping[int, str] | None = None) ->
     }
 
 
-def stamp_workspace(spec: dict[str, Any], workspace: str | None) -> None:
+def stamp_workspace(
+    spec: dict[str, Any], workspace: str | None, people: Sequence[str] = ()
+) -> None:
     """Put ``workspace`` in the resolved ``spec`` of a run that starts now. A run
-    that starts outside a workspace has no ``workspace`` key."""
+    that starts outside a workspace has no ``workspace`` key.
+
+    ``people`` are the people of a shared workspace, from the ``_meta`` of the
+    call. They go in ``workspace_people`` and may read the run (``may_read``).
+    The people of a shared workspace never change, so the list stays true."""
+    spec.pop("workspace_people", None)
     if workspace:
         spec["workspace"] = workspace
+        if people:
+            spec["workspace_people"] = list(dict.fromkeys(people))
     else:
         spec.pop("workspace", None)
+
+
+def may_read(row: Mapping[str, Any] | None, person: str | None) -> bool:
+    """True when ``person`` may read the assignment ``row``: its owner, or a
+    person of the shared workspace that started it. Only the owner changes it."""
+    if row is None or person is None:
+        return False
+    if row["person_id"] == person:
+        return True
+    people = (row.get("spec") or {}).get("workspace_people") or []
+    return isinstance(people, list) and person in people
 
 
 def rerun_spec(spec: Mapping[str, Any], note: str | None) -> dict[str, Any]:
@@ -208,6 +228,7 @@ def rerun_spec(spec: Mapping[str, Any], note: str | None) -> dict[str, Any]:
     out = dict(spec)
     # The run starts where the re-run starts, so it takes no workspace along.
     out.pop("workspace", None)
+    out.pop("workspace_people", None)
     old = out.pop("rerun_note", None)
     goal = str(out.get("goal") or "")
     if old:
@@ -262,6 +283,7 @@ def full_view(
         ),
         "rerun_note": spec.get("rerun_note"),
         "workspace": spec.get("workspace"),
+        "workspace_people": spec.get("workspace_people") or [],
         "goal": spec.get("goal"),
         "model_id": row.get("model"),
         "budget": spec.get("budget"),
@@ -606,6 +628,7 @@ class Manager:
         rerun: Any = None,
         note: Any = None,
         workspace: str | None = None,
+        workspace_people: Sequence[str] = (),
     ) -> dict[str, Any]:
         """Start an assignment now: the draft ``draft`` (a row of ``person``), a
         new one from the saved assignment ``saved``, a re-run of the run
@@ -621,7 +644,8 @@ class Manager:
         ``workspace`` is the id from the ``_meta`` of the call, when the start
         came from a workspace thread. It is stored in ``workspace`` of the spec,
         and the report and the question go back to that thread. A caller cannot
-        set it in a spec: the spec refuses the field.
+        set it in a spec: the spec refuses the field. ``workspace_people`` are
+        the people of a shared workspace, from the same ``_meta``.
         """
         if rerun is not None or note is not None:
             if raw_spec is not None or saved is not None or draft is not None or rerun is None:
@@ -629,11 +653,20 @@ class Manager:
                     rejected("invalid_arguments", "note goes only with rerun, and alone")
                 )
             return with_hint(
-                await self._start_rerun(person, rerun, note, conversation_id, workspace)
+                await self._start_rerun(
+                    person, rerun, note, conversation_id, workspace, workspace_people
+                )
             )
         return with_hint(
             await self._start(
-                person, raw_spec, conversation_id, saved, draft, new=new, workspace=workspace
+                person,
+                raw_spec,
+                conversation_id,
+                saved,
+                draft,
+                new=new,
+                workspace=workspace,
+                workspace_people=workspace_people,
             )
         )
 
@@ -644,6 +677,7 @@ class Manager:
         raw_note: Any,
         conversation_id: str | None,
         workspace: str | None = None,
+        workspace_people: Sequence[str] = (),
     ) -> dict[str, Any]:
         """Start a new run with the spec of the run ``raw_id`` of ``person``.
 
@@ -686,7 +720,7 @@ class Manager:
         _, resolved = checked
         if note:
             resolved.spec["rerun_note"] = note
-        stamp_workspace(resolved.spec, workspace)
+        stamp_workspace(resolved.spec, workspace, workspace_people)
         refused = await self._refuse_unknown_limits(resolved.spec)
         if refused is not None:
             return refused
@@ -737,13 +771,14 @@ class Manager:
         *,
         new: bool,
         workspace: str | None = None,
+        workspace_people: Sequence[str] = (),
     ) -> dict[str, Any]:
         if not self.section.enabled:
             return rejected("disabled", "assignments.enabled is false in joshua.yaml")
         if draft is not None:
             if raw_spec is not None or saved is not None:
                 return rejected("invalid_arguments", "give one of spec, id, or saved")
-            return await self._start_draft(person, draft, workspace)
+            return await self._start_draft(person, draft, workspace, workspace_people)
         if saved is None and raw_spec is not None and not new:
             refused = await self._drafts_open(person)
             if refused is not None:
@@ -756,7 +791,7 @@ class Manager:
         if isinstance(checked, dict):
             return checked
         _, resolved = checked
-        stamp_workspace(resolved.spec, workspace)
+        stamp_workspace(resolved.spec, workspace, workspace_people)
         refused = await self._refuse_unknown_limits(resolved.spec)
         if refused is not None:
             return refused
@@ -805,7 +840,11 @@ class Manager:
         )
 
     async def _start_draft(
-        self, person: str, row: dict[str, Any], workspace: str | None = None
+        self,
+        person: str,
+        row: dict[str, Any],
+        workspace: str | None = None,
+        workspace_people: Sequence[str] = (),
     ) -> dict[str, Any]:
         """Start the draft ``row`` as itself: the run keeps the id of the draft.
 
@@ -823,7 +862,7 @@ class Manager:
         if isinstance(checked, dict):
             return checked
         _, resolved = checked
-        stamp_workspace(resolved.spec, workspace)
+        stamp_workspace(resolved.spec, workspace, workspace_people)
         refused = await self._refuse_unknown_limits(resolved.spec)
         if refused is not None:
             return refused
@@ -1223,15 +1262,23 @@ class Manager:
         return full_view(row, checkpoint, await self._names([row]), parent)
 
     async def recent(
-        self, person: str | None, limit: int, status: str | None, state: str | None = None
+        self,
+        person: str | None,
+        limit: int,
+        status: str | None,
+        state: str | None = None,
+        *,
+        shared: bool = False,
     ) -> dict[str, Any]:
+        """The newest assignments of ``person``. With ``shared``, also the runs
+        of a shared workspace of that person (``Store.recent``)."""
         if status is not None and status not in STATUSES:
             return rejected("invalid_status", f"status is one of {', '.join(STATUSES)}")
         if state is not None and state not in STATES:
             return rejected("invalid_state", f"state is one of {', '.join(STATES)}")
         limit = max(1, min(int(limit), MAX_LIST))
         statuses = statuses_of(state) if state is not None else None
-        rows = await self.store.recent(person, limit, status, statuses)
+        rows = await self.store.recent(person, limit, status, statuses, shared=shared)
         names = await self._names(rows)
         return {"assignments": [summary_view(row, names) for row in rows]}
 

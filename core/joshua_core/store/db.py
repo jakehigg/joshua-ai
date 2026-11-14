@@ -221,6 +221,15 @@ CREATE TABLE IF NOT EXISTS workspaces (
     UNIQUE (owner, slug)
 );
 
+-- A shared workspace is one thread that several people write in. `members`
+-- holds the ids beside the owner, and they never change after the create.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS members JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- "the shared workspaces that hold this person", for the list and the reach rule.
+CREATE INDEX IF NOT EXISTS ix_workspaces_members ON workspaces USING gin (members);
+-- The slug of a shared workspace is one for everyone, so no second one takes it.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workspaces_shared_slug ON workspaces (slug) WHERE shared;
+
 CREATE TABLE IF NOT EXISTS workspace_items (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

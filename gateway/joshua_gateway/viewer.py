@@ -12,7 +12,8 @@ ones at ``/shared/…``, their own page at ``/me``, the journal as a feed at
 at ``/documents`` and ``/documents/<owner>/<slug>``, the assignments at
 ``/assignments``, ``/assignments/<id>``, ``/assignments/saved`` and
 ``/assignments/saved/<id>``, the editor at ``/edit/…`` and ``/new``, and the
-chat at ``/chat/<person id>`` with a workspace at ``/chat/w/<slug>``. The
+chat at ``/chat/<person id>`` with a workspace at
+``/chat/w/<owner>/<slug>`` (``shared`` for a shared one). The
 agent never calls the viewer.
 
 The app reads and writes one JSON API under ``/api/v1/``, and

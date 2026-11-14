@@ -46,6 +46,7 @@ def gateway_servers(
     role: str = "guest",
     group_id: str | None = None,
     workspace_id: str | None = None,
+    workspace_people: Iterable[str] = (),
 ) -> dict[str, dict[str, Any]]:
     """Build the SDK ``mcp_servers`` map that routes each name through the gateway.
 
@@ -60,7 +61,9 @@ def gateway_servers(
 
     ``workspace_id`` is the id of the workspace when the session is a workspace
     thread. It rides in ``X-Joshua-Workspace`` and, like the conversation, is
-    fixed for the session.
+    fixed for the session. ``workspace_people`` is everyone of a shared
+    workspace, the owner first. It rides in ``X-Joshua-Workspace-People``, so
+    an addon can let them all read a long job that started there.
 
     The role of a conversation cannot change inside a session. The SDK writes
     this whole map onto the command line of the CLI subprocess when the session
@@ -79,6 +82,9 @@ def gateway_servers(
         # A workspace session: the gateway stamps ``_meta["joshua/workspace"]``
         # on each tool call from it, and records items for the workspace.
         headers["X-Joshua-Workspace"] = workspace_id
+        people = [p for p in workspace_people if p]
+        if people:
+            headers["X-Joshua-Workspace-People"] = ",".join(people)
     return {
         name: {"type": "http", "url": f"{base}/{name}", "headers": dict(headers)} for name in names
     }

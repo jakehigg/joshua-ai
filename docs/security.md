@@ -55,8 +55,9 @@ Every route has an allowlist of fleet identities. The list is in
   no exception.
 - `gateway` admits only the identities in `gateway.person_header_callers` on
   its MCP routes (default `core` and `assignments`), and trusts the
-  `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, `X-Joshua-Workspace`, and
-  `X-Joshua-Conversation` headers only from them. The list must hold `core`.
+  `X-Joshua-Person`, `X-Joshua-Role`, `X-Joshua-Group`, `X-Joshua-Workspace`,
+  `X-Joshua-Workspace-People`, and `X-Joshua-Conversation` headers only from
+  them. The list must hold `core`.
   Every other caller gets `403` on an MCP route, and a test proves it for
   `viewer`. The assignments container acts for the person who started an
   assignment, so the person tool policy applies to it in the same way.

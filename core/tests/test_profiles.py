@@ -9,6 +9,8 @@ _MEMBER = Person(id="alex", display_name="Alex", role="member")
 _GUEST = Person(id="sam", display_name="Sam", role="guest")
 _DM = Channel(id="telegram:1", channel_type="telegram", session_mode="per_person")
 _SHARED = Channel(id="telegram:g", channel_type="telegram", session_mode="shared")
+_WORKSPACE = Channel(id="workspace:w1", channel_type="workspace", session_mode="per_person")
+_SHARED_WORKSPACE = Channel(id="workspace:w2", channel_type="workspace", session_mode="shared")
 
 
 def test_derive_dm() -> None:
@@ -61,6 +63,40 @@ def test_kind_beats_shared_and_role() -> None:
 
 def test_dm_when_person_is_none() -> None:
     assert derive_profile(None, _DM).name == "dm"
+
+
+def test_a_workspace_channel_adds_the_workspace_file() -> None:
+    profile = derive_profile(_MEMBER, _WORKSPACE)
+    assert profile.name == "dm"
+    assert profile.prompt_files == (
+        "base.md",
+        "people.md",
+        "chat.md",
+        "registration.md",
+        "speech.md",
+        "workspace.md",
+    )
+
+
+def test_a_shared_workspace_adds_the_shared_file_to_the_group_profile() -> None:
+    profile = derive_profile(_MEMBER, _SHARED_WORKSPACE)
+    assert profile.name == "group"
+    assert profile.prompt_files == (
+        "base.md",
+        "people.md",
+        "chat.md",
+        "group.md",
+        "registration.md",
+        "speech.md",
+        "workspace.md",
+        "workspace_shared.md",
+    )
+
+
+def test_a_guest_in_a_workspace_keeps_the_guest_profile_and_the_workspace_file() -> None:
+    profile = derive_profile(_GUEST, _WORKSPACE)
+    assert profile.name == "guest"
+    assert profile.prompt_files == ("base.md", "guest.md", "chat.md", "speech.md", "workspace.md")
 
 
 def test_with_files_appends() -> None:

@@ -17,6 +17,12 @@
 // hidden, until `polling` is false: the answer is in the transcript, and the
 // refresh brings it. A tab that becomes visible refreshes at once, with no
 // wait for the rate limit.
+//
+// `live` is true for the thread of a shared workspace, where other people
+// write. The newest page is then loaded every LIVE_MS while the tab is
+// visible and every POLL_HIDDEN_MS while it is hidden, also when nothing is
+// pending, so a message of another person shows without a reload. Their
+// turn then shows as `pending`, and `polling` brings the answer.
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { getHistory } from "../api/client";
@@ -26,6 +32,7 @@ export const PAGE_SIZE = 50;
 export const FOCUS_REFRESH_MS = 10_000;
 export const POLL_MS = 3_000;
 export const POLL_HIDDEN_MS = 30_000;
+export const LIVE_MS = 4_000;
 
 export type LoadStatus = "loading" | "ready" | "error";
 
@@ -51,6 +58,7 @@ export function useHistory(
   onError?: (message: string) => void,
   workspace?: string,
   polling = false,
+  live = false,
 ): History {
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -120,15 +128,17 @@ export function useHistory(
   }, [load, wake]);
 
   useEffect(() => {
-    if (!polling) return undefined;
+    if (!polling && !live) return undefined;
+    const visibleMs = polling ? POLL_MS : LIVE_MS;
+    const next = () => (document.visibilityState === "visible" ? visibleMs : POLL_HIDDEN_MS);
     let timer: ReturnType<typeof setTimeout>;
     const tick = () => {
       if (!isRunningRef.current()) void load();
-      timer = setTimeout(tick, document.visibilityState === "visible" ? POLL_MS : POLL_HIDDEN_MS);
+      timer = setTimeout(tick, next());
     };
-    timer = setTimeout(tick, document.visibilityState === "visible" ? POLL_MS : POLL_HIDDEN_MS);
+    timer = setTimeout(tick, next());
     return () => clearTimeout(timer);
-  }, [polling, load]);
+  }, [polling, live, load]);
 
   const refresh = useCallback(() => {
     if (!isRunningRef.current()) void load();

@@ -40,9 +40,12 @@ _PROMPT_FILES: dict[str, tuple[str, ...]] = {
 # never loaded.
 VOICE_FILES = ("voice.md",)
 
-# The channel type of a workspace thread, and the file it adds to the dm profile.
+# The channel type of a workspace thread, and the file it adds to whichever
+# profile the turn took. A shared workspace, one thread that several people
+# write in, takes the group profile and adds the second file after the first.
 WORKSPACE_CHANNEL_TYPE = "workspace"
 WORKSPACE_FILES = ("workspace.md",)
+WORKSPACE_SHARED_FILES = ("workspace_shared.md",)
 
 
 @dataclass(frozen=True)
@@ -79,8 +82,10 @@ def derive_profile(
     else:
         name = "dm"
     profile = Profile(name=name, prompt_files=_PROMPT_FILES[name])
-    if name == "dm" and channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+    if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
         profile = profile.with_files(WORKSPACE_FILES)
+        if channel.session_mode == "shared":
+            profile = profile.with_files(WORKSPACE_SHARED_FILES)
     if voice is not None and channel.channel_type == VOICE_CHANNEL_TYPE:
         return _spoken(profile, voice)
     return profile
