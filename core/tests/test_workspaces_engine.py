@@ -817,14 +817,17 @@ async def test_send_to_normal_chat_goes_to_the_main_conversation_with_a_link() -
     )
     assert "Sent" in _text(reply)
     assert sent == [
-        ("imessage:+1", "Done\n\nSolar install: https://joshua.example.org/chat/w/solar")
+        ("imessage:+1", "Done\n\nSolar install: https://joshua.example.org/chat/w/alex/solar")
     ]
 
 
 async def test_send_to_normal_chat_falls_back_to_the_path_and_reports_failures() -> None:
     repo = WsRepo(_ws())
     settings = make_settings()  # no viewer_url
-    assert ws_tools.chat_link(settings, _ws()) == "/chat/w/solar"
+    assert ws_tools.chat_link(settings, _ws()) == "/chat/w/alex/solar"
+    # A shared workspace stands in the `shared` namespace, not under its owner.
+    shared = _ws(shared=True, members=("mia",))
+    assert ws_tools.chat_link(settings, shared) == "/chat/w/shared/solar"
 
     async def no(target: str, text: str) -> bool:
         return False

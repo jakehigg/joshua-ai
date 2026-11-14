@@ -71,9 +71,9 @@ async def test_a_workspace_row_is_personal_and_a_shared_slug_is_one_for_everyone
         assert await cur.fetchone() == {"shared": False, "members": []}
         # The same personal slug for another owner is free.
         await conn.execute(insert, ("trip", "mia", False, "[]"))
-        await conn.execute(insert, ("shared_trip", "alex", True, '["mia"]'))
+        await conn.execute(insert, ("feast", "alex", True, '["mia"]'))
         with pytest.raises(psycopg.errors.UniqueViolation):
-            await conn.execute(insert, ("shared_trip", "mia", True, '["alex"]'))
+            await conn.execute(insert, ("feast", "mia", True, '["alex"]'))
 
 
 async def test_seed_people_and_handles(repo) -> None:

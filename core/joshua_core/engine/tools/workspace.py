@@ -32,7 +32,7 @@ from joshua_core.engine.agent import create_sdk_mcp_server, tool
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.workspace import workspace_id_of
 from joshua_core.store.models import WORKSPACE_ITEM_KINDS, Workspace
-from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE
+from joshua_core.store.repo import SHARED_NAMESPACE, WORKSPACE_CHANNEL_TYPE
 
 logger = get_logger("tools.workspace")
 
@@ -165,8 +165,11 @@ async def do_update_workspace_notes(deps: ToolDeps, *, notes: str) -> dict[str, 
 
 def chat_link(settings: JoshuaConfig, workspace: Workspace) -> str:
     """The address of a workspace in the viewer: the public address and the path,
-    or the path alone when ``workspaces.viewer_url`` is not set."""
-    path = f"/chat/w/{workspace.slug}"
+    or the path alone when ``workspaces.viewer_url`` is not set. The path names
+    the namespace of the workspace: ``shared`` when it is shared, its owner when
+    it is not."""
+    namespace = SHARED_NAMESPACE if workspace.shared else workspace.owner
+    path = f"/chat/w/{namespace}/{workspace.slug}"
     base = settings.workspaces.viewer_url
     return f"{base.rstrip('/')}{path}" if base else path
 

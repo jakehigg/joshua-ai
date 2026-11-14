@@ -162,20 +162,35 @@ async def test_find_scopes_to_the_people_and_takes_a_slug_or_an_id(seeded) -> No
     assert await seeded.find_workspace_for("alex", "") is None
     assert await seeded.find_workspace_for("alex", "not-a-uuid-or-slug") is None
     assert await seeded.get_workspace("nonsense") is None
-    # A shared workspace reaches its members, by its slug and by its id.
-    assert (await seeded.find_workspace_for("mia", "shared_thanksgiving")).id == shared.id
-    assert (await seeded.find_workspace_for("mia", shared.id)).id == shared.id
-    assert await seeded.find_workspace_for("robin", "shared_thanksgiving") is None
+    # The two-segment ref names the namespace: `<owner>` or `shared`.
+    assert (await seeded.find_workspace_for("alex", "alex/trip")).id == ws.id
+    assert await seeded.find_workspace_for("mia", "alex/trip") is None
+    assert await seeded.find_workspace_for("alex", "mia/trip") is None
+    assert await seeded.find_workspace_for("alex", "shared/trip") is None
+    # Anything else is no workspace at all.
+    for ref in ("/trip", "trip/", "alex/trip/items", "alex//trip"):
+        assert await seeded.find_workspace_for("alex", ref) is None, ref
+    # A shared workspace reaches its people, by either namespace and by its id.
+    for person in ("alex", "mia"):
+        assert (await seeded.find_workspace_for(person, "shared/thanksgiving")).id == shared.id
+        assert (await seeded.find_workspace_for(person, "alex/thanksgiving")).id == shared.id
+        assert (await seeded.find_workspace_for(person, shared.id)).id == shared.id
+    # A ref with a slash also reaches a route URL-encoded.
+    assert (await seeded.find_workspace_for("mia", "shared%2Fthanksgiving")).id == shared.id
+    assert await seeded.find_workspace_for("robin", "shared/thanksgiving") is None
     assert await seeded.find_workspace_for("robin", shared.id) is None
+    # The one-segment ref is the person's own slug: a member reaches no shared
+    # workspace with it.
+    assert await seeded.find_workspace_for("mia", "thanksgiving") is None
     # A turn runs in a workspace of its own person, so it asks for the owner.
-    assert (await seeded.find_workspace("alex", "shared_thanksgiving")).id == shared.id
-    assert await seeded.find_workspace("mia", "shared_thanksgiving") is None
+    assert (await seeded.find_workspace("alex", "shared/thanksgiving")).id == shared.id
+    assert await seeded.find_workspace("mia", "shared/thanksgiving") is None
 
 
 async def test_a_shared_create_makes_one_thread_for_everyone(seeded) -> None:
     shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
 
-    assert shared.shared is True and shared.slug == "shared_thanksgiving"
+    assert shared.shared is True and shared.slug == "thanksgiving"
     assert shared.members == ("mia",) and shared.people == ("alex", "mia")
     channel = await seeded.get_channel(shared.channel_id)
     assert channel.session_mode == "shared" and channel.default_person_id == "alex"
@@ -186,9 +201,10 @@ async def test_a_shared_create_makes_one_thread_for_everyone(seeded) -> None:
     # The slug of a shared workspace is one for everyone, and takes no number.
     with pytest.raises(SlugTaken) as taken:
         await seeded.create_workspace("mia", "Thanksgiving!", members=["alex"])
-    assert taken.value.slug == "shared_thanksgiving"
-    # A personal workspace of the same title keeps the plain slug.
-    personal = await seeded.create_workspace("alex", "Thanksgiving")
+    assert taken.value.slug == "thanksgiving"
+    # A personal workspace of another person keeps that slug: it is unique for
+    # its owner alone.
+    personal = await seeded.create_workspace("mia", "Thanksgiving")
     assert personal.slug == "thanksgiving"
     assert personal.shared is False and personal.members == ()
     assert (await seeded.workspace_conversation(personal)).person_id == "alex"
@@ -382,7 +398,7 @@ async def test_create_list_get_patch(client) -> None:
 
 async def test_a_shared_workspace_is_made_once_and_reaches_every_person(client, seeded) -> None:
     made = await _create(client, title="Thanksgiving", members=["mia", "mia"])
-    assert made["slug"] == "shared_thanksgiving"
+    assert made["slug"] == "thanksgiving"
     assert made["shared"] is True and made["members"] == ["mia"]
     channel = await seeded.get_channel(made["channel"])
     assert channel.session_mode == "shared"
@@ -395,23 +411,30 @@ async def test_a_shared_workspace_is_made_once_and_reaches_every_person(client, 
         headers=_h(),
         json={"title": "Thanksgiving", "members": ["alex"]},
     )
-    assert again.status_code == 409 and again.json()["slug"] == "shared_thanksgiving"
-
-    # A personal workspace of the same title keeps the plain slug.
-    personal = await _create(client, title="Thanksgiving")
-    assert personal["slug"] == "thanksgiving" and personal["shared"] is False
+    assert again.status_code == 409 and again.json()["slug"] == "thanksgiving"
 
     mia = {"person": "mia"}
     listing = (await client.get("/v1/workspaces", params=mia, headers=_h())).json()
-    assert [w["slug"] for w in listing["workspaces"]] == ["shared_thanksgiving"]
-    got = await client.get("/v1/workspaces/shared_thanksgiving", params=mia, headers=_h())
-    assert got.status_code == 200 and got.json()["id"] == made["id"]
-    block = await client.get("/v1/workspaces/shared_thanksgiving/block", params=mia, headers=_h())
+    assert [w["slug"] for w in listing["workspaces"]] == ["thanksgiving"]
+    # Both namespaces reach it, in the path and URL-encoded alike.
+    for ref in ("shared/thanksgiving", "alex/thanksgiving", "shared%2Fthanksgiving"):
+        got = await client.get(f"/v1/workspaces/{ref}", params=mia, headers=_h())
+        assert got.status_code == 200 and got.json()["id"] == made["id"], ref
+    block = await client.get("/v1/workspaces/shared/thanksgiving/block", params=mia, headers=_h())
     assert block.status_code == 200 and "Thanksgiving" in block.text
+    item = await client.post(
+        "/v1/workspaces/shared/thanksgiving/items",
+        params=mia,
+        headers=_h(),
+        json={"kind": "link", "ref": "https://x", "title": "X"},
+    )
+    assert item.status_code == 200
+    listed = await client.get("/v1/workspaces/shared/thanksgiving/items", params=mia, headers=_h())
+    assert [i["id"] for i in listed.json()["items"]] == [item.json()["id"]]
 
     # A new title leaves the channel shared, and no patch carries the people.
     patched = await client.patch(
-        "/v1/workspaces/shared_thanksgiving",
+        "/v1/workspaces/shared/thanksgiving",
         params=mia,
         headers=_h(),
         json={"title": "Thanksgiving dinner"},
@@ -420,7 +443,7 @@ async def test_a_shared_workspace_is_made_once_and_reaches_every_person(client, 
     assert (await seeded.get_channel(made["channel"])).session_mode == "shared"
     for body in ({"members": ["gus"]}, {"shared": False}):
         refused = await client.patch(
-            "/v1/workspaces/shared_thanksgiving", params=mia, headers=_h(), json=body
+            "/v1/workspaces/shared/thanksgiving", params=mia, headers=_h(), json=body
         )
         assert refused.status_code == 422, body
 
@@ -429,7 +452,7 @@ async def test_a_create_checks_every_person_and_their_servers(client) -> None:
     post = lambda p, b: client.post("/v1/workspaces", params=p, json=b, headers=_h())  # noqa: E731
     alex, mia = {"person": "alex"}, {"person": "mia"}
     # A guest and an unknown person never hold a workspace.
-    for members in (["gus"], ["nobody"], ["mia", "gus"]):
+    for members in (["gus"], ["nobody"], ["mia", "gus"], ["shared"]):
         resp = await post(alex, {"title": "T", "members": members})
         assert resp.status_code == 422, members
     # `private` is allowed for mia only, so a workspace of both may not use it.
@@ -437,6 +460,27 @@ async def test_a_create_checks_every_person_and_their_servers(client) -> None:
     assert refused.status_code == 422 and "private" in refused.json()["detail"]
     allowed = await post(mia, {"title": "P", "members": ["alex"], "servers": ["tasks"]})
     assert allowed.status_code == 201 and allowed.json()["servers"] == ["tasks"]
+
+
+async def test_the_person_id_shared_is_reserved_for_the_namespace(seeded) -> None:
+    """``shared`` names the namespace of a shared workspace in a link and in a
+    ref, so the create refuses it as an owner and as a member."""
+    config = CONFIG.replace(
+        "  - id: gus", "  - id: shared\n    name: Shared\n    role: member\n  - id: gus"
+    )
+    settings = config_module.parse(config, env={}, source="<test>")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_app(seeded, settings)), base_url="http://core"
+    ) as c:
+        for person, body in (
+            ("shared", {"title": "Thanksgiving"}),
+            ("alex", {"title": "Thanksgiving", "members": ["shared"]}),
+        ):
+            resp = await c.post(
+                "/v1/workspaces", params={"person": person}, json=body, headers=_h()
+            )
+            assert resp.status_code == 422, person
+            assert "reserved" in resp.json()["detail"]
 
 
 async def test_another_owner_gets_404_on_every_route(client) -> None:

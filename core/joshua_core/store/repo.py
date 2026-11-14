@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import unquote
 from uuid import UUID, uuid4
 
 import psycopg
@@ -56,9 +57,10 @@ FROM_CHAT_SOURCE = "normal_chat"
 # The columns that ``update_workspace`` may change.
 WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "status")
 _SLUG_MAX = 48
-# The prefix of the slug of a shared workspace. A slug from a title never holds
-# an underscore, so a personal slug never carries it.
-SHARED_SLUG_PREFIX = "shared_"
+# The namespace of a shared workspace in a link and in a ref: a shared one is
+# ``shared/<slug>``, a personal one ``<owner>/<slug>``. No person may hold this
+# id, so the two namespaces never collide.
+SHARED_NAMESPACE = "shared"
 
 
 # Slugs that a route of /v1/workspaces uses.
@@ -80,16 +82,12 @@ class SlugTaken(Exception):
         self.slug = slug
 
 
-def slugify(title: str, *, shared: bool = False) -> str:
-    """A lower-case slug of ``title``: letters and digits, joined by ``-``. A
-    shared workspace carries the ``shared_`` prefix, and a personal one never
-    does, so the two live in their own namespaces."""
+def slugify(title: str) -> str:
+    """A lower-case slug of ``title``: letters and digits, joined by ``-``."""
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:_SLUG_MAX].strip("-")
     slug = slug or "workspace"
     # ``options`` is a route of /v1/workspaces, so no workspace may take it.
-    if slug in RESERVED_SLUGS:
-        slug = f"{slug}-1"
-    return f"{SHARED_SLUG_PREFIX}{slug}" if shared else slug
+    return f"{slug}-1" if slug in RESERVED_SLUGS else slug
 
 
 def _channel(row: dict[str, Any]) -> Channel:
@@ -1253,7 +1251,7 @@ class Repo:
         ``SlugTaken`` instead of taking a number.
         """
         shared = bool(members)
-        base = slugify(title, shared=shared)
+        base = slugify(title)
         workspace_id = str(uuid4())
         row: dict[str, Any] | None = None
         for attempt in range(1, 50):
@@ -1318,30 +1316,42 @@ class Repo:
         return _workspace(row) if row else None
 
     async def find_workspace_for(self, person_id: str, ref: str) -> Workspace | None:
-        """The workspace that ``ref`` names for ``person_id``, in this order:
-        the workspace of that person whose slug is ``ref``; the workspace whose
-        id is ``ref``, when the person is one of its people; the shared
-        workspace whose slug is ``ref`` and whose members hold the person. Any
-        other workspace is never found."""
-        ref = (ref or "").strip()
+        """The workspace that ``ref`` names for ``person_id``. A ref has one
+        segment or two, and a two-segment one names the namespace:
+
+        - ``shared/<slug>``: the shared workspace of that slug;
+        - ``<owner>/<slug>``: the workspace of that owner with that slug;
+        - ``<slug>`` or ``<id>``: the workspace of the person with that slug,
+          then the workspace of that id.
+
+        The person must be one of the people of the workspace; any other one is
+        never found, and any other ref is None. A ref with a slash reaches a
+        route URL-encoded as well as in the path, so it is decoded here."""
+        ref = unquote((ref or "").strip())
         if not ref or not person_id:
             return None
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                "SELECT * FROM workspaces WHERE owner = %s AND slug = %s", (person_id, ref)
-            )
-            row = await cur.fetchone()
-        if row:
-            return _workspace(row)
-        found = await self.get_workspace(ref)
+        namespace, slash, slug = ref.partition("/")
+        if slash:
+            if not namespace or not slug or "/" in slug:
+                return None
+            found = await self._workspace_by_slug(namespace, slug)
+            return found if found is not None and person_id in found.people else None
+        found = await self._workspace_by_slug(person_id, ref)
         if found is not None:
-            return found if person_id in found.people else None
+            return found
+        found = await self.get_workspace(ref)
+        return found if found is not None and person_id in found.people else None
+
+    async def _workspace_by_slug(self, namespace: str, slug: str) -> Workspace | None:
+        """The workspace of a namespace and a slug: the shared one of that slug
+        under ``shared``, the workspace of that owner otherwise."""
+        shared = namespace == SHARED_NAMESPACE
+        sql = "SELECT * FROM workspaces WHERE slug = %s AND " + (
+            "shared" if shared else "owner = %s"
+        )
+        args = (slug,) if shared else (slug, namespace)
         async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                "SELECT * FROM workspaces "
-                "WHERE shared AND slug = %s AND members @> to_jsonb(%s::text)",
-                (ref, person_id),
-            )
+            cur = await conn.execute(sql, args)
             row = await cur.fetchone()
         return _workspace(row) if row else None
 

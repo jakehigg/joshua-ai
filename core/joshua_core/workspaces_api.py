@@ -16,13 +16,15 @@ checked before the body is read. A ``person`` that is not a member of
   ``servers``, ``notify``, ``members``). The slug comes from the title. The
   create also makes the channel ``workspace:<id>`` and its conversation.
   ``members`` makes it a shared workspace: one thread that the owner and the
-  members write in, with the slug ``shared_<slug>``. The slug of a shared
-  workspace is one for everyone, so a taken one answers 409 and names it. The
-  people are set here and never change: no body and no route adds or removes
-  one.
+  members write in. The slug of a shared workspace is one for everyone, so a
+  taken one answers 409 and names it. The people are set here and never
+  change: no body and no route adds or removes one. ``shared`` is the
+  namespace of a shared workspace, so an owner or a member of that id is 422.
 - ``GET`` and ``PATCH /v1/workspaces/{slug}`` read and change one (``title``,
   ``goal``, ``notes``, ``servers``, ``model``, ``notify``, ``status``).
-  ``{slug}`` may also be the id.
+  ``{slug}`` may also be the id, or a two-segment ref: ``shared/<slug>`` for a
+  shared workspace and ``<owner>/<slug>`` for the workspace of a person. A ref
+  with a slash is taken in the path and URL-encoded alike.
 - ``GET`` and ``POST /v1/workspaces/{slug}/items`` list and add items.
   ``DELETE /v1/workspaces/{slug}/items/{id}`` removes one and
   ``PATCH /v1/workspaces/{slug}/items/{id}`` changes ``pinned`` or ``seen``.
@@ -62,11 +64,16 @@ from joshua_core.store.models import (
     Workspace,
     WorkspaceItem,
 )
-from joshua_core.store.repo import SlugTaken
+from joshua_core.store.repo import SHARED_NAMESPACE, SlugTaken
 
 logger = get_logger("workspaces_api")
 
 WORKSPACES_PATH = "/v1/workspaces"
+# One workspace, by ref: a slug, an id, or two segments (``shared/<slug>`` or
+# ``<owner>/<slug>``). The converter takes the slash, so a two-segment ref
+# reaches the route in the path as well as URL-encoded. It is greedy, so every
+# route of a longer path stands before these ones in this file.
+WORKSPACE_REF_PATH = WORKSPACES_PATH + "/{slug:path}"
 
 Notify = Literal["none", "questions", "questions+finishes"]
 Status = Literal["active", "paused", "archived"]
@@ -221,8 +228,15 @@ def _check_servers(
     return None
 
 
-def _check_people(settings: Any, members: list[str]) -> JSONResponse | None:
-    """422 when a named person is not on the roster or does not write."""
+def _check_people(settings: Any, owner: str, members: list[str]) -> JSONResponse | None:
+    """422 when a named person is not on the roster, does not write, or holds
+    the reserved id ``shared``: that is the namespace of a shared workspace in
+    a link and in a ref, so no person may take it."""
+    if SHARED_NAMESPACE in (owner, *members):
+        return JSONResponse(
+            {"error": "invalid request", "detail": f"{SHARED_NAMESPACE} is a reserved person id"},
+            status_code=422,
+        )
     unknown = sorted(
         m for m in members if (p := settings.person(m)) is None or not is_member(p.role)
     )
@@ -300,7 +314,7 @@ def build_workspaces_router() -> APIRouter:
         servers = _dedupe(body.servers)
         members = _dedupe(body.members)
         refused = (
-            _check_people(settings, members)
+            _check_people(settings, person_id, members)
             or _check_servers(settings, [person_id, *members], servers)
             or _check_model(settings, body.model)
         )
@@ -351,7 +365,100 @@ def build_workspaces_router() -> APIRouter:
             {"servers": servers, "models": list(settings.workspaces.models), "people": people}
         )
 
-    @router.get(WORKSPACES_PATH + "/{slug}")
+    @router.post(WORKSPACES_PATH + "/by-id/{workspace_id}/items")
+    async def add_tool_item(workspace_id: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, identity = _authorize(request)
+        if denied is not None:
+            return denied
+        try:
+            body = ToolItemBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        repo = request.app.state.ctx.repo
+        workspace = await repo.get_workspace(workspace_id)
+        if workspace is None:
+            return _not_found()
+        item = await repo.add_workspace_item(
+            workspace.id,
+            body.kind,
+            body.ref.strip(),
+            body.title.strip() or body.ref.strip(),
+            url=(body.url or "").strip() or None,
+            added_by=body.added_by,
+            # An update with no title keeps the title that the item has.
+            rename=bool(body.title.strip()),
+        )
+        logger.info({"message": "tool item recorded", "caller": identity, "kind": body.kind})
+        return JSONResponse(item_json(item))
+
+    @router.get(WORKSPACE_REF_PATH + "/items")
+    async def list_items(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, _, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None
+        items = await request.app.state.ctx.repo.list_workspace_items(workspace.id)
+        return JSONResponse({"items": [item_json(i) for i in items]})
+
+    @router.post(WORKSPACE_REF_PATH + "/items")
+    async def add_item(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, _, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None
+        try:
+            body = ItemBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        item = await request.app.state.ctx.repo.add_workspace_item(
+            workspace.id,
+            body.kind,
+            body.ref.strip(),
+            body.title.strip() or body.ref.strip(),
+            url=(body.url or "").strip() or None,
+            added_by="person",
+        )
+        return JSONResponse(item_json(item))
+
+    @router.patch(WORKSPACE_REF_PATH + "/items/{item_id}")
+    async def patch_item(slug: str, item_id: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, _, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None
+        try:
+            body = ItemPatchBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        item = await request.app.state.ctx.repo.update_workspace_item(
+            workspace.id, item_id, pinned=body.pinned, seen=body.seen
+        )
+        return JSONResponse(item_json(item)) if item is not None else _not_found()
+
+    @router.delete(WORKSPACE_REF_PATH + "/items/{item_id}")
+    async def delete_item(slug: str, item_id: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, _, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None
+        removed = await request.app.state.ctx.repo.delete_workspace_item(workspace.id, item_id)
+        return Response(status_code=204) if removed else _not_found()
+
+    @router.get(WORKSPACE_REF_PATH + "/block")
+    async def get_block(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, _, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None
+        ctx = request.app.state.ctx
+        block = getattr(ctx.manager, "workspace_block", None) or WorkspaceBlock(ctx.repo)
+        conversation = await ctx.repo.workspace_conversation(workspace)
+        # The same text a turn gets, with no thread rows and no side effect:
+        # nothing is marked seen.
+        text = await block.render(workspace, conversation.id, fresh=False, mark_seen=None)
+        return PlainTextResponse(text)
+
+    @router.get(WORKSPACE_REF_PATH)
     async def get_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]
         denied, _, workspace = await _scope(request, slug)
         if denied is not None:
@@ -359,7 +466,7 @@ def build_workspaces_router() -> APIRouter:
         assert workspace is not None
         return JSONResponse(workspace_json(workspace))
 
-    @router.patch(WORKSPACES_PATH + "/{slug}")
+    @router.patch(WORKSPACE_REF_PATH)
     async def patch_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]
         denied, person_id, workspace = await _scope(request, slug)
         if denied is not None:
@@ -403,98 +510,5 @@ def build_workspaces_router() -> APIRouter:
                 session_mode="shared" if updated.shared else "per_person",
             )
         return JSONResponse(workspace_json(updated))
-
-    @router.get(WORKSPACES_PATH + "/{slug}/items")
-    async def list_items(slug: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, _, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None
-        items = await request.app.state.ctx.repo.list_workspace_items(workspace.id)
-        return JSONResponse({"items": [item_json(i) for i in items]})
-
-    @router.post(WORKSPACES_PATH + "/{slug}/items")
-    async def add_item(slug: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, _, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None
-        try:
-            body = ItemBody.model_validate_json(await request.body())
-        except ValidationError as exc:
-            return _invalid(exc)
-        item = await request.app.state.ctx.repo.add_workspace_item(
-            workspace.id,
-            body.kind,
-            body.ref.strip(),
-            body.title.strip() or body.ref.strip(),
-            url=(body.url or "").strip() or None,
-            added_by="person",
-        )
-        return JSONResponse(item_json(item))
-
-    @router.post(WORKSPACES_PATH + "/by-id/{workspace_id}/items")
-    async def add_tool_item(workspace_id: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, identity = _authorize(request)
-        if denied is not None:
-            return denied
-        try:
-            body = ToolItemBody.model_validate_json(await request.body())
-        except ValidationError as exc:
-            return _invalid(exc)
-        repo = request.app.state.ctx.repo
-        workspace = await repo.get_workspace(workspace_id)
-        if workspace is None:
-            return _not_found()
-        item = await repo.add_workspace_item(
-            workspace.id,
-            body.kind,
-            body.ref.strip(),
-            body.title.strip() or body.ref.strip(),
-            url=(body.url or "").strip() or None,
-            added_by=body.added_by,
-            # An update with no title keeps the title that the item has.
-            rename=bool(body.title.strip()),
-        )
-        logger.info({"message": "tool item recorded", "caller": identity, "kind": body.kind})
-        return JSONResponse(item_json(item))
-
-    @router.patch(WORKSPACES_PATH + "/{slug}/items/{item_id}")
-    async def patch_item(slug: str, item_id: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, _, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None
-        try:
-            body = ItemPatchBody.model_validate_json(await request.body())
-        except ValidationError as exc:
-            return _invalid(exc)
-        item = await request.app.state.ctx.repo.update_workspace_item(
-            workspace.id, item_id, pinned=body.pinned, seen=body.seen
-        )
-        return JSONResponse(item_json(item)) if item is not None else _not_found()
-
-    @router.delete(WORKSPACES_PATH + "/{slug}/items/{item_id}")
-    async def delete_item(slug: str, item_id: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, _, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None
-        removed = await request.app.state.ctx.repo.delete_workspace_item(workspace.id, item_id)
-        return Response(status_code=204) if removed else _not_found()
-
-    @router.get(WORKSPACES_PATH + "/{slug}/block")
-    async def get_block(slug: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, _, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None
-        ctx = request.app.state.ctx
-        block = getattr(ctx.manager, "workspace_block", None) or WorkspaceBlock(ctx.repo)
-        conversation = await ctx.repo.workspace_conversation(workspace)
-        # The same text a turn gets, with no thread rows and no side effect:
-        # nothing is marked seen.
-        text = await block.render(workspace, conversation.id, fresh=False, mark_seen=None)
-        return PlainTextResponse(text)
 
     return router

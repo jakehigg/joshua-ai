@@ -156,8 +156,9 @@ single `/`. The routes answer 422 and the tool refuses any other value.
 
 The main chat is the most recently active direct conversation that is not a
 workspace, a terminal or a voice thread. Core sends to its last channel. The link is
-`<workspaces.viewer_url>/chat/w/<slug>`. With no `viewer_url`, the message has
-the path `/chat/w/<slug>`.
+`<workspaces.viewer_url>/chat/w/<owner>/<slug>`, and `shared` stands for the
+owner of a shared workspace. With no `viewer_url`, the message has the path
+`/chat/w/<owner>/<slug>`.
 
 ## Normal chat knows its workspaces
 
