@@ -1,11 +1,12 @@
 """A turn on a ``workspace:`` channel, offline: core resolves it only for the
-owner, never creates the channel, and delivers nothing."""
+people of the workspace, never creates the channel, and delivers nothing. A
+shared workspace is one thread of everyone, and its turn carries the speaker."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from joshua_core.store.models import Channel, Person, Workspace
+from joshua_core.store.models import Channel, Conversation, Person, Workspace
 from test_turns_api import (
     CHANNELS_TOKEN,
     TurnsFakeRepo,
@@ -18,29 +19,51 @@ from test_turns_api import (
 )
 
 WS_ID = "33333333-3333-3333-3333-333333333333"
+SHARED_ID = "66666666-6666-6666-6666-666666666666"
 
 
 class WorkspaceRepo(TurnsFakeRepo):
-    """The turns fake repo with one workspace of alex and one of mia."""
+    """The turns fake repo with one workspace of alex, one of mia, and one
+    shared workspace of alex that mia is a member of."""
 
     def __init__(self) -> None:
         super().__init__()
         self.people["mia"] = Person(id="mia", display_name="Mia", role="member")
+        self.people["robin"] = Person(id="robin", display_name="Robin", role="guest")
         self.workspaces = {
             WS_ID: Workspace(id=WS_ID, slug="solar", title="Solar", owner="alex"),
             "44444444-4444-4444-4444-444444444444": Workspace(
                 id="44444444-4444-4444-4444-444444444444", slug="trip", title="Trip", owner="mia"
             ),
+            SHARED_ID: Workspace(
+                id=SHARED_ID,
+                slug="thanksgiving",
+                title="Thanksgiving",
+                owner="alex",
+                shared=True,
+                members=("mia",),
+            ),
         }
         self.channels[f"workspace:{WS_ID}"] = Channel(
             id=f"workspace:{WS_ID}", channel_type="workspace", default_person_id="alex"
         )
+        self.channels[f"workspace:{SHARED_ID}"] = Channel(
+            id=f"workspace:{SHARED_ID}",
+            channel_type="workspace",
+            default_person_id="alex",
+            session_mode="shared",
+        )
 
-    async def find_workspace(self, owner: str, ref: str) -> Workspace | None:
+    async def find_workspace_for(self, person_id: str, ref: str) -> Workspace | None:
         for w in self.workspaces.values():
-            if w.owner == owner and ref in (w.slug, w.id):
+            if person_id in w.people and ref in (w.slug, w.id):
                 return w
         return None
+
+    async def workspace_conversation(self, workspace: Workspace) -> Conversation:
+        return await self.get_or_create_conversation(
+            workspace.channel_id, None if workspace.shared else workspace.owner
+        )
 
     async def get_workspace(self, workspace_id: str) -> Workspace | None:
         return self.workspaces.get(workspace_id)
@@ -72,7 +95,32 @@ async def test_an_owner_turn_runs_and_nothing_is_delivered(tmp_path) -> None:
     assert received == []  # transcript-only
     rows = [r for r in repo.transcripts if r["direction"] == "out"]
     assert len(rows) == 2 and rows[0]["content"].startswith("(stub)")
-    assert {k[0] for k in repo.conversations} == {f"workspace:{WS_ID}"}
+    assert list(repo.conversations) == [(f"workspace:{WS_ID}", "alex")]
+    # A personal workspace is the owner's thread alone: no speaker on its rows.
+    assert all("speaker" not in r["meta"] for r in repo.transcripts)
+
+
+async def test_a_member_turn_runs_in_the_shared_thread_and_carries_her_name(tmp_path) -> None:
+    repo = WorkspaceRepo()
+    received: list[dict[str, Any]] = []
+    turns = build_turns(repo, make_settings(), received, tmp_path)
+
+    async with core_client(turns) as client:
+        for ref, person in (("thanksgiving", "mia"), (SHARED_ID, "alex")):
+            resp = await client.post(
+                "/v1/turns",
+                json=_event(f"workspace:{ref}", person),
+                headers=bearer(CHANNELS_TOKEN),
+            )
+            assert resp.status_code == 202
+        await turns.drain()
+
+    assert received == []  # transcript-only, as any workspace turn
+    # One thread of everyone: the conversation of the shared channel has no person.
+    assert list(repo.conversations) == [(f"workspace:{SHARED_ID}", None)]
+    rows = [r for r in repo.transcripts if r["direction"] == "in"]
+    assert [r["meta"]["speaker"] for r in rows] == ["Mia", "Alex"]
+    assert [r["content"] for r in rows] == ["hello there", "hello there"]
 
 
 async def test_the_stream_runs_on_the_workspace_thread(tmp_path) -> None:
@@ -101,6 +149,7 @@ async def test_a_foreign_or_unknown_workspace_is_refused_and_creates_nothing(tmp
             ("workspace:trip", "alex"),  # the slug of mia's workspace
             ("workspace:44444444-4444-4444-4444-444444444444", "alex"),  # her id
             ("workspace:solar", "mia"),  # alex's, asked for by mia
+            ("workspace:thanksgiving", "robin"),  # the shared one, and he is not in it
             ("workspace:nothing", "alex"),
             ("workspace:55555555-5555-5555-5555-555555555555", "alex"),
         ):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import psycopg
 import pytest
 from joshua_core.store.db import Database
 from joshua_core.store.repo import AUTH_IMPORT_MARKER_ID
@@ -51,6 +52,28 @@ async def test_schema_applies_twice(db: Database) -> None:
         cur = await conn.execute("SELECT count(*) AS n FROM people")
         row = await cur.fetchone()
     assert row["n"] == 0
+
+
+async def test_a_workspace_row_is_personal_and_a_shared_slug_is_one_for_everyone(repo) -> None:
+    """The columns of a shared workspace are additive: a row written without
+    them is personal, and only a shared slug is unique for every owner."""
+    await repo.upsert_person("alex", "Alex")
+    await repo.upsert_person("mia", "Mia")
+    insert = (
+        "INSERT INTO workspaces (slug, title, owner, shared, members) "
+        "VALUES (%s, 'Trip', %s, %s, %s::jsonb)"
+    )
+    async with repo._pool.connection() as conn:
+        cur = await conn.execute(
+            "INSERT INTO workspaces (slug, title, owner) VALUES ('trip', 'Trip', 'alex') "
+            "RETURNING shared, members"
+        )
+        assert await cur.fetchone() == {"shared": False, "members": []}
+        # The same personal slug for another owner is free.
+        await conn.execute(insert, ("trip", "mia", False, "[]"))
+        await conn.execute(insert, ("feast", "alex", True, '["mia"]'))
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            await conn.execute(insert, ("feast", "mia", True, '["alex"]'))
 
 
 async def test_seed_people_and_handles(repo) -> None:

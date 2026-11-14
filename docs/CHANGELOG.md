@@ -8,6 +8,22 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- A workspace can hold several people. The person who makes it picks the
+  others from the roster, and all of them write in one thread, read every
+  row, and see the same goal, notes, and items. Each message names the person
+  who wrote it, and a document Joshua writes there goes to
+  `documents/shared/`. `send_to_normal_chat` still reaches one person: the one
+  who wrote the turn, or the owner on a scheduled or event turn. The people of
+  a workspace are set when it is made and never change. A shared workspace
+  opens at `/chat/w/shared/<slug>`, and a personal one at
+  `/chat/w/<owner>/<slug>`, so no person may hold the id `shared`. The slug of
+  a shared workspace is unique over all people, and a taken one is refused
+  with the slug. The schema adds the columns `workspaces.shared` and
+  `workspaces.members`.
+- When a new workspace or a change to one is refused, the dialog now shows
+  why. For a server that a person cannot use, it names the person and the
+  server, for example "Alex cannot use tasks", and says that a shared
+  workspace can use only the servers that all its people can use.
 - In the web chat, a message written while Joshua is still working is taken
   and waits, instead of being refused until the turn ends. Each waiting
   message shows under the conversation, and can be taken back before it

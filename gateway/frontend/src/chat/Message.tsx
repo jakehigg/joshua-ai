@@ -21,6 +21,10 @@
 // files route. A turn that waits for another turn of the conversation says so.
 // A message written while a turn runs (`Held`) is a person bubble that says
 // it waits, with a button to take it back.
+//
+// In the thread of a shared workspace a person row carries `who`, the name of
+// the person who wrote it. A small line above the bubble names them, once for
+// a run of messages from the same person (`showWho`, which the list decides).
 
 import { memo, useEffect, useMemo, useState } from "react";
 import type { FileRef } from "../api/client";
@@ -156,6 +160,8 @@ interface Props {
   message: ChatMessage;
   canRetry: boolean;
   onRetry: (message: ChatMessage) => void;
+  /** Name the person above the bubble: the first message of their run. */
+  showWho?: boolean;
 }
 
 function EventLine({ text }: { text: string }) {
@@ -206,7 +212,7 @@ function EventLine({ text }: { text: string }) {
   );
 }
 
-export const Message = memo(function Message({ message, canRetry, onRetry }: Props) {
+export const Message = memo(function Message({ message, canRetry, onRetry, showWho }: Props) {
   const isPerson = message.role === "person";
   const pending = message.state === "pending";
   const answer = useMemo(() => {
@@ -241,6 +247,7 @@ export const Message = memo(function Message({ message, canRetry, onRetry }: Pro
     <article className={`msg ${isPerson ? "msg-person" : "msg-joshua"}`}>
       {isPerson ? (
         <>
+          {showWho && message.who && <div className="msg-who">{message.who}</div>}
           {hasFile && (
             <div className="msg-media">
               {message.file ? (

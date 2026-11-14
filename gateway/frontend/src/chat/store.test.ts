@@ -45,6 +45,11 @@ describe("history store", () => {
     expect("spoken" in fromServer(row(9))).toBe(false);
   });
 
+  it("keeps who wrote a row of a shared workspace", () => {
+    expect(fromServer(row(10, { who: "Mia" })).who).toBe("Mia");
+    expect("who" in fromServer(row(11))).toBe(false);
+  });
+
   it("replaces the list with the server list", () => {
     const view: View = { messages: [fromServer(row(1)), local("old-done", { role: "joshua" })], nextBefore: null, pending: null };
     const next = reconcile(view, page([1, 2, 3]));

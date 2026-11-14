@@ -1,15 +1,17 @@
-"""The ``workspaces`` source adapter: one record for each active workspace.
+"""The ``workspaces`` source adapter: one record for each person of each active
+workspace.
 
 The record holds the title, the goal, the notes, and the titles of the items.
 The indexer writes one row (kind ``workspace``) with the title as the title,
 the status as the heading, and this text, cut to ``TEXT_CHARS``. The row is
-for the owner only. A paused or archived workspace has no row.
+scoped to one person, so a shared workspace has one record for each of its
+people and each of them finds it. A paused or archived workspace has no row.
 
 Normal chat reads the row for one line, "May relate to workspace X"
 (``engine/workspace_awareness.py``). It is never shown as text, and recall and
-the RAG note never return it. The uri is ``workspaces/<id>``. The revision is a
-hash of the record, so the indexing cycle writes a row again only when the
-workspace changed.
+the RAG note never return it. The uri is ``workspaces/<id>/<person>``. The
+revision is a hash of the record, so the indexing cycle writes a row again only
+when the workspace changed.
 """
 
 from __future__ import annotations
@@ -30,12 +32,27 @@ TEXT_CHARS = 1500
 MAX_ITEM_TITLES = 30
 
 
-def uri_of(workspace_id: str) -> str:
-    return f"{WORKSPACES_PREFIX}{workspace_id}"
+def uri_of(workspace_id: str, person_id: str) -> str:
+    return f"{WORKSPACES_PREFIX}{workspace_id}/{person_id}"
+
+
+def _segments(uri: str) -> list[str]:
+    if not uri.startswith(WORKSPACES_PREFIX):
+        return []
+    return uri[len(WORKSPACES_PREFIX) :].split("/")
 
 
 def workspace_id_of_uri(uri: str) -> str | None:
-    return uri[len(WORKSPACES_PREFIX) :] if uri.startswith(WORKSPACES_PREFIX) else None
+    """The workspace of a record uri: the second segment of
+    ``workspaces/<id>/<person>``."""
+    parts = _segments(uri)
+    return parts[0] if parts and parts[0] else None
+
+
+def person_of_uri(uri: str) -> str | None:
+    """The person of a record uri: the third segment."""
+    parts = _segments(uri)
+    return parts[1] if len(parts) > 1 and parts[1] else None
 
 
 def record_text(workspace: Workspace, items: list[WorkspaceItem]) -> str:
@@ -52,15 +69,15 @@ def record_text(workspace: Workspace, items: list[WorkspaceItem]) -> str:
     return text if len(text) <= TEXT_CHARS else text[:TEXT_CHARS].rstrip() + "…"
 
 
-def _document(workspace: Workspace, items: list[WorkspaceItem]) -> Document:
+def _document(workspace: Workspace, person_id: str, items: list[WorkspaceItem]) -> Document:
     text = record_text(workspace, items)
     rev = hashlib.sha256(
         "\x00".join((workspace.title, workspace.status, text)).encode()
     ).hexdigest()
     return Document(
         source=WORKSPACES_SOURCE,
-        uri=uri_of(workspace.id),
-        person_id=workspace.owner,
+        uri=uri_of(workspace.id, person_id),
+        person_id=person_id,
         title=workspace.title,
         text=text,
         updated_at=workspace.updated_at or datetime.now(UTC),
@@ -70,7 +87,7 @@ def _document(workspace: Workspace, items: list[WorkspaceItem]) -> Document:
 
 
 class WorkspacesSource:
-    """Lists the active workspaces from the database."""
+    """Lists the active workspaces from the database, one record per person."""
 
     name = WORKSPACES_SOURCE
 
@@ -79,11 +96,15 @@ class WorkspacesSource:
 
     async def list_documents(self) -> AsyncIterator[Document]:
         for workspace in await self._repo.list_all_workspaces("active"):
-            yield _document(workspace, await self._repo.list_workspace_items(workspace.id))
+            items = await self._repo.list_workspace_items(workspace.id)
+            for person_id in workspace.people:
+                yield _document(workspace, person_id, items)
 
     async def fetch(self, uri: str) -> Document | None:
-        workspace_id = workspace_id_of_uri(uri)
+        workspace_id, person_id = workspace_id_of_uri(uri), person_of_uri(uri)
         workspace = await self._repo.get_workspace(workspace_id) if workspace_id else None
         if workspace is None or workspace.status != "active":
             return None
-        return _document(workspace, await self._repo.list_workspace_items(workspace.id))
+        if person_id is None or person_id not in workspace.people:
+            return None
+        return _document(workspace, person_id, await self._repo.list_workspace_items(workspace.id))

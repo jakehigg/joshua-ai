@@ -13,29 +13,38 @@ checked before the body is read. A ``person`` that is not a member of
 
 - ``GET /v1/workspaces?status=`` lists the workspaces.
 - ``POST /v1/workspaces`` creates one (``title``, ``goal``, ``model``,
-  ``servers``, ``notify``). The slug comes from the title. The create also
-  makes the channel ``workspace:<id>`` and its conversation.
+  ``servers``, ``notify``, ``members``). The slug comes from the title. The
+  create also makes the channel ``workspace:<id>`` and its conversation.
+  ``members`` makes it a shared workspace: one thread that the owner and the
+  members write in. The slug of a shared workspace is one for everyone, so a
+  taken one answers 409 and names it. The people are set here and never
+  change: no body and no route adds or removes one. ``shared`` is the
+  namespace of a shared workspace, so an owner or a member of that id is 422.
 - ``GET`` and ``PATCH /v1/workspaces/{slug}`` read and change one (``title``,
   ``goal``, ``notes``, ``servers``, ``model``, ``notify``, ``status``).
-  ``{slug}`` may also be the id.
+  ``{slug}`` may also be the id, or a two-segment ref: ``shared/<slug>`` for a
+  shared workspace and ``<owner>/<slug>`` for the workspace of a person. A ref
+  with a slash is taken in the path and URL-encoded alike.
 - ``GET`` and ``POST /v1/workspaces/{slug}/items`` list and add items.
   ``DELETE /v1/workspaces/{slug}/items/{id}`` removes one and
   ``PATCH /v1/workspaces/{slug}/items/{id}`` changes ``pinned`` or ``seen``.
-- ``GET /v1/workspaces/options`` gives the servers and the models that the
-  person may pick.
+- ``GET /v1/workspaces/options`` gives the servers, the models, and the people
+  that the person may pick.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
 - ``POST /v1/workspaces/by-id/{id}/items`` is for the gateway, which records
   the items of a tool call from a workspace. It takes the id of the workspace
   and no ``person``: the caller is trusted, and the workspace is the one of the
   stamp. The body is an item and ``added_by`` (``tool:<server>``).
 
-``servers`` must be among the servers the person may use. ``model`` must be in
+``servers`` must be among the servers every person of the workspace may use,
+and every named person must be a member of the roster. ``model`` must be in
 ``workspaces.models`` when that list is not empty, and any text otherwise. The
 routes log the caller and the route, never a goal, a note, or a title.
 """
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any, Literal
 
 from fastapi import APIRouter, Request
@@ -55,10 +64,16 @@ from joshua_core.store.models import (
     Workspace,
     WorkspaceItem,
 )
+from joshua_core.store.repo import SHARED_NAMESPACE, SlugTaken
 
 logger = get_logger("workspaces_api")
 
 WORKSPACES_PATH = "/v1/workspaces"
+# One workspace, by ref: a slug, an id, or two segments (``shared/<slug>`` or
+# ``<owner>/<slug>``). The converter takes the slash, so a two-segment ref
+# reaches the route in the path as well as URL-encoded. It is greedy, so every
+# route of a longer path stands before these ones in this file.
+WORKSPACE_REF_PATH = WORKSPACES_PATH + "/{slug:path}"
 
 Notify = Literal["none", "questions", "questions+finishes"]
 Status = Literal["active", "paused", "archived"]
@@ -92,6 +107,9 @@ class CreateBody(_Body):
     model: str | None = Field(default=None, max_length=200)
     servers: list[str] = Field(default_factory=list, max_length=100)
     notify: Notify = "none"
+    # The other people of a shared workspace. They are set at the create and
+    # never change, so no body below holds them.
+    members: list[str] = Field(default_factory=list, max_length=100)
 
 
 class PatchBody(_Body):
@@ -170,6 +188,8 @@ def workspace_json(workspace: Workspace) -> dict[str, Any]:
         "model": workspace.model,
         "notify": workspace.notify,
         "status": workspace.status,
+        "shared": workspace.shared,
+        "members": list(workspace.members),
         "channel": workspace.channel_id,
         "created_at": _iso(workspace.created_at),
         "updated_at": _iso(workspace.updated_at),
@@ -190,13 +210,60 @@ def item_json(item: WorkspaceItem) -> dict[str, Any]:
     }
 
 
-def _check_servers(settings: Any, person_id: str, servers: list[str]) -> JSONResponse | None:
-    """422 when a server is not one the person may use."""
-    allowed = set(allowed_gateway_servers(settings, person_id))
-    unknown = sorted({s for s in servers if s not in allowed})
+def _check_servers(
+    settings: Any, people: Collection[str], servers: list[str]
+) -> JSONResponse | None:
+    """422 when a server is not one that every person of the workspace may
+    use: the servers are the intersection over all of them.
+
+    The ``detail`` is a sentence for the person at the screen: it names each
+    refused server and who in the workspace cannot use it, because the viewer
+    shows it as it is."""
+    people = list(people)
+    reach = {p: set(allowed_gateway_servers(settings, p)) for p in people}
+    sentences: list[str] = []
+    for server in dict.fromkeys(servers):
+        lacking = [p for p in people if server not in reach[p]]
+        if not lacking:
+            continue
+        if len(lacking) == len(people):
+            sentences.append(f"This workspace cannot use {server}.")
+        else:
+            names = _names(settings, lacking)
+            sentences.append(f"{names} cannot use {server}.")
+    if not sentences:
+        return None
+    if len(people) > 1:
+        sentences.append("A shared workspace can use only the servers that all its people can use.")
+    sentences.append("Clear these servers and try again.")
+    return JSONResponse(
+        {"error": "invalid request", "detail": " ".join(sentences)}, status_code=422
+    )
+
+
+def _names(settings: Any, person_ids: list[str]) -> str:
+    """The display names of these people, joined for a sentence."""
+    names = [(p.name if (p := settings.person(i)) is not None else i) for i in person_ids]
+    if len(names) <= 2:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + ", and " + names[-1]
+
+
+def _check_people(settings: Any, owner: str, members: list[str]) -> JSONResponse | None:
+    """422 when a named person is not on the roster, does not write, or holds
+    the reserved id ``shared``: that is the namespace of a shared workspace in
+    a link and in a ref, so no person may take it."""
+    if SHARED_NAMESPACE in (owner, *members):
+        return JSONResponse(
+            {"error": "invalid request", "detail": f"{SHARED_NAMESPACE} is a reserved person id"},
+            status_code=422,
+        )
+    unknown = sorted(
+        m for m in members if (p := settings.person(m)) is None or not is_member(p.role)
+    )
     if unknown:
         return JSONResponse(
-            {"error": "invalid request", "detail": f"unknown servers: {', '.join(unknown)}"},
+            {"error": "invalid request", "detail": f"unknown people: {', '.join(unknown)}"},
             status_code=422,
         )
     return None
@@ -237,7 +304,7 @@ def build_workspaces_router() -> APIRouter:
         assert person_id is not None
         if slug is None:
             return None, person_id, None
-        workspace = await request.app.state.ctx.repo.find_workspace(person_id, slug)
+        workspace = await request.app.state.ctx.repo.find_workspace_for(person_id, slug)
         if workspace is None:
             return _not_found(), person_id, None
         return None, person_id, workspace
@@ -266,25 +333,37 @@ def build_workspaces_router() -> APIRouter:
             return _invalid(exc)
         settings = request.app.state.ctx.settings
         servers = _dedupe(body.servers)
-        refused = _check_servers(settings, person_id, servers) or _check_model(settings, body.model)
+        members = _dedupe(body.members)
+        refused = (
+            _check_people(settings, person_id, members)
+            or _check_servers(settings, [person_id, *members], servers)
+            or _check_model(settings, body.model)
+        )
         if refused is not None:
             return refused
-        workspace = await request.app.state.ctx.repo.create_workspace(
-            person_id,
-            body.title.strip(),
-            goal=body.goal.strip(),
-            model=(body.model or "").strip() or None,
-            servers=servers,
-            notify=body.notify,
-        )
+        try:
+            workspace = await request.app.state.ctx.repo.create_workspace(
+                person_id,
+                body.title.strip(),
+                goal=body.goal.strip(),
+                model=(body.model or "").strip() or None,
+                servers=servers,
+                notify=body.notify,
+                members=members,
+            )
+        except SlugTaken as taken:
+            # The slug of a shared workspace is one for everyone, and no number
+            # is added: the person picks another title.
+            return JSONResponse({"error": str(taken), "slug": taken.slug}, status_code=409)
         logger.info({"message": "workspace created", "workspace": workspace.id})
         return JSONResponse(workspace_json(workspace), status_code=201)
 
     @router.get(WORKSPACES_PATH + "/options")
     async def get_options(request: Request):  # type: ignore[no-untyped-def]
         """What a person may pick for a workspace: the servers they may use (a
-        name and one line) and the models in ``workspaces.models``. An empty
-        ``models`` means any text, and the list is empty."""
+        name and one line), the models in ``workspaces.models``, and the people
+        they may share a workspace with. An empty ``models`` means any text, and
+        the list is empty."""
         denied, person_id, _ = await _scope(request)
         if denied is not None:
             return denied
@@ -296,86 +375,16 @@ def build_workspaces_router() -> APIRouter:
             }
             for name in allowed_gateway_servers(settings, person_id)
         ]
-        return JSONResponse({"servers": servers, "models": list(settings.workspaces.models)})
-
-    @router.get(WORKSPACES_PATH + "/{slug}")
-    async def get_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, _, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None
-        return JSONResponse(workspace_json(workspace))
-
-    @router.patch(WORKSPACES_PATH + "/{slug}")
-    async def patch_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, person_id, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None and person_id is not None
-        try:
-            body = PatchBody.model_validate_json(await request.body())
-        except ValidationError as exc:
-            return _invalid(exc)
-        settings = request.app.state.ctx.settings
-        fields = body.model_dump(exclude_unset=True)
-        if fields.get("title") is None:
-            fields.pop("title", None)
-        for name in ("goal", "notes", "notify", "status", "servers"):
-            if name in fields and fields[name] is None:
-                fields.pop(name)
-        if "servers" in fields:
-            fields["servers"] = _dedupe(fields["servers"])
-            refused = _check_servers(settings, person_id, fields["servers"])
-            if refused is not None:
-                return refused
-        if "model" in fields:
-            fields["model"] = (fields["model"] or "").strip() or None
-            refused = _check_model(settings, fields["model"])
-            if refused is not None:
-                return refused
-        for name in ("title", "goal"):
-            if name in fields:
-                fields[name] = fields[name].strip()
-        updated = await request.app.state.ctx.repo.update_workspace(workspace.id, **fields)
-        if updated is None:
-            return _not_found()
-        if "title" in fields:
-            await request.app.state.ctx.repo.upsert_channel(
-                updated.channel_id,
-                "workspace",
-                display_name=updated.title,
-                default_person_id=updated.owner,
-            )
-        return JSONResponse(workspace_json(updated))
-
-    @router.get(WORKSPACES_PATH + "/{slug}/items")
-    async def list_items(slug: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, _, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None
-        items = await request.app.state.ctx.repo.list_workspace_items(workspace.id)
-        return JSONResponse({"items": [item_json(i) for i in items]})
-
-    @router.post(WORKSPACES_PATH + "/{slug}/items")
-    async def add_item(slug: str, request: Request):  # type: ignore[no-untyped-def]
-        denied, _, workspace = await _scope(request, slug)
-        if denied is not None:
-            return denied
-        assert workspace is not None
-        try:
-            body = ItemBody.model_validate_json(await request.body())
-        except ValidationError as exc:
-            return _invalid(exc)
-        item = await request.app.state.ctx.repo.add_workspace_item(
-            workspace.id,
-            body.kind,
-            body.ref.strip(),
-            body.title.strip() or body.ref.strip(),
-            url=(body.url or "").strip() or None,
-            added_by="person",
+        # Everyone on the roster who writes, the caller apart: a guest never
+        # holds a workspace.
+        people = [
+            {"id": person.id, "name": person.name}
+            for person in settings.people
+            if person.id != person_id and is_member(person.role)
+        ]
+        return JSONResponse(
+            {"servers": servers, "models": list(settings.workspaces.models), "people": people}
         )
-        return JSONResponse(item_json(item))
 
     @router.post(WORKSPACES_PATH + "/by-id/{workspace_id}/items")
     async def add_tool_item(workspace_id: str, request: Request):  # type: ignore[no-untyped-def]
@@ -403,7 +412,36 @@ def build_workspaces_router() -> APIRouter:
         logger.info({"message": "tool item recorded", "caller": identity, "kind": body.kind})
         return JSONResponse(item_json(item))
 
-    @router.patch(WORKSPACES_PATH + "/{slug}/items/{item_id}")
+    @router.get(WORKSPACE_REF_PATH + "/items")
+    async def list_items(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, _, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None
+        items = await request.app.state.ctx.repo.list_workspace_items(workspace.id)
+        return JSONResponse({"items": [item_json(i) for i in items]})
+
+    @router.post(WORKSPACE_REF_PATH + "/items")
+    async def add_item(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, _, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None
+        try:
+            body = ItemBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        item = await request.app.state.ctx.repo.add_workspace_item(
+            workspace.id,
+            body.kind,
+            body.ref.strip(),
+            body.title.strip() or body.ref.strip(),
+            url=(body.url or "").strip() or None,
+            added_by="person",
+        )
+        return JSONResponse(item_json(item))
+
+    @router.patch(WORKSPACE_REF_PATH + "/items/{item_id}")
     async def patch_item(slug: str, item_id: str, request: Request):  # type: ignore[no-untyped-def]
         denied, _, workspace = await _scope(request, slug)
         if denied is not None:
@@ -418,7 +456,7 @@ def build_workspaces_router() -> APIRouter:
         )
         return JSONResponse(item_json(item)) if item is not None else _not_found()
 
-    @router.delete(WORKSPACES_PATH + "/{slug}/items/{item_id}")
+    @router.delete(WORKSPACE_REF_PATH + "/items/{item_id}")
     async def delete_item(slug: str, item_id: str, request: Request):  # type: ignore[no-untyped-def]
         denied, _, workspace = await _scope(request, slug)
         if denied is not None:
@@ -427,7 +465,7 @@ def build_workspaces_router() -> APIRouter:
         removed = await request.app.state.ctx.repo.delete_workspace_item(workspace.id, item_id)
         return Response(status_code=204) if removed else _not_found()
 
-    @router.get(WORKSPACES_PATH + "/{slug}/block")
+    @router.get(WORKSPACE_REF_PATH + "/block")
     async def get_block(slug: str, request: Request):  # type: ignore[no-untyped-def]
         denied, _, workspace = await _scope(request, slug)
         if denied is not None:
@@ -435,12 +473,63 @@ def build_workspaces_router() -> APIRouter:
         assert workspace is not None
         ctx = request.app.state.ctx
         block = getattr(ctx.manager, "workspace_block", None) or WorkspaceBlock(ctx.repo)
-        conversation = await ctx.repo.find_conversation(workspace.channel_id, workspace.owner)
+        conversation = await ctx.repo.workspace_conversation(workspace)
         # The same text a turn gets, with no thread rows and no side effect:
         # nothing is marked seen.
-        text = await block.render(
-            workspace, conversation.id if conversation else "", fresh=False, mark_seen=None
-        )
+        text = await block.render(workspace, conversation.id, fresh=False, mark_seen=None)
         return PlainTextResponse(text)
+
+    @router.get(WORKSPACE_REF_PATH)
+    async def get_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, _, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None
+        return JSONResponse(workspace_json(workspace))
+
+    @router.patch(WORKSPACE_REF_PATH)
+    async def patch_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        denied, person_id, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None and person_id is not None
+        try:
+            body = PatchBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        settings = request.app.state.ctx.settings
+        fields = body.model_dump(exclude_unset=True)
+        if fields.get("title") is None:
+            fields.pop("title", None)
+        for name in ("goal", "notes", "notify", "status", "servers"):
+            if name in fields and fields[name] is None:
+                fields.pop(name)
+        if "servers" in fields:
+            fields["servers"] = _dedupe(fields["servers"])
+            refused = _check_servers(settings, workspace.people, fields["servers"])
+            if refused is not None:
+                return refused
+        if "model" in fields:
+            fields["model"] = (fields["model"] or "").strip() or None
+            refused = _check_model(settings, fields["model"])
+            if refused is not None:
+                return refused
+        for name in ("title", "goal"):
+            if name in fields:
+                fields[name] = fields[name].strip()
+        updated = await request.app.state.ctx.repo.update_workspace(workspace.id, **fields)
+        if updated is None:
+            return _not_found()
+        if "title" in fields:
+            await request.app.state.ctx.repo.upsert_channel(
+                updated.channel_id,
+                "workspace",
+                display_name=updated.title,
+                default_person_id=updated.owner,
+                # The mode of the workspace, so a new title leaves a shared
+                # channel shared.
+                session_mode="shared" if updated.shared else "per_person",
+            )
+        return JSONResponse(workspace_json(updated))
 
     return router

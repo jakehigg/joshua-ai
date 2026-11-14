@@ -34,10 +34,13 @@
 //
 // The screen has a rail on the left (Rail.tsx): Chat, the workspaces, and
 // "+ New workspace". `/chat/:person` is the normal chat, the person's one main
-// thread. `/chat/w/:slug` (WorkspacePage) is a workspace of the person who
-// signed in: the same chat, with the workspace header and the item panel
-// (ItemPanel.tsx). `workspace` goes to the turn and the history calls. Each
-// finished turn reloads the items, because the turn may have made some.
+// thread. `/chat/w/:space/:slug` (WorkspacePage) is one workspace: the same
+// chat, with the workspace header and the item panel (ItemPanel.tsx). The
+// space is `shared` for a shared workspace and the owner for a personal one,
+// and the ref `<space>/<slug>` goes to the turn, the history and the item
+// calls. A one-segment `/chat/w/:ref` link redirects to that address
+// (WorkspaceLink). Each finished turn reloads the items, because the turn may
+// have made some.
 //
 // On a phone the rail, the item list and the panel are sheets over the
 // conversation, and only one is open at a time: opening one closes the
@@ -50,9 +53,9 @@
 // has one menu button there; a route change closes it.
 
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError, getJson } from "../api/client";
-import { getWorkspace, type Workspace } from "../api/workspaces";
+import { getWorkspace, linkOf, refOf, type Workspace } from "../api/workspaces";
 import Shell, { type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Spinner from "../ui/Spinner";
@@ -414,7 +417,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
         </div>
         {ws && (
           <ItemPanel
-            slug={ws.slug}
+            slug={refOf(ws)}
             refreshKey={itemsKey}
             open={itemsOpen}
             onClose={() => setItemsOpen(false)}
@@ -440,7 +443,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
             onCreated={(created) => {
               setCreating(false);
               workspaces.reload();
-              navigate(`/chat/w/${encodeURIComponent(created.slug)}`);
+              navigate(linkOf(created));
             }}
           />
         )}
@@ -474,10 +477,13 @@ export function ChatPage({ workspace }: { workspace?: string } = {}) {
   );
 }
 
-/** `/chat/w/:slug`: a workspace of the person who signed in. */
-export function WorkspacePage() {
-  const { slug = "" } = useParams();
-  const workspaces = useWorkspaces();
+// The workspace a ref names, and who is signed in. `null` while it loads.
+function useWorkspaceOf(reference: string): {
+  person: string;
+  ws: Workspace | null;
+  setWs: (w: Workspace) => void;
+  error: string;
+} {
   const [person, setPerson] = useState("");
   const [ws, setWs] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
@@ -486,7 +492,7 @@ export function WorkspacePage() {
     let live = true;
     setWs(null);
     setError("");
-    Promise.all([getJson<Session>("/session"), getWorkspace(slug)])
+    Promise.all([getJson<Session>("/session"), getWorkspace(reference)])
       .then(([session, found]) => {
         if (!live) return;
         setPerson(session.person.id);
@@ -506,17 +512,34 @@ export function WorkspacePage() {
     return () => {
       live = false;
     };
-  }, [slug]);
+  }, [reference]);
+
+  return { person, ws, setWs, error };
+}
+
+function WorkspaceError({ text }: { text: string }) {
+  return (
+    <Shell section="chat">
+      <ErrorLine text={text} />
+      <p>
+        <Link to="/chat">Back to the chat</Link>
+      </p>
+    </Shell>
+  );
+}
+
+/**
+ * `/chat/w/:space/:slug`: one workspace. `:space` is `shared` for a shared
+ * workspace and the id of the owner for the workspace of a person, so every
+ * person in a shared workspace opens it at the same address.
+ */
+export function WorkspacePage() {
+  const { space = "", slug = "" } = useParams();
+  const workspaces = useWorkspaces();
+  const { person, ws, setWs, error } = useWorkspaceOf(`${space}/${slug}`);
 
   if (error !== "") {
-    return (
-      <Shell section="chat">
-        <ErrorLine text={error} />
-        <p>
-          <Link to="/chat">Back to the chat</Link>
-        </p>
-      </Shell>
-    );
+    return <WorkspaceError text={error} />;
   }
   if (ws === null) {
     return (
@@ -530,11 +553,33 @@ export function WorkspacePage() {
       <Chat
         key={ws.id}
         person={person}
-        workspace={ws.slug}
+        workspace={refOf(ws)}
         ws={ws}
         onWs={setWs}
         workspaces={workspaces}
       />
     </Shell>
   );
+}
+
+/**
+ * `/chat/w/:ref`: a link from the days of one segment, a slug or an id. It
+ * finds the workspace and sends the browser to the two-segment address, so
+ * an old link, and a link a person kept, still opens the workspace.
+ */
+export function WorkspaceLink() {
+  const { ref = "" } = useParams();
+  const { ws, error } = useWorkspaceOf(ref);
+
+  if (error !== "") {
+    return <WorkspaceError text={error} />;
+  }
+  if (ws === null) {
+    return (
+      <Shell section="chat">
+        <Spinner label="Loading the workspace" />
+      </Shell>
+    );
+  }
+  return <Navigate to={linkOf(ws)} replace />;
 }

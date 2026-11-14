@@ -51,7 +51,7 @@ from joshua_core.engine.types import (
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.engine.usage import Usage
 from joshua_core.memory import prompt as memory_prompt
-from joshua_core.store.models import Channel, Conversation
+from joshua_core.store.models import Channel, Conversation, Workspace
 from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE, Repo
 from joshua_core.store.usage_events import record_usage
 
@@ -458,28 +458,34 @@ class ConversationManager:
         )
         profile = self._derive_profile(person, channel)
         resolved = inference_plan.resolve(self._settings, inference_plan.turn_job(profile))
-        role = self._conversation_role(channel, conversation)
+        workspace = await self._workspace_of(channel)
+        role = self._conversation_role(channel, conversation, workspace)
         group = self._conversation_group(channel, conversation)
         group_id = group.id if group is not None else None
         gateway_names = allowed_gateway_servers(self._settings, conversation.person_id, group_id)
         workspace_sig = None
         workspace_id: str | None = None
-        if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+        if workspace is not None:
             # A workspace thread: the model of the workspace, the servers it
             # picked among the ones the person may use, and tool search by the
             # number of servers. A missing row builds a normal direct session.
-            workspace = await self._workspace_of(channel)
-            if workspace is not None:
-                gateway_names = workspace_engine.picked_servers(gateway_names, workspace)
-                resolved = workspace_engine.with_workspace(
-                    resolved,
-                    workspace,
-                    tool_search=workspace_engine.tool_search_for(
-                        gateway_names, self._settings.workspaces.tool_search_max_servers
-                    ),
-                )
-                workspace_sig = workspace_engine.signature(workspace)
-                workspace_id = workspace.id
+            # A shared workspace belongs to nobody, so there is no person to
+            # filter the servers by: the create route stored the servers that
+            # every person of it may use.
+            gateway_names = (
+                list(workspace.servers)
+                if workspace.shared
+                else workspace_engine.picked_servers(gateway_names, workspace)
+            )
+            resolved = workspace_engine.with_workspace(
+                resolved,
+                workspace,
+                tool_search=workspace_engine.tool_search_for(
+                    gateway_names, self._settings.workspaces.tool_search_max_servers
+                ),
+            )
+            workspace_sig = workspace_engine.signature(workspace)
+            workspace_id = workspace.id
         resume = self._resume_on(conversation, resume, resolved)
         memory = self._memory_block(person, channel)
         system_prompt = self._composer.compose(
@@ -559,13 +565,23 @@ class ConversationManager:
             workspace_sig=workspace_sig,
         )
 
-    async def _workspace_of(self, channel: Channel) -> Any:
-        """The workspace row of a ``workspace:<id>`` channel, or None."""
+    async def _workspace_of(self, channel: Channel) -> Workspace | None:
+        """The workspace row of a ``workspace:<id>`` channel, or None for a
+        channel of another type and for a row that is gone."""
+        if channel.channel_type != WORKSPACE_CHANNEL_TYPE:
+            return None
         workspace_id = workspace_engine.workspace_id_of(channel.id)
         return await self._repo.get_workspace(workspace_id) if workspace_id else None
 
-    def _conversation_role(self, channel: Channel, conversation: Conversation) -> str:
+    def _conversation_role(
+        self, channel: Channel, conversation: Conversation, workspace: Workspace | None = None
+    ) -> str:
         """The role this conversation carries, for the gateway file policy.
+
+        A workspace thread carries the role of its workspace: ``member`` only
+        when every person of it is a member. It is the rule of a group chat,
+        read off the workspace row, because a shared workspace belongs to
+        nobody and has no ``groups:`` entry to read.
 
         A direct message carries the role of its person. A group carries the role
         derived from its ``members``: ``member`` only when every handle names a
@@ -577,6 +593,8 @@ class ConversationManager:
         subprocess when the session starts. A per-turn role could not reach the
         gateway without rebuilding the session for every message.
         """
+        if workspace is not None:
+            return self._workspace_role(workspace)
         if channel.session_mode != "shared" and conversation.person_id:
             person = self._settings.person(conversation.person_id)
             return person.role if person is not None else "guest"
@@ -586,11 +604,27 @@ class ConversationManager:
         role, _ = self._settings.group_role(group)
         return role
 
-    def _conversation_group(self, channel: Channel, conversation: Conversation) -> Group | None:
-        """The configured group of a group chat, or None for a direct message.
+    def _workspace_role(self, workspace: Workspace) -> str:
+        """The role of a workspace thread: ``member`` only when every person of
+        the workspace writes, as ``JoshuaConfig.group_role`` asks of the handles
+        of a group chat. One guest, or one id the roster does not know, makes
+        the whole thread a guest thread."""
+        for person_id in workspace.people:
+            person = self._settings.person(person_id)
+            if person is None or not is_member(person.role):
+                return "guest"
+        return "member"
 
-        The gateway admits this group to a server whose ``allow`` names it.
+    def _conversation_group(self, channel: Channel, conversation: Conversation) -> Group | None:
+        """The configured group of a group chat, or None for a direct message
+        and for a workspace thread.
+
+        The gateway admits this group to a server whose ``allow`` names it. A
+        shared workspace is no group chat: its people come from its own row, so
+        it carries no group header.
         """
+        if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+            return None
         if channel.session_mode != "shared" and conversation.person_id:
             return None
         return self._settings.groups_by_chat(channel.channel_type, _chat_id(channel.id))
@@ -974,7 +1008,7 @@ class ConversationManager:
             preamble += "\n" + WORKSPACE_UNATTENDED_NOTE
         # A shared conversation labels the message with who sent it.
         body = f"{speaker}: {text}" if speaker else text
-        role = self._conversation_role(channel, conversation)
+        role = self._conversation_role(channel, conversation, await self._workspace_of(channel))
         if self._url_grants is not None and direction == "in":
             # What the person wrote, and nothing the agent found for itself.
             self._url_grants.grant_from_text(conversation.id, text)

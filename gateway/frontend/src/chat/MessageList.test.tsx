@@ -45,6 +45,25 @@ describe("MessageList", () => {
     expect(screen.queryByRole("button", { name: "Load earlier" })).toBeNull();
   });
 
+  it("names the person once for a run of their messages in a shared workspace", () => {
+    const person = { role: "person" as const };
+    render(
+      <MessageList
+        messages={[
+          msg(1, { ...person, text: "I'll bring pie", who: "Mia" }),
+          msg(2, { ...person, text: "and cider", who: "Mia" }),
+          msg(3, { text: "Noted." }),
+          msg(4, { ...person, text: "me too", who: "Mia" }),
+          msg(5, { ...person, text: "the oven is mine", who: "Jake" }),
+        ]}
+        canRetry
+        onRetry={() => undefined}
+      />,
+    );
+    const names = [...document.querySelectorAll(".msg-who")].map((el) => el.textContent);
+    expect(names).toEqual(["Mia", "Mia", "Jake"]);
+  });
+
   it("shows the loading state and the load error with Retry", () => {
     const onReload = vi.fn();
     const { rerender } = render(<MessageList messages={[]} canRetry onRetry={() => undefined} status="loading" />);

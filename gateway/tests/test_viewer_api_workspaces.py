@@ -136,6 +136,49 @@ def test_core_status_and_body_pass_through_and_are_not_cached(client, core) -> N
     assert client.get(BASE + "/nope", auth=ALEX).status_code == 404
 
 
+def test_a_two_segment_ref_reaches_core_whole(client, core) -> None:
+    """``shared/<slug>`` and ``<owner>/<slug>`` come URL-encoded from the
+    browser and go to core as two segments, on every route of one workspace."""
+    item = "11111111-1111-1111-1111-111111111111"
+    calls = [
+        ("get", f"{BASE}/shared%2Fthanksgiving", "GET", "/v1/workspaces/shared/thanksgiving"),
+        ("patch", f"{BASE}/shared%2Fthanksgiving", "PATCH", "/v1/workspaces/shared/thanksgiving"),
+        (
+            "get",
+            f"{BASE}/alex%2Fsolar/items",
+            "GET",
+            "/v1/workspaces/alex/solar/items",
+        ),
+        (
+            "post",
+            f"{BASE}/alex%2Fsolar/items",
+            "POST",
+            "/v1/workspaces/alex/solar/items",
+        ),
+        (
+            "patch",
+            f"{BASE}/alex%2Fsolar/items/{item}",
+            "PATCH",
+            f"/v1/workspaces/alex/solar/items/{item}",
+        ),
+        (
+            "delete",
+            f"{BASE}/alex%2Fsolar/items/{item}",
+            "DELETE",
+            f"/v1/workspaces/alex/solar/items/{item}",
+        ),
+    ]
+    for verb, url, method, path in calls:
+        response = client.request(verb.upper(), url, json={}, auth=ALEX)
+        assert response.status_code == 200, url
+        request = core.requests[-1]
+        assert (request.method, request.url.path) == (method, path), url
+        assert request.url.params["person"] == "alex"
+    # The options route is a name, never a ref.
+    assert client.get(BASE + "/options", auth=ALEX).status_code == 200
+    assert core.requests[-1].url.path == "/v1/workspaces/options"
+
+
 def test_the_status_filter_of_the_list_goes_to_core(client, core) -> None:
     client.get(BASE + "?status=paused", auth=ALEX)
     assert dict(core.requests[0].url.params) == {"person": "alex", "status": "paused"}

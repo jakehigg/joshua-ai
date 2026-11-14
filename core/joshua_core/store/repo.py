@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import unquote
 from uuid import UUID, uuid4
 
 import psycopg
@@ -56,14 +57,29 @@ FROM_CHAT_SOURCE = "normal_chat"
 # The columns that ``update_workspace`` may change.
 WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "status")
 _SLUG_MAX = 48
+# The namespace of a shared workspace in a link and in a ref: a shared one is
+# ``shared/<slug>``, a personal one ``<owner>/<slug>``. No person may hold this
+# id, so the two namespaces never collide.
+SHARED_NAMESPACE = "shared"
 
 
 # Slugs that a route of /v1/workspaces uses.
 RESERVED_SLUGS = frozenset({"options"})
 
+
 # The id of the only row of ``auth_import_marker``: the one-time import of the
 # viewer passwords into ``auth_secret``.
 AUTH_IMPORT_MARKER_ID = "viewer_passwords"
+
+
+class SlugTaken(Exception):
+    """A shared workspace already holds this slug. The slug of a shared
+    workspace is one for everyone, so the create fails instead of adding a
+    number."""
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(f"the slug {slug} is taken")
+        self.slug = slug
 
 
 def slugify(title: str) -> str:
@@ -134,6 +150,8 @@ def _workspace(row: dict[str, Any]) -> Workspace:
         model=row.get("model"),
         notify=row.get("notify") or "none",
         status=row.get("status") or "active",
+        shared=bool(row.get("shared")),
+        members=tuple(row.get("members") or ()),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
     )
@@ -1219,13 +1237,20 @@ class Repo:
         model: str | None = None,
         servers: Collection[str] = (),
         notify: str = "none",
+        members: Collection[str] = (),
     ) -> Workspace:
         """Create a workspace, its channel ``workspace:<id>`` (type ``workspace``,
         a direct thread of the owner), and its conversation.
 
         The slug comes from the title and is made unique among the owner's
         workspaces with a number.
+
+        ``members`` makes it a shared workspace: one thread that the owner and
+        the members write in, so the channel is ``shared`` and the conversation
+        belongs to nobody. Its slug is one for everyone, so a taken one raises
+        ``SlugTaken`` instead of taking a number.
         """
+        shared = bool(members)
         base = slugify(title)
         workspace_id = str(uuid4())
         row: dict[str, Any] | None = None
@@ -1236,8 +1261,9 @@ class Repo:
                     cur = await conn.execute(
                         """
                         INSERT INTO workspaces
-                            (id, slug, title, owner, goal, servers, model, notify)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            (id, slug, title, owner, goal, servers, model, notify,
+                             shared, members)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING *
                         """,
                         (
@@ -1249,11 +1275,15 @@ class Repo:
                             Json(list(servers)),
                             model,
                             notify,
+                            shared,
+                            Json(list(members)),
                         ),
                     )
                     row = await cur.fetchone()
                 break
             except psycopg.errors.UniqueViolation:
+                if shared:
+                    raise SlugTaken(base) from None
                 continue
         if row is None:
             raise ValueError("no free slug for this title")
@@ -1264,8 +1294,9 @@ class Repo:
                 WORKSPACE_CHANNEL_TYPE,
                 display_name=title,
                 default_person_id=owner,
+                session_mode="shared" if shared else "per_person",
             )
-            await self.get_or_create_conversation(workspace.channel_id, owner)
+            await self.workspace_conversation(workspace)
         except Exception:
             # No row without its channel: a workspace that cannot hold a thread
             # would show in the list and fail on the first turn.
@@ -1284,25 +1315,68 @@ class Repo:
             row = await cur.fetchone()
         return _workspace(row) if row else None
 
+    async def find_workspace_for(self, person_id: str, ref: str) -> Workspace | None:
+        """The workspace that ``ref`` names for ``person_id``. A ref has one
+        segment or two, and a two-segment one names the namespace:
+
+        - ``shared/<slug>``: the shared workspace of that slug;
+        - ``<owner>/<slug>``: the workspace of that owner with that slug;
+        - ``<slug>`` or ``<id>``: the workspace of the person with that slug,
+          then the workspace of that id.
+
+        The person must be one of the people of the workspace; any other one is
+        never found, and any other ref is None. A ref with a slash reaches a
+        route URL-encoded as well as in the path, so it is decoded here."""
+        ref = unquote((ref or "").strip())
+        if not ref or not person_id:
+            return None
+        namespace, slash, slug = ref.partition("/")
+        if slash:
+            if not namespace or not slug or "/" in slug:
+                return None
+            found = await self._workspace_by_slug(namespace, slug)
+            return found if found is not None and person_id in found.people else None
+        found = await self._workspace_by_slug(person_id, ref)
+        if found is not None:
+            return found
+        found = await self.get_workspace(ref)
+        return found if found is not None and person_id in found.people else None
+
+    async def _workspace_by_slug(self, namespace: str, slug: str) -> Workspace | None:
+        """The workspace of a namespace and a slug: the shared one of that slug
+        under ``shared``, the workspace of that owner otherwise."""
+        shared = namespace == SHARED_NAMESPACE
+        sql = "SELECT * FROM workspaces WHERE slug = %s AND " + (
+            "shared" if shared else "owner = %s"
+        )
+        args = (slug,) if shared else (slug, namespace)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, args)
+            row = await cur.fetchone()
+        return _workspace(row) if row else None
+
     async def find_workspace(self, owner: str, ref: str) -> Workspace | None:
         """The workspace of ``owner`` that ``ref`` names: its id or its slug.
-        Another person's workspace is never found."""
-        ref = (ref or "").strip()
-        if not ref:
-            return None
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                "SELECT * FROM workspaces WHERE owner = %s AND slug = %s", (owner, ref)
-            )
-            row = await cur.fetchone()
-        if row:
-            return _workspace(row)
-        found = await self.get_workspace(ref)
+        Another person's workspace, a shared one included, is never found. A
+        turn runs only in a workspace of its own person, so it asks this one."""
+        found = await self.find_workspace_for(owner, ref)
         return found if found is not None and found.owner == owner else None
 
-    async def list_workspaces(self, owner: str, status: str | None = None) -> list[Workspace]:
-        sql = "SELECT * FROM workspaces WHERE owner = %s"
-        args: list[Any] = [owner]
+    async def workspace_conversation(self, workspace: Workspace) -> Conversation:
+        """The thread of a workspace: the one thread of everyone when it is
+        shared, the owner's thread when it is not."""
+        return await self.get_or_create_conversation(
+            workspace.channel_id, None if workspace.shared else workspace.owner
+        )
+
+    async def list_workspaces(self, person_id: str, status: str | None = None) -> list[Workspace]:
+        """The workspaces a person reaches: the ones they own and the shared
+        ones whose members hold them, newest first."""
+        sql = (
+            "SELECT * FROM workspaces "
+            "WHERE (owner = %s OR (shared AND members @> to_jsonb(%s::text)))"
+        )
+        args: list[Any] = [person_id, person_id]
         if status is not None:
             sql += " AND status = %s"
             args.append(status)

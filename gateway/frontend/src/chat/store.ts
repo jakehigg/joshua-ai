@@ -41,6 +41,8 @@ export interface ChatMessage {
   tools?: string[];
   // On a person message: it was sent with Brief on (a spoken turn).
   spoken?: boolean;
+  // On a person message of a shared workspace: the name of who wrote it.
+  who?: string;
   // On a local person message: the name of the file sent with it, for the chip.
   fileName?: string;
   // On a local person message: the file itself, to send again on Retry.
@@ -88,6 +90,7 @@ export function fromServer(m: HistoryMessage): ChatMessage {
     ...(m.turnId ? { turnId: m.turnId } : {}),
     ...(m.tools ? { tools: m.tools } : {}),
     ...(m.spoken ? { spoken: true } : {}),
+    ...(m.who ? { who: m.who } : {}),
     ...(m.attachments ? { attachments: m.attachments } : {}),
   };
 }

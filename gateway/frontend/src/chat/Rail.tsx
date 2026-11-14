@@ -1,5 +1,7 @@
 // The left rail of the chat screen: Chat, the active workspaces, the paused
-// ones (folded), and "+ New workspace". Under them it repeats the app
+// ones (folded), and "+ New workspace". A shared workspace is marked as
+// shared, and every link is `/chat/w/<space>/<slug>` (api/workspaces.ts).
+// Under them it repeats the app
 // navigation links of the shell (AppNav), without Chat, which the first entry
 // of the rail already is, which the shell's own sidebar shows
 // only from 760px; so on a phone this drawer is the one menu of the chat.
@@ -11,7 +13,7 @@
 
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import type { Workspace } from "../api/workspaces";
+import { linkOf, type Workspace } from "../api/workspaces";
 import AppNav, { useNav } from "../shell/AppNav";
 import { inertProps, useMedia } from "./viewport";
 
@@ -52,11 +54,12 @@ export function Rail({
   const row = (w: Workspace) => (
     <li key={w.id}>
       <Link
-        to={`/chat/w/${encodeURIComponent(w.slug)}`}
+        to={linkOf(w)}
         aria-current={w.slug === activeSlug ? "page" : undefined}
         onClick={onNavigate}
       >
         {w.title}
+        {w.shared && <span className="rail-shared"> Shared</span>}
       </Link>
     </li>
   );

@@ -76,6 +76,11 @@ class EventsFakeRepo:
             self.conversations[key] = conv
         return conv
 
+    async def workspace_conversation(self, workspace: Any) -> Conversation:
+        return await self.get_or_create_conversation(
+            workspace.channel_id, None if workspace.shared else workspace.owner
+        )
+
     async def add_transcript(
         self,
         conversation_id: str,
@@ -539,13 +544,23 @@ async def test_an_event_attachment_keeps_the_sender_filename(tmp_path) -> None:
 WS_ID = "11111111-1111-4111-8111-111111111111"
 
 
-def workspace_repo() -> EventsFakeRepo:
+def workspace_repo(shared: bool = False) -> EventsFakeRepo:
     from joshua_core.store.models import Workspace
 
     repo = EventsFakeRepo()
-    workspace = Workspace(id=WS_ID, slug="solar", title="Solar", owner="alex")
+    workspace = Workspace(
+        id=WS_ID,
+        slug="solar",
+        title="Solar",
+        owner="alex",
+        shared=shared,
+        members=("mia",) if shared else (),
+    )
     repo.channels[workspace.channel_id] = Channel(
-        id=workspace.channel_id, channel_type="workspace", default_person_id="alex"
+        id=workspace.channel_id,
+        channel_type="workspace",
+        default_person_id="alex",
+        session_mode="shared" if shared else "per_person",
     )
 
     async def get_workspace(workspace_id: str):
@@ -594,6 +609,20 @@ async def test_a_verbatim_workspace_event_is_recorded_in_the_thread_with_no_mode
     rows = [r for r in repo.transcripts if r["direction"] == "inject"]
     assert [r["content"] for r in rows] == ["the build finished"]
     assert rows[0]["conversation_id"] == repo.conversations[(f"workspace:{WS_ID}", "alex")].id
+
+
+async def test_a_shared_workspace_event_runs_in_the_thread_of_everyone(tmp_path):
+    service, repo, manager, received = build_service(tmp_path, repo=workspace_repo(shared=True))
+
+    resp = await service.handle(workspace_event())
+    await service.drain()
+
+    assert resp.status_code == 202
+    assert len(manager.calls) == 1
+    # One thread for the owner and the members, so it belongs to nobody.
+    assert manager.calls[0].conversation.person_id is None
+    assert list(repo.conversations) == [(f"workspace:{WS_ID}", None)]
+    assert received == []
 
 
 async def test_a_workspace_event_for_an_unknown_workspace_is_refused_with_a_reason(tmp_path):
