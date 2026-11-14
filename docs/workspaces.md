@@ -8,8 +8,9 @@ workspaces.
 
 A workspace chat is the full Joshua. It has the same prompt, the same builtin
 tools, the same memory, and the same RAG from everything outside the
-workspace. Only these things differ: the thread, the model, the servers, one
-prompt file (`workspace.md`), and a small workspace block in each message.
+workspace. Only these things differ: the thread, the model, the servers, the
+prompt file `workspace.md` (and `workspace_shared.md` in a shared workspace),
+and a small workspace block in each message.
 
 Nothing changes until a workspace exists. The tables are empty and no turn
 reads them.
@@ -18,11 +19,12 @@ reads them.
 
 | Field | Meaning |
 |---|---|
-| `slug`, `title` | The slug comes from the title. It is unique for each owner. |
-| `owner` | One person. Another person sees the workspace as not found. |
+| `slug`, `title` | The slug comes from the title. It is unique for each owner, and the slug of a shared workspace is unique over everybody. |
+| `owner` | The person who made it. |
+| `shared`, `members` | `shared` is true for a workspace that several people write in, and `members` names the other people. A person who is neither the owner nor a member sees the workspace as not found. |
 | `goal` | A short paragraph. |
 | `notes` | Standing facts and rules. The agent keeps them with `update_workspace_notes`. |
-| `servers` | The MCP servers that the workspace uses. Only servers that the person may use. |
+| `servers` | The MCP servers that the workspace uses. Only servers that every person of it may use. |
 | `model` | The model of the workspace. Empty keeps the model of the chat job. |
 | `notify` | `none` (default), `questions`, or `questions+finishes`. |
 | `status` | `active`, `paused`, or `archived`. |
@@ -36,9 +38,11 @@ the row.
 ## The thread
 
 A new workspace gets the channel `workspace:<id>` (type `workspace`) and one
-conversation for the owner. A turn on this channel runs only when the
-workspace exists and its owner is the person of the turn. Core never creates a
-`workspace:` channel from a turn.
+conversation. The conversation belongs to the owner, and to nobody for a
+shared workspace, where it is the one thread of everybody. A turn on this
+channel runs only when the workspace exists and the person of the turn reaches
+it: the owner, or a member of a shared one. Core never creates a `workspace:`
+channel from a turn.
 
 Replies stay in the thread. Core writes each reply to the transcript, and the
 viewer reads it there. Core delivers nothing to a phone for a workspace: not a
@@ -54,14 +58,75 @@ scheduled task in a workspace. Nothing you write here reaches the person. If
 the person should see it, call send_to_normal_chat." The description of
 `schedule_task` says the same inside a workspace.
 
+## A shared workspace
+
+A workspace can hold several people. The person who makes it picks the others
+from the roster, and they are the `members`. The people of a workspace are set
+at the create and never change: no route and no tool adds or removes one. For
+other people, make another workspace.
+
+A shared workspace is one thread. The owner and every member write in it, read
+every row, and see the same goal, notes, and items. Everything written there is
+read by everybody in it.
+
+**The address.** A link to a workspace has two segments: `<owner>/<slug>` for a
+personal one and `shared/<slug>` for a shared one. The viewer address is
+`/chat/w/<owner>/<slug>` or `/chat/w/shared/<slug>`, so everybody in a shared
+workspace opens the same address. `shared` is the namespace of a shared
+workspace, so no person may hold the id `shared`. A create that names one
+answers 422.
+
+**The slug.** The slug of a personal workspace is unique for its owner, and a
+taken one gets a number (`solar-install-2`). The slug of a shared workspace is
+unique over all people, because its address names no owner. A title whose
+shared slug is taken answers 409 and gives the slug, and the person picks
+another title. A personal workspace of any person may hold the same slug.
+
+**The ref.** A route, a tool, and a turn name a workspace with a ref. It has
+three forms:
+
+- `shared/<slug>`: the shared workspace of that slug;
+- `<owner>/<slug>`: the workspace of that person with that slug;
+- `<slug>` or `<id>`: one segment. Core takes the person's own workspace of
+  that slug first, then the workspace of that id.
+
+The person must be one of the people of the workspace. Any other ref is not
+found. The one-segment form keeps every older link working: the owner of a
+shared workspace still reaches it by its slug, and a member by its id. A ref
+with a slash reaches a route in the path
+(`/v1/workspaces/shared/thanksgiving`) and URL-encoded
+(`shared%2Fthanksgiving`) alike.
+
+**The turn.** A turn of a shared workspace runs as a group turn. The message
+carries the name of the person who wrote it ("Mia: who brings the pie?"), and
+the transcript row keeps that name in `meta.speaker`, so the viewer shows it on
+the row. Core runs the turns of the one conversation one at a time. A message
+written while a turn of the thread runs waits in the hold of the person who
+wrote it, and goes as their own turn after.
+
+**What it writes.** A document that Joshua writes in a shared workspace goes to
+`documents/shared/<slug>.md`, where every member reads it. RAG skips the
+documents of the workspace under that path, as it does for a personal one.
+
+**One message, one person.** `send_to_normal_chat` sends to the main chat of
+the person who wrote the turn, and never to everybody. On a turn with no
+person, a job event or a scheduled task, it sends to the owner. To tell
+everybody something, the agent writes in the thread.
+
 ## What a session gets
 
 - **Model.** The model of the workspace replaces the model of the chat job.
   The server and the key of the job stay.
 - **Servers.** The servers that the workspace picked, among the servers that
-  the person may use. The builtin tools stay as in a normal chat, with the
-  `workspace` tools added.
-- **Prompt.** The `dm` profile and `workspace.md`.
+  the person may use. A shared workspace keeps the servers of its create,
+  which are the servers that every person of it may use. The builtin tools
+  stay as in a normal chat, with the `workspace` tools added.
+- **Prompt.** The `dm` profile and `workspace.md`. A shared workspace takes
+  the `group` profile, `workspace.md`, and `workspace_shared.md`, which tells
+  the agent that several people read the thread, that each message names its
+  writer, and that `send_to_normal_chat` reaches one person.
+- **Role.** A workspace thread carries the role of its people, as a group chat
+  does: `member` only when every person of it is a member.
 - **Tool search.** Off when the workspace picks `workspaces.tool_search_max_servers`
   servers or fewer (default 3). On when it picks more. Core does not know how
   many tools a server has, so the rule counts servers.
@@ -73,6 +138,8 @@ the person should see it, call send_to_normal_chat." The description of
 Each turn of a workspace starts with the workspace block. It holds:
 
 - the title, the goal, the `notify` setting, and the notes;
+- the "People:" line of a shared workspace, under the goal: the owner, marked
+  `(owner)`, then the members. A personal workspace has no such line;
 - the items as kind and title, with the ref in brackets: pinned items first,
   then the newest, at most 30;
 - the items that came from normal chat and that this workspace has not seen.
@@ -91,7 +158,8 @@ Each turn of a workspace starts with the workspace block. It holds:
   the last rows of the thread show it;
 - when the session has no history of its own (the first turn, a start after
   the context cap, a reset, or a restart that could not resume), the last 10
-  rows of the thread, cut short.
+  rows of the thread, cut short. Each row of a shared workspace names the
+  person who wrote it.
 
 Because the block is always in context, a reset loses no project state.
 `GET /v1/workspaces/<slug>/block` returns the block as text.
@@ -130,7 +198,7 @@ The `workspace` builtin server has these tools.
 
 | Tool | Where | Use |
 |---|---|---|
-| `add_to_workspace(kind, ref, title, url?, workspace?)` | every chat | Add an item. In a workspace, `workspace` defaults to this one. In a normal chat it is required: a slug or a title of one of the person's workspaces. An item added from another chat shows as new in the block. |
+| `add_to_workspace(kind, ref, title, url?, workspace?)` | every chat | Add an item. In a workspace, `workspace` defaults to this one. In a normal chat it is required: a slug or a title of a workspace the person reaches. An item added from another chat shows as new in the block. |
 | `update_workspace_notes(notes)` | workspace | Replace the notes. Keep them short, under 4000 characters. |
 | `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the main chat of the person who wrote the turn. A turn with no person, a job event or a scheduled task, sends to the owner. One recipient, never the whole workspace. |
 
@@ -192,27 +260,33 @@ them. There is no schema change.
 
 The viewer calls `/v1/workspaces` on core. The caller names the person with the
 `person` query parameter, and core trusts it, as for a search of documents.
-Every route works on the workspaces of that person. A workspace of another
-person answers 404. The callers are `workspaces.allowed_callers` (default
-`viewer` and `gateway`). An empty list turns the routes off (403).
+Every route works on the workspaces that person reaches, their own and the
+shared ones they are in. Any other workspace answers 404. The callers are
+`workspaces.allowed_callers` (default `viewer` and `gateway`). An empty list
+turns the routes off (403).
+
+Every `{slug}` below is a ref: a slug, an id, or two segments
+(`shared/<slug>`, `<owner>/<slug>`), in the path or URL-encoded.
 
 | Route | Use |
 |---|---|
-| `GET /v1/workspaces?status=` | List the workspaces. |
-| `POST /v1/workspaces` | Create one: `title`, `goal`, `model`, `servers`, `notify`. |
-| `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `status`. `{slug}` can also be the id. |
+| `GET /v1/workspaces?status=` | List the workspaces the person reaches. |
+| `POST /v1/workspaces` | Create one: `title`, `goal`, `model`, `servers`, `notify`, `members`. `members` makes it shared. A taken shared slug answers 409 with the slug. |
+| `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `status`. No route changes the people. |
 | `GET`, `POST /v1/workspaces/{slug}/items` | List or add items. |
 | `PATCH`, `DELETE /v1/workspaces/{slug}/items/{id}` | Change `pinned` or `seen`, or remove an item. |
 | `GET /v1/workspaces/{slug}/block` | The workspace block as text. |
 | `POST /v1/workspaces/by-id/{id}/items` | Add an item for a tool call. The gateway calls it (see Items from tools). It takes no `person`. |
 
-`servers` must be servers that the person may use (422 otherwise). `model`
-must be in `workspaces.models` when that list is not empty, and can be any text
-when it is empty.
+`servers` must be servers that every person of the workspace may use (422
+otherwise). Every name in `members` must be a member of the roster, and never
+the reserved id `shared` (422 otherwise). `model` must be in
+`workspaces.models` when that list is not empty, and can be any text when it
+is empty.
 
 A chat turn in a workspace goes through the channels terminal routes.
 `POST /v1/cli/turns/stream` and `GET /v1/cli/transcript` take an optional
-`workspace` (the slug or the id). Core looks the workspace up for the person.
+`workspace` (a ref). Core looks the workspace up for the person.
 
 `GET /v1/usage?group=conversation&person=<id>` gives the totals of each conversation, with
 the slug and the title of the workspace when the conversation belongs to one.
@@ -361,12 +435,14 @@ and names the signed-in person. A guest gets 403. Every write checks the
 | `PATCH`, `DELETE /api/v1/workspaces/{slug}/items/{id}` | the same on core |
 
 `GET /v1/workspaces/options` returns `servers` (the servers that the person may
-use, each with a `name` and a one-line `description`) and `models` (the list
-`workspaces.models`, empty when any model is allowed). The description is the
-optional `description` of the server in `mcp:`. Without it, the name is used.
-The slug `options` is reserved.
+use, each with a `name` and a one-line `description`), `models` (the list
+`workspaces.models`, empty when any model is allowed), and `people` (every
+member of the roster but the caller, each with an `id` and a `name`, to share a
+workspace with). The description is the optional `description` of the server in
+`mcp:`. Without it, the name is used. The slug `options` is reserved.
 
-The chat routes take `workspace` (the slug or the id): `POST
+The chat routes take `workspace` (a ref, two segments for a workspace on
+screen): `POST
 /api/v1/chat/<person>/turns` in the JSON body or the form, and `GET
 /api/v1/chat/<person>/history` in the query. The documents list takes
 `tag`: `GET /api/v1/documents?tag=ws:<slug>` keeps the documents with that tag.
