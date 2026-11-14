@@ -40,6 +40,8 @@ from joshua_shared.log import get_logger
 logger = get_logger("gateway.workspace_items")
 
 WORKSPACE_META_KEY = "joshua/workspace"
+# The people of a shared workspace, the owner first, beside the workspace id.
+WORKSPACE_PEOPLE_META_KEY = "joshua/workspace_people"
 ITEMS_PATH = "/v1/workspaces/by-id/{workspace}/items"
 CORE_URL_ENV = "CORE_URL"
 TOKEN_ENV = "JOSHUA_TOKEN_GATEWAY"

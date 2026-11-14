@@ -22,7 +22,7 @@ from engine_fakes import (
 from joshua_core.delivery import workspace_delivery_target
 from joshua_core.engine import workspace as ws
 from joshua_core.engine.injection import kb_context
-from joshua_core.engine.manager import ConversationManager, TurnCtx
+from joshua_core.engine.manager import UNSET, ConversationManager, TurnCtx, acting_person_of
 from joshua_core.engine.profiles import derive_profile
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.tools import workspace as ws_tools
@@ -288,10 +288,76 @@ async def test_a_shared_workspace_session_takes_the_servers_of_the_row(tmp_path,
     assert list(options.mcp_servers) == ["tasks", "secret"]
     for server in options.mcp_servers.values():
         headers = server["headers"]
-        assert headers["X-Joshua-Person"] == "unknown"
+        # With no acting person given, the owner acts.
+        assert headers["X-Joshua-Person"] == "alex"
         assert headers["X-Joshua-Role"] == "member"
         assert headers["X-Joshua-Workspace"] == WS_ID
+        assert headers["X-Joshua-Workspace-People"] == "alex,mia"
         assert "X-Joshua-Group" not in headers
+
+
+async def test_a_shared_workspace_session_names_the_acting_person(tmp_path, monkeypatch):
+    """A server with a bearer for each person routes by the person header, so
+    a shared session names the person who acts: the owner by default, the
+    person given, or nobody."""
+    install_fake_sdk(monkeypatch)
+    workspace = _ws(shared=True, members=("mia",), servers=("tasks",))
+    manager = make_manager(WsRepo(workspace), tmp_path)
+    channel, conversation = _shared_channel(), _shared_conversation()
+
+    for given, header in ((UNSET, "alex"), ("mia", "mia"), (None, "unknown")):
+        built = await manager._build_session(channel, conversation, None, given)
+        headers = built.session._options.mcp_servers["tasks"]["headers"]
+        assert headers["X-Joshua-Person"] == header, given
+        assert built.acting_person == (None if given is None else header)
+
+
+async def test_a_personal_workspace_session_ignores_the_acting_person(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    manager = make_manager(WsRepo(_ws(servers=("tasks",))), tmp_path)
+    built = await manager._build_session(_channel(), _conversation(), None, "mia")
+    assert built.session._options.mcp_servers["tasks"]["headers"]["X-Joshua-Person"] == "alex"
+    assert built.acting_person is None
+
+
+def test_the_acting_person_of_a_shared_workspace() -> None:
+    workspace = _ws(shared=True, members=("mia",))
+    assert acting_person_of(workspace, "mia") == "mia"
+    assert acting_person_of(workspace, "alex") == "alex"
+    # A scheduled or an event turn has no person: the owner acts.
+    assert acting_person_of(workspace, None) == "alex"
+    # A person outside the workspace acts as nobody, never as the owner.
+    assert acting_person_of(workspace, "gus") is None
+
+
+async def test_another_writer_rebuilds_a_shared_session_before_the_turn(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    headers_per_query: list[str] = []
+
+    class Client(FakeSDKClient):
+        async def query(self, prompt):
+            server = self.options.mcp_servers["tasks"]
+            headers_per_query.append(server["headers"]["X-Joshua-Person"])
+
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", Client)
+    workspace = _ws(shared=True, members=("mia",), servers=("tasks",))
+    manager = make_manager(WsRepo(workspace), tmp_path)
+    channel, conversation = _shared_channel(), _shared_conversation()
+
+    await manager.run_turn(channel, conversation, "one", person_id="alex", speaker="Alex")
+    first = manager._pool[conversation.id].session
+    await manager.run_turn(channel, conversation, "two", person_id="alex", speaker="Alex")
+    # The same writer keeps the session.
+    assert manager._pool[conversation.id].session is first
+    await manager.run_turn(channel, conversation, "three", person_id="mia", speaker="Mia")
+    mc = manager._pool[conversation.id]
+    assert mc.session is not first
+    assert mc.acting_person == "mia"
+    # A turn with no person (scheduled, an event) acts as the owner.
+    await manager.run_turn(channel, conversation, "four")
+    assert headers_per_query == ["alex", "alex", "mia", "alex"]
 
 
 def test_a_shared_workspace_is_a_guest_thread_when_one_person_is_not_a_member(tmp_path) -> None:

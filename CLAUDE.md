@@ -169,7 +169,7 @@ Route allowlists, by default:
   200 fast, because BlueBubbles never retries.
 - gateway MCP routes: `gateway.person_header_callers` (default `core`,
   `assignments`; it must hold `core`). `X-Joshua-Person`, `X-Joshua-Role`,
-  `X-Joshua-Group`, `X-Joshua-Workspace`, and `X-Joshua-Conversation` are trusted only from them.
+  `X-Joshua-Group`, `X-Joshua-Workspace`, `X-Joshua-Workspace-People`, and `X-Joshua-Conversation` are trusted only from them.
 - gateway `POST /v1/snapshots/{name}`: `core` only. The body is empty: the
   gateway reads the tool and the arguments from `memory.snapshots`, so the
   config is the allowlist.

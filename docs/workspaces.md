@@ -104,6 +104,17 @@ the row. Core runs the turns of the one conversation one at a time. A message
 written while a turn of the thread runs waits in the hold of the person who
 wrote it, and goes as their own turn after.
 
+**Who acts.** The person who wrote the turn acts. The session names that
+person to the gateway, so a server with a bearer for each person (the
+assignments container, the developer addon) acts as that person. When the
+next turn is from another person, core builds the session again before the
+turn runs, and the thread carries on. A turn with no person, a job event or a
+scheduled task, acts as the owner.
+
+**The screen.** The chat screen of a shared workspace loads the newest rows
+every 4 seconds while the tab shows, and every 30 seconds while it is hidden,
+so a message of another person shows with no reload.
+
 **What it writes.** A document that Joshua writes in a shared workspace goes to
 `documents/shared/<slug>.md`, where every member reads it. RAG skips the
 documents of the workspace under that path, as it does for a personal one.
@@ -300,7 +311,10 @@ thread. The gateway does this. It adds no container.
 A session of a workspace sends `X-Joshua-Workspace: <workspace id>` to the
 gateway on every MCP server, and the gateway trusts the header only from
 `gateway.person_header_callers`, as it does the conversation header. The header
-is fixed for the session.
+is fixed for the session. A session of a shared workspace also sends
+`X-Joshua-Workspace-People`: the owner and the members, comma separated. The
+gateway refuses an id that is not in `people` (400), and sends the list
+upstream as `_meta["joshua/workspace_people"]`.
 
 After a tool call from a workspace succeeds, the gateway records items. It does
 this in the background and never fails the call: a failed post is a log line.

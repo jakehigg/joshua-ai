@@ -158,6 +158,10 @@ class _Managed:
     # For a workspace: the model and the servers it was built from. A change
     # rebuilds the session on the next turn.
     workspace_sig: tuple[Any, ...] | None = None
+    # For a shared workspace: the person the gateway headers name. The person
+    # who writes the turn acts, so a turn of another person rebuilds the
+    # session first (``_act_as_locked``).
+    acting_person: str | None = None
     # The channel the system prompt was built for, and the channel of the last
     # turn. A thread that several channels share (the main thread) gets a note
     # in the turn when its channel is not the one the prompt names.
@@ -184,6 +188,7 @@ class _Built:
     inference: ResolvedInference
     resumed: bool = False
     workspace_sig: tuple[Any, ...] | None = None
+    acting_person: str | None = None
 
     def apply(self, mc: _Managed) -> None:
         """Put this session and its fields on ``mc``."""
@@ -195,6 +200,7 @@ class _Built:
         mc.memory_mtime = self.memory_mtime
         mc.has_history = self.resumed
         mc.workspace_sig = self.workspace_sig
+        mc.acting_person = self.acting_person
         mc.inference = self.inference
 
 
@@ -318,6 +324,25 @@ async def _tell(hook: StateHook | None, state: str) -> None:
         await hook(state)
     except Exception as exc:  # noqa: BLE001 — a status line is not worth a turn
         logger.warning({"message": "turn state hook failed", "error": str(exc)})
+
+
+class _Unset:
+    """The type of ``UNSET``: no acting person given."""
+
+
+# No acting person given: a new session acts as the owner, and a rebuild keeps
+# the person of the session. None is a value of its own: nobody.
+UNSET = _Unset()
+
+
+def acting_person_of(workspace: Workspace, person_id: str | None) -> str | None:
+    """The person a shared workspace session acts as: the person who writes
+    the turn when that person is in the workspace, the owner for a turn with
+    no person (a scheduled or an event turn), and nobody for a person who is
+    not in it, so that a server with a bearer for each person refuses."""
+    if person_id is None:
+        return workspace.owner
+    return person_id if person_id in workspace.people else None
 
 
 def _chat_id(channel_id: str) -> str:
@@ -449,10 +474,19 @@ class ConversationManager:
         return None
 
     async def _build_session(
-        self, channel: Channel, conversation: Conversation, resume: str | None
+        self,
+        channel: Channel,
+        conversation: Conversation,
+        resume: str | None,
+        acting_person: str | None | _Unset = UNSET,
     ) -> _Built:
         """Build a session for a conversation, on the server and the model of
-        its job (``voice`` for a spoken profile, else ``chat``)."""
+        its job (``voice`` for a spoken profile, else ``chat``).
+
+        ``acting_person`` is for a shared workspace: the person that the
+        gateway headers name (``acting_person_of``), so a server with a bearer
+        for each person (the assignments container, the developer addon) acts
+        as that person. ``UNSET`` names the owner, and None names nobody."""
         person = (
             await self._repo.get_person(conversation.person_id) if conversation.person_id else None
         )
@@ -486,6 +520,13 @@ class ConversationManager:
             )
             workspace_sig = workspace_engine.signature(workspace)
             workspace_id = workspace.id
+        # The person the gateway headers name. A shared workspace belongs to
+        # nobody, so the person who writes the turn acts.
+        header_person = conversation.person_id
+        acting: str | None = None
+        if workspace is not None and workspace.shared:
+            acting = workspace.owner if isinstance(acting_person, _Unset) else acting_person
+            header_person = acting
         resume = self._resume_on(conversation, resume, resolved)
         memory = self._memory_block(person, channel)
         system_prompt = self._composer.compose(
@@ -519,6 +560,7 @@ class ConversationManager:
                 resolved,
                 resumed=resume is not None,
                 workspace_sig=workspace_sig,
+                acting_person=acting,
             )
 
         from joshua_core.engine.agent import AgentSession, build_options
@@ -527,11 +569,12 @@ class ConversationManager:
             gateway_names,
             self._gateway_url,
             self._gateway_token,
-            conversation.person_id,
+            header_person,
             conversation.id,
             role,
             group_id,
             workspace_id,
+            workspace.people if workspace is not None and workspace.shared else (),
         )
         deps = ToolDeps(
             repo=self._repo,
@@ -563,6 +606,7 @@ class ConversationManager:
             resolved,
             resumed=resume is not None,
             workspace_sig=workspace_sig,
+            acting_person=acting,
         )
 
     async def _workspace_of(self, channel: Channel) -> Workspace | None:
@@ -629,7 +673,12 @@ class ConversationManager:
             return None
         return self._settings.groups_by_chat(channel.channel_type, _chat_id(channel.id))
 
-    async def _get_or_create(self, channel: Channel, conversation: Conversation) -> _Managed:
+    async def _get_or_create(
+        self,
+        channel: Channel,
+        conversation: Conversation,
+        acting_person: str | None | _Unset = UNSET,
+    ) -> _Managed:
         # A handoff in progress holds the old session. Wait for it outside the
         # pool lock, so other conversations do not wait too.
         pending = self._pool.get(conversation.id)
@@ -640,7 +689,9 @@ class ConversationManager:
             if mc is not None:
                 await self._refresh_if_stale_locked(mc, channel)
                 return mc
-            built = await self._build_session(channel, conversation, conversation.sdk_session_id)
+            built = await self._build_session(
+                channel, conversation, conversation.sdk_session_id, acting_person
+            )
             mc = _Managed(
                 conversation=conversation,
                 session=built.session,
@@ -676,10 +727,23 @@ class ConversationManager:
             return
         await self._rebuild_locked(mc, channel, "session rebuilt (memory changed)")
 
-    async def _rebuild_locked(self, mc: _Managed, channel: Channel, message: str) -> None:
-        """Give ``mc`` a new session: a new client with new MCP connections."""
+    async def _rebuild_locked(
+        self,
+        mc: _Managed,
+        channel: Channel,
+        message: str,
+        acting_person: str | None | _Unset = UNSET,
+    ) -> None:
+        """Give ``mc`` a new session: a new client with new MCP connections.
+        ``acting_person`` replaces the person of a shared workspace session;
+        ``UNSET`` keeps it."""
         old = mc.session
-        built = await self._build_session(channel, mc.conversation, mc.conversation.sdk_session_id)
+        built = await self._build_session(
+            channel,
+            mc.conversation,
+            mc.conversation.sdk_session_id,
+            mc.acting_person if isinstance(acting_person, _Unset) else acting_person,
+        )
         built.apply(mc)
         mc.built_channel = channel.id
         mc.built_at = monotonic()
@@ -996,10 +1060,17 @@ class ConversationManager:
         not move ``last_channel_id``, so a reminder still goes to the phone."""
         turn_id = pending.turn_id
         t_start = monotonic()
-        mc = await self._get_or_create(channel, conversation)
         # The current turn's speaker. A per-person session carries a fixed
         # conversation.person_id; a shared turn passes the resolved sender.
         turn_person_id = person_id or conversation.person_id
+        turn_workspace = await self._workspace_of(channel)
+        shared_workspace = turn_workspace is not None and turn_workspace.shared
+        acting: str | None | _Unset = (
+            acting_person_of(turn_workspace, turn_person_id)
+            if turn_workspace is not None and turn_workspace.shared
+            else UNSET
+        )
+        mc = await self._get_or_create(channel, conversation, acting)
         # A fresh local-time header each turn — the CLI injects the date, not the
         # clock time. Cheap and always current, unlike the cached system prompt.
         preamble = f"[Current local time: {self._now_str()}]"
@@ -1008,7 +1079,7 @@ class ConversationManager:
             preamble += "\n" + WORKSPACE_UNATTENDED_NOTE
         # A shared conversation labels the message with who sent it.
         body = f"{speaker}: {text}" if speaker else text
-        role = self._conversation_role(channel, conversation, await self._workspace_of(channel))
+        role = self._conversation_role(channel, conversation, turn_workspace)
         if self._url_grants is not None and direction == "in":
             # What the person wrote, and nothing the agent found for itself.
             self._url_grants.grant_from_text(conversation.id, text)
@@ -1078,6 +1149,14 @@ class ConversationManager:
             pending.state = "running"
             await _tell(on_state, "running")
             lock_wait_ms = round((monotonic() - t_lock) * 1000)
+            if shared_workspace and mc.acting_person != acting:
+                # A shared workspace: the gateway headers must name the person
+                # of this turn before it runs. The check is under the lock, so
+                # a turn that waited behind another person's turn never runs
+                # as that person.
+                await self._rebuild_locked(
+                    mc, channel, "session rebuilt (another person writes)", acting
+                )
             mc.last_used = monotonic()
             # Bind the in-process tools to THIS turn's channel and speaker. Safe
             # under the per-conversation lock — turns are serialized.

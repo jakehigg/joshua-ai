@@ -54,3 +54,15 @@ def test_a_workspace_session_adds_the_workspace_header_and_others_do_not() -> No
     )
     assert "X-Joshua-Workspace" not in plain["files"]["headers"]
     assert stamped["files"]["headers"]["X-Joshua-Workspace"] == ws
+    assert "X-Joshua-Workspace-People" not in stamped["files"]["headers"]
+
+
+def test_a_shared_workspace_session_adds_its_people() -> None:
+    ws = "11111111-1111-4111-8111-111111111111"
+    shared = gateway_servers(
+        ["files"], "http://g", "tok", "mia", "c1", workspace_id=ws, workspace_people=("alex", "mia")
+    )
+    assert shared["files"]["headers"]["X-Joshua-Workspace-People"] == "alex,mia"
+    # People without a workspace go nowhere.
+    none = gateway_servers(["files"], "http://g", "tok", "mia", "c1", workspace_people=("alex",))
+    assert "X-Joshua-Workspace-People" not in none["files"]["headers"]

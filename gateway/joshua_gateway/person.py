@@ -17,7 +17,9 @@ for the audit trail and for the provenance of a journal entry.
 A trusted person must match the person id pattern and exist in ``people``, or
 be the literal ``unknown``. A trusted role must be ``member`` or ``guest``. A
 trusted group must exist in ``groups``. A trusted workspace
-(``X-Joshua-Workspace``) must be a UUID. Anything else is a 400.
+(``X-Joshua-Workspace``) must be a UUID. The people of a shared workspace
+(``X-Joshua-Workspace-People``, comma separated) go only with a workspace, and
+each must exist in ``people``. Anything else is a 400.
 """
 
 from __future__ import annotations
@@ -63,6 +65,7 @@ class Attribution:
     role: str | None = None
     group: str | None = None
     workspace: str | None = None
+    workspace_people: tuple[str, ...] = ()
 
 
 def trusted_identities() -> frozenset[str]:
@@ -81,6 +84,7 @@ def resolve(
     known_groups: Container[str] = (),
     trusted: Container[str] = DEFAULT_TRUSTED,
     workspace_header: str | None = None,
+    workspace_people_header: str | None = None,
 ) -> Attribution:
     """Attribute a request to a person, a conversation, a role, and a group.
 
@@ -112,7 +116,19 @@ def resolve(
         except ValueError:
             raise PersonError("workspace must be a UUID") from None
 
+    people = tuple(p.strip() for p in (workspace_people_header or "").split(",") if p.strip())
+    if people and workspace is None:
+        raise PersonError("workspace people need a workspace")
+    for member in people:
+        if not _PERSON_RE.match(member) or member not in known_persons:
+            raise PersonError(f"unknown workspace person: {member}")
+
     conversation = (conversation_header or "").strip() or None
     return Attribution(
-        person=person, conversation=conversation, role=role, group=group, workspace=workspace
+        person=person,
+        conversation=conversation,
+        role=role,
+        group=group,
+        workspace=workspace,
+        workspace_people=tuple(dict.fromkeys(people)),
     )
