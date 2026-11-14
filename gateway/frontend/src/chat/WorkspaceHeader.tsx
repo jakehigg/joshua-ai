@@ -14,6 +14,7 @@ import {
   type Workspace,
   type WorkspaceStatus,
 } from "../api/workspaces";
+import { errorText } from "../api/client";
 import { SessionContext } from "../shell/Shell";
 import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
 import { ServerChecklist } from "./ServerChecklist";
@@ -59,7 +60,7 @@ function EditDrawer({
         onSaved(w);
         if (close) onClose();
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "the change was not saved"));
+      .catch((e: unknown) => setError(errorText(e, "the change was not saved")));
   };
 
   const submit = (e: FormEvent) => {

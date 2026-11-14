@@ -20,6 +20,10 @@ with the images and the packaged chart, are at
   a shared workspace is unique over all people, and a taken one is refused
   with the slug. The schema adds the columns `workspaces.shared` and
   `workspaces.members`.
+- When a new workspace or a change to one is refused, the dialog now shows
+  why. For a server that a person cannot use, it names the person and the
+  server, for example "Alex cannot use tasks", and says that a shared
+  workspace can use only the servers that all its people can use.
 - In the web chat, a message written while Joshua is still working is taken
   and waits, instead of being refused until the turn ends. Each waiting
   message shows under the conversation, and can be taken back before it

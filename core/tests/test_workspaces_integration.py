@@ -467,7 +467,12 @@ async def test_a_create_checks_every_person_and_their_servers(client) -> None:
         assert resp.status_code == 422, members
     # `private` is allowed for mia only, so a workspace of both may not use it.
     refused = await post(mia, {"title": "P", "members": ["alex"], "servers": ["private"]})
-    assert refused.status_code == 422 and "private" in refused.json()["detail"]
+    assert refused.status_code == 422
+    # The detail is a sentence for the screen: who cannot use which server, and why.
+    assert refused.json()["detail"] == (
+        "Alex cannot use private. A shared workspace can use only the servers that"
+        " all its people can use. Clear these servers and try again."
+    )
     allowed = await post(mia, {"title": "P", "members": ["alex"], "servers": ["tasks"]})
     assert allowed.status_code == 201 and allowed.json()["servers"] == ["tasks"]
 
@@ -538,7 +543,11 @@ async def test_validation_of_servers_model_and_bodies(client) -> None:
     alex = {"person": "alex"}
     post = lambda p, b: client.post("/v1/workspaces", params=p, json=b, headers=_h())  # noqa: E731
     # `private` is allowed for mia only.
-    assert (await post(alex, {"title": "T", "servers": ["private"]})).status_code == 422
+    alone = await post(alex, {"title": "T", "servers": ["private"]})
+    assert alone.status_code == 422
+    assert alone.json()["detail"] == (
+        "This workspace cannot use private. Clear these servers and try again."
+    )
     assert (await post(mia, {"title": "T", "servers": ["private"]})).status_code == 201
     assert (await post(alex, {"title": "T", "servers": ["nope"]})).status_code == 422
     assert (await post(alex, {"title": "T", "model": "model-z"})).status_code == 422

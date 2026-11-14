@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { API_BASE, ApiError, getJson, postJson } from "./client";
+import { API_BASE, ApiError, errorText, getJson, postJson } from "./client";
 
 function answer(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -48,6 +48,42 @@ describe("the JSON client", () => {
     expect(thrown).toBeInstanceOf(ApiError);
     expect((thrown as ApiError).status).toEqual(404);
     expect((thrown as ApiError).message).toEqual("not found");
+  });
+
+  it("keeps the detail of a refusal, and errorText shows it", async () => {
+    const detail = "Lauren cannot use assignments. Clear these servers and try again.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(answer({ error: "invalid request", detail }, 422)),
+    );
+
+    const thrown = await postJson("/workspaces", {}).catch((exc: unknown) => exc);
+
+    expect((thrown as ApiError).message).toEqual("invalid request");
+    expect((thrown as ApiError).detail).toEqual(detail);
+    expect(errorText(thrown, "failed")).toEqual(detail);
+  });
+
+  it("turns a list of validation errors into one line", async () => {
+    const detail = [
+      { loc: ["body", "title"], msg: "String should have at least 1 character" },
+      { loc: ["body", "notify"], msg: "Input should be 'none' or 'done'" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(answer({ error: "invalid request", detail }, 422)),
+    );
+
+    const thrown = await postJson("/workspaces", {}).catch((exc: unknown) => exc);
+
+    expect(errorText(thrown, "failed")).toEqual(
+      "title: String should have at least 1 character; notify: Input should be 'none' or 'done'",
+    );
+  });
+
+  it("errorText falls back to the message, then to the fallback", () => {
+    expect(errorText(new ApiError(404, "not found"), "failed")).toEqual("not found");
+    expect(errorText("not an error", "failed")).toEqual("failed");
   });
 
   it("throws the status alone when the body is not JSON", async () => {

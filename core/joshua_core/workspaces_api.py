@@ -214,18 +214,39 @@ def _check_servers(
     settings: Any, people: Collection[str], servers: list[str]
 ) -> JSONResponse | None:
     """422 when a server is not one that every person of the workspace may
-    use: the servers are the intersection over all of them."""
-    allowed: set[str] | None = None
-    for person_id in people:
-        names = set(allowed_gateway_servers(settings, person_id))
-        allowed = names if allowed is None else allowed & names
-    unknown = sorted({s for s in servers if s not in (allowed or set())})
-    if unknown:
-        return JSONResponse(
-            {"error": "invalid request", "detail": f"unknown servers: {', '.join(unknown)}"},
-            status_code=422,
-        )
-    return None
+    use: the servers are the intersection over all of them.
+
+    The ``detail`` is a sentence for the person at the screen: it names each
+    refused server and who in the workspace cannot use it, because the viewer
+    shows it as it is."""
+    people = list(people)
+    reach = {p: set(allowed_gateway_servers(settings, p)) for p in people}
+    sentences: list[str] = []
+    for server in dict.fromkeys(servers):
+        lacking = [p for p in people if server not in reach[p]]
+        if not lacking:
+            continue
+        if len(lacking) == len(people):
+            sentences.append(f"This workspace cannot use {server}.")
+        else:
+            names = _names(settings, lacking)
+            sentences.append(f"{names} cannot use {server}.")
+    if not sentences:
+        return None
+    if len(people) > 1:
+        sentences.append("A shared workspace can use only the servers that all its people can use.")
+    sentences.append("Clear these servers and try again.")
+    return JSONResponse(
+        {"error": "invalid request", "detail": " ".join(sentences)}, status_code=422
+    )
+
+
+def _names(settings: Any, person_ids: list[str]) -> str:
+    """The display names of these people, joined for a sentence."""
+    names = [(p.name if (p := settings.person(i)) is not None else i) for i in person_ids]
+    if len(names) <= 2:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + ", and " + names[-1]
 
 
 def _check_people(settings: Any, owner: str, members: list[str]) -> JSONResponse | None:

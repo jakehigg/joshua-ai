@@ -10,7 +10,7 @@
 // stay in a footer above the keyboard (index.css).
 
 import { useEffect, useState, type FormEvent } from "react";
-import { ApiError } from "../api/client";
+import { ApiError, errorText } from "../api/client";
 import {
   createWorkspace,
   getOptions,
@@ -74,9 +74,7 @@ export function NewWorkspace({
         setError(
           err instanceof ApiError && err.status === 409
             ? `A shared workspace called ${slug} exists. Pick another title.`
-            : err instanceof Error
-              ? err.message
-              : "the workspace was not created",
+            : errorText(err, "the workspace was not created"),
         );
       });
   };

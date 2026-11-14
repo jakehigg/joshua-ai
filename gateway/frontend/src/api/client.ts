@@ -25,30 +25,72 @@ export class ApiError extends Error {
   readonly status: number;
   /** The `reason` of a refusal that came from channels, when the body has one. */
   readonly reason: string | undefined;
+  /** The `detail` of a refusal, as a sentence for the screen, when the body has one. */
+  readonly detail: string | undefined;
 
-  constructor(status: number, message: string, reason?: string) {
+  constructor(status: number, message: string, reason?: string, detail?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.reason = reason;
+    this.detail = detail;
   }
 }
 
-// The error of a refused call: the `error` and `reason` of a JSON body, else
-// the status alone.
+// The `detail` of a refused call as one line. Core sends a sentence, or the
+// list of a body that does not validate: each item gives the field and the
+// problem.
+function detailOf(detail: unknown): string | undefined {
+  if (typeof detail === "string" && detail.trim() !== "") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const lines = detail
+      .map((item: unknown) => {
+        if (!item || typeof item !== "object") return "";
+        const { loc, msg } = item as { loc?: unknown; msg?: unknown };
+        if (typeof msg !== "string") return "";
+        const field = Array.isArray(loc) ? loc.filter((p) => p !== "body").join(".") : "";
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .filter((line) => line !== "");
+    return lines.length > 0 ? lines.join("; ") : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The text to show for an error: the `detail` of a refused call when it has
+ * one, else its message, else `fallback`.
+ */
+export function errorText(err: unknown, fallback: string): string {
+  if (err instanceof ApiError && err.detail) {
+    return err.detail;
+  }
+  return err instanceof Error ? err.message : fallback;
+}
+
+// The error of a refused call: the `error`, `reason` and `detail` of a JSON
+// body, else the status alone.
 function apiErrorOf(status: number, body: unknown): ApiError {
   let message = `the viewer answered ${status}`;
   let reason: string | undefined;
+  let detail: string | undefined;
   if (body && typeof body === "object") {
-    const { error, reason: why } = body as { error?: unknown; reason?: unknown };
+    const { error, reason: why, detail: more } = body as {
+      error?: unknown;
+      reason?: unknown;
+      detail?: unknown;
+    };
     if (typeof error === "string") {
       message = error;
     }
     if (typeof why === "string") {
       reason = why;
     }
+    detail = detailOf(more);
   }
-  return new ApiError(status, message, reason);
+  return new ApiError(status, message, reason, detail);
 }
 
 async function readError(response: Response): Promise<ApiError> {
