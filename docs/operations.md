@@ -793,6 +793,13 @@ kept: the chat, the wiki pages, the documents and the workspaces always come
 from the instance, and no answer of a person sits in the cache of the phone.
 An update arrives on the next visit with a network.
 
+The app has no reload button of the browser, so the menu has one: "Reload", at
+the foot of the navigation. It loads the page again, which clears a screen that
+is stuck. On a phone the drawer holds it, and in the chat the drawer of the
+workspaces does; on a wide screen it is at the foot of the sidebar. A file that
+is going out holds the reload: the item says that it waits, and the page loads
+again when the send is done.
+
 ### Links in the menu
 
 The menu has a "Links" group: links to the addons and other tools that the

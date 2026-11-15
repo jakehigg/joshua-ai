@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workspace, WorkspaceItem } from "../api/workspaces";
+import { NavContext } from "../shell/AppNav";
 import { SessionContext, type Session } from "../shell/Shell";
 import { ChatPage, WorkspaceLink, WorkspacePage } from "./ChatPage";
 import { DocumentPanelProvider, useDocumentPanelState } from "./DocumentPanel";
@@ -155,6 +156,21 @@ describe("the rail", () => {
     const onNew = show();
     fireEvent.click(screen.getByRole("button", { name: "+ New workspace" }));
     expect(onNew).toHaveBeenCalled();
+  });
+
+  // The chat page draws no app bar, so on a phone this drawer is the only
+  // place the Reload item of the app navigation can be reached.
+  it("repeats the app navigation, with its Reload item", () => {
+    viewer({});
+    render(
+      <MemoryRouter future={FUTURE}>
+        <NavContext.Provider value={{ sections: [{ key: "wiki", label: "Wiki", path: "/wiki/" }], section: "chat" }}>
+          <Rail person="alex" workspaces={[]} open onNew={vi.fn()} onNavigate={vi.fn()} onClose={vi.fn()} />
+        </NavContext.Provider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "Wiki" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
   });
 });
 

@@ -46,6 +46,9 @@ export const ADMIN_ICON =
 
 export const ME_ICON = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>';
 
+/** A turning arrow: the item that loads the page again. */
+export const RELOAD_ICON = '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>';
+
 /** Two people: the mark of a thread several people write in. */
 export const PEOPLE_ICON =
   '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/>' +

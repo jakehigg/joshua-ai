@@ -77,6 +77,15 @@ with the images and the packaged chart, are at
   who did not watch the work, explains a name the person may not know, says
   whose each step is, and checks with a tool before it asks the person.
 
+### Viewer
+
+- The menu has a "Reload" item, at the foot of the navigation on every
+  screen. The installed app has no address bar and no reload button, so a
+  screen that was stuck could only be cleared by killing the app and opening
+  it again. On a phone the drawer holds the item, and in the chat the drawer
+  of the workspaces does. A file that is going out holds the reload: the item
+  says that it waits, and the page loads again when the send is done.
+
 ## 0.3.0 - 2026-11-13
 
 Joshua now has workspaces: a chat thread for one large piece of work, with

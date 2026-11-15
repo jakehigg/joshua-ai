@@ -242,6 +242,18 @@ section.limits > .j-meta { margin-top: -6px; }
 .v-links-edit { color: var(--j-faint); font-size: var(--j-text-sm); padding-left: 38px; }
 /* the person's own page sits at the foot of the sidebar */
 .v-you { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--j-line-soft); }
+/* the Reload item of .v-app, under it: a button that looks like a nav link,
+   because the installed app has no reload button of its own */
+button.j-nav-item {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
 
 /* the list on /links */
 .v-link-list .j-list-row { color: var(--j-text); }

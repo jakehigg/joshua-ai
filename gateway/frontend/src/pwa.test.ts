@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildIdOf, stampWorker } from "./buildStamp";
-import { holdReload, registerServiceWorker, watchForUpdates } from "./pwa";
+import { holdReload, registerServiceWorker, requestReload, watchForUpdates } from "./pwa";
 
 // The two files of `public/`, which the build copies to the root as they are.
 import manifestSource from "../public/manifest.webmanifest?raw";
@@ -331,6 +331,36 @@ describe("the update of the page", () => {
     const release = holdReload();
     setState("hidden");
     listeners.controllerchange?.();
+    expect(reload).not.toHaveBeenCalled();
+    release();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the reload a person asks for", () => {
+  function stubReload() {
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload },
+      configurable: true,
+    });
+    return reload;
+  }
+
+  it("loads the page again at once", () => {
+    const reload = stubReload();
+
+    expect(requestReload()).toBe(true);
+
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for a send that is going out, and says so", () => {
+    const reload = stubReload();
+    const release = holdReload();
+
+    expect(requestReload()).toBe(false);
+
     expect(reload).not.toHaveBeenCalled();
     release();
     expect(reload).toHaveBeenCalledTimes(1);
