@@ -389,6 +389,39 @@ describe("the item panel", () => {
     expect(screen.getByTestId("shown").textContent).toBe("/documents/alex/pie");
   });
 
+  it("shows one row for a document recorded twice, the one with a title that opens it", async () => {
+    const path = "documents/alex/pie.md";
+    viewer({
+      "GET /api/v1/workspaces/solar/items": {
+        items: [
+          item({ id: "d1", kind: "plan", ref: path, title: "", url: null }),
+          item({ id: "d2", kind: "document", ref: path, title: "Pie", url: "/documents/alex/pie" }),
+        ],
+      },
+    });
+    render(<Panel />);
+    const row = await screen.findByRole("button", { name: "Pie" });
+    expect(screen.queryByText(path)).toBeNull();
+    expect(document.querySelectorAll(".items .item").length).toBe(1);
+    expect(screen.queryByText("Plans")).toBeNull();
+    fireEvent.click(row);
+    expect(screen.getByTestId("shown").textContent).toBe("/documents/alex/pie");
+  });
+
+  it("asks the viewer for the title of a row whose only label is a path", async () => {
+    viewer({
+      "GET /api/v1/workspaces/solar/items": {
+        items: [item({ id: "d1", kind: "document", ref: "documents/alex/pie.md", title: "documents/alex/pie.md", url: null })],
+      },
+      "GET /documents/alex/pie.json": { title: "Pie plan", kind: "plan", status: "", updated: "" },
+    });
+    render(<Panel />);
+    // Until the answer comes the slug stands for the title; the path never does.
+    await screen.findByRole("button", { name: "pie" });
+    await screen.findByRole("button", { name: "Pie plan" });
+    expect(screen.queryByText("documents/alex/pie.md")).toBeNull();
+  });
+
   it("pins from the row menu, removes with an undo window, and adds a link behind a button", async () => {
     const { calls } = viewer({
       "GET /api/v1/workspaces/solar/items": { items: [item()] },
