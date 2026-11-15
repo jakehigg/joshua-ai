@@ -223,6 +223,35 @@ def test_the_shared_workspace_page_says_who_reads_it_and_where_a_document_goes()
         assert words in page, words
 
 
+def test_the_event_page_makes_work_joshua_started_leave_a_line() -> None:
+    """The person cannot see a worker that Joshua started. So the event that ends
+    a task, and the question of a worker that Joshua answers, must leave a line
+    in the thread. Both arrived as a silent `[IGNORE]` once."""
+    page = (
+        Path(__file__).parents[1] / "joshua_core" / "prompts" / "builtin" / "event.md"
+    ).read_text()
+    for words in (
+        "a task or an assignment that you started ends, with success or with an error",
+        "a worker of yours asks a question and you answer it",
+        "always gets one short line in this\nthread",
+        "Never `[IGNORE]`",
+        "the commit, the pull\nrequest, the error",
+        "what the person must do, if anything",
+        "the person's own setup",
+        "says so plainly and\nfirst",
+        "Silence is still right for an event the person did not start",
+    ):
+        assert words in page, words
+    # Quiet work used to mean silence, and that is what hid the two results.
+    assert "stay silent" not in page
+
+
+def test_an_event_turn_carries_the_rule_that_its_own_work_leaves_a_line() -> None:
+    composer = PromptComposer()
+    prompt = composer.compose(derive_profile(_MEMBER, _DM, kind="event"), _MEMBER, _DM)
+    assert "## Work you started always leaves a line" in prompt
+
+
 def test_the_assignments_skill_goes_only_to_a_session_that_holds_the_server() -> None:
     composer = PromptComposer()
     profile = derive_profile(_MEMBER, _DM)

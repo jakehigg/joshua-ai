@@ -420,6 +420,18 @@ def test_inject_fallback_used_when_event_file_missing(tmp_path) -> None:
     assert service._inject_framing() == INJECT_FALLBACK
 
 
+def test_inject_fallback_says_that_joshuas_own_work_leaves_a_line() -> None:
+    # Kept in sync with prompts/builtin/event.md: the end of a task Joshua
+    # started, and a question of a worker that Joshua answers, are never silent.
+    for words in (
+        "a task or an assignment that you started ends",
+        "asks a question and you answer it",
+        "always post one short line",
+        "says so plainly and first",
+    ):
+        assert words in INJECT_FALLBACK, words
+
+
 def test_inject_framing_reads_event_file(tmp_path) -> None:
     builtin = tmp_path / "builtin"
     builtin.mkdir()
