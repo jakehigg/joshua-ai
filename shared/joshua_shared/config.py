@@ -973,7 +973,9 @@ class WorkspacesConfig(_Model):
     ``allowed_callers`` names the fleet identities that may call
     ``/v1/workspaces``. The caller vouches for the person with the ``person``
     query parameter. The ``gateway`` records the items of a tool call on
-    ``POST /v1/workspaces/by-id/<id>/items``, which takes no person. An empty
+    ``POST /v1/workspaces/by-id/<id>/items``, which takes no person.
+    ``assignments`` records the outputs of a run that started in a workspace,
+    as the person of the run. An empty
     list turns the routes off. ``models`` is the
     list of models a workspace may pick; an empty list accepts any name.
     ``context_cap`` is the input size, in tokens, over which a workspace turn
@@ -991,7 +993,7 @@ class WorkspacesConfig(_Model):
     off.
     """
 
-    allowed_callers: list[str] = ["viewer", "gateway"]
+    allowed_callers: list[str] = ["viewer", "gateway", "assignments"]
     models: list[str] = []
     context_cap: int = Field(default=150_000, ge=1_000)
     max_turns: int = Field(default=50, gt=0)

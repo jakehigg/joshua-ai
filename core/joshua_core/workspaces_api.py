@@ -28,6 +28,9 @@ checked before the body is read. A ``person`` that is not a member of
 - ``GET`` and ``POST /v1/workspaces/{slug}/items`` list and add items.
   ``DELETE /v1/workspaces/{slug}/items/{id}`` removes one and
   ``PATCH /v1/workspaces/{slug}/items/{id}`` changes ``pinned`` or ``seen``.
+  The assignments container adds the outputs of a run that started in a
+  workspace here, with the person of the run, so a run of a person who is not
+  one of the people of that workspace adds nothing (404).
 - ``GET /v1/workspaces/options`` gives the servers, the models, and the people
   that the person may pick.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
