@@ -1,16 +1,17 @@
 /**
- * The Notifications control of the workspace page: the state it shows, the
- * tap that asks and subscribes, the test send, and the way off again.
+ * "Notifications on this device", the card of the Profile page: the state it
+ * shows, the tap that asks and subscribes, the test send, and the way off
+ * again.
  *
  * `push.ts` is the browser half and has its own test; here it is a fake, so
- * the control is tested on what it does with each answer.
+ * the card is tested on what it does with each answer.
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../api/client";
-import { Notifications } from "./Notifications";
+import { DeviceNotifications } from "./ProfileSettings";
 import type { PushStatus } from "../push";
 
 const push = vi.hoisted(() => ({
@@ -32,12 +33,12 @@ function given(status: PushStatus): void {
   push.sendTest.mockReset();
 }
 
-describe("the Notifications control", () => {
+describe("the notifications of this device", () => {
   it("asks for the permission on a tap, and says the device is on", async () => {
     given(OFF);
     push.enable.mockResolvedValue(ON);
 
-    render(<Notifications />);
+    render(<DeviceNotifications />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Turn on notifications" }));
 
@@ -49,7 +50,7 @@ describe("the Notifications control", () => {
     given(OFF);
     push.enable.mockResolvedValue({ ...OFF, permission: "denied" });
 
-    render(<Notifications />);
+    render(<DeviceNotifications />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Turn on notifications" }));
 
@@ -60,7 +61,7 @@ describe("the Notifications control", () => {
   it("asks nothing of a device that blocks them", async () => {
     given({ support: "ready", permission: "denied", subscribed: false });
 
-    render(<Notifications />);
+    render(<DeviceNotifications />);
 
     expect(await screen.findByText(/settings of the device/)).toBeDefined();
     expect(screen.queryByRole("button")).toBeNull();
@@ -70,7 +71,7 @@ describe("the Notifications control", () => {
   it("asks for the app on the home screen on an iPhone", async () => {
     given({ support: "install", permission: "default", subscribed: false });
 
-    render(<Notifications />);
+    render(<DeviceNotifications />);
 
     expect(await screen.findByText(/add Joshua to the home screen/)).toBeDefined();
     expect(screen.queryByRole("button")).toBeNull();
@@ -79,7 +80,7 @@ describe("the Notifications control", () => {
   it("says that the browser cannot show notifications at all", async () => {
     given({ support: "unsupported", permission: "default", subscribed: false });
 
-    render(<Notifications />);
+    render(<DeviceNotifications />);
 
     expect(await screen.findByText("This browser cannot show notifications.")).toBeDefined();
     expect(screen.queryByRole("button")).toBeNull();
@@ -90,7 +91,7 @@ describe("the Notifications control", () => {
     push.sendTest.mockResolvedValueOnce({ sent: 1, failed: 0, dropped: 0, held: 0, error: null });
     push.sendTest.mockResolvedValueOnce({ sent: 0, failed: 1, dropped: 0, held: 0, error: null });
 
-    render(<Notifications />);
+    render(<DeviceNotifications />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Send a test" }));
     expect(await screen.findByText("A test notification is on its way.")).toBeDefined();
@@ -103,7 +104,7 @@ describe("the Notifications control", () => {
     given(ON);
     push.forget.mockResolvedValue(OFF);
 
-    render(<Notifications />);
+    render(<DeviceNotifications />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Turn off" }));
 
@@ -111,17 +112,33 @@ describe("the Notifications control", () => {
     expect(push.forget).toHaveBeenCalledTimes(1);
   });
 
-  it("shows what the viewer said when push is off on the Joshua side", async () => {
+  it("shows what the server said when push is off or a send cannot be built", async () => {
     given(OFF);
     push.enable.mockRejectedValue(new ApiError(503, "notifications are not configured"));
 
-    render(<Notifications />);
+    render(<DeviceNotifications />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Turn on notifications" }));
 
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
       "notifications are not configured",
+    );
+  });
+
+  it("shows the real message of a test send the server could not build", async () => {
+    given(ON);
+    push.sendTest.mockRejectedValue(
+      new ApiError(400, "VapidException: Missing 'sub' from claims."),
+    );
+
+    render(<DeviceNotifications />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Send a test" }));
+
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "VapidException: Missing 'sub' from claims.",
     );
   });
 });

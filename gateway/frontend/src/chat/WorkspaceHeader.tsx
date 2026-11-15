@@ -1,8 +1,9 @@
 // The header of a workspace: its title and goal, and an edit drawer for the
 // goal, the notes, the servers, the model, the notify setting and the status
 // (pause, resume, archive). The notify setting says when Joshua writes to the
-// phone; under it, the notifications of this device say whether it hears that
-// (Notifications.tsx). A shared workspace adds "When Joshua may reach you
+// phone. Whether a device hears that is the device's own setting, one person's
+// and not one workspace's, so it is on the Profile page and the drawer points
+// there. A shared workspace adds "When Joshua may reach you
 // here", the notify mode of the signed-in person: it governs the `notify_user`
 // tool, it is theirs alone, and it saves as it changes. A shared workspace carries a two-person icon
 // beside its title and names its people under it, "Jake, Mia". They are not in
@@ -24,7 +25,6 @@ import {
 import { errorText } from "../api/client";
 import { SessionContext } from "../shell/Shell";
 import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
-import { Notifications } from "./Notifications";
 import { ServerChecklist } from "./ServerChecklist";
 import { SharedMark } from "./SharedMark";
 
@@ -184,7 +184,10 @@ function EditDrawer({
           ))}
         </select>
         {workspace.shared && <NotifyModeField workspace={workspace} />}
-        <Notifications />
+        <p className="ws-link j-meta">
+          Whether this device shows a notification is set on your{" "}
+          <a href="/me">Profile page</a>.
+        </p>
         <ServerChecklist servers={shown} picked={servers} onChange={setServers} />
         {error && (
           <p className="j-error" role="alert">
