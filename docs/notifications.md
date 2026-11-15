@@ -125,6 +125,39 @@ sign-out button of its own yet. When it gets one, it must call `forget` in
 needs the session, and a browser that signs out otherwise leaves a
 subscription behind that Joshua keeps pushing to.
 
+## When Joshua may reach you in a workspace
+
+In a shared workspace Joshua can reach one person who is not reading the
+thread, with the `notify_user` tool
+(see [workspaces.md](workspaces.md#notifying-one-person)). Each person says
+when it may reach them there, under Edit → **When Joshua may reach you here**:
+
+| The setting | The mode | What Joshua does |
+|---|---|---|
+| Never | `off` | Nothing. The tool refuses. |
+| When the thread needs me | `decide` | It notifies you when a question in the thread is for you, a decision waits on you, it wrote a document you need, it added an item you asked for, or somebody asked it to tell you. |
+| Every message of another person | `all` | It notifies you on every turn another person writes. |
+
+A person who sets nothing is asked for in a shared workspace (`decide`) and
+never in a personal one (`off`), where nobody else writes. The setting is
+yours alone: it says nothing about the other people of the workspace, and
+nobody changes yours.
+
+The notification goes to the devices you subscribed, as above, and to your
+normal chat when you have no device. Three rules hold whatever the setting
+is: Joshua never notifies the person who wrote the turn, it never notifies a
+person who has the thread open and read to its newest row, and one person gets
+one notification of one workspace in ten minutes. A line inside that time
+folds into the notification you already have, which opens the thread.
+
+**Messages to your phone** is a different setting, of the workspace and not of
+one person: it says when Joshua writes to your normal chat about that
+workspace. The two work together, as the table of each one says.
+
+The mode is one row of the `notify_prefs` table, for that person and that
+workspace, so it survives a restart. The same row holds the moment of the last
+notification, which the ten-minute rule reads.
+
 ## What the browser does
 
 The service worker of the installed app (`gateway/frontend/public/sw.js`) is

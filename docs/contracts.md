@@ -146,6 +146,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /v1/usage?group=conversation&person=` | `usage.allowed_callers` (default `viewer`) | | `{"days", "conversations": [{"conversation_id", "workspace": {"slug", "title"} or null, "calls", "input", "output", "cache_read", "cache_write"}]}`, largest first. Only the conversations of `person`. A row with no conversation is not listed. `422` for another `group` or no `person`; `403` for a person who is not a member. |
 | `/v1/workspaces` | `workspaces.allowed_callers` (default `viewer`, `gateway`) | `person` query parameter | See [workspaces.md](workspaces.md#routes). |
 | `POST /v1/workspaces/{slug}/read` | `workspaces.allowed_callers` | `person` query parameter, `{"turn_id"}` | `{"conversation", "last_read_turn_id", "last_read_at", "unread"}`. It marks the thread of that workspace read, for that person alone, up to the id of a transcript row. The mark never moves back. `404` for a workspace the person does not reach, `422` for a missing or negative `turn_id`. `GET /v1/workspaces` carries the `unread` count of each workspace for that person. |
+| `GET`, `POST /v1/workspaces/{slug}/notify` | `workspaces.allowed_callers` | `person` query parameter, `{"mode"}` on the `POST` | `{"mode", "default"}`, the notify mode of that person in that workspace and the default of the workspace. `mode` is `off`, `decide`, or `all`. `404` for a workspace the person does not reach, `422` for another mode, a missing one, or an unknown field. |
 | `POST /v1/usage` | `usage.writers` (default `assignments`, `developer`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment` or `developer`, `413` over 1 MiB, `503` when the database fails. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
@@ -471,6 +472,24 @@ other push, so its answer says what each browser did: `sent`, `failed`,
 limiting that endpoint). A send never raises into the turn that caused it.
 [notifications.md](notifications.md) has the sender, the payload, and what the
 owner does to turn push on.
+
+### The workspace notify mode
+
+`GET` and `POST /v1/workspaces/{slug}/notify` hold when Joshua may reach one
+person of one workspace with the `notify_user` tool: one row of the
+`notify_prefs` table per person and workspace, with the `mode` and the moment
+that person was last notified of that workspace. A person with no row has the
+default of the workspace: `decide` when it is shared, and `off` when it is
+personal, where nobody else writes. So the table stays empty until somebody
+changes a mode.
+
+**The mode is one person's own.** Every workspace route is scoped by the
+`person` query parameter, so a caller reads and writes the mode of that person
+and of nobody else. The viewer proxies the two routes as the identity `viewer`,
+under `GET` and `POST /api/v1/workspaces/{slug}/notify`, and serves them to the
+person who signed in. [notifications.md](notifications.md#when-joshua-may-reach-you-in-a-workspace)
+has the setting, and [workspaces.md](workspaces.md#notifying-one-person) has
+the tool and the rules it keeps on its own.
 
 ### The stream
 

@@ -142,7 +142,8 @@ everybody something, the agent writes in the thread.
 - **Prompt.** The `dm` profile and `workspace.md`. A shared workspace takes
   the `group` profile, `workspace.md`, and `workspace_shared.md`, which tells
   the agent that several people read the thread, that each message names its
-  writer, and that `send_to_normal_chat` reaches one person.
+  writer, that `send_to_normal_chat` reaches one person, and when to use
+  `notify_user`.
 - **Role.** A workspace thread carries the role of its people, as a group chat
   does: `member` only when every person of it is a member.
 - **Tool search.** Off when the workspace picks `workspaces.tool_search_max_servers`
@@ -158,6 +159,9 @@ Each turn of a workspace starts with the workspace block. It holds:
 - the title, the goal, the `notify` setting, and the notes;
 - the "People:" line of a shared workspace, under the goal: the owner, marked
   `(owner)`, then the members. A personal workspace has no such line;
+- the "Notify each person:" line of a shared workspace, under `Notify`: the
+  notify mode of each person, as `alex decide, mia all`. It is what
+  `notify_user` may do for them, and a personal workspace has no such line;
 - the items as kind and title, with the ref in brackets: pinned items first,
   then the newest, at most 30;
 - the items that came from normal chat and that this workspace has not seen.
@@ -219,6 +223,7 @@ The `workspace` builtin server has these tools.
 | `add_to_workspace(kind, ref, title, url?, workspace?)` | every chat | Add an item. In a workspace, `workspace` defaults to this one. In a normal chat it is required: a slug or a title of a workspace the person reaches. An item added from another chat shows as new in the block. |
 | `update_workspace_notes(notes)` | workspace | Replace the notes. Keep them short, under 4000 characters. |
 | `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the main chat of the person who wrote the turn. A turn with no person, a job event or a scheduled task, sends to the owner. One recipient, never the whole workspace. |
+| `notify_user(person, text)` | shared workspace | Reach one person of this workspace: a notification on their devices, or a line and a link in their normal chat when they have none. A person who is not in the workspace is refused. See [Notifying one person](#notifying-one-person). |
 
 A normal chat (a direct chat that is not a workspace) has four more tools.
 `workspace` takes a slug or a title, matched with no regard to case among the
@@ -246,6 +251,38 @@ workspace, a terminal or a voice thread. Core sends to its last channel. The lin
 `<workspaces.viewer_url>/chat/w/<owner>/<slug>`, and `shared` stands for the
 owner of a shared workspace. With no `viewer_url`, the message has the path
 `/chat/w/<owner>/<slug>`.
+
+## Notifying one person
+
+In a shared workspace, `notify_user(person, text)` reaches one person who is
+not reading the thread. It goes to the push subscriptions of that person
+(see [notifications.md](notifications.md)), with the title of the workspace,
+`text` as one line of at most 160 characters, the address of the thread, and
+the slug of the workspace as the tag, so the notifications of one workspace
+collapse into the newest one. A person with no subscription gets a line and a
+link in their normal chat instead. A personal workspace does not get the tool:
+nobody else writes there.
+
+**When Joshua notifies.** The prompt (`workspace_shared.md`) says to notify a
+person when a question in the thread is addressed to them, a decision waits on
+them, Joshua wrote a document they need, it added an item they asked for, or
+somebody asked it to tell them. More conversation on a subject they already
+know about notifies nobody.
+
+**Three rules are the tool's own**, so no prompt has to hold them:
+
+- it never notifies the person who wrote the turn;
+- it never notifies a person whose read mark is the newest row of the thread,
+  because the thread is in front of them;
+- one person gets one notification of one workspace in ten minutes. A line
+  inside that time folds into the notification they already have, which opens
+  the thread, so nothing is sent twice and nothing is lost.
+
+The mode of the person comes first: `off` sends nothing, `decide` leaves the
+rules above, and `all` asks for a notification on every turn another person
+writes. Each person sets their own mode on the workspace page, and the block
+shows every mode on its "Notify each person:" line. See
+[notifications.md](notifications.md#when-joshua-may-reach-you-in-a-workspace).
 
 ## Normal chat knows its workspaces
 
@@ -295,6 +332,7 @@ Every `{slug}` below is a ref: a slug, an id, or two segments
 | `PATCH`, `DELETE /v1/workspaces/{slug}/items/{id}` | Change `pinned` or `seen`, or remove an item. |
 | `GET /v1/workspaces/{slug}/block` | The workspace block as text. |
 | `POST /v1/workspaces/{slug}/read` | Mark the thread read up to `turn_id`, for that person alone. |
+| `GET`, `POST /v1/workspaces/{slug}/notify` | Read or write the notify mode of that person in that workspace: `off`, `decide`, or `all`. |
 | `POST /v1/workspaces/by-id/{id}/items` | Add an item for a tool call. The gateway calls it (see Items from tools). It takes no `person`. |
 
 `GET /v1/workspaces` gives each workspace an `unread` count: the rows of its
@@ -305,6 +343,12 @@ when they have read nothing of it. `POST /v1/workspaces/{slug}/read` takes
 one row of `conversation_reads`, for that person and that conversation, and it
 never moves back. In a shared workspace every person holds a mark of their own,
 so one of them reading the thread leaves the counts of the others whole.
+
+`GET /v1/workspaces/{slug}/notify` answers `{"mode", "default"}`: the mode of
+that person and the default of the workspace, which a person with no row of
+their own has. `POST` takes `{"mode"}`, one of `off`, `decide` and `all` (422
+otherwise), writes the row, and answers the same two keys. The mode is that
+person's alone: no route sets the mode of another person.
 
 `servers` must be servers that every person of the workspace may use (422
 otherwise). Every name in `members` must be a member of the roster, and never
@@ -450,7 +494,9 @@ compose and on Kubernetes, and it adds no container.
 - A workspace view has the chat in the centre, an item panel at the right, and
   a header with the title and the goal. The edit drawer changes the goal, the
   notes, the servers, the model, `notify`, and the status (pause, resume,
-  archive). The item panel groups items by kind. A document or an artifact opens
+  archive). In a shared workspace it also holds "When Joshua may reach you
+  here", the notify mode of the person who is signed in, which saves as it
+  changes. The item panel groups items by kind. A document or an artifact opens
   in the document panel. Another item opens in a new tab, but only when its
   address is http(s) or a path that starts with `/`. Any other address is shown
   as text. Each item can be pinned or removed, and a form adds a link. The panel
@@ -471,6 +517,7 @@ and names the signed-in person. A guest gets 403. Every write checks the
 | `GET`, `POST /api/v1/workspaces/{slug}/items` | `GET`, `POST /v1/workspaces/{slug}/items` |
 | `PATCH`, `DELETE /api/v1/workspaces/{slug}/items/{id}` | the same on core |
 | `POST /api/v1/workspaces/{slug}/read` | `POST /v1/workspaces/{slug}/read` |
+| `GET`, `POST /api/v1/workspaces/{slug}/notify` | `GET`, `POST /v1/workspaces/{slug}/notify` |
 
 `GET /v1/workspaces/options` returns `servers` (the servers that the person may
 use, each with a `name` and a one-line `description`), `models` (the list

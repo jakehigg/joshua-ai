@@ -203,6 +203,30 @@ with the images and the packaged chart, are at
   send never raises into the turn that caused it. The schema adds the table
   `push_subscriptions`, one row per browser a person subscribed with, and core
   gains the dependency `pywebpush`.
+- **In a shared workspace, Joshua can reach one person who is not reading the
+  thread.** The new `notify_user` tool sends one person a notification on
+  their devices, or a line in their normal chat when they have no device. It
+  is in a shared workspace only, and it refuses a person who is not in that
+  workspace. Joshua notifies a person when a question in the thread is for
+  them, a decision waits on them, it wrote a document they need, it added an
+  item they asked for, or somebody asked it to tell them. More conversation
+  on a subject they already know about notifies nobody. See
+  [workspaces.md](workspaces.md#notifying-one-person).
+- The tool keeps three rules of its own, so a chatty turn cannot flood a
+  phone: it never notifies the person who wrote the turn, it never notifies a
+  person who has the thread open and read to its newest row, and it sends one
+  person one notification of one workspace in ten minutes. A line inside that
+  time folds into the notification they already have, which carries the tag of
+  the workspace and opens the thread, so nothing is lost and nothing is sent
+  twice.
+- **Each person of a workspace says when Joshua may reach them there**, under
+  Edit → "When Joshua may reach you here": never, when the thread needs me, or
+  every message of another person. A person who sets nothing is asked for in a
+  shared workspace and never in a personal one, where nobody else writes. The
+  setting is that person's alone: nobody changes another person's. The schema
+  adds the table `notify_prefs`, and the viewer gains
+  `GET` and `POST /api/v1/workspaces/{slug}/notify`. See
+  [notifications.md](notifications.md#when-joshua-may-reach-you-in-a-workspace).
 
 ## 0.3.0 - 2026-11-13
 
