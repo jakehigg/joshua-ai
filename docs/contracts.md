@@ -149,6 +149,10 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/usage` | `usage.writers` (default `assignments`, `developer`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment` or `developer`, `413` over 1 MiB, `503` when the database fails. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
+| `GET /v1/push/key` | `AUTH_CALLERS` (default `viewer`) | `person` query parameter | `{"key"}`, the public VAPID key a browser subscribes with. `503 {"error": …}` while push is not configured (below). |
+| `POST /v1/push/subscribe` | `AUTH_CALLERS` | `person` query parameter, `{"endpoint", "keys": {"p256dh", "auth"}, "user_agent"?}` | `{"subscribed": true}`. The endpoint is unique, so a browser that subscribes again updates its row and starts from no failure. `422` for an `endpoint` that is not an `https` URL, a missing key, or an unknown field. `503` while push is not configured. |
+| `DELETE /v1/push/subscribe` | `AUTH_CALLERS` | `person` query parameter, `{"endpoint"}` | `{"removed": true}`. The delete is that person's alone: `404 {"error": "this browser is not subscribed"}` for an endpoint they do not have. `503` while push is not configured. |
+| `POST /v1/push/test` | `AUTH_CALLERS` | `person` query parameter, empty body | `{"sent", "failed", "dropped", "held", "error"}`, the counts of that person's browsers. `404` when they have no subscription, `503` while push is not configured. |
 | `POST /auth/verify` | `AUTH_CALLERS` (default `viewer`) | `{"person", "secret"}` | `{"ok": bool}`. `ok` is `false` for a wrong secret, for a person with no secret, and for a person who is not on the roster; the answer never says which of the three. |
 | `POST /auth/secret` | `AUTH_CALLERS` | `{"person", "secret", "new_secret"}` | `{"ok": true, "person"}`. A person changes their own secret and sends the current one: `403 {"error": "wrong secret"}` for a wrong one and for a person who has none yet, `404` for a person who is not on the roster. |
 | `POST /auth/secret/admin` | `AUTH_CALLERS` | `{"person", "new_secret"}` | `{"ok": true, "person"}`. The secret of a person without the current one, for a first sign-in or a reset. `404` for a person who is not on the roster. |
@@ -437,6 +441,36 @@ answers `is_secret` and `is_set`, and `value` is `null` for it, whether one is
 stored or not. The owner replaces a secret by writing a new one; nothing reads
 the old one back. [settings.md](settings.md) has the store, the encryption,
 and `JOSHUA_SETTINGS_KEY`.
+
+### The push routes
+
+`/v1/push` holds the web push subscription of a browser and sends one
+notification to it. Core owns the database and the VAPID private key, so the
+subscriptions live here and core is what posts to a push service. The viewer
+proxies the four routes as the identity `viewer`, under
+`GET /api/v1/push/key`, `POST /api/v1/push/subscribe`,
+`DELETE /api/v1/push/subscribe`, and `POST /api/v1/push/test`, and serves each
+one to the person who signed in. They take the same `AUTH_CALLERS` check as
+the auth routes.
+
+**The person is the `person` query parameter and never a body field**, so one
+person can neither read the key of another nor remove another's subscription.
+The viewer adds the `User-Agent` of the request to a subscription, so the
+owner can tell two devices apart, and it checks the `Origin` of every write
+(`403 {"error": …}`) as the workspace writes do. With no `CORE_URL`, no viewer
+token, or a core that does not answer, the viewer's own routes are `503`.
+
+**Every route is `503` while push is not configured**: `push.enabled` is not
+`true`, one of the three VAPID settings is missing, or `JOSHUA_SETTINGS_KEY`
+is unset, which is what the private key needs to be read. The `error` is the
+sentence that says what the owner has to do, so the page can show it.
+
+`POST /v1/push/test` sends the notification through the same sender as every
+other push, so its answer says what each browser did: `sent`, `failed`,
+`dropped` (the subscription is gone), and `held` (a push service is rate
+limiting that endpoint). A send never raises into the turn that caused it.
+[notifications.md](notifications.md) has the sender, the payload, and what the
+owner does to turn push on.
 
 ### The stream
 

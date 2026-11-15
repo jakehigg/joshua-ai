@@ -154,6 +154,37 @@ with the images and the packaged chart, are at
   alone: a member and a guest are refused. The schema adds the table
   `settings`.
 
+### Notifications
+
+- **Joshua can send a web push notification to a browser, once the owner turns
+  push on.** Push is off in every deployment, compose and Kubernetes alike,
+  and no environment variable turns it on: the owner writes four settings
+  under Admin → Instance → Notifications, `push.enabled` and the VAPID public
+  key, private key and subject. The private key is a secret setting, so it is
+  encrypted at rest with `JOSHUA_SETTINGS_KEY` and no route ever answers it.
+  See [notifications.md](notifications.md), which has the command that
+  generates the pair.
+- A browser subscribes over four new viewer routes, each the signed-in
+  person's alone: `GET /api/v1/push/key`, `POST /api/v1/push/subscribe`,
+  `DELETE /api/v1/push/subscribe`, and `POST /api/v1/push/test`, which sends
+  that person a test notification. They proxy core's `/v1/push/*`. While push
+  is off, a key is missing, or `JOSHUA_SETTINGS_KEY` is unset, every route
+  answers `503` with the sentence that says what the owner has to do, and the
+  sender does nothing. See [contracts.md](contracts.md#the-push-routes).
+- The sender runs in core, because the private key never leaves it: it signs
+  each request with VAPID (RFC 8292) and encrypts the payload to the keys of
+  the browser (RFC 8291), so a push service carries a notification it cannot
+  read. The payload holds `title`, `body`, `url` and `tag`, and the tag is the
+  workspace slug, so several notifications of one workspace collapse into the
+  newest. On Kubernetes the `joshua-core` pod is the one that needs egress to
+  the push services.
+- A dead browser cleans itself up: a `404` or a `410` from a push service
+  deletes the subscription, a `429` leaves that endpoint alone until its
+  `Retry-After` has passed, and five other failures in a row drop the row. A
+  send never raises into the turn that caused it. The schema adds the table
+  `push_subscriptions`, one row per browser a person subscribed with, and core
+  gains the dependency `pywebpush`.
+
 ## 0.3.0 - 2026-11-13
 
 Joshua now has workspaces: a chat thread for one large piece of work, with

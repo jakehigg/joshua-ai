@@ -54,6 +54,8 @@ subscription. You do not need Python, and you do not need a Telegram bot.
   the owner keeps the people.
 - [docs/settings.md](docs/settings.md): the settings the owner writes under
   Admin → Instance, and the key that encrypts a secret one.
+- [docs/notifications.md](docs/notifications.md): push notifications, and the
+  VAPID keys the owner enters to turn them on.
 - [docs/operations.md](docs/operations.md): health, logs, updates, backup, the viewer.
 - [docs/architecture.md](docs/architecture.md): the three containers.
 - [docs/security.md](docs/security.md): what the agent can and cannot reach.

@@ -53,9 +53,11 @@ so a later feature adds a group there and the page renders it with nothing of
 its own. A key that no group declares cannot be written: the route answers
 `400`.
 
-The first group is push notifications: the VAPID pair of the instance, the
-public key the browser subscribes with and the private key that signs each
-push. The store came with push and is not of it; any feature uses it.
+The first group is push notifications: whether they are on, the VAPID pair of
+the instance, the public key the browser subscribes with and the private key
+that signs each push, and the subject a push service writes to.
+[notifications.md](notifications.md) has that feature. The store came with
+push and is not of it; any feature uses it.
 
 ## Admin → Instance
 

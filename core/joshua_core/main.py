@@ -61,6 +61,7 @@ from joshua_core.memory.store import MemoryStore
 from joshua_core.migrate_links import migrate_page_links
 from joshua_core.model_forwarder import ModelForwarder
 from joshua_core.profile_api import build_profile_router
+from joshua_core.push_api import build_push_router
 from joshua_core.scheduler import Scheduler
 from joshua_core.search_api import build_search_router
 from joshua_core.settings_api import build_settings_router
@@ -530,6 +531,7 @@ def build_app() -> FastAPI:
     app.include_router(build_admin_router())
     app.include_router(build_auth_router())
     app.include_router(build_profile_router())
+    app.include_router(build_push_router())
     app.include_router(build_search_router())
     app.include_router(build_settings_router())
     app.include_router(build_transcript_router())

@@ -114,14 +114,22 @@ class Setting:
 
 
 # Every group of settings, in the order the Instance page shows them. Push
-# notifications are the first consumer: the VAPID pair of the instance, the
-# public key the browser subscribes with and the private key that signs a
-# push. A later feature adds its group here.
+# notifications are the first consumer: the switch that turns them on, the
+# VAPID pair of the instance, the public key the browser subscribes with and
+# the private key that signs a push, and the subject of each signature. Push
+# is off in every deployment until the owner writes these four here: no
+# environment variable turns it on (docs/notifications.md). A later feature
+# adds its group here.
 SETTING_GROUPS: tuple[SettingGroup, ...] = (
     SettingGroup(
         prefix="push",
-        label="Push notifications",
+        label="Notifications",
         fields=(
+            SettingField(
+                key="push.enabled",
+                label="Push notifications on",
+                hint='Type "true" to turn them on, once the three keys below are set.',
+            ),
             SettingField(
                 key="push.vapid_public_key",
                 label="VAPID public key",
@@ -132,6 +140,12 @@ SETTING_GROUPS: tuple[SettingGroup, ...] = (
                 label="VAPID private key",
                 secret=True,
                 hint="Signs each push. It never leaves the server.",
+            ),
+            SettingField(
+                key="push.vapid_subject",
+                label="VAPID subject",
+                hint="Who a push service writes to about this instance: "
+                "https://joshua.example, or mailto:you@example.com.",
             ),
         ),
     ),

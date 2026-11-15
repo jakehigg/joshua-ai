@@ -34,8 +34,10 @@ LAPTOP = "laptop-token"
 VIEWER = "viewer-token"
 CHANNELS = "channels-token"
 
+ENABLED = "push.enabled"
 PUBLIC = "push.vapid_public_key"
 PRIVATE = "push.vapid_private_key"
+SUBJECT = "push.vapid_subject"
 SECRET_VALUE = "a private key nobody may read back"
 
 
@@ -196,7 +198,7 @@ def test_a_key_of_the_wrong_shape_is_refused(monkeypatch, bad) -> None:
 def test_a_key_is_namespaced_by_its_prefix() -> None:
     group = find_group("push")
     assert group is not None
-    assert [field.key for field in group.fields] == [PUBLIC, PRIVATE]
+    assert [field.key for field in group.fields] == [ENABLED, PUBLIC, PRIVATE, SUBJECT]
     assert all(field.key.startswith(f"{group.prefix}.") for field in group.fields)
     assert find_group("nothing") is None
     assert find_field("push.nothing") is None

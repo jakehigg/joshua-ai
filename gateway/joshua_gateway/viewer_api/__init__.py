@@ -26,6 +26,10 @@ core's people and secret routes, and the Instance section has two under
 ``/api/v1/admin/settings``, which proxy core's settings routes. They are the
 owner's alone: a member and a guest get 403. See ``viewer_api.admin``.
 
+Web push has four routes under ``/api/v1/push``, which proxy core's ``/v1/push``
+routes for the signed-in person: the public key, the subscription of this
+browser (store and remove), and a test notification. See ``viewer_api.push``.
+
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
 
@@ -47,6 +51,7 @@ from joshua_gateway.viewer_api import (
     journal,
     links,
     me,
+    push,
     search,
     session,
     usage,
@@ -170,6 +175,12 @@ def routes() -> list[Route]:
         Route(
             api_path("workspaces/{slug:path}"), _require_auth(workspaces.change), methods=["PATCH"]
         ),
+        # Web push: the subscription of this browser, and a test notification.
+        # They are the signed-in person's alone (``viewer_api.push``).
+        Route(api_path("push/key"), _require_auth(push.key)),
+        Route(api_path("push/subscribe"), _require_auth(push.subscribe), methods=["POST"]),
+        Route(api_path("push/subscribe"), _require_auth(push.unsubscribe), methods=["DELETE"]),
+        Route(api_path("push/test"), _require_auth(push.test), methods=["POST"]),
         # The Users section: the owner's alone, whatever a route looks like.
         Route(api_path("admin/users"), _require_auth(admin.users)),
         Route(api_path("admin/users"), _require_auth(admin.add), methods=["POST"]),

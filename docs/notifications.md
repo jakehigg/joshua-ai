@@ -1,0 +1,146 @@
+# Push notifications
+
+A push notification reaches a person when Joshua has something to say and the
+viewer is not open: a workspace finished, an assignment wants an answer, a
+scheduled turn ran. The browser shows it, the person taps it, and the viewer
+opens at the page the notification names.
+
+Push is **off in every deployment** until the owner turns it on, and no
+environment variable turns it on. The owner enters three keys under
+Admin → Instance and writes `true` in one field, and that is the whole setup.
+
+[settings.md](settings.md) has the store the keys live in, and
+[contracts.md](contracts.md#the-push-routes) has the four routes.
+
+## What push is
+
+A browser that wants notifications subscribes at its own push service: Apple
+for Safari, Google for Chrome, Mozilla for Firefox. The subscription is an
+endpoint URL at that service and two keys of the browser. Joshua stores it,
+and to send a notification it posts to that endpoint:
+
+- the payload is encrypted to the keys of the browser (RFC 8291), so the push
+  service carries a notification it cannot read;
+- the request is signed with the VAPID private key of the instance (RFC 8292),
+  so the push service knows which server sent it and whom to write to about
+  it.
+
+The payload holds four fields: `title`, `body`, `url`, and `tag`. The `tag` is
+the workspace slug, so several notifications of one workspace collapse into
+the newest instead of stacking up.
+
+Nothing about a person's conversation goes to a push service in the clear.
+Keep the `body` short anyway: a notification is a knock on the door, not the
+message.
+
+What is here is the server half: the subscriptions, the sender, and the four
+routes. The browser half, the button that subscribes a device and the service
+worker that shows what arrives, lands with it; until then
+`POST /api/v1/push/test` is what sends, and nothing else calls the sender.
+
+## Turning it on
+
+You need a VAPID key pair. It is yours, it is made once, and it belongs to the
+instance and not to a person. `py_vapid` ships inside the core image, so one
+command prints both keys in the base64url form the fields take:
+
+```bash
+docker compose exec core python -c "
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from py_vapid import Vapid02, b64urlencode
+key = Vapid02()
+key.generate_keys()
+raw = key.public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+print('public: ', b64urlencode(raw))
+print('private:', b64urlencode(key.private_key.private_numbers().private_value.to_bytes(32, 'big')))
+"
+```
+
+It writes no file: copy the two lines, and nothing is left in the container.
+
+Then, in the viewer, under **Admin → Instance → Notifications**, write:
+
+| Field | What it holds |
+|---|---|
+| VAPID public key | the public key, base64url |
+| VAPID private key | the private key, base64url. A secret: it is never shown again |
+| Subject | `mailto:you@example.com`, or `https://joshua.example` |
+| Push notifications on | `true` |
+
+Save each field on its own. Keep the two keys together somewhere safe: a
+browser that subscribed with one public key cannot be pushed to with another,
+so a new pair means every device subscribes again.
+
+The private key is a secret setting, so it needs `JOSHUA_SETTINGS_KEY` in the
+environment of core, and it is encrypted at rest with it. No route ever
+answers its value. [settings.md](settings.md#joshua_settings_key) has that
+key, how to generate it, and why it is backed up with the database.
+
+Turn push off again by writing anything but `true` in **Push notifications
+on**. The subscriptions stay, so turning it on again needs no device to do
+anything.
+
+## Where the keys live
+
+In the `settings` table of core's database, as four rows:
+
+| Key | |
+|---|---|
+| `push.enabled` | `true` turns the routes and the sender on |
+| `push.vapid_public_key` | what a browser subscribes with |
+| `push.vapid_private_key` | signs each push. A secret setting |
+| `push.vapid_subject` | the `mailto:` or `https:` the push service writes to |
+
+They are not in `joshua.yaml`, not in `.env`, and not in the Helm values. A
+container needs no restart: core reads a setting when it sends.
+
+## While push is off
+
+Every push route answers `503` and the error says what the owner has to do,
+and the sender does nothing at all. That is the answer in each of three cases:
+
+- `push.enabled` is not `true`;
+- one of the public key, the private key, and the subject has no value;
+- `JOSHUA_SETTINGS_KEY` is unset, so the private key cannot be read.
+
+So an instance with no key is in a sound state, not a broken one: the viewer
+shows that notifications are off, and nothing else notices.
+
+## The subscriptions
+
+One row of the `push_subscriptions` table per browser a person subscribed
+with. One person has several rows, one per device, and the endpoint is unique:
+a browser that subscribes again updates the row it already has.
+
+The row keeps the two keys, the `User-Agent` the viewer saw, when it was made,
+when a send last worked, and how many sends in a row were refused.
+
+A push service's refusal is how Joshua learns a browser is gone:
+
+- a `404` or a `410` deletes the subscription at once;
+- a `429` is a rate limit, so that endpoint is left alone until its
+  `Retry-After` has passed, and its failure count is untouched;
+- any other failure raises the failure count, and the fifth one in a row drops
+  the row.
+
+A send never raises into the turn that caused it. A browser that cannot be
+reached costs the person nothing but that notification.
+
+## The sender is core
+
+**Core sends.** The VAPID private key is a secret setting of core's database,
+it is decrypted inside core, and it never leaves it, so the request to the
+push service goes out of core. The gateway is not in this path.
+
+That makes core the container that needs egress for push: on Kubernetes the
+`joshua-core` pod reaches the push services, among them
+`web.push.apple.com` and `fcm.googleapis.com`. A browser's endpoint names the
+service of that browser, so the set follows the devices that subscribe. On
+compose core already reaches the internet and there is nothing to allow.
+
+There is no connectivity check and no pre-flight: with the keys written, the
+first real send either works or reports the error of the push service.
+**Admin → Instance** saves a key without testing it.
+`POST /api/v1/push/test` is the test: it sends the signed-in person a
+notification through the same sender, and answers what each of their browsers
+did with it.

@@ -286,6 +286,28 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_by TEXT
 );
 
+-- The web push subscriptions, one row per browser a person subscribed with
+-- (see store/push.py). One person has several rows, one per device, and
+-- `endpoint` is the push service URL of that browser, so it is unique: a
+-- browser that subscribes again updates its row. `p256dh` and `auth` are the
+-- keys the payload is encrypted to (RFC 8291). `failures` counts the sends in
+-- a row that the push service refused; a row over the threshold is dropped,
+-- and a 404 or a 410 drops it at once.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    person_id  TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    endpoint   TEXT NOT NULL UNIQUE,
+    p256dh     TEXT NOT NULL,
+    auth       TEXT NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_ok_at TIMESTAMPTZ,
+    failures   INT NOT NULL DEFAULT 0
+);
+-- "the subscriptions of this person", for a send and for the list.
+CREATE INDEX IF NOT EXISTS ix_push_subscriptions_person
+    ON push_subscriptions (person_id);
+
 -- The marker of the one-time import of the viewer passwords into auth_secret.
 -- This schema has no key/value or meta table, so the import gets this small
 -- one of its own: one row, the id of the import.

@@ -5,9 +5,11 @@ The resolution primitives (``get_channel``, ``get_person_by_handle``,
 (channel, person, conversation) triple. This module owns the storage; the
 channel adapters own the platform-specific policy.
 
-The one table with its SQL elsewhere is ``settings``: it encrypts a secret
-value, so its four methods live beside that encryption, in
-``store/settings.py``, and ``Repo`` holds them as ``repo.settings``.
+Two tables have their SQL elsewhere, and ``Repo`` holds each as an attribute.
+``settings`` encrypts a secret value, so its four methods live beside that
+encryption, in ``store/settings.py`` (``repo.settings``).
+``push_subscriptions`` lives beside the sender that writes its failures, in
+``store/push.py`` (``repo.push_subscriptions``).
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from joshua_core.store.models import (
     Workspace,
     WorkspaceItem,
 )
+from joshua_core.store.push import PushStore
 from joshua_core.store.settings import SettingsStore
 from joshua_core.store.transcript import (
     BLANK_CHARS,
@@ -192,6 +195,8 @@ class Repo:
         self._db = db
         # The settings table, with its own SQL and its encryption.
         self.settings = SettingsStore(db)
+        # The push subscriptions, with their own SQL beside the sender.
+        self.push_subscriptions = PushStore(db)
 
     @property
     def _pool(self):
