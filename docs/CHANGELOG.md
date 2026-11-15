@@ -85,6 +85,13 @@ with the images and the packaged chart, are at
   it again. On a phone the drawer holds the item, and in the chat the drawer
   of the workspaces does. A file that is going out holds the reload: the item
   says that it waits, and the page loads again when the send is done.
+- The page of an HTML document has a "Full screen" button over its frame. It
+  gives the document the whole screen: no menu, no app bar, no head card, and
+  no reading width. Before, the frame kept the width of the content column,
+  760 pixels, so a document that is drawn to be read at its own size was
+  scaled down on a tablet. The same button and Escape leave the state. Only
+  the safe area of the screen, such as the rounded corners of a tablet, is
+  kept out.
 
 ## 0.3.0 - 2026-11-13
 

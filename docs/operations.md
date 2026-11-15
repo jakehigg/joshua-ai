@@ -1141,7 +1141,10 @@ A document opens at `/documents/<owner>/<slug>`:
   address of the document, `/documents/<owner>/<slug>/artifact`. The frame
   cannot reach the viewer, its sign-in, or a form of the viewer. Scripts do
   not run, unless the frontmatter of the document has `scripts: true`: then
-  the sandbox allows scripts and nothing more.
+  the sandbox allows scripts and nothing more. `Full screen` over the frame
+  puts the frame over the whole viewport, with no app bar, no menu and no
+  content column, less the safe-area insets of the screen. The button and
+  `Escape` leave the state, and the state is not kept.
 - The `Source` fold gives the frontmatter first, with no number and no `+`,
   then each line of the body with its number and a `+`.
 - The `Versions` fold lists the commits of the file in the git repository of

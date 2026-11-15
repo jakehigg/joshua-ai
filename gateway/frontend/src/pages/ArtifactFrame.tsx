@@ -21,6 +21,18 @@
  * wider than the page, and the choice is kept for each document in
  * localStorage. A document that fits is the same in both modes.
  *
+ * The button "Full screen" (the full page only; in a frame there is nothing to
+ * escape) lifts the frame out of the page: the section is fixed over the whole
+ * viewport, above the sidebar and the app bar, so no page chrome and no
+ * content column keeps the width any more, and the document gets every pixel
+ * the screen has, less the safe-area insets (viewer.css). This is the state
+ * that matters on a tablet in the installed app, where a 792 px document had
+ * to be scaled down to the 760 px column. The browser's own full-screen API is
+ * no help there: an installed app on iPadOS does not offer it. Escape and the
+ * same button leave the state again, the page behind does not scroll while it
+ * is on (`j-lock`, as the navigation drawer), and the box is measured again at
+ * the new width.
+ *
  * The note on scripts is not a line of its own: the embed page puts it in its
  * Details fold, and the full page shows it as the ⓘ of the bar.
  */
@@ -65,9 +77,18 @@ interface Props {
   scripts: boolean;
   /** Show the note on scripts as an ⓘ in the bar (the full page). */
   info?: boolean;
+  /** Offer "Full screen" (the full page, which is not in a frame itself). */
+  fullScreen?: boolean;
 }
 
-export function ArtifactFrame({ url, artifactUrl, title, scripts, info = false }: Props) {
+export function ArtifactFrame({
+  url,
+  artifactUrl,
+  title,
+  scripts,
+  info = false,
+  fullScreen = false,
+}: Props) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const innerObserver = useRef<ResizeObserver | null>(null);
@@ -76,6 +97,7 @@ export function ArtifactFrame({ url, artifactUrl, title, scripts, info = false }
   modeRef.current = mode;
   const [wide, setWide] = useState(false);
   const [measured, setMeasured] = useState(false);
+  const [full, setFull] = useState(false);
 
   const measure = useCallback(() => {
     const frame = frameRef.current;
@@ -125,7 +147,25 @@ export function ArtifactFrame({ url, artifactUrl, title, scripts, info = false }
     return () => observer.disconnect();
   }, [measure]);
   useEffect(() => () => innerObserver.current?.disconnect(), []);
-  useEffect(measure, [mode, measure]);
+  // The box is as wide as the viewport in the full-screen state and as wide as
+  // the content column outside it, so each change is a new measurement. A
+  // browser with no ResizeObserver gets it from here too.
+  useEffect(measure, [mode, full, measure]);
+
+  // While the frame is full screen, the page behind it does not scroll, and
+  // Escape leaves the state.
+  useEffect(() => {
+    if (!full) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFull(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.documentElement.classList.add("j-lock");
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.documentElement.classList.remove("j-lock");
+    };
+  }, [full]);
 
   const toggle = () => {
     const next: FitMode = mode === "fit" ? "actual" : "fit";
@@ -135,8 +175,8 @@ export function ArtifactFrame({ url, artifactUrl, title, scripts, info = false }
 
   const showInfo = info;
   return (
-    <section className="d-artifact">
-      {((wide && !scripts) || showInfo) && (
+    <section className={`d-artifact${full ? " full" : ""}`}>
+      {((wide && !scripts) || showInfo || fullScreen) && (
         <div className="d-frame-bar">
           {showInfo && (
             <span className="d-info" role="img" aria-label={scriptsNote(scripts)} title={scriptsNote(scripts)}>
@@ -148,9 +188,22 @@ export function ArtifactFrame({ url, artifactUrl, title, scripts, info = false }
               {mode === "fit" ? "Actual size" : "Fit width"}
             </button>
           )}
+          {fullScreen && (
+            <button
+              type="button"
+              className="d-full"
+              onClick={() => setFull(!full)}
+              aria-pressed={full}
+            >
+              {full ? "Leave full screen" : "Full screen"}
+            </button>
+          )}
         </div>
       )}
-      <div className="d-frame-box" ref={boxRef}>
+      {/* A frame the page may not measure (a document with scripts) has no
+          height of its own, so in the full-screen state it takes the height
+          that is left (viewer.css). */}
+      <div className={`d-frame-box${measured ? "" : " fills"}`} ref={boxRef}>
         <iframe
           ref={frameRef}
           className={`d-frame${measured ? " measured" : ""}`}

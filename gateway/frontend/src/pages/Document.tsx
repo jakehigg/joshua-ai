@@ -29,7 +29,9 @@
  * `/documents/<owner>/<slug>/artifact`, a route of the server that sends the
  * content policy of the document. ArtifactFrame.tsx sizes the frame to its
  * content and fits it to the width. The note on scripts is in the Details fold
- * of the embed page, and the ⓘ of the bar on the full page.
+ * of the embed page, and the ⓘ of the bar on the full page. The full page also
+ * offers "Full screen", which lifts the frame out of this page and gives the
+ * document the whole viewport.
  *
  * A document of another member and one that is not there are both 404, so
  * the page says what the viewer said.
@@ -211,15 +213,20 @@ function Props({ front }: { front: Record<string, unknown> }) {
   );
 }
 
-/** An HTML document, in the sandboxed frame of the artifact route. */
-function Frame({ doc, info }: { doc: DocumentData; info: boolean }) {
+/**
+ * An HTML document, in the sandboxed frame of the artifact route. `page` is
+ * the full page, which shows the note on scripts as the ⓘ of the bar and
+ * offers "Full screen"; the embed page is in a frame already.
+ */
+function Frame({ doc, page }: { doc: DocumentData; page: boolean }) {
   return (
     <ArtifactFrame
       url={doc.url}
       artifactUrl={doc.artifact_url ?? ""}
       title={doc.title}
       scripts={doc.frontmatter["scripts"] === true}
-      info={info}
+      info={page}
+      fullScreen={page}
     />
   );
 }
@@ -400,7 +407,7 @@ export default function Document() {
     const rest = code === null ? [] : doc.blocks.filter((block) => block !== code);
     let body;
     if (doc.format === "html") {
-      body = <Frame doc={doc} info={false} />;
+      body = <Frame doc={doc} page={false} />;
     } else if (code !== null) {
       body = (
         <>
@@ -452,7 +459,7 @@ export default function Document() {
       {head}
       <Older doc={doc} />
       {doc.format === "html" ? (
-        <Frame doc={doc} info />
+        <Frame doc={doc} page />
       ) : (
         <Showcase report={report} blocks={doc.blocks} gutter={gutter} />
       )}

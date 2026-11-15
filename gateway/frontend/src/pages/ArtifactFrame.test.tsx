@@ -18,7 +18,12 @@ class FakeObserver {
   }
 }
 
-function show(content: { width: number; height: number }, scripts = false, info = false) {
+function show(
+  content: { width: number; height: number },
+  scripts = false,
+  info = false,
+  fullScreen = false,
+) {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
     return this.classList.contains("d-frame-box") ? panelWidth : 0;
   });
@@ -29,6 +34,7 @@ function show(content: { width: number; height: number }, scripts = false, info 
       title="Mockup"
       scripts={scripts}
       info={info}
+      fullScreen={fullScreen}
     />,
   );
   const frame = document.querySelector("iframe") as HTMLIFrameElement;
@@ -145,6 +151,52 @@ describe("the frame of an HTML document", () => {
     expect(box.style.height).toBe("");
     expect(frame.className).not.toContain("measured");
     expect(screen.queryByRole("button", { name: /Actual size|Fit width/ })).toBeNull();
+  });
+
+  it("offers full screen only where the page asks for it", () => {
+    show({ width: 792, height: 272 });
+    expect(screen.queryByRole("button", { name: "Full screen" })).toBeNull();
+  });
+
+  it("takes the whole viewport in full screen, and leaves it on Escape", () => {
+    const { frame, box } = show({ width: 792, height: 272 }, false, true, true);
+    fireEvent.load(frame);
+    const section = document.querySelector(".d-artifact") as HTMLElement;
+    expect(frame.style.transform).toBe(`scale(${390 / 792})`);
+    // In full screen the box is the screen, not the 390 px content column.
+    panelWidth = 1024;
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    expect(section.className).toContain("full");
+    expect(document.documentElement.classList.contains("j-lock")).toBe(true);
+    expect(frame.style.width).toBe("1024px");
+    expect(frame.style.transform).toBe("none");
+    expect(box.style.height).toBe("272px");
+    panelWidth = 390;
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(section.className).not.toContain("full");
+    expect(document.documentElement.classList.contains("j-lock")).toBe(false);
+    expect(frame.style.transform).toBe(`scale(${390 / 792})`);
+  });
+
+  it("leaves full screen on the button that opened it", () => {
+    const { frame } = show({ width: 380, height: 300 }, false, true, true);
+    fireEvent.load(frame);
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    const leave = screen.getByRole("button", { name: "Leave full screen" });
+    expect(leave.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(leave);
+    expect(document.querySelector(".d-artifact.full")).toBeNull();
+    expect(document.documentElement.classList.contains("j-lock")).toBe(false);
+  });
+
+  it("lets a frame it may not measure fill the screen itself", () => {
+    const withScripts = show({ width: 792, height: 272 }, true, true, true);
+    expect(withScripts.box.className).toContain("fills");
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+    const measured = show({ width: 792, height: 272 }, false, true, true);
+    fireEvent.load(measured.frame);
+    expect(measured.box.className).not.toContain("fills");
   });
 
   it("puts the note on scripts in the bar as an ⓘ, when asked, and nowhere as a line", () => {
