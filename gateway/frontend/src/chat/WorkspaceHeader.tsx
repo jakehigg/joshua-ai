@@ -14,7 +14,6 @@ import {
   changeWorkspace,
   getNotifyMode,
   getOptions,
-  refOf,
   setNotifyMode,
   type Notify,
   type NotifyMode,
@@ -49,7 +48,7 @@ function NotifyModeField({ workspace }: { workspace: Workspace }) {
 
   useEffect(() => {
     let live = true;
-    getNotifyMode(refOf(workspace))
+    getNotifyMode(workspace.id)
       .then((state) => live && setMode(state.mode))
       .catch(() => undefined);
     return () => {
@@ -62,7 +61,7 @@ function NotifyModeField({ workspace }: { workspace: Workspace }) {
   const pick = (picked: NotifyMode) => {
     setMode(picked);
     setError("");
-    setNotifyMode(refOf(workspace), picked)
+    setNotifyMode(workspace.id, picked)
       .then((state) => setMode(state.mode))
       .catch((e: unknown) => setError(errorText(e, "the setting was not saved")));
   };
@@ -122,7 +121,7 @@ function EditDrawer({
 
   const save = (patch: Parameters<typeof changeWorkspace>[1], close: boolean) => {
     setError("");
-    changeWorkspace(refOf(workspace), patch)
+    changeWorkspace(workspace.id, patch)
       .then((w) => {
         onSaved(w);
         if (close) onClose();

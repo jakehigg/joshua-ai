@@ -384,8 +384,10 @@ function postTurnXhr(
 // frame. An abort through `signal` throws the AbortError unchanged.
 // `file` is one photo or one PDF; it makes the request multipart, and
 // `hooks.onUploadProgress` hears how much of it has gone out.
-// `workspace` (a slug or an id) goes in the body as a `workspace` field. The
-// turn then runs in that workspace; without it, in the main thread.
+// `workspace` goes in the body as a `workspace` field. The turn then runs in
+// that workspace; without it, in the main thread. The viewer sends the id of
+// the workspace: the routes take a ref as well, and a ref may name another
+// workspace later (api/workspaces.ts).
 export async function postTurn(
   person: string,
   text: string,

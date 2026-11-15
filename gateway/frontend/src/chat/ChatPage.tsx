@@ -41,13 +41,15 @@
 // "+ New workspace". `/chat/:person` is the normal chat, the person's one main
 // thread. `/chat/w/:space/:slug` (WorkspacePage) is one workspace: the same
 // chat, with the workspace header and the item panel (ItemPanel.tsx). The
-// space is `shared` for a shared workspace and the owner for a personal one,
-// and the ref `<space>/<slug>` goes to the turn, the history and the item
-// calls. Every link the screen builds is `/chat/w/<id>`, the permanent address
-// of a workspace: a closed workspace frees its name, so a later one may hold
-// its slug. A one-segment `/chat/w/:ref` opens the workspace of that id, and
-// sends a slug to the id (WorkspaceLink). Each finished turn reloads the
-// items, because the turn may have made some.
+// space is `shared` for a shared workspace and the owner for a personal one.
+// The screen resolves the address it was opened at once, and after that names
+// the workspace by its id alone: the id goes to the turn, the history, the
+// read mark and the item calls, because a closed workspace frees its name and
+// a ref may move to another row. Every link the screen builds is
+// `/chat/w/<id>`, the permanent address of a workspace. A one-segment
+// `/chat/w/:ref` opens the workspace of that id, and sends a slug to the id
+// (WorkspaceLink). Each finished turn reloads the items, because the turn may
+// have made some.
 //
 // The thread of a shared workspace reads like a group messaging app: the
 // messages of the person who is signed in stand at the right, every other
@@ -68,7 +70,7 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError, getJson } from "../api/client";
-import { getWorkspace, linkOf, markRead, refOf, type Workspace } from "../api/workspaces";
+import { getWorkspace, linkOf, markRead, type Workspace } from "../api/workspaces";
 import Shell, { type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Spinner from "../ui/Spinner";
@@ -124,7 +126,10 @@ interface ChatProps {
    * take the right of the list (MessageList.tsx).
    */
   me?: string;
-  /** The slug sent to the turn and history calls; none is the main thread. */
+  /**
+   * The id of the workspace, sent to the turn and history calls; none is the
+   * main thread. Never a ref: a ref may name another workspace later.
+   */
   workspace?: string;
   /** The workspace on screen, for its header and item panel. */
   ws?: Workspace;
@@ -332,7 +337,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
         <Rail
           person={person}
           workspaces={workspaces.list}
-          activeSlug={ws?.slug}
+          activeId={ws?.id}
           open={railOpen}
           onNew={() => {
             setRailOpen(false);
@@ -467,7 +472,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
         </div>
         {ws && (
           <ItemPanel
-            slug={refOf(ws)}
+            workspace={ws.id}
             refreshKey={itemsKey}
             open={itemsOpen}
             onClose={() => setItemsOpen(false)}
@@ -612,7 +617,7 @@ function WorkspaceScreen({ reference, toId = false }: { reference: string; toId?
         key={ws.id}
         person={person}
         me={name}
-        workspace={refOf(ws)}
+        workspace={ws.id}
         ws={ws}
         onWs={setWs}
         workspaces={workspaces}

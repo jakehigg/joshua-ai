@@ -1,8 +1,12 @@
 // The workspace calls: `/api/v1/workspaces`, which the viewer proxies to core.
 //
-// One workspace is named by its ref, `<space>/<slug>`: `shared/<slug>` for a
-// shared workspace, `<owner>/<slug>` for the workspace of a person. `refOf`
-// builds it from a workspace and `linkOf` builds the address of its screen.
+// Every call that names one workspace names it by its id, and so do the chat
+// turn and history calls. The id is the one name of a row: a closed workspace
+// keeps its slug and frees its name, so a ref `<space>/<slug>` may move to
+// another workspace, and a viewer that sent a ref would read and write the row
+// that took the name. The ref is the human-readable form, for a person to read
+// and for an address a person types; `linkOf` builds the address of the screen
+// of a workspace, which is its id.
 
 import { deleteJson, getJson, patchJson, postJson } from "./client";
 
@@ -98,17 +102,6 @@ export type WorkspacePatch = Partial<
 /** The namespace of a shared workspace, in a ref and in an address. */
 export const SHARED = "shared";
 
-/** The namespace of a workspace: `shared`, or the id of its owner. */
-export const spaceOf = (workspace: Workspace): string =>
-  workspace.shared ? SHARED : workspace.owner;
-
-/**
- * The ref of a workspace, `<space>/<slug>`: what the calls below name it by,
- * and what the chat routes take as `workspace`. A member of a shared
- * workspace reaches it under `shared`, never under a slug of their own.
- */
-export const refOf = (workspace: Workspace): string => `${spaceOf(workspace)}/${workspace.slug}`;
-
 /**
  * Where a workspace lives in the viewer: `/chat/w/<id>`, its permanent
  * address. A closed workspace keeps its slug but frees the name, so a later
@@ -131,18 +124,25 @@ export function slugOf(title: string): string {
 }
 
 const BASE = "/workspaces";
-// A ref with a slash goes URL-encoded; the viewer and core both decode it.
-const at = (slug: string) => `${BASE}/${encodeURIComponent(slug)}`;
+// One workspace, by its id. Core's route takes a ref, and an id is one of the
+// forms it takes; the id holds no slash, and goes encoded all the same.
+const at = (id: string) => `${BASE}/${encodeURIComponent(id)}`;
 
 export async function listWorkspaces(): Promise<Workspace[]> {
   const body = await getJson<{ workspaces?: Workspace[] }>(BASE);
   return Array.isArray(body.workspaces) ? body.workspaces : [];
 }
 
-export const getWorkspace = (slug: string) => getJson<Workspace>(at(slug));
+/**
+ * One workspace, by its id. The screen resolves the address it was opened at
+ * once, here, and every call after it takes `workspace.id`; so this is also
+ * where a ref a person typed (`<space>/<slug>`, or a bare slug) is resolved,
+ * and the screen then goes to the id (ChatPage.tsx).
+ */
+export const getWorkspace = (id: string) => getJson<Workspace>(at(id));
 export const createWorkspace = (body: NewWorkspace) => postJson<Workspace>(BASE, body);
-export const changeWorkspace = (slug: string, body: WorkspacePatch) =>
-  patchJson<Workspace>(at(slug), body);
+export const changeWorkspace = (id: string, body: WorkspacePatch) =>
+  patchJson<Workspace>(at(id), body);
 export const getOptions = () => getJson<Options>(`${BASE}/options`);
 
 /**
@@ -150,27 +150,27 @@ export const getOptions = () => getJson<Options>(`${BASE}/options`);
  * person. The mark is theirs alone: in a shared workspace every other person
  * keeps the count they have.
  */
-export const markRead = (slug: string, turnId: number) =>
-  postJson<ReadMark>(`${at(slug)}/read`, { turn_id: turnId });
+export const markRead = (id: string, turnId: number) =>
+  postJson<ReadMark>(`${at(id)}/read`, { turn_id: turnId });
 
 /**
  * The notify mode of the signed-in person in a workspace, and the write of it.
  * The mode is theirs alone: nobody sets the mode of another person.
  */
-export const getNotifyMode = (slug: string) => getJson<NotifyModeState>(`${at(slug)}/notify`);
-export const setNotifyMode = (slug: string, mode: NotifyMode) =>
-  postJson<NotifyModeState>(`${at(slug)}/notify`, { mode });
+export const getNotifyMode = (id: string) => getJson<NotifyModeState>(`${at(id)}/notify`);
+export const setNotifyMode = (id: string, mode: NotifyMode) =>
+  postJson<NotifyModeState>(`${at(id)}/notify`, { mode });
 
-export async function listItems(slug: string): Promise<WorkspaceItem[]> {
-  const body = await getJson<{ items?: WorkspaceItem[] }>(`${at(slug)}/items`);
+export async function listItems(id: string): Promise<WorkspaceItem[]> {
+  const body = await getJson<{ items?: WorkspaceItem[] }>(`${at(id)}/items`);
   return Array.isArray(body.items) ? body.items : [];
 }
 
 export const addItem = (
-  slug: string,
+  id: string,
   item: { kind: string; ref: string; title?: string; url?: string },
-) => postJson<WorkspaceItem>(`${at(slug)}/items`, item);
-export const pinItem = (slug: string, id: string, pinned: boolean) =>
-  patchJson<WorkspaceItem>(`${at(slug)}/items/${encodeURIComponent(id)}`, { pinned });
-export const removeItem = (slug: string, id: string) =>
-  deleteJson<unknown>(`${at(slug)}/items/${encodeURIComponent(id)}`);
+) => postJson<WorkspaceItem>(`${at(id)}/items`, item);
+export const pinItem = (id: string, itemId: string, pinned: boolean) =>
+  patchJson<WorkspaceItem>(`${at(id)}/items/${encodeURIComponent(itemId)}`, { pinned });
+export const removeItem = (id: string, itemId: string) =>
+  deleteJson<unknown>(`${at(id)}/items/${encodeURIComponent(itemId)}`);

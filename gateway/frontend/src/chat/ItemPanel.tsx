@@ -230,14 +230,15 @@ function Entry({
 }
 
 export function ItemPanel({
-  slug,
+  workspace,
   refreshKey,
   open,
   onClose,
   collapsed = false,
   onCollapse,
 }: {
-  slug: string;
+  /** The id of the workspace whose items these are, never a slug ref. */
+  workspace: string;
   refreshKey: number;
   open: boolean;
   onClose: () => void;
@@ -262,13 +263,13 @@ export function ItemPanel({
   undoRef.current = undo;
 
   const load = useCallback(() => {
-    listItems(slug)
+    listItems(workspace)
       .then((rows) => {
         setItems(rows);
         setError("");
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "the items did not load"));
-  }, [slug]);
+  }, [workspace]);
 
   useEffect(load, [load, refreshKey]);
   useEffect(() => {
@@ -310,25 +311,25 @@ export function ItemPanel({
     if (!waiting) return;
     clearTimeout(waiting.timer);
     setUndo(null);
-    void act(removeItem(slug, waiting.item.id));
+    void act(removeItem(workspace, waiting.item.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, load]);
+  }, [workspace, load]);
   useEffect(
     () => () => {
       const waiting = undoRef.current;
       if (waiting) {
         clearTimeout(waiting.timer);
-        void removeItem(slug, waiting.item.id).catch(() => undefined);
+        void removeItem(workspace, waiting.item.id).catch(() => undefined);
       }
     },
-    [slug],
+    [workspace],
   );
   const remove = (item: WorkspaceItem) => {
     setMenuFor(null);
     flush();
     const timer = setTimeout(() => {
       setUndo(null);
-      void act(removeItem(slug, item.id));
+      void act(removeItem(workspace, item.id));
     }, UNDO_MS);
     setUndo({ item, timer });
   };
@@ -361,7 +362,7 @@ export function ItemPanel({
     e.preventDefault();
     const address = url.trim();
     if (!address) return;
-    void act(addItem(slug, { kind: "link", ref: address, title: name.trim(), url: address }));
+    void act(addItem(workspace, { kind: "link", ref: address, title: name.trim(), url: address }));
     setUrl("");
     setName("");
     setAdding(false);
@@ -433,7 +434,7 @@ export function ItemPanel({
                     onMenu={() => setMenuFor(menuFor === item.id ? null : item.id)}
                     onPin={() => {
                       setMenuFor(null);
-                      void act(pinItem(slug, item.id, !item.pinned));
+                      void act(pinItem(workspace, item.id, !item.pinned));
                     }}
                     onRemove={() => remove(item)}
                   />

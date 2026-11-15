@@ -100,10 +100,10 @@ describe("the rail", () => {
     ws({ id: "b", slug: "trip", title: "Trip", status: "paused" }),
     ws({ id: "c", slug: "old", title: "Old", status: "archived" }),
   ];
-  function show(activeSlug?: string, onNew = vi.fn()) {
+  function show(activeId?: string, onNew = vi.fn()) {
     render(
       <MemoryRouter future={FUTURE}>
-        <Rail person="alex" workspaces={list} activeSlug={activeSlug} open onNew={onNew} onNavigate={vi.fn()} onClose={vi.fn()} />
+        <Rail person="alex" workspaces={list} activeId={activeId} open onNew={onNew} onNavigate={vi.fn()} onClose={vi.fn()} />
       </MemoryRouter>,
     );
     return onNew;
@@ -120,8 +120,8 @@ describe("the rail", () => {
     expect(within(fold).getByRole("link", { name: "Trip", hidden: true })).toBeTruthy();
   });
 
-  it("marks the page on screen", () => {
-    show("solar");
+  it("marks the page on screen, by the id of the workspace", () => {
+    show("a");
     expect(screen.getByRole("link", { name: "Solar install" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Chat" }).getAttribute("aria-current")).toBeNull();
   });
@@ -314,7 +314,7 @@ function Panel({ refreshKey = 0 }: { refreshKey?: number }) {
   return (
     <MemoryRouter future={FUTURE}>
       <DocumentPanelProvider panel={state}>
-        <ItemPanel slug="solar" refreshKey={refreshKey} open onClose={vi.fn()} />
+        <ItemPanel workspace="w1" refreshKey={refreshKey} open onClose={vi.fn()} />
         <output data-testid="shown">{state.shown?.url ?? ""}</output>
       </DocumentPanelProvider>
     </MemoryRouter>
@@ -330,7 +330,7 @@ describe("the item panel", () => {
   ];
 
   it("groups by kind and opens items in the panel, never as links", async () => {
-    viewer({ "GET /api/v1/workspaces/solar/items": { items } });
+    viewer({ "GET /api/v1/workspaces/w1/items": { items } });
     render(<Panel />);
     await screen.findByText("Quote");
     expect(screen.getByText("Links")).toBeTruthy();
@@ -353,7 +353,7 @@ describe("the item panel", () => {
       url: "/api/v1/files/wiki/attachments/2026/11/garden.jpg",
     });
     const pdf = item({ id: "p2", kind: "file", ref: "wiki/attachments/bill.pdf", title: "Bill", url: "/api/v1/files/wiki/attachments/bill.pdf" });
-    viewer({ "GET /api/v1/workspaces/solar/items": { items: [photo, pdf] } });
+    viewer({ "GET /api/v1/workspaces/w1/items": { items: [photo, pdf] } });
     render(<Panel />);
     await screen.findByText("An e-paper display");
     const row = screen.getByRole("button", { name: "An e-paper display" }).closest("li") as HTMLElement;
@@ -366,13 +366,13 @@ describe("the item panel", () => {
 
   it("opens a photo item in the image view of the panel", async () => {
     const photo = item({ id: "p1", kind: "file", ref: "a.jpg", title: "Garden bed", url: "/api/v1/files/wiki/a.jpg" });
-    viewer({ "GET /api/v1/workspaces/solar/items": { items: [photo] } });
+    viewer({ "GET /api/v1/workspaces/w1/items": { items: [photo] } });
     function Both() {
       const state = useDocumentPanelState();
       return (
         <MemoryRouter future={FUTURE}>
           <DocumentPanelProvider panel={state}>
-            <ItemPanel slug="solar" refreshKey={0} open onClose={vi.fn()} />
+            <ItemPanel workspace="w1" refreshKey={0} open onClose={vi.fn()} />
             <output data-testid="view">{state.view?.type === "image" ? state.view.image.url : ""}</output>
           </DocumentPanelProvider>
         </MemoryRouter>
@@ -384,7 +384,7 @@ describe("the item panel", () => {
   });
 
   it("opens a document in the document panel", async () => {
-    viewer({ "GET /api/v1/workspaces/solar/items": { items } });
+    viewer({ "GET /api/v1/workspaces/w1/items": { items } });
     render(<Panel />);
     fireEvent.click(await screen.findByRole("button", { name: "Pie" }));
     expect(screen.getByTestId("shown").textContent).toBe("/documents/alex/pie");
@@ -393,7 +393,7 @@ describe("the item panel", () => {
   it("shows one row for a document recorded twice, the one with a title that opens it", async () => {
     const path = "documents/alex/pie.md";
     viewer({
-      "GET /api/v1/workspaces/solar/items": {
+      "GET /api/v1/workspaces/w1/items": {
         items: [
           item({ id: "d1", kind: "plan", ref: path, title: "", url: null }),
           item({ id: "d2", kind: "document", ref: path, title: "Pie", url: "/documents/alex/pie" }),
@@ -411,7 +411,7 @@ describe("the item panel", () => {
 
   it("asks the viewer for the title of a row whose only label is a path", async () => {
     viewer({
-      "GET /api/v1/workspaces/solar/items": {
+      "GET /api/v1/workspaces/w1/items": {
         items: [item({ id: "d1", kind: "document", ref: "documents/alex/pie.md", title: "documents/alex/pie.md", url: null })],
       },
       "GET /documents/alex/pie.json": { title: "Pie plan", kind: "plan", status: "", updated: "" },
@@ -425,10 +425,10 @@ describe("the item panel", () => {
 
   it("pins from the row menu, removes with an undo window, and adds a link behind a button", async () => {
     const { calls } = viewer({
-      "GET /api/v1/workspaces/solar/items": { items: [item()] },
-      "PATCH /api/v1/workspaces/solar/items/i1": item({ pinned: true }),
-      "DELETE /api/v1/workspaces/solar/items/i1": {},
-      "POST /api/v1/workspaces/solar/items": item({ id: "i9" }),
+      "GET /api/v1/workspaces/w1/items": { items: [item()] },
+      "PATCH /api/v1/workspaces/w1/items/i1": item({ pinned: true }),
+      "DELETE /api/v1/workspaces/w1/items/i1": {},
+      "POST /api/v1/workspaces/w1/items": item({ id: "i9" }),
     });
     render(<Panel />);
     await screen.findByText("Quote");
@@ -475,7 +475,7 @@ describe("the item panel", () => {
 
   it("shows one line per item, with the whole title on hover, a pin mark, pinned first", async () => {
     viewer({
-      "GET /api/v1/workspaces/solar/items": {
+      "GET /api/v1/workspaces/w1/items": {
         items: [
           item({ id: "a", kind: "link", title: "A long title that gets cut", url: "https://a.test" }),
           item({ id: "b", kind: "link", title: "Pinned one", url: "https://b.test", pinned: true }),
@@ -494,7 +494,7 @@ describe("the item panel", () => {
 
   it("folds a group with its header, keeps that, and counts the items", async () => {
     window.localStorage.clear();
-    viewer({ "GET /api/v1/workspaces/solar/items": { items } });
+    viewer({ "GET /api/v1/workspaces/w1/items": { items } });
     const { unmount } = render(<Panel />);
     await screen.findByText("Quote");
     const toggle = screen.getByRole("button", { name: /Links/ });
@@ -510,7 +510,7 @@ describe("the item panel", () => {
   });
 
   it("marks the item open in the panel", async () => {
-    viewer({ "GET /api/v1/workspaces/solar/items": { items } });
+    viewer({ "GET /api/v1/workspaces/w1/items": { items } });
     render(<Panel />);
     const pie = await screen.findByRole("button", { name: "Pie" });
     expect(pie.getAttribute("aria-current")).toBeNull();
@@ -520,7 +520,7 @@ describe("the item panel", () => {
   });
 
   it("reloads on a finished turn and on focus", async () => {
-    const { calls } = viewer({ "GET /api/v1/workspaces/solar/items": { items: [] } });
+    const { calls } = viewer({ "GET /api/v1/workspaces/w1/items": { items: [] } });
     const { rerender } = render(<Panel />);
     await screen.findByText("Nothing here yet.");
     const before = calls.length;
@@ -538,7 +538,7 @@ describe("the workspace header", () => {
   it("shows the title and the goal, and saves an edit", async () => {
     const { calls } = viewer({
       "GET /api/v1/workspaces/options": OPTIONS,
-      "PATCH /api/v1/workspaces/alex%2Fsolar": ws({ title: "Solar 2" }),
+      "PATCH /api/v1/workspaces/w1": ws({ title: "Solar 2" }),
     });
     const onChange = vi.fn();
     render(<WorkspaceHeader workspace={ws()} onChange={onChange} onItems={vi.fn()} />);
@@ -570,7 +570,7 @@ describe("the workspace header", () => {
   it("pauses, resumes and archives with a status change", async () => {
     const { calls } = viewer({
       "GET /api/v1/workspaces/options": OPTIONS,
-      "PATCH /api/v1/workspaces/alex%2Fsolar": ws({ status: "paused" }),
+      "PATCH /api/v1/workspaces/w1": ws({ status: "paused" }),
     });
     render(<WorkspaceHeader workspace={ws()} onChange={vi.fn()} onItems={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -608,25 +608,25 @@ describe("the workspace header", () => {
     expect(within(document.querySelector(".ws-dialog") as HTMLElement).queryByText("People")).toBeNull();
   });
 
-  it("changes a shared workspace by its two-segment ref", async () => {
-    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+  it("changes a shared workspace by its id, never by its slug ref", async () => {
+    const shared = ws({ id: "s4", slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
     const { calls } = viewer({
       "GET /api/v1/workspaces/options": OPTIONS,
-      "PATCH /api/v1/workspaces/shared%2Fthanksgiving": shared,
+      "PATCH /api/v1/workspaces/s4": shared,
     });
     render(<WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
-    expect(calls.find((c) => c.method === "PATCH")?.path).toBe("/api/v1/workspaces/shared%2Fthanksgiving");
+    expect(calls.find((c) => c.method === "PATCH")?.path).toBe("/api/v1/workspaces/s4");
   });
 
   it("sets the notify mode of the signed-in person in a shared workspace", async () => {
-    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    const shared = ws({ id: "s4", slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
     const { calls } = viewer({
       "GET /api/v1/workspaces/options": OPTIONS,
-      "GET /api/v1/workspaces/shared%2Fthanksgiving/notify": { mode: "decide", default: "decide" },
-      "POST /api/v1/workspaces/shared%2Fthanksgiving/notify": { mode: "all", default: "decide" },
+      "GET /api/v1/workspaces/s4/notify": { mode: "decide", default: "decide" },
+      "POST /api/v1/workspaces/s4/notify": { mode: "all", default: "decide" },
     });
     render(<WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -635,7 +635,7 @@ describe("the workspace header", () => {
     fireEvent.change(field, { target: { value: "all" } });
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
     const post = calls.find((c) => c.method === "POST");
-    expect(post?.path).toBe("/api/v1/workspaces/shared%2Fthanksgiving/notify");
+    expect(post?.path).toBe("/api/v1/workspaces/s4/notify");
     expect(post?.body).toEqual({ mode: "all" });
   });
 
@@ -679,7 +679,7 @@ describe("the routes", () => {
       "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
       "GET /api/v1/workspaces/alex%2Fsolar": ws(),
       "GET /api/v1/workspaces": { workspaces: [ws()] },
-      "GET /api/v1/workspaces/alex%2Fsolar/items": { items: [item()] },
+      "GET /api/v1/workspaces/w1/items": { items: [item()] },
       "GET /api/v1/chat/alex/history": { messages: [], nextBefore: null },
     });
     render(
@@ -694,11 +694,12 @@ describe("the routes", () => {
     await screen.findByText("Quote");
     const history = calls.find((c) => c.path === "/api/v1/chat/alex/history");
     expect(history).toBeTruthy();
-    // The history call names the workspace, by its two-segment ref.
+    // The history call names the workspace by its id, never by its slug ref.
     const asked = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
       .map(([u]) => String(u))
       .find((u) => u.includes("/history"));
-    expect(asked).toContain("workspace=alex%2Fsolar");
+    expect(asked).toContain("workspace=w1");
+    expect(asked).not.toContain("solar");
   });
 
   it("reads a shared thread as a group chat: own messages right, the others left and named", async () => {
@@ -720,7 +721,7 @@ describe("the routes", () => {
         members: ["mia"],
       }),
       "GET /api/v1/workspaces": { workspaces: [] },
-      "GET /api/v1/workspaces/shared%2Fthanksgiving/items": { items: [] },
+      "GET /api/v1/workspaces/w1/items": { items: [] },
       "GET /api/v1/chat/mia/history": {
         messages: [
           row(1, "person", "I'll bring pie", "Mia"),
@@ -757,7 +758,7 @@ describe("the routes", () => {
       "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
       "GET /api/v1/workspaces/alex%2Fsolar": ws(),
       "GET /api/v1/workspaces": { workspaces: [ws()] },
-      "GET /api/v1/workspaces/alex%2Fsolar/items": { items: [] },
+      "GET /api/v1/workspaces/w1/items": { items: [] },
       "GET /api/v1/chat/alex/history": {
         messages: [
           { id: 1, role: "person", text: "How long?", status: "ok", at: "2026-01-01T10:00:00Z" },
@@ -792,7 +793,7 @@ describe("the routes", () => {
       "GET /api/v1/session": { person: { id: "mia", name: "Mia", role: "member" }, sections: [] },
       "GET /api/v1/workspaces/shared%2Fthanksgiving": thread,
       "GET /api/v1/workspaces": { workspaces: [{ ...thread, unread: 2 }] },
-      "GET /api/v1/workspaces/shared%2Fthanksgiving/items": { items: [] },
+      "GET /api/v1/workspaces/w1/items": { items: [] },
       "GET /api/v1/chat/mia/history": {
         messages: [
           { id: 7, role: "person", text: "the oven is mine", status: "ok", at: "2026-01-01T10:00:00Z", who: "Alex" },
@@ -800,7 +801,7 @@ describe("the routes", () => {
         ],
         nextBefore: null,
       },
-      "POST /api/v1/workspaces/shared%2Fthanksgiving/read": { last_read_turn_id: 8, unread: 0 },
+      "POST /api/v1/workspaces/w1/read": { last_read_turn_id: 8, unread: 0 },
     });
     render(
       <MemoryRouter initialEntries={["/chat/w/shared/thanksgiving"]} future={FUTURE}>
@@ -847,7 +848,7 @@ describe("the routes", () => {
       "GET /api/v1/workspaces/thanksgiving": shared,
       "GET /api/v1/workspaces/s9": shared,
       "GET /api/v1/workspaces": { workspaces: [shared] },
-      "GET /api/v1/workspaces/shared%2Fthanksgiving/items": { items: [] },
+      "GET /api/v1/workspaces/s9/items": { items: [] },
       "GET /api/v1/chat/mia/history": { messages: [], nextBefore: null },
     });
     render(
@@ -864,12 +865,90 @@ describe("the routes", () => {
     expect(screen.getByTestId("where").textContent).toBe("/chat/w/s9");
   });
 
+  // A closed workspace keeps its slug and frees its name, so two rows can
+  // hold `test`. Opened by its id, the closed one must be the row every call
+  // of the screen addresses: its thread, its items, its read mark, its notify
+  // mode, and a change of it.
+  it("names a workspace by its id, so a live workspace of the same slug is never touched", async () => {
+    const closed = ws({
+      id: "old",
+      slug: "test",
+      title: "Test",
+      status: "archived",
+      shared: true,
+      members: ["mia"],
+    });
+    const live = ws({ id: "new", slug: "test", title: "Test" });
+    const { calls } = viewer({
+      "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/old": closed,
+      "GET /api/v1/workspaces": { workspaces: [live] },
+      "GET /api/v1/workspaces/options": OPTIONS,
+      "GET /api/v1/workspaces/old/items": { items: [item({ title: "The closed quote" })] },
+      "GET /api/v1/workspaces/old/notify": { mode: "decide", default: "decide" },
+      "POST /api/v1/workspaces/old/read": { last_read_turn_id: 5, unread: 0 },
+      "PATCH /api/v1/workspaces/old": closed,
+      // The row that took the name answers with its own thread and items, so
+      // a call that named the ref would show them.
+      "GET /api/v1/workspaces/test": live,
+      "GET /api/v1/workspaces/alex%2Ftest": live,
+      "GET /api/v1/workspaces/new/items": { items: [item({ id: "i2", title: "The live quote" })] },
+      "GET /api/v1/chat/alex/history": {
+        messages: [{ id: 5, role: "joshua", text: "The closed thread.", status: "ok", at: "2026-01-01T10:00:00Z" }],
+        nextBefore: null,
+      },
+      "GET /api/v1/chat/alex/held": { held: [] },
+    });
+    render(
+      <MemoryRouter initialEntries={["/chat/w/old"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/w/:ref" element={<WorkspaceLink />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    // The thread and the items of the closed row, and not of the live one.
+    await screen.findByText("The closed thread.");
+    await screen.findByText("The closed quote");
+    expect(screen.queryByText("The live quote")).toBeNull();
+    // The read mark names the closed row.
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/workspaces/old/read")).toBe(true));
+    // A turn goes to the closed thread, by its id.
+    fireEvent.change(screen.getByLabelText("Message to Joshua"), { target: { value: "still here?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(calls.some((c) => c.path.endsWith("/turns"))).toBe(true));
+    expect(calls.find((c) => c.path.endsWith("/turns"))?.body).toEqual({
+      text: "still here?",
+      workspace: "old",
+    });
+    // So does a change from the header, and the notify mode of the person.
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+    expect(calls.some((c) => c.path === "/api/v1/workspaces/old/notify")).toBe(true);
+
+    // No call of this screen names one workspace by its slug ref: the id, and
+    // the list and the options, which name none.
+    const named = calls.filter(
+      (c) => c.path.startsWith("/api/v1/workspaces/") && c.path !== "/api/v1/workspaces/options",
+    );
+    expect(named.length).toBeGreaterThan(4);
+    for (const call of named) {
+      expect(call.path.startsWith("/api/v1/workspaces/old")).toBe(true);
+    }
+    // The chat calls name the id too, never the slug.
+    const chat = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .map(([u]) => String(u))
+      .filter((u) => u.includes("/api/v1/chat/"));
+    expect(chat.some((u) => u.includes("workspace=old"))).toBe(true);
+    for (const url of chat) expect(url).not.toContain("test");
+  });
+
   it("holds a message written while a turn of the workspace runs", async () => {
     const { calls } = viewer({
       "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
       "GET /api/v1/workspaces/alex%2Fsolar": ws(),
       "GET /api/v1/workspaces": { workspaces: [ws()] },
-      "GET /api/v1/workspaces/alex%2Fsolar/items": { items: [item()] },
+      "GET /api/v1/workspaces/w1/items": { items: [item()] },
       "GET /api/v1/chat/alex/history": {
         messages: [],
         nextBefore: null,
@@ -890,12 +969,12 @@ describe("the routes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("Waiting to go with the next turn")).toBeTruthy();
     const add = calls.find((c) => c.method === "POST" && c.path === "/api/v1/chat/alex/held");
-    expect(add?.body).toEqual({ text: "one more", workspace: "alex/solar" });
+    expect(add?.body).toEqual({ text: "one more", workspace: "w1" });
     // The hold of the thread is asked for with the workspace, and no turn went out.
     const asked = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
       .map(([u]) => String(u))
       .find((u) => u.includes("/held"));
-    expect(asked).toBe("/api/v1/chat/alex/held?workspace=alex%2Fsolar");
+    expect(asked).toBe("/api/v1/chat/alex/held?workspace=w1");
     expect(calls.some((c) => c.path.endsWith("/turns"))).toBe(false);
   });
 

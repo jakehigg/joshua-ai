@@ -108,6 +108,15 @@ with a slash reaches a route in the path
 (`/v1/workspaces/shared/thanksgiving`) and URL-encoded
 (`shared%2Fthanksgiving`) alike.
 
+The ref is the human-readable form of the name, for an address a person types
+and a name a person says to Joshua. The viewer never sends one once it has the
+workspace: the screen resolves the address it was opened at once, and after
+that names the workspace by its id, in every workspace route and as the
+`workspace` of a turn, of the thread, of the history and of the hold
+(`gateway/frontend/src/api/workspaces.ts`). A ref may move to another
+workspace, because a closed one frees its name; an id names one row for ever,
+so the closed workspace stays the one that is read and written.
+
 **The turn.** A turn of a shared workspace runs as a group turn. The message
 carries the name of the person who wrote it ("Mia: who brings the pie?"), and
 the transcript row keeps that name in `meta.speaker`, so the viewer shows it on
@@ -386,7 +395,9 @@ is empty.
 
 A chat turn in a workspace goes through the channels terminal routes.
 `POST /v1/cli/turns/stream` and `GET /v1/cli/transcript` take an optional
-`workspace` (a ref). Core looks the workspace up for the person.
+`workspace` (a ref). Core looks the workspace up for the person. The viewer
+sends the id there, as it does everywhere else; the ref form stays for the
+terminal and anything else that names a workspace the way a person does.
 
 `GET /v1/usage?group=conversation&person=<id>` gives the totals of each conversation, with
 the slug and the title of the workspace when the conversation belongs to one.

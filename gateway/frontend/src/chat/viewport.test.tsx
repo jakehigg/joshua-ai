@@ -60,7 +60,7 @@ function items(open: boolean, collapsed = false) {
     return (
       <MemoryRouter future={FUTURE}>
         <DocumentPanelProvider panel={state}>
-          <ItemPanel slug="solar" refreshKey={0} open={open} collapsed={collapsed} onClose={vi.fn()} />
+          <ItemPanel workspace="w1" refreshKey={0} open={open} collapsed={collapsed} onClose={vi.fn()} />
         </DocumentPanelProvider>
       </MemoryRouter>
     );

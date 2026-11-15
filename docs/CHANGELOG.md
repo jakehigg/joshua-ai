@@ -127,7 +127,12 @@ with the images and the packaged chart, are at
   keeps the slug it was made with, and the address of a workspace that is
   always its own is its id, `/chat/w/<id>`, which is where the chat screen
   links to it. A slug that only closed workspaces hold opens the one closed
-  last.
+  last. The chat screen now names a workspace by that id in every call it
+  makes: its thread, its history, its items, its read mark, its notify mode,
+  and a change to it. Before, it sent the name `<owner>/test`, so opening a
+  closed workspace read and wrote the new one that had taken the name. The
+  `<owner>/<slug>` form is the one a person reads and types, and such an
+  address still opens the workspace and goes to its id.
 
 ### Viewer
 
