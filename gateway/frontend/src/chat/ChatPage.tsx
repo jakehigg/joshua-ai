@@ -43,9 +43,11 @@
 // chat, with the workspace header and the item panel (ItemPanel.tsx). The
 // space is `shared` for a shared workspace and the owner for a personal one,
 // and the ref `<space>/<slug>` goes to the turn, the history and the item
-// calls. A one-segment `/chat/w/:ref` link redirects to that address
-// (WorkspaceLink). Each finished turn reloads the items, because the turn may
-// have made some.
+// calls. Every link the screen builds is `/chat/w/<id>`, the permanent address
+// of a workspace: a closed workspace frees its name, so a later one may hold
+// its slug. A one-segment `/chat/w/:ref` opens the workspace of that id, and
+// sends a slug to the id (WorkspaceLink). Each finished turn reloads the
+// items, because the turn may have made some.
 //
 // The thread of a shared workspace reads like a group messaging app: the
 // messages of the person who is signed in stand at the right, every other
@@ -385,10 +387,6 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
                 onChange={(w) => {
                   onWs?.(w);
                   workspaces.reload();
-                  // Closing a workspace releases its slug (core: the name is
-                  // free for a new workspace), so the screen follows the
-                  // address the row now has.
-                  if (w.slug !== ws.slug) navigate(linkOf(w), { replace: true });
                 }}
                 onItems={toggleItems}
               />
@@ -586,14 +584,14 @@ function WorkspaceError({ text }: { text: string }) {
 }
 
 /**
- * `/chat/w/:space/:slug`: one workspace. `:space` is `shared` for a shared
- * workspace and the id of the owner for the workspace of a person, so every
- * person in a shared workspace opens it at the same address.
+ * The screen of the workspace a ref names: the chat, with the workspace
+ * header and the item panel. With `toId`, a ref that is not the id of the
+ * workspace sends the browser to `/chat/w/<id>` instead, the permanent
+ * address.
  */
-export function WorkspacePage() {
-  const { space = "", slug = "" } = useParams();
+function WorkspaceScreen({ reference, toId = false }: { reference: string; toId?: boolean }) {
   const workspaces = useWorkspaces();
-  const { person, name, ws, setWs, error } = useWorkspaceOf(`${space}/${slug}`);
+  const { person, name, ws, setWs, error } = useWorkspaceOf(reference);
 
   if (error !== "") {
     return <WorkspaceError text={error} />;
@@ -604,6 +602,9 @@ export function WorkspacePage() {
         <Spinner label="Loading the workspace" />
       </Shell>
     );
+  }
+  if (toId && reference !== ws.id) {
+    return <Navigate to={linkOf(ws)} replace />;
   }
   return (
     <Shell section="chat">
@@ -621,23 +622,22 @@ export function WorkspacePage() {
 }
 
 /**
- * `/chat/w/:ref`: a link from the days of one segment, a slug or an id. It
- * finds the workspace and sends the browser to the two-segment address, so
- * an old link, and a link a person kept, still opens the workspace.
+ * `/chat/w/:space/:slug`: one workspace. `:space` is `shared` for a shared
+ * workspace and the id of the owner for the workspace of a person, so every
+ * person in a shared workspace opens it at the same address.
+ */
+export function WorkspacePage() {
+  const { space = "", slug = "" } = useParams();
+  return <WorkspaceScreen reference={`${space}/${slug}`} />;
+}
+
+/**
+ * `/chat/w/:ref`: one segment, the id of a workspace or a slug. The id is the
+ * permanent address and opens the workspace here; any other ref finds the
+ * workspace and sends the browser there, so an old link, and a link a person
+ * kept, still opens the workspace it named.
  */
 export function WorkspaceLink() {
   const { ref = "" } = useParams();
-  const { ws, error } = useWorkspaceOf(ref);
-
-  if (error !== "") {
-    return <WorkspaceError text={error} />;
-  }
-  if (ws === null) {
-    return (
-      <Shell section="chat">
-        <Spinner label="Loading the workspace" />
-      </Shell>
-    );
-  }
-  return <Navigate to={linkOf(ws)} replace />;
+  return <WorkspaceScreen reference={ref} toId />;
 }

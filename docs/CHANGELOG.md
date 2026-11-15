@@ -120,11 +120,14 @@ with the images and the packaged chart, are at
   is asked for again a few times before it ends as a chip that says it did not
   load.
 - Closing a workspace frees its name. Create "test", close it, and create
-  "test" again: the second create was refused before, because the closed one
-  still held the slug. The closed workspace keeps its row and its id, takes
-  the next free number of its name (`test-2`), and stays readable at that
-  address and at `/chat/w/<id>`. The screen of a workspace you close follows
-  it to its new address.
+  "test" again: the second create was refused before, or took a number,
+  because the closed one still held the slug. A name is now taken by the
+  workspaces that are open only, so the new one gets the plain address
+  (`/chat/w/<owner>/test`). The closed workspace is renamed by nothing: it
+  keeps the slug it was made with, and the address of a workspace that is
+  always its own is its id, `/chat/w/<id>`, which is where the chat screen
+  links to it. A slug that only closed workspaces hold opens the one closed
+  last.
 
 ### Viewer
 

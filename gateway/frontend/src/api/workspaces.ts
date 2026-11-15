@@ -109,9 +109,14 @@ export const spaceOf = (workspace: Workspace): string =>
  */
 export const refOf = (workspace: Workspace): string => `${spaceOf(workspace)}/${workspace.slug}`;
 
-/** Where a workspace lives in the viewer: `/chat/w/<space>/<slug>`. */
+/**
+ * Where a workspace lives in the viewer: `/chat/w/<id>`, its permanent
+ * address. A closed workspace keeps its slug but frees the name, so a later
+ * workspace may hold `/chat/w/<space>/<slug>`; the id never moves. A slug
+ * address still opens the workspace and goes to the id (ChatPage.tsx).
+ */
 export const linkOf = (workspace: Workspace): string =>
-  `/chat/w/${encodeURIComponent(spaceOf(workspace))}/${encodeURIComponent(workspace.slug)}`;
+  `/chat/w/${encodeURIComponent(workspace.id)}`;
 
 // The slug core gives a title (core: store/repo.py, `slugify`), so a dialog
 // can show the address a workspace will take before it exists.

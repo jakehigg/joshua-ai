@@ -112,7 +112,8 @@ describe("the rail", () => {
   it("lists Chat, the active workspaces and the paused ones in a fold", () => {
     show();
     expect(screen.getByRole("link", { name: "Chat" }).getAttribute("href")).toBe("/chat/alex");
-    expect(screen.getByRole("link", { name: "Solar install" }).getAttribute("href")).toBe("/chat/w/alex/solar");
+    // The link is the permanent address of the workspace, its id.
+    expect(screen.getByRole("link", { name: "Solar install" }).getAttribute("href")).toBe("/chat/w/a");
     expect(screen.queryByText("Old")).toBeNull();
     const fold = screen.getByText("Paused (1)").closest("details") as HTMLDetailsElement;
     expect(fold.open).toBe(false);
@@ -125,7 +126,7 @@ describe("the rail", () => {
     expect(screen.getByRole("link", { name: "Chat" }).getAttribute("aria-current")).toBeNull();
   });
 
-  it("marks a shared workspace with the two-person icon and links it under the shared namespace", () => {
+  it("marks a shared workspace with the two-person icon and links it by its id", () => {
     render(
       <MemoryRouter future={FUTURE}>
         <Rail
@@ -139,7 +140,7 @@ describe("the rail", () => {
       </MemoryRouter>,
     );
     const link = screen.getByRole("link", { name: /Thanksgiving/ });
-    expect(link.getAttribute("href")).toBe("/chat/w/shared/thanksgiving");
+    expect(link.getAttribute("href")).toBe("/chat/w/s");
     // The icon, and no label: "Shared" is nowhere in the row.
     expect(link.querySelector(".shared-mark svg.j-icon")).not.toBeNull();
     expect(link.textContent).toBe("Thanksgiving");
@@ -839,20 +840,28 @@ describe("the routes", () => {
     expect(calls.some((c) => c.path.endsWith("/read"))).toBe(false);
   });
 
-  it("sends a one-segment link to the two-segment address of its workspace", async () => {
+  it("sends a one-segment slug link to the permanent address of its workspace, its id", async () => {
+    const shared = ws({ id: "s9", slug: "thanksgiving", title: "Thanksgiving", owner: "alex", shared: true, members: ["mia"] });
     viewer({
       "GET /api/v1/session": { person: { id: "mia", name: "Mia", role: "member" }, sections: [] },
-      "GET /api/v1/workspaces/thanksgiving": ws({ slug: "thanksgiving", owner: "alex", shared: true, members: ["mia"] }),
+      "GET /api/v1/workspaces/thanksgiving": shared,
+      "GET /api/v1/workspaces/s9": shared,
+      "GET /api/v1/workspaces": { workspaces: [shared] },
+      "GET /api/v1/workspaces/shared%2Fthanksgiving/items": { items: [] },
+      "GET /api/v1/chat/mia/history": { messages: [], nextBefore: null },
     });
     render(
       <MemoryRouter initialEntries={["/chat/w/thanksgiving"]} future={FUTURE}>
+        <Where />
         <Routes>
-          <Route path="/chat/w/:space/:slug" element={<Where />} />
           <Route path="/chat/w/:ref" element={<WorkspaceLink />} />
         </Routes>
       </MemoryRouter>,
     );
-    expect((await screen.findByTestId("where")).textContent).toBe("/chat/w/shared/thanksgiving");
+    // The id opens the workspace where it is: no slug a later workspace may
+    // take stands in the address.
+    expect(await screen.findByRole("heading", { name: /Thanksgiving/ })).toBeTruthy();
+    expect(screen.getByTestId("where").textContent).toBe("/chat/w/s9");
   });
 
   it("holds a message written while a turn of the workspace runs", async () => {
@@ -906,21 +915,21 @@ describe("the routes", () => {
     viewer({
       "GET /api/v1/workspaces": { workspaces: [] },
       "GET /api/v1/workspaces/options": OPTIONS,
-      "POST /api/v1/workspaces": ws({ slug: "trip", title: "Trip" }),
+      "POST /api/v1/workspaces": ws({ id: "w7", slug: "trip", title: "Trip" }),
       "GET /api/v1/chat/alex/history": { messages: [], nextBefore: null },
     });
     render(
       <MemoryRouter initialEntries={["/chat/alex"]} future={FUTURE}>
         <Routes>
           <Route path="/chat/:person" element={<ChatPage />} />
-          <Route path="/chat/w/:space/:slug" element={<Where />} />
+          <Route path="/chat/w/:ref" element={<Where />} />
         </Routes>
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByRole("button", { name: "+ New workspace" }));
     fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Trip" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    expect((await screen.findByTestId("where")).textContent).toBe("/chat/w/alex/trip");
+    expect((await screen.findByTestId("where")).textContent).toBe("/chat/w/w7");
   });
 });
 

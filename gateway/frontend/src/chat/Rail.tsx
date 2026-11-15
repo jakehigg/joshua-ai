@@ -1,9 +1,9 @@
 // The left rail of the chat screen: Chat, the active workspaces, the paused
 // ones (folded), and "+ New workspace". A shared workspace is marked with a
-// two-person icon, and every link is `/chat/w/<space>/<slug>`
-// (api/workspaces.ts). A workspace with rows the person has not read carries
-// the count of them after its name; in a shared workspace that count is
-// theirs alone.
+// two-person icon, and every link is `/chat/w/<id>`, the permanent address of
+// a workspace (api/workspaces.ts). A workspace with rows the person has not
+// read carries the count of them after its name; in a shared workspace that
+// count is theirs alone.
 // Under them it repeats the app
 // navigation links of the shell (AppNav), without Chat, which the first entry
 // of the rail already is, which the shell's own sidebar shows

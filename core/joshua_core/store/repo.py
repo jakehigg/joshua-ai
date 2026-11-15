@@ -67,11 +67,6 @@ WORKSPACE_CHANNEL_TYPE = "workspace"
 FROM_CHAT_SOURCE = "normal_chat"
 # The columns that ``update_workspace`` may change.
 WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "status")
-# The status of a workspace that is closed. Closing it releases its slug, so
-# a new workspace may take the name (``update_workspace``).
-ARCHIVED_STATUS = "archived"
-# How many numbers a released slug tries before it keeps the one it has.
-_RELEASE_TRIES = 50
 _SLUG_MAX = 48
 # The namespace of a shared workspace in a link and in a ref: a shared one is
 # ``shared/<slug>``, a personal one ``<owner>/<slug>``. No person may hold this
@@ -1364,7 +1359,9 @@ class Repo:
         a direct thread of the owner), and its conversation.
 
         The slug comes from the title and is made unique among the owner's
-        workspaces with a number.
+        workspaces that are not archived, with a number: a closed workspace
+        keeps its slug but frees the name, so the same title takes the plain
+        slug again.
 
         ``members`` makes it a shared workspace: one thread that the owner and
         the members write in, so the channel is ``shared`` and the conversation
@@ -1445,6 +1442,11 @@ class Repo:
         - ``<slug>`` or ``<id>``: the workspace of the person with that slug,
           then the workspace of that id.
 
+        A slug names the live workspace that holds it: a closed workspace keeps
+        its slug, and a new workspace may take the name, so a slug reaches an
+        archived row only when no live row holds it (``_workspace_by_slug``).
+        An id names one row for ever, archived or not.
+
         The person must be one of the people of the workspace; any other one is
         never found, and any other ref is None. A ref with a slash reaches a
         route URL-encoded as well as in the path, so it is decoded here."""
@@ -1465,11 +1467,16 @@ class Repo:
 
     async def _workspace_by_slug(self, namespace: str, slug: str) -> Workspace | None:
         """The workspace of a namespace and a slug: the shared one of that slug
-        under ``shared``, the workspace of that owner otherwise."""
+        under ``shared``, the workspace of that owner otherwise.
+
+        A closed workspace keeps its slug, and only the live rows hold a slug
+        uniquely (store/db.py), so a slug may name an archived row beside a
+        live one: the live one comes first, and the newest inside each group."""
         shared = namespace == SHARED_NAMESPACE
         sql = "SELECT * FROM workspaces WHERE slug = %s AND " + (
             "shared" if shared else "owner = %s"
         )
+        sql += " ORDER BY status = 'archived', created_at DESC, id LIMIT 1"
         args = (slug,) if shared else (slug, namespace)
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, args)
@@ -1556,42 +1563,19 @@ class Repo:
 
     async def update_workspace(self, workspace_id: str, **fields: Any) -> Workspace | None:
         """Change the given fields of a workspace. ``fields`` are among
-        ``WORKSPACE_FIELDS``; a name outside raises ``ValueError``.
+        ``WORKSPACE_FIELDS``; a name outside raises ``ValueError``. No slug is
+        ever written here.
 
-        Closing a workspace (``status`` ``archived``) releases its slug: the
-        row takes the next free number of its base, so a new workspace may
-        take the name again. The id of the row never changes, and the closed
-        workspace stays readable at the address of its new slug and at
-        ``/chat/w/<id>``."""
+        Closing a workspace (``status`` ``archived``) frees its name at once,
+        because the uniqueness of a slug holds among the live rows only
+        (store/db.py): a new workspace of the same title takes the plain slug.
+        The closed row keeps the slug it was created with, and stays reachable
+        at its permanent address, ``/chat/w/<id>``."""
         unknown = set(fields) - set(WORKSPACE_FIELDS)
         if unknown:
             raise ValueError(f"cannot update {sorted(unknown)}")
         if not fields:
             return await self.get_workspace(workspace_id)
-        if fields.get("status") == ARCHIVED_STATUS:
-            current = await self.get_workspace(workspace_id)
-            if current is not None and current.status != ARCHIVED_STATUS:
-                return await self._close_workspace(current, fields)
-        return await self._write_workspace(workspace_id, fields)
-
-    async def _close_workspace(
-        self, workspace: Workspace, fields: dict[str, Any]
-    ) -> Workspace | None:
-        """Write the fields that close a workspace and release its slug: the
-        row takes the next free number of its base (``test`` becomes
-        ``test-2``). A base with no free number keeps the slug it has, so the
-        close never fails."""
-        base = re.sub(r"-\d+$", "", workspace.slug) or workspace.slug
-        for number in range(2, _RELEASE_TRIES):
-            try:
-                return await self._write_workspace(
-                    workspace.id, {**fields, "slug": f"{base}-{number}"}
-                )
-            except psycopg.errors.UniqueViolation:
-                continue
-        return await self._write_workspace(workspace.id, fields)
-
-    async def _write_workspace(self, workspace_id: str, fields: dict[str, Any]) -> Workspace | None:
         sets = []
         args: list[Any] = []
         for name, value in fields.items():

@@ -164,30 +164,47 @@ async def test_create_makes_the_channel_the_conversation_and_unique_slugs(seeded
     assert first.notify == "none" and first.status == "active" and first.servers == ()
 
 
-async def test_closing_a_workspace_releases_its_slug_and_keeps_the_row_readable(seeded) -> None:
+async def test_closing_a_workspace_frees_its_name_and_keeps_its_own_slug(seeded) -> None:
     first = await seeded.create_workspace("alex", "Test")
     closed = await seeded.update_workspace(first.id, status="archived")
 
-    # The name is free again, so a new workspace of the same name takes it.
-    assert closed.slug == "test-2" and closed.status == "archived"
+    # The closed row keeps the slug it was created with, and nothing renames it.
+    assert closed.slug == "test" and closed.status == "archived"
+    # The name is free at once, so a new workspace of the same title takes it.
     second = await seeded.create_workspace("alex", "Test")
     assert second.slug == "test" and second.id != first.id
+    # The bare slug names the live workspace; the closed one answers to its id,
+    # which is its permanent address.
     assert (await seeded.find_workspace_for("alex", "test")).id == second.id
-    # The closed one is still readable, by its id and at its new slug.
+    assert (await seeded.find_workspace_for("alex", "alex/test")).id == second.id
     assert (await seeded.find_workspace_for("alex", first.id)).id == first.id
-    assert (await seeded.find_workspace_for("alex", "test-2")).id == first.id
-    assert (await seeded.find_workspace_for("alex", "alex/test-2")).id == first.id
-    # Another change of a closed workspace keeps the slug it has.
+    # A second change of the closed row still writes no slug.
     again = await seeded.update_workspace(first.id, status="archived", title="Test (old)")
-    assert again.slug == "test-2"
+    assert again.slug == "test"
 
-    # A shared workspace releases its slug too: its create takes no number, so
+    # A shared workspace frees its name too: its create takes no number, so
     # without this the name would stay refused for everyone.
     shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
-    assert (await seeded.update_workspace(shared.id, status="archived")).slug == "thanksgiving-2"
+    assert (await seeded.update_workspace(shared.id, status="archived")).slug == "thanksgiving"
     new_shared = await seeded.create_workspace("mia", "Thanksgiving", members=["alex"])
     assert new_shared.slug == "thanksgiving"
+    for person in ("alex", "mia"):
+        assert (await seeded.find_workspace_for(person, "shared/thanksgiving")).id == new_shared.id
     assert (await seeded.find_workspace_for("mia", shared.id)).id == shared.id
+
+
+async def test_a_slug_that_only_archived_rows_hold_names_the_newest(seeded) -> None:
+    older = await seeded.create_workspace("alex", "Test")
+    await seeded.update_workspace(older.id, status="archived")
+    newer = await seeded.create_workspace("alex", "Test")
+    await seeded.update_workspace(newer.id, status="archived")
+
+    assert older.slug == newer.slug == "test"
+    # No live row holds the slug, so it names the archived row made last. Each
+    # row still answers to its own id.
+    assert (await seeded.find_workspace_for("alex", "test")).id == newer.id
+    assert (await seeded.find_workspace_for("alex", "alex/test")).id == newer.id
+    assert (await seeded.find_workspace_for("alex", older.id)).id == older.id
 
 
 async def test_find_scopes_to_the_people_and_takes_a_slug_or_an_id(seeded) -> None:

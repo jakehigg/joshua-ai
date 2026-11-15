@@ -19,7 +19,7 @@ reads them.
 
 | Field | Meaning |
 |---|---|
-| `slug`, `title` | The slug comes from the title. It is unique for each owner, and the slug of a shared workspace is unique over everybody. Closing a workspace releases its slug; its `id` is the stable name of the row. |
+| `slug`, `title` | The slug comes from the title. It is unique for each owner among the workspaces that are not closed, and the slug of a shared workspace is unique over everybody. A closed workspace keeps its slug and frees the name; its `id` is the permanent name of the row. |
 | `owner` | The person who made it. |
 | `shared`, `members` | `shared` is true for a workspace that several people write in, and `members` names the other people. A person who is neither the owner nor a member sees the workspace as not found. |
 | `goal` | A short paragraph. |
@@ -27,7 +27,7 @@ reads them.
 | `servers` | The MCP servers that the workspace uses. Only servers that every person of it may use. |
 | `model` | The model of the workspace. Empty keeps the model of the chat job. |
 | `notify` | `none` (default), `questions`, or `questions+finishes`. |
-| `status` | `active`, `paused`, or `archived`. `archived` means closed: it releases the slug. |
+| `status` | `active`, `paused`, or `archived`. `archived` means closed: it frees the name for a new workspace, and the closed row keeps its own slug. |
 
 An item is a link: a `kind` (`document`, `artifact`, `plan`, `wiki`,
 `tasks_project`, `task`, `assignment`, `developer_task`, `pr`, `link`, or
@@ -82,12 +82,16 @@ unique over all people, because its address names no owner. A title whose
 shared slug is taken answers 409 and gives the slug, and the person picks
 another title. A personal workspace of any person may hold the same slug.
 
-Closing a workspace (`status` `archived`) releases its slug: the row takes the
-next free number of its base, so `test` becomes `test-2` and a new workspace
-may take the name `test` again. Core does this in the one place that writes a
-status. The id of the row never changes, so the closed workspace stays
-readable at `/chat/w/<owner>/test-2` and at `/chat/w/<id>`, and the screen of
-a workspace that is closed follows it to its new address.
+Closing a workspace (`status` `archived`) frees its name at once: a new
+workspace of the same title takes the plain slug (`test`), personal or shared.
+The uniqueness of a slug holds among the workspaces that are not archived, in
+the database (two partial unique indexes with `status <> 'archived'`), so
+nothing renames a row: the closed workspace keeps the slug it was created
+with, for ever. A bare slug names the live workspace that holds it, so
+`/chat/w/<owner>/test` is the new one; a slug reaches a closed workspace only
+when no live one holds it, and then the one made last. The permanent address
+of a workspace, closed or not, is its id: `/chat/w/<id>`. That is the address
+the chat screen links to.
 
 **The ref.** A route, a tool, and a turn name a workspace with a ref. It has
 three forms:
@@ -348,7 +352,7 @@ Every `{slug}` below is a ref: a slug, an id, or two segments
 |---|---|
 | `GET /v1/workspaces?status=` | List the workspaces the person reaches. |
 | `POST /v1/workspaces` | Create one: `title`, `goal`, `model`, `servers`, `notify`, `members`. `members` makes it shared. A taken shared slug answers 409 with the slug. |
-| `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `status`. A `status` of `archived` closes it and releases its slug, and the answer carries the new slug. No route changes the people. |
+| `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `status`. A `status` of `archived` closes it, which frees its name for a new workspace and keeps its own slug. No route changes the people, and no route changes a slug. |
 | `GET`, `POST /v1/workspaces/{slug}/items` | List or add items. The assignments container adds the outputs of a run that started in a workspace here, as the person of the run. |
 | `PATCH`, `DELETE /v1/workspaces/{slug}/items/{id}` | Change `pinned` or `seen`, or remove an item. |
 | `GET /v1/workspaces/{slug}/block` | The workspace block as text. |
@@ -513,9 +517,12 @@ compose and on Kubernetes, and it adds no container.
 
 - `/chat/<person>` is the normal chat. `/chat/w/<owner>/<slug>` is a
   workspace, and `shared` stands for the owner of a shared one, so everyone in
-  it opens the same address. A link of one segment, `/chat/w/<ref>`, still
-  works: it finds the workspace and sends the browser to the two-segment
-  address. The id `w` is reserved, so no person can have it.
+  it opens the same address. Every link the screen builds — the rail, the
+  header, a new workspace — is `/chat/w/<id>`, the permanent address: a closed
+  workspace frees its name, so a later workspace may hold its slug, and the id
+  never moves. A link of one segment that is not an id still works: it finds
+  the workspace and sends the browser to `/chat/w/<id>`. The id `w` is
+  reserved, so no person can have it.
 - The left rail shows Chat, the active workspaces, the paused workspaces (folded),
   and "+ New workspace". On a phone it is a drawer. A shared workspace carries
   a small two-person icon beside its name, in the rail and in the header of the

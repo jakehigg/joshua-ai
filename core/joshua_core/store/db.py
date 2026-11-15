@@ -231,8 +231,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
     status      TEXT NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active', 'paused', 'archived')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (owner, slug)
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- A shared workspace is one thread that several people write in. `members`
@@ -241,8 +240,25 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS members JSONB NOT NULL DEFAULT '[]'::jsonb;
 -- "the shared workspaces that hold this person", for the list and the reach rule.
 CREATE INDEX IF NOT EXISTS ix_workspaces_members ON workspaces USING gin (members);
--- The slug of a shared workspace is one for everyone, so no second one takes it.
-CREATE UNIQUE INDEX IF NOT EXISTS ux_workspaces_shared_slug ON workspaces (slug) WHERE shared;
+
+-- The status is part of the uniqueness of a slug: a closed (archived)
+-- workspace frees its name at once, so a new workspace of the same title takes
+-- the plain slug, while the archived row keeps the slug it was created with.
+-- Nothing is ever renamed. A slug lookup therefore orders the live rows first
+-- (store/repo.py), and the permanent address of a workspace is its id.
+-- A database from before this rule holds the inline UNIQUE (owner, slug),
+-- which knew nothing of the status, under the name Postgres gives such a
+-- constraint, and the shared index without the status. Both go, so a fresh
+-- database and a migrated one hold the same two indexes and nothing else.
+ALTER TABLE workspaces DROP CONSTRAINT IF EXISTS workspaces_owner_slug_key;
+DROP INDEX IF EXISTS ux_workspaces_shared_slug;
+-- One slug per owner among the workspaces that are not archived.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workspaces_owner_slug_live
+    ON workspaces (owner, slug) WHERE status <> 'archived';
+-- The slug of a shared workspace is one for everyone, so no second live one
+-- takes it.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workspaces_shared_slug_live
+    ON workspaces (slug) WHERE shared AND status <> 'archived';
 
 CREATE TABLE IF NOT EXISTS workspace_items (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
