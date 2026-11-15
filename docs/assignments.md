@@ -500,7 +500,7 @@ The session has these tools, and no other:
 |---|---|
 | `write_plan(markdown)` | Replaces the plan. A plan above 64 KiB is refused, and the reply gives its size. |
 | `read_plan()` | Gives the plan, or an empty text when there is none. |
-| `record_output(kind, ref, title)` | Adds one output to the list and gives the count. |
+| `record_output(kind, ref, title)` | Adds one output to the list and gives the count. A run that a workspace started also records it as an item of that workspace. |
 | `write_report(markdown)` | Writes the report. A report above 256 KiB is refused. |
 | `checkpoint(note)` | Stores the note. `assignment_status` gives the latest note as the last checkpoint, and the text after `Next:` as the next step. |
 | `wait(seconds)` | Waits up to 10 minutes. The working time continues. |
@@ -1041,6 +1041,19 @@ with no destination still gets them. A re-run takes the workspace of its own
 start. `start_assignment` and `assignment_status` return a `resource_link` to
 `/assignments/<id>` (under `workspaces.viewer_url` when it is set) on a call from
 a workspace.
+
+Each output that such a run records with `record_output` also becomes an item
+of that workspace, at the moment it is recorded, so the Items panel of the
+thread holds what the run wrote and nobody adds it by hand. The container posts
+it to core at `POST /v1/workspaces/<workspace>/items` with `person`, the person
+the run belongs to, so a run of a person who is not one of the people of that
+workspace adds nothing (404). An output that names a document is a `document`
+item (an `.html` one an `artifact`) whose `url` is the page of the document, a
+ref that is an `http(s)` address keeps it as the `url`, and a kind core does
+not know is a `link`. The same output recorded twice updates the one row it
+has. A failed post is a log line and never fails the tool call. `assignments`
+must be in `workspaces.allowed_callers`; see
+[workspaces.md](workspaces.md#items-from-tools).
 
 A run that a shared workspace started belongs to the person who started it,
 and the other people of that workspace read it. The gateway sets

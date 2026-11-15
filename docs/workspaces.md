@@ -19,7 +19,7 @@ reads them.
 
 | Field | Meaning |
 |---|---|
-| `slug`, `title` | The slug comes from the title. It is unique for each owner, and the slug of a shared workspace is unique over everybody. |
+| `slug`, `title` | The slug comes from the title. It is unique for each owner, and the slug of a shared workspace is unique over everybody. Closing a workspace releases its slug; its `id` is the stable name of the row. |
 | `owner` | The person who made it. |
 | `shared`, `members` | `shared` is true for a workspace that several people write in, and `members` names the other people. A person who is neither the owner nor a member sees the workspace as not found. |
 | `goal` | A short paragraph. |
@@ -27,7 +27,7 @@ reads them.
 | `servers` | The MCP servers that the workspace uses. Only servers that every person of it may use. |
 | `model` | The model of the workspace. Empty keeps the model of the chat job. |
 | `notify` | `none` (default), `questions`, or `questions+finishes`. |
-| `status` | `active`, `paused`, or `archived`. |
+| `status` | `active`, `paused`, or `archived`. `archived` means closed: it releases the slug. |
 
 An item is a link: a `kind` (`document`, `artifact`, `plan`, `wiki`,
 `tasks_project`, `task`, `assignment`, `developer_task`, `pr`, `link`, or
@@ -81,6 +81,13 @@ taken one gets a number (`solar-install-2`). The slug of a shared workspace is
 unique over all people, because its address names no owner. A title whose
 shared slug is taken answers 409 and gives the slug, and the person picks
 another title. A personal workspace of any person may hold the same slug.
+
+Closing a workspace (`status` `archived`) releases its slug: the row takes the
+next free number of its base, so `test` becomes `test-2` and a new workspace
+may take the name `test` again. Core does this in the one place that writes a
+status. The id of the row never changes, so the closed workspace stays
+readable at `/chat/w/<owner>/test-2` and at `/chat/w/<id>`, and the screen of
+a workspace that is closed follows it to its new address.
 
 **The ref.** A route, a tool, and a turn name a workspace with a ref. It has
 three forms:
@@ -331,8 +338,8 @@ The viewer calls `/v1/workspaces` on core. The caller names the person with the
 `person` query parameter, and core trusts it, as for a search of documents.
 Every route works on the workspaces that person reaches, their own and the
 shared ones they are in. Any other workspace answers 404. The callers are
-`workspaces.allowed_callers` (default `viewer` and `gateway`). An empty list
-turns the routes off (403).
+`workspaces.allowed_callers` (default `viewer`, `gateway` and `assignments`).
+An empty list turns the routes off (403).
 
 Every `{slug}` below is a ref: a slug, an id, or two segments
 (`shared/<slug>`, `<owner>/<slug>`), in the path or URL-encoded.
@@ -341,8 +348,8 @@ Every `{slug}` below is a ref: a slug, an id, or two segments
 |---|---|
 | `GET /v1/workspaces?status=` | List the workspaces the person reaches. |
 | `POST /v1/workspaces` | Create one: `title`, `goal`, `model`, `servers`, `notify`, `members`. `members` makes it shared. A taken shared slug answers 409 with the slug. |
-| `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `status`. No route changes the people. |
-| `GET`, `POST /v1/workspaces/{slug}/items` | List or add items. |
+| `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `status`. A `status` of `archived` closes it and releases its slug, and the answer carries the new slug. No route changes the people. |
+| `GET`, `POST /v1/workspaces/{slug}/items` | List or add items. The assignments container adds the outputs of a run that started in a workspace here, as the person of the run. |
 | `PATCH`, `DELETE /v1/workspaces/{slug}/items/{id}` | Change `pinned` or `seen`, or remove an item. |
 | `GET /v1/workspaces/{slug}/block` | The workspace block as text. |
 | `POST /v1/workspaces/{slug}/read` | Mark the thread read up to `turn_id`, for that person alone. |
@@ -418,10 +425,24 @@ this in the background and never fails the call: a failed post is a log line.
 
 The gateway posts to core at `POST /v1/workspaces/by-id/<id>/items`, with its own
 fleet token. The route takes the id of the workspace and no person. The caller is
-trusted: it is in `workspaces.allowed_callers` (default `viewer` and `gateway`).
+trusted: it is in `workspaces.allowed_callers`.
 The body is `kind`, `ref`, `title`, `url`, and `added_by` (`tool:<server>`). An
 item with the same kind and ref updates the row, and an empty `title` keeps the
 title that the item has.
+
+**Items from an assignment.** A run of assignments that started in a workspace
+thread keeps the id of that workspace in its spec, and each output it records
+with `record_output` becomes an item of that workspace at that moment
+(`assignments/joshua_assignments/workspace_items.py`). An output that names a
+document is a `document` item, an `.html` one an `artifact`, and `url` is the
+page of the document, so the item opens in the chat. An output whose ref is an
+`http(s)` address keeps it as the `url`, and an output of a kind core does not
+know is a `link`. The container posts to
+`POST /v1/workspaces/<workspace>/items` with `person`, the person the run
+belongs to, so a run of a person who is not one of the people of that
+workspace adds nothing (404). An item with the same kind and ref updates the
+one row it has. A refused or failed post is a log line and never fails the
+tool call. `assignments` must be in `workspaces.allowed_callers`.
 
 The gateway needs `JOSHUA_TOKEN_GATEWAY`, which it holds already, and the
 address of core. `CORE_URL` names it. Without it, the address is
@@ -513,7 +534,11 @@ compose and on Kubernetes, and it adds no container.
   notes, the servers, the model, `notify`, and the status (pause, resume,
   archive). In a shared workspace it also holds "When Joshua may reach you
   here", the notify mode of the person who is signed in, which saves as it
-  changes. The item panel groups items by kind. A document or an artifact opens
+  changes. The item panel groups items by kind, with one row for each thing
+  the items point at: the same document recorded twice, as two kinds or by two
+  writers, keeps the row that has a title and opens it, and a row with no
+  title of its own asks the viewer for the title of its document, so no row is
+  labelled with a bare path. A document or an artifact opens
   in the document panel. Another item opens in a new tab, but only when its
   address is http(s) or a path that starts with `/`. Any other address is shown
   as text. Each item can be pinned or removed, and a form adds a link. The panel
@@ -573,7 +598,7 @@ session.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `workspaces.allowed_callers` | `viewer`, `gateway` | Fleet identities that may call `/v1/workspaces`. |
+| `workspaces.allowed_callers` | `viewer`, `gateway`, `assignments` | Fleet identities that may call `/v1/workspaces`. |
 | `workspaces.models` | empty | The models a workspace may pick. Empty accepts any text. |
 | `workspaces.context_cap` | `150000` | Input tokens over which a workspace turn ends its session. |
 | `workspaces.max_turns` | `50` | The least number of agent turns that a workspace turn gets. |

@@ -99,6 +99,32 @@ with the images and the packaged chart, are at
   own task as quiet work and said nothing, so a finished commit or an answer
   it gave a worker stayed hidden. An event you did not start, and that needs
   nothing from you, is still silent.
+- The Items list of a workspace shows one row for each thing the items point
+  at. The same document was recorded twice when a tool and a hand added it, or
+  when one run called it a plan and another a document, and the list then held
+  two rows for it: one with the title, one labelled with the bare path. Now
+  the list keeps the row that has a title and opens the document, and a row
+  with no title of its own asks the viewer for the title of its document, so
+  no row is labelled with a path. Nothing is removed: both rows are still
+  recorded.
+- An assignment that starts in a workspace adds each output it records to
+  that workspace, at the moment it records it. A document output becomes a
+  titled row that opens the document in the chat. Before, the run named the
+  document in its report only, and somebody had to add it to the list by
+  hand. The item is added as the person the run belongs to, so a run of a
+  person who is not one of the people of that workspace adds nothing, and the
+  same output recorded twice stays one row.
+- A photo you just sent no longer flashes the browser's broken-image icon. It
+  shows from the bytes on your device while it goes out, the stored photo
+  stands in its own shape until it answers, and a photo that does not answer
+  is asked for again a few times before it ends as a chip that says it did not
+  load.
+- Closing a workspace frees its name. Create "test", close it, and create
+  "test" again: the second create was refused before, because the closed one
+  still held the slug. The closed workspace keeps its row and its id, takes
+  the next free number of its name (`test-2`), and stays readable at that
+  address and at `/chat/w/<id>`. The screen of a workspace you close follows
+  it to its new address.
 
 ### Viewer
 
