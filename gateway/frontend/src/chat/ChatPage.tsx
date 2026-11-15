@@ -385,6 +385,10 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
                 onChange={(w) => {
                   onWs?.(w);
                   workspaces.reload();
+                  // Closing a workspace releases its slug (core: the name is
+                  // free for a new workspace), so the screen follows the
+                  // address the row now has.
+                  if (w.slug !== ws.slug) navigate(linkOf(w), { replace: true });
                 }}
                 onItems={toggleItems}
               />

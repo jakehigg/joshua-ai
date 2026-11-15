@@ -164,6 +164,32 @@ async def test_create_makes_the_channel_the_conversation_and_unique_slugs(seeded
     assert first.notify == "none" and first.status == "active" and first.servers == ()
 
 
+async def test_closing_a_workspace_releases_its_slug_and_keeps_the_row_readable(seeded) -> None:
+    first = await seeded.create_workspace("alex", "Test")
+    closed = await seeded.update_workspace(first.id, status="archived")
+
+    # The name is free again, so a new workspace of the same name takes it.
+    assert closed.slug == "test-2" and closed.status == "archived"
+    second = await seeded.create_workspace("alex", "Test")
+    assert second.slug == "test" and second.id != first.id
+    assert (await seeded.find_workspace_for("alex", "test")).id == second.id
+    # The closed one is still readable, by its id and at its new slug.
+    assert (await seeded.find_workspace_for("alex", first.id)).id == first.id
+    assert (await seeded.find_workspace_for("alex", "test-2")).id == first.id
+    assert (await seeded.find_workspace_for("alex", "alex/test-2")).id == first.id
+    # Another change of a closed workspace keeps the slug it has.
+    again = await seeded.update_workspace(first.id, status="archived", title="Test (old)")
+    assert again.slug == "test-2"
+
+    # A shared workspace releases its slug too: its create takes no number, so
+    # without this the name would stay refused for everyone.
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    assert (await seeded.update_workspace(shared.id, status="archived")).slug == "thanksgiving-2"
+    new_shared = await seeded.create_workspace("mia", "Thanksgiving", members=["alex"])
+    assert new_shared.slug == "thanksgiving"
+    assert (await seeded.find_workspace_for("mia", shared.id)).id == shared.id
+
+
 async def test_find_scopes_to_the_people_and_takes_a_slug_or_an_id(seeded) -> None:
     ws = await seeded.create_workspace("alex", "Trip")
     shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
