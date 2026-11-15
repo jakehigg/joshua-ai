@@ -1,5 +1,5 @@
 """Workspaces in the engine, offline: the session build, the block, the cap,
-RAG exclude, the delivery gate, the profile, and the three builtin tools.
+RAG exclude, the delivery gate, the profile, and the builtin tools.
 
 A fake repo stands in for Postgres and a fake SDK client for the model.
 """
@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from engine_fakes import (
+    BASE_CONFIG,
     FakeComposer,
     FakeRepo,
     FakeSDKClient,
@@ -33,6 +34,7 @@ from joshua_core.memory.models import KbChunk
 from joshua_core.push import SendReport
 from joshua_core.store.models import Channel, Conversation, Person, Workspace, WorkspaceItem
 from joshua_core.store.notify import NotifyPref, default_mode
+from joshua_shared import config as config_module
 from joshua_shared.inference import MODEL_TIER_KEYS, TOOL_SEARCH_KEY, TOOL_SEARCH_ON
 
 MCP = """
@@ -1337,10 +1339,11 @@ def test_a_shared_workspace_adds_notify_user_to_the_tools_of_a_workspace(
         "update_workspace_notes",
         "send_to_normal_chat",
         "notify_user",
+        "notify_person",
     }
 
 
-def test_the_server_has_three_tools_in_a_workspace_and_five_in_normal_chat(
+def test_the_server_has_four_tools_in_a_workspace_and_six_in_normal_chat(
     listed_tools: None,
 ) -> None:
     settings = make_settings()
@@ -1349,14 +1352,221 @@ def test_the_server_has_three_tools_in_a_workspace_and_five_in_normal_chat(
     normal = ws_tools.build_workspace_server(
         _deps(repo, Channel(id="cli:alex", channel_type="cli")), settings
     )
-    assert _names(in_ws) == {"add_to_workspace", "update_workspace_notes", "send_to_normal_chat"}
+    assert _names(in_ws) == {
+        "add_to_workspace",
+        "update_workspace_notes",
+        "send_to_normal_chat",
+        "notify_person",
+    }
     assert _names(normal) == {
         "add_to_workspace",
+        "notify_person",
         "send_to_workspace",
         "tell_workspace",
         "list_workspaces",
         "workspace_status",
     }
+
+
+# --- notify_person -------------------------------------------------------------------------------
+
+ROSTER = BASE_CONFIG + "  - id: sam\n    name: Sam\n    role: guest\n"
+
+
+def _roster(extra: str = "") -> Any:
+    """The settings of these tests: alex and mia are members, sam is a guest."""
+    return config_module.parse(ROSTER + extra, env={}, source="<test>")
+
+
+@pytest.fixture
+def no_notified() -> Any:
+    """``notify_person`` holds its ten minutes in a module-level map, so a test
+    starts with nobody notified."""
+    ws_tools.clear_notified()
+    yield
+    ws_tools.clear_notified()
+
+
+async def _notify_person(
+    repo: WsRepo,
+    *,
+    person: str = "mia",
+    text: str = "The installer called about tomorrow",
+    url: str | None = None,
+    person_id: str | None = "alex",
+    channel: Channel | None = None,
+    settings: Any = None,
+    now: datetime | None = MOMENT,
+    notify: Notifier | None = None,
+    deliver: Any = None,
+) -> dict:
+    """``notify_person`` as the agent calls it: alex writes the turn in a normal
+    chat and mia is the person it names."""
+    return await ws_tools.do_notify_person(
+        _deps(repo, channel or Channel(id="cli:alex", channel_type="cli"), person_id=person_id),
+        person=person,
+        text=text,
+        url=url,
+        settings=settings or _roster(),
+        deliver=deliver,
+        notify=notify,
+        now=now,
+    )
+
+
+def _mia_has_a_device() -> WsRepo:
+    repo = WsRepo(None)
+    repo.push_subscriptions.rows["mia"] = [SimpleNamespace(endpoint="https://push/1")]
+    return repo
+
+
+async def test_notify_person_reaches_a_phone_from_a_normal_chat(no_notified: None) -> None:
+    repo = _mia_has_a_device()
+    notifier = Notifier()
+
+    reply = await _notify_person(repo, notify=notifier, url="/wiki/recipes.md")
+
+    assert "Notified mia on their phone" in _text(reply)
+    person, notification = notifier.calls[0]
+    assert person == "mia"
+    assert notification.title == "Joshua"
+    assert notification.body == "The installer called about tomorrow"
+    assert notification.url == "/wiki/recipes.md"
+    assert notification.tag == ws_tools.NOTIFY_TAG
+
+
+async def test_notify_person_falls_back_to_the_normal_chat_of_a_person_with_no_device(
+    no_notified: None,
+) -> None:
+    repo = WsRepo(None)
+    repo.main = Conversation(id="m", channel_id="telegram:2", person_id="mia")
+    notifier = Notifier()
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    reply = await _notify_person(repo, notify=notifier, deliver=deliver)
+
+    assert "Notified mia in their normal chat" in _text(reply)
+    assert notifier.calls == []
+    assert repo.mains == ["mia"]
+    # The path is the app itself, so the message is the line and nothing else.
+    assert sent == [("telegram:2", "The installer called about tomorrow")]
+
+
+async def test_notify_person_puts_a_path_in_the_message_of_a_normal_chat(
+    no_notified: None,
+) -> None:
+    repo = WsRepo(None)
+    repo.main = Conversation(id="m", channel_id="telegram:2", person_id="mia")
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    await _notify_person(repo, url="/chat", deliver=deliver, text="Look at the recipe")
+
+    assert sent == [("telegram:2", "Look at the recipe\n\n/chat")]
+
+
+async def test_notify_person_sends_one_notification_per_person_in_ten_minutes(
+    no_notified: None,
+) -> None:
+    repo = _mia_has_a_device()
+    repo.push_subscriptions.rows["alex"] = [SimpleNamespace(endpoint="https://push/2")]
+    notifier = Notifier()
+
+    assert "Notified mia" in _text(await _notify_person(repo, notify=notifier))
+
+    held = await _notify_person(
+        repo, notify=notifier, text="And the roof?", now=MOMENT + timedelta(minutes=1)
+    )
+    assert "notified 1 minute(s) ago" in _text(held)
+    assert len(notifier.calls) == 1
+    # The limit is that person's own: another person is notified in the same
+    # minute.
+    assert "Notified alex" in _text(
+        await _notify_person(repo, person="alex", person_id="mia", notify=notifier)
+    )
+    later = await _notify_person(repo, notify=notifier, now=MOMENT + timedelta(minutes=11))
+    assert "Notified mia" in _text(later)
+    assert [p for p, _ in notifier.calls] == ["mia", "alex", "mia"]
+
+
+async def test_notify_person_takes_an_id_or_a_name_and_refuses_anybody_else(
+    no_notified: None,
+) -> None:
+    repo = _mia_has_a_device()
+    notifier = Notifier()
+
+    assert "Notified mia" in _text(await _notify_person(repo, person="MIA", notify=notifier))
+    ws_tools.clear_notified()
+    assert "Notified mia" in _text(await _notify_person(repo, person=" Mia ", notify=notifier))
+
+    nobody = await _notify_person(repo, person="lauren", notify=notifier)
+    assert "'lauren' is nobody here" in _text(nobody)
+    assert "Give the text" in _text(await _notify_person(repo, text="  "))
+    assert len(notifier.calls) == 2
+
+
+async def test_notify_person_refuses_an_ambiguous_name_and_names_the_candidates(
+    no_notified: None,
+) -> None:
+    """Two people called Lauren: the tool asks for an id rather than guessing."""
+    settings = _roster(
+        "  - id: lauren-k\n    name: Lauren\n    role: member\n"
+        "  - id: lauren-s\n    name: Lauren\n    role: member\n"
+    )
+    notifier = Notifier()
+    repo = WsRepo(None)
+    repo.push_subscriptions.rows["lauren-k"] = [SimpleNamespace(endpoint="https://push/3")]
+
+    reply = await _notify_person(repo, person="Lauren", settings=settings, notify=notifier)
+
+    assert "More than one person is called 'Lauren'" in _text(reply)
+    assert "Lauren (lauren-k), Lauren (lauren-s)" in _text(reply)
+    assert notifier.calls == []
+    # The id of one of them still reaches that one.
+    assert "Notified lauren-k" in _text(
+        await _notify_person(repo, person="lauren-k", settings=settings, notify=notifier)
+    )
+
+
+@pytest.mark.parametrize(
+    "url", ["https://elsewhere.example/page", "//elsewhere.example", "chat", "mailto:mia@x.test"]
+)
+async def test_notify_person_refuses_a_url_that_is_not_a_path_in_the_app(
+    no_notified: None, url: str
+) -> None:
+    notifier = Notifier()
+    reply = await _notify_person(_mia_has_a_device(), url=url, notify=notifier)
+    assert "must be a path inside Joshua" in _text(reply)
+    assert notifier.calls == []
+
+
+async def test_notify_person_says_so_when_nothing_reached_the_person(no_notified: None) -> None:
+    """Nothing reached them, so no stamp is kept and the next line tries again."""
+    repo = WsRepo(None)
+    assert "did not reach mia" in _text(await _notify_person(repo, deliver=None))
+    assert ws_tools._NOTIFIED == {}
+
+
+def test_notify_person_is_in_every_chat_of_a_member_and_in_none_of_a_guest(
+    listed_tools: None,
+) -> None:
+    settings = _roster()
+    normal = Channel(id="cli:alex", channel_type="cli")
+    for channel in (normal, _channel(), _shared_channel()):
+        deps = _deps(WsRepo(_shared_ws()), channel, person_id="alex")
+        assert "notify_person" in _names(ws_tools.build_workspace_server(deps, settings))
+    guest = _deps(WsRepo(_ws(owner="sam")), normal, person_id="sam")
+    assert "notify_person" not in _names(ws_tools.build_workspace_server(guest, settings))
+    # An event turn has no person, so it has nobody to send as.
+    nobody = _deps(WsRepo(_ws()), _channel(), person_id=None)
+    assert "notify_person" not in _names(ws_tools.build_workspace_server(nobody, settings))
 
 
 def test_register_wires_the_builtin_for_every_job() -> None:

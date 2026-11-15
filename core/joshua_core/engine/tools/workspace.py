@@ -1,5 +1,5 @@
 """In-process ``workspace`` tool server: collect things into a workspace, keep
-its notes, and send the person a message in normal chat.
+its notes, send the person a message in normal chat, and reach another person.
 
 ``add_to_workspace`` is in every chat. Inside a workspace thread it adds to the
 current workspace unless the call names another. In a normal chat it must name
@@ -19,13 +19,26 @@ Every tool acts for ``deps.person_id``, the person who wrote the turn: the
 workspaces they reach are their own and the shared ones they are in. A
 workspace they do not reach is never found.
 
-``notify_user`` is the one tool that reaches another person. Three guards are
+``notify_user`` and ``notify_person`` are the two tools that reach another
+person, and both send on one chain (``_deliver_notification``): every push
+subscription of that person, then their normal chat when no browser took it.
+
+``notify_user`` belongs to the thread of a shared workspace. Three guards are
 in the tool and not in the prompt: it never notifies the person who wrote the
 turn, it never notifies a person who has read the thread to its newest row,
 and it sends at most one notification per person per workspace in
 ``NOTIFY_QUIET_S``. A line inside that time folds into the notification
 already sent, which carries the tag of the workspace and opens this thread. The
 mode of the person (``store/notify.py``) governs the rest: ``off`` refuses.
+
+``notify_person`` is in every chat of a member: a normal chat, a personal
+workspace, and a shared one. It names anybody of the roster, not of a
+workspace, because Joshua decides somebody needs to know or a person asks him
+to tell somebody. A guest does not get the tool. One target person gets one
+notification from it in ``NOTIFY_QUIET_S``, held in ``_NOTIFIED``, this
+process's own map: a restart of core forgets the limit, which is a known and
+accepted cost of keeping a per-person limit out of ``notify_prefs``, which is
+keyed by person and workspace.
 """
 
 from __future__ import annotations
@@ -35,7 +48,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from joshua_shared.config import JoshuaConfig
+from joshua_shared.config import JoshuaConfig, Person, is_member
 from joshua_shared.item_url import check_item_url
 from joshua_shared.log import get_logger
 
@@ -73,6 +86,20 @@ NOTIFY_QUIET_S = 600
 # A notification is a knock on the door, not the message, so its body is one
 # short line. The thread holds the rest.
 NOTIFY_BODY_CHARS = 160
+
+# What ``notify_person`` says it is from, and the tag it carries, so a second
+# one replaces the first in the browser instead of stacking up.
+NOTIFY_TITLE = "Joshua"
+NOTIFY_TAG = "from-joshua"
+# Where a notification opens when the call names no path: the app itself.
+APP_ROOT = "/"
+
+# The moment each person was last notified by ``notify_person``, so one person
+# gets one of those in ``NOTIFY_QUIET_S``. The map is this process's own: a
+# restart of core forgets it and the next call goes out, which is cheaper than
+# a row per notification. It is keyed by person alone, because this tool names
+# a person and no workspace.
+_NOTIFIED: dict[str, datetime] = {}
 
 
 def _reply(text: str) -> dict[str, Any]:
@@ -198,15 +225,18 @@ async def do_update_workspace_notes(deps: ToolDeps, *, notes: str) -> dict[str, 
     return _reply("Notes updated.")
 
 
-def chat_link(settings: JoshuaConfig, workspace: Workspace) -> str:
-    """The address of a workspace in the viewer: the public address and the path,
-    or the path alone when ``workspaces.viewer_url`` is not set. The path names
-    the namespace of the workspace: ``shared`` when it is shared, its owner when
-    it is not."""
-    namespace = SHARED_NAMESPACE if workspace.shared else workspace.owner
-    path = f"/chat/w/{namespace}/{workspace.slug}"
+def app_link(settings: JoshuaConfig, path: str) -> str:
+    """The address of one path of the viewer: the public address and the path, or
+    the path alone when ``workspaces.viewer_url`` is not set."""
     base = settings.workspaces.viewer_url
     return f"{base.rstrip('/')}{path}" if base else path
+
+
+def chat_link(settings: JoshuaConfig, workspace: Workspace) -> str:
+    """The address of a workspace in the viewer. The path names the namespace of
+    the workspace: ``shared`` when it is shared, its owner when it is not."""
+    namespace = SHARED_NAMESPACE if workspace.shared else workspace.owner
+    return app_link(settings, f"/chat/w/{namespace}/{workspace.slug}")
 
 
 async def do_send_to_normal_chat(
@@ -308,7 +338,22 @@ async def do_notify_user(
             f"{target} was notified of this workspace {_minutes(moment - last)} minute(s) ago. "
             "This line folds into that notification, which opens this thread. Nothing was sent."
         )
-    reached, how = await _notify_one(deps, target, workspace, text, settings, deliver, notify)
+    link = chat_link(settings, workspace)
+    reached, how = await _deliver_notification(
+        deps,
+        target,
+        notification=Notification(
+            title=workspace.title,
+            body=_one_line(text, NOTIFY_BODY_CHARS),
+            url=link,
+            # The tag of the workspace, so its notifications collapse into the
+            # newest one instead of stacking up.
+            tag=workspace.slug,
+        ),
+        message=f"{text}\n\n{workspace.title}: {link}",
+        deliver=deliver,
+        notify=notify,
+    )
     if not reached:
         return _reply(f"The notification did not reach {target}. Say it in this thread as well.")
     await deps.repo.notify_prefs.mark_sent(target, workspace.id, mode=mode, at=now)
@@ -316,27 +361,21 @@ async def do_notify_user(
     return _reply(f"Notified {target} {how}.")
 
 
-async def _notify_one(
+async def _deliver_notification(
     deps: ToolDeps,
     target: str,
-    workspace: Workspace,
-    text: str,
-    settings: JoshuaConfig,
+    *,
+    notification: Notification,
+    message: str,
     deliver: Deliver | None,
     notify: Notify | None,
 ) -> tuple[bool, str]:
-    """Send one notification: the browsers of the person first, and their
-    normal chat when no browser of theirs took it. ``(reached, how)``."""
-    link = chat_link(settings, workspace)
+    """The one chain both notify tools send on: every push subscription of the
+    person first, and their normal chat when no browser of theirs took it.
+
+    ``(reached, how)``: ``how`` is the half-sentence the tool answers with.
+    """
     if notify is not None and await deps.repo.push_subscriptions.list_for(target):
-        notification = Notification(
-            title=workspace.title,
-            body=_one_line(text, NOTIFY_BODY_CHARS),
-            url=link,
-            # The tag of the workspace, so its notifications collapse into the
-            # newest one instead of stacking up.
-            tag=workspace.slug,
-        )
         report = await notify(target, notification)
         if report.sent:
             return True, "on their phone"
@@ -345,9 +384,98 @@ async def _notify_one(
     main = await deps.repo.main_conversation(target)
     if main is None:
         return False, ""
-    message = f"{text}\n\n{workspace.title}: {link}"
     sent = await deliver(main.last_channel_id or main.channel_id, message)
     return sent, "in their normal chat"
+
+
+def _person_named(settings: JoshuaConfig, name: str) -> tuple[Person | None, list[Person]]:
+    """``(person, candidates)``: the one person of the roster that ``name``
+    means, by id or by name, with no regard to case.
+
+    With no match the person is None and ``candidates`` is empty. With a name
+    two people share it is None and ``candidates`` lists them, so the tool can
+    ask which one.
+    """
+    wanted = (name or "").strip().casefold()
+    if not wanted:
+        return None, []
+    by_id = [person for person in settings.people if person.id.casefold() == wanted]
+    if by_id:
+        return by_id[0], []
+    by_name = [person for person in settings.people if person.name.strip().casefold() == wanted]
+    if len(by_name) == 1:
+        return by_name[0], []
+    return None, by_name
+
+
+def _app_path(url: str | None) -> str | None:
+    """The path a notification opens, inside the app: ``/`` by default. None for
+    anything else, an address of another site included: this tool sends people
+    to Joshua, and nowhere else."""
+    path = (url or "").strip() or APP_ROOT
+    if not path.startswith("/") or path.startswith("//"):
+        return None
+    return path
+
+
+async def do_notify_person(
+    deps: ToolDeps,
+    *,
+    person: str,
+    text: str,
+    url: str | None,
+    settings: JoshuaConfig,
+    deliver: Deliver | None,
+    notify: Notify | None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Reach one person of the roster, from any chat: their push subscriptions,
+    or their normal chat when no browser of theirs took it.
+
+    The guard is here and not in the prompt: one person gets one notification
+    from this tool in ``NOTIFY_QUIET_S``, whoever asked for it and whatever
+    chat it came from.
+    """
+    text = _message(text)
+    if not text:
+        return _reply("Give the text to send.")
+    target, candidates = _person_named(settings, person)
+    if target is None:
+        if candidates:
+            names = ", ".join(f"{p.name} ({p.id})" for p in candidates)
+            return _reply(f"More than one person is called '{person}'. Use an id: {names}.")
+        return _reply(f"'{person}' is nobody here. Use the id or the name of a person.")
+    path = _app_path(url)
+    if path is None:
+        return _reply("The url must be a path inside Joshua, as /chat or /wiki.")
+    moment = now or datetime.now(UTC)
+    last = _NOTIFIED.get(target.id)
+    if last is not None and moment - last < timedelta(seconds=NOTIFY_QUIET_S):
+        return _reply(
+            f"{target.id} was notified {_minutes(moment - last)} minute(s) ago. "
+            "Nothing was sent: say the rest where they will read it."
+        )
+    link = app_link(settings, path)
+    reached, how = await _deliver_notification(
+        deps,
+        target.id,
+        notification=Notification(
+            title=NOTIFY_TITLE, body=_one_line(text, NOTIFY_BODY_CHARS), url=link, tag=NOTIFY_TAG
+        ),
+        message=text if path == APP_ROOT else f"{text}\n\n{link}",
+        deliver=deliver,
+        notify=notify,
+    )
+    if not reached:
+        return _reply(f"The notification did not reach {target.id}. Tell the person who asked.")
+    _NOTIFIED[target.id] = moment
+    logger.info({"message": "person notified", "person": target.id, "tool": "notify_person"})
+    return _reply(f"Notified {target.id} {how}.")
+
+
+def clear_notified() -> None:
+    """Forget who was notified by ``notify_person``. A restart does the same."""
+    _NOTIFIED.clear()
 
 
 def _normal_chat(deps: ToolDeps) -> bool:
@@ -579,6 +707,28 @@ _NOTIFY_SCHEMA = {
     "required": ["person", "text"],
 }
 
+_NOTIFY_PERSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "person": {
+            "type": "string",
+            "description": "The id or the name of one person of this Joshua.",
+        },
+        "text": {
+            "type": "string",
+            "description": "One short line: what they need to know, in your own words.",
+        },
+        "url": {
+            "type": "string",
+            "description": (
+                "A path inside Joshua that the notification opens, as "
+                "/chat or /wiki/recipes. The app itself by default."
+            ),
+        },
+    },
+    "required": ["person", "text"],
+}
+
 
 def build_workspace_server(
     deps: ToolDeps,
@@ -595,6 +745,10 @@ def build_workspace_server(
     ``add_to_workspace`` and the four tools of normal chat. A shared (group)
     chat gets no server: the workspaces of one person do not belong in a chat
     that others read.
+
+    ``notify_person`` is in every one of those, for a member: the roster says
+    who the person of the turn is, and a guest does not get a tool that reaches
+    somebody else.
     """
     if not _in_workspace(deps) and deps.channel.session_mode != "per_person":
         return None
@@ -657,6 +811,27 @@ def build_workspace_server(
         )
 
     @tool(
+        "notify_person",
+        "Tell one person of this Joshua something now: a line on their phone, or in their "
+        "normal chat when they have no device. Use it when you decide somebody needs to "
+        "know (their plan changed, what they waited for arrived), or when a person asks you "
+        "to tell somebody ('tell Lauren to look at the recipe'). It is a knock on the door: "
+        "one short line, and a path that opens what it is about. One person gets one of "
+        "these in ten minutes, so send the thing that matters.",
+        _NOTIFY_PERSON_SCHEMA,
+    )
+    async def notify_person(args: dict[str, Any]) -> dict[str, Any]:
+        return await do_notify_person(
+            deps,
+            person=args.get("person", ""),
+            text=args.get("text", ""),
+            url=args.get("url") or None,
+            settings=settings,
+            deliver=deliver,
+            notify=notify,
+        )
+
+    @tool(
         "send_to_workspace",
         "Record something in one of the person's workspaces, without a turn: use it when "
         "what they said belongs to a workspace (a recipe for the dinner plans, a quote for "
@@ -702,6 +877,9 @@ def build_workspace_server(
         return await do_workspace_status(deps, workspace=args.get("workspace", ""), render=render)
 
     tools = [add_to_workspace]
+    person = settings.person(deps.person_id) if deps.person_id else None
+    if person is not None and is_member(person.role):
+        tools.append(notify_person)
     if _in_workspace(deps):
         tools += [update_workspace_notes, send_to_normal_chat]
         if _in_shared_workspace(deps):
@@ -717,8 +895,9 @@ def register(manager: Any, settings: JoshuaConfig, deliverer: Any = None, repo: 
     ``deliverer`` is core's ``Deliverer``. Without one, ``send_to_normal_chat``
     says it is not available. ``tell_workspace`` runs its turn through the
     manager, and ``workspace_status`` renders the block of ``manager``.
-    ``notify_user`` sends through core's push sender, which is a no-op while
-    push is off, and then falls back to the normal chat of the person.
+    ``notify_user`` and ``notify_person`` send through core's push sender, which
+    is a no-op while push is off, and then fall back to the normal chat of the
+    person.
     """
     deliver: Deliver | None = deliverer.deliver if deliverer is not None else None
     repo = repo or getattr(manager, "_repo", None)

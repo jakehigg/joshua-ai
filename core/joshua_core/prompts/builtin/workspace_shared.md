@@ -31,3 +31,9 @@ Two rules are the tool's own, so you need not keep them: it never notifies the
 person who wrote the turn, and one person gets one notification of this
 workspace in ten minutes. A line inside that time folds into the notification
 they already have, which opens this thread.
+
+`notify_person(person, text, url)` reaches anybody of this Joshua, in this
+workspace or not: use it when you decide somebody needs to know, or when a
+person asks you to tell somebody ("tell Lauren to look at the recipe"). Use
+`notify_user` for a person of this workspace, because its notification opens
+this thread. One person gets one `notify_person` in ten minutes.
