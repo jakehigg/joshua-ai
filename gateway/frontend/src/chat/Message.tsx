@@ -23,8 +23,14 @@
 // it waits, with a button to take it back.
 //
 // In the thread of a shared workspace a person row carries `who`, the name of
-// the person who wrote it. A small line above the bubble names them, once for
-// a run of messages from the same person (`showWho`, which the list decides).
+// the person who wrote it. The thread then reads like a group messaging app:
+// the signed-in person's own bubbles stay at the right (`mine`), every other
+// person's bubble stands at the left, and each writer keeps one bubble colour
+// of their own (`tone`). A small line above the bubble names them, once for a
+// run of messages from the same person (`showWho`); the same line marks a run
+// of Joshua's as Joshua. The list decides all three (MessageList.tsx). A
+// personal thread gets none of them, so it keeps the layout it has: the
+// person at the right, Joshua full width, and no name.
 
 import { memo, useEffect, useMemo, useState } from "react";
 import type { FileRef } from "../api/client";
@@ -34,6 +40,9 @@ import { ARTIFACT_INFO, SPEECH_INFO, splitFence } from "./blocks";
 import { ArtifactCard } from "./ArtifactCard";
 import { Markdown } from "./Markdown";
 import { cleanEvent, eventLinks, headline, isQuestion, questionPreview } from "./events";
+
+// What a Joshua row is called above its answer, in a shared thread.
+const JOSHUA = "Joshua";
 
 export const ELAPSED_FROM_S = 5;
 export const SLOW_FROM_S = 30;
@@ -160,8 +169,15 @@ interface Props {
   message: ChatMessage;
   canRetry: boolean;
   onRetry: (message: ChatMessage) => void;
-  /** Name the person above the bubble: the first message of their run. */
+  /** Name the writer above the bubble: the first message of their run. */
   showWho?: boolean;
+  /**
+   * The signed-in person wrote it, so the bubble stands at the right. A row
+   * of a personal thread, and a message this screen just sent, is theirs.
+   */
+  mine?: boolean;
+  /** The colour class of the writer's bubble in a shared thread (tone.ts). */
+  tone?: string;
 }
 
 function EventLine({ text }: { text: string }) {
@@ -212,7 +228,14 @@ function EventLine({ text }: { text: string }) {
   );
 }
 
-export const Message = memo(function Message({ message, canRetry, onRetry, showWho }: Props) {
+export const Message = memo(function Message({
+  message,
+  canRetry,
+  onRetry,
+  showWho,
+  mine = true,
+  tone = "",
+}: Props) {
   const isPerson = message.role === "person";
   const pending = message.state === "pending";
   const answer = useMemo(() => {
@@ -244,7 +267,9 @@ export const Message = memo(function Message({ message, canRetry, onRetry, showW
   );
 
   return (
-    <article className={`msg ${isPerson ? "msg-person" : "msg-joshua"}`}>
+    <article
+      className={`msg ${isPerson ? (mine ? "msg-person" : "msg-person msg-other") : "msg-joshua"}`}
+    >
       {isPerson ? (
         <>
           {showWho && message.who && <div className="msg-who">{message.who}</div>}
@@ -261,11 +286,12 @@ export const Message = memo(function Message({ message, canRetry, onRetry, showW
             </div>
           )}
           {(!hasFile || message.text !== NO_CAPTION) && message.text && (
-            <div className="bubble">{message.text}</div>
+            <div className={`bubble${tone ? ` ${tone}` : ""}`}>{message.text}</div>
           )}
         </>
       ) : (
         <div className="reading">
+          {showWho && <div className="msg-who">{JOSHUA}</div>}
           {failedRow ? (
             <div className="msg-error failed-row">{message.text}</div>
           ) : (

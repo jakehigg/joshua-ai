@@ -3,8 +3,14 @@
 // the list stays put and a "new" button appears instead. "Load earlier"
 // at the top adds the page before; the rows on screen do not move. A time
 // line stands before the first message of a run (see stamps.ts), and in a
-// shared workspace the name of the person stands above the first message of
-// their run (`who`).
+// shared workspace the name of the writer stands above the first message of
+// their run: the person (`who`), or Joshua.
+//
+// In a shared workspace the list also says which side a message takes and
+// which colour: the messages of the person who is signed in (`me`, their
+// name) stay at the right, and every other person's go to the left, each in
+// the colour of its writer (tone.ts). A personal thread passes no `me` and no
+// `shared`, and keeps the layout it has.
 //
 // `pending` is a turn that Joshua works on and this screen does not stream (a
 // message sent from another device): the list ends with the same working line,
@@ -18,15 +24,40 @@ import type { Pending } from "../api/client";
 import type { ChatMessage, HeldMessage } from "./store";
 import { Held, Message, Working } from "./Message";
 import { formatStamp, needsStamp } from "./stamps";
+import { toneOf } from "./tone";
 import type { LoadStatus } from "./useHistory";
 
 // Pixels from the bottom that still count as "at the bottom".
 const NEAR_BOTTOM_PX = 48;
 
-// A person row of a shared workspace names who wrote it. The name stands
-// above the first message of a run from that person, and not above the rest.
-function namesWho(before: ChatMessage | undefined, message: ChatMessage): boolean {
-  return !!message.who && (before?.role !== "person" || before.who !== message.who);
+// The signed-in person wrote this row. A row with no `who` is theirs: a
+// personal thread has none, and neither has a message this screen just sent.
+function mine(message: ChatMessage, me?: string): boolean {
+  return !message.who || message.who === me;
+}
+
+// A bubble at the left of a shared thread says who wrote it, above the first
+// message of the run and not above the rest: the name of the other person, or
+// Joshua. The person's own messages stand at the right and carry no name.
+function namesWho(
+  before: ChatMessage | undefined,
+  message: ChatMessage,
+  me: string | undefined,
+  shared: boolean,
+): boolean {
+  if (message.role === "joshua") return shared && before?.role !== "joshua";
+  if (message.role !== "person" || mine(message, me)) return false;
+  return before?.role !== "person" || before.who !== message.who;
+}
+
+// The colour of a bubble in a shared thread: the writer's own, and none at
+// all in a personal thread. A message this screen just sent carries no `who`
+// yet, so the person's own name stands in and the bubble keeps its colour
+// when the row of the transcript takes its place.
+function toneFor(message: ChatMessage, me: string | undefined, shared: boolean): string {
+  if (!shared || message.role !== "person") return "";
+  const who = message.who || me;
+  return who ? toneOf(who) : "";
 }
 
 function reducedMotion(): boolean {
@@ -49,6 +80,10 @@ interface Props {
   pending?: Pending | null;
   held?: HeldMessage[];
   onDropHeld?: (id: string) => void;
+  /** The name of the signed-in person: their own messages take the right. */
+  me?: string;
+  /** The thread of a shared workspace: several people write in it. */
+  shared?: boolean;
 }
 
 export function MessageList({
@@ -64,6 +99,8 @@ export function MessageList({
   pending = null,
   held = [],
   onDropHeld,
+  me,
+  shared = false,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -187,11 +224,20 @@ export function MessageList({
                 message={m}
                 canRetry={canRetry}
                 onRetry={onRetry}
-                showWho={namesWho(messages[i - 1], m)}
+                showWho={namesWho(messages[i - 1], m, me, shared)}
+                mine={mine(m, me)}
+                tone={toneFor(m, me, shared)}
               />
             </Fragment>
           ))}
-          {ghost && <Message message={ghost} canRetry={false} onRetry={onRetry} />}
+          {ghost && (
+            <Message
+              message={ghost}
+              canRetry={false}
+              onRetry={onRetry}
+              tone={toneFor(ghost, me, shared)}
+            />
+          )}
           {pending && (
             <div className="reading pending-turn">
               <Working since={pending.since} waiting={pending.state === "queued"} />

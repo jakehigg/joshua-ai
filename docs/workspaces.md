@@ -113,7 +113,14 @@ scheduled task, acts as the owner.
 
 **The screen.** The chat screen of a shared workspace loads the newest rows
 every 4 seconds while the tab shows, and every 30 seconds while it is hidden,
-so a message of another person shows with no reload.
+so a message of another person shows with no reload. The thread reads like a
+group messaging app: the messages of the person who is signed in stand at the
+right, every other person's and Joshua's at the left, and each writer keeps
+one bubble colour. A bubble at the left is named, once for a run of messages
+from the same writer: the person's name, or Joshua. The colour comes from the
+name `meta.speaker` holds, so every device agrees on it and nothing is
+stored; two people with the same display name share a colour, and a renamed
+person takes a new one. The screen of a personal workspace is unchanged.
 
 **What it writes.** A document that Joshua writes in a shared workspace goes to
 `documents/shared/<slug>.md`, where every member reads it. RAG skips the

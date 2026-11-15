@@ -221,6 +221,37 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   font-size: 0.75rem;
   line-height: 1.2;
 }
+/* The message of another person in the thread of a shared workspace: it
+   stands at the left, as Joshua's answers do, and the bubble turns its
+   corner the other way. The person's own messages keep the right. */
+.chat-screen .msg-other {
+  align-items: flex-start;
+}
+.chat-screen .msg-other .bubble {
+  border-bottom-right-radius: var(--j-radius);
+  border-bottom-left-radius: 4px;
+}
+/* One bubble colour for each writer of a shared thread (tone.ts picks it).
+   Each tone is a quiet wash over the dark ground, so every bubble keeps the
+   contrast of the plain one. */
+.chat-screen .bubble.tone-0 {
+  background: rgb(92 208 245 / 0.16);
+}
+.chat-screen .bubble.tone-1 {
+  background: rgb(94 230 154 / 0.14);
+}
+.chat-screen .bubble.tone-2 {
+  background: rgb(244 193 90 / 0.14);
+}
+.chat-screen .bubble.tone-3 {
+  background: rgb(199 146 234 / 0.18);
+}
+.chat-screen .bubble.tone-4 {
+  background: rgb(255 150 122 / 0.15);
+}
+.chat-screen .bubble.tone-5 {
+  background: rgb(130 170 255 / 0.18);
+}
 
 
 /* A time line before the first message of a run: centered, quiet, and always
@@ -1568,6 +1599,10 @@ html.vv-fit .chat-screen .ws-overlay {
   align-items: flex-end;
   gap: 4px;
   max-width: min(85%, 600px);
+}
+/* The file of another person's message, at the left with their bubble. */
+.chat-screen .msg-other .msg-media {
+  align-items: flex-start;
 }
 .chat-screen .thumb-link {
   display: block;

@@ -548,6 +548,85 @@ describe("the routes", () => {
     expect(asked).toContain("workspace=alex%2Fsolar");
   });
 
+  it("reads a shared thread as a group chat: own messages right, the others left and named", async () => {
+    const row = (id: number, role: "person" | "joshua", text: string, who?: string) => ({
+      id,
+      role,
+      text,
+      status: "ok",
+      at: "2026-01-01T10:00:00Z",
+      ...(who ? { who } : {}),
+    });
+    viewer({
+      "GET /api/v1/session": { person: { id: "mia", name: "Mia", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/shared%2Fthanksgiving": ws({
+        slug: "thanksgiving",
+        title: "Thanksgiving",
+        owner: "jake",
+        shared: true,
+        members: ["mia"],
+      }),
+      "GET /api/v1/workspaces": { workspaces: [] },
+      "GET /api/v1/workspaces/shared%2Fthanksgiving/items": { items: [] },
+      "GET /api/v1/chat/mia/history": {
+        messages: [
+          row(1, "person", "I'll bring pie", "Mia"),
+          row(2, "person", "the oven is mine", "Jake"),
+          row(3, "joshua", "Noted."),
+        ],
+        nextBefore: null,
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={["/chat/w/shared/thanksgiving"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("I'll bring pie");
+    const mine = screen.getByText("I'll bring pie").closest("article");
+    const other = screen.getByText("the oven is mine").closest("article");
+    expect(mine?.className).toBe("msg msg-person");
+    expect(other?.className).toBe("msg msg-person msg-other");
+    expect(within(other as HTMLElement).getByText("Jake").className).toBe("msg-who");
+    expect(mine?.querySelector(".msg-who")).toBeNull();
+    // Each writer has a colour of their own.
+    const tones = [mine, other].map((el) => el?.querySelector(".bubble")?.className);
+    expect(tones[0]).not.toBe(tones[1]);
+    // The answer is marked as Joshua's.
+    const names = [...document.querySelectorAll(".msg-who")].map((el) => el.textContent);
+    expect(names).toEqual(["Jake", "Joshua"]);
+  });
+
+  it("keeps the layout of a personal workspace: no name and no colour", async () => {
+    viewer({
+      "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/alex%2Fsolar": ws(),
+      "GET /api/v1/workspaces": { workspaces: [ws()] },
+      "GET /api/v1/workspaces/alex%2Fsolar/items": { items: [] },
+      "GET /api/v1/chat/alex/history": {
+        messages: [
+          { id: 1, role: "person", text: "How long?", status: "ok", at: "2026-01-01T10:00:00Z" },
+          { id: 2, role: "joshua", text: "Eleven years.", status: "ok", at: "2026-01-01T10:00:01Z" },
+        ],
+        nextBefore: null,
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={["/chat/w/alex/solar"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("How long?");
+    expect(screen.getByText("How long?").closest("article")?.className).toBe("msg msg-person");
+    expect(screen.getByText("How long?").className).toBe("bubble");
+    expect(document.querySelector(".msg-who")).toBeNull();
+    expect(document.querySelector(".msg-other")).toBeNull();
+  });
+
   it("sends a one-segment link to the two-segment address of its workspace", async () => {
     viewer({
       "GET /api/v1/session": { person: { id: "mia", name: "Mia", role: "member" }, sections: [] },

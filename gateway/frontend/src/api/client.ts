@@ -463,6 +463,8 @@ function historyMessage(raw: unknown): HistoryMessage | null {
   if (typeof m.turnId === "string") message.turnId = m.turnId;
   if (Array.isArray(m.tools)) message.tools = m.tools.filter((t): t is string => typeof t === "string");
   if (role === "person" && m.spoken === true) message.spoken = true;
+  // The thread of a shared workspace names who wrote a person row.
+  if (role === "person" && typeof m.who === "string" && m.who !== "") message.who = m.who;
   const files = fileRefs(m.attachments);
   if (files.length > 0) message.attachments = files;
   return message;

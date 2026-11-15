@@ -64,6 +64,57 @@ describe("MessageList", () => {
     expect(names).toEqual(["Mia", "Mia", "Jake"]);
   });
 
+  it("puts the signed-in person's messages at the right and the others at the left", () => {
+    const person = { role: "person" as const };
+    render(
+      <MessageList
+        messages={[
+          msg(1, { ...person, text: "I'll bring pie", who: "Mia" }),
+          msg(2, { ...person, text: "the oven is mine", who: "Jake" }),
+          msg(3, { text: "Noted." }),
+          msg(4, { ...person, text: "and cider", who: "Mia" }),
+        ]}
+        canRetry
+        onRetry={() => undefined}
+        me="Jake"
+        shared
+      />,
+    );
+    const sides = [...document.querySelectorAll("article.msg")].map((el) => el.className);
+    expect(sides).toEqual([
+      "msg msg-person msg-other",
+      "msg msg-person",
+      "msg msg-joshua",
+      "msg msg-person msg-other",
+    ]);
+    // Each writer at the left is named; the person's own message is not, and
+    // Joshua's answer is marked as Joshua.
+    const names = [...document.querySelectorAll(".msg-who")].map((el) => el.textContent);
+    expect(names).toEqual(["Mia", "Joshua", "Mia"]);
+    // Two people, two colours, and Mia keeps hers through the thread.
+    const tones = [...document.querySelectorAll(".bubble")].map((el) => el.className);
+    expect(new Set(tones).size).toBe(2);
+    expect(tones[0]).toBe(tones[2]);
+  });
+
+  it("keeps the layout of a personal thread: no name, no colour, all at the right", () => {
+    render(
+      <MessageList
+        messages={[
+          msg(1, { role: "person", text: "How long?" }),
+          msg(2, { text: "About eleven years." }),
+        ]}
+        canRetry
+        onRetry={() => undefined}
+        me="Jake"
+      />,
+    );
+    const sides = [...document.querySelectorAll("article.msg")].map((el) => el.className);
+    expect(sides).toEqual(["msg msg-person", "msg msg-joshua"]);
+    expect(document.querySelector(".msg-who")).toBeNull();
+    expect(document.querySelector(".bubble")?.className).toBe("bubble");
+  });
+
   it("shows the loading state and the load error with Retry", () => {
     const onReload = vi.fn();
     const { rerender } = render(<MessageList messages={[]} canRetry onRetry={() => undefined} status="loading" />);

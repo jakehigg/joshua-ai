@@ -30,6 +30,15 @@ with the images and the packaged chart, are at
 - The chat screen of a shared workspace shows the messages of the other
   people with no reload. It loads the newest rows every 4 seconds while the
   tab shows.
+- The thread of a shared workspace now reads like a group messaging app. Your
+  own messages stand at the right, everybody else's and Joshua's at the left,
+  each writer keeps a bubble colour of their own, and a bubble at the left
+  says who wrote it: the person's name, or Joshua. Before, every message sat
+  in one column with no author, and a thread with two people in it was hard
+  to follow. The colour comes from the name on the row, so every device
+  agrees on it and nothing new is stored; two people with the same display
+  name share a colour, and a renamed person takes a new one. A personal
+  workspace and the normal chat keep the layout they have.
 - When a new workspace or a change to one is refused, the dialog now shows
   why. For a server that a person cannot use, it names the person and the
   server, for example "Alex cannot use tasks", and says that a shared

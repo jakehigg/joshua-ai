@@ -42,6 +42,12 @@
 // (WorkspaceLink). Each finished turn reloads the items, because the turn may
 // have made some.
 //
+// The thread of a shared workspace reads like a group messaging app: the
+// messages of the person who is signed in stand at the right, every other
+// person's at the left, each writer in their own colour and named
+// (MessageList.tsx, Message.tsx). The session gives the name that says which
+// rows are theirs.
+//
 // On a phone the rail, the item list and the panel are sheets over the
 // conversation, and only one is open at a time: opening one closes the
 // others. A rail or item sheet has a dimmed backdrop, and a tap on it closes
@@ -105,6 +111,12 @@ function useToast(): [string | null, (message: string) => void] {
 
 interface ChatProps {
   person: string;
+  /**
+   * The name of the signed-in person, from the session. In the thread of a
+   * shared workspace it says which rows are theirs, so their own messages
+   * take the right of the list (MessageList.tsx).
+   */
+  me?: string;
   /** The slug sent to the turn and history calls; none is the main thread. */
   workspace?: string;
   /** The workspace on screen, for its header and item panel. */
@@ -113,7 +125,7 @@ interface ChatProps {
   workspaces: Workspaces;
 }
 
-function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
+function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const panels = usePanels();
@@ -382,6 +394,8 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
             pending={turn.running ? null : view.pending}
             held={turn.held}
             onDropHeld={turn.dropHeld}
+            me={me}
+            shared={ws?.shared ?? false}
           />
           {draft && (
             <div className="draft-banner" role="alert">
@@ -486,14 +500,18 @@ export function ChatPage({ workspace }: { workspace?: string } = {}) {
   );
 }
 
-// The workspace a ref names, and who is signed in. `null` while it loads.
+// The workspace a ref names, and who is signed in: their id and their name,
+// the name the thread of a shared workspace shows on a row. `null` while it
+// loads.
 function useWorkspaceOf(reference: string): {
   person: string;
+  name: string;
   ws: Workspace | null;
   setWs: (w: Workspace) => void;
   error: string;
 } {
   const [person, setPerson] = useState("");
+  const [name, setName] = useState("");
   const [ws, setWs] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
 
@@ -505,6 +523,7 @@ function useWorkspaceOf(reference: string): {
       .then(([session, found]) => {
         if (!live) return;
         setPerson(session.person.id);
+        setName(session.person.name);
         setWs(found);
       })
       .catch((exc: unknown) => {
@@ -523,7 +542,7 @@ function useWorkspaceOf(reference: string): {
     };
   }, [reference]);
 
-  return { person, ws, setWs, error };
+  return { person, name, ws, setWs, error };
 }
 
 function WorkspaceError({ text }: { text: string }) {
@@ -545,7 +564,7 @@ function WorkspaceError({ text }: { text: string }) {
 export function WorkspacePage() {
   const { space = "", slug = "" } = useParams();
   const workspaces = useWorkspaces();
-  const { person, ws, setWs, error } = useWorkspaceOf(`${space}/${slug}`);
+  const { person, name, ws, setWs, error } = useWorkspaceOf(`${space}/${slug}`);
 
   if (error !== "") {
     return <WorkspaceError text={error} />;
@@ -562,6 +581,7 @@ export function WorkspacePage() {
       <Chat
         key={ws.id}
         person={person}
+        me={name}
         workspace={refOf(ws)}
         ws={ws}
         onWs={setWs}
