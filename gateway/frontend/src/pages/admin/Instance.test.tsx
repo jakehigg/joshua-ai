@@ -17,11 +17,12 @@ function session(role: string): Session {
   };
 }
 
-/** A plain setting that is written, and a secret that is not. */
+/** The four push settings: two plain ones, a secret, and the switch. */
 const PUBLIC_KEY: AdminSetting = {
   key: "push.vapid_public_key",
   label: "VAPID public key",
   hint: "The browser subscribes with this key.",
+  kind: "text",
   is_secret: false,
   is_set: true,
   value: "a-public-key",
@@ -32,9 +33,32 @@ const PRIVATE_KEY: AdminSetting = {
   key: "push.vapid_private_key",
   label: "VAPID private key",
   hint: "",
+  kind: "secret",
   is_secret: true,
   is_set: false,
   value: null,
+  updated_at: null,
+  updated_by: null,
+};
+const SUBJECT: AdminSetting = {
+  key: "push.vapid_subject",
+  label: "VAPID subject",
+  hint: "",
+  kind: "text",
+  is_secret: false,
+  is_set: true,
+  value: "mailto:mira@example.test",
+  updated_at: null,
+  updated_by: null,
+};
+const ENABLED: AdminSetting = {
+  key: "push.enabled",
+  label: "Push notifications on",
+  hint: "Turn this on once the three keys above are set.",
+  kind: "bool",
+  is_secret: false,
+  is_set: false,
+  value: "",
   updated_at: null,
   updated_by: null,
 };
@@ -44,7 +68,15 @@ function answer(...settings: AdminSetting[]): AdminSettings {
   return { groups: [{ prefix: "push", label: "Push notifications", settings }] };
 }
 
-const SETTINGS = answer(PUBLIC_KEY, PRIVATE_KEY);
+const SETTINGS = answer(PUBLIC_KEY, PRIVATE_KEY, SUBJECT, ENABLED);
+/** The same four, with the private key stored and push on. */
+const WORKING = answer(PUBLIC_KEY, { ...PRIVATE_KEY, is_set: true }, SUBJECT, {
+  ...ENABLED,
+  is_set: true,
+  value: "true",
+});
+/** The four with the private key stored, so the switch is the step that is left. */
+const READY = answer(PUBLIC_KEY, { ...PRIVATE_KEY, is_set: true }, SUBJECT, ENABLED);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -120,7 +152,73 @@ describe("the admin Instance section", () => {
     expect(within(form("VAPID private key")).getByText(SECRET_NOT_SET)).toBeDefined();
     // No field at all until the owner asks to write one.
     expect(input("push.vapid_private_key")).toBeNull();
-    expect(within(form("VAPID private key")).getByRole("button", { name: "Set" })).toBeDefined();
+    // The step the owner has not taken: the primary button, and it says what
+    // it sets. A grey "Set" under a hint is what nobody found.
+    const button = within(form("VAPID private key")).getByRole("button", {
+      name: "Set the private key",
+    });
+    expect(button.className).toContain("primary");
+  });
+
+  it("says what is still to do, and links the docs", async () => {
+    stubRoutes("owner");
+
+    app();
+
+    expect(await screen.findByText("Push is off: the private key is not set.")).toBeDefined();
+    expect(screen.getByRole("link", { name: "notifications.md" }).getAttribute("href")).toEqual(
+      "/wiki/joshua-docs/notifications.md",
+    );
+  });
+
+  it("turns push on with one tap of the checkbox", async () => {
+    const sent = stubRoutes("owner", READY);
+
+    app();
+
+    const box = (await screen.findByLabelText("Push notifications on")) as HTMLInputElement;
+    expect(box.type).toEqual("checkbox");
+    expect(box.checked).toEqual(false);
+    fireEvent.click(box);
+
+    await waitFor(() =>
+      expect(sent).toEqual([
+        { path: "/api/v1/admin/settings", body: { key: "push.enabled", value: "true" } },
+      ]),
+    );
+  });
+
+  it("turns push off again, and says that it was on", async () => {
+    const sent = stubRoutes("owner", WORKING);
+
+    app();
+
+    const line = "The three keys are set and push is on. Each person turns their own devices on.";
+    expect(await screen.findByText(line)).toBeDefined();
+    const box = screen.getByLabelText("Push notifications on") as HTMLInputElement;
+    expect(box.checked).toEqual(true);
+    fireEvent.click(box);
+
+    await waitFor(() =>
+      expect(sent).toEqual([
+        { path: "/api/v1/admin/settings", body: { key: "push.enabled", value: "false" } },
+      ]),
+    );
+  });
+
+  it("refuses a subject that is no mailto: and no https: address", async () => {
+    const sent = stubRoutes("owner");
+
+    app();
+
+    expect(await screen.findByText("VAPID subject")).toBeDefined();
+    const field = input("push.vapid_subject") as HTMLInputElement;
+    expect(field.placeholder).toEqual("mailto:you@example.com");
+    fireEvent.change(field, { target: { value: "mira@example.test" } });
+    fireEvent.click(within(form("VAPID subject")).getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/must start with mailto: or https:\/\//)).toBeDefined();
+    expect(sent).toEqual([]);
   });
 
   it("writes a plain setting", async () => {
@@ -176,7 +274,7 @@ describe("the admin Instance section", () => {
 
     expect(await screen.findByText("VAPID private key")).toBeDefined();
     const secret = within(form("VAPID private key"));
-    fireEvent.click(secret.getByRole("button", { name: "Set" }));
+    fireEvent.click(secret.getByRole("button", { name: "Set the private key" }));
     fireEvent.change(input("push.vapid_private_key") as HTMLInputElement, {
       target: { value: "a new private key" },
     });
