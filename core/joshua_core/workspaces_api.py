@@ -36,6 +36,11 @@ checked before the body is read. A ``person`` that is not a member of
   theirs alone, so in a shared workspace every other person keeps the count
   they have. The list route gives each workspace the ``unread`` count of that
   person: the rows of its thread after their mark.
+- ``GET`` and ``POST /v1/workspaces/{slug}/notify`` read and write the notify
+  mode of that person in that workspace (``off``, ``decide``, ``all``), which
+  governs ``notify_user``. The mode is theirs alone. A person with no row of
+  their own has the default: ``decide`` in a shared workspace and ``off`` in a
+  personal one.
 - ``POST /v1/workspaces/by-id/{id}/items`` is for the gateway, which records
   the items of a tool call from a workspace. It takes the id of the workspace
   and no ``person``: the caller is trusted, and the workspace is the one of the
@@ -69,6 +74,7 @@ from joshua_core.store.models import (
     Workspace,
     WorkspaceItem,
 )
+from joshua_core.store.notify import NOTIFY_MODES, default_mode
 from joshua_core.store.repo import SHARED_NAMESPACE, SlugTaken
 
 logger = get_logger("workspaces_api")
@@ -81,6 +87,7 @@ WORKSPACES_PATH = "/v1/workspaces"
 WORKSPACE_REF_PATH = WORKSPACES_PATH + "/{slug:path}"
 
 Notify = Literal["none", "questions", "questions+finishes"]
+NotifyMode = Literal["off", "decide", "all"]
 Status = Literal["active", "paused", "archived"]
 Kind = Literal[
     "document",
@@ -96,8 +103,9 @@ Kind = Literal[
     "file",
 ]
 
-# The two lists above and the store's lists must stay the same.
+# The lists above and the store's lists must stay the same.
 assert Notify.__args__ == WORKSPACE_NOTIFY  # type: ignore[attr-defined]
+assert NotifyMode.__args__ == NOTIFY_MODES  # type: ignore[attr-defined]
 assert Status.__args__ == WORKSPACE_STATUSES  # type: ignore[attr-defined]
 assert Kind.__args__ == WORKSPACE_ITEM_KINDS  # type: ignore[attr-defined]
 
@@ -154,6 +162,12 @@ class ReadBody(_Body):
     """How far a person has read a thread: the id of a transcript row."""
 
     turn_id: int = Field(ge=0)
+
+
+class NotifyModeBody(_Body):
+    """When Joshua may notify this person of this workspace."""
+
+    mode: NotifyMode
 
 
 def _authorize(request: Request) -> tuple[JSONResponse | None, str | None]:
@@ -532,6 +546,35 @@ def build_workspaces_router() -> APIRouter:
                 "unread": unread.get(conversation.id, 0),
             }
         )
+
+    @router.get(WORKSPACE_REF_PATH + "/notify")
+    async def get_notify_mode(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        """The notify mode of this person in this workspace, and the default
+        when they have no row of their own."""
+        denied, person_id, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None and person_id is not None
+        pref = await request.app.state.ctx.repo.notify_prefs.get(person_id, workspace.id)
+        default = default_mode(workspace.shared)
+        return JSONResponse({"mode": pref.mode if pref else default, "default": default})
+
+    @router.post(WORKSPACE_REF_PATH + "/notify")
+    async def set_notify_mode(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        """Write the notify mode of this person in this workspace. It is theirs
+        alone: nobody sets the mode of another person."""
+        denied, person_id, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None and person_id is not None
+        try:
+            body = NotifyModeBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        pref = await request.app.state.ctx.repo.notify_prefs.set_mode(
+            person_id, workspace.id, body.mode
+        )
+        return JSONResponse({"mode": pref.mode, "default": default_mode(workspace.shared)})
 
     @router.get(WORKSPACE_REF_PATH)
     async def get_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]

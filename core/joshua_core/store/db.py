@@ -263,6 +263,23 @@ CREATE TABLE IF NOT EXISTS workspace_items (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_workspace_items_ref
     ON workspace_items (workspace_id, kind, ref);
 
+-- When Joshua may reach one person of one workspace (see store/notify.py).
+-- `mode`: 'off' never, 'decide' when the thread needs them, 'all' on every
+-- turn another person writes. A person with no row takes the default of the
+-- workspace: 'decide' in a shared one, 'off' in a personal one, so this table
+-- is empty until somebody changes a mode. `last_notified_at` is the
+-- ten-minute guard of `notify_user`: one notification per person per
+-- workspace in that time.
+CREATE TABLE IF NOT EXISTS notify_prefs (
+    person_id        TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    workspace_id     UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    mode             TEXT NOT NULL DEFAULT 'decide'
+                     CHECK (mode IN ('off', 'decide', 'all')),
+    last_notified_at TIMESTAMPTZ,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (person_id, workspace_id)
+);
+
 -- The secret of a person, for the sign-in of the viewer (see joshua_core.auth_api).
 -- Only the bcrypt hash is stored, and no route ever gives it back. A hard
 -- delete of a person takes the row with it.

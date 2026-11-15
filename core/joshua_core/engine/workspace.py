@@ -25,6 +25,7 @@ from joshua_shared.inference import (
 from joshua_shared.log import get_logger
 
 from joshua_core.store.models import Workspace, WorkspaceItem
+from joshua_core.store.notify import default_mode
 from joshua_core.store.repo import (
     FROM_CHAT_SOURCE,
     SHARED_NAMESPACE,
@@ -151,6 +152,15 @@ def _people_line(workspace: Workspace) -> str:
     return f"People: {people}"
 
 
+def _notify_line(workspace: Workspace, modes: dict[str, str]) -> str:
+    """The notify mode of each person of a shared workspace: what
+    ``notify_user`` may do for them."""
+    people = ", ".join(
+        f"{person} {modes.get(person) or default_mode(True)}" for person in workspace.people
+    )
+    return f"Notify each person: {people}"
+
+
 def render_block(
     workspace: Workspace,
     items: list[WorkspaceItem],
@@ -160,6 +170,7 @@ def render_block(
     recent: list[str] | None = None,
     extra: list[str] | None = None,
     handoff: str | None = None,
+    notify_modes: dict[str, str] | None = None,
 ) -> str:
     """The workspace block as text.
 
@@ -170,7 +181,9 @@ def render_block(
     the last rows of the thread, and the line that points at ``history``.
     ``chat_rows`` holds the text of the rows that normal chat sent to the
     thread and that no block has shown. ``extra`` holds the text of the
-    sections that ``add_section`` registers.
+    sections that ``add_section`` registers. ``notify_modes`` is the notify
+    mode of each person of a shared workspace, which only such a workspace
+    has.
     """
     lines = [f"[Workspace: {workspace.title} ({workspace.slug})]"]
     if workspace.goal:
@@ -178,6 +191,8 @@ def render_block(
     if workspace.shared:
         lines.append(_people_line(workspace))
     lines.append(f"Notify: {workspace.notify}")
+    if workspace.shared:
+        lines.append(_notify_line(workspace, notify_modes or {}))
     if workspace.notes:
         lines += ["Notes:", workspace.notes]
     if items:
@@ -250,6 +265,7 @@ class WorkspaceBlock:
                 continue
             if text:
                 extra.append(text)
+        modes = await self._notify_modes(workspace)
         chat_rows = await self._repo.unseen_chat_rows(conversation_id) if conversation_id else []
         if (unseen or chat_rows) and mark_seen is not None:
             mark_seen(unseen, [r["id"] for r in chat_rows])
@@ -261,7 +277,17 @@ class WorkspaceBlock:
             recent=recent,
             extra=extra,
             handoff=handoff,
+            notify_modes=modes,
         )
+
+    async def _notify_modes(self, workspace: Workspace) -> dict[str, str]:
+        """The notify mode of each person of a shared workspace, the default
+        of a person with no row of their own. A personal workspace has
+        nobody else to notify, so it gets none."""
+        if not workspace.shared:
+            return {}
+        rows = await self._repo.notify_prefs.list_for(workspace.id)
+        return {row.person_id: row.mode for row in rows}
 
     async def __call__(self, ctx: Any) -> str | None:
         if ctx.channel.channel_type != WORKSPACE_CHANNEL_TYPE:

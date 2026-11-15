@@ -7,6 +7,7 @@ A fake repo stands in for Postgres and a fake SDK client for the model.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,7 +30,9 @@ from joshua_core.engine.tools import workspace as ws_tools
 from joshua_core.engine.types import HANDOFF_PROMPT
 from joshua_core.memory import embed as embed_module
 from joshua_core.memory.models import KbChunk
+from joshua_core.push import SendReport
 from joshua_core.store.models import Channel, Conversation, Person, Workspace, WorkspaceItem
+from joshua_core.store.notify import NotifyPref, default_mode
 from joshua_shared.inference import MODEL_TIER_KEYS, TOOL_SEARCH_KEY, TOOL_SEARCH_ON
 
 MCP = """
@@ -91,11 +94,55 @@ def _shared_channel() -> Channel:
     )
 
 
+class FakeNotifyPrefs:
+    """``repo.notify_prefs`` in a dict, keyed by (person, workspace)."""
+
+    def __init__(self) -> None:
+        self.rows: dict[tuple[str, str], NotifyPref] = {}
+
+    async def get(self, person_id: str, workspace_id: str) -> NotifyPref | None:
+        return self.rows.get((person_id, workspace_id))
+
+    async def list_for(self, workspace_id: str) -> list[NotifyPref]:
+        return [row for row in self.rows.values() if row.workspace_id == workspace_id]
+
+    async def set_mode(self, person_id: str, workspace_id: str, mode: str) -> NotifyPref:
+        row = NotifyPref(person_id=person_id, workspace_id=workspace_id, mode=mode)
+        self.rows[(person_id, workspace_id)] = row
+        return row
+
+    async def mark_sent(
+        self, person_id: str, workspace_id: str, *, mode: str = "decide", at=None
+    ) -> NotifyPref:
+        row = NotifyPref(
+            person_id=person_id,
+            workspace_id=workspace_id,
+            mode=mode,
+            last_notified_at=at or datetime.now(UTC),
+        )
+        self.rows[(person_id, workspace_id)] = row
+        return row
+
+
+class FakePushSubscriptions:
+    """``repo.push_subscriptions``: the endpoints of each person."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, list[Any]] = {}
+
+    async def list_for(self, person_id: str) -> list[Any]:
+        return list(self.rows.get(person_id, []))
+
+
 class WsRepo(FakeRepo):
     """The fake repo with the workspace calls the engine makes."""
 
     def __init__(self, workspace: Workspace | None = None, items=None) -> None:
         super().__init__()
+        self.notify_prefs = FakeNotifyPrefs()
+        self.push_subscriptions = FakePushSubscriptions()
+        # The rows of each thread that a person has not read, by person.
+        self.unread: dict[str, int] = {}
         self.workspace = workspace
         self.items: list[WorkspaceItem] = list(items or [])
         self.tail: list[dict[str, Any]] = []
@@ -157,6 +204,13 @@ class WsRepo(FakeRepo):
     async def main_conversation(self, person_id: str):
         self.mains.append(person_id)
         return self.main
+
+    async def unread_counts(self, person_id: str, conversation_ids):
+        """Every thread holds the same count for one person: the fakes have
+        one thread. A person with no entry has one row unread, as a person who
+        is not reading the thread does."""
+        count = self.unread.get(person_id, 1)
+        return {str(i): count for i in conversation_ids} if count else {}
 
     async def unseen_chat_rows(self, conversation_id: str):
         return [r for r in self.chat_rows if not r.get("seen")]
@@ -1086,12 +1140,204 @@ async def test_the_tools_of_a_shared_workspace_act_for_each_of_its_people() -> N
     assert len(repo.added) == 3 and repo.notes == ["n"] * 3
 
 
-def test_a_shared_workspace_keeps_the_three_tools_of_a_workspace(listed_tools: None) -> None:
+# --- notify_user ---------------------------------------------------------------------------------
+
+# The clock of the notify tests: every one of them passes `now`, so the
+# ten-minute guard is tested with no wait.
+MOMENT = datetime(2026, 3, 1, 9, 0, tzinfo=UTC)
+
+
+class Notifier:
+    """``push.send_to_person`` in a list: one report for one notification."""
+
+    def __init__(self, sent: int = 1) -> None:
+        self.sent = sent
+        self.calls: list[tuple[str, Any]] = []
+
+    async def __call__(self, person_id: str, notification: Any) -> SendReport:
+        self.calls.append((person_id, notification))
+        return SendReport(sent=self.sent)
+
+
+async def _notify(
+    repo: WsRepo,
+    *,
+    person: str = "alex",
+    text: str = "Which quote do we take?",
+    person_id: str | None = "mia",
+    now: datetime | None = MOMENT,
+    notify: Notifier | None = None,
+    deliver: Any = None,
+    channel: Channel | None = None,
+) -> dict:
+    """``notify_user`` as the agent calls it: mia writes the turn and alex is
+    the person it asks about."""
+    return await ws_tools.do_notify_user(
+        _deps(repo, channel or _shared_channel(), person_id=person_id),
+        person=person,
+        text=text,
+        settings=make_settings(),
+        deliver=deliver,
+        notify=notify,
+        now=now,
+    )
+
+
+def _with_a_device() -> WsRepo:
+    repo = WsRepo(_shared_ws())
+    repo.push_subscriptions.rows["alex"] = [SimpleNamespace(endpoint="https://push/1")]
+    return repo
+
+
+async def test_notify_user_reaches_the_person_once_and_a_later_line_folds() -> None:
+    """One question to alex notifies them once. A line a minute later folds
+    into the notification they have, and one eleven minutes later is new."""
+    repo = _with_a_device()
+    notifier = Notifier()
+
+    first = await _notify(repo, notify=notifier)
+    assert "Notified alex on their phone" in _text(first)
+    person, notification = notifier.calls[0]
+    assert person == "alex"
+    assert notification.title == "Solar install"
+    assert notification.body == "Which quote do we take?"
+    assert notification.url == "/chat/w/shared/solar"
+    # The tag of the workspace: the browser replaces the older line with this one.
+    assert notification.tag == "solar"
+    assert repo.notify_prefs.rows[("alex", WS_ID)].last_notified_at == MOMENT
+
+    folded = await _notify(
+        repo, text="And the roof?", notify=notifier, now=MOMENT + timedelta(minutes=1)
+    )
+    assert "folds into that notification" in _text(folded)
+    assert len(notifier.calls) == 1
+
+    later = await _notify(
+        repo, text="The installer called", notify=notifier, now=MOMENT + timedelta(minutes=11)
+    )
+    assert "Notified alex" in _text(later)
+    assert [n.tag for _, n in notifier.calls] == ["solar", "solar"]
+    assert repo.notify_prefs.rows[("alex", WS_ID)].last_notified_at == MOMENT + timedelta(
+        minutes=11
+    )
+
+
+async def test_notify_user_falls_back_to_the_normal_chat_of_a_person_with_no_device() -> None:
+    repo = WsRepo(_shared_ws())
+    repo.main = Conversation(id="m", channel_id="telegram:1", person_id="alex")
+    notifier = Notifier()
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    reply = await _notify(repo, notify=notifier, deliver=deliver)
+
+    assert "Notified alex in their normal chat" in _text(reply)
+    assert notifier.calls == []
+    assert repo.mains == ["alex"]
+    assert sent == [
+        ("telegram:1", "Which quote do we take?\n\nSolar install: /chat/w/shared/solar")
+    ]
+
+
+async def test_notify_user_says_so_when_nothing_reached_the_person() -> None:
+    """A person with no device and no normal chat keeps no send stamp, so the
+    next line tries again."""
+    repo = WsRepo(_shared_ws())
+
+    async def deliver(target: str, text: str) -> bool:
+        return False
+
+    assert "did not reach alex" in _text(await _notify(repo, deliver=deliver))
+    assert "did not reach alex" in _text(await _notify(repo, deliver=None))
+    assert repo.notify_prefs.rows == {}
+
+
+async def test_notify_user_never_notifies_the_person_who_wrote_the_turn() -> None:
+    repo = _with_a_device()
+    notifier = Notifier()
+
+    reply = await _notify(repo, person="alex", person_id="alex", notify=notifier)
+
+    assert "alex wrote this turn" in _text(reply)
+    assert notifier.calls == [] and repo.notify_prefs.rows == {}
+
+
+async def test_notify_user_is_silent_for_a_person_who_is_reading_the_thread() -> None:
+    """Their ``last_read_turn_id`` is the newest turn, so they have it in front
+    of them."""
+    repo = _with_a_device()
+    repo.unread["alex"] = 0
+    notifier = Notifier()
+
+    reply = await _notify(repo, notify=notifier)
+
+    assert "read this thread to its newest row" in _text(reply)
+    assert notifier.calls == [] and repo.notify_prefs.rows == {}
+
+
+async def test_notify_user_takes_a_roster_name_and_refuses_anybody_else() -> None:
+    repo = _with_a_device()
+    notifier = Notifier()
+
+    assert "Notified alex" in _text(await _notify(repo, person="ALEX", notify=notifier))
+
+    outside = await _notify(repo, person="sam", notify=notifier)
+    assert "'sam' is not in this workspace" in _text(outside)
+    assert "alex, mia" in _text(outside)
+    assert len(notifier.calls) == 1
+
+
+async def test_notify_user_is_not_for_a_personal_workspace() -> None:
+    """The builder withholds the tool there; the handler says so as well."""
+    repo = _with_a_device()
+    assert default_mode(False) == "off"
+    reply = await _notify(repo, person="alex", person_id=None, channel=_channel())
+    assert "for a shared workspace" in _text(reply)
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("off", "Notifications are off for alex"),
+        ("decide", "Notified alex"),
+        ("all", "Notified alex"),
+    ],
+)
+async def test_notify_user_follows_the_mode_of_the_person(mode: str, expected: str) -> None:
+    repo = _with_a_device()
+    notifier = Notifier()
+    await repo.notify_prefs.set_mode("alex", WS_ID, mode)
+
+    reply = await _notify(repo, notify=notifier)
+
+    assert expected in _text(reply)
+    assert len(notifier.calls) == (0 if mode == "off" else 1)
+    # A send keeps the mode of the person: only the control changes it.
+    assert repo.notify_prefs.rows[("alex", WS_ID)].mode == mode
+
+
+async def test_notify_user_needs_text_and_a_workspace_row() -> None:
+    repo = _with_a_device()
+    assert "Give the text" in _text(await _notify(repo, text="  "))
+    assert "was not found" in _text(await _notify(WsRepo(None)))
+
+
+def test_a_shared_workspace_adds_notify_user_to_the_tools_of_a_workspace(
+    listed_tools: None,
+) -> None:
     """The builder declines a shared chat that is not a workspace, not a shared
-    workspace."""
+    workspace, and a shared workspace is the one place ``notify_user`` is in."""
     deps = _deps(WsRepo(_shared_ws()), _shared_channel(), person_id="mia")
     server = ws_tools.build_workspace_server(deps, make_settings())
-    assert _names(server) == {"add_to_workspace", "update_workspace_notes", "send_to_normal_chat"}
+    assert _names(server) == {
+        "add_to_workspace",
+        "update_workspace_notes",
+        "send_to_normal_chat",
+        "notify_user",
+    }
 
 
 def test_the_server_has_three_tools_in_a_workspace_and_five_in_normal_chat(
