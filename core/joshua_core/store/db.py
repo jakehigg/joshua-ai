@@ -272,6 +272,20 @@ CREATE TABLE IF NOT EXISTS auth_secret (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The settings of the instance, one row per setting (see store/settings.py).
+-- `key` is namespaced by a dotted prefix, such as `push.vapid_public_key`.
+-- `value` holds the text of a plain setting, and the ciphertext of a secret
+-- one: `is_secret` says which, and no route ever answers a secret value.
+-- `updated_by` is the person who wrote it last, or NULL for server code.
+-- Nothing reads this table until a row exists.
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL DEFAULT '',
+    is_secret  BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by TEXT
+);
+
 -- The marker of the one-time import of the viewer passwords into auth_secret.
 -- This schema has no key/value or meta table, so the import gets this small
 -- one of its own: one row, the id of the import.

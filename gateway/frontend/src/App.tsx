@@ -220,6 +220,14 @@ export default function App() {
             </OwnerOnly>
           }
         />
+        <Route
+          path="/admin/instance"
+          element={
+            <OwnerOnly>
+              <Admin />
+            </OwnerOnly>
+          }
+        />
       </Routes>
     </SignedIn>
   );

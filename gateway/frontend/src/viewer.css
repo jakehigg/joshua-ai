@@ -297,6 +297,9 @@ button.j-nav-item {
 .v-user-nosecret { color: var(--j-bad); }
 .v-user-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0; }
 
+/* one setting of the Instance section: the label over the field, then the save */
+.v-setting { display: flex; flex-direction: column; gap: 6px; margin: 0; max-width: 32rem; }
+
 /* the add dialog, over the page */
 .v-admin-overlay {
   position: fixed; inset: 0; z-index: 50;

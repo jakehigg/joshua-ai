@@ -768,6 +768,7 @@ source = { editable = "core" }
 dependencies = [
     { name = "bcrypt" },
     { name = "claude-agent-sdk" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "fastembed" },
     { name = "joshua-shared" },
@@ -780,6 +781,7 @@ dependencies = [
 requires-dist = [
     { name = "bcrypt", specifier = ">=4.0" },
     { name = "claude-agent-sdk", specifier = ">=0.2.165" },
+    { name = "cryptography", specifier = ">=45" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "fastembed", specifier = ">=0.3" },
     { name = "joshua-shared", editable = "shared" },

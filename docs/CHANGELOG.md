@@ -128,6 +128,32 @@ with the images and the packaged chart, are at
   [operations.md](operations.md#the-usage-page) and
   [contracts.md](contracts.md#the-usage-write-route).
 
+### Settings
+
+- **The instance has settings in the database, and the owner writes them under
+  Admin → Instance.** A setting is a row of the new `settings` table, named by
+  a dotted prefix such as `push.vapid_public_key`, so it survives a restart
+  and needs no edit of `joshua.yaml` and no new environment variable. The
+  Instance section of the Admin area shows a section for each group of
+  settings, each field with its own save. Before, the section was a
+  placeholder marked "soon". The first group is the VAPID pair of push
+  notifications.
+- A setting marked secret is encrypted at rest with AES-GCM, so its value is
+  unreadable in the database, and no route ever answers it: a field says only
+  whether a secret is set, and the owner replaces one by writing a new value.
+  The key comes from `JOSHUA_SETTINGS_KEY` in the environment, a base64
+  32-byte key. Generate one with `openssl rand -base64 32`, keep it for the
+  life of the instance, and put it in `.env` (or in the `joshua-core` secret
+  of the chart). With the variable unset, every plain setting still reads and
+  writes, and a write or a read of a secret fails with one error that names
+  the variable. Nothing falls back to plaintext, and no key is minted at
+  startup. See [settings.md](settings.md).
+- The new routes are `GET /api/v1/admin/settings` and
+  `POST /api/v1/admin/settings` in the viewer, over core's
+  `GET /admin/settings` and `POST /admin/settings`. Each one is the owner's
+  alone: a member and a guest are refused. The schema adds the table
+  `settings`.
+
 ## 0.3.0 - 2026-11-13
 
 Joshua now has workspaces: a chat thread for one large piece of work, with

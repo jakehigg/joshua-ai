@@ -149,8 +149,11 @@ def authorize_admin(request: Request) -> JSONResponse | None:
     return None
 
 
-def authorize_roster(request: Request) -> JSONResponse | None:
-    """Like ``authorize_admin``, and the callers of ``AUTH_CALLERS`` pass too."""
+def _authorize_admin_or_auth(request: Request, refusal: str) -> JSONResponse | None:
+    """Like ``authorize_admin``, and the callers of ``AUTH_CALLERS`` pass too.
+
+    ``refusal`` says what the identity may not do, for the 403.
+    """
     allowed = parse_callers(os.environ.get("ADMIN_CALLERS", DEFAULT_ADMIN_CALLERS)) | parse_callers(
         os.environ.get(AUTH_CALLERS_ENV, DEFAULT_AUTH_CALLERS)
     )
@@ -160,10 +163,23 @@ def authorize_roster(request: Request) -> JSONResponse | None:
     if status == 401:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if status == 403:
-        return JSONResponse(
-            {"error": f"caller {identity} may not change the roster"}, status_code=403
-        )
+        return JSONResponse({"error": f"caller {identity} {refusal}"}, status_code=403)
     return None
+
+
+def authorize_roster(request: Request) -> JSONResponse | None:
+    """Like ``authorize_admin``, and the callers of ``AUTH_CALLERS`` pass too."""
+    return _authorize_admin_or_auth(request, "may not change the roster")
+
+
+def authorize_settings(request: Request) -> JSONResponse | None:
+    """The guard of the settings routes: an admin caller, or one of
+    ``AUTH_CALLERS``.
+
+    The viewer is in ``AUTH_CALLERS``, and it serves the settings to the owner
+    alone, the way it serves the roster (``joshua_core.settings_api``).
+    """
+    return _authorize_admin_or_auth(request, "may not read or change the settings")
 
 
 def _people_error(exc: people.PeopleError) -> JSONResponse:

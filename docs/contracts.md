@@ -161,6 +161,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /admin/people` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"id", "name", "handle"?, "role"?}` | `201 {"person": …}`, `400 {"error": …}`, `409` when it takes the role of the only owner. `handle` is `<type>:<value>`; with none, the person has no handle. |
 | `POST /admin/people/{id}/role` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"role"}` (`member`, `guest`, or `owner`) | `{"person": …}` with only the role changed, `400 {"error": …}` for another role, `404` for a person who is not on the roster, `409` for the only owner |
 | `POST /admin/people/{id}/remove` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"removed": true, "id"}`. The handles and the sign-in secret go; the data dirs and the transcripts stay. `404` for a person who is not on the roster, `409` for the only owner. |
+| `GET /admin/settings?prefix=` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"groups": [{"prefix", "label", "settings": [{"key", "label", "hint", "is_secret", "is_set", "value", "updated_at", "updated_by"}]}]}`. `prefix` names one group; with none, every group comes back. `value` is `null` for a secret, set or not, and `is_set` says whether one is stored. `404 {"error": …}` for a prefix no group declares. |
+| `POST /admin/settings` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"key", "value", "person"?}` | `{"setting": …}`, one field in the shape of the `GET`, so no answer carries a secret value. `400 {"error": …}` for a key no group declares, a `value` that is not a string or is over 4096 characters, an empty value for a secret, or an unknown field. `503 {"error": …}` for a write of a secret with no `JOSHUA_SETTINGS_KEY`; the error names the variable. |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
 | `POST /admin/sessions/flush` | `ADMIN_CALLERS` | | `{"flushed": n}` |
 | `GET /admin/transcript/{conversation}?limit=` | `ADMIN_CALLERS` | | `{"conversation_id", "rows": […]}` |
@@ -413,6 +415,28 @@ identity `viewer`. The roster routes admit the callers of `AUTH_CALLERS` as
 well as those of `ADMIN_CALLERS`, so the viewer needs no admin setting, and it
 gets no other admin route. A change that would leave the roster with no owner
 is `409`.
+
+### The settings routes
+
+`/admin/settings` holds the settings of the instance: one row of the
+`settings` table per setting, named by a dotted prefix such as
+`push.vapid_public_key`. Core owns the database, so a setting lives here and
+nowhere else. The viewer's Admin → Instance section calls the two routes as
+the identity `viewer`, over `GET /api/v1/admin/settings` and
+`POST /api/v1/admin/settings`, and serves them to the owner alone. Like the
+roster routes, they admit the callers of `AUTH_CALLERS` as well as those of
+`ADMIN_CALLERS`.
+
+The write takes a key that a settings group declares, and nothing else: core
+holds the groups, and a group says which of its fields are secret, so a caller
+can neither write an unknown key nor turn a secret into a plain value.
+`person` names the writer, for the `updated_by` of the row.
+
+**No answer carries a secret value.** A secret is encrypted at rest, a field
+answers `is_secret` and `is_set`, and `value` is `null` for it, whether one is
+stored or not. The owner replaces a secret by writing a new one; nothing reads
+the old one back. [settings.md](settings.md) has the store, the encryption,
+and `JOSHUA_SETTINGS_KEY`.
 
 ### The stream
 

@@ -63,6 +63,7 @@ from joshua_core.model_forwarder import ModelForwarder
 from joshua_core.profile_api import build_profile_router
 from joshua_core.scheduler import Scheduler
 from joshua_core.search_api import build_search_router
+from joshua_core.settings_api import build_settings_router
 from joshua_core.snapshots import SnapshotRunner, build_runner
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
@@ -530,6 +531,7 @@ def build_app() -> FastAPI:
     app.include_router(build_auth_router())
     app.include_router(build_profile_router())
     app.include_router(build_search_router())
+    app.include_router(build_settings_router())
     app.include_router(build_transcript_router())
     app.include_router(build_usage_router())
     app.include_router(build_workspaces_router())

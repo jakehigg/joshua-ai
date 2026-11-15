@@ -22,8 +22,9 @@ The workspaces have ten routes under ``/api/v1/workspaces``, which proxy
 core (``CORE_URL``). See ``viewer_api.workspaces``.
 
 The Users section has five routes under ``/api/v1/admin/users``, which proxy
-core's people and secret routes. They are the owner's alone: a member and a
-guest get 403. See ``viewer_api.admin``.
+core's people and secret routes, and the Instance section has two under
+``/api/v1/admin/settings``, which proxy core's settings routes. They are the
+owner's alone: a member and a guest get 403. See ``viewer_api.admin``.
 
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
@@ -187,6 +188,9 @@ def routes() -> list[Route]:
             _require_auth(admin.remove),
             methods=["POST"],
         ),
+        # The Instance section: the settings of the instance, the owner's too.
+        Route(api_path("admin/settings"), _require_auth(admin.settings)),
+        Route(api_path("admin/settings"), _require_auth(admin.save_setting), methods=["POST"]),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),
         Route(api_path("files/{root}/{path:path}"), _require_auth(files.file)),

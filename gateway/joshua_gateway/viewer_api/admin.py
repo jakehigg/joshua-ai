@@ -1,10 +1,10 @@
-"""The JSON routes of the Users section: the roster, as the owner manages it.
+"""The JSON routes of the Admin area: the roster and the settings of the instance.
 
-Core owns the roster and every secret, so each route here is a call to core
-with ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER``. The viewer calls core's
-``/admin/people`` routes with its own fleet token, as the identity ``viewer``.
-Core admits it there because ``viewer`` is in core's ``AUTH_CALLERS``, the
-callers of ``/auth/*``.
+Core owns the roster, every secret, and the settings, so each route here is a
+call to core with ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER``. The viewer calls
+core's ``/admin/people`` and ``/admin/settings`` routes with its own fleet
+token, as the identity ``viewer``. Core admits it there because ``viewer`` is
+in core's ``AUTH_CALLERS``, the callers of ``/auth/*``.
 
 - ``GET /api/v1/admin/users`` — the roster of ``joshua.yaml``, with
   ``has_secret`` for each person from core's ``GET /auth/people``.
@@ -20,6 +20,13 @@ callers of ``/auth/*``.
   ``POST /admin/people/{id}/role``.
 - ``POST /api/v1/admin/users/{id}/remove`` — core's
   ``POST /admin/people/{id}/remove``.
+- ``GET /api/v1/admin/settings?prefix=`` — the settings of the instance, by
+  group, from core's ``GET /admin/settings``. A secret carries ``is_set`` and
+  never a value.
+- ``POST /api/v1/admin/settings`` — ``{key, value}``: core's
+  ``POST /admin/settings``, with the signed-in person as the writer. Core
+  knows which keys are secret, and answers 503 for a secret write with no
+  ``JOSHUA_SETTINGS_KEY``.
 
 Core refuses, with 409, a role change or a remove that leaves no owner.
 
@@ -37,6 +44,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from joshua_shared import config
@@ -56,6 +64,7 @@ VIEWER_TOKEN_ENV = "JOSHUA_TOKEN_VIEWER"
 PEOPLE_PATH = "/admin/people"
 AUTH_PEOPLE_PATH = "/auth/people"
 SECRET_PATH = "/auth/secret/admin"
+SETTINGS_PATH = "/admin/settings"
 TIMEOUT_S = 15.0
 
 # The one role that manages the roster.
@@ -64,11 +73,13 @@ OWNER_ROLE = "owner"
 DEFAULT_ROLE = "member"
 
 FORBIDDEN = "the roster is the owner's"
+FORBIDDEN_SETTINGS = "the settings are the owner's"
 CROSS_SITE = "the request comes from another site"
 NOT_CONFIGURED = "the roster is not configured on the Joshua side"
 UNREACHABLE = "Joshua is unreachable"
 BAD_BODY = "the body must be a JSON object"
 NO_SECRET = "a secret is needed"
+NO_KEY = "a setting key is needed"
 SECRET_FAILED = "that person was added, and their secret was not set"
 
 
@@ -82,10 +93,12 @@ def _error(message: str, status: int) -> JSONResponse:
     return _json({"error": message}, status)
 
 
-def _guard(request: Request, person: Person, *, write: bool) -> JSONResponse | None:
+def _guard(
+    request: Request, person: Person, *, write: bool, refusal: str = FORBIDDEN
+) -> JSONResponse | None:
     """The refusal of a request that is not the owner's, else None."""
     if person.role != OWNER_ROLE:
-        return _error(FORBIDDEN, 403)
+        return _error(refusal, 403)
     if write and not _origin_ok(request):
         return _error(CROSS_SITE, 403)
     return None
@@ -236,6 +249,48 @@ async def set_role(request: Request, person: Person) -> JSONResponse:
     logger.info(
         {"message": "admin users: role set", "person": target, "role": role, "status": status}
     )
+    return _json(answer, status)
+
+
+async def settings(request: Request, person: Person) -> JSONResponse:
+    """The settings of the instance, by group, as core answers them.
+
+    ``prefix`` names one group; with none, every group comes back. A secret
+    carries ``is_set`` and never its value, so nothing of it reaches the
+    browser.
+    """
+    denied = _guard(request, person, write=False, refusal=FORBIDDEN_SETTINGS)
+    if denied is not None:
+        return denied
+    prefix = request.query_params.get("prefix", "").strip()
+    path = f"{SETTINGS_PATH}?prefix={quote(prefix)}" if prefix else SETTINGS_PATH
+    status, answer = await _call("GET", path)
+    return _json(answer, status)
+
+
+async def save_setting(request: Request, person: Person) -> JSONResponse:
+    """Write one setting, as the person who signed in.
+
+    Core knows which keys exist and which of them are secret, so the body
+    carries the key and the value alone. Core's status passes through: 400 for
+    a key it does not know, and 503 for a secret write with no
+    ``JOSHUA_SETTINGS_KEY``.
+    """
+    denied = _guard(request, person, write=True, refusal=FORBIDDEN_SETTINGS)
+    if denied is not None:
+        return denied
+    fields = await _fields(request)
+    if fields is None:
+        return _error(BAD_BODY, 422)
+    key = _field(fields, "key").strip()
+    if not key:
+        return _error(NO_KEY, 400)
+    status, answer = await _call(
+        "POST",
+        SETTINGS_PATH,
+        {"key": key, "value": _field(fields, "value"), "person": person.id},
+    )
+    logger.info({"message": "admin settings: setting written", "key": key, "status": status})
     return _json(answer, status)
 
 

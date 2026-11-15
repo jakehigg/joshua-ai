@@ -52,6 +52,8 @@ subscription. You do not need Python, and you do not need a Telegram bot.
   you read and comment on.
 - [docs/auth.md](docs/auth.md): how a person signs in to the viewer, and how
   the owner keeps the people.
+- [docs/settings.md](docs/settings.md): the settings the owner writes under
+  Admin → Instance, and the key that encrypts a secret one.
 - [docs/operations.md](docs/operations.md): health, logs, updates, backup, the viewer.
 - [docs/architecture.md](docs/architecture.md): the three containers.
 - [docs/security.md](docs/security.md): what the agent can and cannot reach.
