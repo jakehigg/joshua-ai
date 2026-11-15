@@ -3,9 +3,9 @@
 The encryption tests are the store's own (``store/settings.py``): a secret
 reads back under its key and under no other, and every error names
 ``JOSHUA_SETTINGS_KEY``. The route tests use a fake store, so they say what
-``/admin/settings`` answers without a database: the guard, that no answer
-carries a secret value, and that a secret write with no key is a 503 that
-names the variable.
+``/admin/settings`` answers without a database: the guard, the check of each
+push setting, that no answer carries a secret value, and that a secret write
+with no key is a 503 that names the variable.
 """
 
 from __future__ import annotations
@@ -16,10 +16,15 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import FastAPI
 from joshua_core.settings_api import SETTINGS_PATH, build_settings_router
 from joshua_core.store.settings import (
+    BOOL_KIND,
+    SECRET_KIND,
     SETTINGS_KEY_ENV,
+    TEXT_KIND,
     VERSION_PREFIX,
     Setting,
     SettingsKeyError,
@@ -38,7 +43,22 @@ ENABLED = "push.enabled"
 PUBLIC = "push.vapid_public_key"
 PRIVATE = "push.vapid_private_key"
 SUBJECT = "push.vapid_subject"
-SECRET_VALUE = "a private key nobody may read back"
+
+
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _a_vapid_pair() -> tuple[str, str]:
+    """One VAPID pair, as the owner pastes it: base64url, public first."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    public = key.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    return _b64url(public), _b64url(key.private_numbers().private_value.to_bytes(32, "big"))
+
+
+# One pair for this module: a write of a key is checked against its shape.
+PUBLIC_VALUE, SECRET_VALUE = _a_vapid_pair()
+SUBJECT_VALUE = "mailto:owner@example.test"
 
 
 def _key() -> str:
@@ -198,10 +218,22 @@ def test_a_key_of_the_wrong_shape_is_refused(monkeypatch, bad) -> None:
 def test_a_key_is_namespaced_by_its_prefix() -> None:
     group = find_group("push")
     assert group is not None
-    assert [field.key for field in group.fields] == [ENABLED, PUBLIC, PRIVATE, SUBJECT]
+    # The three keys first, and the switch that turns push on last.
+    assert [field.key for field in group.fields] == [PUBLIC, PRIVATE, SUBJECT, ENABLED]
     assert all(field.key.startswith(f"{group.prefix}.") for field in group.fields)
     assert find_group("nothing") is None
     assert find_field("push.nothing") is None
+
+
+def test_each_field_says_what_kind_of_value_it_holds() -> None:
+    kinds = {key: find_field(key) for key in (PUBLIC, PRIVATE, SUBJECT, ENABLED)}
+    assert all(field is not None for field in kinds.values())
+    assert kinds[PUBLIC].kind == TEXT_KIND  # type: ignore[union-attr]
+    assert kinds[SUBJECT].kind == TEXT_KIND  # type: ignore[union-attr]
+    assert kinds[ENABLED].kind == BOOL_KIND  # type: ignore[union-attr]
+    assert kinds[PRIVATE].kind == SECRET_KIND  # type: ignore[union-attr]
+    # The secret is the one field whose value never comes back.
+    assert [key for key, field in kinds.items() if field.is_secret] == [PRIVATE]  # type: ignore[union-attr]
 
 
 # --- the guard --------------------------------------------------------------
@@ -243,6 +275,7 @@ def test_get_lists_every_declared_field(client, no_settings_key) -> None:
         "key": PUBLIC,
         "label": "VAPID public key",
         "hint": "The browser subscribes with this key.",
+        "kind": TEXT_KIND,
         "is_secret": False,
         "is_set": False,
         "value": "",
@@ -250,6 +283,8 @@ def test_get_lists_every_declared_field(client, no_settings_key) -> None:
         "updated_by": None,
     }
     assert fields[PRIVATE]["is_secret"] is True
+    assert fields[PRIVATE]["kind"] == SECRET_KIND
+    assert fields[ENABLED]["kind"] == BOOL_KIND
 
 
 def test_get_of_an_unknown_prefix_is_404(client) -> None:
@@ -262,15 +297,15 @@ def test_post_writes_a_plain_setting(client, settings_key) -> None:
     resp = client.post(
         SETTINGS_PATH,
         headers=_viewer(),
-        json={"key": PUBLIC, "value": "a-public-key", "person": "mira"},
+        json={"key": PUBLIC, "value": PUBLIC_VALUE, "person": "mira"},
     )
     assert resp.status_code == 200
-    assert resp.json()["setting"]["value"] == "a-public-key"
-    assert client.store.rows[PUBLIC]["value"] == "a-public-key"
+    assert resp.json()["setting"]["value"] == PUBLIC_VALUE
+    assert client.store.rows[PUBLIC]["value"] == PUBLIC_VALUE
     assert client.store.rows[PUBLIC]["updated_by"] == "mira"
     # And the list reads it back, by prefix.
     fields = _settings(client.get(f"{SETTINGS_PATH}?prefix=push", headers=_viewer()).json())
-    assert fields[PUBLIC]["value"] == "a-public-key"
+    assert fields[PUBLIC]["value"] == PUBLIC_VALUE
     assert fields[PUBLIC]["updated_by"] == "mira"
 
 
@@ -283,6 +318,7 @@ def test_post_writes_a_secret_and_no_answer_carries_it(client, settings_key) -> 
         "key": PRIVATE,
         "label": "VAPID private key",
         "hint": "Signs each push. It never leaves the server.",
+        "kind": SECRET_KIND,
         "is_secret": True,
         "is_set": True,
         "value": None,
@@ -309,7 +345,7 @@ def test_a_secret_write_with_no_key_is_refused(client, no_settings_key) -> None:
     # The rest of the settings still work.
     assert (
         client.post(
-            SETTINGS_PATH, headers=_viewer(), json={"key": PUBLIC, "value": "x"}
+            SETTINGS_PATH, headers=_viewer(), json={"key": PUBLIC, "value": PUBLIC_VALUE}
         ).status_code
         == 200
     )
@@ -329,3 +365,68 @@ def test_post_refuses_a_bad_body(client, settings_key, body) -> None:
     resp = client.post(SETTINGS_PATH, headers=_viewer(), json=body)
     assert resp.status_code == 400
     assert resp.json()["error"]
+
+
+# --- the check of each push setting ------------------------------------------
+
+
+def _write(client, key: str, value: str):  # type: ignore[no-untyped-def]
+    return client.post(SETTINGS_PATH, headers=_viewer(), json={"key": key, "value": value})
+
+
+@pytest.mark.parametrize(
+    "subject",
+    ["owner@example.test", "http://joshua.example", "joshua.example", "", "  "],
+)
+def test_a_subject_that_is_not_a_mailto_or_an_https_url_is_refused(
+    client, settings_key, subject
+) -> None:
+    """``py_vapid`` raises ``VapidException`` on such a subject in the middle of
+    a send, so the write is where the owner hears about it."""
+    resp = _write(client, SUBJECT, subject)
+    assert resp.status_code == 400
+    line = resp.json()["error"]
+    assert "mailto:" in line and "https://" in line
+    assert SUBJECT not in client.store.rows
+
+
+@pytest.mark.parametrize("subject", [SUBJECT_VALUE, "https://joshua.example"])
+def test_a_mailto_or_an_https_subject_is_written(client, settings_key, subject) -> None:
+    assert _write(client, SUBJECT, subject).status_code == 200
+    assert client.store.rows[SUBJECT]["value"] == subject
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not base64url at all!",
+        _b64url(b"\x04" + b"a" * 32),  # 33 bytes: too short for a P-256 point
+        _b64url(bytes([0x02]) + b"a" * 64),  # 65 bytes, but not an uncompressed point
+    ],
+)
+def test_a_public_key_of_the_wrong_shape_is_refused(client, settings_key, value) -> None:
+    resp = _write(client, PUBLIC, value)
+    assert resp.status_code == 400
+    line = resp.json()["error"]
+    assert "65 bytes" in line and "0x04" in line
+    assert PUBLIC not in client.store.rows
+
+
+@pytest.mark.parametrize("value", ["not base64url at all!", _b64url(b"a" * 31), PUBLIC_VALUE])
+def test_a_private_key_of_the_wrong_shape_is_refused(client, settings_key, value) -> None:
+    """The public key pasted into the private field is the likely mistake, and
+    it is 65 bytes where 32 belong."""
+    resp = _write(client, PRIVATE, value)
+    assert resp.status_code == 400
+    assert "32 bytes" in resp.json()["error"]
+    assert value not in resp.json()["error"]
+    assert PRIVATE not in client.store.rows
+
+
+def test_the_pair_of_the_command_is_written(client, settings_key) -> None:
+    assert _write(client, PUBLIC, PUBLIC_VALUE).status_code == 200
+    assert _write(client, PRIVATE, SECRET_VALUE).status_code == 200
+    assert _write(client, ENABLED, "true").status_code == 200
+    assert client.store.rows[ENABLED]["value"] == "true"
+    assert _write(client, ENABLED, "false").status_code == 200
+    assert client.store.rows[ENABLED]["value"] == "false"

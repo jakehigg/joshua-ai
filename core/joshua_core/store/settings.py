@@ -59,6 +59,13 @@ VERSION_PREFIX = "v1:"
 KEY_MAX = 128
 VALUE_MAX = 4096
 
+# What kind of value a field holds: a line of text, a switch, or a secret.
+# The page draws one control for each, and the route answers the kind.
+TEXT_KIND = "text"
+BOOL_KIND = "bool"
+SECRET_KIND = "secret"
+FIELD_KINDS = (TEXT_KIND, BOOL_KIND, SECRET_KIND)
+
 MISSING_KEY = (
     f"{SETTINGS_KEY_ENV} is not set: a secret setting cannot be read or written "
     "without it. Generate one with `openssl rand -base64 32`, put it in .env, "
@@ -77,13 +84,24 @@ class SettingsKeyError(RuntimeError):
 
 @dataclass(frozen=True)
 class SettingField:
-    """One setting a group declares: its key, what the page calls it, and
-    whether its value is a secret."""
+    """One setting a group declares: its key, what the page calls it, and what
+    kind of value it holds.
+
+    The kind says what the page draws and what the route does with the value:
+    ``text`` is a line of text, ``bool`` is a switch that stores ``true`` or
+    ``false``, and ``secret`` is a value that is encrypted at rest and never
+    answered.
+    """
 
     key: str
     label: str
-    secret: bool = False
+    kind: str = TEXT_KIND
     hint: str = ""
+
+    @property
+    def is_secret(self) -> bool:
+        """Whether the value is encrypted at rest and never answered."""
+        return self.kind == SECRET_KIND
 
 
 @dataclass(frozen=True)
@@ -114,22 +132,18 @@ class Setting:
 
 
 # Every group of settings, in the order the Instance page shows them. Push
-# notifications are the first consumer: the switch that turns them on, the
-# VAPID pair of the instance, the public key the browser subscribes with and
-# the private key that signs a push, and the subject of each signature. Push
-# is off in every deployment until the owner writes these four here: no
-# environment variable turns it on (docs/notifications.md). A later feature
-# adds its group here.
+# notifications are the first consumer: the VAPID pair of the instance, the
+# public key the browser subscribes with and the private key that signs a
+# push, the subject of each signature, and the switch that turns them on. The
+# switch is last, because it is the step the owner takes once the three keys
+# are in. Push is off in every deployment until the owner writes these four
+# here: no environment variable turns it on (docs/notifications.md). A later
+# feature adds its group here.
 SETTING_GROUPS: tuple[SettingGroup, ...] = (
     SettingGroup(
         prefix="push",
         label="Notifications",
         fields=(
-            SettingField(
-                key="push.enabled",
-                label="Push notifications on",
-                hint='Type "true" to turn them on, once the three keys below are set.',
-            ),
             SettingField(
                 key="push.vapid_public_key",
                 label="VAPID public key",
@@ -138,7 +152,7 @@ SETTING_GROUPS: tuple[SettingGroup, ...] = (
             SettingField(
                 key="push.vapid_private_key",
                 label="VAPID private key",
-                secret=True,
+                kind=SECRET_KIND,
                 hint="Signs each push. It never leaves the server.",
             ),
             SettingField(
@@ -146,6 +160,12 @@ SETTING_GROUPS: tuple[SettingGroup, ...] = (
                 label="VAPID subject",
                 hint="Who a push service writes to about this instance: "
                 "https://joshua.example, or mailto:you@example.com.",
+            ),
+            SettingField(
+                key="push.enabled",
+                label="Push notifications on",
+                kind=BOOL_KIND,
+                hint="Turn this on once the three keys above are set.",
             ),
         ),
     ),

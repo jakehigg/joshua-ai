@@ -30,6 +30,13 @@ There is no connectivity check: a real send fails with the real error.
 workspace slug, so the browser collapses several notifications of one
 workspace into the newest.
 
+**A send that cannot be signed sends nothing.** The VAPID header takes the
+private key and the subject, so a wrong one of either breaks every send and no
+browser. ``_send`` builds the header of each endpoint before the first
+request: when that raises, the report carries the message as its ``reason``,
+nothing goes out, and no row is touched, so a test with a wrong subject costs
+no subscription.
+
 **What a refusal means.** A 404 or a 410 says the browser is gone, so the
 subscription is deleted at once. A 429 is a rate limit, so the endpoint is held
 until its ``Retry-After`` has passed and its failure count is untouched. Any
@@ -127,9 +134,11 @@ class SendReport:
     """What one send did, for the log and for the answer of a route.
 
     ``reason`` says why nothing was sent at all: push is off, a key is
-    missing, or ``JOSHUA_SETTINGS_KEY`` is unset. ``error`` names the last
-    refusal of a push service, as a status or an exception name. Neither one
-    ever holds a key or a payload.
+    missing, ``JOSHUA_SETTINGS_KEY`` is unset, or the VAPID header of the send
+    would not build, which is a wrong subject or an unreadable private key.
+    ``error`` names the last refusal of a push service, as a status or the
+    name and the message of an exception. Neither one ever holds a key or a
+    payload.
     """
 
     sent: int = 0
@@ -168,6 +177,17 @@ async def push_config(repo: Repo) -> tuple[PushConfig | None, str]:
     if not (public and private and subject):
         return None, NO_KEYS
     return PushConfig(public_key=public, private_key=private, subject=subject), ""
+
+
+def error_text(exc: Exception) -> str:
+    """One exception as the line a page shows: its class and its message.
+
+    ``py_vapid`` says "Invalid subject" and the settings store names
+    ``JOSHUA_SETTINGS_KEY``, and a class name alone says neither. No key and
+    no payload is ever in this text: it is the message of the library, which
+    holds the shape of what was wrong and not the value.
+    """
+    return f"{type(exc).__name__}: {exc}"
 
 
 def vapid_headers(config: PushConfig, endpoint: str, *, now: float | None = None) -> dict[str, str]:
@@ -276,6 +296,21 @@ async def _send(
     subscriptions = await repo.push_subscriptions.list_for(person_id)
     if not subscriptions:
         return SendReport()
+    try:
+        # The signature is built for every endpoint before the first send: it
+        # takes the private key and the subject, so what breaks it breaks the
+        # whole send and is no fault of any browser. Nothing is sent and no
+        # row is touched, so a test with a wrong subject costs no subscription.
+        signed = {
+            subscription.endpoint: vapid_headers(config, subscription.endpoint)
+            for subscription in subscriptions
+        }
+    except Exception as exc:  # a wrong subject, or a key that does not read
+        message = error_text(exc)
+        logger.warning(
+            {"message": "the VAPID header did not build", "person": person_id, "error": message}
+        )
+        return SendReport(reason=message)
     payload = notification.payload()
     factory = client_factory or (lambda: httpx.AsyncClient(timeout=TIMEOUT_S))
     counts = {"sent": 0, "failed": 0, "dropped": 0, "held": 0}
@@ -285,7 +320,9 @@ async def _send(
             if held(subscription.endpoint):
                 counts["held"] += 1
                 continue
-            outcome, detail = await _deliver(client, repo, config, subscription, payload)
+            outcome, detail = await _deliver(
+                client, repo, signed[subscription.endpoint], subscription, payload
+            )
             counts[outcome] += 1
             if outcome != "sent" and detail:
                 error = detail
@@ -296,11 +333,13 @@ async def _send(
 async def _deliver(
     client: httpx.AsyncClient,
     repo: Repo,
-    config: PushConfig,
+    signature: dict[str, str],
     subscription: PushSubscription,
     payload: bytes,
 ) -> tuple[str, str]:
     """One notification to one browser: the outcome and what went wrong.
+
+    ``signature`` is the VAPID header of this endpoint, built in ``_send``.
 
     The outcome is ``sent``, ``dropped`` (the row is gone), ``failed`` (the row
     kept one more failure) or ``held`` (a 429, so the row is untouched).
@@ -309,19 +348,20 @@ async def _deliver(
     try:
         body = encrypt(subscription, payload)
         headers = {
-            **vapid_headers(config, subscription.endpoint),
+            **signature,
             "content-encoding": "aes128gcm",
             "content-type": "application/octet-stream",
             "ttl": str(TTL_S),
             "urgency": "normal",
         }
     except Exception as exc:
-        # A key that does not read, or a subject that is not a mailto: or an
-        # https URL. The notification cannot be built, so it is a failure of
-        # this subscription and the next one still goes out.
-        logger.warning({"message": "a push could not be built", "error": type(exc).__name__})
+        # The keys of this browser do not encrypt to, so the notification
+        # cannot be built for it. It is a failure of this subscription alone,
+        # and the next one still goes out.
+        message = error_text(exc)
+        logger.warning({"message": "a push could not be built", "error": message})
         gone = await store.mark_failure(subscription.endpoint)
-        return ("dropped" if gone else "failed"), type(exc).__name__
+        return ("dropped" if gone else "failed"), message
     try:
         response = await client.post(subscription.endpoint, content=body, headers=headers)
     except httpx.HTTPError as exc:

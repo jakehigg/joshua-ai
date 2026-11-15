@@ -8,13 +8,20 @@ under ``/api/v1/admin/settings/``, as the identity ``viewer``.
   each with its fields and what is stored for each. With no ``prefix`` it is
   every group. A prefix no group declares is 404.
 - ``POST /admin/settings`` — ``{key, value, person?}``: write one setting.
-  ``SETTING_GROUPS`` says whether the key is a secret, so a caller can never
-  turn a secret into a plain value. A key no group declares is 400.
+  ``SETTING_GROUPS`` says what kind the key is, so a caller can never turn a
+  secret into a plain value. A key no group declares is 400.
 
-**No answer carries a secret value.** A field says ``is_secret`` and
-``is_set``, and ``value`` is null for a secret, whether it is stored or not.
-The owner replaces a secret by writing a new one; nothing reads the old one
-back.
+**A value that the feature cannot use is refused here, not later.** ``CHECKS``
+holds one check per key, and a refusal is a 400 whose line says what the field
+takes: the VAPID subject must be a ``mailto:`` or an ``https://`` address,
+which is what ``py_vapid`` raises ``VapidException`` for in the middle of a
+send, and each VAPID key must be base64url of the right length. A refusal
+names no value: the private key is a secret.
+
+**No answer carries a secret value.** A field says its ``kind``, ``is_secret``
+and ``is_set``, and ``value`` is null for a secret, whether it is stored or
+not. The owner replaces a secret by writing a new one; nothing reads the old
+one back.
 
 A write of a secret needs ``JOSHUA_SETTINGS_KEY`` (see
 ``store/settings.py``). With the variable unset, that one write is 503 and its
@@ -28,6 +35,9 @@ exception.
 
 from __future__ import annotations
 
+import base64
+import binascii
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -35,6 +45,7 @@ from fastapi.responses import JSONResponse
 from joshua_shared.log import get_logger
 
 from joshua_core.admin import authorize_settings
+from joshua_core.push import PRIVATE_KEY, PUBLIC_KEY, SUBJECT_KEY
 from joshua_core.store.settings import (
     KEY_MAX,
     SETTING_GROUPS,
@@ -53,9 +64,87 @@ SETTINGS_PATH = "/admin/settings"
 # The longest person id a write may name as the writer.
 PERSON_MAX = 64
 
+# What a VAPID subject may be (RFC 8292): a mail address or an https URL.
+SUBJECT_PREFIXES = ("mailto:", "https://")
+# A VAPID public key is one uncompressed P-256 point: the marker 0x04 and the
+# two 32-byte coordinates. The private key is the 32-byte private value.
+PUBLIC_KEY_BYTES = 65
+PRIVATE_KEY_BYTES = 32
+UNCOMPRESSED_POINT = 0x04
+
 
 def _bad(message: str) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=400)
+
+
+def _b64url(value: str) -> bytes | None:
+    """The bytes of a base64url value, or None when it is not base64url.
+
+    The two VAPID keys are base64url with no padding, as ``py_vapid`` prints
+    them, and the padding is added back here.
+    """
+    text = value.strip()
+    try:
+        return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _check_subject(value: str) -> str:
+    """``push.vapid_subject``: a ``mailto:`` or an ``https://`` address.
+
+    ``py_vapid`` raises ``VapidException`` on anything else, in the middle of a
+    send, so the write is where it is caught instead.
+    """
+    if value.startswith(SUBJECT_PREFIXES):
+        return ""
+    return (
+        f"{SUBJECT_KEY} must start with mailto: or https://, "
+        "as in mailto:you@example.com: a push service writes to it about this instance"
+    )
+
+
+def _check_public_key(value: str) -> str:
+    """``push.vapid_public_key``: the 65 uncompressed bytes of a P-256 point."""
+    raw = _b64url(value)
+    if raw is not None and len(raw) == PUBLIC_KEY_BYTES and raw[0] == UNCOMPRESSED_POINT:
+        return ""
+    return (
+        f"{PUBLIC_KEY} must be the base64url of a VAPID public key: "
+        f"{PUBLIC_KEY_BYTES} bytes that start with 0x04. "
+        "notifications.md has the command that prints the pair"
+    )
+
+
+def _check_private_key(value: str) -> str:
+    """``push.vapid_private_key``: the 32 bytes of a P-256 private value."""
+    raw = _b64url(value)
+    if raw is not None and len(raw) == PRIVATE_KEY_BYTES:
+        return ""
+    return (
+        f"{PRIVATE_KEY} must be the base64url of a VAPID private key: "
+        f"{PRIVATE_KEY_BYTES} bytes. "
+        "It is the second line of the command in notifications.md, not the public key"
+    )
+
+
+# The check of each setting that has one, by key. A key with no check here
+# takes any text the route accepts.
+CHECKS: dict[str, Callable[[str], str]] = {
+    SUBJECT_KEY: _check_subject,
+    PUBLIC_KEY: _check_public_key,
+    PRIVATE_KEY: _check_private_key,
+}
+
+
+def check_value(key: str, value: str) -> str:
+    """Why this value is refused for this key, or ``""`` when it is good.
+
+    A refusal is a line for the owner at the screen: it says what the field
+    takes. It never holds the value, which for the private key is a secret.
+    """
+    check = CHECKS.get(key)
+    return check(value) if check is not None else ""
 
 
 def _field_answer(field: SettingField, stored: Setting | None) -> dict[str, Any]:
@@ -65,9 +154,10 @@ def _field_answer(field: SettingField, stored: Setting | None) -> dict[str, Any]
         "key": field.key,
         "label": field.label,
         "hint": field.hint,
-        "is_secret": field.secret,
+        "kind": field.kind,
+        "is_secret": field.is_secret,
         "is_set": bool(stored and stored.is_set),
-        "value": None if field.secret else (stored.value if stored else ""),
+        "value": None if field.is_secret else (stored.value if stored else ""),
         "updated_at": stored.updated_at.isoformat() if stored and stored.updated_at else None,
         "updated_by": stored.updated_by if stored else None,
     }
@@ -133,12 +223,16 @@ def build_settings_router() -> APIRouter:
             return _bad("value must be a string")
         if len(value) > VALUE_MAX:
             return _bad(f"value must be at most {VALUE_MAX} characters")
-        if field.secret and not value:
+        if field.is_secret and not value:
             return _bad(f"{key} is a secret: send the new value")
+        refusal = check_value(key, value)
+        if refusal:
+            logger.info({"message": "a setting was refused", "key": key})
+            return _bad(refusal)
         person = str(body.get("person") or "")[:PERSON_MAX] or None
         store = request.app.state.ctx.repo.settings
         try:
-            stored = await store.set(key, value, is_secret=field.secret, updated_by=person)
+            stored = await store.set(key, value, is_secret=field.is_secret, updated_by=person)
         except SettingsKeyError as exc:
             logger.warning({"message": "a secret setting was refused", "key": key})
             return JSONResponse({"error": str(exc)}, status_code=503)

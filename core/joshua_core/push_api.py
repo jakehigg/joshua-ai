@@ -1,7 +1,7 @@
 """``/v1/push``: the push subscription of a browser, and a test notification.
 
 The viewer proxies these four routes to the person who signed in, under
-``/api/v1/push/`` (``joshua_gateway.viewer_api.push``), and names them with the
+``/api/v1/push/`` (the push module of its own API), and names them with the
 ``person`` query parameter, as it does for the workspaces. The caller check is
 the one of the ``/auth/*`` routes (``AUTH_CALLERS``, default ``viewer``): no
 request body ever names the person.
@@ -13,7 +13,9 @@ request body ever names the person.
 - ``DELETE /v1/push/subscribe`` — ``{endpoint}``: drop one subscription of that
   person. It is theirs alone, so the endpoint of another person is not found.
 - ``POST /v1/push/test`` — send that person a notification now, and answer what
-  each of their browsers did with it.
+  each of their browsers did with it. A send that never reached a browser,
+  because the VAPID header did not build, is a 400 whose ``error`` is the
+  message of that failure, so the page says what is wrong with the settings.
 
 **Every route is 503 while push is not configured**: ``push.enabled`` false, a
 VAPID key missing, or ``JOSHUA_SETTINGS_KEY`` unset. The ``error`` is the
@@ -92,6 +94,11 @@ def _person(request: Request) -> tuple[JSONResponse | None, str | None]:
     if person is None:
         return JSONResponse({"error": "unknown person"}, status_code=403), None
     return None, person.id
+
+
+def _touched(report: SendReport) -> bool:
+    """Whether the send reached a browser at all: one of the four counts."""
+    return bool(report.sent or report.failed or report.dropped or report.held)
 
 
 def _report_json(report: SendReport) -> dict[str, object]:
@@ -182,6 +189,10 @@ def build_push_router() -> APIRouter:
             Notification(title=TEST_TITLE, body=TEST_BODY, url=TEST_URL, tag=TEST_TAG),
         )
         logger.info({"message": "push test", "person": person_id, "sent": report.sent})
+        if report.reason and not _touched(report):
+            # Nothing reached a browser and no row changed: the send itself
+            # could not be built. The reason is the sentence of the failure.
+            return JSONResponse({"error": report.reason}, status_code=400)
         return JSONResponse(_report_json(report))
 
     return router

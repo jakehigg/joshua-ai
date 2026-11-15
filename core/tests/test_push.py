@@ -6,10 +6,11 @@ network. The subscriptions and the settings are fakes of the two stores
 covered by ``test_push_integration.py``.
 
 The tests cover the VAPID signature of a request (RFC 8292), the encryption of
-the payload to the keys of a browser (RFC 8291), the 410 that deletes a
-subscription, the 429 that is honoured and does not count as a failure, the
-threshold that drops a subscription, and the four routes, which answer 503
-while push is off or a key is missing.
+the payload to the keys of a browser (RFC 8291), the header that will not build
+and costs no subscription, the 410 that deletes a subscription, the 429 that is
+honoured and does not count as a failure, the threshold that drops a
+subscription, and the four routes, which answer 503 while push is off or a key
+is missing and 400 when the send itself could not be built.
 """
 
 from __future__ import annotations
@@ -389,6 +390,63 @@ async def test_an_unreachable_push_service_is_a_failure_and_not_an_exception(rep
     report = await send_to_person(repo, MIRA, _note(), client_factory=factory)
     assert (report.failed, report.error) == (1, "ConnectError")
     assert repo.push_subscriptions.rows[ENDPOINT].failures == 1
+
+
+async def test_a_header_that_will_not_build_sends_nothing_and_costs_no_row(repo, service) -> None:
+    """A wrong subject or an unreadable private key breaks every send and no
+    browser, so the report carries the message and every row stays."""
+    repo.push_subscriptions.add(MIRA, ENDPOINT, a_browser())
+    repo.push_subscriptions.add(MIRA, SECOND_ENDPOINT, a_browser())
+    repo.settings.write(SUBJECT_KEY, "owner@example.test")
+    for _ in range(FAILURE_LIMIT + 1):
+        report = await send_to_person(repo, MIRA, _note(), client_factory=service.factory())
+        assert (report.sent, report.failed, report.dropped, report.held) == (0, 0, 0, 0)
+    # The message of the library, not its class alone, and no key in it.
+    assert report.reason.startswith("VapidException: ")
+    assert "sub" in report.reason
+    assert repo.vapid_public not in report.reason
+    assert service.requests == []
+    assert sorted(repo.push_subscriptions.rows) == [ENDPOINT, SECOND_ENDPOINT]
+
+
+async def test_a_browser_whose_keys_do_not_encrypt_is_the_only_one_that_fails(
+    repo, service
+) -> None:
+    """``encrypt`` takes the keys of one browser, so its failure is that
+    subscription's own and the next one still goes out."""
+    row = repo.push_subscriptions.add(MIRA, ENDPOINT, a_browser())
+    repo.push_subscriptions.rows[ENDPOINT] = replace(row, p256dh="not a key")
+    repo.push_subscriptions.add(MIRA, SECOND_ENDPOINT, a_browser())
+    report = await send_to_person(repo, MIRA, _note(), client_factory=service.factory())
+    assert (report.sent, report.failed) == (1, 1)
+    assert report.error and ": " in report.error
+    assert repo.push_subscriptions.rows[ENDPOINT].failures == 1
+
+
+def test_the_test_route_answers_the_message_of_a_header_that_will_not_build(
+    client, repo, service, monkeypatch
+) -> None:
+    repo.push_subscriptions.add(MIRA, ENDPOINT, a_browser())
+    repo.settings.write(SUBJECT_KEY, "owner@example.test")
+    monkeypatch.setattr(httpx, "AsyncClient", _client_of(service))
+    answer = client.post(f"{TEST_PATH}?person={MIRA}", headers=_viewer())
+    assert answer.status_code == 400
+    assert answer.json()["error"].startswith("VapidException: ")
+    assert service.requests == []
+    assert ENDPOINT in repo.push_subscriptions.rows
+
+
+def test_the_test_route_still_answers_200_when_a_browser_refused(
+    client, repo, service, monkeypatch
+) -> None:
+    """A refusal of one push service is the answer of the send, not a 400: a
+    row was touched, so the page shows the counts."""
+    repo.push_subscriptions.add(MIRA, ENDPOINT, a_browser())
+    service.answer(500)
+    monkeypatch.setattr(httpx, "AsyncClient", _client_of(service))
+    answer = client.post(f"{TEST_PATH}?person={MIRA}", headers=_viewer())
+    assert answer.status_code == 200
+    assert answer.json()["failed"] == 1
 
 
 async def test_one_dead_browser_does_not_stop_the_other(repo, service) -> None:
