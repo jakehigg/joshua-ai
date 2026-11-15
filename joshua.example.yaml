@@ -336,17 +336,20 @@ viewer:                         # the web interface for the wiki, a person's
 
 usage:
   # Core's GET /v1/usage: the tokens of each day, for the chat, the nightly
-  # reflection, the lookups, the describer, and the assignments. The usage
+  # reflection, the lookups, the describer, the assignments, and the
+  # developer addon. The usage
   # page of the viewer reads it. Each caller needs a JOSHUA_TOKEN_<NAME> in
   # .env. An empty value turns the route off. GET /admin/usage gives the same answer to an admin
   # caller.
   allowed_callers:
     - viewer                   # the web viewer
   # Core's POST /v1/usage: the fleet identities that may write usage rows of
-  # the kind assignment. The usage page then shows the assignment group. An
-  # empty value turns the write off.
+  # the kind assignment or developer. The usage page then shows the
+  # assignment group and the developer group. An empty value turns the write
+  # off.
   writers:
     - assignments              # the assignments container
+    - developer                # the developer addon
 
 # workspaces:
 #   # Core's /v1/workspaces: a place in Chat for one large piece of work. The

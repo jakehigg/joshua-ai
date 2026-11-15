@@ -1268,7 +1268,7 @@ calls for each day and each group. The viewer's usage page reads it.
 | Knob | Default | Effect |
 |---|---|---|
 | `allowed_callers` | `viewer` | The fleet identities that may call `GET /v1/usage`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the route off, and every caller gets 403. |
-| `writers` | `assignments` | The fleet identities that may write usage rows with `POST /v1/usage`. A row must be of kind `assignment`. An empty value turns the write off, and every caller gets 403. |
+| `writers` | `assignments`, `developer` | The fleet identities that may write usage rows with `POST /v1/usage`. A row must be of kind `assignment` or `developer`. An empty value turns the write off, and every caller gets 403. |
 
 ```yaml
 usage:
@@ -1276,11 +1276,12 @@ usage:
     - viewer
   writers:
     - assignments
+    - developer
 ```
 
 `GET /admin/usage` gives the same answer to an admin caller and does not read
-these lists. The usage page always shows the `assignment` group, with zero
-counts when it has no row. See [contracts.md](contracts.md#the-usage-route)
+these lists. The usage page always shows the `assignment` group and the
+`developer` group, with zero counts when one has no row. See [contracts.md](contracts.md#the-usage-route)
 and [the usage write route](contracts.md#the-usage-write-route).
 
 ## Context cap

@@ -5,7 +5,7 @@ The viewer calls ``/v1/usage`` for its usage page. An operator calls
 ``/admin/usage`` with an admin token, for example with ``curl``. Both routes
 give the same answer: for each calendar day in the instance timezone, the
 calls, the tokens, and the models of each group (``chat``, ``reflection``,
-``internet``, ``describe``, and ``assignment``). ``groups`` and
+``internet``, ``describe``, ``assignment``, and ``developer``). ``groups`` and
 ``totals`` always hold each feature of ``usage_features``, with zero counts
 when it made no call. See ``store/usage_events.py``.
 
@@ -24,10 +24,12 @@ no question.
 
 ``POST /v1/usage`` writes usage rows that a container reports for its own
 model calls. ``usage.writers`` names the fleet identities that may call it
-(default ``assignments``). An empty list turns it off, so every caller gets
-403. The body is a ``UsageWriteRequest``: at most ``USAGE_WRITE_MAX_ROWS``
-rows and ``USAGE_WRITE_MAX_BYTES`` bytes (413). Each row must be of kind
-``assignment``. A row of a kind that core writes itself, or any other body
+(default ``assignments`` and ``developer``). An empty list turns it off, so
+every caller gets 403. The body is a ``UsageWriteRequest``: at most
+``USAGE_WRITE_MAX_ROWS`` rows and ``USAGE_WRITE_MAX_BYTES`` bytes (413). Each
+row must be of a kind of ``USAGE_WRITE_KINDS`` (``assignment`` or
+``developer``), and it lands in the group of its ``name``, the kind by
+default. A row of a kind that core writes itself, or any other body
 that is not valid, gets 400 and core writes no row. Core stores the ``ref``
 of a row as ``<writer>:<ref>``, so a writer cannot touch the rows of core or
 of another writer, and a row sent again is not written again. The route logs
@@ -115,7 +117,7 @@ def _event(writer: str, row: UsageWriteRow) -> UsageEvent:
     counts = row.usage
     return UsageEvent(
         kind=row.kind,
-        name=row.name,
+        name=row.name or row.kind,
         usage=Usage(
             input=counts.input,
             output=counts.output,
