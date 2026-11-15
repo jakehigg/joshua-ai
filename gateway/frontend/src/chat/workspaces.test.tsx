@@ -614,6 +614,17 @@ describe("the workspace header", () => {
     expect(calls.some((c) => c.path.endsWith("/notify"))).toBe(false);
   });
 
+  it("points at the Profile page for the device, and holds no control of its own", async () => {
+    viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    render(<WorkspaceHeader workspace={ws()} onChange={vi.fn()} onItems={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Tasks and projects");
+    // The subscription is one person's and one device's, so the drawer says
+    // where it lives and offers nothing of its own.
+    expect(screen.getByRole("link", { name: "Profile page" }).getAttribute("href")).toEqual("/me");
+    expect(screen.queryByRole("button", { name: "Turn on notifications" })).toBeNull();
+  });
+
   it("offers Resume for a paused workspace", async () => {
     viewer({ "GET /api/v1/workspaces/options": OPTIONS });
     render(<WorkspaceHeader workspace={ws({ status: "paused" })} onChange={vi.fn()} onItems={vi.fn()} />);
