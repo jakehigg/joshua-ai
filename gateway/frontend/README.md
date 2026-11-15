@@ -59,6 +59,14 @@ The manifest declares `logo-192.png` and `logo-512.png`, both `purpose:
 "any"`. It declares no maskable icon: the mark fills the square to its edges,
 so a circular mask would cut the ear and the tusk.
 
+Notifications are two handlers of that same worker, because a scope holds one
+worker: `push` shows what the payload names, and `notificationclick` brings
+the window to the path it names. `src/push.ts` is the rest — the permission,
+the subscription, and the test send — and the Notifications control of a
+workspace (`src/chat/Notifications.tsx`) is where a person taps.
+[docs/notifications.md](../../docs/notifications.md) has the whole flow,
+including the home-screen requirement of iOS.
+
 `src/shell/sections.ts` is the one source of the navigation.
 `src/shell/AppNav.tsx` draws it as a drawer on a phone, and
 `src/shell/panels.ts` keeps the folds of the desktop. A section carries a
