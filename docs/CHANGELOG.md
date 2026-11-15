@@ -108,6 +108,19 @@ with the images and the packaged chart, are at
   the safe area of the screen, such as the rounded corners of a tablet, is
   kept out.
 
+### Usage
+
+- **The usage page shows what the developer addon used.** `POST /v1/usage`
+  now takes rows of kind `developer` beside `assignment`, and the page shows
+  `developer` as its own group, with zero counts until the first row. The
+  addon reports the tokens of its own model calls with its fleet token, and
+  each task shows as a worker of the group. `usage.writers` now defaults to
+  `assignments` and `developer`, so an instance needs no change in
+  `joshua.yaml`. A row of a kind that core writes itself, such as `chat`,
+  still gets `400`. See
+  [operations.md](operations.md#the-usage-page) and
+  [contracts.md](contracts.md#the-usage-write-route).
+
 ## 0.3.0 - 2026-11-13
 
 Joshua now has workspaces: a chat thread for one large piece of work, with

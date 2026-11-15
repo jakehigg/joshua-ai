@@ -28,7 +28,7 @@ def load(section: str = ""):
 def test_the_defaults_name_the_assignments_container() -> None:
     cfg = load()
     assert cfg.inference.forwarder.allowed_callers == ["assignments"]
-    assert cfg.usage.writers == ["assignments"]
+    assert cfg.usage.writers == ["assignments", "developer"]
     assert cfg.usage.allowed_callers == ["viewer"]
     assert cfg.memory.exclude_folders == ["assignments"]
     assert cfg.gateway.person_header_callers == ["core", "assignments"]

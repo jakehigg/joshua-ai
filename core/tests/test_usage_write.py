@@ -23,6 +23,7 @@ from joshua_shared.contracts import (
 from starlette.testclient import TestClient
 
 ASSIGNMENTS = "assignments-token"
+DEVELOPER = "developer-token"
 VIEWER = "viewer-token"
 CORE = "core-token"
 NOW = datetime(2026, 10, 20, 15, 0, tzinfo=UTC)
@@ -60,8 +61,11 @@ class FakeRepo:
         ]
 
 
-def _client(monkeypatch, *, writers=("assignments",), repo: FakeRepo | None = None) -> TestClient:
+def _client(
+    monkeypatch, *, writers=("assignments", "developer"), repo: FakeRepo | None = None
+) -> TestClient:
     monkeypatch.setenv("JOSHUA_TOKEN_ASSIGNMENTS", ASSIGNMENTS)
+    monkeypatch.setenv("JOSHUA_TOKEN_DEVELOPER", DEVELOPER)
     monkeypatch.setenv("JOSHUA_TOKEN_VIEWER", VIEWER)
     monkeypatch.setenv("JOSHUA_TOKEN_CORE", CORE)
     settings = SimpleNamespace(
@@ -88,6 +92,22 @@ def _row(**fields: Any) -> dict[str, Any]:
         "calls": 3,
         "usage": {"input": 100, "output": 20, "cache_read": 1000, "cache_write": 50},
         "ref": "12:slice:1",
+    }
+    row.update(fields)
+    return row
+
+
+def _developer_row(**fields: Any) -> dict[str, Any]:
+    """A row as the developer addon reports it: no `name`, so the group is the
+    kind."""
+    row: dict[str, Any] = {
+        "kind": "developer",
+        "worker": "227",
+        "model": "claude-sonnet-5",
+        "endpoint": "anthropic",
+        "calls": 3,
+        "usage": {"input": 100, "output": 20, "cache_read": 1000, "cache_write": 50},
+        "ref": "227",
     }
     row.update(fields)
     return row
@@ -129,9 +149,10 @@ def test_the_bearer_is_checked_before_the_body(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("kind", ["chat", "reflection", "internet", "describe", "voice", ""])
-def test_a_row_that_is_not_an_assignment_is_400(monkeypatch, kind: str) -> None:
+@pytest.mark.parametrize("token", [ASSIGNMENTS, DEVELOPER])
+def test_a_row_of_a_kind_core_writes_itself_is_400(monkeypatch, token: str, kind: str) -> None:
     client = _client(monkeypatch)
-    response = _post(client, ASSIGNMENTS, {"rows": [_row(), _row(kind=kind, ref="other")]})
+    response = _post(client, token, {"rows": [_row(), _row(kind=kind, ref="other")]})
     assert response.status_code == 400
     assert client.repo.events == []  # type: ignore[attr-defined]
 
@@ -237,6 +258,14 @@ def test_a_row_sent_again_is_not_written_again(monkeypatch) -> None:
     assert len(client.repo.events) == 1  # type: ignore[attr-defined]
 
 
+def test_the_same_ref_from_two_writers_is_two_rows(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    assert _post(client, ASSIGNMENTS, {"rows": [_row(ref="7")]}).status_code == 200
+    assert _post(client, DEVELOPER, {"rows": [_developer_row(ref="7")]}).status_code == 200
+    refs = [e.ref for e in client.repo.events]  # type: ignore[attr-defined]
+    assert refs == ["assignments:7", "developer:7"]
+
+
 def test_the_assignment_group_is_there_with_no_row(monkeypatch) -> None:
     client = _client(monkeypatch)
     usage = client.get("/v1/usage", headers={"Authorization": f"Bearer {VIEWER}"}).json()
@@ -248,6 +277,47 @@ def test_an_empty_list_writes_nothing(monkeypatch) -> None:
     client = _client(monkeypatch)
     response = _post(client, ASSIGNMENTS, {"rows": []})
     assert response.json() == {"accepted": 0}
+
+
+# ── the developer addon ──────────────────────────────────────────────────────
+
+
+def test_a_developer_row_is_written_into_the_developer_group(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    response = _post(client, DEVELOPER, {"rows": [_developer_row()]})
+    assert response.status_code == 200
+    assert response.json() == {"accepted": 1}
+
+    [event] = client.repo.events  # type: ignore[attr-defined]
+    # The row names no group, so the group is the kind.
+    assert (event.kind, event.name) == ("developer", "developer")
+    assert event.worker == "227"
+    assert event.calls == 3
+    assert event.ref == "developer:227"
+
+    usage = client.get("/v1/usage", headers={"Authorization": f"Bearer {VIEWER}"}).json()
+    assert "developer" in usage["groups"]
+    group = usage["totals"]["developer"]
+    assert group["calls"] == 3
+    assert group["total"] == 1170
+    assert group["workers"]["227"]["calls"] == 3
+
+
+def test_the_developer_group_is_there_with_no_row(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    usage = client.get("/v1/usage", headers={"Authorization": f"Bearer {VIEWER}"}).json()
+    assert "developer" in usage["groups"]
+    assert usage["totals"]["developer"]["calls"] == 0
+    assert usage["totals"]["developer"]["total"] == 0
+
+
+def test_a_developer_row_from_the_assignments_writer_is_written_too(monkeypatch) -> None:
+    """A writer may report any accepted kind: the ref, not the kind, keeps the
+    writers apart."""
+    client = _client(monkeypatch)
+    assert _post(client, ASSIGNMENTS, {"rows": [_developer_row()]}).status_code == 200
+    [event] = client.repo.events  # type: ignore[attr-defined]
+    assert (event.name, event.ref) == ("developer", "assignments:227")
 
 
 def test_a_database_failure_is_503(monkeypatch) -> None:

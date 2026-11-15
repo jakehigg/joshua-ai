@@ -145,7 +145,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
 | `GET /v1/usage?group=conversation&person=` | `usage.allowed_callers` (default `viewer`) | | `{"days", "conversations": [{"conversation_id", "workspace": {"slug", "title"} or null, "calls", "input", "output", "cache_read", "cache_write"}]}`, largest first. Only the conversations of `person`. A row with no conversation is not listed. `422` for another `group` or no `person`; `403` for a person who is not a member. |
 | `/v1/workspaces` | `workspaces.allowed_callers` (default `viewer`, `gateway`) | `person` query parameter | See [workspaces.md](workspaces.md#routes). |
-| `POST /v1/usage` | `usage.writers` (default `assignments`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment`, `413` over 1 MiB, `503` when the database fails. |
+| `POST /v1/usage` | `usage.writers` (default `assignments`, `developer`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment` or `developer`, `413` over 1 MiB, `503` when the database fails. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
 | `POST /auth/verify` | `AUTH_CALLERS` (default `viewer`) | `{"person", "secret"}` | `{"ok": bool}`. `ok` is `false` for a wrong secret, for a person with no secret, and for a person who is not on the roster; the answer never says which of the three. |
@@ -209,13 +209,15 @@ logs the query.
 the instance `timezone` and for each group. The groups are `chat` (the turns
 of the agent), `reflection` (the nightly reflection), `internet` (a lookup
 that the agent makes with `use_internet`), `describe` (the attachment
-describer), and `assignment` (the model calls of the assignments container).
+describer), `assignment` (the model calls of the assignments container), and
+`developer` (the model calls of the developer addon).
 `days` is the window, today included: default 30, held to 1 to
 366.
 
 ```json
 {"timezone": "America/New_York", "days": 30,
- "groups": ["chat", "reflection", "internet", "describe", "assignment"],
+ "groups": ["chat", "reflection", "internet", "describe", "assignment",
+            "developer"],
  "rows": [{"date": "2026-10-20",
            "groups": {"chat": {"calls": 12, "input": 900, "output": 400,
                                "cache_read": 52000, "cache_write": 3100,
@@ -226,7 +228,8 @@ describer), and `assignment` (the model calls of the assignments container).
 ```
 
 `groups` always holds every feature, also one with no usage: `chat`,
-`reflection`, `internet`, `describe`, and `assignment`, in that order. After them come the
+`reflection`, `internet`, `describe`, `assignment`, and `developer`, in that
+order. After them come the
 other names of the rows in the window, sorted. `totals` holds one entry for
 each name of `groups`, with zero counts for a group with no usage. `rows` is
 newest first and holds only a day with usage, and a day holds only the groups
@@ -238,14 +241,15 @@ the other groups. The answer holds no person, no message, and no question. An
 empty list in `usage.allowed_callers` turns the route off: every caller gets
 `403`. `GET /admin/usage` gives the same answer to an admin caller.
 
-The group `assignment` holds the model calls of the assignments container.
-Core does not make these calls itself, so the container reports them with
-`POST /v1/usage`.
+The group `assignment` holds the model calls of the assignments container,
+and the group `developer` those of the developer addon. Core does not make
+these calls itself, so each one reports them with `POST /v1/usage`.
 
 ### The usage write route
 
 `POST /v1/usage` writes usage rows that another container reports for its
-own model calls. The callers are `usage.writers` (default `assignments`). An
+own model calls. The callers are `usage.writers` (default `assignments` and
+`developer`). An
 empty list turns the route off: every caller gets `403`. Core checks the
 bearer before it reads the body.
 
@@ -260,9 +264,9 @@ bearer before it reads the body.
 
 | Field | Rule |
 |---|---|
-| `kind` | `assignment` only. A row of `chat`, `reflection`, `internet`, `describe`, or any other kind gets `400`. Only core writes those. |
-| `name` | `assignment`, the default. It is the group on the usage page. |
-| `worker` | optional, at most 64 characters. The usage page shows it as a worker of the group, for example one assignment. |
+| `kind` | `assignment` or `developer` only. A row of `chat`, `reflection`, `internet`, `describe`, or any other kind gets `400`. Only core writes those. |
+| `name` | optional, the group on the usage page: `assignment` or `developer`. With none, the group is the `kind`. |
+| `worker` | optional, at most 64 characters. The usage page shows it as a worker of the group, for example one assignment or one developer task. |
 | `run_id` | optional, a positive integer, for example the id of the assignment. |
 | `person_id` | optional, a person id. |
 | `model`, `endpoint` | optional labels: the model and the server label of the calls. |

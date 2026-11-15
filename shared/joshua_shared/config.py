@@ -943,7 +943,7 @@ class UsageConfig(_Model):
 
     ``allowed_callers`` names the fleet identities that may read the tokens
     of each group by day. ``writers`` names the fleet identities that may
-    write usage rows of kind ``assignment``. Each one needs a
+    write usage rows of kind ``assignment`` or ``developer``. Each one needs a
     ``JOSHUA_TOKEN_<NAME>`` in core's environment. An empty value turns that
     route off, so every caller gets 403. ``GET /admin/usage`` gives the same
     answer to an admin caller and does not read these lists.
@@ -952,7 +952,7 @@ class UsageConfig(_Model):
     allowed_callers: list[str] = ["viewer"]
     # The fleet identities that may write usage rows with ``POST /v1/usage``.
     # An empty list turns the write off.
-    writers: list[str] = ["assignments"]
+    writers: list[str] = ["assignments", "developer"]
 
     @field_validator("allowed_callers", "writers", mode="before")
     @classmethod

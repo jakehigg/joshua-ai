@@ -84,8 +84,9 @@ Every route has an allowlist of fleet identities. The list is in
   path, or another parameter. A test proves the `403` for every other
   caller, `assignments` too.
 
-- core's `POST /v1/usage` admits `usage.writers` (default `assignments`) and
-  accepts rows of kind `assignment` only. A row of `chat`, `reflection`,
+- core's `POST /v1/usage` admits `usage.writers` (default `assignments` and
+  `developer`) and accepts rows of kind `assignment` or `developer` only. A
+  row of `chat`, `reflection`,
   `internet`, or `describe` gets `400`, so a writer cannot change the numbers
   of the calls that core makes. Core stores each `ref` with the name of the
   writer, so a writer cannot reach the rows of another writer.

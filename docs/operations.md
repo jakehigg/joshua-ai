@@ -893,9 +893,14 @@ cache read, cache write, and total. The groups are:
 | `reflection` | the nightly reflection |
 | `internet` | a lookup that the agent makes with `use_internet` in a conversation |
 | `describe` | the attachment describer |
+| `assignment` | the model calls of the assignments container |
+| `developer` | the model calls of the developer addon |
 
 The table of days and the table of totals show each of these groups, also a
-group with no usage in the window. The `Models` column of the totals table
+group with no usage in the window. Core makes the calls of the first four
+itself; the assignments container and the developer addon report theirs with
+`POST /v1/usage`, and `usage.writers` (default `assignments` and `developer`)
+names the identities that may. The `Models` column of the totals table
 lists the models of the calls of each group. A dash means that no call of the
 group named its model, for example an old row from before the table kept the
 model. A group whose rows name a worker gets a table of its workers under the
