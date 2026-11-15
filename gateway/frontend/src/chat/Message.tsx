@@ -18,7 +18,10 @@
 // has no bubble at all): a photo as a thumbnail that opens the full image, a PDF as a chip with its name. A
 // message that this screen just sent shows the file it holds; a message from
 // the history shows the files the transcript row names, from the viewer's
-// files route. A turn that waits for another turn of the conversation says so.
+// files route. A photo of the history stands in its own shape while it loads,
+// and asks again a few times when it does not answer, so the broken-image
+// glyph of the browser never shows: a photo that really fails ends as a chip
+// that says so. A turn that waits for another turn of the conversation says so.
 // A message written while a turn runs (`Held`) is a person bubble that says
 // it waits, with a button to take it back.
 //
@@ -32,7 +35,7 @@
 // personal thread gets none of them, so it keeps the layout it has: the
 // person at the right, Joshua full width, and no name.
 
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { FileRef } from "../api/client";
 import type { ChatMessage, HeldMessage } from "./store";
 import { useDocumentPanel } from "./DocumentPanel";
@@ -118,6 +121,58 @@ function FileChip({ name, url }: { name: string; url?: string }) {
   );
 }
 
+// How often a thumbnail asks again for a photo that did not answer, and how
+// long it waits before each try. A photo that was just sent is stored a
+// moment after the turn starts, so the first try can come too early.
+export const THUMB_TRIES = 3;
+export const THUMB_BACKOFF_MS = 600;
+
+// A photo of the thread. The box keeps the shape of a thumbnail while the
+// image loads, so the browser's broken-image glyph never shows. An `error` is
+// tried again a few times, each after a longer wait; after that the photo is
+// a chip that says it did not load.
+function Thumb({ url, alt }: { url: string; alt: string }) {
+  const [shown, setShown] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [tries, setTries] = useState(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    setShown(false);
+    setFailed(false);
+    setTries(0);
+  }, [url]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  if (failed) {
+    return (
+      <span className="file-chip sent thumb-failed" role="status">
+        <span aria-hidden="true">🖼</span>
+        <span className="file-name">{alt}</span>
+        <span className="j-meta">did not load</span>
+      </span>
+    );
+  }
+  const again = () => {
+    if (tries >= THUMB_TRIES) {
+      setFailed(true);
+      return;
+    }
+    const next = tries + 1;
+    timer.current = setTimeout(() => setTries(next), THUMB_BACKOFF_MS * next);
+  };
+  return (
+    <span className={`thumb-box${shown ? "" : " waiting"}`}>
+      <img
+        className="thumb"
+        src={tries ? `${url}${url.includes("?") ? "&" : "?"}try=${tries}` : url}
+        alt={alt}
+        loading="lazy"
+        onLoad={() => setShown(true)}
+        onError={again}
+      />
+    </span>
+  );
+}
+
 // A photo as a thumbnail. A tap shows it full size in the panel of the chat;
 // outside a chat screen the link opens the image in a new tab.
 function Attachment({ file }: { file: FileRef }) {
@@ -136,7 +191,7 @@ function Attachment({ file }: { file: FileRef }) {
           panel.open({ type: "image", image: { url, title: file.name } });
         }}
       >
-        <img className="thumb" src={url} alt={file.name} loading="lazy" />
+        <Thumb url={url} alt={file.name} />
       </a>
     );
   }

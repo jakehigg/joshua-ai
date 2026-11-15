@@ -1643,6 +1643,33 @@ html.vv-fit .chat-screen .ws-overlay {
 .chat-screen .thumb-link .thumb {
   border-radius: 0;
 }
+/* A photo that has not answered yet: a quiet box of the shape a thumbnail
+   takes, with the image hidden inside it, so no broken-image glyph shows
+   (Message.tsx). The image is still laid out, so it loads. */
+.chat-screen .thumb-box {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
+.chat-screen .thumb-box.waiting {
+  width: 180px;
+  height: 135px;
+  border-radius: var(--j-radius);
+  border-bottom-right-radius: 4px;
+  background: var(--j-surface-2);
+  outline: 1px solid var(--j-line-soft);
+  outline-offset: -1px;
+}
+.chat-screen .thumb-link .thumb-box.waiting {
+  border-radius: 0;
+}
+.chat-screen .thumb-box.waiting .thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  visibility: hidden;
+}
 .chat-screen .file-chip,
 .chat-screen .file-chip.sent {
   display: inline-flex;
