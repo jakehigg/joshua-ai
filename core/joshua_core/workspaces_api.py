@@ -35,7 +35,8 @@ checked before the body is read. A ``person`` that is not a member of
   (``turn_id``, the id of a transcript row) for that person. The mark is
   theirs alone, so in a shared workspace every other person keeps the count
   they have. The list route gives each workspace the ``unread`` count of that
-  person: the rows of its thread after their mark.
+  person: the rows of its thread after their mark that somebody else wrote,
+  Joshua or another person of the thread. A row of their own never counts.
 - ``GET`` and ``POST /v1/workspaces/{slug}/notify`` read and write the notify
   mode of that person in that workspace (``off``, ``decide``, ``all``), which
   governs ``notify_user``. The mode is theirs alone. A person with no row of
@@ -315,7 +316,8 @@ def _dedupe(servers: list[str]) -> list[str]:
 
 async def _unread(repo: Any, person_id: str, workspaces: Collection[Workspace]) -> dict[str, int]:
     """How many rows of each workspace thread this person has not read, by
-    workspace id. A workspace with nothing unread is not in the answer."""
+    workspace id: the rows another speaker wrote, never their own. A workspace
+    with nothing unread is not in the answer."""
     threads: dict[str, str] = {}
     for workspace in workspaces:
         conversation = await repo.workspace_conversation(workspace)

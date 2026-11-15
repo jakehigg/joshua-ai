@@ -356,11 +356,46 @@ async def test_the_read_mark_is_one_for_each_person_of_a_thread(seeded) -> None:
     assert back.last_read_turn_id == silent
     assert await seeded.unread_counts("alex", []) == {}
 
-    # A thread a person has read nothing of counts every row it shows.
+    # A thread a person has read nothing of counts every row it shows that
+    # somebody else wrote. Mia's own line is not one of them.
     mine = await seeded.create_workspace("mia", "Trip")
     other = (await seeded.workspace_conversation(mine)).id
     await seeded.add_transcript(other, "in", "which cabin?")
+    assert await seeded.unread_counts("mia", [conv, other]) == {conv: 2}
+    await seeded.add_transcript(other, "out", "Cabin four is free.")
     assert await seeded.unread_counts("mia", [conv, other]) == {conv: 2, other: 1}
+
+
+async def test_the_unread_count_skips_the_turns_the_reader_wrote(seeded) -> None:
+    """The count is what somebody else said: Joshua, or another person here.
+
+    Alex sends a message and leaves the workspace at once: his own turn is not
+    unread, so his badge stays at zero until somebody answers. The same turn
+    counts for Mia, who has not read it.
+    """
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    conv = (await seeded.workspace_conversation(shared)).id
+
+    # His own turn, which a shared thread stamps with his name.
+    await seeded.add_transcript(conv, "in", "who brings the pie?", meta={"speaker": "Alex"})
+    assert await seeded.unread_counts("alex", [conv]) == {}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 1}
+
+    # A turn of Joshua's counts for both of them.
+    await seeded.add_transcript(conv, "out", "Mia does.")
+    assert await seeded.unread_counts("alex", [conv]) == {conv: 1}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 2}
+
+    # A turn of the other person's counts for the reader, never for its author.
+    await seeded.add_transcript(conv, "in", "I can bring two.", meta={"speaker": "Mia"})
+    assert await seeded.unread_counts("alex", [conv]) == {conv: 2}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 2}
+
+    # A thread of one person carries no name: the person of the thread wrote it.
+    mine = await seeded.create_workspace("alex", "Trip")
+    own = (await seeded.workspace_conversation(mine)).id
+    await seeded.add_transcript(own, "in", "which cabin?")
+    assert await seeded.unread_counts("alex", [own]) == {}
 
 
 async def test_the_notify_mode_is_one_for_each_person_of_a_workspace(seeded) -> None:

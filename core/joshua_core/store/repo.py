@@ -668,6 +668,12 @@ class Repo:
         conversation they have read nothing of. A conversation with nothing
         unread is not in the answer.
 
+        A row this person wrote is never counted: the count is what somebody
+        else said, Joshua or another person of a shared thread. The author of
+        an incoming row is its ``meta.speaker``, the person who wrote it, and
+        the person of the conversation when the row carries no speaker, as a
+        thread of one person has one writer.
+
         The rows counted are the ones a thread shows, as ``transcript_page``
         gives them: a reply that says nothing is left out.
         """
@@ -679,14 +685,23 @@ class Repo:
                 """
                 SELECT t.conversation_id AS conversation_id, count(*) AS unread
                 FROM transcript t
+                JOIN conversations c ON c.id = t.conversation_id
+                LEFT JOIN people me ON me.id = %s
                 LEFT JOIN conversation_reads r
                     ON r.conversation_id = t.conversation_id AND r.person_id = %s
                 WHERE t.conversation_id = ANY(%s::uuid[])
                   AND t.id > COALESCE(r.last_read_turn_id, 0)
                   AND NOT (t.direction = 'out' AND btrim(t.content, %s) IN ('', %s))
+                  AND NOT (
+                      t.direction = 'in'
+                      AND (CASE
+                              WHEN t.meta->>'speaker' IS NULL THEN c.person_id = me.id
+                              ELSE t.meta->>'speaker' = me.display_name
+                           END) IS TRUE
+                  )
                 GROUP BY t.conversation_id
                 """,
-                (person_id, ids, BLANK_CHARS, SILENT_REPLY),
+                (person_id, person_id, ids, BLANK_CHARS, SILENT_REPLY),
             )
             rows = await cur.fetchall()
         return {str(r["conversation_id"]): int(r["unread"]) for r in rows}
