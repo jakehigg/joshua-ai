@@ -7,7 +7,10 @@ opens at the page the notification names.
 
 Push is **off in every deployment** until the owner turns it on, and no
 environment variable turns it on. The owner enters three keys under
-Admin → Instance and writes `true` in one field, and that is the whole setup.
+Admin → Instance and writes `true` in one field, and that is the whole setup
+of the instance. Each person then turns notifications on once per device, and
+on an iPhone or an iPad that device must be Joshua installed to the home
+screen.
 
 [settings.md](settings.md) has the store the keys live in, and
 [contracts.md](contracts.md#the-push-routes) has the four routes.
@@ -33,12 +36,13 @@ Nothing about a person's conversation goes to a push service in the clear.
 Keep the `body` short anyway: a notification is a knock on the door, not the
 message.
 
-What is here is the server half: the subscriptions, the sender, and the four
-routes. The browser half, the button that subscribes a device and the service
-worker that shows what arrives, lands with it; until then
-`POST /api/v1/push/test` is what sends, and nothing else calls the sender.
+Two halves make one notification. Core holds the keys, the subscriptions and
+the sender. The browser asks for the permission, subscribes, shows what
+arrives, and opens the address of the payload when a person taps it. The
+owner turns push on once, for the instance; each person then turns it on once
+per device.
 
-## Turning it on
+## Turning it on, as the owner
 
 You need a VAPID key pair. It is yours, it is made once, and it belongs to the
 instance and not to a person. `py_vapid` ships inside the core image, so one
@@ -79,6 +83,70 @@ key, how to generate it, and why it is backed up with the database.
 Turn push off again by writing anything but `true` in **Push notifications
 on**. The subscriptions stay, so turning it on again needs no device to do
 anything.
+
+## Turning it on, on your phone
+
+Each device of yours subscribes once, and you do it yourself: a browser gives
+no notification away without a tap.
+
+1. **On an iPhone or an iPad, install Joshua first.** Open the viewer in
+   Safari, tap Share, then **Add to Home Screen**, and open Joshua from that
+   icon. iOS gives web push to an installed app only, on iOS 16.4 or later,
+   and never to a tab. Android and a desktop browser need no install, but an
+   installed app there keeps the notifications too.
+2. Open a workspace, tap **Edit**, and look under "Messages to your phone".
+3. Tap **Turn on notifications**. The browser asks, and you allow it. That one
+   tap asks, subscribes at the push service of the browser, and stores the
+   subscription.
+4. Tap **Send a test**. A notification arrives, and a tap on it opens Joshua
+   at the workspace it names.
+
+What the control says:
+
+| It says | What to do |
+|---|---|
+| Notifications are on for this device. | Nothing. **Turn off** drops this device again. |
+| This device gets no notifications yet. | Tap **Turn on notifications**. |
+| This device blocks notifications. | Allow them for Joshua in the settings of the device. A page can only ask once; after a refusal only the operating system can undo it. |
+| Add Joshua to the home screen. | Install the app, as in step 1, and open it from the icon. |
+| This browser cannot show notifications. | Use another browser; this one has no web push. |
+| notifications are not configured on the Joshua side | Ask the owner to turn push on, above. |
+
+Per workspace, **Messages to your phone** says *when* Joshua writes: never,
+on a question, or on a question and a finish. The control says whether this
+device hears it. Both are needed: a workspace set to "Never" sends nothing to
+a subscribed phone, and a workspace that would write reaches no device that
+never subscribed.
+
+**Turn off** drops the subscription in the browser and deletes the row on the
+server, so Joshua stops pushing to that device at once. It is also what a
+sign-out does: the viewer has no sign-out button of its own yet, and the step
+it takes is `forget` in `push.ts`.
+
+## What the browser does
+
+The service worker of the installed app (`gateway/frontend/public/sw.js`) is
+the one worker of the app, and web push is two of its handlers. There is one
+worker per scope, so there is no second file.
+
+- `push`: it shows the notification of the payload — the `title`, the `body`,
+  and the `tag`. A payload it cannot read still shows a line that says Joshua
+  has something, because iOS shows every push it delivers and allows no silent
+  one.
+- `notificationclick`: it brings the window to the `url` of the payload, which
+  is a path of the app, such as `/chat/w/shared/kitchen`. A window that already
+  shows that address takes the focus, an open window goes there, and with no
+  window open it opens one. An address of another site is never followed: the
+  tap opens Joshua.
+
+The worker is served from `/sw.js`, so its scope is `/` and it covers the chat
+at `/chat/…` with no `Service-Worker-Allowed` header. A worker served from
+anywhere else would need one.
+
+`gateway/frontend/src/push.ts` is the rest: the permission, the subscription,
+and the test send. A subscription the browser holds and the server does not is
+a notification nobody gets, so the two always go together: a refusal anywhere
+unsubscribes the browser and deletes the row.
 
 ## Where the keys live
 

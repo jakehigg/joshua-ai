@@ -178,6 +178,25 @@ with the images and the packaged chart, are at
   workspace slug, so several notifications of one workspace collapse into the
   newest. On Kubernetes the `joshua-core` pod is the one that needs egress to
   the push services.
+- **A device can now turn notifications on itself.** A workspace holds a
+  Notifications control under Edit → "Messages to your phone": one tap asks
+  the browser for the permission, subscribes with the public VAPID key of the
+  instance, and stores the subscription. "Send a test" then sends this device
+  a notification, and "Turn off" drops the subscription in the browser and on
+  the server. The control says what the state is, including a device that
+  blocks notifications, which only the settings of that device can undo, and
+  it shows the sentence of the viewer while the owner has not turned push on.
+- The service worker of the installed app now shows what arrives and opens
+  what a tap asks for: the notification carries the `title`, the `body` and
+  the `tag` of the payload, and a tap brings the window to the address the
+  payload names, such as `/chat/w/shared/kitchen`. A window that already
+  shows it takes the focus, an open window goes there, and with no window
+  open it opens one. An address of another site is never followed. A payload
+  the worker cannot read still shows a line, because iOS shows every push.
+- **On an iPhone or an iPad, notifications need Joshua on the home screen.**
+  iOS gives web push to an installed app only, on iOS 16.4 or later, so the
+  control asks for the install in Safari and says why. See
+  [notifications.md](notifications.md), which has the steps a person takes.
 - A dead browser cleans itself up: a `404` or a `410` from a push service
   deletes the subscription, a `429` leaves that endpoint alone until its
   `Retry-After` has passed, and five other failures in a row drop the row. A

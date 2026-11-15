@@ -15,6 +15,12 @@
  * workspace routes, and every other JSON route of the viewer go to the
  * network exactly as they would with no worker. Nothing else is written to
  * the cache either: only a GET of this origin that answered 200.
+ *
+ * It is also the half of web push that runs in the browser: a `push` event
+ * shows the notification its payload names, and a tap on that notification
+ * (`notificationclick`) brings the window to the address of the payload, or
+ * opens one there. There is one worker per scope, so these handlers live
+ * beside the cache and not in a second file.
  */
 
 // The build writes its id over the placeholder (see `buildStamp.ts`), so every
@@ -129,4 +135,93 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith(ASSETS) || PRECACHE.includes(url.pathname)) {
     event.respondWith(cacheFirst(request));
   }
+});
+
+// Web push: the notification, and the tap on it.
+//
+// The payload of a push holds `title`, `body`, `url` and `tag` (core's
+// `Notification`). iOS shows every push it delivers and allows no silent one,
+// so a payload that cannot be read still leaves a line a person can tap.
+
+// What a notification says when the payload says nothing.
+const FALLBACK_TITLE = "Joshua";
+const FALLBACK_TAG = "joshua";
+
+// Where a tap goes when the payload names no address: the start of the app.
+const FALLBACK_URL = "/";
+
+// The app icon of a notification, and the small badge a phone draws beside it.
+const NOTIFICATION_ICON = "/logo-192.png";
+const NOTIFICATION_BADGE = "/favicon-32.png";
+
+// The address of a payload, which is a path of this app, such as
+// `/chat/w/shared/<slug>`. Anything else — another origin, a scheme, a
+// protocol-relative address — is not followed, and the tap opens the app.
+function pathOf(value) {
+  if (!value.startsWith("/") || value.startsWith("//")) return FALLBACK_URL;
+  return value;
+}
+
+// The four fields of the payload, each of them a string.
+function payloadOf(event) {
+  let body = null;
+  try {
+    body = event.data ? event.data.json() : null;
+  } catch {
+    // The payload is not JSON: the notification below says Joshua has
+    // something, and the tap opens the app.
+  }
+  if (!body || typeof body !== "object") body = {};
+  const text = (value) => (typeof value === "string" ? value : "");
+  return {
+    title: text(body.title) || FALLBACK_TITLE,
+    body: text(body.body),
+    // The tag of a workspace, so its notifications collapse into the newest.
+    tag: text(body.tag) || FALLBACK_TAG,
+    url: pathOf(text(body.url)),
+  };
+}
+
+self.addEventListener("push", (event) => {
+  const payload = payloadOf(event);
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
+      icon: NOTIFICATION_ICON,
+      badge: NOTIFICATION_BADGE,
+      // The tap reads the address back from here.
+      data: { url: payload.url },
+    }),
+  );
+});
+
+// The window the tap belongs in: the one that already shows that address, else
+// the open window, sent there, else a new one. The installed app has one
+// window, so the common path is the second one.
+async function showAt(url) {
+  const target = new URL(url, self.location.origin);
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const here = windows.find((client) => new URL(client.url).pathname === target.pathname);
+  if (here) {
+    await here.focus();
+    return;
+  }
+  const first = windows[0];
+  if (first && typeof first.navigate === "function") {
+    // A browser that refuses to send a window elsewhere gets a window of its
+    // own below.
+    const moved = await first.navigate(target.href).catch(() => null);
+    if (moved) {
+      await moved.focus();
+      return;
+    }
+  }
+  await self.clients.openWindow(target.href);
+}
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  event.waitUntil(showAt(data && typeof data.url === "string" ? data.url : FALLBACK_URL));
 });

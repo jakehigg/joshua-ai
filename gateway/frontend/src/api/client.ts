@@ -137,9 +137,19 @@ export function patchJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-/** Remove one thing. */
-export function deleteJson<T>(path: string): Promise<T> {
-  return send<T>(path, { method: "DELETE", headers: { Accept: "application/json" } });
+/**
+ * Remove one thing. A route that names what to remove in a body, as the push
+ * subscription of this browser does, takes it in `body`.
+ */
+export function deleteJson<T>(path: string, body?: unknown): Promise<T> {
+  return send<T>(path, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
 }
 
 // The chat calls: one turn, and the history of a conversation.

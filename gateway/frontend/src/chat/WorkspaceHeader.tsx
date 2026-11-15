@@ -1,6 +1,8 @@
 // The header of a workspace: its title and goal, and an edit drawer for the
 // goal, the notes, the servers, the model, the notify setting and the status
-// (pause, resume, archive). A shared workspace carries a two-person icon
+// (pause, resume, archive). The notify setting says when Joshua writes to the
+// phone; under it, the notifications of this device say whether it hears that
+// (Notifications.tsx). A shared workspace carries a two-person icon
 // beside its title and names its people under it, "Jake, Mia". They are not in
 // the drawer: they are set at the create and never change.
 
@@ -17,6 +19,7 @@ import {
 import { errorText } from "../api/client";
 import { SessionContext } from "../shell/Shell";
 import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
+import { Notifications } from "./Notifications";
 import { ServerChecklist } from "./ServerChecklist";
 import { SharedMark } from "./SharedMark";
 
@@ -117,6 +120,7 @@ function EditDrawer({
             </option>
           ))}
         </select>
+        <Notifications />
         <ServerChecklist servers={shown} picked={servers} onChange={setServers} />
         {error && (
           <p className="j-error" role="alert">
