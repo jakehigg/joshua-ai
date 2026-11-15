@@ -41,6 +41,12 @@ with the images and the packaged chart, are at
   as one turn, in order, one per line. The messages wait on the server, so a
   reload or a closed tab keeps them. The iMessage and Telegram paths do not
   change.
+- Leaving a chat screen while Joshua works no longer spoils the turn. The
+  turn runs on, and the screen shows its real answer when it opens again.
+  Before, the thread could show "Sorry, something went wrong on my end"
+  instead of the answer: the stream that the page dropped could fail the turn
+  it was reading. Core now drops what it cannot hand to a client that has
+  gone, and keeps the turn.
 - A turn that uses all of its agent turns now gets a reply. Before, the
   person got "Sorry, something went wrong on my end" and lost the work of
   the turn. Now core asks the same session for a reply with no tool call:

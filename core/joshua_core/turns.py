@@ -18,6 +18,13 @@ stream tells the client what happens, in these events: ``accepted`` (core has
 the turn and it will finish), ``status`` (``queued`` while another turn of the
 conversation runs, then ``running``), ``delta``, ``done``, and ``error``.
 
+Nothing on the client's side of the queue can fail the turn: ``put`` swallows
+what it cannot deliver, and the engine does the same with the hooks it is
+given. Each end of a streamed turn logs its own line with the ``turn_id``:
+``client left a running turn`` and ``turn finished after the client left`` when
+a client goes, ``stream turn cancelled`` on shutdown, and ``stream turn
+failed`` when the turn itself raised.
+
 ``/v1/holds`` is the hold of a chat thread: the messages a person wrote while
 a turn of that thread was still running. The hold lives here and not in the
 page, so a reload or a closed tab never loses a message. ``POST`` adds one,
@@ -429,10 +436,26 @@ class TurnService:
         """
         queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
         gone = False
+        dropped = False
 
         def put(name: str, data: dict[str, Any]) -> None:
-            if not gone:
+            """Offer one event to the reader. It never raises into the turn."""
+            nonlocal dropped
+            if gone:
+                return
+            try:
                 queue.put_nowait((name, data))
+            except Exception as exc:  # noqa: BLE001 — an event is not worth a turn
+                if not dropped:
+                    dropped = True
+                    logger.warning(
+                        {
+                            "message": "stream event dropped",
+                            "turn_id": turn_id,
+                            "event": name,
+                            "error": str(exc),
+                        }
+                    )
 
         async def on_delta(chunk: str) -> None:
             put("delta", {"text": chunk})
@@ -451,11 +474,23 @@ class TurnService:
                 )
             except asyncio.CancelledError:
                 # Shutdown. The manager has already abandoned the client.
+                logger.info(
+                    {
+                        "message": "stream turn cancelled",
+                        "turn_id": turn_id,
+                        "channel": event.channel,
+                    }
+                )
                 put("error", {"message": "Joshua is restarting"})
                 raise
             except Exception as exc:  # noqa: BLE001 — surface the failure as an SSE error
                 logger.error(
-                    {"message": "stream turn failed", "channel": event.channel, "error": str(exc)}
+                    {
+                        "message": "stream turn failed",
+                        "turn_id": turn_id,
+                        "channel": event.channel,
+                        "error": str(exc),
+                    }
                 )
                 put("error", {"message": str(exc)})
             finally:
@@ -463,6 +498,8 @@ class TurnService:
                     logger.info(
                         {"message": "turn finished after the client left", "turn_id": turn_id}
                     )
+                # The queue has no bound, so the sentinel always fits and this
+                # never raises back into the turn.
                 queue.put_nowait(None)
 
         task = asyncio.create_task(run(), name=f"stream-turn-{turn_id}")
