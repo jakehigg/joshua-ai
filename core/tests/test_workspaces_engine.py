@@ -1166,6 +1166,7 @@ async def _notify(
     *,
     person: str = "alex",
     text: str = "Which quote do we take?",
+    url: str | None = None,
     person_id: str | None = "mia",
     now: datetime | None = MOMENT,
     notify: Notifier | None = None,
@@ -1178,11 +1179,21 @@ async def _notify(
         _deps(repo, channel or _shared_channel(), person_id=person_id),
         person=person,
         text=text,
+        url=url,
         settings=make_settings(),
         deliver=deliver,
         notify=notify,
         now=now,
     )
+
+
+def _decisions(caplog: pytest.LogCaptureFixture) -> list[dict]:
+    """The decision lines of ``notify_user``, in order."""
+    return [
+        r.msg
+        for r in caplog.records
+        if isinstance(r.msg, dict) and r.msg.get("message") == "notify decision"
+    ]
 
 
 def _with_a_device() -> WsRepo:
@@ -1325,6 +1336,96 @@ async def test_notify_user_needs_text_and_a_workspace_row() -> None:
     repo = _with_a_device()
     assert "Give the text" in _text(await _notify(repo, text="  "))
     assert "was not found" in _text(await _notify(WsRepo(None)))
+
+
+async def test_notify_user_opens_the_url_it_is_given_and_the_thread_by_default() -> None:
+    """Lauren settles the meal plan and asks Joshua to check it with Jake: the
+    tap lands on the document, not on the thread."""
+    repo = _with_a_device()
+    repo.main = Conversation(id="m", channel_id="telegram:1", person_id="alex")
+    notifier = Notifier()
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    await _notify(
+        repo,
+        text="The meal plan is settled. Does it work for you?",
+        url="/documents/shared/meal-plan",
+        notify=notifier,
+        deliver=deliver,
+    )
+    _, notification = notifier.calls[0]
+    assert notification.url == "/documents/shared/meal-plan"
+    # The tag and the title stay the workspace's, so the lines of one
+    # workspace still collapse into the newest.
+    assert notification.title == "Solar install" and notification.tag == "solar"
+
+    # A person with no device gets the same path in their normal chat.
+    plain = WsRepo(_shared_ws())
+    plain.main = Conversation(id="m", channel_id="telegram:1", person_id="alex")
+    await _notify(plain, text="Does it work for you?", url="/wiki/recipes.md", deliver=deliver)
+    assert sent == [("telegram:1", "Does it work for you?\n\nSolar install: /wiki/recipes.md")]
+
+    # With no url the notification opens this thread.
+    await _notify(_with_a_device(), notify=notifier)
+    assert notifier.calls[1][1].url == "/chat/w/shared/solar"
+
+
+@pytest.mark.parametrize(
+    "url", ["https://elsewhere.example/page", "//elsewhere.example", "chat", "mailto:mia@x.test"]
+)
+async def test_notify_user_refuses_a_url_that_is_not_a_path_in_the_app(url: str) -> None:
+    """The one validator of both notify tools: the tap opens Joshua, as the
+    service worker's ``notificationclick`` allows nothing else."""
+    notifier = Notifier()
+    reply = await _notify(_with_a_device(), url=url, notify=notifier)
+    assert "must be a path inside Joshua" in _text(reply)
+    assert notifier.calls == []
+
+
+async def test_notify_user_logs_the_decision_and_the_guard_that_stopped_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One line per call: the person, the workspace, whether a notification
+    went, and the guard that held it."""
+    repo = _with_a_device()
+    notifier = Notifier()
+    with caplog.at_level("INFO"):
+        await _notify(repo, notify=notifier)
+        await _notify(repo, notify=notifier, now=MOMENT + timedelta(minutes=1))
+        await _notify(repo, person="alex", person_id="alex", notify=notifier)
+
+    assert [(d["person"], d["workspace"], d["sent"], d["guard"]) for d in _decisions(caplog)] == [
+        ("alex", WS_ID, True, None),
+        ("alex", WS_ID, False, ws_tools.GUARD_FOLD),
+        ("alex", WS_ID, False, ws_tools.GUARD_WRITER),
+    ]
+
+
+async def test_the_decision_line_names_the_mode_the_read_state_and_a_send_that_reached_nobody(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    off = _with_a_device()
+    await off.notify_prefs.set_mode("alex", WS_ID, "off")
+    reading = _with_a_device()
+    reading.unread["alex"] = 0
+
+    with caplog.at_level("INFO"):
+        await _notify(off, notify=Notifier())
+        await _notify(reading, notify=Notifier())
+        # No device and no normal chat: the send reached nobody.
+        await _notify(WsRepo(_shared_ws()))
+
+    decisions = _decisions(caplog)
+    assert [d["guard"] for d in decisions] == [
+        ws_tools.GUARD_OFF,
+        ws_tools.GUARD_READING,
+        ws_tools.GUARD_UNREACHED,
+    ]
+    assert [d["sent"] for d in decisions] == [False, False, False]
 
 
 def test_a_shared_workspace_adds_notify_user_to_the_tools_of_a_workspace(

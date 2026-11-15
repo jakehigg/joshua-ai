@@ -28,8 +28,17 @@ in the tool and not in the prompt: it never notifies the person who wrote the
 turn, it never notifies a person who has read the thread to its newest row,
 and it sends at most one notification per person per workspace in
 ``NOTIFY_QUIET_S``. A line inside that time folds into the notification
-already sent, which carries the tag of the workspace and opens this thread. The
-mode of the person (``store/notify.py``) governs the rest: ``off`` refuses.
+already sent, which carries the tag of the workspace and opens where that one
+pointed. The mode of the person (``store/notify.py``) governs the rest: ``off``
+refuses.
+Each call writes one decision line (``_log_decision``): the person, the
+workspace, whether a notification went, and the guard that stopped it.
+
+Both tools take an optional ``url``, the path the tap opens, so a notification
+lands on the thing to read: a document, a wiki page, or the workspace thread,
+which is what ``notify_user`` opens when the call names no path. ``_app_path``
+is the one validator of both: a path of this app and nothing else, as the
+service worker's ``notificationclick`` refuses an address of another site.
 
 ``notify_person`` is in every chat of a member: a normal chat, a personal
 workspace, and a shared one. It names anybody of the roster, not of a
@@ -91,8 +100,20 @@ NOTIFY_BODY_CHARS = 160
 # one replaces the first in the browser instead of stacking up.
 NOTIFY_TITLE = "Joshua"
 NOTIFY_TAG = "from-joshua"
-# Where a notification opens when the call names no path: the app itself.
+# Where a ``notify_person`` notification opens when the call names no path: the
+# app itself. ``notify_user`` defaults to the thread of its workspace.
 APP_ROOT = "/"
+# What both notify tools answer for a ``url`` that is not a path of this app.
+BAD_URL = "The url must be a path inside Joshua, as /chat or /wiki."
+
+# Why a notification did not go, on the decision line of a ``notify_user``
+# call. The first four are the guards of the tool, and the last one is a
+# delivery that reached neither a browser nor a normal chat.
+GUARD_WRITER = "writer"
+GUARD_READING = "reading"
+GUARD_FOLD = "fold"
+GUARD_OFF = "mode:off"
+GUARD_UNREACHED = "unreached"
 
 # The moment each person was last notified by ``notify_person``, so one person
 # gets one of those in ``NOTIFY_QUIET_S``. The map is this process's own: a
@@ -232,11 +253,16 @@ def app_link(settings: JoshuaConfig, path: str) -> str:
     return f"{base.rstrip('/')}{path}" if base else path
 
 
-def chat_link(settings: JoshuaConfig, workspace: Workspace) -> str:
-    """The address of a workspace in the viewer. The path names the namespace of
+def chat_path(workspace: Workspace) -> str:
+    """The path of a workspace thread in the viewer. It names the namespace of
     the workspace: ``shared`` when it is shared, its owner when it is not."""
     namespace = SHARED_NAMESPACE if workspace.shared else workspace.owner
-    return app_link(settings, f"/chat/w/{namespace}/{workspace.slug}")
+    return f"/chat/w/{namespace}/{workspace.slug}"
+
+
+def chat_link(settings: JoshuaConfig, workspace: Workspace) -> str:
+    """The address of a workspace in the viewer."""
+    return app_link(settings, chat_path(workspace))
 
 
 async def do_send_to_normal_chat(
@@ -288,11 +314,41 @@ def _minutes(span: timedelta) -> int:
     return max(1, int(span.total_seconds() // 60))
 
 
+def _app_path(url: str | None, default: str) -> str | None:
+    """The path a notification opens, inside the app: ``default`` when the call
+    names none. None for anything else, an address of another site included:
+    these tools send people to Joshua, and nowhere else, as the service
+    worker's ``notificationclick`` refuses an address of another site.
+
+    It is the one validator of ``notify_user`` and ``notify_person``.
+    """
+    path = (url or "").strip() or default
+    if not path.startswith("/") or path.startswith("//"):
+        return None
+    return path
+
+
+def _log_decision(person: str, workspace: Workspace, *, sent: bool, guard: str | None) -> None:
+    """One line for one ``notify_user`` call: the person, the workspace,
+    whether a notification went, and the guard that stopped it. A notification
+    that did not arrive has a reason, and this is where it is read."""
+    logger.info(
+        {
+            "message": "notify decision",
+            "person": person,
+            "workspace": workspace.id,
+            "sent": sent,
+            "guard": guard,
+        }
+    )
+
+
 async def do_notify_user(
     deps: ToolDeps,
     *,
     person: str,
     text: str,
+    url: str | None = None,
     settings: JoshuaConfig,
     deliver: Deliver | None,
     notify: Notify | None,
@@ -301,11 +357,14 @@ async def do_notify_user(
     """Reach one person of this shared workspace: their push subscriptions, or
     their normal chat when they have none.
 
+    ``url`` is the path the tap opens, so the notification lands on the thing
+    to read: a document, a wiki page, or this thread, which is the default.
+
     The guards are here and not in the prompt: the person who wrote the turn is
     never notified, a person who has read the thread to its newest row is
     looking at it already, and one person gets one notification of one
     workspace in ``NOTIFY_QUIET_S``. Their mode (``store/notify.py``) comes
-    first: ``off`` sends nothing.
+    first: ``off`` sends nothing. Each decision is one log line.
     """
     if not _in_shared_workspace(deps):
         return _reply("This tool is for a shared workspace.")
@@ -319,26 +378,34 @@ async def do_notify_user(
     if target is None:
         people = ", ".join(workspace.people)
         return _reply(f"'{person}' is not in this workspace. Its people are: {people}.")
+    path = _app_path(url, chat_path(workspace))
+    if path is None:
+        return _reply(BAD_URL)
     if deps.person_id is not None and target == deps.person_id:
+        _log_decision(target, workspace, sent=False, guard=GUARD_WRITER)
         return _reply(f"{target} wrote this turn, so they get no notification of it.")
     pref = await deps.repo.notify_prefs.get(target, workspace.id)
     mode = pref.mode if pref is not None else default_mode(workspace.shared)
     if mode == OFF:
+        _log_decision(target, workspace, sent=False, guard=GUARD_OFF)
         return _reply(f"Notifications are off for {target} in this workspace. Nothing was sent.")
     conversation = await deps.repo.workspace_conversation(workspace)
     unread = await deps.repo.unread_counts(target, [conversation.id])
     if not unread.get(conversation.id, 0):
+        _log_decision(target, workspace, sent=False, guard=GUARD_READING)
         return _reply(
             f"{target} has read this thread to its newest row, so they are reading it now."
         )
     moment = now or datetime.now(UTC)
     last = pref.last_notified_at if pref is not None else None
     if last is not None and moment - last < timedelta(seconds=NOTIFY_QUIET_S):
+        _log_decision(target, workspace, sent=False, guard=GUARD_FOLD)
         return _reply(
             f"{target} was notified of this workspace {_minutes(moment - last)} minute(s) ago. "
-            "This line folds into that notification, which opens this thread. Nothing was sent."
+            "This line folds into that notification, which opens where that one pointed. "
+            "Nothing was sent."
         )
-    link = chat_link(settings, workspace)
+    link = app_link(settings, path)
     reached, how = await _deliver_notification(
         deps,
         target,
@@ -355,9 +422,10 @@ async def do_notify_user(
         notify=notify,
     )
     if not reached:
+        _log_decision(target, workspace, sent=False, guard=GUARD_UNREACHED)
         return _reply(f"The notification did not reach {target}. Say it in this thread as well.")
     await deps.repo.notify_prefs.mark_sent(target, workspace.id, mode=mode, at=now)
-    logger.info({"message": "person notified", "person": target, "workspace": workspace.id})
+    _log_decision(target, workspace, sent=True, guard=None)
     return _reply(f"Notified {target} {how}.")
 
 
@@ -408,16 +476,6 @@ def _person_named(settings: JoshuaConfig, name: str) -> tuple[Person | None, lis
     return None, by_name
 
 
-def _app_path(url: str | None) -> str | None:
-    """The path a notification opens, inside the app: ``/`` by default. None for
-    anything else, an address of another site included: this tool sends people
-    to Joshua, and nowhere else."""
-    path = (url or "").strip() or APP_ROOT
-    if not path.startswith("/") or path.startswith("//"):
-        return None
-    return path
-
-
 async def do_notify_person(
     deps: ToolDeps,
     *,
@@ -445,9 +503,9 @@ async def do_notify_person(
             names = ", ".join(f"{p.name} ({p.id})" for p in candidates)
             return _reply(f"More than one person is called '{person}'. Use an id: {names}.")
         return _reply(f"'{person}' is nobody here. Use the id or the name of a person.")
-    path = _app_path(url)
+    path = _app_path(url, APP_ROOT)
     if path is None:
-        return _reply("The url must be a path inside Joshua, as /chat or /wiki.")
+        return _reply(BAD_URL)
     moment = now or datetime.now(UTC)
     last = _NOTIFIED.get(target.id)
     if last is not None and moment - last < timedelta(seconds=NOTIFY_QUIET_S):
@@ -703,6 +761,14 @@ _NOTIFY_SCHEMA = {
             "type": "string",
             "description": "One short line: what waits on them, in your own words.",
         },
+        "url": {
+            "type": "string",
+            "description": (
+                "A path inside Joshua that the notification opens, so the tap lands on "
+                "what they must read: a document (/documents/<owner>/<slug>) or a wiki "
+                "page (/wiki/...). This workspace thread by default."
+            ),
+        },
     },
     "required": ["person", "text"],
 }
@@ -796,7 +862,8 @@ def build_workspace_server(
         "Notify one person of this shared workspace: a line on their phone, or in their "
         "normal chat when they have no device. Use it when the thread needs that person: "
         "a question for them, a decision that waits on them, something written or added "
-        "for them, or a request to tell them. It never notifies the person who wrote this "
+        "for them, or a request to tell them. Give the url of the thing to read, so the "
+        "tap opens it instead of this thread. It never notifies the person who wrote this "
         "turn, and one person gets one notification of this workspace in ten minutes.",
         _NOTIFY_SCHEMA,
     )
@@ -805,6 +872,7 @@ def build_workspace_server(
             deps,
             person=args.get("person", ""),
             text=args.get("text", ""),
+            url=args.get("url") or None,
             settings=settings,
             deliver=deliver,
             notify=notify,
