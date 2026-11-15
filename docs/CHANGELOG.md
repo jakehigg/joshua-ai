@@ -85,6 +85,12 @@ with the images and the packaged chart, are at
   it again. On a phone the drawer holds the item, and in the chat the drawer
   of the workspaces does. A file that is going out holds the reload: the item
   says that it waits, and the page loads again when the send is done.
+- A PDF in the chat now opens in the browser's own viewer instead of starting
+  a download, in the browser and in the installed app. The route that serves a
+  file gives an image and a PDF its own type and `Content-Disposition: inline`.
+  Any other file still downloads under its name. Every file of the viewer is
+  now served `nosniff` and sandboxed, so a file that is secretly HTML runs
+  nothing with your sign-in.
 - The page of an HTML document has a "Full screen" button over its frame. It
   gives the document the whole screen: no menu, no app bar, no head card, and
   no reading width. Before, the frame kept the width of the content column,

@@ -328,6 +328,18 @@ shows a document page in its artifact panel, so there is no second renderer
 and no second comment surface. The value is always `'self'`, never `*` and
 never a host, so no page off the origin can frame the viewer.
 
+A file is different too. `GET /api/v1/files/<root>/<path>` serves the bytes of
+a file of the wiki, of the shared files, and of a person's attachments, and the
+chat links an attachment there. An image and a PDF answer with their own media
+type and `Content-Disposition: inline`, so a link opens the browser's own
+viewer; every other file answers `application/octet-stream` as an attachment
+with its name. The type comes from the suffix of the stored name, never from
+the metadata file beside an attachment, whose content is untrusted. Each answer
+carries `X-Content-Type-Options: nosniff`, so a browser keeps to the type the
+route named, and `Content-Security-Policy: sandbox`, so a file that is secretly
+HTML gets an opaque origin with no script and reaches neither the viewer nor
+its sign-in.
+
 An HTML document is different. The page shows it in a `sandbox` frame. A
 document with `scripts: true` has an opaque origin (no `allow-same-origin`), so
 it cannot reach the viewer, its sign-in, or a form of the viewer. A document

@@ -14,7 +14,8 @@ export interface WikiFileData {
 
 /**
  * A file that is not a page: the browser goes to the route that delivers the
- * bytes. An image shows inline there, anything else downloads with its name.
+ * bytes. An image and a PDF show inline there, anything else downloads with
+ * its name.
  * The address of the file replaces this one in the history, so every
  * bookmarked `/wiki/…`, `/shared/…` and `/attachments/…` address still works.
  */

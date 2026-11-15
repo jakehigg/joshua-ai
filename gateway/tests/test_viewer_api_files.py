@@ -1,8 +1,9 @@
 """Offline tests for ``GET /api/v1/files/{root}/{path}``: the bytes of one
 file of the viewer.
 
-An image answers with its own media type, so a browser shows it inline.
-Anything else answers as an attachment with the name of the file. Only the
+An image and a PDF answer with their own media type and ``inline``, so a
+browser opens them in its own viewer. Anything else answers as an attachment
+with the name of the file. Every answer is ``nosniff`` and sandboxed. Only the
 three display roots of the viewer are reachable, and every path goes through
 the resolver of the files MCP.
 """
@@ -44,6 +45,9 @@ PNG = bytes.fromhex(
     "890000000a49444154789c6300010000050001a5f645400000000049454e44ae426082"
 )
 
+# The head and the tail of a PDF. The route reads the suffix, not the bytes.
+PDF = b"%PDF-1.7\n1 0 obj\n<< >>\nendobj\n%%EOF\n"
+
 
 def _write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,6 +61,7 @@ def _tree(data: Path) -> None:
     _write_bytes(data / "shared" / "attachments" / "team.png", PNG)
     own = data / "people" / "alex" / "attachments" / "2026" / "08"
     _write_bytes(own / "receipt.txt", b"3.50\n")
+    _write_bytes(own / "bill.pdf", PDF)
 
 
 @pytest.fixture
@@ -74,8 +79,35 @@ def test_an_image_shows_inline_with_its_own_type(client) -> None:
     response = client.get("/api/v1/files/wiki/attachments/2026/09/plant.png", auth=ALEX)
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
-    assert "content-disposition" not in response.headers
+    assert response.headers["content-disposition"] == 'inline; filename="plant.png"'
     assert response.content == PNG
+
+
+def test_a_pdf_opens_in_the_browser_viewer(client) -> None:
+    """The chat links an attachment at this route, so a PDF must open there
+    and never start a download."""
+    response = client.get("/api/v1/files/attachments/2026/08/bill.pdf", auth=ALEX)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"] == 'inline; filename="bill.pdf"'
+    assert response.content == PDF
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "wiki/attachments/2026/09/plant.png",
+        "attachments/2026/08/bill.pdf",
+        "attachments/2026/08/receipt.txt",
+    ),
+)
+def test_every_file_is_nosniff_and_sandboxed(client, path) -> None:
+    """The browser keeps to the type this route named, and a file that is
+    secretly HTML gets an opaque origin and runs nothing with the session."""
+    response = client.get(f"/api/v1/files/{path}", auth=ALEX)
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-security-policy"] == "sandbox"
 
 
 def test_a_shared_image_and_an_own_attachment_both_answer(client) -> None:
