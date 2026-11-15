@@ -42,6 +42,13 @@ with the images and the packaged chart, are at
 - A shared workspace now carries a small two-person icon beside its name, in
   the rail and in the header of the workspace. Before, the rail wrote the
   word "Shared" after the title, which took the room the title needed.
+- A workspace whose thread holds rows you have not read now shows how many,
+  next to its name in the rail. The count is yours alone: in a shared
+  workspace each person has a count of their own, and reading the thread
+  clears only that person's. The chat marks the thread read while its newest
+  row is on screen, so a row that arrives behind another tab stays unread.
+  The schema adds the table `conversation_reads`, one row for each person and
+  conversation.
 - When a new workspace or a change to one is refused, the dialog now shows
   why. For a server that a person cannot use, it names the person and the
   server, for example "Alex cannot use tasks", and says that a shared

@@ -24,6 +24,7 @@ from joshua_core.store.db import Database
 from joshua_core.store.models import (
     Channel,
     Conversation,
+    ConversationRead,
     Person,
     Task,
     Workspace,
@@ -121,6 +122,15 @@ def _conversation(row: dict[str, Any]) -> Conversation:
         last_channel_id=row.get("last_channel_id"),
         session_started_on=row.get("session_started_on"),
         inference_endpoint=row.get("inference_endpoint"),
+    )
+
+
+def _conversation_read(row: dict[str, Any]) -> ConversationRead:
+    return ConversationRead(
+        person_id=row["person_id"],
+        conversation_id=str(row["conversation_id"]),
+        last_read_turn_id=int(row.get("last_read_turn_id") or 0),
+        last_read_at=row.get("last_read_at"),
     )
 
 
@@ -589,6 +599,81 @@ class Repo:
                 (today, today),
             )
             return cur.rowcount
+
+    # --- read state --------------------------------------------------------
+
+    async def conversation_read(
+        self, person_id: str, conversation_id: str
+    ) -> ConversationRead | None:
+        """What this person has read of this conversation, or None when they
+        have read nothing of it."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM conversation_reads WHERE person_id = %s AND conversation_id = %s",
+                (person_id, conversation_id),
+            )
+            row = await cur.fetchone()
+        return _conversation_read(row) if row else None
+
+    async def mark_conversation_read(
+        self, person_id: str, conversation_id: str, last_read_turn_id: int
+    ) -> ConversationRead:
+        """Mark this conversation read up to ``last_read_turn_id`` (the id of a
+        transcript row) for this person, and return the row.
+
+        The mark never moves back: a smaller id than the stored one leaves it
+        where it is and only stamps the time. A shared workspace holds one row
+        for each of its people, so one person reading the thread leaves the
+        others' marks alone.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                INSERT INTO conversation_reads (person_id, conversation_id, last_read_turn_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (person_id, conversation_id) DO UPDATE
+                SET last_read_turn_id = GREATEST(
+                        conversation_reads.last_read_turn_id, EXCLUDED.last_read_turn_id
+                    ),
+                    last_read_at = now()
+                RETURNING *
+                """,
+                (person_id, conversation_id, max(0, last_read_turn_id)),
+            )
+            row = await cur.fetchone()
+        assert row is not None
+        return _conversation_read(row)
+
+    async def unread_counts(
+        self, person_id: str, conversation_ids: Collection[str]
+    ) -> dict[str, int]:
+        """How many rows of each of these conversations this person has not
+        read: the rows after their ``last_read_turn_id``, and every row of a
+        conversation they have read nothing of. A conversation with nothing
+        unread is not in the answer.
+
+        The rows counted are the ones a thread shows, as ``transcript_page``
+        gives them: a reply that says nothing is left out.
+        """
+        ids = [str(i) for i in conversation_ids]
+        if not ids:
+            return {}
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT t.conversation_id AS conversation_id, count(*) AS unread
+                FROM transcript t
+                LEFT JOIN conversation_reads r
+                    ON r.conversation_id = t.conversation_id AND r.person_id = %s
+                WHERE t.conversation_id = ANY(%s::uuid[])
+                  AND t.id > COALESCE(r.last_read_turn_id, 0)
+                  AND NOT (t.direction = 'out' AND btrim(t.content, %s) IN ('', %s))
+                GROUP BY t.conversation_id
+                """,
+                (person_id, ids, BLANK_CHARS, SILENT_REPLY),
+            )
+            rows = await cur.fetchall()
+        return {str(r["conversation_id"]): int(r["unread"]) for r in rows}
 
     # --- tasks -------------------------------------------------------------
 

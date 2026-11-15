@@ -32,6 +32,11 @@
 // and the `pending` one of the history, which another device may have sent —
 // every waiting message goes as one turn, with no action from the person.
 //
+// While the newest row of a workspace thread is on screen, the screen marks
+// that thread read up to it, so the rail stops counting it. The mark is the
+// signed-in person's own: in a shared workspace every other person keeps the
+// count they have.
+//
 // The screen has a rail on the left (Rail.tsx): Chat, the workspaces, and
 // "+ New workspace". `/chat/:person` is the normal chat, the person's one main
 // thread. `/chat/w/:space/:slug` (WorkspacePage) is one workspace: the same
@@ -61,7 +66,7 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError, getJson } from "../api/client";
-import { getWorkspace, linkOf, refOf, type Workspace } from "../api/workspaces";
+import { getWorkspace, linkOf, markRead, refOf, type Workspace } from "../api/workspaces";
 import Shell, { type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Spinner from "../ui/Spinner";
@@ -300,6 +305,25 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
     if (nextBefore !== null) loadEarlier(nextBefore);
   }, [loadEarlier, nextBefore]);
 
+  // The thread is read as far as the newest row on screen. The mark is this
+  // person's own, so in a shared workspace it clears nobody else's count. The
+  // rail is loaded again, so the count beside the name goes. A mark that fails
+  // is not kept, so the next row tries again.
+  const { reload: reloadWorkspaces } = workspaces;
+  const marked = useRef(0);
+  const onRead = useCallback(
+    (serverId: number) => {
+      if (!workspace || serverId <= marked.current) return;
+      marked.current = serverId;
+      markRead(workspace, serverId)
+        .then(reloadWorkspaces)
+        .catch(() => {
+          marked.current = 0;
+        });
+    },
+    [workspace, reloadWorkspaces],
+  );
+
   return (
     <DocumentPanelProvider panel={panel}>
       <div className={`chat-screen${sheetOpen ? " sheet-open" : ""}${itemsCollapsed ? " items-collapsed" : ""}`}>
@@ -396,6 +420,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
             onDropHeld={turn.dropHeld}
             me={me}
             shared={ws?.shared ?? false}
+            onRead={onRead}
           />
           {draft && (
             <div className="draft-banner" role="alert">

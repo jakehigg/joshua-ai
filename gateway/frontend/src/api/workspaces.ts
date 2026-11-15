@@ -24,6 +24,16 @@ export interface Workspace {
   // holds the ids beside the owner, and they never change after the create.
   shared: boolean;
   members: string[];
+  // How many rows of the thread the signed-in person has not read. Only the
+  // list gives it, and it is the count of that person alone: in a shared
+  // workspace every other person has one of their own.
+  unread?: number;
+}
+
+/** How far a person has read a thread, as the read call answers. */
+export interface ReadMark {
+  last_read_turn_id: number;
+  unread: number;
 }
 
 export interface WorkspaceItem {
@@ -116,6 +126,14 @@ export const createWorkspace = (body: NewWorkspace) => postJson<Workspace>(BASE,
 export const changeWorkspace = (slug: string, body: WorkspacePatch) =>
   patchJson<Workspace>(at(slug), body);
 export const getOptions = () => getJson<Options>(`${BASE}/options`);
+
+/**
+ * Mark the thread of a workspace read up to a row id, for the signed-in
+ * person. The mark is theirs alone: in a shared workspace every other person
+ * keeps the count they have.
+ */
+export const markRead = (slug: string, turnId: number) =>
+  postJson<ReadMark>(`${at(slug)}/read`, { turn_id: turnId });
 
 export async function listItems(slug: string): Promise<WorkspaceItem[]> {
   const body = await getJson<{ items?: WorkspaceItem[] }>(`${at(slug)}/items`);

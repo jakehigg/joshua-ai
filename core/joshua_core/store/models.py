@@ -61,6 +61,21 @@ class Conversation:
 
 
 @dataclass(frozen=True)
+class ConversationRead:
+    """What one person has read of one conversation.
+
+    ``last_read_turn_id`` is the id of the newest transcript row they have
+    seen; the rows after it are their unread ones. A shared workspace holds one
+    row for each of its people, so each of them has a mark of their own.
+    """
+
+    person_id: str
+    conversation_id: str
+    last_read_turn_id: int = 0
+    last_read_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class Task:
     """An agent-schedulable task. One live row per task."""
 

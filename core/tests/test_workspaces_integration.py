@@ -1,7 +1,8 @@
 """Workspaces against the real Postgres repo and the real routes: the schema,
 the slugs, the scoping, the channel and conversation of a create, the items,
-the nightly skip, the main conversation, the usage by conversation, and the
-two people of a shared workspace writing one thread."""
+the nightly skip, the main conversation, the usage by conversation, the read
+state of each person, and the two people of a shared workspace writing one
+thread."""
 
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.usage import Usage
 from joshua_core.engine.workspace import WorkspaceBlock
 from joshua_core.store.repo import SlugTaken
+from joshua_core.store.transcript import SILENT_REPLY
 from joshua_core.store.usage_events import UsageEvent
 from joshua_core.transcript_api import build_transcript_router
 from joshua_core.turns import TurnService
@@ -323,6 +325,44 @@ async def test_main_conversation_is_the_latest_direct_non_workspace_thread(seede
     assert await seeded.main_conversation("mia") is None
 
 
+async def test_the_read_mark_is_one_for_each_person_of_a_thread(seeded) -> None:
+    """The mark of what a person has read, and the rows after it.
+
+    One shared thread holds one row for each of its people, so Alex reading it
+    leaves Mia's count where it was. A reply that says nothing is not counted:
+    the thread does not show it either.
+    """
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    conv = (await seeded.workspace_conversation(shared)).id
+    assert await seeded.conversation_read("alex", conv) is None
+    first = await seeded.add_transcript(conv, "in", "who brings the pie?")
+    await seeded.add_transcript(conv, "out", "Mia does.")
+    silent = await seeded.add_transcript(conv, "out", SILENT_REPLY)
+    assert await seeded.unread_counts("alex", [conv]) == {conv: 2}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 2}
+
+    read = await seeded.mark_conversation_read("alex", conv, first)
+    assert read.person_id == "alex" and read.conversation_id == conv
+    assert read.last_read_turn_id == first and read.last_read_at is not None
+    assert (await seeded.conversation_read("alex", conv)).last_read_turn_id == first
+    assert await seeded.unread_counts("alex", [conv]) == {conv: 1}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 2}
+
+    # Read to the end: nothing is unread, so the thread is not in the answer.
+    await seeded.mark_conversation_read("alex", conv, silent)
+    assert await seeded.unread_counts("alex", [conv]) == {}
+    # The mark never moves back.
+    back = await seeded.mark_conversation_read("alex", conv, first)
+    assert back.last_read_turn_id == silent
+    assert await seeded.unread_counts("alex", []) == {}
+
+    # A thread a person has read nothing of counts every row it shows.
+    mine = await seeded.create_workspace("mia", "Trip")
+    other = (await seeded.workspace_conversation(mine)).id
+    await seeded.add_transcript(other, "in", "which cabin?")
+    assert await seeded.unread_counts("mia", [conv, other]) == {conv: 2, other: 1}
+
+
 # --- the routes ------------------------------------------------------------------
 
 
@@ -458,6 +498,67 @@ async def test_a_shared_workspace_is_made_once_and_reaches_every_person(client, 
         assert refused.status_code == 422, body
 
 
+async def test_each_person_of_a_shared_workspace_has_an_unread_count_of_their_own(
+    client, seeded
+) -> None:
+    """The count the list gives, and the route that clears it.
+
+    Alex and Mia read one thread, so each of them has a count of their own, and
+    Alex marking it read leaves Mia's count whole.
+    """
+    made = await _create(client, title="Thanksgiving", members=["mia"])
+    conv = (await seeded.find_conversation(made["channel"], None)).id
+    first = await seeded.add_transcript(conv, "in", "who brings the pie?")
+    newest = await seeded.add_transcript(conv, "out", "Mia does.")
+
+    async def counts(person: str) -> dict[str, int]:
+        resp = await client.get("/v1/workspaces", params={"person": person}, headers=_h())
+        assert resp.status_code == 200, resp.text
+        return {w["slug"]: w["unread"] for w in resp.json()["workspaces"]}
+
+    assert await counts("alex") == {"thanksgiving": 2}
+    assert await counts("mia") == {"thanksgiving": 2}
+
+    read = await client.post(
+        f"/v1/workspaces/shared/{made['slug']}/read",
+        params={"person": "alex"},
+        json={"turn_id": first},
+        headers=_h(),
+    )
+    assert read.status_code == 200, read.text
+    assert read.json()["conversation"] == conv
+    assert read.json()["last_read_turn_id"] == first and read.json()["unread"] == 1
+    assert "T" in read.json()["last_read_at"]
+    assert await counts("alex") == {"thanksgiving": 1}
+    assert await counts("mia") == {"thanksgiving": 2}
+
+    # Mia reads the whole thread: hers is clear, and his stays where it was.
+    hers = await client.post(
+        f"/v1/workspaces/shared/{made['slug']}/read",
+        params={"person": "mia"},
+        json={"turn_id": newest},
+        headers=_h(),
+    )
+    assert hers.status_code == 200 and hers.json()["unread"] == 0
+    assert await counts("mia") == {"thanksgiving": 0}
+    assert await counts("alex") == {"thanksgiving": 1}
+
+
+async def test_the_read_route_checks_the_workspace_and_the_body(client) -> None:
+    made = await _create(client)
+    alex, mia = {"person": "alex"}, {"person": "mia"}
+    read = lambda p, b: client.post(  # noqa: E731
+        f"/v1/workspaces/{made['slug']}/read", params=p, json=b, headers=_h()
+    )
+    assert (await read(mia, {"turn_id": 1})).status_code == 404  # another person's
+    assert (await read(alex, {})).status_code == 422
+    assert (await read(alex, {"turn_id": -1})).status_code == 422
+    assert (await read(alex, {"turn_id": 1, "extra": 1})).status_code == 422
+    # A row id ahead of the thread is the newest row the screen has seen.
+    assert (await read(alex, {"turn_id": 0})).status_code == 200
+    assert (await read(alex, {"turn_id": 99})).json()["unread"] == 0
+
+
 async def test_a_create_checks_every_person_and_their_servers(client) -> None:
     post = lambda p, b: client.post("/v1/workspaces", params=p, json=b, headers=_h())  # noqa: E731
     alex, mia = {"person": "alex"}, {"person": "mia"}
@@ -529,6 +630,7 @@ async def test_another_owner_gets_404_on_every_route(client) -> None:
         ),
         client.delete(f"/v1/workspaces/{slug}/items/{item['id']}", params=mia, headers=_h()),
         client.get(f"/v1/workspaces/{slug}/block", params=mia, headers=_h()),
+        client.post(f"/v1/workspaces/{slug}/read", params=mia, headers=_h(), json={"turn_id": 1}),
     ]
     for call in calls:
         assert (await call).status_code == 404

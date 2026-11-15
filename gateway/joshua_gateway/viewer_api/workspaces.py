@@ -7,6 +7,8 @@
 - ``GET`` and ``POST /api/v1/workspaces/{slug}/items`` list and add items.
 - ``PATCH`` and ``DELETE /api/v1/workspaces/{slug}/items/{id}`` change
   (``pinned``) or remove an item.
+- ``POST /api/v1/workspaces/{slug}/read`` marks the thread read up to a turn
+  id (``turn_id``) for the signed-in person.
 
 ``{slug}`` is a ref: a slug, an id, or two segments (``shared/<slug>`` for a
 shared workspace, ``<owner>/<slug>`` for the workspace of a person). The
@@ -130,6 +132,11 @@ async def read(request: Request, person: Person) -> JSONResponse:
 
 async def change(request: Request, person: Person) -> JSONResponse:
     return await _call(request, person, "PATCH", f"/{_slug(request)}", write=True)
+
+
+async def read_up_to(request: Request, person: Person) -> JSONResponse:
+    """Mark the thread of a workspace read for the signed-in person."""
+    return await _call(request, person, "POST", f"/{_slug(request)}/read", write=True)
 
 
 async def list_items(request: Request, person: Person) -> JSONResponse:

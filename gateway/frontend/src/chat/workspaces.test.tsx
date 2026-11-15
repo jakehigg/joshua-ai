@@ -152,6 +152,46 @@ describe("the rail", () => {
     expect(document.querySelector(".shared-mark")).toBeNull();
   });
 
+  it("counts the rows a person has not read, after the name", () => {
+    render(
+      <MemoryRouter future={FUTURE}>
+        <Rail
+          person="alex"
+          workspaces={[ws({ unread: 3 }), ws({ id: "b", slug: "trip", title: "Trip" })]}
+          open
+          onNew={vi.fn()}
+          onNavigate={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    const counted = screen.getByRole("link", { name: /Solar install/ });
+    expect(counted.querySelector(".rail-unread")?.textContent).toBe("3");
+    // A thread with nothing unread carries no count at all.
+    expect(screen.getByRole("link", { name: "Trip" }).querySelector(".rail-unread")).toBeNull();
+  });
+
+  it("gives each person of a shared workspace their own count", () => {
+    const thread = ws({ slug: "thanksgiving", title: "Thanksgiving", shared: true, members: ["mia"] });
+    const rail = (person: string, unread: number) => (
+      <MemoryRouter future={FUTURE}>
+        <Rail
+          person={person}
+          workspaces={[{ ...thread, unread }]}
+          open
+          onNew={vi.fn()}
+          onNavigate={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+    const alex = render(rail("alex", 0));
+    expect(document.querySelector(".rail-unread")).toBeNull();
+    alex.unmount();
+    render(rail("mia", 2));
+    expect(document.querySelector(".rail-unread")?.textContent).toBe("2");
+  });
+
   it("opens the dialog from the new workspace button", () => {
     const onNew = show();
     fireEvent.click(screen.getByRole("button", { name: "+ New workspace" }));
@@ -666,6 +706,66 @@ describe("the routes", () => {
     expect(screen.getByText("How long?").className).toBe("bubble");
     expect(document.querySelector(".msg-who")).toBeNull();
     expect(document.querySelector(".msg-other")).toBeNull();
+  });
+
+  it("marks the thread read up to the newest row on screen, and asks for the counts again", async () => {
+    const thread = ws({
+      slug: "thanksgiving",
+      title: "Thanksgiving",
+      owner: "alex",
+      shared: true,
+      members: ["mia"],
+    });
+    const { calls } = viewer({
+      "GET /api/v1/session": { person: { id: "mia", name: "Mia", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/shared%2Fthanksgiving": thread,
+      "GET /api/v1/workspaces": { workspaces: [{ ...thread, unread: 2 }] },
+      "GET /api/v1/workspaces/shared%2Fthanksgiving/items": { items: [] },
+      "GET /api/v1/chat/mia/history": {
+        messages: [
+          { id: 7, role: "person", text: "the oven is mine", status: "ok", at: "2026-01-01T10:00:00Z", who: "Alex" },
+          { id: 8, role: "joshua", text: "Noted.", status: "ok", at: "2026-01-01T10:00:01Z" },
+        ],
+        nextBefore: null,
+      },
+      "POST /api/v1/workspaces/shared%2Fthanksgiving/read": { last_read_turn_id: 8, unread: 0 },
+    });
+    render(
+      <MemoryRouter initialEntries={["/chat/w/shared/thanksgiving"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Noted.");
+    // The newest row of the thread, and that row alone, is the mark.
+    await waitFor(() => {
+      const read = calls.filter((c) => c.path.endsWith("/read"));
+      expect(read.map((c) => c.body)).toEqual([{ turn_id: 8 }]);
+    });
+    // The rail is loaded again, so the count beside the name is the new one.
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === "/api/v1/workspaces").length).toBeGreaterThan(1),
+    );
+  });
+
+  it("marks nothing in the normal chat: a count belongs to a workspace thread", async () => {
+    const { calls } = viewer({
+      "GET /api/v1/workspaces": { workspaces: [ws()] },
+      "GET /api/v1/chat/alex/history": {
+        messages: [{ id: 4, role: "joshua", text: "Eleven years.", status: "ok", at: "2026-01-01T10:00:00Z" }],
+        nextBefore: null,
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={["/chat/alex"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/:person" element={<ChatPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Eleven years.");
+    expect(calls.some((c) => c.path.endsWith("/read"))).toBe(false);
   });
 
   it("sends a one-segment link to the two-segment address of its workspace", async () => {

@@ -18,7 +18,7 @@ as server-sent events, ``GET /api/v1/chat/<person>/history`` gives a page
 of the conversation, and four ``held`` routes hold the messages written while
 a turn still runs. They all go to the channels container (``CHANNELS_URL``).
 
-The workspaces have nine routes under ``/api/v1/workspaces``, which proxy
+The workspaces have ten routes under ``/api/v1/workspaces``, which proxy
 core (``CORE_URL``). See ``viewer_api.workspaces``.
 
 The Users section has five routes under ``/api/v1/admin/users``, which proxy
@@ -153,6 +153,11 @@ def routes() -> list[Route]:
             api_path("workspaces/{slug:path}/items/{id}"),
             _require_auth(workspaces.delete_item),
             methods=["DELETE"],
+        ),
+        Route(
+            api_path("workspaces/{slug:path}/read"),
+            _require_auth(workspaces.read_up_to),
+            methods=["POST"],
         ),
         Route(api_path("workspaces/{slug:path}/items"), _require_auth(workspaces.list_items)),
         Route(

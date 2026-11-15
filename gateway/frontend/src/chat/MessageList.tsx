@@ -18,6 +18,9 @@
 //
 // `held` are the messages written while a turn runs. They end the list, each
 // marked as waiting, with a button that takes one back before it goes.
+//
+// While the newest row of the thread is on screen, the list says so with
+// `onRead`, so the screen can mark the thread read up to that row.
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Pending } from "../api/client";
@@ -84,6 +87,11 @@ interface Props {
   me?: string;
   /** The thread of a shared workspace: several people write in it. */
   shared?: boolean;
+  /**
+   * The newest row of the thread is on screen: the thread is read up to that
+   * row id. It is called again for each newer row that arrives.
+   */
+  onRead?: (serverId: number) => void;
 }
 
 export function MessageList({
@@ -101,12 +109,24 @@ export function MessageList({
   onDropHeld,
   me,
   shared = false,
+  onRead,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const [unseen, setUnseen] = useState(false);
   // The scroll height and position before "Load earlier", to restore after.
   const anchor = useRef<{ height: number; top: number } | null>(null);
+
+  // The newest row the server has: how far the thread is read when it shows.
+  // A local message has no id yet, and an older page adds none above it.
+  const newest = messages.reduce((id, m) => ((m.serverId ?? 0) > id ? (m.serverId as number) : id), 0);
+  const onReadRef = useRef(onRead);
+  onReadRef.current = onRead;
+  // The thread is read up to its newest row, unless the tab is hidden: a row
+  // that arrives behind another tab is not on screen.
+  const readHere = useCallback(() => {
+    if (newest > 0 && document.visibilityState !== "hidden") onReadRef.current?.(newest);
+  }, [newest]);
 
   const toBottom = useCallback((smooth: boolean) => {
     const el = ref.current;
@@ -124,7 +144,10 @@ export function MessageList({
     const el = ref.current;
     if (!el) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
-    if (atBottom.current) setUnseen(false);
+    if (atBottom.current) {
+      setUnseen(false);
+      readHere();
+    }
   };
 
   // The newest content: the last message and its text length. A page added
@@ -159,9 +182,20 @@ export function MessageList({
   }, [loadingEarlier]);
 
   useLayoutEffect(() => {
-    if (atBottom.current) toBottom(false);
-    else setUnseen(true);
-  }, [signature, toBottom]);
+    if (atBottom.current) {
+      toBottom(false);
+      readHere();
+    } else setUnseen(true);
+  }, [signature, toBottom, readHere]);
+
+  // A tab that comes back shows the rows that arrived while it was hidden.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && atBottom.current) readHere();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [readHere]);
 
   // A growing composer or a rotated phone changes the height; stay at the bottom.
   useEffect(() => {
@@ -249,7 +283,15 @@ export function MessageList({
         </div>
       </div>
       {unseen && (
-        <button type="button" className="new-below" onClick={() => toBottom(true)} aria-label="Scroll to the newest message">
+        <button
+          type="button"
+          className="new-below"
+          onClick={() => {
+            toBottom(true);
+            readHere();
+          }}
+          aria-label="Scroll to the newest message"
+        >
           ↓ new
         </button>
       )}

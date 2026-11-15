@@ -294,7 +294,17 @@ Every `{slug}` below is a ref: a slug, an id, or two segments
 | `GET`, `POST /v1/workspaces/{slug}/items` | List or add items. |
 | `PATCH`, `DELETE /v1/workspaces/{slug}/items/{id}` | Change `pinned` or `seen`, or remove an item. |
 | `GET /v1/workspaces/{slug}/block` | The workspace block as text. |
+| `POST /v1/workspaces/{slug}/read` | Mark the thread read up to `turn_id`, for that person alone. |
 | `POST /v1/workspaces/by-id/{id}/items` | Add an item for a tool call. The gateway calls it (see Items from tools). It takes no `person`. |
+
+`GET /v1/workspaces` gives each workspace an `unread` count: the rows of its
+thread after the `last_read_turn_id` of that person, and every row it shows
+when they have read nothing of it. `POST /v1/workspaces/{slug}/read` takes
+`{"turn_id"}`, the id of a transcript row (0 or more), and answers
+`{"conversation", "last_read_turn_id", "last_read_at", "unread"}`. The mark is
+one row of `conversation_reads`, for that person and that conversation, and it
+never moves back. In a shared workspace every person holds a mark of their own,
+so one of them reading the thread leaves the counts of the others whole.
 
 `servers` must be servers that every person of the workspace may use (422
 otherwise). Every name in `members` must be a member of the roster, and never
@@ -427,7 +437,11 @@ compose and on Kubernetes, and it adds no container.
 - The left rail shows Chat, the active workspaces, the paused workspaces (folded),
   and "+ New workspace". On a phone it is a drawer. A shared workspace carries
   a small two-person icon beside its name, in the rail and in the header of the
-  workspace; the icon is the only mark, and no row says "Shared".
+  workspace; the icon is the only mark, and no row says "Shared". A workspace
+  whose thread holds rows the person has not read shows the count after the
+  title. The chat marks the thread read while its newest row is on screen, and
+  not while the tab is hidden, and the rail asks for the counts again after
+  each mark.
 - The new workspace dialog asks for a title, a goal (optional), a model, and
   the servers. "Shared" offers the other people of the roster as checkboxes
   and shows the address the workspace will take; Create waits until at least
@@ -456,6 +470,7 @@ and names the signed-in person. A guest gets 403. Every write checks the
 | `GET`, `PATCH /api/v1/workspaces/{slug}` | `GET`, `PATCH /v1/workspaces/{slug}` |
 | `GET`, `POST /api/v1/workspaces/{slug}/items` | `GET`, `POST /v1/workspaces/{slug}/items` |
 | `PATCH`, `DELETE /api/v1/workspaces/{slug}/items/{id}` | the same on core |
+| `POST /api/v1/workspaces/{slug}/read` | `POST /v1/workspaces/{slug}/read` |
 
 `GET /v1/workspaces/options` returns `servers` (the servers that the person may
 use, each with a `name` and a one-line `description`), `models` (the list

@@ -103,6 +103,20 @@ CREATE INDEX IF NOT EXISTS idx_transcript_created ON transcript (created_at DESC
 CREATE INDEX IF NOT EXISTS idx_transcript_fts
     ON transcript USING gin (to_tsvector('english', content));
 
+-- What a person has read of a conversation. `last_read_turn_id` is the id of
+-- the newest transcript row they have seen, so the rows after it are their
+-- unread ones. The key is the person and the conversation, never the
+-- conversation alone: in a shared workspace every person reads one
+-- conversation, and each of them has a count of their own. Nothing reads this
+-- table until a row exists.
+CREATE TABLE IF NOT EXISTS conversation_reads (
+    person_id         TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    conversation_id   UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    last_read_turn_id BIGINT NOT NULL DEFAULT 0,
+    last_read_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (person_id, conversation_id)
+);
+
 -- KB retrieval audit (phase 4). One row per injection decision or kb tool call;
 -- `results` carries what the model was given. Write-only from the app.
 CREATE TABLE IF NOT EXISTS kb_event (

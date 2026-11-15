@@ -977,6 +977,18 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   opacity: 0.75;
 }
 .chat-screen .shared-mark .j-icon { width: 15px; height: 15px; }
+/* The rows of a thread that this person has not read, counted after the name. */
+.chat-screen .rail-unread {
+  flex: none;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: var(--j-radius-pill);
+  background: var(--j-accent);
+  color: var(--j-accent-ink);
+  font-size: var(--j-text-xs);
+  font-weight: 600;
+  line-height: 18px;
+}
 .chat-screen .rail-new { margin-top: 8px; text-align: left; }
 .chat-screen .rail-toggle { flex: none; }
 .chat-screen .ws-title { flex: 1; min-width: 0; }

@@ -31,6 +31,11 @@ checked before the body is read. A ``person`` that is not a member of
 - ``GET /v1/workspaces/options`` gives the servers, the models, and the people
   that the person may pick.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
+- ``POST /v1/workspaces/{slug}/read`` marks the thread read up to a turn id
+  (``turn_id``, the id of a transcript row) for that person. The mark is
+  theirs alone, so in a shared workspace every other person keeps the count
+  they have. The list route gives each workspace the ``unread`` count of that
+  person: the rows of its thread after their mark.
 - ``POST /v1/workspaces/by-id/{id}/items`` is for the gateway, which records
   the items of a tool call from a workspace. It takes the id of the workspace
   and no ``person``: the caller is trusted, and the workspace is the one of the
@@ -143,6 +148,12 @@ class ToolItemBody(ItemBody):
 class ItemPatchBody(_Body):
     pinned: bool | None = None
     seen: bool | None = None
+
+
+class ReadBody(_Body):
+    """How far a person has read a thread: the id of a transcript row."""
+
+    turn_id: int = Field(ge=0)
 
 
 def _authorize(request: Request) -> tuple[JSONResponse | None, str | None]:
@@ -288,6 +299,17 @@ def _dedupe(servers: list[str]) -> list[str]:
     return list(dict.fromkeys(s.strip() for s in servers if s.strip()))
 
 
+async def _unread(repo: Any, person_id: str, workspaces: Collection[Workspace]) -> dict[str, int]:
+    """How many rows of each workspace thread this person has not read, by
+    workspace id. A workspace with nothing unread is not in the answer."""
+    threads: dict[str, str] = {}
+    for workspace in workspaces:
+        conversation = await repo.workspace_conversation(workspace)
+        threads[conversation.id] = workspace.id
+    counts = await repo.unread_counts(person_id, threads)
+    return {threads[conversation_id]: n for conversation_id, n in counts.items()}
+
+
 def build_workspaces_router() -> APIRouter:
     router = APIRouter()
 
@@ -319,8 +341,14 @@ def build_workspaces_router() -> APIRouter:
             return JSONResponse(
                 {"error": "invalid request", "detail": "unknown status"}, status_code=422
             )
-        rows = await request.app.state.ctx.repo.list_workspaces(person_id, status)
-        return JSONResponse({"workspaces": [workspace_json(w) for w in rows]})
+        repo = request.app.state.ctx.repo
+        rows = await repo.list_workspaces(person_id, status)
+        # Each workspace carries the unread count of this person: in a shared
+        # workspace the other people have counts of their own.
+        unread = await _unread(repo, person_id, rows)
+        return JSONResponse(
+            {"workspaces": [{**workspace_json(w), "unread": unread.get(w.id, 0)} for w in rows]}
+        )
 
     @router.post(WORKSPACES_PATH)
     async def create_workspace(request: Request):  # type: ignore[no-untyped-def]
@@ -478,6 +506,32 @@ def build_workspaces_router() -> APIRouter:
         # nothing is marked seen.
         text = await block.render(workspace, conversation.id, fresh=False, mark_seen=None)
         return PlainTextResponse(text)
+
+    @router.post(WORKSPACE_REF_PATH + "/read")
+    async def mark_read(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        """Mark the thread of this workspace read, up to the id of a transcript
+        row, for the person the caller names. The mark is that person's alone:
+        in a shared workspace every other person keeps the count they have."""
+        denied, person_id, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None and person_id is not None
+        try:
+            body = ReadBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        repo = request.app.state.ctx.repo
+        conversation = await repo.workspace_conversation(workspace)
+        read = await repo.mark_conversation_read(person_id, conversation.id, body.turn_id)
+        unread = await repo.unread_counts(person_id, [conversation.id])
+        return JSONResponse(
+            {
+                "conversation": conversation.id,
+                "last_read_turn_id": read.last_read_turn_id,
+                "last_read_at": _iso(read.last_read_at),
+                "unread": unread.get(conversation.id, 0),
+            }
+        )
 
     @router.get(WORKSPACE_REF_PATH)
     async def get_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]
