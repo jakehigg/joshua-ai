@@ -133,6 +133,13 @@ with the images and the packaged chart, are at
   closed workspace read and wrote the new one that had taken the name. The
   `<owner>/<slug>` form is the one a person reads and types, and such an
   address still opens the workspace and goes to its id.
+- A tap on another workspace in the rail now opens it. Before, the page
+  flashed and the chat stayed in the workspace you were already in, on every
+  switch from one workspace to another: the screen still held the workspace of
+  the address before, and sent the browser back to it. The screen now says it
+  is loading until the workspace of the new address is in. Going to Chat first,
+  and a reload, worked before and still do, and a slug address still opens the
+  workspace and goes to its id.
 
 ### Viewer
 

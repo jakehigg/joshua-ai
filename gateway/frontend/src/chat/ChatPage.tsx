@@ -48,8 +48,12 @@
 // a ref may move to another row. Every link the screen builds is
 // `/chat/w/<id>`, the permanent address of a workspace. A one-segment
 // `/chat/w/:ref` opens the workspace of that id, and sends a slug to the id
-// (WorkspaceLink). Each finished turn reloads the items, because the turn may
-// have made some.
+// (WorkspaceLink). A tap on another workspace in the rail only changes that
+// ref, and this screen stays mounted, so the workspace it holds carries the
+// ref it was loaded for (useWorkspaceOf): until the new ref has its own
+// workspace the screen is loading, and the workspace of the ref before never
+// sends the browser back to its address. Each finished turn reloads the
+// items, because the turn may have made some.
 //
 // The thread of a shared workspace reads like a group messaging app: the
 // messages of the person who is signed in stand at the right, every other
@@ -532,9 +536,25 @@ export function ChatPage({ workspace }: { workspace?: string } = {}) {
   );
 }
 
+/**
+ * What one ref loaded: the workspace of that ref, or the reason it did not
+ * load. The ref is in the same state value as its answer, because a switch
+ * from one workspace to another keeps this screen mounted and only changes
+ * the ref: React renders with the new ref before the effect that loads it
+ * runs. The answer of the ref before is then not the answer of the ref now,
+ * and the screen is still loading.
+ */
+interface Loaded {
+  reference: string;
+  ws: Workspace | null;
+  error: string;
+}
+
+const NOTHING_LOADED: Loaded = { reference: "", ws: null, error: "" };
+
 // The workspace a ref names, and who is signed in: their id and their name,
 // the name the thread of a shared workspace shows on a row. `null` while it
-// loads.
+// loads, and while the ref of the answer is not the ref asked for.
 function useWorkspaceOf(reference: string): {
   person: string;
   name: string;
@@ -544,29 +564,29 @@ function useWorkspaceOf(reference: string): {
 } {
   const [person, setPerson] = useState("");
   const [name, setName] = useState("");
-  const [ws, setWs] = useState<Workspace | null>(null);
-  const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState<Loaded>(NOTHING_LOADED);
 
   useEffect(() => {
     let live = true;
-    setWs(null);
-    setError("");
     Promise.all([getJson<Session>("/session"), getWorkspace(reference)])
       .then(([session, found]) => {
         if (!live) return;
         setPerson(session.person.id);
         setName(session.person.name);
-        setWs(found);
+        setLoaded({ reference, ws: found, error: "" });
       })
       .catch((exc: unknown) => {
         if (live) {
-          setError(
-            exc instanceof ApiError && exc.status === 404
-              ? "This workspace does not exist."
-              : exc instanceof Error
-                ? exc.message
-                : "the workspace did not load",
-          );
+          setLoaded({
+            reference,
+            ws: null,
+            error:
+              exc instanceof ApiError && exc.status === 404
+                ? "This workspace does not exist."
+                : exc instanceof Error
+                  ? exc.message
+                  : "the workspace did not load",
+          });
         }
       });
     return () => {
@@ -574,7 +594,13 @@ function useWorkspaceOf(reference: string): {
     };
   }, [reference]);
 
-  return { person, name, ws, setWs, error };
+  const setWs = useCallback(
+    (w: Workspace) => setLoaded({ reference, ws: w, error: "" }),
+    [reference],
+  );
+  const answer = loaded.reference === reference ? loaded : NOTHING_LOADED;
+
+  return { person, name, ws: answer.ws, setWs, error: answer.error };
 }
 
 function WorkspaceError({ text }: { text: string }) {

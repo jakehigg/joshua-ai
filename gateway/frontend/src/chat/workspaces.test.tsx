@@ -94,6 +94,13 @@ function Where() {
   return <output data-testid="where">{useLocation().pathname}</output>;
 }
 
+// Where the browser is, and every address it has been at, in order.
+function Trail({ seen }: { seen: string[] }) {
+  const { pathname } = useLocation();
+  if (seen[seen.length - 1] !== pathname) seen.push(pathname);
+  return <output data-testid="where">{pathname}</output>;
+}
+
 describe("the rail", () => {
   const list = [
     ws({ id: "a", slug: "solar", title: "Solar install" }),
@@ -863,6 +870,45 @@ describe("the routes", () => {
     // take stands in the address.
     expect(await screen.findByRole("heading", { name: /Thanksgiving/ })).toBeTruthy();
     expect(screen.getByTestId("where").textContent).toBe("/chat/w/s9");
+  });
+
+  // A tap in the rail changes the ref of a screen that stays mounted, so the
+  // screen renders with the new ref while it still holds the workspace of the
+  // one before. That workspace must never send the browser to its own
+  // address, or the switch the person made is undone.
+  it("switches from one workspace to another, and never goes back to the first", async () => {
+    const solar = ws({ id: "a", slug: "solar", title: "Solar install" });
+    const trip = ws({ id: "b", slug: "trip", title: "Trip" });
+    viewer({
+      "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/a": solar,
+      "GET /api/v1/workspaces/b": trip,
+      "GET /api/v1/workspaces": { workspaces: [solar, trip] },
+      "GET /api/v1/workspaces/a/items": { items: [item({ title: "The solar quote" })] },
+      "GET /api/v1/workspaces/b/items": { items: [item({ id: "i2", title: "The trip quote" })] },
+      "GET /api/v1/chat/alex/history": { messages: [], nextBefore: null },
+      "GET /api/v1/chat/alex/held": { held: [] },
+    });
+    const seen: string[] = [];
+    render(
+      <MemoryRouter initialEntries={["/chat/w/a"]} future={FUTURE}>
+        <Trail seen={seen} />
+        <Routes>
+          <Route path="/chat/w/:ref" element={<WorkspaceLink />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: "Solar install" })).toBeTruthy();
+    await screen.findByText("The solar quote");
+
+    // The link of the other workspace in the rail, as a person taps it.
+    fireEvent.click(screen.getByRole("link", { name: "Trip", hidden: true }));
+    expect(await screen.findByRole("heading", { name: "Trip" })).toBeTruthy();
+    await screen.findByText("The trip quote");
+    expect(screen.queryByRole("heading", { name: "Solar install" })).toBeNull();
+    // The screen stays there: no address after the new one is the old one.
+    expect(screen.getByTestId("where").textContent).toBe("/chat/w/b");
+    expect(seen.slice(seen.indexOf("/chat/w/b"))).toEqual(["/chat/w/b"]);
   });
 
   // A closed workspace keeps its slug and frees its name, so two rows can
