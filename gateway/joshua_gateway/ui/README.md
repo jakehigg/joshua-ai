@@ -71,7 +71,8 @@ navigation. `.j-tabs.mobile-only` hides once the sidebar shows.
 - Controls: `input.j-check`, `input.j-toggle`, `.j-stepper`.
 - Cards and figures: `.j-card`, `.j-stats` > `.j-stat`.
 - Feedback: `.j-toast` (`.float` to pin it to the bottom), `.j-empty`,
-  `.j-spinner`.
+  `.j-spinner` (`.lg` for the spinner of a whole page) in `.j-loading`, which
+  centres it in the content area.
 - Documents: `.j-crumbs`, `.j-doc-title`, `.j-meta`, `.j-prose` for rendered
   markdown, `.j-entry` for a journal entry, `.j-table` in `.j-table-wrap`.
 - Phone helpers: `.j-bottom-bar` for a quick-add field pinned to the bottom.
