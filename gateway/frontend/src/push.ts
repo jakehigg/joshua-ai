@@ -25,8 +25,12 @@
  *
  * A subscription this browser keeps and the server does not is a notification
  * nobody gets, so the two are dropped together: a refusal anywhere in `enable`
- * unsubscribes the browser and deletes the row (`forget`), and that is also
- * what a sign-out does, while the session still exists.
+ * unsubscribes the browser and deletes the row (`forget`), and so does the
+ * person who turns the notifications of the device off.
+ *
+ * `forget` is the step of a sign-out too. The viewer has no sign-out of its
+ * own yet; the one that gets it calls `forget` before it posts to
+ * `POST /api/v1/session/sign-out`, because the delete needs the session.
  */
 
 import { deleteJson, getJson, postJson } from "./api/client";

@@ -119,9 +119,11 @@ a subscribed phone, and a workspace that would write reaches no device that
 never subscribed.
 
 **Turn off** drops the subscription in the browser and deletes the row on the
-server, so Joshua stops pushing to that device at once. It is also what a
-sign-out does: the viewer has no sign-out button of its own yet, and the step
-it takes is `forget` in `push.ts`.
+server, so Joshua stops pushing to that device at once. The viewer has no
+sign-out button of its own yet. When it gets one, it must call `forget` in
+`push.ts` **before** it posts to `POST /api/v1/session/sign-out`: the delete
+needs the session, and a browser that signs out otherwise leaves a
+subscription behind that Joshua keeps pushing to.
 
 ## What the browser does
 
