@@ -425,7 +425,9 @@ compose and on Kubernetes, and it adds no container.
   works: it finds the workspace and sends the browser to the two-segment
   address. The id `w` is reserved, so no person can have it.
 - The left rail shows Chat, the active workspaces, the paused workspaces (folded),
-  and "+ New workspace". On a phone it is a drawer.
+  and "+ New workspace". On a phone it is a drawer. A shared workspace carries
+  a small two-person icon beside its name, in the rail and in the header of the
+  workspace; the icon is the only mark, and no row says "Shared".
 - The new workspace dialog asks for a title, a goal (optional), a model, and
   the servers. "Shared" offers the other people of the roster as checkboxes
   and shows the address the workspace will take; Create waits until at least

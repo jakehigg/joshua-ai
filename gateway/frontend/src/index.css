@@ -967,14 +967,16 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   text-transform: uppercase;
   color: var(--j-muted);
 }
-/* The mark of a shared workspace in the rail: quiet, after the title. */
-.chat-screen .rail-shared {
+/* The mark of a shared workspace, in the rail and in the workspace header:
+   two small people, quiet, after the name. */
+.chat-screen .shared-mark {
+  display: inline-flex;
+  align-items: center;
   margin-left: 6px;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  vertical-align: -2px;
   opacity: 0.75;
 }
+.chat-screen .shared-mark .j-icon { width: 15px; height: 15px; }
 .chat-screen .rail-new { margin-top: 8px; text-align: left; }
 .chat-screen .rail-toggle { flex: none; }
 .chat-screen .ws-title { flex: 1; min-width: 0; }

@@ -46,6 +46,11 @@ export const ADMIN_ICON =
 
 export const ME_ICON = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>';
 
+/** Two people: the mark of a thread several people write in. */
+export const PEOPLE_ICON =
+  '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/>' +
+  '<path d="M16 5.2a3.5 3.5 0 0 1 0 7"/><path d="M17.5 14.2A6.5 6.5 0 0 1 21.5 20"/>';
+
 /** The icon of the chat, which is also a link icon. */
 const CHAT_ICON = '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>';
 

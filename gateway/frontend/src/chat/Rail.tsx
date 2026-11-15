@@ -1,6 +1,7 @@
 // The left rail of the chat screen: Chat, the active workspaces, the paused
-// ones (folded), and "+ New workspace". A shared workspace is marked as
-// shared, and every link is `/chat/w/<space>/<slug>` (api/workspaces.ts).
+// ones (folded), and "+ New workspace". A shared workspace is marked with a
+// two-person icon, and every link is `/chat/w/<space>/<slug>`
+// (api/workspaces.ts).
 // Under them it repeats the app
 // navigation links of the shell (AppNav), without Chat, which the first entry
 // of the rail already is, which the shell's own sidebar shows
@@ -15,6 +16,7 @@ import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { linkOf, type Workspace } from "../api/workspaces";
 import AppNav, { useNav } from "../shell/AppNav";
+import { SharedMark } from "./SharedMark";
 import { inertProps, useMedia } from "./viewport";
 
 export function Rail({
@@ -59,7 +61,7 @@ export function Rail({
         onClick={onNavigate}
       >
         {w.title}
-        {w.shared && <span className="rail-shared"> Shared</span>}
+        {w.shared && <SharedMark />}
       </Link>
     </li>
   );

@@ -39,6 +39,9 @@ with the images and the packaged chart, are at
   agrees on it and nothing new is stored; two people with the same display
   name share a colour, and a renamed person takes a new one. A personal
   workspace and the normal chat keep the layout they have.
+- A shared workspace now carries a small two-person icon beside its name, in
+  the rail and in the header of the workspace. Before, the rail wrote the
+  word "Shared" after the title, which took the room the title needed.
 - When a new workspace or a change to one is refused, the dialog now shows
   why. For a server that a person cannot use, it names the person and the
   server, for example "Alex cannot use tasks", and says that a shared

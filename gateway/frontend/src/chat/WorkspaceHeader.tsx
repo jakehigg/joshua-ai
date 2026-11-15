@@ -1,8 +1,8 @@
 // The header of a workspace: its title and goal, and an edit drawer for the
 // goal, the notes, the servers, the model, the notify setting and the status
-// (pause, resume, archive). A shared workspace also names its people under
-// the title, "Jake, Mia". They are not in the drawer: they are set at the
-// create and never change.
+// (pause, resume, archive). A shared workspace carries a two-person icon
+// beside its title and names its people under it, "Jake, Mia". They are not in
+// the drawer: they are set at the create and never change.
 
 import { useContext, useEffect, useState, type FormEvent } from "react";
 import {
@@ -18,6 +18,7 @@ import { errorText } from "../api/client";
 import { SessionContext } from "../shell/Shell";
 import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
 import { ServerChecklist } from "./ServerChecklist";
+import { SharedMark } from "./SharedMark";
 
 const NOTIFY: [Notify, string][] = [
   ["none", "Never"],
@@ -187,7 +188,10 @@ export function WorkspaceHeader({
   return (
     <>
       <div className="title ws-title">
-        <h1>{workspace.title}</h1>
+        <h1>
+          {workspace.title}
+          {workspace.shared && <SharedMark />}
+        </h1>
         {workspace.shared && <People workspace={workspace} />}
         {workspace.status !== "active" && <span className="subtitle">{workspace.status}</span>}
         {workspace.goal && <span className="subtitle ws-goal">{workspace.goal}</span>}

@@ -124,7 +124,7 @@ describe("the rail", () => {
     expect(screen.getByRole("link", { name: "Chat" }).getAttribute("aria-current")).toBeNull();
   });
 
-  it("marks a shared workspace and links it under the shared namespace", () => {
+  it("marks a shared workspace with the two-person icon and links it under the shared namespace", () => {
     render(
       <MemoryRouter future={FUTURE}>
         <Rail
@@ -139,7 +139,16 @@ describe("the rail", () => {
     );
     const link = screen.getByRole("link", { name: /Thanksgiving/ });
     expect(link.getAttribute("href")).toBe("/chat/w/shared/thanksgiving");
-    expect(link.querySelector(".rail-shared")?.textContent?.trim()).toBe("Shared");
+    // The icon, and no label: "Shared" is nowhere in the row.
+    expect(link.querySelector(".shared-mark svg.j-icon")).not.toBeNull();
+    expect(link.textContent).toBe("Thanksgiving");
+  });
+
+  it("marks no personal workspace", () => {
+    show();
+    const link = screen.getByRole("link", { name: "Solar install" });
+    expect(link.querySelector(".shared-mark")).toBeNull();
+    expect(document.querySelector(".shared-mark")).toBeNull();
   });
 
   it("opens the dialog from the new workspace button", () => {
@@ -445,6 +454,8 @@ describe("the workspace header", () => {
     render(<WorkspaceHeader workspace={ws()} onChange={onChange} onItems={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "Solar install" })).toBeTruthy();
     expect(screen.getByText("Pick an installer")).toBeTruthy();
+    // A personal workspace carries no mark.
+    expect(document.querySelector(".shared-mark")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByText("Tasks and projects");
@@ -476,6 +487,20 @@ describe("the workspace header", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ status: "paused" });
+  });
+
+  it("marks a shared workspace with the two-person icon beside the title", async () => {
+    viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    render(
+      <SessionContext.Provider value={session("jake", "Jake")}>
+        <WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />
+      </SessionContext.Provider>,
+    );
+    const heading = screen.getByRole("heading");
+    expect(heading.querySelector(".shared-mark svg.j-icon")).not.toBeNull();
+    // The icon stands for no text: the title is the name alone.
+    expect(heading.textContent).toBe("Thanksgiving");
   });
 
   it("names the people of a shared workspace under the title, and not in the drawer", async () => {
