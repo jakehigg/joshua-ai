@@ -30,6 +30,19 @@ export interface Workspace {
   unread?: number;
 }
 
+/**
+ * When Joshua may reach one person of a shared workspace, which governs the
+ * `notify_user` tool: `off` never, `decide` when the thread needs them, `all`
+ * on every message another person writes.
+ */
+export type NotifyMode = "off" | "decide" | "all";
+
+/** The notify mode of the signed-in person, and the default of the workspace. */
+export interface NotifyModeState {
+  mode: NotifyMode;
+  default: NotifyMode;
+}
+
 /** How far a person has read a thread, as the read call answers. */
 export interface ReadMark {
   last_read_turn_id: number;
@@ -134,6 +147,14 @@ export const getOptions = () => getJson<Options>(`${BASE}/options`);
  */
 export const markRead = (slug: string, turnId: number) =>
   postJson<ReadMark>(`${at(slug)}/read`, { turn_id: turnId });
+
+/**
+ * The notify mode of the signed-in person in a workspace, and the write of it.
+ * The mode is theirs alone: nobody sets the mode of another person.
+ */
+export const getNotifyMode = (slug: string) => getJson<NotifyModeState>(`${at(slug)}/notify`);
+export const setNotifyMode = (slug: string, mode: NotifyMode) =>
+  postJson<NotifyModeState>(`${at(slug)}/notify`, { mode });
 
 export async function listItems(slug: string): Promise<WorkspaceItem[]> {
   const body = await getJson<{ items?: WorkspaceItem[] }>(`${at(slug)}/items`);

@@ -1,8 +1,8 @@
 """Workspaces against the real Postgres repo and the real routes: the schema,
 the slugs, the scoping, the channel and conversation of a create, the items,
 the nightly skip, the main conversation, the usage by conversation, the read
-state of each person, and the two people of a shared workspace writing one
-thread."""
+state and the notify mode of each person, and the two people of a shared
+workspace writing one thread."""
 
 from __future__ import annotations
 
@@ -363,6 +363,40 @@ async def test_the_read_mark_is_one_for_each_person_of_a_thread(seeded) -> None:
     assert await seeded.unread_counts("mia", [conv, other]) == {conv: 2, other: 1}
 
 
+async def test_the_notify_mode_is_one_for_each_person_of_a_workspace(seeded) -> None:
+    """``notify_prefs``: a mode of their own, and the send stamp of the guard.
+
+    Nobody has a row until a mode is set, so the table is empty while every
+    person takes the default of the workspace.
+    """
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    assert await seeded.notify_prefs.get("alex", shared.id) is None
+    assert await seeded.notify_prefs.list_for(shared.id) == []
+
+    mine = await seeded.notify_prefs.set_mode("alex", shared.id, "all")
+    assert mine.person_id == "alex" and mine.workspace_id == shared.id
+    assert mine.mode == "all" and mine.last_notified_at is None
+    assert (await seeded.notify_prefs.set_mode("mia", shared.id, "off")).mode == "off"
+    assert [(p.person_id, p.mode) for p in await seeded.notify_prefs.list_for(shared.id)] == [
+        ("alex", "all"),
+        ("mia", "off"),
+    ]
+    # A second write replaces the mode of that person alone.
+    assert (await seeded.notify_prefs.set_mode("alex", shared.id, "decide")).mode == "decide"
+    assert (await seeded.notify_prefs.get("mia", shared.id)).mode == "off"
+    with pytest.raises(ValueError):
+        await seeded.notify_prefs.set_mode("alex", shared.id, "sometimes")
+
+    # The stamp of a send keeps the mode, and a person with no row gets one.
+    moment = datetime(2026, 3, 1, 9, 0, tzinfo=UTC)
+    stamped = await seeded.notify_prefs.mark_sent("alex", shared.id, mode="decide", at=moment)
+    assert stamped.mode == "decide" and stamped.last_notified_at == moment
+    other = await seeded.create_workspace("mia", "Trip")
+    fresh = await seeded.notify_prefs.mark_sent("mia", other.id, at=moment)
+    assert fresh.mode == "decide" and fresh.last_notified_at == moment
+    assert await seeded.notify_prefs.list_for(other.id) == [fresh]
+
+
 # --- the routes ------------------------------------------------------------------
 
 
@@ -559,6 +593,39 @@ async def test_the_read_route_checks_the_workspace_and_the_body(client) -> None:
     assert (await read(alex, {"turn_id": 99})).json()["unread"] == 0
 
 
+async def test_the_notify_route_reads_and_writes_the_mode_of_one_person(client) -> None:
+    """The control of the workspace page: the mode of the person who is signed
+    in, and the default of the workspace beside it."""
+    shared = await _create(client, title="Thanksgiving", members=["mia"])
+    personal = await _create(client)
+    get = lambda slug, p: client.get(f"/v1/workspaces/{slug}/notify", params=p, headers=_h())  # noqa: E731
+    post = lambda slug, p, b: client.post(  # noqa: E731
+        f"/v1/workspaces/{slug}/notify", params=p, json=b, headers=_h()
+    )
+    alex, mia = {"person": "alex"}, {"person": "mia"}
+
+    # A shared workspace decides; a personal one notifies nobody.
+    assert (await get(f"shared/{shared['slug']}", alex)).json() == {
+        "mode": "decide",
+        "default": "decide",
+    }
+    assert (await get(personal["slug"], alex)).json() == {"mode": "off", "default": "off"}
+
+    written = await post(f"shared/{shared['slug']}", alex, {"mode": "all"})
+    assert written.status_code == 200, written.text
+    assert written.json() == {"mode": "all", "default": "decide"}
+    assert (await get(f"shared/{shared['slug']}", alex)).json()["mode"] == "all"
+    # The mode is of that person alone: Mia keeps the default.
+    assert (await get(f"shared/{shared['slug']}", mia)).json()["mode"] == "decide"
+    assert (await post(f"shared/{shared['slug']}", mia, {"mode": "off"})).status_code == 200
+    assert (await get(f"shared/{shared['slug']}", alex)).json()["mode"] == "all"
+
+    assert (await post(f"shared/{shared['slug']}", alex, {"mode": "sometimes"})).status_code == 422
+    assert (await post(f"shared/{shared['slug']}", alex, {})).status_code == 422
+    assert (await post(personal["slug"], mia, {"mode": "all"})).status_code == 404
+    assert (await get(personal["slug"], mia)).status_code == 404
+
+
 async def test_a_create_checks_every_person_and_their_servers(client) -> None:
     post = lambda p, b: client.post("/v1/workspaces", params=p, json=b, headers=_h())  # noqa: E731
     alex, mia = {"person": "alex"}, {"person": "mia"}
@@ -631,6 +698,10 @@ async def test_another_owner_gets_404_on_every_route(client) -> None:
         client.delete(f"/v1/workspaces/{slug}/items/{item['id']}", params=mia, headers=_h()),
         client.get(f"/v1/workspaces/{slug}/block", params=mia, headers=_h()),
         client.post(f"/v1/workspaces/{slug}/read", params=mia, headers=_h(), json={"turn_id": 1}),
+        client.get(f"/v1/workspaces/{slug}/notify", params=mia, headers=_h()),
+        client.post(
+            f"/v1/workspaces/{slug}/notify", params=mia, headers=_h(), json={"mode": "off"}
+        ),
     ]
     for call in calls:
         assert (await call).status_code == 404

@@ -115,6 +115,8 @@ def test_each_route_proxies_to_core_with_the_person_and_the_token(client, core) 
             None,
         ),
         ("post", BASE + "/solar/read", "POST", "/v1/workspaces/solar/read", {"turn_id": 12}),
+        ("get", BASE + "/solar/notify", "GET", "/v1/workspaces/solar/notify", None),
+        ("post", BASE + "/solar/notify", "POST", "/v1/workspaces/solar/notify", {"mode": "all"}),
     ]
     for verb, url, method, path, body in calls:
         kwargs = {"json": body} if body is not None else {}
@@ -174,6 +176,12 @@ def test_a_two_segment_ref_reaches_core_whole(client, core) -> None:
             "POST",
             "/v1/workspaces/shared/thanksgiving/read",
         ),
+        (
+            "post",
+            f"{BASE}/shared%2Fthanksgiving/notify",
+            "POST",
+            "/v1/workspaces/shared/thanksgiving/notify",
+        ),
     ]
     for verb, url, method, path in calls:
         response = client.request(verb.upper(), url, json={}, auth=ALEX)
@@ -205,6 +213,8 @@ def test_a_guest_is_403_on_every_route_and_core_hears_nothing(client, core) -> N
         ("patch", BASE + "/a"),
         ("delete", BASE + "/a/items/b"),
         ("post", BASE + "/a/read"),
+        ("get", BASE + "/a/notify"),
+        ("post", BASE + "/a/notify"),
     ]:
         assert getattr(client, verb)(url, auth=GUS).status_code == 403, url
     assert core.requests == []
@@ -219,6 +229,7 @@ def test_a_cross_site_write_is_403_but_a_read_is_not_checked(client, core) -> No
         ("patch", BASE + "/a/items/b"),
         ("delete", BASE + "/a/items/b"),
         ("post", BASE + "/a/read"),
+        ("post", BASE + "/a/notify"),
     ]:
         response = client.request(verb.upper(), url, json={}, auth=ALEX, headers=evil)
         assert response.status_code == 403, url

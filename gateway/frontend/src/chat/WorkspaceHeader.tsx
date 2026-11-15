@@ -2,16 +2,21 @@
 // goal, the notes, the servers, the model, the notify setting and the status
 // (pause, resume, archive). The notify setting says when Joshua writes to the
 // phone; under it, the notifications of this device say whether it hears that
-// (Notifications.tsx). A shared workspace carries a two-person icon
+// (Notifications.tsx). A shared workspace adds "When Joshua may reach you
+// here", the notify mode of the signed-in person: it governs the `notify_user`
+// tool, it is theirs alone, and it saves as it changes. A shared workspace carries a two-person icon
 // beside its title and names its people under it, "Jake, Mia". They are not in
 // the drawer: they are set at the create and never change.
 
 import { useContext, useEffect, useState, type FormEvent } from "react";
 import {
   changeWorkspace,
+  getNotifyMode,
   getOptions,
   refOf,
+  setNotifyMode,
   type Notify,
+  type NotifyMode,
   type Options,
   type Workspace,
   type WorkspaceStatus,
@@ -28,6 +33,64 @@ const NOTIFY: [Notify, string][] = [
   ["questions", "Questions"],
   ["questions+finishes", "Questions and finishes"],
 ];
+
+const NOTIFY_MODE: [NotifyMode, string][] = [
+  ["off", "Never"],
+  ["decide", "When the thread needs me"],
+  ["all", "Every message of another person"],
+];
+
+// The notify mode of the signed-in person in a shared workspace: when Joshua
+// may reach them there, rather than wait for them to open the thread. It is
+// one person's own setting, so it saves on its own, not with the form.
+function NotifyModeField({ workspace }: { workspace: Workspace }) {
+  const [mode, setMode] = useState<NotifyMode | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    getNotifyMode(refOf(workspace))
+      .then((state) => live && setMode(state.mode))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [workspace]);
+
+  if (mode === null) return null;
+
+  const pick = (picked: NotifyMode) => {
+    setMode(picked);
+    setError("");
+    setNotifyMode(refOf(workspace), picked)
+      .then((state) => setMode(state.mode))
+      .catch((e: unknown) => setError(errorText(e, "the setting was not saved")));
+  };
+
+  return (
+    <>
+      <label className="j-field-label" htmlFor="ws-e-notify-mode">
+        When Joshua may reach you here
+      </label>
+      <select
+        id="ws-e-notify-mode"
+        value={mode}
+        onChange={(e) => pick(e.target.value as NotifyMode)}
+      >
+        {NOTIFY_MODE.map(([value, text]) => (
+          <option key={value} value={value}>
+            {text}
+          </option>
+        ))}
+      </select>
+      {error && (
+        <p className="j-error" role="alert">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
 
 function EditDrawer({
   workspace,
@@ -120,6 +183,7 @@ function EditDrawer({
             </option>
           ))}
         </select>
+        {workspace.shared && <NotifyModeField workspace={workspace} />}
         <Notifications />
         <ServerChecklist servers={shown} picked={servers} onChange={setServers} />
         {error && (

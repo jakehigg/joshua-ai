@@ -587,6 +587,33 @@ describe("the workspace header", () => {
     expect(calls.find((c) => c.method === "PATCH")?.path).toBe("/api/v1/workspaces/shared%2Fthanksgiving");
   });
 
+  it("sets the notify mode of the signed-in person in a shared workspace", async () => {
+    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    const { calls } = viewer({
+      "GET /api/v1/workspaces/options": OPTIONS,
+      "GET /api/v1/workspaces/shared%2Fthanksgiving/notify": { mode: "decide", default: "decide" },
+      "POST /api/v1/workspaces/shared%2Fthanksgiving/notify": { mode: "all", default: "decide" },
+    });
+    render(<WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const field = (await screen.findByLabelText("When Joshua may reach you here")) as HTMLSelectElement;
+    expect(field.value).toBe("decide");
+    fireEvent.change(field, { target: { value: "all" } });
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.path).toBe("/api/v1/workspaces/shared%2Fthanksgiving/notify");
+    expect(post?.body).toEqual({ mode: "all" });
+  });
+
+  it("has no notify mode in a personal workspace, where nobody else writes", async () => {
+    const { calls } = viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    render(<WorkspaceHeader workspace={ws()} onChange={vi.fn()} onItems={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Tasks and projects");
+    expect(screen.queryByLabelText("When Joshua may reach you here")).toBeNull();
+    expect(calls.some((c) => c.path.endsWith("/notify"))).toBe(false);
+  });
+
   it("offers Resume for a paused workspace", async () => {
     viewer({ "GET /api/v1/workspaces/options": OPTIONS });
     render(<WorkspaceHeader workspace={ws({ status: "paused" })} onChange={vi.fn()} onItems={vi.fn()} />);
