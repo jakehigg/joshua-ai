@@ -62,8 +62,10 @@ so a circular mask would cut the ear and the tusk.
 Notifications are two handlers of that same worker, because a scope holds one
 worker: `push` shows what the payload names, and `notificationclick` brings
 the window to the path it names. `src/push.ts` is the rest — the permission,
-the subscription, and the test send — and the Notifications control of a
-workspace (`src/chat/Notifications.tsx`) is where a person taps.
+the subscription, and the test send — and "Notifications on this device", on
+the Profile page (`DeviceNotifications` in `src/pages/ProfileSettings.tsx`),
+is where a person taps. A subscription is one person's and one device's, so it
+is not a control of a workspace.
 [docs/notifications.md](../../docs/notifications.md) has the whole flow,
 including the home-screen requirement of iOS.
 
