@@ -149,15 +149,21 @@ subscription behind that Joshua keeps pushing to.
 ## When Joshua may reach you in a workspace
 
 In a shared workspace Joshua can reach one person who is not reading the
-thread, with the `notify_user` tool
+thread, with the `notify_user(person, text, url?)` tool
 (see [workspaces.md](workspaces.md#notifying-one-person)). Each person says
 when it may reach them there, under Edit → **When Joshua may reach you here**:
 
 | The setting | The mode | What Joshua does |
 |---|---|---|
 | Never | `off` | Nothing. The tool refuses. |
-| When the thread needs me | `decide` | It notifies you when a question in the thread is for you, a decision waits on you, it wrote a document you need, it added an item you asked for, or somebody asked it to tell you. |
+| When the thread needs me | `decide` | It notifies you when a question in the thread is for you, a decision waits on you, it wrote a document you need, it added an item you asked for, somebody asked it to tell you, somebody asks it to check something with you ("see if this works for Jake"), or a plan or a document of the workspace is settled and waits on you. |
 | Every message of another person | `all` | It notifies you on every turn another person writes. |
+
+`url` is the path the tap opens, so the notification lands on the thing to
+read: the document (`/documents/<owner>/<slug>`) or the wiki page (`/wiki/...`)
+that is settled and waits on you. A call with no `url` opens the thread of the
+workspace, which is the default. As for `notify_person` below, it is a path
+inside Joshua and nothing else.
 
 A person who sets nothing is asked for in a shared workspace (`decide`) and
 never in a personal one (`off`), where nobody else writes. The setting is
@@ -169,7 +175,9 @@ normal chat when you have no device. Three rules hold whatever the setting
 is: Joshua never notifies the person who wrote the turn, it never notifies a
 person who has the thread open and read to its newest row, and one person gets
 one notification of one workspace in ten minutes. A line inside that time
-folds into the notification you already have, which opens the thread.
+folds into the notification you already have, which opens where that one
+pointed. Each call writes one line in core's log that says whether a
+notification went and which of these stopped it.
 
 **Messages to your phone** is a different setting, of the workspace and not of
 one person: it says when Joshua writes to your normal chat about that

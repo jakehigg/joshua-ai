@@ -49,6 +49,13 @@ with the images and the packaged chart, are at
   row is on screen, so a row that arrives behind another tab stays unread.
   The schema adds the table `conversation_reads`, one row for each person and
   conversation.
+- **The count skips the messages you wrote yourself.** It counts what somebody
+  else said, Joshua or another person of a shared workspace, so sending a
+  message and leaving the workspace at once leaves the count at zero, and
+  Joshua's answer raises it to one. Before, your own message counted, and the
+  rail read as if Joshua had already replied. In a shared workspace a message
+  raises the count of the other people and never of the person who wrote it.
+  The read mark is unchanged, and reading the thread still clears the count.
 - When a new workspace or a change to one is refused, the dialog now shows
   why. For a server that a person cannot use, it names the person and the
   server, for example "Alex cannot use tasks", and says that a shared
@@ -114,6 +121,12 @@ with the images and the packaged chart, are at
   scaled down on a tablet. The same button and Escape leave the state. Only
   the safe area of the screen, such as the rounded corners of a tablet, is
   kept out.
+- **A page that loads now shows one larger spinner, in the middle of the
+  page.** Before, the mark sat at the top left of the content area and was
+  small enough to miss at arm's length on a phone. Every full-page loading
+  state of the viewer uses the one spinner, so each of them is centred both
+  ways and the same size, on the phone and on the desktop. A spinner inside a
+  button or a row keeps the size it had.
 
 ### Usage
 
@@ -268,6 +281,22 @@ with the images and the packaged chart, are at
   alone, and each attempt counted as a failure of the browser, so five tests
   in a row deleted a good subscription. A browser that refuses the push it was
   sent still counts against that one subscription, as before.
+- **A notification of a workspace can now open the thing to read.**
+  `notify_user` takes a `url` beside the person and the line: the path the tap
+  opens, such as the document Joshua wrote or the wiki page that waits on
+  them. A call that names no path still opens the thread of the workspace, as
+  before. The path is a path inside Joshua and nothing else, the one rule
+  `notify_person` already had, so a notification never sends a person to
+  another site. Joshua now notifies a person when somebody asks it to check
+  something with them ("see if this works for Jake"), and once when a plan or
+  a document of a shared workspace is settled and waits on them, with the url
+  of the thing to read. See
+  [workspaces.md](workspaces.md#notifying-one-person).
+- Each `notify_user` call writes one line in core's log: the person, the
+  workspace, whether a notification went, and the guard that stopped it (the
+  writer of the turn, the read state, the ten-minute fold, `mode: off`, or a
+  send that reached neither a browser nor a normal chat). A notification that
+  did not arrive now has a reason you can read.
 
 ## 0.3.0 - 2026-11-13
 

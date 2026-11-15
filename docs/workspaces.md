@@ -223,7 +223,7 @@ The `workspace` builtin server has these tools.
 | `add_to_workspace(kind, ref, title, url?, workspace?)` | every chat | Add an item. In a workspace, `workspace` defaults to this one. In a normal chat it is required: a slug or a title of a workspace the person reaches. An item added from another chat shows as new in the block. |
 | `update_workspace_notes(notes)` | workspace | Replace the notes. Keep them short, under 4000 characters. |
 | `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the main chat of the person who wrote the turn. A turn with no person, a job event or a scheduled task, sends to the owner. One recipient, never the whole workspace. |
-| `notify_user(person, text)` | shared workspace | Reach one person of this workspace: a notification on their devices, or a line and a link in their normal chat when they have none. A person who is not in the workspace is refused. See [Notifying one person](#notifying-one-person). |
+| `notify_user(person, text, url?)` | shared workspace | Reach one person of this workspace: a notification on their devices, or a line and a link in their normal chat when they have none. `url` is the path the tap opens, this thread by default. A person who is not in the workspace is refused. See [Notifying one person](#notifying-one-person). |
 
 A normal chat (a direct chat that is not a workspace) has four more tools.
 `workspace` takes a slug or a title, matched with no regard to case among the
@@ -254,20 +254,28 @@ owner of a shared workspace. With no `viewer_url`, the message has the path
 
 ## Notifying one person
 
-In a shared workspace, `notify_user(person, text)` reaches one person who is
-not reading the thread. It goes to the push subscriptions of that person
+In a shared workspace, `notify_user(person, text, url?)` reaches one person who
+is not reading the thread. It goes to the push subscriptions of that person
 (see [notifications.md](notifications.md)), with the title of the workspace,
-`text` as one line of at most 160 characters, the address of the thread, and
+`text` as one line of at most 160 characters, the address `url` names, and
 the slug of the workspace as the tag, so the notifications of one workspace
 collapse into the newest one. A person with no subscription gets a line and a
 link in their normal chat instead. A personal workspace does not get the tool:
 nobody else writes there.
 
+**The url is where the tap lands**, so a notification opens the thing to read:
+a document (`/documents/<owner>/<slug>`), a wiki page (`/wiki/...`), or the
+thread of the workspace, which is what a call with no `url` opens. It is a path
+inside Joshua and nothing else: an address of another site is refused, as the
+service worker refuses one on a tap.
+
 **When Joshua notifies.** The prompt (`workspace_shared.md`) says to notify a
 person when a question in the thread is addressed to them, a decision waits on
-them, Joshua wrote a document they need, it added an item they asked for, or
-somebody asked it to tell them. More conversation on a subject they already
-know about notifies nobody.
+them, Joshua wrote a document they need, it added an item they asked for,
+somebody asked it to tell them, somebody asks it to check something with them
+("see if this works for Jake"), or a plan or a document of the workspace is
+settled and waits on them. The last two carry the `url` of the thing to read.
+More conversation on a subject they already know about notifies nobody.
 
 **Three rules are the tool's own**, so no prompt has to hold them:
 
@@ -276,13 +284,19 @@ know about notifies nobody.
   because the thread is in front of them;
 - one person gets one notification of one workspace in ten minutes. A line
   inside that time folds into the notification they already have, which opens
-  the thread, so nothing is sent twice and nothing is lost.
+  where that one pointed, so nothing is sent twice and nothing is lost.
 
 The mode of the person comes first: `off` sends nothing, `decide` leaves the
 rules above, and `all` asks for a notification on every turn another person
 writes. Each person sets their own mode on the workspace page, and the block
 shows every mode on its "Notify each person:" line. See
 [notifications.md](notifications.md#when-joshua-may-reach-you-in-a-workspace).
+
+Each call writes one decision line in core's log: the person, the workspace,
+whether a notification went, and the guard that stopped it (`writer`,
+`reading`, `fold`, `mode:off`, or `unreached` for a person a send reached
+neither way). A notification that did not arrive has a reason, and that is
+where it is read.
 
 ## Normal chat knows its workspaces
 
@@ -336,8 +350,11 @@ Every `{slug}` below is a ref: a slug, an id, or two segments
 | `POST /v1/workspaces/by-id/{id}/items` | Add an item for a tool call. The gateway calls it (see Items from tools). It takes no `person`. |
 
 `GET /v1/workspaces` gives each workspace an `unread` count: the rows of its
-thread after the `last_read_turn_id` of that person, and every row it shows
-when they have read nothing of it. `POST /v1/workspaces/{slug}/read` takes
+thread after the `last_read_turn_id` of that person that somebody else wrote,
+Joshua or another person of the thread, and every such row when they have read
+nothing of it. A row of their own never counts, so sending a message and
+leaving the workspace at once leaves the count at zero.
+`POST /v1/workspaces/{slug}/read` takes
 `{"turn_id"}`, the id of a transcript row (0 or more), and answers
 `{"conversation", "last_read_turn_id", "last_read_at", "unread"}`. The mark is
 one row of `conversation_reads`, for that person and that conversation, and it
