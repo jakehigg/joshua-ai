@@ -47,7 +47,7 @@ push.vapid_private_key
 ```
 
 A group is one section of the Instance page, with its own label, and each of
-its fields has a label, a hint, and a flag that says whether it is a secret.
+its fields has a label, a hint, and a kind.
 Core declares every group in one place, `core/joshua_core/store/settings.py`,
 so a later feature adds a group there and the page renders it with nothing of
 its own. A key that no group declares cannot be written: the route answers
@@ -59,18 +59,56 @@ that signs each push, and the subject a push service writes to.
 [notifications.md](notifications.md) has that feature. The store came with
 push and is not of it; any feature uses it.
 
+## What a field holds
+
+Each field declares a **kind**. The kind says which control the Instance page
+draws, and what the value looks like:
+
+| Kind | The control | The value |
+|---|---|---|
+| `text` | one line | the text, as the owner writes it |
+| `bool` | a checkbox | `true` or `false`, written by the tap |
+| `secret` | an empty field behind **Set** or **Replace** | encrypted at rest, never answered |
+
+`GET /admin/settings` answers the `kind` of each field, and `is_secret`,
+which is the kind `secret`. Nobody types the word `true`: a switch is one tap,
+and core reads `true`, `yes`, `on` and `1` as on.
+
+A field may also declare a check, and then a value the feature cannot use is
+refused where it is written: the write is a `400` whose line says what the
+field takes, and no row changes. The three push keys have one, because each
+is a form the browser or `py_vapid` has to accept:
+
+| The field | What it takes |
+|---|---|
+| `push.vapid_subject` | a `mailto:` or an `https://` address |
+| `push.vapid_public_key` | base64url of 65 bytes that start with `0x04` |
+| `push.vapid_private_key` | base64url of 32 bytes |
+
+A refusal never carries the value, because the private key is a secret.
+Checking the subject at the write is what keeps `py_vapid` from raising
+`VapidException` in the middle of a send, where nobody is watching.
+
 ## Admin → Instance
 
 The Instance section of the Admin area is the editor. It shows one section
 per group, and in it one field per setting, each with its own save: a save
 writes that setting and nothing else.
 
+A section starts with the steps of its group, in order, and a link to the
+page of the docs that has the whole story. The push group then says in one
+line which of its keys are set and whether push is on, so the owner sees what
+is left to do without reading four fields.
+
 A plain setting shows its value in the field, and the line under it says when
-it last changed and who changed it.
+it last changed and who changed it. A switch is a checkbox: one tap writes it,
+and there is no save of its own.
 
 A secret setting shows **set** or **not set**, and no field at all. "Replace"
-(or "Set", for one that is not stored) opens an empty field, and a save writes
-what the owner typed. The stored secret is never shown, never filled into a
+opens an empty field, and a save writes what the owner typed. A secret with
+nothing stored is the step the owner has not taken yet, so its button is the
+primary one of the section and says what it sets, as in **Set the private
+key**. The stored secret is never shown, never filled into a
 field, and never sent to the browser, so the owner can replace a secret and
 nobody, the owner included, can read one back.
 

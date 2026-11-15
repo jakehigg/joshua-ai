@@ -433,9 +433,23 @@ roster routes, they admit the callers of `AUTH_CALLERS` as well as those of
 `ADMIN_CALLERS`.
 
 The write takes a key that a settings group declares, and nothing else: core
-holds the groups, and a group says which of its fields are secret, so a caller
-can neither write an unknown key nor turn a secret into a plain value.
-`person` names the writer, for the `updated_by` of the row.
+holds the groups, and a group says the kind of each of its fields (`text`,
+`bool` or `secret`), so a caller can neither write an unknown key nor turn a
+secret into a plain value. A field of the answer carries its `kind` beside
+`is_secret`. `person` names the writer, for the `updated_by` of the row.
+
+**A value the feature cannot use is `400` here, not an error later.** The
+refusal is one line that says what the field takes, and it never carries the
+value:
+
+| The key | The refusal |
+|---|---|
+| `push.vapid_subject` | it must start with `mailto:` or `https://` |
+| `push.vapid_public_key` | it must be base64url of 65 bytes that start with `0x04` |
+| `push.vapid_private_key` | it must be base64url of 32 bytes |
+
+A write of an unknown key, a value over 4096 characters, and an empty value
+for a secret are `400` as before.
 
 **No answer carries a secret value.** A secret is encrypted at rest, a field
 answers `is_secret` and `is_set`, and `value` is `null` for it, whether one is
@@ -470,6 +484,13 @@ sentence that says what the owner has to do, so the page can show it.
 other push, so its answer says what each browser did: `sent`, `failed`,
 `dropped` (the subscription is gone), and `held` (a push service is rate
 limiting that endpoint). A send never raises into the turn that caused it.
+
+**A send that could not be signed is `400`, and the `error` is the real
+message**, such as `VapidException: Missing 'sub' from claims.` The VAPID
+header is built once, before the subscriptions, so a bad subject or an
+unreadable private key sends nothing, touches no subscription, and counts
+against no browser. A browser that refused the push is still a `200` with
+`failed`: that is one device's answer, not a failure of the instance.
 [notifications.md](notifications.md) has the sender, the payload, and what the
 owner does to turn push on.
 

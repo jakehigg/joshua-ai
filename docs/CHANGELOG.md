@@ -153,6 +153,22 @@ with the images and the packaged chart, are at
   `GET /admin/settings` and `POST /admin/settings`. Each one is the owner's
   alone: a member and a guest are refused. The schema adds the table
   `settings`.
+- **A field says its kind, and the page draws the control that fits.** A kind
+  is `text`, `bool` or `secret`, and a `bool` is a checkbox that writes `true`
+  or `false`: nobody types the word "true" any more. Each group of the
+  Instance page now carries its numbered steps and a link to the docs, the
+  push group says in one line which keys are set and whether push is on, and a
+  secret with nothing stored is the primary button that names what it sets
+  ("Set the private key") instead of a grey "Set" under a hint. The answer of
+  the read route adds `kind` beside `is_secret`. See
+  [settings.md](settings.md#what-a-field-holds).
+- **A value the feature cannot use is refused where it is written.** The VAPID
+  subject must start with `mailto:` or `https://`, the public key must be the
+  base64url of 65 bytes that start with `0x04`, and the private key the
+  base64url of 32 bytes. A refusal is a `400` whose line says what the field
+  takes, and it never carries the value. Before, a wrong subject was written
+  and `py_vapid` raised `VapidException` in the middle of the first send. See
+  [contracts.md](contracts.md#the-settings-routes).
 
 ### Notifications
 
@@ -178,14 +194,18 @@ with the images and the packaged chart, are at
   workspace slug, so several notifications of one workspace collapse into the
   newest. On Kubernetes the `joshua-core` pod is the one that needs egress to
   the push services.
-- **A device can now turn notifications on itself.** A workspace holds a
-  Notifications control under Edit → "Messages to your phone": one tap asks
-  the browser for the permission, subscribes with the public VAPID key of the
-  instance, and stores the subscription. "Send a test" then sends this device
-  a notification, and "Turn off" drops the subscription in the browser and on
-  the server. The control says what the state is, including a device that
-  blocks notifications, which only the settings of that device can undo, and
-  it shows the sentence of the viewer while the owner has not turned push on.
+- **A device can now turn notifications on itself**, under "Notifications on
+  this device" on your Profile page: one tap asks the browser for the
+  permission, subscribes with the public VAPID key of the instance, and stores
+  the subscription. "Send a test" then sends this device a notification, and
+  "Turn off" drops the subscription in the browser and on the server. The
+  control says what the state is, including a device that blocks
+  notifications, which only the settings of that device can undo, and it shows
+  the sentence of the viewer while the owner has not turned push on. A
+  subscription is one person's and one device's, so the control is on the page
+  of the person and not on a page of a workspace; the Edit drawer of a
+  workspace keeps "Messages to your phone" and "When Joshua may reach you
+  here", which are of the workspace, and points at the Profile page.
 - The service worker of the installed app now shows what arrives and opens
   what a tap asks for: the notification carries the `title`, the `body` and
   the `tag` of the payload, and a tap brings the window to the address the
@@ -227,6 +247,27 @@ with the images and the packaged chart, are at
   adds the table `notify_prefs`, and the viewer gains
   `GET` and `POST /api/v1/workspaces/{slug}/notify`. See
   [notifications.md](notifications.md#when-joshua-may-reach-you-in-a-workspace).
+- **Joshua can tell one person something from any chat.** The new
+  `notify_person` tool takes a person of the roster, one short line, and an
+  optional path inside Joshua, and reaches that person on their phones, or in
+  their normal chat when they have no device. It is for the two cases that are
+  not a workspace's: Joshua decides somebody needs to know, or a person asks
+  him to tell somebody ("tell Lauren to look at the recipe"). It is in a
+  normal chat, a personal workspace and a shared one, for a member only, and
+  it sends one person one notification in ten minutes. A name that two people
+  share is refused with both named, and a `url` that is not a path inside
+  Joshua is refused. `notify_user` is unchanged and stays the tool of a shared
+  workspace, because its notification opens that thread. See
+  [notifications.md](notifications.md#telling-one-person-from-any-chat).
+- **A test send that cannot be signed now says why, and costs no device.** The
+  VAPID header is built once, before the subscriptions, so a subject
+  `py_vapid` refuses or a private key that does not read sends nothing and
+  touches no row: `POST /api/v1/push/test` answers `400` and the `error` is the
+  real message, such as `VapidException: Missing 'sub' from claims.`, which
+  the card on the Profile page shows. Before, the page showed the class name
+  alone, and each attempt counted as a failure of the browser, so five tests
+  in a row deleted a good subscription. A browser that refuses the push it was
+  sent still counts against that one subscription, as before.
 
 ## 0.3.0 - 2026-11-13
 

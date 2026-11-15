@@ -7,10 +7,10 @@ opens at the page the notification names.
 
 Push is **off in every deployment** until the owner turns it on, and no
 environment variable turns it on. The owner enters three keys under
-Admin → Instance and writes `true` in one field, and that is the whole setup
-of the instance. Each person then turns notifications on once per device, and
-on an iPhone or an iPad that device must be Joshua installed to the home
-screen.
+Admin → Instance and ticks one checkbox, and that is the whole setup of the
+instance. Each person then turns notifications on once per device, on their
+Profile page, and on an iPhone or an iPad that device must be Joshua
+installed to the home screen.
 
 [settings.md](settings.md) has the store the keys live in, and
 [contracts.md](contracts.md#the-push-routes) has the four routes.
@@ -67,22 +67,36 @@ Then, in the viewer, under **Admin → Instance → Notifications**, write:
 | Field | What it holds |
 |---|---|
 | VAPID public key | the public key, base64url |
-| VAPID private key | the private key, base64url. A secret: it is never shown again |
-| Subject | `mailto:you@example.com`, or `https://joshua.example` |
-| Push notifications on | `true` |
+| VAPID private key | the private key, base64url. **Set the private key** opens the field. A secret: it is never shown again |
+| VAPID subject | `mailto:you@example.com`, or `https://joshua.example` |
+| Push notifications on | the checkbox. One tap writes it |
 
-Save each field on its own. Keep the two keys together somewhere safe: a
-browser that subscribed with one public key cannot be pushed to with another,
-so a new pair means every device subscribes again.
+Save each key on its own; the checkbox needs no save. The line above the
+fields says which keys are in and whether push is on, so it says what is
+left. Keep the two keys together somewhere safe: a browser that subscribed
+with one public key cannot be pushed to with another, so a new pair means
+every device subscribes again.
+
+**Each field is checked as it is written**, so a value that cannot work is
+refused at the screen instead of failing in the middle of the first send:
+
+| The field | What it takes | Why |
+|---|---|---|
+| VAPID subject | starts with `mailto:` or `https://` | `py_vapid` raises `VapidException` on anything else |
+| VAPID public key | base64url of 65 bytes that start with `0x04` | one uncompressed P-256 point, what a browser subscribes with |
+| VAPID private key | base64url of 32 bytes | the private value that signs a push |
+
+A refusal is one line that says what the field takes, and it never shows the
+value back: the private key is a secret. The command above prints both keys in
+exactly these forms, the public one first.
 
 The private key is a secret setting, so it needs `JOSHUA_SETTINGS_KEY` in the
 environment of core, and it is encrypted at rest with it. No route ever
 answers its value. [settings.md](settings.md#joshua_settings_key) has that
 key, how to generate it, and why it is backed up with the database.
 
-Turn push off again by writing anything but `true` in **Push notifications
-on**. The subscriptions stay, so turning it on again needs no device to do
-anything.
+Turn push off again by clearing **Push notifications on**. The subscriptions
+stay, so turning it on again needs no device to do anything.
 
 ## Turning it on, on your phone
 
@@ -94,12 +108,18 @@ no notification away without a tap.
    icon. iOS gives web push to an installed app only, on iOS 16.4 or later,
    and never to a tab. Android and a desktop browser need no install, but an
    installed app there keeps the notifications too.
-2. Open a workspace, tap **Edit**, and look under "Messages to your phone".
+2. Open your **Profile** page and look under "Notifications on this device".
 3. Tap **Turn on notifications**. The browser asks, and you allow it. That one
    tap asks, subscribes at the push service of the browser, and stores the
    subscription.
 4. Tap **Send a test**. A notification arrives, and a tap on it opens Joshua
-   at the workspace it names.
+   at the page it names.
+
+A subscription is one person's and one device's, so the control is on the page
+of the person who signed in and not on a page of a workspace. Each phone,
+tablet and laptop of yours does these steps once. The Edit drawer of a
+workspace keeps the two settings that *are* of the workspace, and a line there
+points at the Profile page.
 
 What the control says:
 
@@ -111,6 +131,7 @@ What the control says:
 | Add Joshua to the home screen. | Install the app, as in step 1, and open it from the icon. |
 | This browser cannot show notifications. | Use another browser; this one has no web push. |
 | notifications are not configured on the Joshua side | Ask the owner to turn push on, above. |
+| a line of the server, such as `VapidException: Missing 'sub' from claims.` | A test send that could not be signed. Tell the owner: the subject or one of the keys under Admin → Instance is wrong. |
 
 Per workspace, **Messages to your phone** says *when* Joshua writes: never,
 on a question, or on a question and a finish. The control says whether this
@@ -157,6 +178,36 @@ workspace. The two work together, as the table of each one says.
 The mode is one row of the `notify_prefs` table, for that person and that
 workspace, so it survives a restart. The same row holds the moment of the last
 notification, which the ten-minute rule reads.
+
+## Telling one person, from any chat
+
+`notify_person` is the tool for the rest: Joshua decides somebody needs to
+know, or a person asks him to tell somebody — "tell Lauren to look at the
+recipe". It is in every chat of a member: a normal chat, a personal workspace,
+and a shared one. A guest does not have it.
+
+| The argument | What it is |
+|---|---|
+| `person` | an id or a name of the roster, with no regard to case |
+| `text` | one short line, the knock on the door |
+| `url` | a path inside Joshua the notification opens, `/` by default |
+
+The person is one of the people of the instance, not of a workspace, so this
+tool reaches anybody of this Joshua. A name that two people share is refused
+with both of them named, and the call names an id instead. A `url` that is not
+a path inside Joshua is refused: a notification of Joshua never sends a person
+to another site.
+
+It delivers on the same chain as `notify_user`: every push subscription of
+that person, and their normal chat when no browser of theirs took it. So a
+person with no device still gets the line, in the chat they already use.
+
+One person gets one `notify_person` in ten minutes, and the tool keeps that
+rule itself, whoever asked for it and from whatever chat. It is held in core's
+memory and not in a table, so a restart of core forgets it; the worst that
+costs is one notification more than the rule allows. **When Joshua may reach
+you here** is of one workspace, so it governs `notify_user` and not this
+tool. [workspaces.md](workspaces.md#notifying-one-person) has `notify_user`.
 
 ## What the browser does
 
@@ -243,7 +294,18 @@ compose core already reaches the internet and there is nothing to allow.
 
 There is no connectivity check and no pre-flight: with the keys written, the
 first real send either works or reports the error of the push service.
-**Admin → Instance** saves a key without testing it.
+**Admin → Instance** checks the form of each value, as above, and does not
+test the pair.
 `POST /api/v1/push/test` is the test: it sends the signed-in person a
 notification through the same sender, and answers what each of their browsers
 did with it.
+
+A send is signed before it goes anywhere, and the VAPID header is built once,
+for every subscription of that send. A header that cannot be built — a subject
+`py_vapid` refuses, a private key that does not read — sends nothing, touches
+no subscription, and answers the real message: the test route is `400` and its
+`error` is the class and the text of the failure, which the card shows. So a
+wrong setting costs no device: it is the instance that is wrong, not the
+browser, and five tests in a row delete nothing. A browser that refuses the
+push it was sent is the other case, and that one counts against that
+subscription, as above.
