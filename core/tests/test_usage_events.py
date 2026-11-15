@@ -117,7 +117,14 @@ async def test_an_unknown_kind_is_not_a_call_kind() -> None:
 def test_usage_features_are_the_call_groups() -> None:
     settings = nightly_settings()
     assert usage_features(settings) == list(CALL_GROUPS)
-    assert CALL_GROUPS == ("chat", "reflection", "internet", "describe", "assignment")
+    assert CALL_GROUPS == (
+        "chat",
+        "reflection",
+        "internet",
+        "describe",
+        "assignment",
+        "developer",
+    )
 
 
 # --- the fold by day -------------------------------------------------------------

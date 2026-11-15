@@ -8,8 +8,9 @@ Core never trusts ``framing`` from user input; only the scheduler and ops set it
 ``POST /v1/memory/search``, which the viewer and an addon call.
 ``UsageResponse`` is the shape of core's ``GET /v1/usage``, which the viewer
 calls for its usage page. ``UsageWriteRequest`` is the body of core's
-``POST /v1/usage``, which the assignments container calls to report the
-tokens of its own model calls. ``MODEL_FORWARDER_PATH`` is the prefix of
+``POST /v1/usage``, which the assignments container and the developer addon
+call to report the tokens of their own model calls, as a row of kind
+``assignment`` or ``developer``. ``MODEL_FORWARDER_PATH`` is the prefix of
 core's model forwarder. ``assignment_conversation`` names the conversation
 of an assignment session, and ``assignment_of`` reads it back.
 ``LimitsResponse`` is the shape of core's
@@ -249,10 +250,11 @@ class UsageResponse(_Model):
 USAGE_WRITE_PATH = "/v1/usage"
 USAGE_WRITE_MAX_BYTES = 1024 * 1024
 USAGE_WRITE_MAX_ROWS = 500
-# The only kind that ``POST /v1/usage`` accepts. The other kinds are the calls
-# that core makes itself, and only core writes them.
-USAGE_WRITE_KINDS = ("assignment",)
-UsageWriteKind = Literal["assignment"]
+# The kinds that ``POST /v1/usage`` accepts: ``assignment`` from the
+# assignments container and ``developer`` from the developer addon. The other
+# kinds are the calls that core makes itself, and only core writes them.
+USAGE_WRITE_KINDS = ("assignment", "developer")
+UsageWriteKind = Literal["assignment", "developer"]
 # The largest count of one row. The columns are INT.
 USAGE_MAX_COUNT = 2**31 - 1
 # Pydantic checks a pattern with the Rust regex engine, where ``$`` matches
@@ -273,15 +275,17 @@ class UsageWriteCounts(_Model):
 class UsageWriteRow(_Model):
     """One usage row that a container reports for its own model calls.
 
-    ``kind`` and ``name`` are ``assignment``: the row goes into the
-    ``assignment`` group of the usage page. ``worker`` names a part of the
-    group, for example one assignment, and the page shows it as a worker.
+    ``kind`` is a kind of ``USAGE_WRITE_KINDS``: ``assignment`` from the
+    assignments container, ``developer`` from the developer addon. ``name`` is
+    the group of the usage page the row goes into, and defaults to ``kind``.
+    ``worker`` names a part of the group, for example one assignment or one
+    developer task, and the page shows it as a worker.
     ``ref`` is the id of the row for its writer. Core keeps one row for each
     writer and ``ref``, so a writer can send a row again after a failure.
     """
 
     kind: UsageWriteKind
-    name: UsageWriteKind = "assignment"
+    name: UsageWriteKind | None = None
     worker: str | None = Field(default=None, max_length=64, pattern=_USAGE_LABEL_PATTERN)
     run_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
     person_id: str | None = Field(default=None, pattern=_PERSON_PATTERN)

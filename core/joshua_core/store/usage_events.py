@@ -9,9 +9,10 @@ A row holds counts and ids only. It never holds a message, a question, or a
 token.
 
 The groups of the usage page are the `name` of a row: `chat`, `reflection`,
-`internet`, `describe`, and `assignment`. Core writes the rows of the first
-four itself. The assignments container reports the rows of `assignment` with
-`POST /v1/usage` (see `usage_api.py`). `summarize` folds the rows of
+`internet`, `describe`, `assignment`, and `developer`. Core writes the rows of
+the first four itself. The assignments container reports the rows of
+`assignment` and the developer addon reports the rows of `developer`, both
+with `POST /v1/usage` (see `usage_api.py`). `summarize` folds the rows of
 `Repo.usage_rows` into the `UsageResponse` shape, one day in the instance
 timezone for each row. `usage_features` names the groups that the answer
 always holds, also with no row.
@@ -34,7 +35,7 @@ from joshua_core.engine.usage import Usage
 
 logger = get_logger("store.usage")
 
-USAGE_KINDS = ("chat", "reflection", "internet", "describe", "assignment")
+USAGE_KINDS = ("chat", "reflection", "internet", "describe", "assignment", "developer")
 
 # The groups of the features that are always on, in the order of the answer.
 CALL_GROUPS = USAGE_KINDS

@@ -167,17 +167,22 @@ def _usage_row(**fields: object) -> dict[str, object]:
     return row
 
 
-def test_a_usage_row_takes_the_assignment_kind_only() -> None:
+def test_a_usage_row_takes_the_write_kinds_only() -> None:
     from joshua_shared.contracts import USAGE_WRITE_KINDS, UsageWriteRequest
 
     body = UsageWriteRequest.model_validate({"rows": [_usage_row()]})
     row = body.rows[0]
-    assert (row.kind, row.name, row.calls) == ("assignment", "assignment", 1)
+    # The row names no group, so the writer of the row leaves ``name`` None.
+    assert (row.kind, row.name, row.calls) == ("assignment", None, 1)
     assert row.usage.input == row.usage.output == 0
-    assert USAGE_WRITE_KINDS == ("assignment",)
+    assert USAGE_WRITE_KINDS == ("assignment", "developer")
+    developer = UsageWriteRequest.model_validate({"rows": [_usage_row(kind="developer")]})
+    assert (developer.rows[0].kind, developer.rows[0].name) == ("developer", None)
     for kind in ("chat", "reflection", "internet", "describe"):
         with pytest.raises(ValidationError):
             UsageWriteRequest.model_validate({"rows": [_usage_row(kind=kind)]})
+        with pytest.raises(ValidationError):
+            UsageWriteRequest.model_validate({"rows": [_usage_row(name=kind)]})
 
 
 @pytest.mark.parametrize(
