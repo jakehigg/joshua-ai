@@ -146,11 +146,11 @@ describe("Composer attachment", () => {
     const { onSend, box } = setup();
     const photo = new File(["pixels"], "photo.png", { type: "image/png" });
     pick(photo);
-    expect(screen.getByText("photo.png")).toBeTruthy();
+    expect(screen.getByAltText("photo.png")).toBeTruthy();
     fireEvent.change(box, { target: { value: "what is on this?" } });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(onSend).toHaveBeenCalledWith("what is on this?", photo);
-    expect(screen.queryByText("photo.png")).toBeNull();
+    expect(screen.queryByAltText("photo.png")).toBeNull();
   });
 
   it("sends a PDF with no text at all", () => {

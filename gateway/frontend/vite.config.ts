@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-import { buildStamp } from "./src/buildStamp";
+import { buildStamp } from "./src/buildStamp.ts";
 
 // The app is the installed progressive web app of the viewer, scoped to `/`,
 // so it is served from the root and never from a subfolder.
