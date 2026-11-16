@@ -1281,7 +1281,8 @@ item = {
   "open_request": {"kind": "repo"|"file"|"info", "ref": str, "reason": str}|null,
   "stopped_at_limits": object|null,
   "saved": {"id": int, "name": str}|null,
-  "parent_id": int|null
+  "parent_id": int|null,
+  "workspace": str|null
 }
 list   = {"items": [item, ...]}
 detail = item + {
@@ -1316,6 +1317,10 @@ comment      = {"id": int, "target": "definition"|"plan"|"report", "line_no": in
   or null, and `rerun_of` gives its id and title. `lineage` holds each run
   of the person that shares the root with this one, the oldest first, at
   most 50, this one too. A run with no re-run has only itself.
+- `workspace` is the id of the workspace that started the run, or null for a
+  run outside a workspace. A draft keeps the workspace it was asked for, and a
+  new spec does not move it. The viewer reads it for the charm beside the name
+  of that workspace ([workspaces.md](workspaces.md#the-charm-beside-the-name)).
 - `open_request` is the open request of the worker, or null. A question
   (`ask`) is a request of kind `info`. The viewer shows a request for a
   repository or a file in the notice band of the page, with its kind, its

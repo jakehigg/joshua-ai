@@ -42,6 +42,18 @@ with the images and the packaged chart, are at
 - A shared workspace now carries a small two-person icon beside its name, in
   the rail and in the header of the workspace. Before, the rail wrote the
   word "Shared" after the title, which took the room the title needed.
+- **A workspace name says whether Joshua is working or waiting for you.** One
+  charm beside the name, in the same place and the same style as the
+  two-person icon of a shared workspace, in the rail and in the chat header. A
+  spinner means Joshua has something in flight for that workspace: a turn of
+  the thread, or an assignment that is running. A question mark means
+  something there needs you: an assignment that stopped with a question or a
+  request, or a draft that waits for a start. A workspace with nothing running
+  and nothing waiting carries no charm. Hover or tap gives the one line of
+  what it is, such as "assignment 31 has a question", and a screen reader
+  reads the same line. The charm does nothing when you press it: it only says
+  what is happening. The developer addon is not a source yet, so a developer
+  task of a workspace shows no charm.
 - A workspace whose thread holds rows you have not read now shows how many,
   next to its name in the rail. The count is yours alone: in a shared
   workspace each person has a count of their own, and reading the thread

@@ -656,6 +656,32 @@ async def test_each_person_of_a_shared_workspace_has_an_unread_count_of_their_ow
     assert await counts("alex") == {"thanksgiving": 1}
 
 
+async def test_the_list_and_the_read_say_when_a_turn_of_the_thread_is_in_flight(seeded) -> None:
+    """``turn_in_flight`` is one source of the charm beside the name of a
+    workspace in the viewer: a turn of its thread has not finished. It comes
+    from the manager's memory, so a quiet workspace carries False."""
+    working = await seeded.create_workspace("alex", "Solar install")
+    quiet = await seeded.create_workspace("alex", "Trip")
+    thread = (await seeded.workspace_conversation(working)).id
+    app = _app(seeded)
+    app.state.ctx.manager = SimpleNamespace(
+        workspace_block=None,
+        pending_for=lambda conversation_id: {"turn_id": 3} if conversation_id == thread else None,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://core"
+    ) as c:
+        listing = await c.get("/v1/workspaces", params={"person": "alex"}, headers=_h())
+        assert listing.status_code == 200, listing.text
+        assert {w["slug"]: w["turn_in_flight"] for w in listing.json()["workspaces"]} == {
+            "solar-install": True,
+            "trip": False,
+        }
+        for ref, expected in ((working.id, True), (quiet.id, False)):
+            one = await c.get(f"/v1/workspaces/{ref}", params={"person": "alex"}, headers=_h())
+            assert one.json()["turn_in_flight"] is expected
+
+
 async def test_the_read_route_checks_the_workspace_and_the_body(client) -> None:
     made = await _create(client)
     alex, mia = {"person": "alex"}, {"person": "mia"}

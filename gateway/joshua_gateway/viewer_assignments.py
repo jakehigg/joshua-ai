@@ -48,6 +48,7 @@ The functions here build data only. The routes live in ``viewer_api``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -167,6 +168,9 @@ class Item(_Model):
     stopped_at_limits: dict[str, Any] | None = None
     saved: SavedRef | None = None
     parent_id: int | None = None
+    # The id of the workspace that started it, or None. The charm beside the
+    # name of a workspace reads it (``viewer_workspaces``).
+    workspace: str | None = None
 
 
 class Output(_Model):
@@ -333,6 +337,15 @@ class AssignmentsClient:
             ItemList, LIST_PATH, {"person": person, "state": state, "limit": LIST_LIMIT}
         )
         return None if isinstance(result, NotFound) else result
+
+    async def open_rows(self, person: str) -> list[Item]:
+        """The assignments of ``person`` that have not ended: the drafts and
+        the runs in progress, the drafts first. The charm of a workspace reads
+        them (``viewer_workspaces``). A state the manager did not answer for
+        is left out, so a manager that is down gives an empty list."""
+        states = ("draft", "in_progress")
+        lists = await asyncio.gather(*(self.list(person, state) for state in states))
+        return [item for rows in lists if rows is not None for item in rows.items]
 
     async def detail(self, person: str, assignment_id: int) -> Detail | NotFound | None:
         """One assignment of ``person``."""
