@@ -324,7 +324,15 @@ async def draft_assignment(
     """
     person = _person(ctx)
     conversation = (ctx.headers or {}).get(CONVERSATION_HEADER)
-    return await get_manager().draft(person, spec, conversation, saved=saved)
+    workspace = origin_of(ctx)
+    return await get_manager().draft(
+        person,
+        spec,
+        conversation,
+        saved=saved,
+        workspace=workspace,
+        workspace_people=people_of(ctx) if workspace else (),
+    )
 
 
 @mcp.tool()

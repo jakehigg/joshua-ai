@@ -11,7 +11,10 @@ empty list turns the routes off, so every caller gets 403. The bearer is
 checked before the body is read. A ``person`` that is not a member of
 ``people`` gets 403, and a missing one gets 400.
 
-- ``GET /v1/workspaces?status=`` lists the workspaces.
+- ``GET /v1/workspaces?status=`` lists the workspaces. Each workspace, in the
+  list and on its own, carries ``turn_in_flight``: a turn of its thread has
+  not finished. The viewer composes that with the workers of the workspace
+  into the charm beside the name.
 - ``POST /v1/workspaces`` creates one (``title``, ``goal``, ``model``,
   ``servers``, ``notify``, ``members``). The slug comes from the title. The
   create also makes the channel ``workspace:<id>`` and its conversation.
@@ -317,16 +320,34 @@ def _dedupe(servers: list[str]) -> list[str]:
     return list(dict.fromkeys(s.strip() for s in servers if s.strip()))
 
 
-async def _unread(repo: Any, person_id: str, workspaces: Collection[Workspace]) -> dict[str, int]:
-    """How many rows of each workspace thread this person has not read, by
-    workspace id: the rows another speaker wrote, never their own. A workspace
-    with nothing unread is not in the answer."""
+async def _threads(repo: Any, workspaces: Collection[Workspace]) -> dict[str, str]:
+    """The conversation of each workspace thread, by conversation id."""
     threads: dict[str, str] = {}
     for workspace in workspaces:
         conversation = await repo.workspace_conversation(workspace)
         threads[conversation.id] = workspace.id
+    return threads
+
+
+async def _unread(repo: Any, person_id: str, threads: dict[str, str]) -> dict[str, int]:
+    """How many rows of each workspace thread this person has not read, by
+    workspace id: the rows another speaker wrote, never their own. A workspace
+    with nothing unread is not in the answer."""
     counts = await repo.unread_counts(person_id, threads)
     return {threads[conversation_id]: n for conversation_id, n in counts.items()}
+
+
+def _turns_in_flight(manager: Any, threads: Collection[str]) -> set[str]:
+    """The conversations of ``threads`` that hold a turn that has not finished.
+
+    A turn of a workspace thread is one worker Joshua started for that
+    workspace, so the viewer shows the workspace as working (``docs/
+    workspaces.md``). The turns in flight live in the manager's memory, so
+    this costs no query, and a restart of core clears them.
+    """
+    if manager is None:
+        return set()
+    return {thread for thread in threads if manager.pending_for(thread) is not None}
 
 
 def build_workspaces_router() -> APIRouter:
@@ -360,13 +381,28 @@ def build_workspaces_router() -> APIRouter:
             return JSONResponse(
                 {"error": "invalid request", "detail": "unknown status"}, status_code=422
             )
-        repo = request.app.state.ctx.repo
+        ctx = request.app.state.ctx
+        repo = ctx.repo
         rows = await repo.list_workspaces(person_id, status)
+        threads = await _threads(repo, rows)
         # Each workspace carries the unread count of this person: in a shared
         # workspace the other people have counts of their own.
-        unread = await _unread(repo, person_id, rows)
+        unread = await _unread(repo, person_id, threads)
+        # And whether a turn of its thread is still running, which the viewer
+        # shows as a charm beside the name.
+        in_flight = _turns_in_flight(getattr(ctx, "manager", None), threads)
+        working = {threads[thread] for thread in in_flight}
         return JSONResponse(
-            {"workspaces": [{**workspace_json(w), "unread": unread.get(w.id, 0)} for w in rows]}
+            {
+                "workspaces": [
+                    {
+                        **workspace_json(w),
+                        "unread": unread.get(w.id, 0),
+                        "turn_in_flight": w.id in working,
+                    }
+                    for w in rows
+                ]
+            }
         )
 
     @router.post(WORKSPACES_PATH)
@@ -587,7 +623,12 @@ def build_workspaces_router() -> APIRouter:
         if denied is not None:
             return denied
         assert workspace is not None
-        return JSONResponse(workspace_json(workspace))
+        ctx = request.app.state.ctx
+        conversation = await ctx.repo.workspace_conversation(workspace)
+        in_flight = _turns_in_flight(getattr(ctx, "manager", None), [conversation.id])
+        return JSONResponse(
+            {**workspace_json(workspace), "turn_in_flight": bool(in_flight)},
+        )
 
     @router.patch(WORKSPACE_REF_PATH)
     async def patch_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]

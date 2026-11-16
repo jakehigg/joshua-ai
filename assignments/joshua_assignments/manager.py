@@ -21,6 +21,10 @@ A worker can park with a request for a repository or a file.
 (see ``inbox``). Each resumes the assignment as ``answer_assignment`` does,
 with the same ``busy`` refusal, and clears the open request.
 
+A draft, like a run, keeps the workspace it was asked for
+(``stamp_workspace``): it waits there for a start, and a new spec does not
+move it.
+
 A draft takes a new spec with ``update_draft``. ``delete_draft`` only
 removes it from view (``deleted_at``), and ``restore`` brings it back. A row
 that ran is never deleted. ``start`` with a new spec is refused as
@@ -901,10 +905,15 @@ class Manager:
         raw_spec: Any = None,
         conversation_id: str | None = None,
         saved: str | None = None,
+        workspace: str | None = None,
+        workspace_people: Sequence[str] = (),
     ) -> dict[str, Any]:
         """Check a spec as ``start`` does and store it as a draft. Nothing runs.
 
-        ``saved`` and ``raw_spec`` work as in ``start``."""
+        ``saved`` and ``raw_spec`` work as in ``start``. ``workspace`` is the
+        workspace the draft was asked for, as in ``start``: the draft waits
+        for a start there, and the viewer says so beside the name of that
+        workspace."""
         if not self.section.enabled:
             return rejected("disabled", "assignments.enabled is false in joshua.yaml")
         found = await self._spec_of(person, raw_spec, saved)
@@ -915,6 +924,7 @@ class Manager:
         if isinstance(checked, dict):
             return checked
         _, resolved = checked
+        stamp_workspace(resolved.spec, workspace, workspace_people)
         if conversation_id:
             conversation_id = conversation_id[:MAX_CONVERSATION_ID]
         row = await self.store.create(
@@ -942,6 +952,10 @@ class Manager:
         if isinstance(checked, dict):
             return checked
         _, resolved = checked
+        # A new spec does not move a draft: it keeps the workspace it was
+        # asked for, and the people of that workspace who may read it.
+        old = row.get("spec") or {}
+        stamp_workspace(resolved.spec, old.get("workspace"), old.get("workspace_people") or [])
         current = await self.store.update(row["id"], spec=resolved.spec, model=resolved.model_id)
         assert current is not None
         lines = {"definition": definition_mod.lines(resolved.spec)}

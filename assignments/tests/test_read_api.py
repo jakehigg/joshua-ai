@@ -33,6 +33,7 @@ ITEM_KEYS = {
     "stopped_at_limits",
     "saved",
     "parent_id",
+    "workspace",
 }
 DETAIL_KEYS = ITEM_KEYS | {
     "rerun_of",
