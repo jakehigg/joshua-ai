@@ -135,6 +135,26 @@ async def test_a_draft_takes_the_workspace_of_its_start(app, store, channels) ->
     assert channels.bodies[-1]["workspace"] == WS
 
 
+async def test_a_draft_asked_for_in_a_workspace_waits_for_a_start_there(app, store) -> None:
+    """The viewer says beside the name of a workspace that a draft of it waits
+    for a start, so a draft keeps the workspace it was asked for, with the
+    people of it, and a new spec does not move it."""
+    meta = {WORKSPACE_META_KEY: WS, WORKSPACE_PEOPLE_META_KEY: ["alex", "mia"]}
+    async with mcp_session(app) as session:
+        draft = payload(await with_meta(session, "draft_assignment", {"spec": spec()}, meta))
+        stored = store.rows[draft["id"]]["spec"]
+        assert stored["workspace"] == WS and stored["workspace_people"] == ["alex", "mia"]
+        changed = await with_meta(
+            session,
+            "update_assignment",
+            {"id": draft["id"], "spec": spec(goal="Audit the other repo.")},
+            None,
+        )
+        assert payload(changed)["id"] == draft["id"]
+    stored = store.rows[draft["id"]]["spec"]
+    assert stored["workspace"] == WS and stored["workspace_people"] == ["alex", "mia"]
+
+
 async def test_status_from_a_workspace_returns_a_link_and_shows_the_workspace(
     app, store, channels
 ) -> None:
