@@ -162,6 +162,14 @@ with the images and the packaged chart, are at
   `pasted-20261116-134500.png`. A paste of text stays a paste of text, and a
   paste attaches nothing while Joshua works on a turn, as the paperclip is
   off then.
+- **Joshua reads its own tail after the nightly rollover.** The rollover
+  closes the session each night, so the first message of a new day used to
+  reach a Joshua that remembered nothing of yesterday and asked again for what
+  it already held. The first turn of a new day now carries one rule: when the
+  message picks up work in progress, read the last rows of this conversation
+  with `read_history` before answering, and carry on from there. A later turn
+  of the same day does not carry the rule, and a message that stands on its
+  own needs no read.
 
 ### Assignments
 
