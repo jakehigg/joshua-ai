@@ -58,6 +58,8 @@ with the images and the packaged chart, are at
 - The workspace prompt asks for direct replies. Joshua writes for a person
   who did not watch the work, explains a name the person may not know, says
   whose each step is, and checks with a tool before it asks the person.
+- A wiki item of a workspace whose ref starts with `wiki/` opens the page.
+  The link held the root two times and gave "not found".
 
 ### Usage
 
