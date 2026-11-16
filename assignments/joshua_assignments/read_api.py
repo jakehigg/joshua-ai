@@ -25,6 +25,9 @@ that are not deleted. No answer holds a token or a bearer.
 A re-run names its parent: ``parent_id`` in each item, and ``rerun_of``
 (``{"id", "title"}``) and ``lineage`` (each run that shares the root with it,
 the oldest first) in a detail.
+
+Each item names the ``workspace`` that started it, or None: the viewer reads
+it to say which workspace is working or waiting (``docs/workspaces.md``).
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from joshua_assignments.comments import (
 )
 from joshua_assignments.digest import lede, next_step
 from joshua_assignments.manager import Manager, may_read, saved_ref
+from joshua_assignments.notify import workspace_of
 from joshua_assignments.settings import Settings
 from joshua_assignments.spec import assignment_title
 from joshua_assignments.store import (
@@ -105,6 +109,9 @@ def item(row: dict[str, Any], names: Mapping[int, str]) -> dict[str, Any]:
         "stopped_at_limits": row.get("stopped_at_limits"),
         "saved": saved_ref(row, names),
         "parent_id": row.get("parent_id"),
+        # The workspace that started it, so the viewer can say which workspace
+        # is working or waiting. None for a run outside a workspace.
+        "workspace": workspace_of(row),
     }
 
 
