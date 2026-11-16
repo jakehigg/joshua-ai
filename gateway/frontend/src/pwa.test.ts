@@ -373,13 +373,33 @@ describe("the notification of a push", () => {
     }
   });
 
-  it("follows no address that is not a path of this app", async () => {
+  it("follows no address that is not of this origin", async () => {
     const worker = load(async () => answer("x"));
 
     await worker.push({ title: "Joshua", url: "https://elsewhere.test/x" });
     await worker.push({ title: "Joshua", url: "//elsewhere.test/x" });
+    await worker.push({ title: "Joshua", url: "mailto:alex@elsewhere.test" });
 
-    expect(worker.shown.map((one) => one.options.data)).toEqual([{ url: "/" }, { url: "/" }]);
+    expect(worker.shown.map((one) => one.options.data)).toEqual([
+      { url: "/" },
+      { url: "/" },
+      { url: "/" },
+    ]);
+  });
+
+  it("takes the path of an absolute address of this origin", async () => {
+    // An older core puts the public address of the instance in the payload.
+    const worker = load(async () => answer("x"));
+
+    await worker.push({ title: "Joshua", url: `https://joshua.test${WORKSPACE}` });
+    await worker.push({ title: "Joshua", url: "https://joshua.test/wiki/recipes/x?a=1#top" });
+    await worker.push({ title: "Joshua", url: WORKSPACE });
+
+    expect(worker.shown.map((one) => one.options.data)).toEqual([
+      { url: WORKSPACE },
+      { url: "/wiki/recipes/x?a=1#top" },
+      { url: WORKSPACE },
+    ]);
   });
 });
 

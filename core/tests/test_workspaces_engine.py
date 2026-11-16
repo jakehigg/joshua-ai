@@ -1172,6 +1172,7 @@ async def _notify(
     notify: Notifier | None = None,
     deliver: Any = None,
     channel: Channel | None = None,
+    settings: Any = None,
 ) -> dict:
     """``notify_user`` as the agent calls it: mia writes the turn and alex is
     the person it asks about."""
@@ -1180,7 +1181,7 @@ async def _notify(
         person=person,
         text=text,
         url=url,
-        settings=make_settings(),
+        settings=settings or make_settings(),
         deliver=deliver,
         notify=notify,
         now=now,
@@ -1374,6 +1375,39 @@ async def test_notify_user_opens_the_url_it_is_given_and_the_thread_by_default()
     assert notifier.calls[1][1].url == "/chat/w/shared/solar"
 
 
+async def test_notify_user_pushes_the_path_and_writes_the_address_in_a_chat() -> None:
+    """With ``viewer_url`` set the payload still carries the path, because the
+    service worker follows a path and throws an absolute address away. The
+    message of a normal chat carries the whole address, which a person clicks.
+    """
+    settings = make_settings(mcp=MCP)  # viewer_url is set
+    notifier = Notifier()
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    await _notify(_with_a_device(), url="/wiki/recipes/x", notify=notifier, settings=settings)
+    assert notifier.calls[0][1].url == "/wiki/recipes/x"
+
+    # With no url the path is this thread, and it is a path in the payload too.
+    await _notify(_with_a_device(), notify=notifier, settings=settings)
+    assert notifier.calls[1][1].url == "/chat/w/shared/solar"
+
+    plain = WsRepo(_shared_ws())
+    plain.main = Conversation(id="m", channel_id="telegram:1", person_id="alex")
+    await _notify(
+        plain, text="Does it work?", url="/wiki/recipes/x", deliver=deliver, settings=settings
+    )
+    assert sent == [
+        (
+            "telegram:1",
+            "Does it work?\n\nSolar install: https://joshua.example.org/wiki/recipes/x",
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     "url", ["https://elsewhere.example/page", "//elsewhere.example", "chat", "mailto:mia@x.test"]
 )
@@ -1473,6 +1507,9 @@ def test_the_server_has_four_tools_in_a_workspace_and_six_in_normal_chat(
 
 ROSTER = BASE_CONFIG + "  - id: sam\n    name: Sam\n    role: guest\n"
 
+# The public address of this instance, for the tests that read a link.
+VIEWER_URL = "workspaces:\n  viewer_url: https://joshua.example.org/\n"
+
 
 def _roster(extra: str = "") -> Any:
     """The settings of these tests: alex and mia are members, sam is a guest."""
@@ -1571,6 +1608,41 @@ async def test_notify_person_puts_a_path_in_the_message_of_a_normal_chat(
     await _notify_person(repo, url="/chat", deliver=deliver, text="Look at the recipe")
 
     assert sent == [("telegram:2", "Look at the recipe\n\n/chat")]
+
+
+async def test_notify_person_pushes_the_path_and_writes_the_address_in_a_chat(
+    no_notified: None,
+) -> None:
+    """Jake asks for the recipe: with ``viewer_url`` set the payload carries the
+    path, because the service worker throws an absolute address away, and the
+    tap lands on the page. The message of a normal chat carries the whole
+    address, which a person clicks."""
+    settings = _roster(VIEWER_URL)
+    recipe = "/wiki/recipes/thanksgiving-turkey-kevin-belton"
+    notifier = Notifier()
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    await _notify_person(_mia_has_a_device(), url=recipe, notify=notifier, settings=settings)
+    assert notifier.calls[0][1].url == recipe
+
+    plain = WsRepo(None)
+    plain.main = Conversation(id="m", channel_id="telegram:2", person_id="mia")
+    # Eleven minutes later, so the per-person guard holds nothing back.
+    await _notify_person(
+        plain,
+        text="The turkey recipe",
+        url=recipe,
+        deliver=deliver,
+        settings=settings,
+        now=MOMENT + timedelta(minutes=11),
+    )
+    assert sent == [
+        ("telegram:2", f"The turkey recipe\n\nhttps://joshua.example.org{recipe}"),
+    ]
 
 
 async def test_notify_person_sends_one_notification_per_person_in_ten_minutes(

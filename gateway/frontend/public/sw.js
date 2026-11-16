@@ -154,12 +154,20 @@ const FALLBACK_URL = "/";
 const NOTIFICATION_ICON = "/logo-192.png";
 const NOTIFICATION_BADGE = "/favicon-32.png";
 
-// The address of a payload, which is a path of this app, such as
-// `/chat/w/shared/<slug>`. Anything else — another origin, a scheme, a
-// protocol-relative address — is not followed, and the tap opens the app.
+// The address of a payload, as a path of this app, such as
+// `/chat/w/shared/<slug>`. An absolute address of this origin, which an older
+// core sends, is reduced to its path, so that payload lands right too.
+// Anything else — another origin, a scheme, a protocol-relative address — is
+// not followed, and the tap opens the app.
 function pathOf(value) {
-  if (!value.startsWith("/") || value.startsWith("//")) return FALLBACK_URL;
-  return value;
+  let url;
+  try {
+    url = new URL(value, self.location.origin);
+  } catch {
+    return FALLBACK_URL;
+  }
+  if (url.origin !== self.location.origin) return FALLBACK_URL;
+  return url.pathname + url.search + url.hash;
 }
 
 // The four fields of the payload, each of them a string.

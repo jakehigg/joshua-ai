@@ -112,6 +112,10 @@ class PushConfig:
 class Notification:
     """What a browser shows: a title, a line, where it goes, and its tag.
 
+    ``url`` is a path of the app, such as ``/chat/w/shared/<slug>``, and never
+    an absolute address: the service worker follows a path of its own origin
+    and opens the app itself for anything else.
+
     ``tag`` is the workspace slug, so the browser replaces the notification of
     that workspace instead of stacking another one.
     """

@@ -39,6 +39,9 @@ lands on the thing to read: a document, a wiki page, or the workspace thread,
 which is what ``notify_user`` opens when the call names no path. ``_app_path``
 is the one validator of both: a path of this app and nothing else, as the
 service worker's ``notificationclick`` refuses an address of another site.
+The push payload carries that path, because the worker follows a path; the
+normal-chat fallback carries the absolute address (``app_link``), because a
+person reads that one in a chat and clicks it.
 
 ``notify_person`` is in every chat of a member: a normal chat, a personal
 workspace, and a shared one. It names anybody of the roster, not of a
@@ -358,7 +361,9 @@ async def do_notify_user(
     their normal chat when they have none.
 
     ``url`` is the path the tap opens, so the notification lands on the thing
-    to read: a document, a wiki page, or this thread, which is the default.
+    to read: a document, a wiki page, or this thread, which is the default. The
+    payload of the push carries that path; the normal-chat fallback carries the
+    absolute address of it.
 
     The guards are here and not in the prompt: the person who wrote the turn is
     never notified, a person who has read the thread to its newest row is
@@ -412,7 +417,9 @@ async def do_notify_user(
         notification=Notification(
             title=workspace.title,
             body=_one_line(text, NOTIFY_BODY_CHARS),
-            url=link,
+            # The path, not ``link``: the service worker follows a path of the
+            # app, and the absolute address goes in the chat message below.
+            url=path,
             # The tag of the workspace, so its notifications collapse into the
             # newest one instead of stacking up.
             tag=workspace.slug,
@@ -490,6 +497,10 @@ async def do_notify_person(
     """Reach one person of the roster, from any chat: their push subscriptions,
     or their normal chat when no browser of theirs took it.
 
+    ``url`` is the path the tap opens, the app itself when the call names none.
+    The payload of the push carries that path; the normal-chat fallback carries
+    the absolute address of it.
+
     The guard is here and not in the prompt: one person gets one notification
     from this tool in ``NOTIFY_QUIET_S``, whoever asked for it and whatever
     chat it came from.
@@ -518,7 +529,12 @@ async def do_notify_person(
         deps,
         target.id,
         notification=Notification(
-            title=NOTIFY_TITLE, body=_one_line(text, NOTIFY_BODY_CHARS), url=link, tag=NOTIFY_TAG
+            title=NOTIFY_TITLE,
+            body=_one_line(text, NOTIFY_BODY_CHARS),
+            # The path, not ``link``: the service worker follows a path of the
+            # app, and the absolute address goes in the chat message below.
+            url=path,
+            tag=NOTIFY_TAG,
         ),
         message=text if path == APP_ROOT else f"{text}\n\n{link}",
         deliver=deliver,
