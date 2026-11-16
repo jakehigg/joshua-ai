@@ -116,6 +116,24 @@ TOOLS_BLOCK = (
 )
 
 
+# The first session of a conversation after the nightly rollover. The SDK
+# session is gone, so the model remembers nothing of the rows that came before
+# it, but the rows are still in the transcript of this same conversation and the
+# ``history`` tools read them. The block is on that one session's prompt, and on
+# no other, so a normal turn pays nothing for it.
+NEW_DAY_BLOCK = (
+    "## A new day in this conversation\n\n"
+    "Your session rolled over last night, so you remember nothing that was "
+    "said before it. The messages are still there: `read_history` reads this "
+    "conversation — the same person, the same channel — over a time window, and "
+    "`search_history` finds a thread by words. When the person's message picks "
+    'up work in progress ("did you get it done", "and the other one", a plan '
+    "you were both on), read the tail of the previous days before you answer, "
+    "and carry on from there. Do not ask for something the transcript already "
+    "holds. A message that stands on its own needs no read."
+)
+
+
 # The MCP servers that ship a skill page, ``builtin/skills/<server>.md``. The
 # page goes into the prompt of a session that holds the server, and of no
 # other session, so a deployment without it pays nothing.
@@ -219,8 +237,14 @@ class PromptComposer:
         channel: Channel | None = None,
         memory: MemoryBlock | None = None,
         servers: Collection[str] = (),
+        new_day: bool = False,
     ) -> str:
-        """Compose the prompt. ``servers`` are the gateway servers of the session."""
+        """Compose the prompt. ``servers`` are the gateway servers of the session.
+
+        ``new_day`` is true for the first session of a conversation after the
+        daily rollover: it adds :data:`NEW_DAY_BLOCK`, which tells Joshua to read
+        the tail of the conversation before it answers.
+        """
         parts: list[str] = []
         for rel in profile.prompt_files:
             text = self._read(rel)
@@ -236,6 +260,9 @@ class PromptComposer:
 
         parts.append(self._identity_block(person, channel))
         parts.append(TOOLS_BLOCK)
+
+        if new_day:
+            parts.append(NEW_DAY_BLOCK)
 
         if memory is not None:
             parts.append(render(memory))

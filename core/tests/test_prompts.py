@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from joshua_core.engine.profiles import derive_profile
-from joshua_core.engine.prompts import TRUST_PREAMBLE, PromptComposer
+from joshua_core.engine.prompts import NEW_DAY_BLOCK, TRUST_PREAMBLE, PromptComposer
 from joshua_core.store.models import Channel, Person
 
 # Pinned exactly, so a weakening of the identity boundary cannot land as a
@@ -94,6 +94,19 @@ def test_channel_line_absent_without_channel() -> None:
     assert composer.channel_lines(None) == ""
     prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, None)
     assert "You are speaking on channel" not in prompt
+
+
+def test_new_day_adds_the_rule_that_reads_the_tail() -> None:
+    composer = PromptComposer()
+    prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM, new_day=True)
+    assert NEW_DAY_BLOCK in prompt
+    assert "`read_history`" in prompt
+
+
+def test_a_prompt_that_is_not_a_new_day_carries_no_such_rule() -> None:
+    composer = PromptComposer()
+    prompt = composer.compose(derive_profile(_MEMBER, _DM), _MEMBER, _DM)
+    assert "## A new day in this conversation" not in prompt
 
 
 def test_read_uses_mtime_cache() -> None:

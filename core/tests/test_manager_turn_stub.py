@@ -4,7 +4,8 @@ echo-tools probe."""
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from engine_fakes import (
@@ -42,11 +43,18 @@ people:
 """
 
 
-def make_manager(repo: FakeRepo, tmp_path, **settings_kw) -> ConversationManager:
+def _today() -> date:
+    """Today in the timezone of ``make_settings`` — the one the rollover stamps."""
+    return datetime.now(ZoneInfo("America/New_York")).date()
+
+
+def make_manager(
+    repo: FakeRepo, tmp_path, composer: FakeComposer | None = None, **settings_kw
+) -> ConversationManager:
     return ConversationManager(
         repo=repo,
         settings=make_settings(**settings_kw),
-        composer=FakeComposer(),
+        composer=composer or FakeComposer(),
         derive_profile=fake_derive_profile,
         agent_backend="stub",
         data_dir=tmp_path,
@@ -94,6 +102,37 @@ async def test_second_turn_reuses_pooled_session(tmp_path):
 
     assert len(manager._pool) == 1
     assert manager._pool["c1"].session is session_after_first
+
+
+async def test_first_turn_after_rollover_carries_the_new_day_rule(tmp_path):
+    # The rollover stamped today and dropped the SDK session last night.
+    repo = FakeRepo()
+    composer = FakeComposer()
+    manager = make_manager(repo, tmp_path, composer=composer)
+    channel = make_channel()
+
+    await manager._get_or_create(channel, make_conversation(session_started_on=_today()))
+
+    assert composer.new_days == [True]
+
+    # A later turn of the same day has the session that first turn started, so
+    # the rule is gone. (The pool is flushed, so the prompt is composed again.)
+    await manager.flush_sessions()
+    later = make_conversation(sdk_session_id="sdk-1", session_started_on=_today())
+    await manager._get_or_create(channel, later)
+
+    assert composer.new_days == [True, False]
+
+
+async def test_conversation_that_never_rolled_over_has_no_new_day_rule(tmp_path):
+    repo = FakeRepo()
+    composer = FakeComposer()
+    manager = make_manager(repo, tmp_path, composer=composer)
+    channel, conversation = make_channel(), make_conversation()
+
+    await manager.run_turn(channel, conversation, "hello there")
+
+    assert composer.new_days == [False]
 
 
 async def test_reaper_closes_idle_session(tmp_path):

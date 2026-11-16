@@ -6,6 +6,7 @@ so the manager runs with no DB, no SDK, and no network.
 
 from __future__ import annotations
 
+from datetime import date
 from types import SimpleNamespace
 from typing import Any
 
@@ -114,9 +115,21 @@ class FakeRepo:
 
 
 class FakeComposer:
+    """Records the ``new_day`` flag of each call, so a test can read it."""
+
+    def __init__(self) -> None:
+        self.new_days: list[bool] = []
+
     def compose(
-        self, profile: Any, person: Any, channel: Channel, memory: Any = None, servers: Any = ()
+        self,
+        profile: Any,
+        person: Any,
+        channel: Channel,
+        memory: Any = None,
+        servers: Any = (),
+        new_day: bool = False,
     ) -> str:
+        self.new_days.append(new_day)
         return "you are joshua"
 
 
@@ -134,6 +147,7 @@ def make_conversation(
     sdk_session_id: str | None = None,
     channel_id: str = "telegram:1",
     inference_endpoint: str | None = None,
+    session_started_on: date | None = None,
 ) -> Conversation:
     return Conversation(
         id=conversation_id,
@@ -141,6 +155,7 @@ def make_conversation(
         person_id=person_id,
         sdk_session_id=sdk_session_id,
         inference_endpoint=inference_endpoint,
+        session_started_on=session_started_on,
     )
 
 
