@@ -709,6 +709,36 @@ describe("the routes", () => {
     expect(asked).not.toContain("solar");
   });
 
+  it("fits the shell to the visible viewport in a workspace too", async () => {
+    viewer({
+      "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/alex%2Fsolar": ws(),
+      "GET /api/v1/workspaces": { workspaces: [ws()] },
+      "GET /api/v1/workspaces/w1/items": { items: [] },
+      "GET /api/v1/chat/alex/history": { messages: [], nextBefore: null },
+    });
+    // The visual viewport of a phone, which the software keyboard shrinks
+    // while the layout keeps its height (viewport.ts).
+    const vv = Object.assign(new EventTarget(), { height: window.innerHeight, offsetTop: 0 });
+    vi.stubGlobal("visualViewport", vv);
+    render(
+      <MemoryRouter initialEntries={["/chat/w/alex/solar"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByLabelText("Message to Joshua");
+    const root = document.documentElement;
+    expect(root.classList.contains("vv-fit")).toBe(true);
+    act(() => {
+      vv.height = 400;
+      vv.dispatchEvent(new Event("resize"));
+    });
+    expect(root.style.getPropertyValue("--vvh")).toBe("400px");
+    expect(root.classList.contains("kb-open")).toBe(true);
+  });
+
   it("reads a shared thread as a group chat: own messages right, the others left and named", async () => {
     const row = (id: number, role: "person" | "joshua", text: string, who?: string) => ({
       id,

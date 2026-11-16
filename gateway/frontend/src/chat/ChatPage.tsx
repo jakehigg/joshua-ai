@@ -105,7 +105,6 @@ const TOAST_MS = 6000;
 const DETACHED_WAIT_MS = 30_000;
 
 function uploadText(upload: Upload): string {
-  if (upload.phase === "sent") return "Sent — Joshua is working";
   if (upload.phase === "saving") return `Saving your ${upload.kind}…`;
   return `Uploading ${upload.kind}… ${upload.percent}%`;
 }
