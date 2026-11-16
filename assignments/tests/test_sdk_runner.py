@@ -500,7 +500,14 @@ async def test_the_session_holds_the_persons_gateway_servers_only(tmp_path, chan
     h = Harness(tmp_path, sdk, FakeCore())
     started = await h.start()
     options = sdk.clients[0].options
-    assert set(options.mcp_servers) == {"files", "documents", "gitlab", "tasks", "assignment"}
+    assert set(options.mcp_servers) == {
+        "files",
+        "documents",
+        "gitlab",
+        "tasks",
+        "assignment",
+        "history",
+    }
     gitlab = options.mcp_servers["gitlab"]
     assert gitlab["url"] == "http://gateway:8000/gitlab"
     assert gitlab["headers"]["X-Joshua-Conversation"] == f"assignment:{started['id']}"

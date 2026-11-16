@@ -1,5 +1,5 @@
-"""The three calls the runner makes to core: the limits, the usage, and the
-item of an output.
+"""The calls the runner makes to core: the limits, the usage, the item of an
+output, and the chat history of a worker.
 
 ``limits`` is ``GET <CORE_URL>/v1/limits``. The route has no bearer. It
 gives the percent used of the 5-hour window and the weekly window. A failed
@@ -19,20 +19,36 @@ nothing is recorded then. It is one attempt: an item that does not land is
 logged and never fails the tool call that recorded the output. ``assignments``
 must be in ``workspaces.allowed_callers``, else core answers 403.
 
+``search_history`` and ``read_history`` are ``POST <CORE_URL>/v1/history/search``
+and ``POST <CORE_URL>/v1/history/read`` with the same bearer. The body names
+who started the run, ``person`` and the ``workspace`` of a workspace run, and
+core alone turns that into the conversations the run may read: the scope is
+not decided here. Both are read-only and one attempt; a failed read gives
+None, and the tool then tells the model that the history is not readable.
+
 The log names the assignment and the status code, never the token or a body.
+A history query and a history message are never logged.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 from urllib.parse import quote
 
 import httpx
 from joshua_shared.contracts import (
+    HISTORY_READ_PATH,
+    HISTORY_SEARCH_PATH,
     LIMITS_PATH,
     USAGE_WRITE_PATH,
     WORKSPACE_ITEMS_PATH,
+    HistoryReadRequest,
+    HistoryReadResponse,
+    HistorySearchRequest,
+    HistorySearchResponse,
     LimitsResponse,
     UsageWriteRequest,
     UsageWriteRow,
@@ -159,3 +175,66 @@ class CoreClient:
             )
             return False
         return True
+
+    async def _history(self, path: str, body: dict[str, Any], where: dict[str, Any]) -> Any:
+        """One read-only history call. Gives the raw answer, or None when it failed."""
+        headers = {"Authorization": f"Bearer {self.settings.fleet_token}"}
+        try:
+            async with self._make_client() as client:
+                response = await client.post(self._url(path), json=body, headers=headers)
+        except (httpx.HTTPError, RuntimeError) as exc:
+            logger.warning(
+                {"message": "history not read", "error_type": type(exc).__name__, **where}
+            )
+            return None
+        if response.status_code != 200:
+            logger.warning(
+                {"message": "history not read", "status_code": response.status_code, **where}
+            )
+            return None
+        return response.content
+
+    async def search_history(
+        self,
+        person: str,
+        workspace: str | None,
+        query: str,
+        limit: int,
+        *,
+        assignment_id: int | None = None,
+    ) -> HistorySearchResponse | None:
+        """Search the conversations of the scope of this run. None when the read failed."""
+        request = HistorySearchRequest(person=person, workspace=workspace, query=query, limit=limit)
+        where = {"assignment_id": assignment_id, "route": "history/search"}
+        content = await self._history(HISTORY_SEARCH_PATH, request.model_dump(mode="json"), where)
+        if content is None:
+            return None
+        try:
+            return HistorySearchResponse.model_validate_json(content)
+        except ValidationError:
+            logger.warning({"message": "history not read: the answer is not valid", **where})
+            return None
+
+    async def read_history(
+        self,
+        person: str,
+        workspace: str | None,
+        start: datetime,
+        end: datetime,
+        cursor: str | None,
+        *,
+        assignment_id: int | None = None,
+    ) -> HistoryReadResponse | None:
+        """Read the conversations of the scope of this run. None when the read failed."""
+        request = HistoryReadRequest(
+            person=person, workspace=workspace, start=start, end=end, cursor=cursor
+        )
+        where = {"assignment_id": assignment_id, "route": "history/read"}
+        content = await self._history(HISTORY_READ_PATH, request.model_dump(mode="json"), where)
+        if content is None:
+            return None
+        try:
+            return HistoryReadResponse.model_validate_json(content)
+        except ValidationError:
+            logger.warning({"message": "history not read: the answer is not valid", **where})
+            return None

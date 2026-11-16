@@ -357,7 +357,8 @@ budget:
 max_turns: 200     # soft cap on model turns; default assignments.default_max_turns
 working_time: 4h   # the clock runs only while it works; default assignments.default_working_time
 repos: [gitlab.example.net/infra/gitops]   # what it may clone, each in assignments.repos
-tools: [gitlab, tasks]     # optional: the MCP servers it may use; documents always stays
+tools: [gitlab, tasks, history]   # optional: the MCP servers it may use, the chat
+                                  # history included; documents always stays
 tasks_project: joshua      # where follow-ups go
 report_to: conversation    # or a destination name
 dry_run: false     # true: plan and report, and change nothing
@@ -509,9 +510,46 @@ The session has these tools, and no other:
 | `request_resource(kind, ref, reason)` | Stops the assignment as `waiting` with a request: `repo` (a repository, `host/group/name`), `file` (a short name of a document), or `info` (a question, the same as `ask`). See [requests](#requests-for-a-repository-or-a-file). |
 | `finish(summary, follow_ups)` | Ends the assignment as `done` with the summary and the follow-ups. It refuses with "write_report first" when the worker wrote no report, and it refuses while a step of the plan is open: the refusal names each open step, and asks the worker to tick it with `write_plan` or to mark it skipped. A step whose text is only `finish` is not a step: the call is the proof of it. |
 
+- The in-process `history` server, the chat history (see
+  [the chat history](#the-chat-history)):
+
+| Tool | What it does |
+|---|---|
+| `search_history(query, limit)` | Finds messages by words, newest first, with the time, who wrote it, and a snippet of each. `limit` is 1 to 50, 10 by default. |
+| `read_history(start, end, cursor)` | Gives the full messages of a time window, oldest first. Times with no offset are local. A long window comes in pages: the reply ends with the cursor of the next page. |
+
 The session loads no settings and no other MCP configuration from the disk. A
 check refuses to start a session with any other built-in tool, or any MCP
-server that is not on the person's list or the `assignment` server.
+server that is not on the person's list, the `assignment` server, or the
+`history` server.
+
+### The chat history
+
+A worker reads the chat history with `search_history` and `read_history`. Both
+are read-only, and neither takes a conversation, a channel, or a person: the
+scope of a read is decided by who started the assignment, in code and not as a
+rule of the prompt.
+
+- An assignment that a person started reads the conversations of that person,
+  the threads of their personal workspaces included.
+- An assignment that a shared workspace started reads the thread of that
+  workspace, and nothing else. A shared thread is one thread of several
+  people and belongs to none of them, so it is never part of a person's
+  scope, and a person's other conversations are never part of a shared
+  workspace's scope.
+
+The container has no database. It calls core `POST /v1/history/search` and
+`POST /v1/history/read` with its fleet token, and names only the person and
+the workspace of the run. Core turns those two into the conversations of the
+read, and the store query takes those ids only, so a row of another
+conversation never comes back. Core is the one place the scope is applied.
+
+A message comes back as it is, so a report may quote a turn verbatim. There is
+no redaction rule.
+
+`tools` of the spec names the `history` server, as it names a gateway server,
+so an assignment that must not read the chat history simply leaves it out: its
+session then holds neither tool. A spec with no `tools` holds both.
 
 The model and the effort come from the `models` entry that the spec names.
 The session sends its model calls to core's forwarder (`CORE_URL` and
@@ -950,7 +988,9 @@ tools that the session holds.
 The first message gives the title, the goal, the clone command of each
 repository (of the spec, then each granted one), where deliverables go
 when the session holds `documents` (see
-[deliverables are documents](#deliverables-are-documents)), and the line
+[deliverables are documents](#deliverables-are-documents)), that the chat
+history is a source when the session holds the `history` server (see
+[the chat history](#the-chat-history)), and the line
 "Write your plan with `write_plan` before any other tool call." Each follow-up goes to `finish` and into the report. When the
 session holds the `tasks` server and the spec names `tasks_project`, the
 first message also says to add each follow-up as a task in that project.

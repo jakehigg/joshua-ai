@@ -153,6 +153,15 @@ with the images and the packaged chart, are at
 
 ### Assignments
 
+- **An assignment can read the chat history.** The worker holds the two
+  read-only tools `search_history` and `read_history`, so a run that needs what
+  was said works from the messages themselves instead of a worse source. Before,
+  an assignment that asked for the history had no way to read it. What a run may
+  read is decided by who started it, and core, not the prompt, applies it: an
+  assignment a person started reads that person's conversations, and one a
+  shared workspace started reads the thread of that workspace alone, never a
+  person's other conversations. A report may quote a message as it stands. A
+  spec whose `tools` leave `history` out has neither tool.
 - An assignment can no longer end with a stale plan. `finish` refuses while a
   step of the plan is open, and names each open step: the worker ticks what it
   did with `write_plan`, or marks a step it did not do as

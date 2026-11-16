@@ -18,7 +18,12 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 from joshua_assignments.core_client import CoreClient
-from joshua_assignments.session import ASSIGNMENT_SERVER, server_handlers
+from joshua_assignments.session import (
+    ASSIGNMENT_SERVER,
+    HISTORY_SERVER,
+    history_handlers,
+    server_handlers,
+)
 from joshua_assignments.settings import Settings
 
 SESSION = "sess-1"
@@ -87,6 +92,11 @@ def call(name: str, **args: Any) -> tuple[str, str, dict[str, Any]]:
     return ("tool", name, args)
 
 
+def history_call(name: str, **args: Any) -> tuple[str, str, dict[str, Any]]:
+    """A script step: the model calls a ``history`` tool of its own container."""
+    return ("history", name, args)
+
+
 REPORT = (
     "# Audit the gitops repo\nThe audit is done.\n## Highlights\n- **2 issues** Filed.\n"
     "## What was asked\nAudit it.\n## What was done\nRead it.\n"
@@ -134,6 +144,10 @@ class FakeClient:
                 await asyncio.Event().wait()
             elif isinstance(step, tuple) and step[0] == "tool":
                 self.replies.append(await handlers[step[1]](step[2]))
+            elif isinstance(step, tuple) and step[0] == "history":
+                history = history_handlers(self.options.mcp_servers[HISTORY_SERVER])
+                assert history is not None
+                self.replies.append(await history[step[1]](step[2]))
             elif isinstance(step, tuple) and step[0] == "shell":
                 # What a Bash call of the session does: run with the session options.
                 self.replies.append(await step[1](self.options))
@@ -167,8 +181,20 @@ def window(used: float, resets_at: str = "2026-03-04T14:05:00+00:00") -> dict[st
     return {"used_pct": used, "left_pct": 100 - used, "resets_at": resets_at}
 
 
+HISTORY_MESSAGES = [
+    {
+        "at": "2026-03-04T12:00:00+00:00",
+        "direction": "in",
+        "speaker": "Alex",
+        "text": "the receipt of the market is in the drawer",
+    },
+    {"at": "2026-03-04T12:01:00+00:00", "direction": "out", "text": "I noted the receipt."},
+]
+
+
 class FakeCore:
-    """Core's ``GET /v1/limits``, ``POST /v1/usage``, and the items of a workspace."""
+    """Core's ``GET /v1/limits``, ``POST /v1/usage``, the items of a workspace,
+    and the two read-only history routes."""
 
     def __init__(self, five_hour: float | None = 20.0, seven_day: float | None = 10.0) -> None:
         self.five_hour = five_hour
@@ -184,6 +210,14 @@ class FakeCore:
         self.item_status = 200
         self.items: list[dict[str, Any]] = []
         self.item_requests: list[httpx.Request] = []
+        # ``POST /v1/history/search`` and ``POST /v1/history/read``: the bodies
+        # that landed, and what to answer with.
+        self.history_status = 200
+        self.history_messages: list[dict[str, Any]] = list(HISTORY_MESSAGES)
+        self.history_cursor: str | None = None
+        self.history_paths: list[str] = []
+        self.history_bodies: list[dict[str, Any]] = []
+        self.history_requests: list[httpx.Request] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         if request.method == "GET" and request.url.path == "/v1/limits":
@@ -204,6 +238,16 @@ class FakeCore:
             if status == 200:
                 self.usage_rows.extend(json.loads(request.content)["rows"])
             return httpx.Response(status, json={"accepted": 1})
+        if request.method == "POST" and request.url.path.startswith("/v1/history/"):
+            self.history_requests.append(request)
+            self.history_paths.append(request.url.path)
+            self.history_bodies.append(json.loads(request.content))
+            if self.history_status != 200:
+                return httpx.Response(self.history_status, json={"error": "x"})
+            answer: dict[str, Any] = {"messages": self.history_messages}
+            if request.url.path.endswith("/read"):
+                answer["cursor"] = self.history_cursor
+            return httpx.Response(200, json=answer)
         if request.method == "POST" and request.url.path.endswith("/items"):
             self.item_requests.append(request)
             if self.item_status != 200:

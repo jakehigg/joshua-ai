@@ -148,6 +148,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/workspaces/{slug}/read` | `workspaces.allowed_callers` | `person` query parameter, `{"turn_id"}` | `{"conversation", "last_read_turn_id", "last_read_at", "unread"}`. It marks the thread of that workspace read, for that person alone, up to the id of a transcript row. The mark never moves back. `404` for a workspace the person does not reach, `422` for a missing or negative `turn_id`. `GET /v1/workspaces` carries the `unread` count of each workspace for that person: the rows after their mark that somebody else wrote, Joshua or another person of the thread. A row of their own never counts. |
 | `GET`, `POST /v1/workspaces/{slug}/notify` | `workspaces.allowed_callers` | `person` query parameter, `{"mode"}` on the `POST` | `{"mode", "default"}`, the notify mode of that person in that workspace and the default of the workspace. `mode` is `off`, `decide`, or `all`. `404` for a workspace the person does not reach, `422` for another mode, a missing one, or an unknown field. |
 | `POST /v1/usage` | `usage.writers` (default `assignments`, `developer`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment` or `developer`, `413` over 1 MiB, `503` when the database fails. |
+| `POST /v1/history/search` | `assignments` | `{"person", "workspace"?, "query", "limit"?}` | `{"messages": [{"at", "direction", "speaker", "text", "cut"}]}`, newest first. The chat history of a worker (below). `400` for a bad body. |
+| `POST /v1/history/read` | `assignments` | `{"person", "workspace"?, "start", "end"?, "cursor"?}` | `{"messages": [...], "cursor"}`, oldest first; `cursor` is the next page or `null`. `400` for a bad body, an `end` at or before the `start`, or a cursor that is not valid. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
 | `GET /v1/push/key` | `AUTH_CALLERS` (default `viewer`) | `person` query parameter | `{"key"}`, the public VAPID key a browser subscribes with. `503 {"error": …}` while push is not configured (below). |
@@ -591,6 +593,32 @@ the turn wrote. Core never logs a message.
 `GET /v1/cli/transcript?person=` on channels asks core for `cli:<person>`
 with the channels token, and returns core's body and status as they are.
 
+### The chat history of a worker
+
+`POST /v1/history/search` and `POST /v1/history/read` give the chat history to
+a worker of the assignments container, which has no database of its own. Both
+are read-only, create no conversation, and take the fleet token of
+`assignments` and no other.
+
+The body names who started the run: `person`, and `workspace` (an id, a slug,
+or `<space>/<slug>`) when the run started in a workspace thread. It never
+names a conversation. Core turns the two into the conversations of the read,
+and the store query takes those ids only:
+
+- a run that a person started reads the conversations of that person, the
+  threads of their personal workspaces included;
+- a run that a shared workspace started reads the thread of that workspace and
+  nothing else. A shared thread belongs to several people and to none of them,
+  so it is never in a person's scope;
+- an unknown person, or a workspace that the person does not reach, has an
+  empty scope, and the answer holds no message.
+
+`query` is the word search of the transcript, `limit` is 1 to 50 (default 10).
+A read takes `start` and `end` (default now) and pages with `cursor`. A
+message is `{"at", "direction", "speaker", "text", "cut"}`, the row as it is,
+so a report may quote a turn verbatim. Core never logs a query or a message.
+[assignments.md](assignments.md#the-chat-history) has the rest.
+
 ### The hold of a chat thread
 
 A person in the web chat can write while a turn of that thread still runs.
@@ -817,13 +845,16 @@ bearer):
 | channels `POST /v1/events` | the report, the question, or the request of an assignment, and the comments of the person on the plan or the report of a completed one | `{"destination": str, "text": str}`, and `"workspace": <id>` for an assignment that a workspace started (the `destination` is then optional). Channels accepts it only when `assignments` is in `channels.webhooks.allowed_callers`. |
 | core `GET /v1/limits` | before each slice, and at `start_assignment` when `when_unknown` is `refuse` and the spec has no `budget.tokens` | none |
 | core `POST /v1/usage` | after each slice that used tokens | one row: kind and name `assignment`, `worker` the model name of the spec, `run_id` the id, `person_id`, `model`, `calls`, `usage`, and `ref` `<id>:slice:<n>` |
+| core `POST /v1/history/search` | a `search_history` call of a session | `{"person", "workspace", "query", "limit"}`: who started the run, and the words. The scope of the read is core's. |
+| core `POST /v1/history/read` | a `read_history` call of a session | `{"person", "workspace", "start", "end", "cursor"}`, the same scope |
 | core `ANY /v1/model/{path}` | each model call of a session, from the Claude CLI | a Claude API request |
 | gateway MCP routes | each MCP call of a session | MCP, with `X-Joshua-Person` the person, `X-Joshua-Role` `member`, and `X-Joshua-Conversation` `assignment:<id>` |
 | a git host, `https://<host>/<repo>.git/...` | a clone or a fetch of a session, through the git proxy | the git request, with HTTP Basic: the token of `assignments.platforms.<host>.token_env`. Never a push. |
 
 A usage row that fails with a connection error, a timeout, or a `5xx` is sent
 again, 3 attempts in all. Core keeps one row for each `ref`, so a row that
-arrives two times counts one time.
+arrives two times counts one time. A history read is one attempt: a read that
+fails tells the worker that the history cannot be read, and the slice goes on.
 
 ## Where `laptop` may go
 

@@ -556,6 +556,27 @@ class Repo:
         row = await self._select_conversation(channel_id, person_id)
         return _conversation(row) if row else None
 
+    async def person_conversation_ids(self, person_id: str) -> list[str]:
+        """The ids of the conversations of one person: their own threads.
+
+        A thread of a shared workspace is one thread of several people and
+        belongs to none of them: it has no ``person_id``, and the join on
+        ``workspaces`` leaves it out a second time, so it is never in a
+        person's scope. ``history_api`` reads this for the scope of a worker.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT c.id FROM conversations c
+                LEFT JOIN workspaces w ON c.channel_id = 'workspace:' || w.id::text
+                WHERE c.person_id = %s AND NOT COALESCE(w.shared, false)
+                ORDER BY c.id
+                """,
+                (person_id,),
+            )
+            rows = await cur.fetchall()
+        return [str(row["id"]) for row in rows]
+
     async def get_conversation(self, conversation_id: str) -> Conversation | None:
         async with self._pool.connection() as conn:
             cur = await conn.execute(

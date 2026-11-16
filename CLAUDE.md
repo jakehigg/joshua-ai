@@ -154,6 +154,14 @@ Route allowlists, by default:
   A viewer or terminal turn with `thread: "main"` runs in the person's main
   conversation (`Repo.main_conversation`, never `cli`), pull-only: it never
   sets `last_channel_id`.
+- core `POST /v1/history/search`, `POST /v1/history/read`: `assignments` only.
+  The chat history of a worker, read-only. The body names who started the run
+  (`person`, and `workspace` for a workspace run) and never a conversation:
+  `history_api.scope_of` turns the two into the conversations of the read, so
+  the scope is applied there and nowhere else. A person's run reads that
+  person's conversations (`Repo.person_conversation_ids`), a shared
+  workspace's run reads that workspace's thread alone, and a shared thread is
+  in no person's scope.
 - core `ANY /v1/model/{path}`: `inference.forwarder.allowed_callers` (default
   `assignments`). The model forwarder: core puts the credential of the
   inference job `assignment` on a Claude API call, so the model credential

@@ -40,6 +40,11 @@ worker wrote none, a report that the runner makes from the row. A run that
 started in a workspace also records each output as an item of that workspace,
 at the moment it is recorded (see ``workspace_items``).
 
+The session also holds the in-process ``history`` server, the chat history of
+the run, unless the ``tools`` of the spec leave ``history`` out. The runner
+sends only who started the run; core applies the scope of each read (see
+``history``).
+
 With a ``GitProxy``, each session gets a new secret for the proxy and a
 ``.gitconfig`` in its ``HOME`` that sends every ``https://`` git URL there.
 The secret goes when the session stops. See ``git_proxy``.
@@ -73,6 +78,7 @@ from joshua_shared.log import get_logger
 
 from joshua_assignments import (
     budget,
+    history,
     inbox,
     notify,
     prompts,
@@ -535,6 +541,27 @@ class SdkRunner:
             role="member",
         )
 
+    def _history(self, row: dict[str, Any]) -> Any:
+        """The in-process ``history`` server of the run, or None when the spec leaves it out.
+
+        ``tools`` of the spec names the servers of the session, so an
+        assignment that must not read the chat history simply does not name
+        ``history``. The scope of a read is not decided here: the server sends
+        the person and the workspace that started the run to core, and core
+        turns those into the conversations of the read (see ``history``).
+        """
+        narrow = (row.get("spec") or {}).get("tools")
+        if narrow is not None and prompts.HISTORY_SERVER not in narrow:
+            return None
+        tools = history.HistoryTools(
+            row["id"],
+            row["person_id"],
+            notify.workspace_of(row),
+            self.host.load_config().timezone,
+            self.core,
+        )
+        return session.history_server(tools.handlers())
+
     def _git_setup(self, row: dict[str, Any], home: Path) -> None:
         """Give the session a new proxy secret and its ``.gitconfig``. No proxy: no file."""
         if self.git is None or self.git.port is None:
@@ -580,6 +607,7 @@ class SdkRunner:
         self._git_setup(row, home)
         tools = AssignmentTools(assignment_id, self.host, self.sleep, self.core)
         server = session.assignment_server(tools.handlers())
+        history_mcp = self._history(row)
         env = session.session_env(
             self.environ,
             core_url=settings.core_url or "",
@@ -644,6 +672,7 @@ class SdkRunner:
                     resumed=scratch_lost,
                     has_tasks=prompts.TASKS_SERVER in held,
                     has_documents=prompts.DOCUMENTS_SERVER in held,
+                    has_history=history_mcp is not None,
                     inbox_gone=inbox_gone,
                 )
                 if answer:
@@ -665,6 +694,7 @@ class SdkRunner:
                 gateway_url=settings.gateway_url or "",
                 assignment=server,
                 resume=row.get("session_id"),
+                history=history_mcp,
             )
             n = await store.next_slice_n(assignment_id)
             checkpoints_before = tools.checkpoints
