@@ -84,12 +84,17 @@ function viewerPath(url: string): boolean {
   return url.startsWith("/");
 }
 
-// The viewer page of an item that has no url, when the viewer has one.
+// The viewer page of an item that has no url, when the viewer has one. The ref
+// of a wiki page is its path, with or without the `wiki/` root (the agent
+// usually writes the KB path, `wiki/recipes/x.md`). The viewer address holds
+// the root once: `/wiki/recipes/x.md`.
 function fallbackPath(item: WorkspaceItem): string | null {
   const ref = item.ref.trim();
   if (item.kind === "assignment" && /^\d+$/.test(ref)) return `/assignments/${ref}`;
-  if (item.kind === "wiki" && ref.endsWith(".md") && !ref.startsWith("/") && !ref.includes(".."))
-    return `/wiki/${ref.split("/").map(encodeURIComponent).join("/")}`;
+  if (item.kind === "wiki" && ref.endsWith(".md") && !ref.startsWith("/") && !ref.includes("..")) {
+    const path = ref.replace(/^wiki\//, "");
+    return `/wiki/${path.split("/").map(encodeURIComponent).join("/")}`;
+  }
   return null;
 }
 

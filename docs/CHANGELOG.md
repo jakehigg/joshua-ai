@@ -140,6 +140,8 @@ with the images and the packaged chart, are at
   is loading until the workspace of the new address is in. Going to Chat first,
   and a reload, worked before and still do, and a slug address still opens the
   workspace and goes to its id.
+- A wiki item of a workspace whose ref starts with `wiki/` opens the page.
+  The link held the root two times and gave "not found".
 
 ### Viewer
 
