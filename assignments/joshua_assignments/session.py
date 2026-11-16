@@ -84,7 +84,8 @@ _ASSIGNMENT_SERVERS: weakref.WeakKeyDictionary[Any, dict[str, ToolHandler]] = (
 TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
     "write_plan": (
         "Replace your plan: Markdown, at most 64 KiB. Write it before any other tool "
-        "call, then keep it current: tick each step, add a progress line, mark the next step.",
+        "call, then keep it current: tick each step, add a progress line, mark the next "
+        "step. A step you do not do goes to `[-] <the step> — skipped: <the reason>`.",
         {
             "type": "object",
             "properties": {"markdown": {"type": "string"}},
@@ -160,7 +161,8 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
         },
     ),
     "finish": (
-        "End the assignment. Call write_report first. follow_ups is a list of short texts.",
+        "End the assignment. Call write_report first, and settle every step of your plan: "
+        "tick it or mark it skipped. follow_ups is a list of short texts.",
         {
             "type": "object",
             "properties": {

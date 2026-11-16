@@ -40,7 +40,10 @@ SCRATCH_LOST = (
 RERUN = "This is a re-run of assignment {parent}; the person has changed the plan document since."
 PLAN_FIRST = "Write your plan with `write_plan` before any other tool call."
 DRY_RUN = "This is a dry run: change nothing. Write your plan and your report only."
-FINISH_LINE = "When the goal is done, write your report with `write_report`, then call `finish`."
+FINISH_LINE = (
+    "When the goal is done, settle every step of your plan, write your report with "
+    "`write_report`, then call `finish`."
+)
 NO_PROGRESS = "You made no progress last slice; if you are stuck, ask."
 REPOS_DIR = "repos"
 # The MCP server that holds a tasks list. A session can hold it or not.

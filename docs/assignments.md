@@ -17,7 +17,8 @@ An assignment has four parts:
   worker sees nothing else of your chat. So the definition holds the goal,
   what "done" means, where each result goes, and each limit that you gave.
 - **The plan**: the steps of the worker, with a tick on each step that is
-  done, and the next step. The worker keeps it current while it works.
+  done, and the next step. The worker keeps it current while it works. A step
+  that the worker does not do is marked skipped, with its reason.
 - **The outputs**: what the worker made, such as a document, a task, an
   issue, or a wiki page.
 - **The report**: what you read at the end. It tells what was done, gives
@@ -183,7 +184,7 @@ The `Assignments` link in the menu of the viewer opens your assignments.
 | The list | `/assignments` | the pills `Drafts`, `In progress`, and `Completed`. Each row has the title, the status, the time, the model, and the tokens. A `question` mark shows that one waits for an answer. |
 | A draft | `/assignments/<id>` | the definition, open, with a `+` on each field and each block of the goal, and the words to say: "Tell Joshua: start assignment N". |
 | In progress | `/assignments/<id>` | the plan with a bar ("4 of 9 steps"), the next step, the last checkpoint, and the outputs so far. A notice shows an open question or a stop at the budget. The page loads again every 20 seconds. |
-| Completed | `/assignments/<id>` | the report. At the top: the decisions that wait for you, and the outputs as cards, the documents first. Then the highlights, the decisions with a text box each, what was asked, what was done, the follow-ups, and the cost. The plan, the progress, and the definition are folded at the end. |
+| Completed | `/assignments/<id>` | the report. At the top: the decisions that wait for you, and the outputs as cards, the documents first. Then the highlights, the decisions with a text box each, what was asked, what was done, the follow-ups, and the cost. The plan, the progress, and the definition are folded at the end. A run that ended with open steps says "ended, N steps open" in place of the bar. |
 | Saved | `/assignments/saved` | your saved assignments, each with its runs |
 | A document | `/documents/<owner>/<slug>` | a deliverable. The `Open` link of its output card goes there. See [documents.md](documents.md#the-documents-section-of-the-viewer). |
 
@@ -498,7 +499,7 @@ The session has these tools, and no other:
 
 | Tool | What it does |
 |---|---|
-| `write_plan(markdown)` | Replaces the plan. A plan above 64 KiB is refused, and the reply gives its size. |
+| `write_plan(markdown)` | Replaces the plan. A plan above 64 KiB is refused, and the reply gives its size. A step that the worker does not do goes to `[-] <the step> — skipped: <the reason>`. |
 | `read_plan()` | Gives the plan, or an empty text when there is none. |
 | `record_output(kind, ref, title)` | Adds one output to the list and gives the count. A run that a workspace started also records it as an item of that workspace. |
 | `write_report(markdown)` | Writes the report. A report above 256 KiB is refused. |
@@ -506,7 +507,7 @@ The session has these tools, and no other:
 | `wait(seconds)` | Waits up to 10 minutes. The working time continues. |
 | `ask(question)` | Stores the question, ends the slice, and stops the assignment as `waiting`. Joshua gets the question. See [questions and answers](#questions-and-answers). |
 | `request_resource(kind, ref, reason)` | Stops the assignment as `waiting` with a request: `repo` (a repository, `host/group/name`), `file` (a short name of a document), or `info` (a question, the same as `ask`). See [requests](#requests-for-a-repository-or-a-file). |
-| `finish(summary, follow_ups)` | Ends the assignment as `done` with the summary and the follow-ups. It refuses with "write_report first" when the worker wrote no report. |
+| `finish(summary, follow_ups)` | Ends the assignment as `done` with the summary and the follow-ups. It refuses with "write_report first" when the worker wrote no report, and it refuses while a step of the plan is open: the refusal names each open step, and asks the worker to tick it with `write_plan` or to mark it skipped. A step whose text is only `finish` is not a step: the call is the proof of it. |
 
 The session loads no settings and no other MCP configuration from the disk. A
 check refuses to start a session with any other built-in tool, or any MCP
@@ -862,6 +863,9 @@ The system prompt gives the worker these rules:
 5. Record each output when you create it.
 6. Write the report for a reader who did not watch you work, then call
    `finish`.
+7. Settle every step before you finish: tick each step that you did, or mark
+   a step that you do not do as `[-] <the step> — skipped: <the reason>`. Do
+   not write a step for `finish`.
 
 ### The report
 
@@ -911,7 +915,9 @@ worker wrote no report, the runner writes one with the same headings:
   <time>." and one sentence that says the worker wrote no report;
 - Highlights: "**Stopped at <status>**" and the reason (the stop reason,
   the limits stop, or a note that a question waits), and "**N of M
-  steps**" from the check boxes of the plan, when the plan has some;
+  steps**" from the check boxes of the plan, when the plan has some, and
+  "**N steps skipped**" with the reason of each, when the worker marked
+  some;
 - What was asked: the goal;
 - What was done: "The plan below shows the progress.", the last
   checkpoint, and the plan. Each heading of the plan goes two levels down
@@ -949,8 +955,8 @@ when the session holds `documents` (see
 session holds the `tasks` server and the spec names `tasks_project`, the
 first message also says to add each follow-up as a task in that project.
 Each later slice starts with the budget and the last checkpoint. It ends
-with the line "When the goal is done, write your report with
-`write_report`, then call `finish`.":
+with the line "When the goal is done, settle every step of your plan, write
+your report with `write_report`, then call `finish`.":
 
 ```
 Continue. Budget: 5-hour window at 40% of your 80% ceiling, weekly at 20% of 90%,

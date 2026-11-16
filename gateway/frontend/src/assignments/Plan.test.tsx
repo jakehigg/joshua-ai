@@ -21,7 +21,7 @@ const PLAN: PlanData = {
   lines: LINES,
   blocks: BLOCKS,
   updated: "5m ago",
-  progress: { done: 1, total: 2, next: "fix the links", percent: 50 },
+  progress: { done: 1, total: 2, skipped: 0, open: 1, next: "fix the links", percent: 50 },
 };
 
 const COMMENT: DocComment = {
@@ -74,10 +74,27 @@ afterEach(() => {
 
 describe("a task box", () => {
   it("reads the box of a list item, and nothing of another block", () => {
-    expect(task(BLOCKS[1] as DocBlock)).toEqual({ done: true, text: "read the pages" });
-    expect(task(BLOCKS[2] as DocBlock)).toEqual({ done: false, text: "fix the links" });
+    expect(task(BLOCKS[1] as DocBlock)).toEqual({
+      done: true,
+      skipped: false,
+      text: "read the pages",
+    });
+    expect(task(BLOCKS[2] as DocBlock)).toEqual({
+      done: false,
+      skipped: false,
+      text: "fix the links",
+    });
     expect(task(BLOCKS[0] as DocBlock)).toBeNull();
     expect(task({ ...(BLOCKS[1] as DocBlock), markdown: "- read the pages" })).toBeNull();
+  });
+
+  it("reads the box of a step that the worker marked skipped", () => {
+    const skipped = { ...(BLOCKS[2] as DocBlock), markdown: "- [-] fix the links — skipped: no" };
+    expect(task(skipped)).toEqual({
+      done: false,
+      skipped: true,
+      text: "fix the links — skipped: no",
+    });
   });
 });
 
@@ -91,9 +108,37 @@ describe("the progress of the plan", () => {
   });
 
   it("gives nothing when there is no box and no next step", () => {
-    render(<Progress plan={{ ...PLAN, progress: { done: 0, total: 0, next: "", percent: 0 } }} />);
+    render(
+      <Progress
+        plan={{ ...PLAN, progress: { done: 0, total: 0, skipped: 0, open: 0, next: "", percent: 0 } }}
+      />,
+    );
 
     expect(document.querySelector(".a-now")).toBeNull();
+  });
+
+  it("names the steps that the worker marked skipped", () => {
+    const progress = { done: 1, total: 3, skipped: 1, open: 1, next: "fix the links", percent: 66.7 };
+    render(<Progress plan={{ ...PLAN, progress }} />);
+
+    expect(document.querySelector(".a-steps")?.textContent).toEqual("1 of 3 steps, 1 skipped");
+  });
+
+  it("says that a run which ended has open steps, in place of the bar", () => {
+    const progress = { done: 5, total: 7, skipped: 0, open: 2, next: "write the report", percent: 71 };
+    render(<Progress plan={{ ...PLAN, progress }} ended />);
+
+    expect(document.querySelector(".a-open-steps")?.textContent).toEqual("ended, 2 steps open");
+    expect(document.querySelector("svg.a-meter")).toBeNull();
+    expect(document.querySelector(".a-now-line")).toBeNull();
+  });
+
+  it("keeps the bar of a run that ended with every step settled", () => {
+    const progress = { done: 6, total: 7, skipped: 1, open: 0, next: "", percent: 100 };
+    render(<Progress plan={{ ...PLAN, progress }} ended />);
+
+    expect(document.querySelector(".a-open-steps")).toBeNull();
+    expect(document.querySelector("svg.a-meter .fill")?.getAttribute("width")).toEqual("100");
   });
 });
 
@@ -145,6 +190,19 @@ describe("the plan of an assignment", () => {
     ]);
   });
 
+  it("draws the box of a skipped step with its own mark", () => {
+    const blocks = [
+      ...BLOCKS.slice(0, 2),
+      { ...(BLOCKS[2] as DocBlock), markdown: "- [-] fix the links — skipped: the host is down" },
+    ];
+    page({ plan: { ...PLAN, blocks } });
+
+    expect(document.querySelector("ul.a-checklist li.skipped")?.textContent).toEqual(
+      "fix the links — skipped: the host is down",
+    );
+    expect(screen.getByLabelText("skipped")).toBeDefined();
+  });
+
   it("says there is no plan yet when the manager wrote none", () => {
     page({
       plan: {
@@ -152,7 +210,7 @@ describe("the plan of an assignment", () => {
         lines: [],
         blocks: [],
         updated: "",
-        progress: { done: 0, total: 0, next: "", percent: 0 },
+        progress: { done: 0, total: 0, skipped: 0, open: 0, next: "", percent: 0 },
       },
     });
 

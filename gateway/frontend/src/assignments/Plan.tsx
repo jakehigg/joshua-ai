@@ -5,7 +5,13 @@
  * the count and the next step, so the page draws the bar and says what comes
  * next without counting anything. The plan renders over the block renderer,
  * one block a unit of its own gutter on the `plan` text, and a task box
- * becomes a box of a checklist.
+ * becomes a box of a checklist. A box of a step that the worker marked
+ * skipped (`- [-] step — skipped: <reason>`) is its own mark, and the reason
+ * is in the text of the step.
+ *
+ * An assignment that ended with open steps shows "ended, N steps open" in
+ * place of the bar and the next step: the run is over, so a bar that stands
+ * still would say that the work goes on.
  */
 
 import { useMemo } from "react";
@@ -18,10 +24,10 @@ import ErrorLine from "../ui/ErrorLine";
 import type { PlanData } from "./data";
 
 /** A task box at the start of a list item: `- [x] read the pages`. */
-const TASK = /^(\s*[-*+]\s+)\[([ xX])\]\s*/;
+const TASK = /^(\s*[-*+]\s+)\[([ xX~-])\]\s*/;
 
-/** One task box: whether it is done, and the text after the box. */
-export function task(block: DocBlock): { done: boolean; text: string } | null {
+/** One task box: how far the step is, and the text after the box. */
+export function task(block: DocBlock): { done: boolean; skipped: boolean; text: string } | null {
   if (block.kind !== "li") {
     return null;
   }
@@ -29,7 +35,23 @@ export function task(block: DocBlock): { done: boolean; text: string } | null {
   if (match === null) {
     return null;
   }
-  return { done: (match[2] ?? " ") !== " ", text: block.markdown.slice(match[0].length) };
+  const mark = match[2] ?? " ";
+  return {
+    done: mark === "x" || mark === "X",
+    skipped: mark === "-" || mark === "~",
+    text: block.markdown.slice(match[0].length),
+  };
+}
+
+/** What the mark of a box says: one class name, and one label. */
+function boxState(box: { done: boolean; skipped: boolean }): { name: string; label: string } {
+  if (box.done) {
+    return { name: "done", label: "done" };
+  }
+  if (box.skipped) {
+    return { name: "skipped", label: "skipped" };
+  }
+  return { name: "", label: "to do" };
 }
 
 /** The bar of the progress, as a share of the steps that are done. */
@@ -42,24 +64,32 @@ function Meter({ percent }: { percent: number }) {
   );
 }
 
-/** The steps that are done, the bar, and the next step. */
-export function Progress({ plan }: { plan: PlanData }) {
-  const { done, total, next, percent } = plan.progress;
+/**
+ * The steps that are done, the bar, and the next step. `ended` is true when
+ * the run is over: with a step still open it then says so in place of both.
+ */
+export function Progress({ plan, ended = false }: { plan: PlanData; ended?: boolean }) {
+  const { done, total, skipped, open, next, percent } = plan.progress;
   if (total === 0 && next === "") {
     return null;
   }
+  const left = ended && open > 0;
   return (
     <div className="a-now" aria-label="Progress of the plan">
-      {total > 0 && (
+      {left && (
+        <p className="a-open-steps">{`ended, ${String(open)} step${open === 1 ? "" : "s"} open`}</p>
+      )}
+      {!left && total > 0 && (
         <div className="a-progress">
           <span className="a-steps">
             <b>{done}</b>
             {` of ${String(total)} step${total === 1 ? "" : "s"}`}
+            {skipped > 0 && `, ${String(skipped)} skipped`}
           </span>
           <Meter percent={percent} />
         </div>
       )}
-      {next !== "" && (
+      {!left && next !== "" && (
         <p className="a-now-line">
           <span className="j-label">Next</span>
           <span>{next}</span>
@@ -77,6 +107,7 @@ export default function Plan({
   person,
   onComments,
   reload,
+  ended = false,
 }: {
   url: string;
   plan: PlanData;
@@ -85,6 +116,7 @@ export default function Plan({
   person: string;
   onComments: (next: DocComment[]) => void;
   reload: () => void;
+  ended?: boolean;
 }) {
   const units = useMemo(() => spans(plan.blocks), [plan]);
   const gutter = useGutter({
@@ -102,6 +134,7 @@ export default function Plan({
 
   function draw(block: DocBlock) {
     const box = task(block);
+    const state = box === null ? null : boxState(box);
     return (
       <Unit
         key={block.id}
@@ -110,12 +143,12 @@ export default function Plan({
         className={`a-block ${block.kind} d${String(block.depth)}`}
         what={what(block)}
       >
-        {box === null ? (
+        {box === null || state === null ? (
           <Markdown text={block.markdown} />
         ) : (
           <ul className="a-checklist">
-            <li className={box.done ? "done" : undefined}>
-              <span className="a-box" role="img" aria-label={box.done ? "done" : "to do"} />
+            <li className={state.name === "" ? undefined : state.name}>
+              <span className="a-box" role="img" aria-label={state.label} />
               <Markdown text={box.text} />
             </li>
           </ul>
@@ -130,7 +163,7 @@ export default function Plan({
         <h2>Plan</h2>
         {plan.updated !== "" && <span className="j-meta">{`updated ${plan.updated}`}</span>}
       </div>
-      <Progress plan={plan} />
+      <Progress plan={plan} ended={ended} />
       {plan.blocks.length === 0 ? (
         <p className="j-faint">No plan yet.</p>
       ) : (

@@ -27,7 +27,7 @@ reads them too.
     Joshua for more: a repository, a file, or an answer. See "When you need
     more".
   - `finish(summary, follow_ups)` ends the assignment. Call it only after
-    `write_report`.
+    `write_report`, and only when no step of your plan is open.
 
 You have no web search and no web fetch.
 
@@ -61,6 +61,7 @@ Write the plan in Markdown, in this shape:
 1. [x] A step that is done.
 2. [ ] **Next:** the step you do now.
 3. [ ] A step that follows.
+4. [-] A step that you do not do — skipped: the reason.
 ## Progress
 - 2026-01-01 10:00 What you did, in one line.
 ## Decisions
@@ -78,6 +79,11 @@ Obey these rules:
    checkpoint.
 4. **When you continue after a stop, read your plan first** with
    `read_plan`. Then continue from the next step that it marks.
+5. **Settle every step before you finish.** `finish` refuses while a step of
+   the plan is open, and names each open step. Tick each step that you did
+   with `write_plan`, or mark a step that you do not do as
+   `[-] <the step> — skipped: <the reason>`. Do not write a step for
+   `finish`: the call itself is the proof of it.
 
 Your plan states the current truth. Plan, Decisions, and Open questions say
 what is true now. Progress is the one place for a timeline.
@@ -151,13 +157,14 @@ state it as the current position in one sentence.
      must make. Each one is the question in bold, then one or two sentences
      of context.
    - Write "None." under a heading with nothing in it.
+   - Write each step that you skipped under What was done, with its reason.
    - Do not write the cost: the runner adds it.
 
 3. **Write for a reader who did not watch you work.** The report is what the
    person reads. Say what you found and what you did. Name each output so
    that the reader can find it.
 4. **Then call `finish`**, with a short summary. `finish` refuses when you
-   have not written the report.
+   have not written the report, and while a step of your plan is open.
 
 ## How you write
 

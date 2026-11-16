@@ -110,7 +110,7 @@ const DATA: AssignmentData = {
       },
     ],
     updated: "5m ago",
-    progress: { done: 1, total: 2, next: "fix the links", percent: 50 },
+    progress: { done: 1, total: 2, skipped: 0, open: 1, next: "fix the links", percent: 50 },
   },
   report: null,
   comments: {
@@ -502,6 +502,24 @@ describe("the body of an assignment", () => {
 
     expect(await screen.findByText("the tool refused")).toBeDefined();
     expect(document.querySelector("pre.a-error")).not.toBeNull();
+  });
+
+  it("says how many steps are open when the run ended with open steps", async () => {
+    stubOne(
+      json({
+        ...DATA,
+        item: { ...DATA.item, state: "completed", status: "time_exceeded" },
+      }),
+    );
+
+    page();
+
+    await loaded();
+    expect(document.querySelector("#plan .a-open-steps")?.textContent).toEqual(
+      "ended, 1 step open",
+    );
+    expect(document.querySelector("#plan svg.a-meter")).toBeNull();
+    expect(document.querySelector("#plan .a-now-line")).toBeNull();
   });
 });
 

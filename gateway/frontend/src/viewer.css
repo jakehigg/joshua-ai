@@ -531,6 +531,16 @@ ul.a-checklist li.done .a-box::after {
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
+ul.a-checklist li.skipped { color: var(--j-muted); }
+ul.a-checklist li.skipped .a-box { position: relative; border-style: dashed; }
+ul.a-checklist li.skipped .a-box::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 9px;
+  border-top: 2px solid var(--j-faint);
+}
 .j-prose li.a-task > p { display: inline; }
 
 /* the cost at the foot */
@@ -554,6 +564,7 @@ svg.a-meter { display: block; width: 100%; height: 8px; }
 svg.a-meter .track { fill: var(--j-line); }
 svg.a-meter .fill { fill: var(--j-accent); }
 svg.a-meter.mini { width: 72px; height: 6px; flex: none; }
+.a-open-steps { margin: 0; color: var(--j-muted); font-size: var(--j-text-sm); }
 .a-now-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; overflow-wrap: anywhere; }
 .a-now-line .j-label { flex: none; min-width: 7.5rem; }
 

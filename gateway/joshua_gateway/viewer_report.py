@@ -21,8 +21,9 @@ goes into :attr:`Report.extra`, and a text with none of the known headings
 gives a :class:`Report` with ``structured`` False, which the viewer shows as
 plain Markdown. A heading inside a fenced code block is not a heading.
 
-The plan is Markdown with task boxes (``- [x] done``, ``- [ ] to do``).
-:func:`plan_progress` counts them and finds the next step.
+The plan is Markdown with task boxes (``- [x] done``, ``- [ ] to do``,
+``- [-] skipped``). :func:`plan_progress` counts them and finds the next
+step.
 
 Each section, list item, and the preamble also knows its line in the text
 (from 1), so the viewer can anchor a comment to the line of a card.
@@ -56,7 +57,13 @@ _H1 = re.compile(r"^#\s+(.*?)\s*#*\s*$")
 _H2 = re.compile(r"^##\s+(.*?)\s*#*\s*$")
 _ITEM = re.compile(r"^( {0,1})(?:[-*+]|\d{1,3}[.)])\s+(.*)$")
 _LEAD = re.compile(r"^(?:\*\*(.+?)\*\*|__(.+?)__)[\s:.,;—–-]*(.*)$", re.DOTALL)
-_BOX = re.compile(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+\[([ xX])\]\s+(.*)$")
+_BOX = re.compile(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+\[([ xX~-])\]\s+(.*)$")
+# The marks of a ticked box and of the box of a step that the worker skipped.
+_TICKED = "xX"
+_SKIPPED = "~-"
+# A step that is only the ``finish`` call: the call is the proof of it, so the
+# plan card does not count it.
+_FINISH_STEP = re.compile(r"^[`*]*finish(?:\(\))?[`*]*[.:]?$", re.IGNORECASE)
 _NEXT = re.compile(r"\*\*\s*next\s*:?\s*\*\*\s*:?\s*", re.IGNORECASE)
 _NONE = re.compile(
     r"^(?:none(?: recorded| yet)?|nothing|n/?a|no\b[^\n]{0,60}|-+)\.?$", re.IGNORECASE
@@ -151,15 +158,25 @@ class OutputLine:
 
 @dataclass(frozen=True)
 class PlanProgress:
-    """The task boxes of a plan: how many are ticked, and the next step."""
+    """The task boxes of a plan: how many are settled, and the next step.
+
+    ``done`` counts the ticked boxes and ``skipped`` the boxes of the steps
+    that the worker marked skipped (``- [-] step — skipped: <reason>``).
+    ``open`` is what is left: the steps that nobody settled.
+    """
 
     done: int
     total: int
     next_step: str
+    skipped: int = 0
+
+    @property
+    def open(self) -> int:
+        return max(0, self.total - self.done - self.skipped)
 
     @property
     def percent(self) -> float:
-        return 100.0 * self.done / self.total if self.total else 0.0
+        return 100.0 * (self.done + self.skipped) / self.total if self.total else 0.0
 
 
 def normal(title: str) -> str:
@@ -363,24 +380,31 @@ def turns(cost: str | None) -> int | None:
 
 
 def plan_progress(plan: str | None) -> PlanProgress:
-    """The task boxes of ``plan``: ticked over all, and the next step.
+    """The task boxes of ``plan``: ticked and skipped over all, and the next step.
 
-    The next step is the first open box that holds ``**Next:**`` (with the
-    marker taken out), else the first open box, else ""."""
+    A box whose text is only ``finish`` is no step: the ``finish`` call is
+    the proof of it. The next step is the first open box that holds
+    ``**Next:**`` (with the marker taken out), else the first open box, else
+    ""."""
     lines = (plan or "").split("\n")
-    done = total = 0
+    done = total = skipped = 0
     marked = first = ""
     for line, free in zip(lines, _lines_outside_fences(lines), strict=True):
         match = _BOX.match(line) if free else None
         if not match:
             continue
+        text = match.group(2).strip()
+        if _FINISH_STEP.match(_NEXT.sub("", text, count=1).strip()):
+            continue
         total += 1
-        if match.group(1) in "xX":
+        if match.group(1) in _TICKED:
             done += 1
             continue
-        text = match.group(2).strip()
+        if match.group(1) in _SKIPPED:
+            skipped += 1
+            continue
         if not first:
             first = text
         if not marked and _NEXT.search(text):
             marked = _NEXT.sub("", text, count=1).strip()
-    return PlanProgress(done=done, total=total, next_step=marked or first)
+    return PlanProgress(done=done, total=total, next_step=marked or first, skipped=skipped)

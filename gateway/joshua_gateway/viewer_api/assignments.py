@@ -302,6 +302,8 @@ def _plan(item: am.Detail, *, now: datetime) -> dict[str, Any]:
         "progress": {
             "done": progress.done,
             "total": progress.total,
+            "skipped": progress.skipped,
+            "open": progress.open,
             "next": progress.next_step,
             "percent": round(progress.percent, 1),
         },
