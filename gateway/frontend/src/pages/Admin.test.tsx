@@ -80,7 +80,7 @@ afterEach(() => {
 });
 
 describe("the admin Users section", () => {
-  it("shows the two columns, with only Users built", async () => {
+  it("shows the two columns, with Users and Instance built", async () => {
     stubRoutes("owner");
 
     app();
@@ -90,14 +90,16 @@ describe("the admin Users section", () => {
     expect(within(nav).getByRole("link", { name: "Users" }).getAttribute("href")).toEqual(
       "/admin/users",
     );
+    expect(within(nav).getByRole("link", { name: "Instance" }).getAttribute("href")).toEqual(
+      "/admin/instance",
+    );
     expect([...nav.querySelectorAll(".v-admin-soon")].map((item) => item.textContent)).toEqual([
       "MCP serverssoon",
       "Channelssoon",
-      "Instancesoon",
       "Usagesoon",
     ]);
     // A placeholder is a line and not a link: there is nothing to follow.
-    expect(within(nav).getAllByRole("link")).toHaveLength(1);
+    expect(within(nav).getAllByRole("link")).toHaveLength(2);
   });
 
   it("shows the roster, each person with their role and their secret", async () => {

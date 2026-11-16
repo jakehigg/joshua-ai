@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildIdOf, stampWorker } from "./buildStamp";
-import { holdReload, registerServiceWorker, watchForUpdates } from "./pwa";
+import { holdReload, registerServiceWorker, requestReload, watchForUpdates } from "./pwa";
 
 // The two files of `public/`, which the build copies to the root as they are.
 import manifestSource from "../public/manifest.webmanifest?raw";
@@ -50,9 +50,67 @@ function keyOf(target: FakeRequest | string): string {
   return typeof target === "string" ? target : new URL(target.url).pathname;
 }
 
+// One window of the app, as `clients.matchAll` gives it to the worker. A
+// browser that cannot take a message has no `postMessage`, and one that cannot
+// send a window elsewhere has no `navigate`.
+interface FakeWindow {
+  url: string;
+  focused: boolean;
+  went: string;
+  /** What the worker asked the app to do, in order. */
+  messages: unknown[];
+  /** True when the window was already focused when the message arrived. */
+  focusedFirst: boolean;
+  focus(): Promise<FakeWindow>;
+  postMessage?(data: unknown): void;
+  navigate?(url: string): Promise<FakeWindow>;
+}
+
+function windowAt(
+  path: string,
+  { canPost = true, refusesMessage = false, canNavigate = true } = {},
+): FakeWindow {
+  const open: FakeWindow = {
+    url: `https://joshua.test${path}`,
+    focused: false,
+    went: "",
+    messages: [],
+    focusedFirst: false,
+    focus: async () => {
+      open.focused = true;
+      return open;
+    },
+  };
+  if (canPost) {
+    open.postMessage = (data: unknown) => {
+      if (refusesMessage) throw new Error("this window takes no message");
+      open.focusedFirst = open.focused;
+      open.messages.push(data);
+    };
+  }
+  if (canNavigate) {
+    open.navigate = async (url: string) => {
+      open.went = url;
+      open.url = url;
+      return open;
+    };
+  }
+  return open;
+}
+
+// One notification, as the worker shows it.
+interface Shown {
+  title: string;
+  options: Record<string, unknown>;
+}
+
 // The worker under one fake of the worker globals: the listeners it set, the
-// one cache it opens, and the calls it made to the network.
-function load(fetchStub: (target: FakeRequest | string) => Promise<FakeResponse>) {
+// one cache it opens, the calls it made to the network, the notifications it
+// showed, and the windows that are open.
+function load(
+  fetchStub: (target: FakeRequest | string) => Promise<FakeResponse>,
+  windows: FakeWindow[] = [],
+) {
   const listeners = new Map<string, (event: unknown) => void>();
   const store = new Map<string, FakeResponse>();
   const deleted: string[] = [];
@@ -74,11 +132,25 @@ function load(fetchStub: (target: FakeRequest | string) => Promise<FakeResponse>
       return true;
     },
   };
+  const shown: Shown[] = [];
+  const opened: string[] = [];
   const self = {
     addEventListener: (name: string, fn: (event: unknown) => void) => listeners.set(name, fn),
     location: { origin: "https://joshua.test" },
     skipWaiting: async () => undefined,
-    clients: { claim: async () => undefined },
+    registration: {
+      showNotification: async (title: string, options: Record<string, unknown>) => {
+        shown.push({ title, options });
+      },
+    },
+    clients: {
+      claim: async () => undefined,
+      matchAll: async () => windows,
+      openWindow: async (url: string) => {
+        opened.push(url);
+        return null;
+      },
+    },
   };
   const run = new Function("self", "caches", "fetch", stampWorker(workerSource, "test")) as (
     s: unknown,
@@ -110,6 +182,46 @@ function load(fetchStub: (target: FakeRequest | string) => Promise<FakeResponse>
       if (!listener) throw new Error(`the worker set no ${name} listener`);
       listener({ waitUntil: (p: Promise<unknown>) => (work = p) });
       await work;
+    },
+    shown,
+    opened,
+    // A push arrives. `payload` is the JSON of it; a string stands for a
+    // payload that is not JSON, and `null` for a push that carries none.
+    push: async (payload: unknown) => {
+      const listener = listeners.get("push");
+      if (!listener) throw new Error("the worker set no push listener");
+      let work: Promise<unknown> = Promise.resolve();
+      listener({
+        data:
+          payload === null
+            ? null
+            : {
+                json: () => {
+                  if (typeof payload === "string") throw new Error("not JSON");
+                  return payload;
+                },
+              },
+        waitUntil: (p: Promise<unknown>) => (work = p),
+      });
+      await work;
+    },
+    // A person taps a notification that carries `data`.
+    click: async (data: unknown) => {
+      const listener = listeners.get("notificationclick");
+      if (!listener) throw new Error("the worker set no notificationclick listener");
+      let work: Promise<unknown> = Promise.resolve();
+      let closed = false;
+      listener({
+        notification: {
+          data,
+          close: () => {
+            closed = true;
+          },
+        },
+        waitUntil: (p: Promise<unknown>) => (work = p),
+      });
+      await work;
+      return closed;
     },
   };
 }
@@ -226,6 +338,144 @@ describe("the service worker", () => {
   });
 });
 
+describe("the notification of a push", () => {
+  const WORKSPACE = "/chat/w/shared/kitchen";
+
+  it("shows what the payload says", async () => {
+    const worker = load(async () => answer("x"));
+
+    await worker.push({
+      title: "Joshua",
+      body: "The kitchen workspace is waiting for you.",
+      url: WORKSPACE,
+      tag: "kitchen",
+    });
+
+    expect(worker.shown).toHaveLength(1);
+    const [one] = worker.shown;
+    expect(one?.title).toBe("Joshua");
+    expect(one?.options.body).toBe("The kitchen workspace is waiting for you.");
+    // One tag per workspace: a second notification of it replaces the first.
+    expect(one?.options.tag).toBe("kitchen");
+    expect(one?.options.data).toEqual({ url: WORKSPACE });
+  });
+
+  it("shows a line a person can tap for a payload it cannot read", async () => {
+    const worker = load(async () => answer("x"));
+
+    await worker.push("not JSON at all");
+    await worker.push(null);
+
+    expect(worker.shown.map((one) => one.title)).toEqual(["Joshua", "Joshua"]);
+    for (const one of worker.shown) {
+      expect(one.options.body).toBe("");
+      expect(one.options.data).toEqual({ url: "/" });
+    }
+  });
+
+  it("follows no address that is not of this origin", async () => {
+    const worker = load(async () => answer("x"));
+
+    await worker.push({ title: "Joshua", url: "https://elsewhere.test/x" });
+    await worker.push({ title: "Joshua", url: "//elsewhere.test/x" });
+    await worker.push({ title: "Joshua", url: "mailto:alex@elsewhere.test" });
+
+    expect(worker.shown.map((one) => one.options.data)).toEqual([
+      { url: "/" },
+      { url: "/" },
+      { url: "/" },
+    ]);
+  });
+
+  it("takes the path of an absolute address of this origin", async () => {
+    // An older core puts the public address of the instance in the payload.
+    const worker = load(async () => answer("x"));
+
+    await worker.push({ title: "Joshua", url: `https://joshua.test${WORKSPACE}` });
+    await worker.push({ title: "Joshua", url: "https://joshua.test/wiki/recipes/x?a=1#top" });
+    await worker.push({ title: "Joshua", url: WORKSPACE });
+
+    expect(worker.shown.map((one) => one.options.data)).toEqual([
+      { url: WORKSPACE },
+      { url: "/wiki/recipes/x?a=1#top" },
+      { url: WORKSPACE },
+    ]);
+  });
+});
+
+describe("the tap on a notification", () => {
+  const WORKSPACE = "/chat/w/shared/kitchen";
+  const AT = `https://joshua.test${WORKSPACE}`;
+
+  it("focuses the window that already shows the workspace", async () => {
+    const open = windowAt(WORKSPACE);
+    const worker = load(async () => answer("x"), [open]);
+
+    const closed = await worker.click({ url: WORKSPACE });
+
+    expect(closed).toBe(true);
+    expect(open.focused).toBe(true);
+    expect(open.messages).toEqual([]);
+    expect(open.went).toBe("");
+    expect(worker.opened).toEqual([]);
+  });
+
+  it("asks the open window to route to the workspace the payload names", async () => {
+    const open = windowAt("/wiki/");
+    const worker = load(async () => answer("x"), [open]);
+
+    await worker.click({ url: WORKSPACE });
+
+    // The app routes, because Safari in the installed app goes nowhere on a
+    // `navigate` and opens no window of its own either.
+    expect(open.messages).toEqual([{ type: "joshua:navigate", url: WORKSPACE }]);
+    // The focus comes first, so the app is in front while it routes.
+    expect(open.focusedFirst).toBe(true);
+    expect(open.went).toBe("");
+    expect(worker.opened).toEqual([]);
+  });
+
+  it("opens a window when none is open", async () => {
+    const worker = load(async () => answer("x"), []);
+
+    await worker.click({ url: WORKSPACE });
+
+    expect(worker.opened).toEqual([AT]);
+  });
+
+  it("sends the open window itself when it takes no message", async () => {
+    const open = windowAt("/wiki/", { canPost: false });
+    const worker = load(async () => answer("x"), [open]);
+
+    await worker.click({ url: WORKSPACE });
+
+    expect(open.went).toBe(AT);
+    expect(open.focused).toBe(true);
+    expect(worker.opened).toEqual([]);
+  });
+
+  it("opens a window when the browser can neither take a message nor send one", async () => {
+    const mute = windowAt("/wiki/", { canPost: false, canNavigate: false });
+    const refusing = windowAt("/wiki/", { refusesMessage: true, canNavigate: false });
+
+    for (const open of [mute, refusing]) {
+      const worker = load(async () => answer("x"), [open]);
+
+      await worker.click({ url: WORKSPACE });
+
+      expect(worker.opened).toEqual([AT]);
+    }
+  });
+
+  it("opens the app when the notification names no address", async () => {
+    const worker = load(async () => answer("x"), []);
+
+    await worker.click(undefined);
+
+    expect(worker.opened).toEqual(["https://joshua.test/"]);
+  });
+});
+
 describe("the build stamp", () => {
   it("replaces the placeholder of the worker", () => {
     expect(workerSource).toContain("joshua-__BUILD_ID__");
@@ -331,6 +581,36 @@ describe("the update of the page", () => {
     const release = holdReload();
     setState("hidden");
     listeners.controllerchange?.();
+    expect(reload).not.toHaveBeenCalled();
+    release();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the reload a person asks for", () => {
+  function stubReload() {
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload },
+      configurable: true,
+    });
+    return reload;
+  }
+
+  it("loads the page again at once", () => {
+    const reload = stubReload();
+
+    expect(requestReload()).toBe(true);
+
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for a send that is going out, and says so", () => {
+    const reload = stubReload();
+    const release = holdReload();
+
+    expect(requestReload()).toBe(false);
+
     expect(reload).not.toHaveBeenCalled();
     release();
     expect(reload).toHaveBeenCalledTimes(1);

@@ -137,9 +137,19 @@ export function patchJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-/** Remove one thing. */
-export function deleteJson<T>(path: string): Promise<T> {
-  return send<T>(path, { method: "DELETE", headers: { Accept: "application/json" } });
+/**
+ * Remove one thing. A route that names what to remove in a body, as the push
+ * subscription of this browser does, takes it in `body`.
+ */
+export function deleteJson<T>(path: string, body?: unknown): Promise<T> {
+  return send<T>(path, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
 }
 
 // The chat calls: one turn, and the history of a conversation.
@@ -374,8 +384,10 @@ function postTurnXhr(
 // frame. An abort through `signal` throws the AbortError unchanged.
 // `file` is one photo or one PDF; it makes the request multipart, and
 // `hooks.onUploadProgress` hears how much of it has gone out.
-// `workspace` (a slug or an id) goes in the body as a `workspace` field. The
-// turn then runs in that workspace; without it, in the main thread.
+// `workspace` goes in the body as a `workspace` field. The turn then runs in
+// that workspace; without it, in the main thread. The viewer sends the id of
+// the workspace: the routes take a ref as well, and a ref may name another
+// workspace later (api/workspaces.ts).
 export async function postTurn(
   person: string,
   text: string,
@@ -463,6 +475,8 @@ function historyMessage(raw: unknown): HistoryMessage | null {
   if (typeof m.turnId === "string") message.turnId = m.turnId;
   if (Array.isArray(m.tools)) message.tools = m.tools.filter((t): t is string => typeof t === "string");
   if (role === "person" && m.spoken === true) message.spoken = true;
+  // The thread of a shared workspace names who wrote a person row.
+  if (role === "person" && typeof m.who === "string" && m.who !== "") message.who = m.who;
   const files = fileRefs(m.attachments);
   if (files.length > 0) message.attachments = files;
   return message;

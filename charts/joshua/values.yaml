@@ -91,6 +91,10 @@ secrets:
       VIEWER_PASSWORDS: {}
       # The assignments container: the model forwarder and POST /v1/usage.
       JOSHUA_TOKEN_ASSIGNMENTS: {}
+      # Encrypts every secret setting of the instance at rest. Keep the same
+      # value for the life of the instance: a key that changes makes every
+      # stored secret unreadable (docs/settings.md).
+      JOSHUA_SETTINGS_KEY: {}
       # The key of the model server in `inference.base_url`, and the key of
       # one job block. Only core gets them. Add the keys that your joshua.yaml
       # refers to:

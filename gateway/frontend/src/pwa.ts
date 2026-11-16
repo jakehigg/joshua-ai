@@ -19,12 +19,17 @@
  * A browser that has no service worker, and a registration that the browser
  * refuses (an insecure origin, for one), change nothing: the app is the same
  * page, served from the network.
+ *
+ * The installed app has no address bar and no reload button of its own, so a
+ * person who asks for a reload asks the app: `requestReload`, which the
+ * navigation calls (`shell/AppNav.tsx`).
  */
 
 export const CHECK_MS = 30 * 60 * 1000;
 
 let holds = 0;
 let pendingReload = false;
+let askedReload = false;
 
 // Hold the reload of a new build while a send is going out. Returns the release.
 export function holdReload(): () => void {
@@ -34,8 +39,33 @@ export function holdReload(): () => void {
     if (released) return;
     released = true;
     holds -= 1;
-    if (holds === 0 && pendingReload && document.visibilityState === "hidden") reload();
+    if (holds > 0) return;
+    // A person who asked for the reload gets it as soon as the send is done,
+    // whether the page is on screen or not.
+    if (askedReload) {
+      askedReload = false;
+      reload();
+      return;
+    }
+    if (pendingReload && document.visibilityState === "hidden") reload();
   };
+}
+
+/**
+ * Load the page again, because a person asked for it.
+ *
+ * It is the way out of a page that shows a state it cannot clear, and in the
+ * installed app it is the only one. A send that is going out holds it
+ * (`holdReload`): the reload then happens when the send is done, and the
+ * answer is false, so the caller can say that it waits.
+ */
+export function requestReload(): boolean {
+  if (holds > 0) {
+    askedReload = true;
+    return false;
+  }
+  reload();
+  return true;
 }
 
 function reload(): void {

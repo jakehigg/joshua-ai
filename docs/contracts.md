@@ -144,10 +144,16 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?, "source"?, "person"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
 | `GET /v1/usage?group=conversation&person=` | `usage.allowed_callers` (default `viewer`) | | `{"days", "conversations": [{"conversation_id", "workspace": {"slug", "title"} or null, "calls", "input", "output", "cache_read", "cache_write"}]}`, largest first. Only the conversations of `person`. A row with no conversation is not listed. `422` for another `group` or no `person`; `403` for a person who is not a member. |
-| `/v1/workspaces` | `workspaces.allowed_callers` (default `viewer`, `gateway`) | `person` query parameter | See [workspaces.md](workspaces.md#routes). |
+| `/v1/workspaces` | `workspaces.allowed_callers` (default `viewer`, `gateway`, `assignments`) | `person` query parameter | See [workspaces.md](workspaces.md#routes). |
+| `POST /v1/workspaces/{slug}/read` | `workspaces.allowed_callers` | `person` query parameter, `{"turn_id"}` | `{"conversation", "last_read_turn_id", "last_read_at", "unread"}`. It marks the thread of that workspace read, for that person alone, up to the id of a transcript row. The mark never moves back. `404` for a workspace the person does not reach, `422` for a missing or negative `turn_id`. `GET /v1/workspaces` carries the `unread` count of each workspace for that person: the rows after their mark that somebody else wrote, Joshua or another person of the thread. A row of their own never counts. |
+| `GET`, `POST /v1/workspaces/{slug}/notify` | `workspaces.allowed_callers` | `person` query parameter, `{"mode"}` on the `POST` | `{"mode", "default"}`, the notify mode of that person in that workspace and the default of the workspace. `mode` is `off`, `decide`, or `all`. `404` for a workspace the person does not reach, `422` for another mode, a missing one, or an unknown field. |
 | `POST /v1/usage` | `usage.writers` (default `assignments`, `developer`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment` or `developer`, `413` over 1 MiB, `503` when the database fails. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
+| `GET /v1/push/key` | `AUTH_CALLERS` (default `viewer`) | `person` query parameter | `{"key"}`, the public VAPID key a browser subscribes with. `503 {"error": …}` while push is not configured (below). |
+| `POST /v1/push/subscribe` | `AUTH_CALLERS` | `person` query parameter, `{"endpoint", "keys": {"p256dh", "auth"}, "user_agent"?}` | `{"subscribed": true}`. The endpoint is unique, so a browser that subscribes again updates its row and starts from no failure. `422` for an `endpoint` that is not an `https` URL, a missing key, or an unknown field. `503` while push is not configured. |
+| `DELETE /v1/push/subscribe` | `AUTH_CALLERS` | `person` query parameter, `{"endpoint"}` | `{"removed": true}`. The delete is that person's alone: `404 {"error": "this browser is not subscribed"}` for an endpoint they do not have. `503` while push is not configured. |
+| `POST /v1/push/test` | `AUTH_CALLERS` | `person` query parameter, empty body | `{"sent", "failed", "dropped", "held", "error"}`, the counts of that person's browsers. `404` when they have no subscription, `503` while push is not configured. |
 | `POST /auth/verify` | `AUTH_CALLERS` (default `viewer`) | `{"person", "secret"}` | `{"ok": bool}`. `ok` is `false` for a wrong secret, for a person with no secret, and for a person who is not on the roster; the answer never says which of the three. |
 | `POST /auth/secret` | `AUTH_CALLERS` | `{"person", "secret", "new_secret"}` | `{"ok": true, "person"}`. A person changes their own secret and sends the current one: `403 {"error": "wrong secret"}` for a wrong one and for a person who has none yet, `404` for a person who is not on the roster. |
 | `POST /auth/secret/admin` | `AUTH_CALLERS` | `{"person", "new_secret"}` | `{"ok": true, "person"}`. The secret of a person without the current one, for a first sign-in or a reset. `404` for a person who is not on the roster. |
@@ -160,6 +166,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /admin/people` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"id", "name", "handle"?, "role"?}` | `201 {"person": …}`, `400 {"error": …}`, `409` when it takes the role of the only owner. `handle` is `<type>:<value>`; with none, the person has no handle. |
 | `POST /admin/people/{id}/role` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"role"}` (`member`, `guest`, or `owner`) | `{"person": …}` with only the role changed, `400 {"error": …}` for another role, `404` for a person who is not on the roster, `409` for the only owner |
 | `POST /admin/people/{id}/remove` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"removed": true, "id"}`. The handles and the sign-in secret go; the data dirs and the transcripts stay. `404` for a person who is not on the roster, `409` for the only owner. |
+| `GET /admin/settings?prefix=` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"groups": [{"prefix", "label", "settings": [{"key", "label", "hint", "is_secret", "is_set", "value", "updated_at", "updated_by"}]}]}`. `prefix` names one group; with none, every group comes back. `value` is `null` for a secret, set or not, and `is_set` says whether one is stored. `404 {"error": …}` for a prefix no group declares. |
+| `POST /admin/settings` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"key", "value", "person"?}` | `{"setting": …}`, one field in the shape of the `GET`, so no answer carries a secret value. `400 {"error": …}` for a key no group declares, a `value` that is not a string or is over 4096 characters, an empty value for a secret, or an unknown field. `503 {"error": …}` for a write of a secret with no `JOSHUA_SETTINGS_KEY`; the error names the variable. |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
 | `POST /admin/sessions/flush` | `ADMIN_CALLERS` | | `{"flushed": n}` |
 | `GET /admin/transcript/{conversation}?limit=` | `ADMIN_CALLERS` | | `{"conversation_id", "rows": […]}` |
@@ -412,6 +420,97 @@ identity `viewer`. The roster routes admit the callers of `AUTH_CALLERS` as
 well as those of `ADMIN_CALLERS`, so the viewer needs no admin setting, and it
 gets no other admin route. A change that would leave the roster with no owner
 is `409`.
+
+### The settings routes
+
+`/admin/settings` holds the settings of the instance: one row of the
+`settings` table per setting, named by a dotted prefix such as
+`push.vapid_public_key`. Core owns the database, so a setting lives here and
+nowhere else. The viewer's Admin → Instance section calls the two routes as
+the identity `viewer`, over `GET /api/v1/admin/settings` and
+`POST /api/v1/admin/settings`, and serves them to the owner alone. Like the
+roster routes, they admit the callers of `AUTH_CALLERS` as well as those of
+`ADMIN_CALLERS`.
+
+The write takes a key that a settings group declares, and nothing else: core
+holds the groups, and a group says the kind of each of its fields (`text`,
+`bool` or `secret`), so a caller can neither write an unknown key nor turn a
+secret into a plain value. A field of the answer carries its `kind` beside
+`is_secret`. `person` names the writer, for the `updated_by` of the row.
+
+**A value the feature cannot use is `400` here, not an error later.** The
+refusal is one line that says what the field takes, and it never carries the
+value:
+
+| The key | The refusal |
+|---|---|
+| `push.vapid_subject` | it must start with `mailto:` or `https://` |
+| `push.vapid_public_key` | it must be base64url of 65 bytes that start with `0x04` |
+| `push.vapid_private_key` | it must be base64url of 32 bytes |
+
+A write of an unknown key, a value over 4096 characters, and an empty value
+for a secret are `400` as before.
+
+**No answer carries a secret value.** A secret is encrypted at rest, a field
+answers `is_secret` and `is_set`, and `value` is `null` for it, whether one is
+stored or not. The owner replaces a secret by writing a new one; nothing reads
+the old one back. [settings.md](settings.md) has the store, the encryption,
+and `JOSHUA_SETTINGS_KEY`.
+
+### The push routes
+
+`/v1/push` holds the web push subscription of a browser and sends one
+notification to it. Core owns the database and the VAPID private key, so the
+subscriptions live here and core is what posts to a push service. The viewer
+proxies the four routes as the identity `viewer`, under
+`GET /api/v1/push/key`, `POST /api/v1/push/subscribe`,
+`DELETE /api/v1/push/subscribe`, and `POST /api/v1/push/test`, and serves each
+one to the person who signed in. They take the same `AUTH_CALLERS` check as
+the auth routes.
+
+**The person is the `person` query parameter and never a body field**, so one
+person can neither read the key of another nor remove another's subscription.
+The viewer adds the `User-Agent` of the request to a subscription, so the
+owner can tell two devices apart, and it checks the `Origin` of every write
+(`403 {"error": …}`) as the workspace writes do. With no `CORE_URL`, no viewer
+token, or a core that does not answer, the viewer's own routes are `503`.
+
+**Every route is `503` while push is not configured**: `push.enabled` is not
+`true`, one of the three VAPID settings is missing, or `JOSHUA_SETTINGS_KEY`
+is unset, which is what the private key needs to be read. The `error` is the
+sentence that says what the owner has to do, so the page can show it.
+
+`POST /v1/push/test` sends the notification through the same sender as every
+other push, so its answer says what each browser did: `sent`, `failed`,
+`dropped` (the subscription is gone), and `held` (a push service is rate
+limiting that endpoint). A send never raises into the turn that caused it.
+
+**A send that could not be signed is `400`, and the `error` is the real
+message**, such as `VapidException: Missing 'sub' from claims.` The VAPID
+header is built once, before the subscriptions, so a bad subject or an
+unreadable private key sends nothing, touches no subscription, and counts
+against no browser. A browser that refused the push is still a `200` with
+`failed`: that is one device's answer, not a failure of the instance.
+[notifications.md](notifications.md) has the sender, the payload, and what the
+owner does to turn push on.
+
+### The workspace notify mode
+
+`GET` and `POST /v1/workspaces/{slug}/notify` hold when Joshua may reach one
+person of one workspace with the `notify_user` tool: one row of the
+`notify_prefs` table per person and workspace, with the `mode` and the moment
+that person was last notified of that workspace. A person with no row has the
+default of the workspace: `decide` when it is shared, and `off` when it is
+personal, where nobody else writes. So the table stays empty until somebody
+changes a mode.
+
+**The mode is one person's own.** Every workspace route is scoped by the
+`person` query parameter, so a caller reads and writes the mode of that person
+and of nobody else. The viewer proxies the two routes as the identity `viewer`,
+under `GET` and `POST /api/v1/workspaces/{slug}/notify`, and serves them to the
+person who signed in. [notifications.md](notifications.md#when-joshua-may-reach-you-in-a-workspace)
+has the setting, and [workspaces.md](workspaces.md#notifying-one-person) has
+the tool and the rules it keeps on its own.
 
 ### The stream
 

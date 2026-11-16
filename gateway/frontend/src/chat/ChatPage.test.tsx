@@ -26,6 +26,10 @@ function rows(list: Row[]) {
   return list.map((r) => ({ status: "ok", at: "2026-01-01T10:00:00Z", ...r }));
 }
 
+// The reply core writes when a turn fails (FAILED_REPLY in core). A turn that
+// a person left must never answer with it.
+const FAILED_REPLY = "Sorry, something went wrong on my end. Please try again.";
+
 // The document a card names, as the viewer's JSON route answers for it.
 const DOC = { title: "Pumpkin soup", kind: "artifact", status: "draft", updated: "2026-02-01T10:00:00Z" };
 
@@ -99,7 +103,7 @@ function backend(
 }
 
 function open(person = "alex") {
-  render(
+  return render(
     <MemoryRouter initialEntries={[`/chat/${person}`]} future={ROUTER_FUTURE}>
       <Routes>
         <Route path="/chat/:person" element={<ChatPage />} />
@@ -452,6 +456,44 @@ describe("ChatPage pending turn", () => {
     const calls = historyCalls().length;
     await advance(POLL_MS * 5);
     expect(historyCalls()).toHaveLength(calls);
+  });
+
+  it("keeps the turn when the page is left, and shows the real answer on the way back", async () => {
+    let pending: unknown = null;
+    let list: Row[] = [];
+    const { turnBodies } = backend(
+      () => json({ messages: rows(list), nextBefore: null, pending }),
+      "the real answer",
+    );
+    const page = open();
+    await advance(0);
+    fireEvent.change(screen.getByLabelText("Message to Joshua"), { target: { value: "rotate it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await advance(0);
+    expect(screen.getByText("rotate it")).toBeTruthy();
+
+    // He left the workspace while the turn ran: the page goes, and with it the
+    // stream. Core keeps the turn, so the history still names it as pending.
+    pending = { turnId: "t-9", state: "running", since: SINCE, text: "rotate it" };
+    list = [{ id: 1, role: "person", text: "rotate it", turnId: "t-9" }];
+    page.unmount();
+    await advance(0);
+
+    open(); // and he came back
+    await advance(0);
+    expect(screen.getByText("Joshua is working…")).toBeTruthy();
+    expect(screen.queryByText(FAILED_REPLY)).toBeNull();
+
+    // The turn ended while he was away. The answer comes from the history.
+    pending = null;
+    list = [...list, { id: 2, role: "joshua", text: "the real answer", turnId: "t-9" }];
+    await advance(POLL_MS);
+    expect(screen.getByText("the real answer")).toBeTruthy();
+    expect(screen.queryByText("Joshua is working…")).toBeNull();
+    expect(screen.queryByText(FAILED_REPLY)).toBeNull();
+    expect(screen.queryByText("the connection was lost")).toBeNull();
+    // One turn went out: coming back never sends the message again.
+    expect(turnBodies()).toHaveLength(1);
   });
 
   it("says that a queued turn waits, and shows its message before the transcript has it", async () => {

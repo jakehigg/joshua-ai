@@ -1,4 +1,5 @@
-"""The two calls the runner makes to core: the limits and the usage.
+"""The three calls the runner makes to core: the limits, the usage, and the
+item of an output.
 
 ``limits`` is ``GET <CORE_URL>/v1/limits``. The route has no bearer. It
 gives the percent used of the 5-hour window and the weekly window. A failed
@@ -11,6 +12,13 @@ one row for each writer and ``ref``, so a row sent two times is written one
 time. A connection error, a timeout, or a 5xx reply is tried again, 3
 attempts in all. A 4xx reply is not tried again.
 
+``add_workspace_item`` is ``POST <CORE_URL>/v1/workspaces/<workspace>/items``
+with the same bearer and ``person`` for the person the run belongs to. Core
+answers 404 when that person is not one of the people of the workspace, so
+nothing is recorded then. It is one attempt: an item that does not land is
+logged and never fails the tool call that recorded the output. ``assignments``
+must be in ``workspaces.allowed_callers``, else core answers 403.
+
 The log names the assignment and the status code, never the token or a body.
 """
 
@@ -18,11 +26,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from urllib.parse import quote
 
 import httpx
 from joshua_shared.contracts import (
     LIMITS_PATH,
     USAGE_WRITE_PATH,
+    WORKSPACE_ITEMS_PATH,
     LimitsResponse,
     UsageWriteRequest,
     UsageWriteRow,
@@ -31,6 +41,7 @@ from joshua_shared.log import get_logger
 from pydantic import ValidationError
 
 from joshua_assignments.settings import Settings
+from joshua_assignments.workspace_items import Item
 
 logger = get_logger("joshua_assignments.core_client")
 
@@ -115,3 +126,36 @@ class CoreClient:
                     await asyncio.sleep(self._backoff_s * attempt)
         logger.error({"message": "usage not sent after retries", **where})
         return False
+
+    async def add_workspace_item(
+        self, workspace: str, person: str, item: Item, *, assignment_id: int | None = None
+    ) -> bool:
+        """Record one item in a workspace, for the person the run belongs to.
+
+        Returns True when core accepted it. A person who is not one of the
+        people of the workspace gets 404, and nothing is recorded."""
+        where = {"assignment_id": assignment_id, "workspace": workspace, "kind": item.kind}
+        path = WORKSPACE_ITEMS_PATH.format(workspace=quote(workspace, safe=""))
+        headers = {"Authorization": f"Bearer {self.settings.fleet_token}"}
+        try:
+            async with self._make_client() as client:
+                response = await client.post(
+                    self._url(path),
+                    params={"person": person},
+                    json=item.body(),
+                    headers=headers,
+                )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                {"message": "item not recorded", "error_type": type(exc).__name__, **where}
+            )
+            return False
+        except RuntimeError:
+            logger.warning({"message": "item not recorded: no core url", **where})
+            return False
+        if response.status_code >= 300:
+            logger.warning(
+                {"message": "core refused the item", "status_code": response.status_code, **where}
+            )
+            return False
+        return True

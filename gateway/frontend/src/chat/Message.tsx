@@ -18,15 +18,24 @@
 // has no bubble at all): a photo as a thumbnail that opens the full image, a PDF as a chip with its name. A
 // message that this screen just sent shows the file it holds; a message from
 // the history shows the files the transcript row names, from the viewer's
-// files route. A turn that waits for another turn of the conversation says so.
+// files route. A photo of the history stands in its own shape while it loads,
+// and asks again a few times when it does not answer, so the broken-image
+// glyph of the browser never shows: a photo that really fails ends as a chip
+// that says so. A turn that waits for another turn of the conversation says so.
 // A message written while a turn runs (`Held`) is a person bubble that says
 // it waits, with a button to take it back.
 //
 // In the thread of a shared workspace a person row carries `who`, the name of
-// the person who wrote it. A small line above the bubble names them, once for
-// a run of messages from the same person (`showWho`, which the list decides).
+// the person who wrote it. The thread then reads like a group messaging app:
+// the signed-in person's own bubbles stay at the right (`mine`), every other
+// person's bubble stands at the left, and each writer keeps one bubble colour
+// of their own (`tone`). A small line above the bubble names them, once for a
+// run of messages from the same person (`showWho`); the same line marks a run
+// of Joshua's as Joshua. The list decides all three (MessageList.tsx). A
+// personal thread gets none of them, so it keeps the layout it has: the
+// person at the right, Joshua full width, and no name.
 
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { FileRef } from "../api/client";
 import type { ChatMessage, HeldMessage } from "./store";
 import { useDocumentPanel } from "./DocumentPanel";
@@ -34,6 +43,9 @@ import { ARTIFACT_INFO, SPEECH_INFO, splitFence } from "./blocks";
 import { ArtifactCard } from "./ArtifactCard";
 import { Markdown } from "./Markdown";
 import { cleanEvent, eventLinks, headline, isQuestion, questionPreview } from "./events";
+
+// What a Joshua row is called above its answer, in a shared thread.
+const JOSHUA = "Joshua";
 
 export const ELAPSED_FROM_S = 5;
 export const SLOW_FROM_S = 30;
@@ -109,6 +121,58 @@ function FileChip({ name, url }: { name: string; url?: string }) {
   );
 }
 
+// How often a thumbnail asks again for a photo that did not answer, and how
+// long it waits before each try. A photo that was just sent is stored a
+// moment after the turn starts, so the first try can come too early.
+export const THUMB_TRIES = 3;
+export const THUMB_BACKOFF_MS = 600;
+
+// A photo of the thread. The box keeps the shape of a thumbnail while the
+// image loads, so the browser's broken-image glyph never shows. An `error` is
+// tried again a few times, each after a longer wait; after that the photo is
+// a chip that says it did not load.
+function Thumb({ url, alt }: { url: string; alt: string }) {
+  const [shown, setShown] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [tries, setTries] = useState(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    setShown(false);
+    setFailed(false);
+    setTries(0);
+  }, [url]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  if (failed) {
+    return (
+      <span className="file-chip sent thumb-failed" role="status">
+        <span aria-hidden="true">🖼</span>
+        <span className="file-name">{alt}</span>
+        <span className="j-meta">did not load</span>
+      </span>
+    );
+  }
+  const again = () => {
+    if (tries >= THUMB_TRIES) {
+      setFailed(true);
+      return;
+    }
+    const next = tries + 1;
+    timer.current = setTimeout(() => setTries(next), THUMB_BACKOFF_MS * next);
+  };
+  return (
+    <span className={`thumb-box${shown ? "" : " waiting"}`}>
+      <img
+        className="thumb"
+        src={tries ? `${url}${url.includes("?") ? "&" : "?"}try=${tries}` : url}
+        alt={alt}
+        loading="lazy"
+        onLoad={() => setShown(true)}
+        onError={again}
+      />
+    </span>
+  );
+}
+
 // A photo as a thumbnail. A tap shows it full size in the panel of the chat;
 // outside a chat screen the link opens the image in a new tab.
 function Attachment({ file }: { file: FileRef }) {
@@ -127,7 +191,7 @@ function Attachment({ file }: { file: FileRef }) {
           panel.open({ type: "image", image: { url, title: file.name } });
         }}
       >
-        <img className="thumb" src={url} alt={file.name} loading="lazy" />
+        <Thumb url={url} alt={file.name} />
       </a>
     );
   }
@@ -160,8 +224,15 @@ interface Props {
   message: ChatMessage;
   canRetry: boolean;
   onRetry: (message: ChatMessage) => void;
-  /** Name the person above the bubble: the first message of their run. */
+  /** Name the writer above the bubble: the first message of their run. */
   showWho?: boolean;
+  /**
+   * The signed-in person wrote it, so the bubble stands at the right. A row
+   * of a personal thread, and a message this screen just sent, is theirs.
+   */
+  mine?: boolean;
+  /** The colour class of the writer's bubble in a shared thread (tone.ts). */
+  tone?: string;
 }
 
 function EventLine({ text }: { text: string }) {
@@ -212,7 +283,14 @@ function EventLine({ text }: { text: string }) {
   );
 }
 
-export const Message = memo(function Message({ message, canRetry, onRetry, showWho }: Props) {
+export const Message = memo(function Message({
+  message,
+  canRetry,
+  onRetry,
+  showWho,
+  mine = true,
+  tone = "",
+}: Props) {
   const isPerson = message.role === "person";
   const pending = message.state === "pending";
   const answer = useMemo(() => {
@@ -244,7 +322,9 @@ export const Message = memo(function Message({ message, canRetry, onRetry, showW
   );
 
   return (
-    <article className={`msg ${isPerson ? "msg-person" : "msg-joshua"}`}>
+    <article
+      className={`msg ${isPerson ? (mine ? "msg-person" : "msg-person msg-other") : "msg-joshua"}`}
+    >
       {isPerson ? (
         <>
           {showWho && message.who && <div className="msg-who">{message.who}</div>}
@@ -261,11 +341,12 @@ export const Message = memo(function Message({ message, canRetry, onRetry, showW
             </div>
           )}
           {(!hasFile || message.text !== NO_CAPTION) && message.text && (
-            <div className="bubble">{message.text}</div>
+            <div className={`bubble${tone ? ` ${tone}` : ""}`}>{message.text}</div>
           )}
         </>
       ) : (
         <div className="reading">
+          {showWho && <div className="msg-who">{JOSHUA}</div>}
           {failedRow ? (
             <div className="msg-error failed-row">{message.text}</div>
           ) : (

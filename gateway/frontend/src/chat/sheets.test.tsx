@@ -39,7 +39,9 @@ function backend() {
       if (path === "/api/v1/session") return json({ person: { id: "alex", name: "Alex", role: "member" }, sections: [{ key: "wiki", label: "Wiki", path: "/wiki/" }] });
       if (path === "/api/v1/workspaces/alex%2Fsolar") return json(WS);
       if (path === "/api/v1/workspaces") return json({ workspaces: [WS] });
-      if (path === "/api/v1/workspaces/alex%2Fsolar/items") return json({ items: ITEMS });
+      // The screen asks for the items by the id of the workspace, never by
+      // the ref of the address it was opened at.
+      if (path === "/api/v1/workspaces/w1/items") return json({ items: ITEMS });
       if (path.endsWith("/history")) return json({ messages: [], nextBefore: null });
       return json({ error: "not found" }, 404);
     }),

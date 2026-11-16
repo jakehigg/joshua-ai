@@ -114,6 +114,12 @@ image comes from the viewer. The artifact reaches no network: it loads no
 font, no stylesheet, and no script from a file, and it sends no request. It
 submits no form and opens no frame. Write the styles in the file.
 
+The frame is as tall as the artifact, and an artifact wider than the page is
+scaled down to the width; `Actual size` and `Fit width` change that. On the
+page of the artifact, `Full screen` gives it the whole screen, with no menu
+and no reading width, which is what an artifact drawn at its own size needs
+on a tablet. The same button and `Escape` leave full screen.
+
 ## Comments
 
 You comment on a document in the viewer, part by part:

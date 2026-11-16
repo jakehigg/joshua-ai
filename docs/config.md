@@ -1231,7 +1231,10 @@ writes — add a person, set their secret, change a role, and take a person off
 the roster. A member and a guest get 403 on every route under
 `/api/v1/admin/`. Core owns the roster, so the viewer calls core's
 `/admin/people` routes as the identity `viewer`. Core admits it there because
-`viewer` is one of its `AUTH_CALLERS`; the viewer gets no other admin route.
+`viewer` is one of its `AUTH_CALLERS`. The Instance section, at
+`/admin/instance`, is the settings of the instance, over core's
+`/admin/settings` routes and as the same identity (see
+[settings.md](settings.md)); the viewer gets no other admin route.
 An operator who is locked out sets a secret from the console with
 `python -m joshua_core people auth-reset`.
 

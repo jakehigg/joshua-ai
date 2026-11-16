@@ -344,6 +344,11 @@ def assignment_of(identity: str | None, conversation: str | None) -> int | None:
     return value if value > 0 else None
 
 
+# The path of core's items route of one workspace. ``{workspace}`` is the id,
+# the slug, or a two-segment ref, URL-encoded. The caller names the person with
+# ``person``, and a workspace that person is not in answers 404.
+WORKSPACE_ITEMS_PATH = "/v1/workspaces/{workspace}/items"
+
 # The path of core's subscription limits route. It has no bearer, as ``/healthz``.
 LIMITS_PATH = "/v1/limits"
 

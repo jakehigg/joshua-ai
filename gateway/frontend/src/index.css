@@ -221,6 +221,37 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   font-size: 0.75rem;
   line-height: 1.2;
 }
+/* The message of another person in the thread of a shared workspace: it
+   stands at the left, as Joshua's answers do, and the bubble turns its
+   corner the other way. The person's own messages keep the right. */
+.chat-screen .msg-other {
+  align-items: flex-start;
+}
+.chat-screen .msg-other .bubble {
+  border-bottom-right-radius: var(--j-radius);
+  border-bottom-left-radius: 4px;
+}
+/* One bubble colour for each writer of a shared thread (tone.ts picks it).
+   Each tone is a quiet wash over the dark ground, so every bubble keeps the
+   contrast of the plain one. */
+.chat-screen .bubble.tone-0 {
+  background: rgb(92 208 245 / 0.16);
+}
+.chat-screen .bubble.tone-1 {
+  background: rgb(94 230 154 / 0.14);
+}
+.chat-screen .bubble.tone-2 {
+  background: rgb(244 193 90 / 0.14);
+}
+.chat-screen .bubble.tone-3 {
+  background: rgb(199 146 234 / 0.18);
+}
+.chat-screen .bubble.tone-4 {
+  background: rgb(255 150 122 / 0.15);
+}
+.chat-screen .bubble.tone-5 {
+  background: rgb(130 170 255 / 0.18);
+}
 
 
 /* A time line before the first message of a run: centered, quiet, and always
@@ -936,13 +967,27 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   text-transform: uppercase;
   color: var(--j-muted);
 }
-/* The mark of a shared workspace in the rail: quiet, after the title. */
-.chat-screen .rail-shared {
+/* The mark of a shared workspace, in the rail and in the workspace header:
+   two small people, quiet, after the name. */
+.chat-screen .shared-mark {
+  display: inline-flex;
+  align-items: center;
   margin-left: 6px;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  vertical-align: -2px;
   opacity: 0.75;
+}
+.chat-screen .shared-mark .j-icon { width: 15px; height: 15px; }
+/* The rows of a thread that this person has not read, counted after the name. */
+.chat-screen .rail-unread {
+  flex: none;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: var(--j-radius-pill);
+  background: var(--j-accent);
+  color: var(--j-accent-ink);
+  font-size: var(--j-text-xs);
+  font-weight: 600;
+  line-height: 18px;
 }
 .chat-screen .rail-new { margin-top: 8px; text-align: left; }
 .chat-screen .rail-toggle { flex: none; }
@@ -1569,6 +1614,10 @@ html.vv-fit .chat-screen .ws-overlay {
   gap: 4px;
   max-width: min(85%, 600px);
 }
+/* The file of another person's message, at the left with their bubble. */
+.chat-screen .msg-other .msg-media {
+  align-items: flex-start;
+}
 .chat-screen .thumb-link {
   display: block;
   margin: 0;
@@ -1593,6 +1642,33 @@ html.vv-fit .chat-screen .ws-overlay {
 }
 .chat-screen .thumb-link .thumb {
   border-radius: 0;
+}
+/* A photo that has not answered yet: a quiet box of the shape a thumbnail
+   takes, with the image hidden inside it, so no broken-image glyph shows
+   (Message.tsx). The image is still laid out, so it loads. */
+.chat-screen .thumb-box {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
+.chat-screen .thumb-box.waiting {
+  width: 180px;
+  height: 135px;
+  border-radius: var(--j-radius);
+  border-bottom-right-radius: 4px;
+  background: var(--j-surface-2);
+  outline: 1px solid var(--j-line-soft);
+  outline-offset: -1px;
+}
+.chat-screen .thumb-link .thumb-box.waiting {
+  border-radius: 0;
+}
+.chat-screen .thumb-box.waiting .thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  visibility: hidden;
 }
 .chat-screen .file-chip,
 .chat-screen .file-chip.sent {
@@ -1828,3 +1904,4 @@ html.vv-fit .chat-screen .ws-overlay {
   background: var(--j-warn-soft); border-radius: var(--j-radius-sm);
 }
 .profile-ok { margin: 0; font-size: var(--j-text-sm); color: var(--j-ok); }
+.profile-push-actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -76,7 +76,13 @@ INJECT_FALLBACK = (
     "A webhook event fired and is described below. An event is not a person and "
     "not a live message — no one is waiting on a reply. If it needs a message to "
     "someone, phrase it the way it should reach them on this channel. If it "
-    "needs quiet work, do it and stay silent. If nothing needs to be said, reply "
+    "needs quiet work, do it, then post one short line that says you did it. "
+    "When a task or an assignment that you started ends, or a worker of yours "
+    "asks a question and you answer it, always post one short line in this "
+    "thread: what happened, the result (the commit, the pull request, the "
+    "error), and what the person must do, if anything. A result or an answer "
+    "that needs a change in the person's own setup says so plainly and first. "
+    "If nothing needs to be said about an event the person did not start, reply "
     "with exactly `[IGNORE]`."
 )
 

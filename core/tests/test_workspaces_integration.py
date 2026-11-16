@@ -1,7 +1,8 @@
 """Workspaces against the real Postgres repo and the real routes: the schema,
 the slugs, the scoping, the channel and conversation of a create, the items,
-the nightly skip, the main conversation, the usage by conversation, and the
-two people of a shared workspace writing one thread."""
+the nightly skip, the main conversation, the usage by conversation, the read
+state and the notify mode of each person, and the two people of a shared
+workspace writing one thread."""
 
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.usage import Usage
 from joshua_core.engine.workspace import WorkspaceBlock
 from joshua_core.store.repo import SlugTaken
+from joshua_core.store.transcript import SILENT_REPLY
 from joshua_core.store.usage_events import UsageEvent
 from joshua_core.transcript_api import build_transcript_router
 from joshua_core.turns import TurnService
@@ -160,6 +162,49 @@ async def test_create_makes_the_channel_the_conversation_and_unique_slugs(seeded
     conversation = await seeded.find_conversation(f"workspace:{first.id}", "alex")
     assert conversation is not None
     assert first.notify == "none" and first.status == "active" and first.servers == ()
+
+
+async def test_closing_a_workspace_frees_its_name_and_keeps_its_own_slug(seeded) -> None:
+    first = await seeded.create_workspace("alex", "Test")
+    closed = await seeded.update_workspace(first.id, status="archived")
+
+    # The closed row keeps the slug it was created with, and nothing renames it.
+    assert closed.slug == "test" and closed.status == "archived"
+    # The name is free at once, so a new workspace of the same title takes it.
+    second = await seeded.create_workspace("alex", "Test")
+    assert second.slug == "test" and second.id != first.id
+    # The bare slug names the live workspace; the closed one answers to its id,
+    # which is its permanent address.
+    assert (await seeded.find_workspace_for("alex", "test")).id == second.id
+    assert (await seeded.find_workspace_for("alex", "alex/test")).id == second.id
+    assert (await seeded.find_workspace_for("alex", first.id)).id == first.id
+    # A second change of the closed row still writes no slug.
+    again = await seeded.update_workspace(first.id, status="archived", title="Test (old)")
+    assert again.slug == "test"
+
+    # A shared workspace frees its name too: its create takes no number, so
+    # without this the name would stay refused for everyone.
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    assert (await seeded.update_workspace(shared.id, status="archived")).slug == "thanksgiving"
+    new_shared = await seeded.create_workspace("mia", "Thanksgiving", members=["alex"])
+    assert new_shared.slug == "thanksgiving"
+    for person in ("alex", "mia"):
+        assert (await seeded.find_workspace_for(person, "shared/thanksgiving")).id == new_shared.id
+    assert (await seeded.find_workspace_for("mia", shared.id)).id == shared.id
+
+
+async def test_a_slug_that_only_archived_rows_hold_names_the_newest(seeded) -> None:
+    older = await seeded.create_workspace("alex", "Test")
+    await seeded.update_workspace(older.id, status="archived")
+    newer = await seeded.create_workspace("alex", "Test")
+    await seeded.update_workspace(newer.id, status="archived")
+
+    assert older.slug == newer.slug == "test"
+    # No live row holds the slug, so it names the archived row made last. Each
+    # row still answers to its own id.
+    assert (await seeded.find_workspace_for("alex", "test")).id == newer.id
+    assert (await seeded.find_workspace_for("alex", "alex/test")).id == newer.id
+    assert (await seeded.find_workspace_for("alex", older.id)).id == older.id
 
 
 async def test_find_scopes_to_the_people_and_takes_a_slug_or_an_id(seeded) -> None:
@@ -323,6 +368,113 @@ async def test_main_conversation_is_the_latest_direct_non_workspace_thread(seede
     assert await seeded.main_conversation("mia") is None
 
 
+async def test_the_read_mark_is_one_for_each_person_of_a_thread(seeded) -> None:
+    """The mark of what a person has read, and the rows after it.
+
+    One shared thread holds one row for each of its people, so Alex reading it
+    leaves Mia's count where it was. A reply that says nothing is not counted:
+    the thread does not show it either.
+    """
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    conv = (await seeded.workspace_conversation(shared)).id
+    assert await seeded.conversation_read("alex", conv) is None
+    first = await seeded.add_transcript(conv, "in", "who brings the pie?")
+    await seeded.add_transcript(conv, "out", "Mia does.")
+    silent = await seeded.add_transcript(conv, "out", SILENT_REPLY)
+    assert await seeded.unread_counts("alex", [conv]) == {conv: 2}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 2}
+
+    read = await seeded.mark_conversation_read("alex", conv, first)
+    assert read.person_id == "alex" and read.conversation_id == conv
+    assert read.last_read_turn_id == first and read.last_read_at is not None
+    assert (await seeded.conversation_read("alex", conv)).last_read_turn_id == first
+    assert await seeded.unread_counts("alex", [conv]) == {conv: 1}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 2}
+
+    # Read to the end: nothing is unread, so the thread is not in the answer.
+    await seeded.mark_conversation_read("alex", conv, silent)
+    assert await seeded.unread_counts("alex", [conv]) == {}
+    # The mark never moves back.
+    back = await seeded.mark_conversation_read("alex", conv, first)
+    assert back.last_read_turn_id == silent
+    assert await seeded.unread_counts("alex", []) == {}
+
+    # A thread a person has read nothing of counts every row it shows that
+    # somebody else wrote. Mia's own line is not one of them.
+    mine = await seeded.create_workspace("mia", "Trip")
+    other = (await seeded.workspace_conversation(mine)).id
+    await seeded.add_transcript(other, "in", "which cabin?")
+    assert await seeded.unread_counts("mia", [conv, other]) == {conv: 2}
+    await seeded.add_transcript(other, "out", "Cabin four is free.")
+    assert await seeded.unread_counts("mia", [conv, other]) == {conv: 2, other: 1}
+
+
+async def test_the_unread_count_skips_the_turns_the_reader_wrote(seeded) -> None:
+    """The count is what somebody else said: Joshua, or another person here.
+
+    Alex sends a message and leaves the workspace at once: his own turn is not
+    unread, so his badge stays at zero until somebody answers. The same turn
+    counts for Mia, who has not read it.
+    """
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    conv = (await seeded.workspace_conversation(shared)).id
+
+    # His own turn, which a shared thread stamps with his name.
+    await seeded.add_transcript(conv, "in", "who brings the pie?", meta={"speaker": "Alex"})
+    assert await seeded.unread_counts("alex", [conv]) == {}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 1}
+
+    # A turn of Joshua's counts for both of them.
+    await seeded.add_transcript(conv, "out", "Mia does.")
+    assert await seeded.unread_counts("alex", [conv]) == {conv: 1}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 2}
+
+    # A turn of the other person's counts for the reader, never for its author.
+    await seeded.add_transcript(conv, "in", "I can bring two.", meta={"speaker": "Mia"})
+    assert await seeded.unread_counts("alex", [conv]) == {conv: 2}
+    assert await seeded.unread_counts("mia", [conv]) == {conv: 2}
+
+    # A thread of one person carries no name: the person of the thread wrote it.
+    mine = await seeded.create_workspace("alex", "Trip")
+    own = (await seeded.workspace_conversation(mine)).id
+    await seeded.add_transcript(own, "in", "which cabin?")
+    assert await seeded.unread_counts("alex", [own]) == {}
+
+
+async def test_the_notify_mode_is_one_for_each_person_of_a_workspace(seeded) -> None:
+    """``notify_prefs``: a mode of their own, and the send stamp of the guard.
+
+    Nobody has a row until a mode is set, so the table is empty while every
+    person takes the default of the workspace.
+    """
+    shared = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+    assert await seeded.notify_prefs.get("alex", shared.id) is None
+    assert await seeded.notify_prefs.list_for(shared.id) == []
+
+    mine = await seeded.notify_prefs.set_mode("alex", shared.id, "all")
+    assert mine.person_id == "alex" and mine.workspace_id == shared.id
+    assert mine.mode == "all" and mine.last_notified_at is None
+    assert (await seeded.notify_prefs.set_mode("mia", shared.id, "off")).mode == "off"
+    assert [(p.person_id, p.mode) for p in await seeded.notify_prefs.list_for(shared.id)] == [
+        ("alex", "all"),
+        ("mia", "off"),
+    ]
+    # A second write replaces the mode of that person alone.
+    assert (await seeded.notify_prefs.set_mode("alex", shared.id, "decide")).mode == "decide"
+    assert (await seeded.notify_prefs.get("mia", shared.id)).mode == "off"
+    with pytest.raises(ValueError):
+        await seeded.notify_prefs.set_mode("alex", shared.id, "sometimes")
+
+    # The stamp of a send keeps the mode, and a person with no row gets one.
+    moment = datetime(2026, 3, 1, 9, 0, tzinfo=UTC)
+    stamped = await seeded.notify_prefs.mark_sent("alex", shared.id, mode="decide", at=moment)
+    assert stamped.mode == "decide" and stamped.last_notified_at == moment
+    other = await seeded.create_workspace("mia", "Trip")
+    fresh = await seeded.notify_prefs.mark_sent("mia", other.id, at=moment)
+    assert fresh.mode == "decide" and fresh.last_notified_at == moment
+    assert await seeded.notify_prefs.list_for(other.id) == [fresh]
+
+
 # --- the routes ------------------------------------------------------------------
 
 
@@ -458,6 +610,100 @@ async def test_a_shared_workspace_is_made_once_and_reaches_every_person(client, 
         assert refused.status_code == 422, body
 
 
+async def test_each_person_of_a_shared_workspace_has_an_unread_count_of_their_own(
+    client, seeded
+) -> None:
+    """The count the list gives, and the route that clears it.
+
+    Alex and Mia read one thread, so each of them has a count of their own, and
+    Alex marking it read leaves Mia's count whole.
+    """
+    made = await _create(client, title="Thanksgiving", members=["mia"])
+    conv = (await seeded.find_conversation(made["channel"], None)).id
+    first = await seeded.add_transcript(conv, "in", "who brings the pie?")
+    newest = await seeded.add_transcript(conv, "out", "Mia does.")
+
+    async def counts(person: str) -> dict[str, int]:
+        resp = await client.get("/v1/workspaces", params={"person": person}, headers=_h())
+        assert resp.status_code == 200, resp.text
+        return {w["slug"]: w["unread"] for w in resp.json()["workspaces"]}
+
+    assert await counts("alex") == {"thanksgiving": 2}
+    assert await counts("mia") == {"thanksgiving": 2}
+
+    read = await client.post(
+        f"/v1/workspaces/shared/{made['slug']}/read",
+        params={"person": "alex"},
+        json={"turn_id": first},
+        headers=_h(),
+    )
+    assert read.status_code == 200, read.text
+    assert read.json()["conversation"] == conv
+    assert read.json()["last_read_turn_id"] == first and read.json()["unread"] == 1
+    assert "T" in read.json()["last_read_at"]
+    assert await counts("alex") == {"thanksgiving": 1}
+    assert await counts("mia") == {"thanksgiving": 2}
+
+    # Mia reads the whole thread: hers is clear, and his stays where it was.
+    hers = await client.post(
+        f"/v1/workspaces/shared/{made['slug']}/read",
+        params={"person": "mia"},
+        json={"turn_id": newest},
+        headers=_h(),
+    )
+    assert hers.status_code == 200 and hers.json()["unread"] == 0
+    assert await counts("mia") == {"thanksgiving": 0}
+    assert await counts("alex") == {"thanksgiving": 1}
+
+
+async def test_the_read_route_checks_the_workspace_and_the_body(client) -> None:
+    made = await _create(client)
+    alex, mia = {"person": "alex"}, {"person": "mia"}
+    read = lambda p, b: client.post(  # noqa: E731
+        f"/v1/workspaces/{made['slug']}/read", params=p, json=b, headers=_h()
+    )
+    assert (await read(mia, {"turn_id": 1})).status_code == 404  # another person's
+    assert (await read(alex, {})).status_code == 422
+    assert (await read(alex, {"turn_id": -1})).status_code == 422
+    assert (await read(alex, {"turn_id": 1, "extra": 1})).status_code == 422
+    # A row id ahead of the thread is the newest row the screen has seen.
+    assert (await read(alex, {"turn_id": 0})).status_code == 200
+    assert (await read(alex, {"turn_id": 99})).json()["unread"] == 0
+
+
+async def test_the_notify_route_reads_and_writes_the_mode_of_one_person(client) -> None:
+    """The control of the workspace page: the mode of the person who is signed
+    in, and the default of the workspace beside it."""
+    shared = await _create(client, title="Thanksgiving", members=["mia"])
+    personal = await _create(client)
+    get = lambda slug, p: client.get(f"/v1/workspaces/{slug}/notify", params=p, headers=_h())  # noqa: E731
+    post = lambda slug, p, b: client.post(  # noqa: E731
+        f"/v1/workspaces/{slug}/notify", params=p, json=b, headers=_h()
+    )
+    alex, mia = {"person": "alex"}, {"person": "mia"}
+
+    # A shared workspace decides; a personal one notifies nobody.
+    assert (await get(f"shared/{shared['slug']}", alex)).json() == {
+        "mode": "decide",
+        "default": "decide",
+    }
+    assert (await get(personal["slug"], alex)).json() == {"mode": "off", "default": "off"}
+
+    written = await post(f"shared/{shared['slug']}", alex, {"mode": "all"})
+    assert written.status_code == 200, written.text
+    assert written.json() == {"mode": "all", "default": "decide"}
+    assert (await get(f"shared/{shared['slug']}", alex)).json()["mode"] == "all"
+    # The mode is of that person alone: Mia keeps the default.
+    assert (await get(f"shared/{shared['slug']}", mia)).json()["mode"] == "decide"
+    assert (await post(f"shared/{shared['slug']}", mia, {"mode": "off"})).status_code == 200
+    assert (await get(f"shared/{shared['slug']}", alex)).json()["mode"] == "all"
+
+    assert (await post(f"shared/{shared['slug']}", alex, {"mode": "sometimes"})).status_code == 422
+    assert (await post(f"shared/{shared['slug']}", alex, {})).status_code == 422
+    assert (await post(personal["slug"], mia, {"mode": "all"})).status_code == 404
+    assert (await get(personal["slug"], mia)).status_code == 404
+
+
 async def test_a_create_checks_every_person_and_their_servers(client) -> None:
     post = lambda p, b: client.post("/v1/workspaces", params=p, json=b, headers=_h())  # noqa: E731
     alex, mia = {"person": "alex"}, {"person": "mia"}
@@ -529,6 +775,11 @@ async def test_another_owner_gets_404_on_every_route(client) -> None:
         ),
         client.delete(f"/v1/workspaces/{slug}/items/{item['id']}", params=mia, headers=_h()),
         client.get(f"/v1/workspaces/{slug}/block", params=mia, headers=_h()),
+        client.post(f"/v1/workspaces/{slug}/read", params=mia, headers=_h(), json={"turn_id": 1}),
+        client.get(f"/v1/workspaces/{slug}/notify", params=mia, headers=_h()),
+        client.post(
+            f"/v1/workspaces/{slug}/notify", params=mia, headers=_h(), json={"mode": "off"}
+        ),
     ]
     for call in calls:
         assert (await call).status_code == 404

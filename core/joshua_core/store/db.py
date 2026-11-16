@@ -103,6 +103,20 @@ CREATE INDEX IF NOT EXISTS idx_transcript_created ON transcript (created_at DESC
 CREATE INDEX IF NOT EXISTS idx_transcript_fts
     ON transcript USING gin (to_tsvector('english', content));
 
+-- What a person has read of a conversation. `last_read_turn_id` is the id of
+-- the newest transcript row they have seen, so the rows after it are their
+-- unread ones. The key is the person and the conversation, never the
+-- conversation alone: in a shared workspace every person reads one
+-- conversation, and each of them has a count of their own. Nothing reads this
+-- table until a row exists.
+CREATE TABLE IF NOT EXISTS conversation_reads (
+    person_id         TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    conversation_id   UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    last_read_turn_id BIGINT NOT NULL DEFAULT 0,
+    last_read_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (person_id, conversation_id)
+);
+
 -- KB retrieval audit (phase 4). One row per injection decision or kb tool call;
 -- `results` carries what the model was given. Write-only from the app.
 CREATE TABLE IF NOT EXISTS kb_event (
@@ -217,8 +231,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
     status      TEXT NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active', 'paused', 'archived')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (owner, slug)
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- A shared workspace is one thread that several people write in. `members`
@@ -227,8 +240,25 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS members JSONB NOT NULL DEFAULT '[]'::jsonb;
 -- "the shared workspaces that hold this person", for the list and the reach rule.
 CREATE INDEX IF NOT EXISTS ix_workspaces_members ON workspaces USING gin (members);
--- The slug of a shared workspace is one for everyone, so no second one takes it.
-CREATE UNIQUE INDEX IF NOT EXISTS ux_workspaces_shared_slug ON workspaces (slug) WHERE shared;
+
+-- The status is part of the uniqueness of a slug: a closed (archived)
+-- workspace frees its name at once, so a new workspace of the same title takes
+-- the plain slug, while the archived row keeps the slug it was created with.
+-- Nothing is ever renamed. A slug lookup therefore orders the live rows first
+-- (store/repo.py), and the permanent address of a workspace is its id.
+-- A database from before this rule holds the inline UNIQUE (owner, slug),
+-- which knew nothing of the status, under the name Postgres gives such a
+-- constraint, and the shared index without the status. Both go, so a fresh
+-- database and a migrated one hold the same two indexes and nothing else.
+ALTER TABLE workspaces DROP CONSTRAINT IF EXISTS workspaces_owner_slug_key;
+DROP INDEX IF EXISTS ux_workspaces_shared_slug;
+-- One slug per owner among the workspaces that are not archived.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workspaces_owner_slug_live
+    ON workspaces (owner, slug) WHERE status <> 'archived';
+-- The slug of a shared workspace is one for everyone, so no second live one
+-- takes it.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workspaces_shared_slug_live
+    ON workspaces (slug) WHERE shared AND status <> 'archived';
 
 CREATE TABLE IF NOT EXISTS workspace_items (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -249,6 +279,23 @@ CREATE TABLE IF NOT EXISTS workspace_items (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_workspace_items_ref
     ON workspace_items (workspace_id, kind, ref);
 
+-- When Joshua may reach one person of one workspace (see store/notify.py).
+-- `mode`: 'off' never, 'decide' when the thread needs them, 'all' on every
+-- turn another person writes. A person with no row takes the default of the
+-- workspace: 'decide' in a shared one, 'off' in a personal one, so this table
+-- is empty until somebody changes a mode. `last_notified_at` is the
+-- ten-minute guard of `notify_user`: one notification per person per
+-- workspace in that time.
+CREATE TABLE IF NOT EXISTS notify_prefs (
+    person_id        TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    workspace_id     UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    mode             TEXT NOT NULL DEFAULT 'decide'
+                     CHECK (mode IN ('off', 'decide', 'all')),
+    last_notified_at TIMESTAMPTZ,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (person_id, workspace_id)
+);
+
 -- The secret of a person, for the sign-in of the viewer (see joshua_core.auth_api).
 -- Only the bcrypt hash is stored, and no route ever gives it back. A hard
 -- delete of a person takes the row with it.
@@ -257,6 +304,42 @@ CREATE TABLE IF NOT EXISTS auth_secret (
     secret_hash TEXT NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- The settings of the instance, one row per setting (see store/settings.py).
+-- `key` is namespaced by a dotted prefix, such as `push.vapid_public_key`.
+-- `value` holds the text of a plain setting, and the ciphertext of a secret
+-- one: `is_secret` says which, and no route ever answers a secret value.
+-- `updated_by` is the person who wrote it last, or NULL for server code.
+-- Nothing reads this table until a row exists.
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL DEFAULT '',
+    is_secret  BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by TEXT
+);
+
+-- The web push subscriptions, one row per browser a person subscribed with
+-- (see store/push.py). One person has several rows, one per device, and
+-- `endpoint` is the push service URL of that browser, so it is unique: a
+-- browser that subscribes again updates its row. `p256dh` and `auth` are the
+-- keys the payload is encrypted to (RFC 8291). `failures` counts the sends in
+-- a row that the push service refused; a row over the threshold is dropped,
+-- and a 404 or a 410 drops it at once.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    person_id  TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    endpoint   TEXT NOT NULL UNIQUE,
+    p256dh     TEXT NOT NULL,
+    auth       TEXT NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_ok_at TIMESTAMPTZ,
+    failures   INT NOT NULL DEFAULT 0
+);
+-- "the subscriptions of this person", for a send and for the list.
+CREATE INDEX IF NOT EXISTS ix_push_subscriptions_person
+    ON push_subscriptions (person_id);
 
 -- The marker of the one-time import of the viewer passwords into auth_secret.
 -- This schema has no key/value or meta table, so the import gets this small

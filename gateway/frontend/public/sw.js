@@ -15,6 +15,12 @@
  * workspace routes, and every other JSON route of the viewer go to the
  * network exactly as they would with no worker. Nothing else is written to
  * the cache either: only a GET of this origin that answered 200.
+ *
+ * It is also the half of web push that runs in the browser: a `push` event
+ * shows the notification its payload names, and a tap on that notification
+ * (`notificationclick`) brings the window to the address of the payload, or
+ * opens one there. There is one worker per scope, so these handlers live
+ * beside the cache and not in a second file.
  */
 
 // The build writes its id over the placeholder (see `buildStamp.ts`), so every
@@ -129,4 +135,123 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith(ASSETS) || PRECACHE.includes(url.pathname)) {
     event.respondWith(cacheFirst(request));
   }
+});
+
+// Web push: the notification, and the tap on it.
+//
+// The payload of a push holds `title`, `body`, `url` and `tag` (core's
+// `Notification`). iOS shows every push it delivers and allows no silent one,
+// so a payload that cannot be read still leaves a line a person can tap.
+
+// What a notification says when the payload says nothing.
+const FALLBACK_TITLE = "Joshua";
+const FALLBACK_TAG = "joshua";
+
+// Where a tap goes when the payload names no address: the start of the app.
+const FALLBACK_URL = "/";
+
+// The app icon of a notification, and the small badge a phone draws beside it.
+const NOTIFICATION_ICON = "/logo-192.png";
+const NOTIFICATION_BADGE = "/favicon-32.png";
+
+// The address of a payload, as a path of this app, such as
+// `/chat/w/shared/<slug>`. An absolute address of this origin, which an older
+// core sends, is reduced to its path, so that payload lands right too.
+// Anything else — another origin, a scheme, a protocol-relative address — is
+// not followed, and the tap opens the app.
+function pathOf(value) {
+  let url;
+  try {
+    url = new URL(value, self.location.origin);
+  } catch {
+    return FALLBACK_URL;
+  }
+  if (url.origin !== self.location.origin) return FALLBACK_URL;
+  return url.pathname + url.search + url.hash;
+}
+
+// The four fields of the payload, each of them a string.
+function payloadOf(event) {
+  let body = null;
+  try {
+    body = event.data ? event.data.json() : null;
+  } catch {
+    // The payload is not JSON: the notification below says Joshua has
+    // something, and the tap opens the app.
+  }
+  if (!body || typeof body !== "object") body = {};
+  const text = (value) => (typeof value === "string" ? value : "");
+  return {
+    title: text(body.title) || FALLBACK_TITLE,
+    body: text(body.body),
+    // The tag of a workspace, so its notifications collapse into the newest.
+    tag: text(body.tag) || FALLBACK_TAG,
+    url: pathOf(text(body.url)),
+  };
+}
+
+self.addEventListener("push", (event) => {
+  const payload = payloadOf(event);
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
+      icon: NOTIFICATION_ICON,
+      badge: NOTIFICATION_BADGE,
+      // The tap reads the address back from here.
+      data: { url: payload.url },
+    }),
+  );
+});
+
+// The message the open app routes on. `App.tsx` listens for it, takes the
+// `url` when it is a path of this app, and routes there with the router.
+const NAVIGATE = "joshua:navigate";
+
+// The window the tap belongs in: the one that already shows that address, else
+// the open window, which the worker asks to route itself, else a new one. The
+// installed app has one window, so the common path is the second one.
+//
+// The open window does the routing because Safari in a home-screen app has no
+// `WindowClient.navigate`: the call answers nothing, and `openWindow` there
+// only brings the app to the front on the page it already shows, so the tap
+// went nowhere. A focus, then one message the app routes on, goes to the
+// address of the payload. `navigate` stays for a client that cannot be sent a
+// message, and `openWindow` runs only when no window is open. Every step is
+// caught, so one that fails still reaches the one below it.
+async function showAt(url) {
+  const target = new URL(url, self.location.origin);
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const here = windows.find((client) => new URL(client.url).pathname === target.pathname);
+  if (here) {
+    await here.focus().catch(() => undefined);
+    return;
+  }
+  const first = windows[0];
+  if (first) {
+    // The focus comes first, so the app is in front while it routes.
+    await first.focus().catch(() => undefined);
+    if (typeof first.postMessage === "function") {
+      try {
+        first.postMessage({ type: NAVIGATE, url });
+        return;
+      } catch {
+        // A client that will not take a message is sent below instead.
+      }
+    }
+    if (typeof first.navigate === "function") {
+      const moved = await first.navigate(target.href).catch(() => null);
+      if (moved) {
+        await moved.focus().catch(() => undefined);
+        return;
+      }
+    }
+  }
+  await self.clients.openWindow(target.href);
+}
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  event.waitUntil(showAt(data && typeof data.url === "string" ? data.url : FALLBACK_URL));
 });

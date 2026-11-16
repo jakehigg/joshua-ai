@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState, type ReactNode } from "react";
-import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { ApiError, getJson } from "./api/client";
 import Admin from "./pages/Admin";
@@ -172,12 +172,57 @@ function OwnerOnly({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** The message the service worker sends when a notification was tapped. */
+const NAVIGATE = "joshua:navigate";
+
+/** True for an address this app renders itself: a path, and not another site. */
+function inApp(url: unknown): url is string {
+  return typeof url === "string" && url.startsWith("/") && !url.startsWith("//");
+}
+
+/**
+ * The address a tap on a notification asks for.
+ *
+ * The worker of the installed app (`public/sw.js`) does not send the window
+ * anywhere itself: Safari in a home-screen app has no `WindowClient.navigate`,
+ * and `openWindow` there only brings the app to the front on the page it
+ * already shows. So the worker focuses the window and sends it one message,
+ * and the app routes. It is the router of the whole app that routes, so the
+ * listener lives here, beside the routes.
+ *
+ * Only a path of this app is followed. Another origin and any other message
+ * are ignored, as the worker already ignores an address of another site.
+ */
+function useNotificationRoute(): void {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) {
+      return undefined;
+    }
+    const container = navigator.serviceWorker;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: unknown; url?: unknown } | null;
+      if (!data || data.type !== NAVIGATE || !inApp(data.url)) {
+        return;
+      }
+      navigate(data.url);
+    };
+    container.addEventListener("message", onMessage);
+    return () => {
+      container.removeEventListener("message", onMessage);
+    };
+  }, [navigate]);
+}
+
 /**
  * The routes of the app. Every screen of the viewer is here: there is no
  * other renderer. An address that no route claims renders an empty page,
  * because the server has no page of its own behind this app.
  */
 export default function App() {
+  useNotificationRoute();
+
   return (
     <SignedIn>
       <Routes>
@@ -214,6 +259,14 @@ export default function App() {
         />
         <Route
           path="/admin/users"
+          element={
+            <OwnerOnly>
+              <Admin />
+            </OwnerOnly>
+          }
+        />
+        <Route
+          path="/admin/instance"
           element={
             <OwnerOnly>
               <Admin />

@@ -22,7 +22,7 @@ the wiki, the file bytes, the journal, the search, the usage, the links, the
 documents with their comments, the assignments and the saved ones with
 theirs, the edit, the new page, the save and the delete, the chat
 (``chat/<person>/turns``, which streams one turn, and
-``chat/<person>/history``), and the nine workspace routes. The chat and the
+``chat/<person>/history``), and the ten workspace routes. The chat and the
 workspaces are routes of the viewer, not another app: the chat reaches the
 channels container through ``viewer_channels`` and ``viewer_multipart``, and
 the workspaces proxy core's ``/v1/workspaces`` through

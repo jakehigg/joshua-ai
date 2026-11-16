@@ -147,6 +147,32 @@ async def test_a_client_that_leaves_does_not_cancel_the_turn(tmp_path: Path) -> 
     assert _names(frames) == ["accepted", "status", "delta"]
 
 
+async def test_a_delta_hook_that_fails_does_not_fail_the_turn(tmp_path: Path) -> None:
+    """The client left, so the hook that fed it raises. The turn still answers."""
+    rig = Rig(tmp_path)
+    chunks: list[str] = []
+
+    async def two_deltas(mc: Any, prompt: str, on_delta: Any) -> TurnResult:
+        await on_delta("one ")
+        await on_delta("two")
+        return TurnResult(text="the answer", is_error=False)
+
+    rig.manager._run_session = two_deltas  # type: ignore[method-assign]
+
+    async def broken(chunk: str) -> None:
+        chunks.append(chunk)
+        raise RuntimeError("the client is gone")
+
+    result = await rig.manager.run_turn(rig.channel, rig.conversation, "hi", on_delta=broken)
+
+    assert result.text == "the answer"
+    out = [r for r in rig.repo.transcripts if r["direction"] == "out"]
+    assert [(r["content"], r["status"]) for r in out] == [("the answer", "ok")]
+    # The hook is dropped once it failed: the turn does not keep calling it.
+    assert chunks == ["one "]
+    assert rig.manager.pending_for("c1") is None
+
+
 async def test_a_connected_client_gets_every_event(tmp_path: Path) -> None:
     rig = Rig(tmp_path)
     frames: list[tuple[str, Any]] = []

@@ -111,6 +111,21 @@ export function isImageItem(item: WorkspaceItem): boolean {
   return item.kind === "file" && url.startsWith("/") && !url.startsWith("//") && (isImagePath(url) || isImagePath(item.ref));
 }
 
+/**
+ * What an item points at, as one key: the document path, the address of a
+ * page or a photo, or the ref of an item that opens nothing. Two rows with
+ * the same key are the same thing, whatever their kind, so the panel shows
+ * one of them (ItemPanel.tsx).
+ */
+export function targetKey(item: WorkspaceItem): string {
+  const target = itemTarget(item);
+  if (target === null) return item.ref.trim();
+  if (target.type === "document") return target.artifact.path;
+  if (target.type === "image") return target.image.url;
+  if (target.type === "page") return target.page.url;
+  return target.card.address || item.ref.trim();
+}
+
 export function itemTarget(item: WorkspaceItem): ItemTarget | null {
   const title = item.title.trim() || item.ref;
   const kindLabel = kindName(item.kind);

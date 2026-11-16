@@ -5,6 +5,12 @@
 // item with an unsafe address (links.ts) is shown as text. The item that is
 // open in the panel is marked in the list.
 //
+// The list holds one row for each thing the items point at: the same document
+// can be recorded twice, as a `plan` and as a `document`, or by a tool and by
+// hand, and the panel then shows the row that has a title and opens it
+// (`dedupeItems`). A row with no title of its own asks the viewer for the
+// title of its document, so no row is labelled with a bare path.
+//
 // A row is one line: a kind icon, the title (cut with an ellipsis, the whole
 // title on hover), a pin mark, and a "..." button. The button opens a small
 // menu with Pin or Unpin and Remove. Remove hides the row at once and says so
@@ -29,8 +35,9 @@ import {
   removeItem,
   type WorkspaceItem,
 } from "../api/workspaces";
+import { getDocumentMeta } from "../api/client";
 import { useDocumentPanel } from "./DocumentPanel";
-import { isImageItem, itemTarget } from "./itemTarget";
+import { isImageItem, itemTarget, targetKey, type ItemTarget } from "./itemTarget";
 
 const KIND_LABELS: Record<string, string> = {
   document: "Documents",
@@ -56,6 +63,60 @@ export function groupItems(items: WorkspaceItem[]): [string, WorkspaceItem[]][] 
 
 function label(item: WorkspaceItem): string {
   return item.title.trim() || item.ref;
+}
+
+/** The title of a row, or "" when its only label is the path it points at. */
+function titleOf(item: WorkspaceItem): string {
+  const title = item.title.trim();
+  return title && title !== item.ref.trim() ? title : "";
+}
+
+// How good a row is as the one row of its target: a title first, then a
+// target that opens.
+function rank(item: WorkspaceItem): number {
+  return (titleOf(item) ? 2 : 0) + (itemTarget(item) ? 1 : 0);
+}
+
+/**
+ * One row for each thing the items point at (`targetKey`). The same document
+ * can be recorded twice, as two kinds or by two writers, and the panel then
+ * shows the row that has a title and opens it, never a second row of the same
+ * path. Rows of equal worth keep the order they came in.
+ */
+export function dedupeItems(items: WorkspaceItem[]): WorkspaceItem[] {
+  const best = new Map<string, WorkspaceItem>();
+  for (const item of items) {
+    const key = targetKey(item);
+    const kept = best.get(key);
+    if (kept === undefined || rank(item) > rank(kept)) best.set(key, item);
+  }
+  return items.filter((item) => best.get(targetKey(item)) === item);
+}
+
+/**
+ * What a row is called. A row with no title of its own points at a document
+ * with one, so it asks the viewer for it (`<url>.json`) instead of showing
+ * the bare path. Until the answer comes, and when it does not come, the slug
+ * of the document stands for the title.
+ */
+function useItemLabel(item: WorkspaceItem, target: ItemTarget | null): string {
+  const known = titleOf(item);
+  const url = !known && target?.type === "document" ? target.artifact.url : "";
+  const [found, setFound] = useState("");
+  useEffect(() => {
+    setFound("");
+    if (!url) return undefined;
+    let live = true;
+    void getDocumentMeta(url).then((meta) => {
+      if (live) setFound(meta?.title.trim() ?? "");
+    });
+    return () => {
+      live = false;
+    };
+  }, [url]);
+  if (known) return known;
+  if (found) return found;
+  return target?.type === "document" ? target.artifact.slug : label(item);
 }
 
 const KIND_ICONS: Record<string, string> = {
@@ -111,7 +172,7 @@ function Entry({
 }) {
   const panel = useDocumentPanel();
   const target = itemTarget(item);
-  const text = label(item);
+  const text = useItemLabel(item, target);
   const name = target ? (
     <button
       type="button"
@@ -169,14 +230,15 @@ function Entry({
 }
 
 export function ItemPanel({
-  slug,
+  workspace,
   refreshKey,
   open,
   onClose,
   collapsed = false,
   onCollapse,
 }: {
-  slug: string;
+  /** The id of the workspace whose items these are, never a slug ref. */
+  workspace: string;
   refreshKey: number;
   open: boolean;
   onClose: () => void;
@@ -201,13 +263,13 @@ export function ItemPanel({
   undoRef.current = undo;
 
   const load = useCallback(() => {
-    listItems(slug)
+    listItems(workspace)
       .then((rows) => {
         setItems(rows);
         setError("");
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "the items did not load"));
-  }, [slug]);
+  }, [workspace]);
 
   useEffect(load, [load, refreshKey]);
   useEffect(() => {
@@ -249,25 +311,25 @@ export function ItemPanel({
     if (!waiting) return;
     clearTimeout(waiting.timer);
     setUndo(null);
-    void act(removeItem(slug, waiting.item.id));
+    void act(removeItem(workspace, waiting.item.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, load]);
+  }, [workspace, load]);
   useEffect(
     () => () => {
       const waiting = undoRef.current;
       if (waiting) {
         clearTimeout(waiting.timer);
-        void removeItem(slug, waiting.item.id).catch(() => undefined);
+        void removeItem(workspace, waiting.item.id).catch(() => undefined);
       }
     },
-    [slug],
+    [workspace],
   );
   const remove = (item: WorkspaceItem) => {
     setMenuFor(null);
     flush();
     const timer = setTimeout(() => {
       setUndo(null);
-      void act(removeItem(slug, item.id));
+      void act(removeItem(workspace, item.id));
     }, UNDO_MS);
     setUndo({ item, timer });
   };
@@ -300,13 +362,13 @@ export function ItemPanel({
     e.preventDefault();
     const address = url.trim();
     if (!address) return;
-    void act(addItem(slug, { kind: "link", ref: address, title: name.trim(), url: address }));
+    void act(addItem(workspace, { kind: "link", ref: address, title: name.trim(), url: address }));
     setUrl("");
     setName("");
     setAdding(false);
   };
 
-  const shown = items.filter((item) => item.id !== undo?.item.id);
+  const shown = dedupeItems(items.filter((item) => item.id !== undo?.item.id));
   const ordered = [...shown].sort((a, b) => Number(b.pinned) - Number(a.pinned));
   return (
     <aside
@@ -372,7 +434,7 @@ export function ItemPanel({
                     onMenu={() => setMenuFor(menuFor === item.id ? null : item.id)}
                     onPin={() => {
                       setMenuFor(null);
-                      void act(pinItem(slug, item.id, !item.pinned));
+                      void act(pinItem(workspace, item.id, !item.pinned));
                     }}
                     onRemove={() => remove(item)}
                   />

@@ -31,7 +31,9 @@ reads its plan first.
 
 The plan, the outputs, and the report are in the store (see ``report``).
 Each stop writes the report: the worker's with the cost added, or, when the
-worker wrote none, a report that the runner makes from the row.
+worker wrote none, a report that the runner makes from the row. A run that
+started in a workspace also records each output as an item of that workspace,
+at the moment it is recorded (see ``workspace_items``).
 
 With a ``GitProxy``, each session gets a new secret for the proxy and a
 ``.gitconfig`` in its ``HOME`` that sends every ``https://`` git URL there.
@@ -64,7 +66,16 @@ from joshua_shared.gateway_mcp import allowed_gateway_servers, gateway_servers
 from joshua_shared.limits import parse_event_windows
 from joshua_shared.log import get_logger
 
-from joshua_assignments import budget, inbox, prompts, report, session, stall
+from joshua_assignments import (
+    budget,
+    inbox,
+    notify,
+    prompts,
+    report,
+    session,
+    stall,
+    workspace_items,
+)
 from joshua_assignments.clock import Clock
 from joshua_assignments.core_client import CoreClient
 from joshua_assignments.git_proxy import GitProxy, git_config, write_git_config
@@ -133,10 +144,12 @@ class AssignmentTools:
         assignment_id: int,
         host: RunnerHost,
         sleep: Callable[[float], Any] = asyncio.sleep,
+        core: CoreClient | None = None,
     ) -> None:
         self.assignment_id = assignment_id
         self.host = host
         self.sleep = sleep
+        self.core = core
         self.finished: dict[str, Any] | None = None
         self.question: str | None = None
         self.checkpoints = 0
@@ -179,10 +192,32 @@ class AssignmentTools:
         kind, ref = _text(args.get("kind")), _text(args.get("ref"))
         if not kind or not ref:
             return _reply("Give a kind and a ref.", is_error=True)
-        count = await self.host.store.add_output(
-            self.assignment_id, kind, ref, _text(args.get("title"))
-        )
+        title = _text(args.get("title"))
+        count = await self.host.store.add_output(self.assignment_id, kind, ref, title)
+        await self._record_item({"kind": kind, "ref": ref, "title": title})
         return _reply(f"Output recorded. Outputs: {count}.")
+
+    async def _record_item(self, output: dict[str, Any]) -> None:
+        """Add one recorded output to the workspace of the run, if it has one.
+
+        Core takes the person of the run, so an output of a run whose person
+        is not one of the people of that workspace adds nothing. The same
+        output recorded twice keeps one row. An item that does not land is
+        logged and never fails ``record_output``.
+        """
+        if self.core is None:
+            return
+        row = await self.host.store.get(self.assignment_id)
+        if row is None:
+            return
+        workspace = notify.workspace_of(row)
+        person = str(row.get("person_id") or "")
+        item = workspace_items.item_of(output)
+        if not workspace or not person or item is None:
+            return
+        await self.core.add_workspace_item(
+            workspace, person, item, assignment_id=self.assignment_id
+        )
 
     async def write_report(self, args: dict[str, Any]) -> dict[str, Any]:
         markdown = _text(args.get("markdown"))
@@ -508,7 +543,7 @@ class SdkRunner:
         config_dir.mkdir(parents=True, exist_ok=True)
         (work / prompts.REPOS_DIR).mkdir(exist_ok=True)
         self._git_setup(row, home)
-        tools = AssignmentTools(assignment_id, self.host, self.sleep)
+        tools = AssignmentTools(assignment_id, self.host, self.sleep, self.core)
         server = session.assignment_server(tools.handlers())
         env = session.session_env(
             self.environ,

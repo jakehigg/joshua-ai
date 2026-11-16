@@ -1,15 +1,16 @@
 // The app-wide navigation links: the sections of the session, the links
-// group, "Profile", and "Admin" for the owner. The sidebar of the shell draws them, and on a phone
+// group, "Profile", "Admin" for the owner, and "Reload". The sidebar draws them, and on a phone
 // in the chat the rail draws them too, under its workspaces, so the phone has
 // one drawer for both (Rail.tsx). The shell puts `sections` and `section` in
 // a context so the rail can read them without a second session call.
 
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import { requestReload } from "../pwa";
 import Icon from "./Icon";
 import LinksNav from "./LinksNav";
-import { ADMIN_ICON, ME_ICON, section as sectionOf } from "./sections";
+import { ADMIN_ICON, ME_ICON, RELOAD_ICON, section as sectionOf } from "./sections";
 
 export interface SessionSection {
   key: string;
@@ -81,6 +82,34 @@ function NavItem({
   );
 }
 
+/**
+ * The item that loads the page again.
+ *
+ * The installed app has no address bar and no reload button, and the chat
+ * screen takes the pull of a finger for its own list, so a page that shows a
+ * state it cannot clear has no other way out. The item is in this navigation,
+ * which the sidebar draws on a wide screen and the drawer on a phone, so it
+ * is one or two taps away on every page.
+ *
+ * A send that is going out holds the reload (`pwa.ts`): the item then says
+ * that it waits, and the page loads again when the send is done.
+ */
+function ReloadItem() {
+  const [waiting, setWaiting] = useState(false);
+  return (
+    <button
+      type="button"
+      className="j-nav-item"
+      onClick={() => {
+        if (!requestReload()) setWaiting(true);
+      }}
+    >
+      <Icon paths={RELOAD_ICON} />
+      {waiting ? "Reloading after the send" : "Reload"}
+    </button>
+  );
+}
+
 export default function AppNav({
   sections,
   section,
@@ -133,6 +162,9 @@ export default function AppNav({
           </Link>
         )}
       </nav>
+      <div className="v-sections v-app">
+        <ReloadItem />
+      </div>
     </>
   );
 }

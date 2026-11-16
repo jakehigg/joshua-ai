@@ -793,6 +793,13 @@ kept: the chat, the wiki pages, the documents and the workspaces always come
 from the instance, and no answer of a person sits in the cache of the phone.
 An update arrives on the next visit with a network.
 
+The app has no reload button of the browser, so the menu has one: "Reload", at
+the foot of the navigation. It loads the page again, which clears a screen that
+is stuck. On a phone the drawer holds it, and in the chat the drawer of the
+workspaces does; on a wide screen it is at the foot of the sidebar. A file that
+is going out holds the reload: the item says that it waits, and the page loads
+again when the send is done.
+
 ### Links in the menu
 
 The menu has a "Links" group: links to the addons and other tools that the
@@ -1139,7 +1146,10 @@ A document opens at `/documents/<owner>/<slug>`:
   address of the document, `/documents/<owner>/<slug>/artifact`. The frame
   cannot reach the viewer, its sign-in, or a form of the viewer. Scripts do
   not run, unless the frontmatter of the document has `scripts: true`: then
-  the sandbox allows scripts and nothing more.
+  the sandbox allows scripts and nothing more. `Full screen` over the frame
+  puts the frame over the whole viewport, with no app bar, no menu and no
+  content column, less the safe-area insets of the screen. The button and
+  `Escape` leave the state, and the state is not kept.
 - The `Source` fold gives the frontmatter first, with no number and no `+`,
   then each line of the body with its number and a `+`.
 - The `Versions` fold lists the commits of the file in the git repository of

@@ -30,6 +30,32 @@ with the images and the packaged chart, are at
 - The chat screen of a shared workspace shows the messages of the other
   people with no reload. It loads the newest rows every 4 seconds while the
   tab shows.
+- The thread of a shared workspace now reads like a group messaging app. Your
+  own messages stand at the right, everybody else's and Joshua's at the left,
+  each writer keeps a bubble colour of their own, and a bubble at the left
+  says who wrote it: the person's name, or Joshua. Before, every message sat
+  in one column with no author, and a thread with two people in it was hard
+  to follow. The colour comes from the name on the row, so every device
+  agrees on it and nothing new is stored; two people with the same display
+  name share a colour, and a renamed person takes a new one. A personal
+  workspace and the normal chat keep the layout they have.
+- A shared workspace now carries a small two-person icon beside its name, in
+  the rail and in the header of the workspace. Before, the rail wrote the
+  word "Shared" after the title, which took the room the title needed.
+- A workspace whose thread holds rows you have not read now shows how many,
+  next to its name in the rail. The count is yours alone: in a shared
+  workspace each person has a count of their own, and reading the thread
+  clears only that person's. The chat marks the thread read while its newest
+  row is on screen, so a row that arrives behind another tab stays unread.
+  The schema adds the table `conversation_reads`, one row for each person and
+  conversation.
+- **The count skips the messages you wrote yourself.** It counts what somebody
+  else said, Joshua or another person of a shared workspace, so sending a
+  message and leaving the workspace at once leaves the count at zero, and
+  Joshua's answer raises it to one. Before, your own message counted, and the
+  rail read as if Joshua had already replied. In a shared workspace a message
+  raises the count of the other people and never of the person who wrote it.
+  The read mark is unchanged, and reading the thread still clears the count.
 - When a new workspace or a change to one is refused, the dialog now shows
   why. For a server that a person cannot use, it names the person and the
   server, for example "Alex cannot use tasks", and says that a shared
@@ -41,6 +67,12 @@ with the images and the packaged chart, are at
   as one turn, in order, one per line. The messages wait on the server, so a
   reload or a closed tab keeps them. The iMessage and Telegram paths do not
   change.
+- Leaving a chat screen while Joshua works no longer spoils the turn. The
+  turn runs on, and the screen shows its real answer when it opens again.
+  Before, the thread could show "Sorry, something went wrong on my end"
+  instead of the answer: the stream that the page dropped could fail the turn
+  it was reading. Core now drops what it cannot hand to a client that has
+  gone, and keeps the turn.
 - A turn that uses all of its agent turns now gets a reply. Before, the
   person got "Sorry, something went wrong on my end" and lost the work of
   the turn. Now core asks the same session for a reply with no tool call:
@@ -58,8 +90,86 @@ with the images and the packaged chart, are at
 - The workspace prompt asks for direct replies. Joshua writes for a person
   who did not watch the work, explains a name the person may not know, says
   whose each step is, and checks with a tool before it asks the person.
+- Work that Joshua started always leaves a line in the thread. When a task or
+  an assignment of Joshua's ends, or a worker of its asks a question that
+  Joshua answers, the thread gets one short line: what happened, the result —
+  the commit, the pull request, the error — and what you must do, if
+  anything. A result that needs a change in your own setup, a gitops
+  repository for example, says so first. Before, Joshua read the end of its
+  own task as quiet work and said nothing, so a finished commit or an answer
+  it gave a worker stayed hidden. An event you did not start, and that needs
+  nothing from you, is still silent.
+- The Items list of a workspace shows one row for each thing the items point
+  at. The same document was recorded twice when a tool and a hand added it, or
+  when one run called it a plan and another a document, and the list then held
+  two rows for it: one with the title, one labelled with the bare path. Now
+  the list keeps the row that has a title and opens the document, and a row
+  with no title of its own asks the viewer for the title of its document, so
+  no row is labelled with a path. Nothing is removed: both rows are still
+  recorded.
+- An assignment that starts in a workspace adds each output it records to
+  that workspace, at the moment it records it. A document output becomes a
+  titled row that opens the document in the chat. Before, the run named the
+  document in its report only, and somebody had to add it to the list by
+  hand. The item is added as the person the run belongs to, so a run of a
+  person who is not one of the people of that workspace adds nothing, and the
+  same output recorded twice stays one row.
+- A photo you just sent no longer flashes the browser's broken-image icon. It
+  shows from the bytes on your device while it goes out, the stored photo
+  stands in its own shape until it answers, and a photo that does not answer
+  is asked for again a few times before it ends as a chip that says it did not
+  load.
+- Closing a workspace frees its name. Create "test", close it, and create
+  "test" again: the second create was refused before, or took a number,
+  because the closed one still held the slug. A name is now taken by the
+  workspaces that are open only, so the new one gets the plain address
+  (`/chat/w/<owner>/test`). The closed workspace is renamed by nothing: it
+  keeps the slug it was made with, and the address of a workspace that is
+  always its own is its id, `/chat/w/<id>`, which is where the chat screen
+  links to it. A slug that only closed workspaces hold opens the one closed
+  last. The chat screen now names a workspace by that id in every call it
+  makes: its thread, its history, its items, its read mark, its notify mode,
+  and a change to it. Before, it sent the name `<owner>/test`, so opening a
+  closed workspace read and wrote the new one that had taken the name. The
+  `<owner>/<slug>` form is the one a person reads and types, and such an
+  address still opens the workspace and goes to its id.
+- A tap on another workspace in the rail now opens it. Before, the page
+  flashed and the chat stayed in the workspace you were already in, on every
+  switch from one workspace to another: the screen still held the workspace of
+  the address before, and sent the browser back to it. The screen now says it
+  is loading until the workspace of the new address is in. Going to Chat first,
+  and a reload, worked before and still do, and a slug address still opens the
+  workspace and goes to its id.
 - A wiki item of a workspace whose ref starts with `wiki/` opens the page.
   The link held the root two times and gave "not found".
+
+### Viewer
+
+- The menu has a "Reload" item, at the foot of the navigation on every
+  screen. The installed app has no address bar and no reload button, so a
+  screen that was stuck could only be cleared by killing the app and opening
+  it again. On a phone the drawer holds the item, and in the chat the drawer
+  of the workspaces does. A file that is going out holds the reload: the item
+  says that it waits, and the page loads again when the send is done.
+- A PDF in the chat now opens in the browser's own viewer instead of starting
+  a download, in the browser and in the installed app. The route that serves a
+  file gives an image and a PDF its own type and `Content-Disposition: inline`.
+  Any other file still downloads under its name. Every file of the viewer is
+  now served `nosniff` and sandboxed, so a file that is secretly HTML runs
+  nothing with your sign-in.
+- The page of an HTML document has a "Full screen" button over its frame. It
+  gives the document the whole screen: no menu, no app bar, no head card, and
+  no reading width. Before, the frame kept the width of the content column,
+  760 pixels, so a document that is drawn to be read at its own size was
+  scaled down on a tablet. The same button and Escape leave the state. Only
+  the safe area of the screen, such as the rounded corners of a tablet, is
+  kept out.
+- **A page that loads now shows one larger spinner, in the middle of the
+  page.** Before, the mark sat at the top left of the content area and was
+  small enough to miss at arm's length on a phone. Every full-page loading
+  state of the viewer uses the one spinner, so each of them is centred both
+  ways and the same size, on the phone and on the desktop. A spinner inside a
+  button or a row keeps the size it had.
 
 ### Usage
 
@@ -73,6 +183,170 @@ with the images and the packaged chart, are at
   still gets `400`. See
   [operations.md](operations.md#the-usage-page) and
   [contracts.md](contracts.md#the-usage-write-route).
+
+### Settings
+
+- **The instance has settings in the database, and the owner writes them under
+  Admin → Instance.** A setting is a row of the new `settings` table, named by
+  a dotted prefix such as `push.vapid_public_key`, so it survives a restart
+  and needs no edit of `joshua.yaml` and no new environment variable. The
+  Instance section of the Admin area shows a section for each group of
+  settings, each field with its own save. Before, the section was a
+  placeholder marked "soon". The first group is the VAPID pair of push
+  notifications.
+- A setting marked secret is encrypted at rest with AES-GCM, so its value is
+  unreadable in the database, and no route ever answers it: a field says only
+  whether a secret is set, and the owner replaces one by writing a new value.
+  The key comes from `JOSHUA_SETTINGS_KEY` in the environment, a base64
+  32-byte key. Generate one with `openssl rand -base64 32`, keep it for the
+  life of the instance, and put it in `.env` (or in the `joshua-core` secret
+  of the chart). With the variable unset, every plain setting still reads and
+  writes, and a write or a read of a secret fails with one error that names
+  the variable. Nothing falls back to plaintext, and no key is minted at
+  startup. See [settings.md](settings.md).
+- The new routes are `GET /api/v1/admin/settings` and
+  `POST /api/v1/admin/settings` in the viewer, over core's
+  `GET /admin/settings` and `POST /admin/settings`. Each one is the owner's
+  alone: a member and a guest are refused. The schema adds the table
+  `settings`.
+- **A field says its kind, and the page draws the control that fits.** A kind
+  is `text`, `bool` or `secret`, and a `bool` is a checkbox that writes `true`
+  or `false`: nobody types the word "true" any more. Each group of the
+  Instance page now carries its numbered steps and a link to the docs, the
+  push group says in one line which keys are set and whether push is on, and a
+  secret with nothing stored is the primary button that names what it sets
+  ("Set the private key") instead of a grey "Set" under a hint. The answer of
+  the read route adds `kind` beside `is_secret`. See
+  [settings.md](settings.md#what-a-field-holds).
+- **A value the feature cannot use is refused where it is written.** The VAPID
+  subject must start with `mailto:` or `https://`, the public key must be the
+  base64url of 65 bytes that start with `0x04`, and the private key the
+  base64url of 32 bytes. A refusal is a `400` whose line says what the field
+  takes, and it never carries the value. Before, a wrong subject was written
+  and `py_vapid` raised `VapidException` in the middle of the first send. See
+  [contracts.md](contracts.md#the-settings-routes).
+
+### Notifications
+
+- **Joshua can send a web push notification to a browser, once the owner turns
+  push on.** Push is off in every deployment, compose and Kubernetes alike,
+  and no environment variable turns it on: the owner writes four settings
+  under Admin → Instance → Notifications, `push.enabled` and the VAPID public
+  key, private key and subject. The private key is a secret setting, so it is
+  encrypted at rest with `JOSHUA_SETTINGS_KEY` and no route ever answers it.
+  See [notifications.md](notifications.md), which has the command that
+  generates the pair.
+- A browser subscribes over four new viewer routes, each the signed-in
+  person's alone: `GET /api/v1/push/key`, `POST /api/v1/push/subscribe`,
+  `DELETE /api/v1/push/subscribe`, and `POST /api/v1/push/test`, which sends
+  that person a test notification. They proxy core's `/v1/push/*`. While push
+  is off, a key is missing, or `JOSHUA_SETTINGS_KEY` is unset, every route
+  answers `503` with the sentence that says what the owner has to do, and the
+  sender does nothing. See [contracts.md](contracts.md#the-push-routes).
+- The sender runs in core, because the private key never leaves it: it signs
+  each request with VAPID (RFC 8292) and encrypts the payload to the keys of
+  the browser (RFC 8291), so a push service carries a notification it cannot
+  read. The payload holds `title`, `body`, `url` and `tag`, and the tag is the
+  workspace slug, so several notifications of one workspace collapse into the
+  newest. On Kubernetes the `joshua-core` pod is the one that needs egress to
+  the push services.
+- **A device can now turn notifications on itself**, under "Notifications on
+  this device" on your Profile page: one tap asks the browser for the
+  permission, subscribes with the public VAPID key of the instance, and stores
+  the subscription. "Send a test" then sends this device a notification, and
+  "Turn off" drops the subscription in the browser and on the server. The
+  control says what the state is, including a device that blocks
+  notifications, which only the settings of that device can undo, and it shows
+  the sentence of the viewer while the owner has not turned push on. A
+  subscription is one person's and one device's, so the control is on the page
+  of the person and not on a page of a workspace; the Edit drawer of a
+  workspace keeps "Messages to your phone" and "When Joshua may reach you
+  here", which are of the workspace, and points at the Profile page.
+- The service worker of the installed app now shows what arrives and opens
+  what a tap asks for: the notification carries the `title`, the `body` and
+  the `tag` of the payload, and a tap brings the window to the address the
+  payload names, such as `/chat/w/shared/kitchen`. A window that already
+  shows it takes the focus, an open window goes there, and with no window
+  open it opens one. An address of another site is never followed. A payload
+  the worker cannot read still shows a line, because iOS shows every push.
+- **On an iPhone or an iPad, notifications need Joshua on the home screen.**
+  iOS gives web push to an installed app only, on iOS 16.4 or later, so the
+  control asks for the install in Safari and says why. See
+  [notifications.md](notifications.md), which has the steps a person takes.
+- A dead browser cleans itself up: a `404` or a `410` from a push service
+  deletes the subscription, a `429` leaves that endpoint alone until its
+  `Retry-After` has passed, and five other failures in a row drop the row. A
+  send never raises into the turn that caused it. The schema adds the table
+  `push_subscriptions`, one row per browser a person subscribed with, and core
+  gains the dependency `pywebpush`.
+- **In a shared workspace, Joshua can reach one person who is not reading the
+  thread.** The new `notify_user` tool sends one person a notification on
+  their devices, or a line in their normal chat when they have no device. It
+  is in a shared workspace only, and it refuses a person who is not in that
+  workspace. Joshua notifies a person when a question in the thread is for
+  them, a decision waits on them, it wrote a document they need, it added an
+  item they asked for, or somebody asked it to tell them. More conversation
+  on a subject they already know about notifies nobody. See
+  [workspaces.md](workspaces.md#notifying-one-person).
+- The tool keeps three rules of its own, so a chatty turn cannot flood a
+  phone: it never notifies the person who wrote the turn, it never notifies a
+  person who has the thread open and read to its newest row, and it sends one
+  person one notification of one workspace in ten minutes. A line inside that
+  time folds into the notification they already have, which carries the tag of
+  the workspace and opens the thread, so nothing is lost and nothing is sent
+  twice.
+- **Each person of a workspace says when Joshua may reach them there**, under
+  Edit → "When Joshua may reach you here": never, when the thread needs me, or
+  every message of another person. A person who sets nothing is asked for in a
+  shared workspace and never in a personal one, where nobody else writes. The
+  setting is that person's alone: nobody changes another person's. The schema
+  adds the table `notify_prefs`, and the viewer gains
+  `GET` and `POST /api/v1/workspaces/{slug}/notify`. See
+  [notifications.md](notifications.md#when-joshua-may-reach-you-in-a-workspace).
+- **Joshua can tell one person something from any chat.** The new
+  `notify_person` tool takes a person of the roster, one short line, and an
+  optional path inside Joshua, and reaches that person on their phones, or in
+  their normal chat when they have no device. It is for the two cases that are
+  not a workspace's: Joshua decides somebody needs to know, or a person asks
+  him to tell somebody ("tell Lauren to look at the recipe"). It is in a
+  normal chat, a personal workspace and a shared one, for a member only, and
+  it sends one person one notification in ten minutes. A name that two people
+  share is refused with both named, and a `url` that is not a path inside
+  Joshua is refused. `notify_user` is unchanged and stays the tool of a shared
+  workspace, because its notification opens that thread. See
+  [notifications.md](notifications.md#telling-one-person-from-any-chat).
+- **A test send that cannot be signed now says why, and costs no device.** The
+  VAPID header is built once, before the subscriptions, so a subject
+  `py_vapid` refuses or a private key that does not read sends nothing and
+  touches no row: `POST /api/v1/push/test` answers `400` and the `error` is the
+  real message, such as `VapidException: Missing 'sub' from claims.`, which
+  the card on the Profile page shows. Before, the page showed the class name
+  alone, and each attempt counted as a failure of the browser, so five tests
+  in a row deleted a good subscription. A browser that refuses the push it was
+  sent still counts against that one subscription, as before.
+- **A notification of a workspace can now open the thing to read.**
+  `notify_user` takes a `url` beside the person and the line: the path the tap
+  opens, such as the document Joshua wrote or the wiki page that waits on
+  them. A call that names no path still opens the thread of the workspace, as
+  before. The path is a path inside Joshua and nothing else, the one rule
+  `notify_person` already had, so a notification never sends a person to
+  another site. Joshua now notifies a person when somebody asks it to check
+  something with them ("see if this works for Jake"), and once when a plan or
+  a document of a shared workspace is settled and waits on them, with the url
+  of the thing to read. See
+  [workspaces.md](workspaces.md#notifying-one-person).
+- Each `notify_user` call writes one line in core's log: the person, the
+  workspace, whether a notification went, and the guard that stopped it (the
+  writer of the turn, the read state, the ten-minute fold, `mode: off`, or a
+  send that reached neither a browser nor a normal chat). A notification that
+  did not arrive now has a reason you can read.
+- **A tap on a notification now opens the page it names, in the app installed
+  to the home screen.** Before, on an iPhone the tap brought Joshua to the
+  front on the page it already showed, and the wiki page or the thread of the
+  notification was never opened. Safari in an installed app cannot be sent to
+  an address from the outside, so the worker now focuses the open window and
+  asks the app to route there, and it opens a window of its own only when no
+  window is open. An address of another site is still never followed.
 
 ## 0.3.0 - 2026-11-13
 

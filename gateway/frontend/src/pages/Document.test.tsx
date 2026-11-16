@@ -284,6 +284,8 @@ describe("an HTML document", () => {
     expect(screen.getByRole("img", { name: "Scripts of this document do not run." })).toBeDefined();
     expect(document.querySelector(".d-frame-note")).toBeNull();
     expect(document.querySelector(".a-blocks")).toBeNull();
+    // The full page can take the whole screen; the embed page is in a frame.
+    expect(screen.getByRole("button", { name: "Full screen" })).toBeDefined();
   });
 
   it("allows the scripts of a document that asks for them", async () => {
@@ -392,6 +394,7 @@ describe("an HTML document in embed mode", () => {
     expect(document.querySelector(".d-artifact + .d-frame-note")).toBeNull();
     expect(document.querySelector(".d-artifact .d-frame-note")).toBeNull();
     expect(document.querySelector(".d-artifact .d-info")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Full screen" })).toBeNull();
   });
 });
 

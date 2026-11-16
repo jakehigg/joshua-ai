@@ -32,15 +32,34 @@
 // and the `pending` one of the history, which another device may have sent —
 // every waiting message goes as one turn, with no action from the person.
 //
+// While the newest row of a workspace thread is on screen, the screen marks
+// that thread read up to it, so the rail stops counting it. The mark is the
+// signed-in person's own: in a shared workspace every other person keeps the
+// count they have.
+//
 // The screen has a rail on the left (Rail.tsx): Chat, the workspaces, and
 // "+ New workspace". `/chat/:person` is the normal chat, the person's one main
 // thread. `/chat/w/:space/:slug` (WorkspacePage) is one workspace: the same
 // chat, with the workspace header and the item panel (ItemPanel.tsx). The
-// space is `shared` for a shared workspace and the owner for a personal one,
-// and the ref `<space>/<slug>` goes to the turn, the history and the item
-// calls. A one-segment `/chat/w/:ref` link redirects to that address
-// (WorkspaceLink). Each finished turn reloads the items, because the turn may
-// have made some.
+// space is `shared` for a shared workspace and the owner for a personal one.
+// The screen resolves the address it was opened at once, and after that names
+// the workspace by its id alone: the id goes to the turn, the history, the
+// read mark and the item calls, because a closed workspace frees its name and
+// a ref may move to another row. Every link the screen builds is
+// `/chat/w/<id>`, the permanent address of a workspace. A one-segment
+// `/chat/w/:ref` opens the workspace of that id, and sends a slug to the id
+// (WorkspaceLink). A tap on another workspace in the rail only changes that
+// ref, and this screen stays mounted, so the workspace it holds carries the
+// ref it was loaded for (useWorkspaceOf): until the new ref has its own
+// workspace the screen is loading, and the workspace of the ref before never
+// sends the browser back to its address. Each finished turn reloads the
+// items, because the turn may have made some.
+//
+// The thread of a shared workspace reads like a group messaging app: the
+// messages of the person who is signed in stand at the right, every other
+// person's at the left, each writer in their own colour and named
+// (MessageList.tsx, Message.tsx). The session gives the name that says which
+// rows are theirs.
 //
 // On a phone the rail, the item list and the panel are sheets over the
 // conversation, and only one is open at a time: opening one closes the
@@ -55,7 +74,7 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError, getJson } from "../api/client";
-import { getWorkspace, linkOf, refOf, type Workspace } from "../api/workspaces";
+import { getWorkspace, linkOf, markRead, type Workspace } from "../api/workspaces";
 import Shell, { type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Spinner from "../ui/Spinner";
@@ -105,7 +124,16 @@ function useToast(): [string | null, (message: string) => void] {
 
 interface ChatProps {
   person: string;
-  /** The slug sent to the turn and history calls; none is the main thread. */
+  /**
+   * The name of the signed-in person, from the session. In the thread of a
+   * shared workspace it says which rows are theirs, so their own messages
+   * take the right of the list (MessageList.tsx).
+   */
+  me?: string;
+  /**
+   * The id of the workspace, sent to the turn and history calls; none is the
+   * main thread. Never a ref: a ref may name another workspace later.
+   */
   workspace?: string;
   /** The workspace on screen, for its header and item panel. */
   ws?: Workspace;
@@ -113,7 +141,7 @@ interface ChatProps {
   workspaces: Workspaces;
 }
 
-function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
+function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const panels = usePanels();
@@ -288,13 +316,32 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
     if (nextBefore !== null) loadEarlier(nextBefore);
   }, [loadEarlier, nextBefore]);
 
+  // The thread is read as far as the newest row on screen. The mark is this
+  // person's own, so in a shared workspace it clears nobody else's count. The
+  // rail is loaded again, so the count beside the name goes. A mark that fails
+  // is not kept, so the next row tries again.
+  const { reload: reloadWorkspaces } = workspaces;
+  const marked = useRef(0);
+  const onRead = useCallback(
+    (serverId: number) => {
+      if (!workspace || serverId <= marked.current) return;
+      marked.current = serverId;
+      markRead(workspace, serverId)
+        .then(reloadWorkspaces)
+        .catch(() => {
+          marked.current = 0;
+        });
+    },
+    [workspace, reloadWorkspaces],
+  );
+
   return (
     <DocumentPanelProvider panel={panel}>
       <div className={`chat-screen${sheetOpen ? " sheet-open" : ""}${itemsCollapsed ? " items-collapsed" : ""}`}>
         <Rail
           person={person}
           workspaces={workspaces.list}
-          activeSlug={ws?.slug}
+          activeId={ws?.id}
           open={railOpen}
           onNew={() => {
             setRailOpen(false);
@@ -382,6 +429,9 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
             pending={turn.running ? null : view.pending}
             held={turn.held}
             onDropHeld={turn.dropHeld}
+            me={me}
+            shared={ws?.shared ?? false}
+            onRead={onRead}
           />
           {draft && (
             <div className="draft-banner" role="alert">
@@ -426,7 +476,7 @@ function Chat({ person, workspace, ws, onWs, workspaces }: ChatProps) {
         </div>
         {ws && (
           <ItemPanel
-            slug={refOf(ws)}
+            workspace={ws.id}
             refreshKey={itemsKey}
             open={itemsOpen}
             onClose={() => setItemsOpen(false)}
@@ -486,36 +536,57 @@ export function ChatPage({ workspace }: { workspace?: string } = {}) {
   );
 }
 
-// The workspace a ref names, and who is signed in. `null` while it loads.
+/**
+ * What one ref loaded: the workspace of that ref, or the reason it did not
+ * load. The ref is in the same state value as its answer, because a switch
+ * from one workspace to another keeps this screen mounted and only changes
+ * the ref: React renders with the new ref before the effect that loads it
+ * runs. The answer of the ref before is then not the answer of the ref now,
+ * and the screen is still loading.
+ */
+interface Loaded {
+  reference: string;
+  ws: Workspace | null;
+  error: string;
+}
+
+const NOTHING_LOADED: Loaded = { reference: "", ws: null, error: "" };
+
+// The workspace a ref names, and who is signed in: their id and their name,
+// the name the thread of a shared workspace shows on a row. `null` while it
+// loads, and while the ref of the answer is not the ref asked for.
 function useWorkspaceOf(reference: string): {
   person: string;
+  name: string;
   ws: Workspace | null;
   setWs: (w: Workspace) => void;
   error: string;
 } {
   const [person, setPerson] = useState("");
-  const [ws, setWs] = useState<Workspace | null>(null);
-  const [error, setError] = useState("");
+  const [name, setName] = useState("");
+  const [loaded, setLoaded] = useState<Loaded>(NOTHING_LOADED);
 
   useEffect(() => {
     let live = true;
-    setWs(null);
-    setError("");
     Promise.all([getJson<Session>("/session"), getWorkspace(reference)])
       .then(([session, found]) => {
         if (!live) return;
         setPerson(session.person.id);
-        setWs(found);
+        setName(session.person.name);
+        setLoaded({ reference, ws: found, error: "" });
       })
       .catch((exc: unknown) => {
         if (live) {
-          setError(
-            exc instanceof ApiError && exc.status === 404
-              ? "This workspace does not exist."
-              : exc instanceof Error
-                ? exc.message
-                : "the workspace did not load",
-          );
+          setLoaded({
+            reference,
+            ws: null,
+            error:
+              exc instanceof ApiError && exc.status === 404
+                ? "This workspace does not exist."
+                : exc instanceof Error
+                  ? exc.message
+                  : "the workspace did not load",
+          });
         }
       });
     return () => {
@@ -523,7 +594,13 @@ function useWorkspaceOf(reference: string): {
     };
   }, [reference]);
 
-  return { person, ws, setWs, error };
+  const setWs = useCallback(
+    (w: Workspace) => setLoaded({ reference, ws: w, error: "" }),
+    [reference],
+  );
+  const answer = loaded.reference === reference ? loaded : NOTHING_LOADED;
+
+  return { person, name, ws: answer.ws, setWs, error: answer.error };
 }
 
 function WorkspaceError({ text }: { text: string }) {
@@ -538,14 +615,14 @@ function WorkspaceError({ text }: { text: string }) {
 }
 
 /**
- * `/chat/w/:space/:slug`: one workspace. `:space` is `shared` for a shared
- * workspace and the id of the owner for the workspace of a person, so every
- * person in a shared workspace opens it at the same address.
+ * The screen of the workspace a ref names: the chat, with the workspace
+ * header and the item panel. With `toId`, a ref that is not the id of the
+ * workspace sends the browser to `/chat/w/<id>` instead, the permanent
+ * address.
  */
-export function WorkspacePage() {
-  const { space = "", slug = "" } = useParams();
+function WorkspaceScreen({ reference, toId = false }: { reference: string; toId?: boolean }) {
   const workspaces = useWorkspaces();
-  const { person, ws, setWs, error } = useWorkspaceOf(`${space}/${slug}`);
+  const { person, name, ws, setWs, error } = useWorkspaceOf(reference);
 
   if (error !== "") {
     return <WorkspaceError text={error} />;
@@ -557,12 +634,16 @@ export function WorkspacePage() {
       </Shell>
     );
   }
+  if (toId && reference !== ws.id) {
+    return <Navigate to={linkOf(ws)} replace />;
+  }
   return (
     <Shell section="chat">
       <Chat
         key={ws.id}
         person={person}
-        workspace={refOf(ws)}
+        me={name}
+        workspace={ws.id}
         ws={ws}
         onWs={setWs}
         workspaces={workspaces}
@@ -572,23 +653,22 @@ export function WorkspacePage() {
 }
 
 /**
- * `/chat/w/:ref`: a link from the days of one segment, a slug or an id. It
- * finds the workspace and sends the browser to the two-segment address, so
- * an old link, and a link a person kept, still opens the workspace.
+ * `/chat/w/:space/:slug`: one workspace. `:space` is `shared` for a shared
+ * workspace and the id of the owner for the workspace of a person, so every
+ * person in a shared workspace opens it at the same address.
+ */
+export function WorkspacePage() {
+  const { space = "", slug = "" } = useParams();
+  return <WorkspaceScreen reference={`${space}/${slug}`} />;
+}
+
+/**
+ * `/chat/w/:ref`: one segment, the id of a workspace or a slug. The id is the
+ * permanent address and opens the workspace here; any other ref finds the
+ * workspace and sends the browser there, so an old link, and a link a person
+ * kept, still opens the workspace it named.
  */
 export function WorkspaceLink() {
   const { ref = "" } = useParams();
-  const { ws, error } = useWorkspaceOf(ref);
-
-  if (error !== "") {
-    return <WorkspaceError text={error} />;
-  }
-  if (ws === null) {
-    return (
-      <Shell section="chat">
-        <Spinner label="Loading the workspace" />
-      </Shell>
-    );
-  }
-  return <Navigate to={linkOf(ws)} replace />;
+  return <WorkspaceScreen reference={ref} toId />;
 }

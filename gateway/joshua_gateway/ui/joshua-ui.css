@@ -1,6 +1,6 @@
 /*!
  * joshua-ui.css — the shared look of Joshua's own interfaces.
- * Version 1.0.0 ("Remix")
+ * Version 1.0.1 ("Remix")
  *
  * This is the master copy. It lives in joshua-ai at
  * gateway/joshua_gateway/ui/joshua-ui.css. Apps that want the Joshua look
@@ -351,6 +351,16 @@ button.j-list-row { width: 100%; font: inherit; text-align: left; background: no
 
 .j-empty { padding: 28px 16px; text-align: center; color: var(--j-muted); font-size: 14px; }
 .j-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--j-line); border-top-color: var(--j-accent); animation: j-spin .8s linear infinite; }
+/* the spinner of a whole page, which a person sees at arm's length */
+.j-spinner.lg { width: 44px; height: 44px; border-width: 3px; }
+/* the wait mark of a page that loads: the spinner, centred both ways in the
+   content area the page gives it. A page that gives it the screen takes the
+   screen, and a content area takes the height that is left in it, so the
+   spinner is in the middle of what the page shows. A spinner in a button or a
+   row keeps `.j-spinner` alone, at its own size. */
+.j-loading { flex: 1; align-self: stretch; display: flex; align-items: center; justify-content: center; min-height: 100vh; min-height: 100dvh; }
+.j-content:has(> .j-loading) { flex: 1; }
+.j-content .j-loading { min-height: 0; }
 @keyframes j-spin { to { transform: rotate(360deg); } }
 
 /* bar pinned to the bottom of a phone screen, e.g. a quick-add input */

@@ -28,9 +28,23 @@ checked before the body is read. A ``person`` that is not a member of
 - ``GET`` and ``POST /v1/workspaces/{slug}/items`` list and add items.
   ``DELETE /v1/workspaces/{slug}/items/{id}`` removes one and
   ``PATCH /v1/workspaces/{slug}/items/{id}`` changes ``pinned`` or ``seen``.
+  The assignments container adds the outputs of a run that started in a
+  workspace here, with the person of the run, so a run of a person who is not
+  one of the people of that workspace adds nothing (404).
 - ``GET /v1/workspaces/options`` gives the servers, the models, and the people
   that the person may pick.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
+- ``POST /v1/workspaces/{slug}/read`` marks the thread read up to a turn id
+  (``turn_id``, the id of a transcript row) for that person. The mark is
+  theirs alone, so in a shared workspace every other person keeps the count
+  they have. The list route gives each workspace the ``unread`` count of that
+  person: the rows of its thread after their mark that somebody else wrote,
+  Joshua or another person of the thread. A row of their own never counts.
+- ``GET`` and ``POST /v1/workspaces/{slug}/notify`` read and write the notify
+  mode of that person in that workspace (``off``, ``decide``, ``all``), which
+  governs ``notify_user``. The mode is theirs alone. A person with no row of
+  their own has the default: ``decide`` in a shared workspace and ``off`` in a
+  personal one.
 - ``POST /v1/workspaces/by-id/{id}/items`` is for the gateway, which records
   the items of a tool call from a workspace. It takes the id of the workspace
   and no ``person``: the caller is trusted, and the workspace is the one of the
@@ -64,6 +78,7 @@ from joshua_core.store.models import (
     Workspace,
     WorkspaceItem,
 )
+from joshua_core.store.notify import NOTIFY_MODES, default_mode
 from joshua_core.store.repo import SHARED_NAMESPACE, SlugTaken
 
 logger = get_logger("workspaces_api")
@@ -76,6 +91,7 @@ WORKSPACES_PATH = "/v1/workspaces"
 WORKSPACE_REF_PATH = WORKSPACES_PATH + "/{slug:path}"
 
 Notify = Literal["none", "questions", "questions+finishes"]
+NotifyMode = Literal["off", "decide", "all"]
 Status = Literal["active", "paused", "archived"]
 Kind = Literal[
     "document",
@@ -91,8 +107,9 @@ Kind = Literal[
     "file",
 ]
 
-# The two lists above and the store's lists must stay the same.
+# The lists above and the store's lists must stay the same.
 assert Notify.__args__ == WORKSPACE_NOTIFY  # type: ignore[attr-defined]
+assert NotifyMode.__args__ == NOTIFY_MODES  # type: ignore[attr-defined]
 assert Status.__args__ == WORKSPACE_STATUSES  # type: ignore[attr-defined]
 assert Kind.__args__ == WORKSPACE_ITEM_KINDS  # type: ignore[attr-defined]
 
@@ -143,6 +160,18 @@ class ToolItemBody(ItemBody):
 class ItemPatchBody(_Body):
     pinned: bool | None = None
     seen: bool | None = None
+
+
+class ReadBody(_Body):
+    """How far a person has read a thread: the id of a transcript row."""
+
+    turn_id: int = Field(ge=0)
+
+
+class NotifyModeBody(_Body):
+    """When Joshua may notify this person of this workspace."""
+
+    mode: NotifyMode
 
 
 def _authorize(request: Request) -> tuple[JSONResponse | None, str | None]:
@@ -288,6 +317,18 @@ def _dedupe(servers: list[str]) -> list[str]:
     return list(dict.fromkeys(s.strip() for s in servers if s.strip()))
 
 
+async def _unread(repo: Any, person_id: str, workspaces: Collection[Workspace]) -> dict[str, int]:
+    """How many rows of each workspace thread this person has not read, by
+    workspace id: the rows another speaker wrote, never their own. A workspace
+    with nothing unread is not in the answer."""
+    threads: dict[str, str] = {}
+    for workspace in workspaces:
+        conversation = await repo.workspace_conversation(workspace)
+        threads[conversation.id] = workspace.id
+    counts = await repo.unread_counts(person_id, threads)
+    return {threads[conversation_id]: n for conversation_id, n in counts.items()}
+
+
 def build_workspaces_router() -> APIRouter:
     router = APIRouter()
 
@@ -319,8 +360,14 @@ def build_workspaces_router() -> APIRouter:
             return JSONResponse(
                 {"error": "invalid request", "detail": "unknown status"}, status_code=422
             )
-        rows = await request.app.state.ctx.repo.list_workspaces(person_id, status)
-        return JSONResponse({"workspaces": [workspace_json(w) for w in rows]})
+        repo = request.app.state.ctx.repo
+        rows = await repo.list_workspaces(person_id, status)
+        # Each workspace carries the unread count of this person: in a shared
+        # workspace the other people have counts of their own.
+        unread = await _unread(repo, person_id, rows)
+        return JSONResponse(
+            {"workspaces": [{**workspace_json(w), "unread": unread.get(w.id, 0)} for w in rows]}
+        )
 
     @router.post(WORKSPACES_PATH)
     async def create_workspace(request: Request):  # type: ignore[no-untyped-def]
@@ -478,6 +525,61 @@ def build_workspaces_router() -> APIRouter:
         # nothing is marked seen.
         text = await block.render(workspace, conversation.id, fresh=False, mark_seen=None)
         return PlainTextResponse(text)
+
+    @router.post(WORKSPACE_REF_PATH + "/read")
+    async def mark_read(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        """Mark the thread of this workspace read, up to the id of a transcript
+        row, for the person the caller names. The mark is that person's alone:
+        in a shared workspace every other person keeps the count they have."""
+        denied, person_id, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None and person_id is not None
+        try:
+            body = ReadBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        repo = request.app.state.ctx.repo
+        conversation = await repo.workspace_conversation(workspace)
+        read = await repo.mark_conversation_read(person_id, conversation.id, body.turn_id)
+        unread = await repo.unread_counts(person_id, [conversation.id])
+        return JSONResponse(
+            {
+                "conversation": conversation.id,
+                "last_read_turn_id": read.last_read_turn_id,
+                "last_read_at": _iso(read.last_read_at),
+                "unread": unread.get(conversation.id, 0),
+            }
+        )
+
+    @router.get(WORKSPACE_REF_PATH + "/notify")
+    async def get_notify_mode(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        """The notify mode of this person in this workspace, and the default
+        when they have no row of their own."""
+        denied, person_id, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None and person_id is not None
+        pref = await request.app.state.ctx.repo.notify_prefs.get(person_id, workspace.id)
+        default = default_mode(workspace.shared)
+        return JSONResponse({"mode": pref.mode if pref else default, "default": default})
+
+    @router.post(WORKSPACE_REF_PATH + "/notify")
+    async def set_notify_mode(slug: str, request: Request):  # type: ignore[no-untyped-def]
+        """Write the notify mode of this person in this workspace. It is theirs
+        alone: nobody sets the mode of another person."""
+        denied, person_id, workspace = await _scope(request, slug)
+        if denied is not None:
+            return denied
+        assert workspace is not None and person_id is not None
+        try:
+            body = NotifyModeBody.model_validate_json(await request.body())
+        except ValidationError as exc:
+            return _invalid(exc)
+        pref = await request.app.state.ctx.repo.notify_prefs.set_mode(
+            person_id, workspace.id, body.mode
+        )
+        return JSONResponse({"mode": pref.mode, "default": default_mode(workspace.shared)})
 
     @router.get(WORKSPACE_REF_PATH)
     async def get_workspace(slug: str, request: Request):  # type: ignore[no-untyped-def]

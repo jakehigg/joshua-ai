@@ -72,6 +72,13 @@ A channel-addressed event carries a `channel` and `text` and no `event_type`.
 - Without `verbatim`, core runs `text` as one turn framed as an injection (see
   `prompts/builtin/event.md`), then delivers the reply.
 
+The framing decides what the person sees. An event the person did not start, and
+that needs nothing from them, may still answer `[IGNORE]`. An event that ends a
+task or an assignment that Joshua started, and the question of such a worker that
+Joshua answers, always leaves one short line in the thread: what happened, the
+result, and what the person must do. A result that needs a change in the person's
+own setup says so first.
+
 ### Events of the assignments container
 
 The assignments container sends channel-addressed events with its own fleet

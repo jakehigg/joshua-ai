@@ -120,6 +120,9 @@ services:
       AGENT_BACKEND: ${AGENT_BACKEND:-sdk}
       # Read-only token for the optional memos memory source.
       MEMOS_TOKEN: ${MEMOS_TOKEN:-}
+      # Encrypts every secret setting of the instance at rest (docs/settings.md).
+      # Without it, a secret setting cannot be written or read; the rest works.
+      JOSHUA_SETTINGS_KEY: ${JOSHUA_SETTINGS_KEY:-}
       # The old viewer passwords, for the one-time import of the sign-in
       # secrets. Core reads them at the first start after the upgrade, writes
       # a hash for each person who has none, and marks the import done. Delete

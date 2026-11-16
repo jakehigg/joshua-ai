@@ -168,7 +168,7 @@ def window(used: float, resets_at: str = "2026-03-04T14:05:00+00:00") -> dict[st
 
 
 class FakeCore:
-    """Core's ``GET /v1/limits`` and ``POST /v1/usage``."""
+    """Core's ``GET /v1/limits``, ``POST /v1/usage``, and the items of a workspace."""
 
     def __init__(self, five_hour: float | None = 20.0, seven_day: float | None = 10.0) -> None:
         self.five_hour = five_hour
@@ -179,6 +179,11 @@ class FakeCore:
         self.usage_rows: list[dict[str, Any]] = []
         self.usage_requests: list[httpx.Request] = []
         self.limit_reads = 0
+        # ``POST /v1/workspaces/<ref>/items``: the bodies that landed, and the
+        # status to answer with (404 for a person who is not in the workspace).
+        self.item_status = 200
+        self.items: list[dict[str, Any]] = []
+        self.item_requests: list[httpx.Request] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         if request.method == "GET" and request.url.path == "/v1/limits":
@@ -199,6 +204,13 @@ class FakeCore:
             if status == 200:
                 self.usage_rows.extend(json.loads(request.content)["rows"])
             return httpx.Response(status, json={"accepted": 1})
+        if request.method == "POST" and request.url.path.endswith("/items"):
+            self.item_requests.append(request)
+            if self.item_status != 200:
+                return httpx.Response(self.item_status, json={"error": "not found"})
+            body = json.loads(request.content)
+            self.items.append(body)
+            return httpx.Response(200, json={"id": f"i{len(self.items)}", **body})
         return httpx.Response(404)
 
     def client(self, settings: Settings) -> CoreClient:

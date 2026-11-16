@@ -1,6 +1,10 @@
 // The left rail of the chat screen: Chat, the active workspaces, the paused
-// ones (folded), and "+ New workspace". A shared workspace is marked as
-// shared, and every link is `/chat/w/<space>/<slug>` (api/workspaces.ts).
+// ones (folded), and "+ New workspace". A shared workspace is marked with a
+// two-person icon, and every link is `/chat/w/<id>`, the permanent address of
+// a workspace (api/workspaces.ts). The marked row is the workspace of the id
+// on screen: a slug may name two rows, one closed and one live. A workspace
+// with rows the person has not read carries the count of them after its name;
+// in a shared workspace that count is theirs alone.
 // Under them it repeats the app
 // navigation links of the shell (AppNav), without Chat, which the first entry
 // of the rail already is, which the shell's own sidebar shows
@@ -15,12 +19,13 @@ import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { linkOf, type Workspace } from "../api/workspaces";
 import AppNav, { useNav } from "../shell/AppNav";
+import { SharedMark } from "./SharedMark";
 import { inertProps, useMedia } from "./viewport";
 
 export function Rail({
   person,
   workspaces,
-  activeSlug,
+  activeId,
   open,
   onNew,
   onNavigate,
@@ -30,8 +35,8 @@ export function Rail({
 }: {
   person: string;
   workspaces: Workspace[];
-  /** The slug of the workspace on screen, or undefined in the normal chat. */
-  activeSlug?: string;
+  /** The id of the workspace on screen, or undefined in the normal chat. */
+  activeId?: string;
   open: boolean;
   onNew: () => void;
   onNavigate: () => void;
@@ -55,11 +60,16 @@ export function Rail({
     <li key={w.id}>
       <Link
         to={linkOf(w)}
-        aria-current={w.slug === activeSlug ? "page" : undefined}
+        aria-current={w.id === activeId ? "page" : undefined}
         onClick={onNavigate}
       >
         {w.title}
-        {w.shared && <span className="rail-shared"> Shared</span>}
+        {w.shared && <SharedMark />}
+        {(w.unread ?? 0) > 0 && (
+          <span className="rail-unread" aria-label={`${w.unread} unread`}>
+            {w.unread}
+          </span>
+        )}
       </Link>
     </li>
   );
@@ -93,7 +103,7 @@ export function Rail({
         <li>
           <Link
             to={`/chat/${encodeURIComponent(person)}`}
-            aria-current={activeSlug === undefined ? "page" : undefined}
+            aria-current={activeId === undefined ? "page" : undefined}
             onClick={onNavigate}
           >
             Chat

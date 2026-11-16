@@ -4,6 +4,13 @@ The resolution primitives (``get_channel``, ``get_person_by_handle``,
 ``get_or_create_conversation``) turn a platform event into a
 (channel, person, conversation) triple. This module owns the storage; the
 channel adapters own the platform-specific policy.
+
+Three tables have their SQL elsewhere, and ``Repo`` holds each as an attribute.
+``settings`` encrypts a secret value, so its four methods live beside that
+encryption, in ``store/settings.py`` (``repo.settings``).
+``push_subscriptions`` lives beside the sender that writes its failures, in
+``store/push.py`` (``repo.push_subscriptions``), and ``notify_prefs`` beside
+the modes it holds, in ``store/notify.py`` (``repo.notify_prefs``).
 """
 
 from __future__ import annotations
@@ -24,11 +31,15 @@ from joshua_core.store.db import Database
 from joshua_core.store.models import (
     Channel,
     Conversation,
+    ConversationRead,
     Person,
     Task,
     Workspace,
     WorkspaceItem,
 )
+from joshua_core.store.notify import NotifyStore
+from joshua_core.store.push import PushStore
+from joshua_core.store.settings import SettingsStore
 from joshua_core.store.transcript import (
     BLANK_CHARS,
     FAILED_STATUS,
@@ -124,6 +135,15 @@ def _conversation(row: dict[str, Any]) -> Conversation:
     )
 
 
+def _conversation_read(row: dict[str, Any]) -> ConversationRead:
+    return ConversationRead(
+        person_id=row["person_id"],
+        conversation_id=str(row["conversation_id"]),
+        last_read_turn_id=int(row.get("last_read_turn_id") or 0),
+        last_read_at=row.get("last_read_at"),
+    )
+
+
 def _task(row: dict[str, Any]) -> Task:
     return Task(
         id=str(row["id"]),
@@ -175,6 +195,12 @@ def _workspace_item(row: dict[str, Any]) -> WorkspaceItem:
 class Repo:
     def __init__(self, db: Database):
         self._db = db
+        # The settings table, with its own SQL and its encryption.
+        self.settings = SettingsStore(db)
+        # The push subscriptions, with their own SQL beside the sender.
+        self.push_subscriptions = PushStore(db)
+        # When Joshua may notify one person of one workspace.
+        self.notify_prefs = NotifyStore(db)
 
     @property
     def _pool(self):
@@ -589,6 +615,96 @@ class Repo:
                 (today, today),
             )
             return cur.rowcount
+
+    # --- read state --------------------------------------------------------
+
+    async def conversation_read(
+        self, person_id: str, conversation_id: str
+    ) -> ConversationRead | None:
+        """What this person has read of this conversation, or None when they
+        have read nothing of it."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM conversation_reads WHERE person_id = %s AND conversation_id = %s",
+                (person_id, conversation_id),
+            )
+            row = await cur.fetchone()
+        return _conversation_read(row) if row else None
+
+    async def mark_conversation_read(
+        self, person_id: str, conversation_id: str, last_read_turn_id: int
+    ) -> ConversationRead:
+        """Mark this conversation read up to ``last_read_turn_id`` (the id of a
+        transcript row) for this person, and return the row.
+
+        The mark never moves back: a smaller id than the stored one leaves it
+        where it is and only stamps the time. A shared workspace holds one row
+        for each of its people, so one person reading the thread leaves the
+        others' marks alone.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                INSERT INTO conversation_reads (person_id, conversation_id, last_read_turn_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (person_id, conversation_id) DO UPDATE
+                SET last_read_turn_id = GREATEST(
+                        conversation_reads.last_read_turn_id, EXCLUDED.last_read_turn_id
+                    ),
+                    last_read_at = now()
+                RETURNING *
+                """,
+                (person_id, conversation_id, max(0, last_read_turn_id)),
+            )
+            row = await cur.fetchone()
+        assert row is not None
+        return _conversation_read(row)
+
+    async def unread_counts(
+        self, person_id: str, conversation_ids: Collection[str]
+    ) -> dict[str, int]:
+        """How many rows of each of these conversations this person has not
+        read: the rows after their ``last_read_turn_id``, and every row of a
+        conversation they have read nothing of. A conversation with nothing
+        unread is not in the answer.
+
+        A row this person wrote is never counted: the count is what somebody
+        else said, Joshua or another person of a shared thread. The author of
+        an incoming row is its ``meta.speaker``, the person who wrote it, and
+        the person of the conversation when the row carries no speaker, as a
+        thread of one person has one writer.
+
+        The rows counted are the ones a thread shows, as ``transcript_page``
+        gives them: a reply that says nothing is left out.
+        """
+        ids = [str(i) for i in conversation_ids]
+        if not ids:
+            return {}
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT t.conversation_id AS conversation_id, count(*) AS unread
+                FROM transcript t
+                JOIN conversations c ON c.id = t.conversation_id
+                LEFT JOIN people me ON me.id = %s
+                LEFT JOIN conversation_reads r
+                    ON r.conversation_id = t.conversation_id AND r.person_id = %s
+                WHERE t.conversation_id = ANY(%s::uuid[])
+                  AND t.id > COALESCE(r.last_read_turn_id, 0)
+                  AND NOT (t.direction = 'out' AND btrim(t.content, %s) IN ('', %s))
+                  AND NOT (
+                      t.direction = 'in'
+                      AND (CASE
+                              WHEN t.meta->>'speaker' IS NULL THEN c.person_id = me.id
+                              ELSE t.meta->>'speaker' = me.display_name
+                           END) IS TRUE
+                  )
+                GROUP BY t.conversation_id
+                """,
+                (person_id, person_id, ids, BLANK_CHARS, SILENT_REPLY),
+            )
+            rows = await cur.fetchall()
+        return {str(r["conversation_id"]): int(r["unread"]) for r in rows}
 
     # --- tasks -------------------------------------------------------------
 
@@ -1243,7 +1359,9 @@ class Repo:
         a direct thread of the owner), and its conversation.
 
         The slug comes from the title and is made unique among the owner's
-        workspaces with a number.
+        workspaces that are not archived, with a number: a closed workspace
+        keeps its slug but frees the name, so the same title takes the plain
+        slug again.
 
         ``members`` makes it a shared workspace: one thread that the owner and
         the members write in, so the channel is ``shared`` and the conversation
@@ -1324,6 +1442,11 @@ class Repo:
         - ``<slug>`` or ``<id>``: the workspace of the person with that slug,
           then the workspace of that id.
 
+        A slug names the live workspace that holds it: a closed workspace keeps
+        its slug, and a new workspace may take the name, so a slug reaches an
+        archived row only when no live row holds it (``_workspace_by_slug``).
+        An id names one row for ever, archived or not.
+
         The person must be one of the people of the workspace; any other one is
         never found, and any other ref is None. A ref with a slash reaches a
         route URL-encoded as well as in the path, so it is decoded here."""
@@ -1344,11 +1467,16 @@ class Repo:
 
     async def _workspace_by_slug(self, namespace: str, slug: str) -> Workspace | None:
         """The workspace of a namespace and a slug: the shared one of that slug
-        under ``shared``, the workspace of that owner otherwise."""
+        under ``shared``, the workspace of that owner otherwise.
+
+        A closed workspace keeps its slug, and only the live rows hold a slug
+        uniquely (store/db.py), so a slug may name an archived row beside a
+        live one: the live one comes first, and the newest inside each group."""
         shared = namespace == SHARED_NAMESPACE
         sql = "SELECT * FROM workspaces WHERE slug = %s AND " + (
             "shared" if shared else "owner = %s"
         )
+        sql += " ORDER BY status = 'archived', created_at DESC, id LIMIT 1"
         args = (slug,) if shared else (slug, namespace)
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, args)
@@ -1435,7 +1563,14 @@ class Repo:
 
     async def update_workspace(self, workspace_id: str, **fields: Any) -> Workspace | None:
         """Change the given fields of a workspace. ``fields`` are among
-        ``WORKSPACE_FIELDS``; a name outside raises ``ValueError``."""
+        ``WORKSPACE_FIELDS``; a name outside raises ``ValueError``. No slug is
+        ever written here.
+
+        Closing a workspace (``status`` ``archived``) frees its name at once,
+        because the uniqueness of a slug holds among the live rows only
+        (store/db.py): a new workspace of the same title takes the plain slug.
+        The closed row keeps the slug it was created with, and stays reachable
+        at its permanent address, ``/chat/w/<id>``."""
         unknown = set(fields) - set(WORKSPACE_FIELDS)
         if unknown:
             raise ValueError(f"cannot update {sorted(unknown)}")

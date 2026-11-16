@@ -242,6 +242,18 @@ section.limits > .j-meta { margin-top: -6px; }
 .v-links-edit { color: var(--j-faint); font-size: var(--j-text-sm); padding-left: 38px; }
 /* the person's own page sits at the foot of the sidebar */
 .v-you { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--j-line-soft); }
+/* the Reload item of .v-app, under it: a button that looks like a nav link,
+   because the installed app has no reload button of its own */
+button.j-nav-item {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
 
 /* the list on /links */
 .v-link-list .j-list-row { color: var(--j-text); }
@@ -284,6 +296,9 @@ section.limits > .j-meta { margin-top: -6px; }
 .v-user-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .v-user-nosecret { color: var(--j-bad); }
 .v-user-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0; }
+
+/* one setting of the Instance section: the label over the field, then the save */
+.v-setting { display: flex; flex-direction: column; gap: 6px; margin: 0; max-width: 32rem; }
 
 /* the add dialog, over the page */
 .v-admin-overlay {
@@ -730,7 +745,23 @@ iframe.d-frame.measured { min-height: 0; max-width: none; transform-origin: 0 0;
   border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); background: #fff;
 }
 .d-frame-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.d-frame-bar .d-fit { min-height: 32px; padding: 2px 10px; font-size: 0.8125rem; }
+.d-frame-bar .d-fit, .d-frame-bar .d-full { min-height: 32px; padding: 2px 10px; font-size: 0.8125rem; }
+/* Full screen: the frame leaves the content column and takes the viewport,
+   over the sidebar (40) and the add dialog (50). The insets keep the controls
+   and the document out of the rounded corners and off the home indicator of a
+   tablet; everything else of the screen is the document. A document taller
+   than the screen scrolls here, with the bar kept at the top. */
+.d-artifact.full {
+  position: fixed; inset: 0; z-index: 60;
+  gap: 0; overflow: auto; background: var(--j-bg);
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.d-artifact.full .d-frame-bar { position: sticky; top: 0; z-index: 1; padding: 4px; background: var(--j-bg); }
+.d-artifact.full .d-frame-box { border: 0; border-radius: 0; }
+/* A frame with no measured height takes the height that is left. */
+.d-artifact.full .d-frame-box.fills { flex: 1; min-height: 0; }
+.d-artifact.full .d-frame-box.fills iframe.d-frame { height: 100%; min-height: 0; }
 .d-info { color: var(--j-muted); cursor: help; font-size: 0.9rem; }
 .d-frame-note { margin: 0 0 8px; }
 ol.d-versions { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }

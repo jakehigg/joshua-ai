@@ -91,6 +91,24 @@ describe("the shell", () => {
     expect(links).toEqual(["Profile", "Admin"]);
   });
 
+  it("holds a Reload item, which the installed app has no button for", async () => {
+    stubSession();
+    const was = Object.getOwnPropertyDescriptor(window, "location");
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload },
+      configurable: true,
+    });
+
+    shell();
+
+    const item = await screen.findByRole("button", { name: "Reload" });
+    expect(item.closest(".j-sidebar .v-app")).not.toBeNull();
+    fireEvent.click(item);
+    expect(reload).toHaveBeenCalledTimes(1);
+    if (was) Object.defineProperty(window, "location", was);
+  });
+
   it("has no search field in the app bar", () => {
     stubSession();
 

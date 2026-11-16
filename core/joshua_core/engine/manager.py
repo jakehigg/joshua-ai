@@ -1018,8 +1018,10 @@ class ConversationManager:
 
         ``turn_id`` names the turn when the caller already told someone its id.
         ``on_state`` hears ``"queued"`` when the turn has to wait for another
-        turn of the conversation, then ``"running"``. The other arguments are
-        those of ``_run_turn``.
+        turn of the conversation, then ``"running"``. Neither ``on_state`` nor
+        ``on_delta`` can fail the turn: a hook that raises, because the client
+        that read it is gone, is logged and dropped for the rest of the turn.
+        The other arguments are those of ``_run_turn``.
         """
         pending = PendingTurn(
             turn_id=turn_id or _new_turn_id(),
@@ -1134,12 +1136,29 @@ class ConversationManager:
         # Time-to-first-output: stamp the first streamed delta even when the
         # channel does not consume deltas.
         first_output_at: list[float] = []
+        # A hook that failed once is gone for the rest of the turn: the client
+        # that read the deltas has left, and the turn runs on without it.
+        delta_hook_gone = False
 
         async def _timed_delta(chunk: str) -> None:
+            """Hand one chunk to the caller. A hook that fails never fails the turn."""
+            nonlocal delta_hook_gone
             if not first_output_at:
                 first_output_at.append(monotonic())
-            if on_delta is not None:
+            if on_delta is None or delta_hook_gone:
+                return
+            try:
                 await on_delta(chunk)
+            except Exception as exc:  # noqa: BLE001 — a streamed chunk is not worth a turn
+                delta_hook_gone = True
+                logger.warning(
+                    {
+                        "message": "turn delta hook failed",
+                        "turn_id": turn_id,
+                        "conversation_id": conversation.id,
+                        "error": str(exc),
+                    }
+                )
 
         t_lock = monotonic()
         if mc.lock.locked():
@@ -1187,6 +1206,7 @@ class ConversationManager:
                 logger.error(
                     {
                         "message": "turn failed",
+                        "turn_id": turn_id,
                         "conversation_id": conversation.id,
                         "error": str(e),
                         "duration_ms": round((monotonic() - t_start) * 1000),
@@ -1208,6 +1228,7 @@ class ConversationManager:
                 logger.warning(
                     {
                         "message": "turn call failed",
+                        "turn_id": turn_id,
                         "conversation_id": conversation.id,
                         "job": resolved.job,
                         "endpoint": resolved.endpoint,

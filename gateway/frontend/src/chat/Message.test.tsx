@@ -1,13 +1,27 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "./store";
 import { DocumentPanelProvider } from "./DocumentPanel";
-import { Message } from "./Message";
+import { Message, THUMB_BACKOFF_MS, THUMB_TRIES } from "./Message";
+import { toneOf } from "./tone";
 
-function show({ showWho, ...extra }: Partial<ChatMessage> & { showWho?: boolean }) {
+function show({
+  showWho,
+  mine,
+  tone,
+  ...extra
+}: Partial<ChatMessage> & { showWho?: boolean; mine?: boolean; tone?: string }) {
   const message: ChatMessage = { id: "m1", role: "joshua", text: "", ts: "2026-01-01T10:00:00Z", state: "ok", ...extra };
-  return render(<Message message={message} canRetry onRetry={() => undefined} showWho={showWho} />)
-    .container;
+  return render(
+    <Message
+      message={message}
+      canRetry
+      onRetry={() => undefined}
+      showWho={showWho}
+      mine={mine}
+      tone={tone}
+    />,
+  ).container;
 }
 
 const ANSWER = "Payback is about **11 years**.\n\n```speech\nAbout eleven years at today's rates.\n```";
@@ -85,6 +99,26 @@ describe("Message", () => {
     expect(show({ role: "person", text: "and cider", who: "Mia" }).querySelector(".msg-who")).toBeNull();
     // A thread of one person carries no name at all.
     expect(show({ role: "person", text: "hi", showWho: true }).querySelector(".msg-who")).toBeNull();
+  });
+
+  it("stands the message of another person at the left, in the colour it is given", () => {
+    const tone = toneOf("Mia");
+    const other = show({ role: "person", text: "I'll bring pie", who: "Mia", showWho: true, mine: false, tone });
+    expect(other.querySelector("article")?.className).toBe("msg msg-person msg-other");
+    expect(other.querySelector(".bubble")?.className).toBe(`bubble ${tone}`);
+  });
+
+  it("keeps the person's own message at the right, in its colour too", () => {
+    const tone = toneOf("Jake");
+    const own = show({ role: "person", text: "the oven is mine", who: "Jake", tone });
+    expect(own.querySelector("article")?.className).toBe("msg msg-person");
+    expect(own.querySelector(".bubble")?.className).toBe(`bubble ${tone}`);
+  });
+
+  it("marks an answer as Joshua's when the list asks for the name", () => {
+    const named = show({ text: "Noted.", showWho: true });
+    expect(named.querySelector(".msg-who")?.textContent).toBe("Joshua");
+    expect(show({ text: "Noted." }).querySelector(".msg-who")).toBeNull();
   });
 
   it("prints a person message's text as plain text", () => {
@@ -187,5 +221,57 @@ describe("a photo in a message", () => {
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     (screen.getByAltText("IMG_1.jpg").closest("a") as HTMLAnchorElement).dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe("a photo that is still being stored", () => {
+  const base = { id: "m", role: "person" as const, text: "", ts: "2026-01-01T10:00:00Z", state: "ok" as const };
+  const photo = { name: "IMG_1.jpg", mime: "image/jpeg", url: "/api/v1/files/wiki/attachments/a.jpg" };
+
+  function shown(container: HTMLElement) {
+    return container.querySelector(".thumb-box") as HTMLElement;
+  }
+
+  it("stands in its own shape until the image answers", () => {
+    const { container } = render(
+      <Message message={{ ...base, attachments: [photo] }} canRetry onRetry={() => undefined} />,
+    );
+    expect(shown(container).classList.contains("waiting")).toBe(true);
+    fireEvent.load(screen.getByAltText("IMG_1.jpg"));
+    expect(shown(container).classList.contains("waiting")).toBe(false);
+  });
+
+  it("asks again a few times, then says it did not load, and never shows a dead glyph", () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(
+        <Message message={{ ...base, attachments: [photo] }} canRetry onRetry={() => undefined} />,
+      );
+      for (let n = 1; n <= THUMB_TRIES; n += 1) {
+        fireEvent.error(screen.getByAltText("IMG_1.jpg"));
+        // The image is still there, in its box, while it waits for the try.
+        expect(shown(container).classList.contains("waiting")).toBe(true);
+        act(() => void vi.advanceTimersByTime(THUMB_BACKOFF_MS * n));
+        expect(screen.getByAltText("IMG_1.jpg").getAttribute("src")).toBe(`${photo.url}?try=${n}`);
+      }
+      // After the last try the photo is a chip that says so, not a broken image.
+      fireEvent.error(screen.getByAltText("IMG_1.jpg"));
+      expect(container.querySelector("img")).toBeNull();
+      expect(container.querySelector(".thumb-failed")?.textContent).toContain("did not load");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the local preview of a file this screen just sent", () => {
+    const create = vi.fn(() => "blob:local");
+    vi.stubGlobal("URL", { createObjectURL: create, revokeObjectURL: vi.fn() });
+    try {
+      const file = new File(["x"], "IMG_2.jpg", { type: "image/jpeg" });
+      render(<Message message={{ ...base, file }} canRetry onRetry={() => undefined} />);
+      expect(screen.getByAltText("IMG_2.jpg").getAttribute("src")).toBe("blob:local");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -18,12 +18,17 @@ as server-sent events, ``GET /api/v1/chat/<person>/history`` gives a page
 of the conversation, and four ``held`` routes hold the messages written while
 a turn still runs. They all go to the channels container (``CHANNELS_URL``).
 
-The workspaces have nine routes under ``/api/v1/workspaces``, which proxy
+The workspaces have twelve routes under ``/api/v1/workspaces``, which proxy
 core (``CORE_URL``). See ``viewer_api.workspaces``.
 
 The Users section has five routes under ``/api/v1/admin/users``, which proxy
-core's people and secret routes. They are the owner's alone: a member and a
-guest get 403. See ``viewer_api.admin``.
+core's people and secret routes, and the Instance section has two under
+``/api/v1/admin/settings``, which proxy core's settings routes. They are the
+owner's alone: a member and a guest get 403. See ``viewer_api.admin``.
+
+Web push has four routes under ``/api/v1/push``, which proxy core's ``/v1/push``
+routes for the signed-in person: the public key, the subscription of this
+browser (store and remove), and a test notification. See ``viewer_api.push``.
 
 Every path starts with ``API_PREFIX``. The prefix is in one constant and
 ``api_path`` builds every path from it, so no route can drift from it.
@@ -46,6 +51,7 @@ from joshua_gateway.viewer_api import (
     journal,
     links,
     me,
+    push,
     search,
     session,
     usage,
@@ -154,6 +160,17 @@ def routes() -> list[Route]:
             _require_auth(workspaces.delete_item),
             methods=["DELETE"],
         ),
+        Route(
+            api_path("workspaces/{slug:path}/read"),
+            _require_auth(workspaces.read_up_to),
+            methods=["POST"],
+        ),
+        Route(api_path("workspaces/{slug:path}/notify"), _require_auth(workspaces.notify_mode)),
+        Route(
+            api_path("workspaces/{slug:path}/notify"),
+            _require_auth(workspaces.set_notify_mode),
+            methods=["POST"],
+        ),
         Route(api_path("workspaces/{slug:path}/items"), _require_auth(workspaces.list_items)),
         Route(
             api_path("workspaces/{slug:path}/items"),
@@ -164,6 +181,12 @@ def routes() -> list[Route]:
         Route(
             api_path("workspaces/{slug:path}"), _require_auth(workspaces.change), methods=["PATCH"]
         ),
+        # Web push: the subscription of this browser, and a test notification.
+        # They are the signed-in person's alone (``viewer_api.push``).
+        Route(api_path("push/key"), _require_auth(push.key)),
+        Route(api_path("push/subscribe"), _require_auth(push.subscribe), methods=["POST"]),
+        Route(api_path("push/subscribe"), _require_auth(push.unsubscribe), methods=["DELETE"]),
+        Route(api_path("push/test"), _require_auth(push.test), methods=["POST"]),
         # The Users section: the owner's alone, whatever a route looks like.
         Route(api_path("admin/users"), _require_auth(admin.users)),
         Route(api_path("admin/users"), _require_auth(admin.add), methods=["POST"]),
@@ -182,6 +205,9 @@ def routes() -> list[Route]:
             _require_auth(admin.remove),
             methods=["POST"],
         ),
+        # The Instance section: the settings of the instance, the owner's too.
+        Route(api_path("admin/settings"), _require_auth(admin.settings)),
+        Route(api_path("admin/settings"), _require_auth(admin.save_setting), methods=["POST"]),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),
         Route(api_path("files/{root}/{path:path}"), _require_auth(files.file)),
