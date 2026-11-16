@@ -51,25 +51,43 @@ function keyOf(target: FakeRequest | string): string {
 }
 
 // One window of the app, as `clients.matchAll` gives it to the worker. A
-// browser that cannot send a window elsewhere has no `navigate`.
+// browser that cannot take a message has no `postMessage`, and one that cannot
+// send a window elsewhere has no `navigate`.
 interface FakeWindow {
   url: string;
   focused: boolean;
   went: string;
+  /** What the worker asked the app to do, in order. */
+  messages: unknown[];
+  /** True when the window was already focused when the message arrived. */
+  focusedFirst: boolean;
   focus(): Promise<FakeWindow>;
+  postMessage?(data: unknown): void;
   navigate?(url: string): Promise<FakeWindow>;
 }
 
-function windowAt(path: string, { canNavigate = true } = {}): FakeWindow {
+function windowAt(
+  path: string,
+  { canPost = true, refusesMessage = false, canNavigate = true } = {},
+): FakeWindow {
   const open: FakeWindow = {
     url: `https://joshua.test${path}`,
     focused: false,
     went: "",
+    messages: [],
+    focusedFirst: false,
     focus: async () => {
       open.focused = true;
       return open;
     },
   };
+  if (canPost) {
+    open.postMessage = (data: unknown) => {
+      if (refusesMessage) throw new Error("this window takes no message");
+      open.focusedFirst = open.focused;
+      open.messages.push(data);
+    };
+  }
   if (canNavigate) {
     open.navigate = async (url: string) => {
       open.went = url;
@@ -377,18 +395,23 @@ describe("the tap on a notification", () => {
 
     expect(closed).toBe(true);
     expect(open.focused).toBe(true);
+    expect(open.messages).toEqual([]);
     expect(open.went).toBe("");
     expect(worker.opened).toEqual([]);
   });
 
-  it("sends the open window to the workspace the payload names", async () => {
+  it("asks the open window to route to the workspace the payload names", async () => {
     const open = windowAt("/wiki/");
     const worker = load(async () => answer("x"), [open]);
 
     await worker.click({ url: WORKSPACE });
 
-    expect(open.went).toBe(AT);
-    expect(open.focused).toBe(true);
+    // The app routes, because Safari in the installed app goes nowhere on a
+    // `navigate` and opens no window of its own either.
+    expect(open.messages).toEqual([{ type: "joshua:navigate", url: WORKSPACE }]);
+    // The focus comes first, so the app is in front while it routes.
+    expect(open.focusedFirst).toBe(true);
+    expect(open.went).toBe("");
     expect(worker.opened).toEqual([]);
   });
 
@@ -400,13 +423,28 @@ describe("the tap on a notification", () => {
     expect(worker.opened).toEqual([AT]);
   });
 
-  it("opens a window when the browser cannot send one elsewhere", async () => {
-    const open = windowAt("/wiki/", { canNavigate: false });
+  it("sends the open window itself when it takes no message", async () => {
+    const open = windowAt("/wiki/", { canPost: false });
     const worker = load(async () => answer("x"), [open]);
 
     await worker.click({ url: WORKSPACE });
 
-    expect(worker.opened).toEqual([AT]);
+    expect(open.went).toBe(AT);
+    expect(open.focused).toBe(true);
+    expect(worker.opened).toEqual([]);
+  });
+
+  it("opens a window when the browser can neither take a message nor send one", async () => {
+    const mute = windowAt("/wiki/", { canPost: false, canNavigate: false });
+    const refusing = windowAt("/wiki/", { refusesMessage: true, canNavigate: false });
+
+    for (const open of [mute, refusing]) {
+      const worker = load(async () => answer("x"), [open]);
+
+      await worker.click({ url: WORKSPACE });
+
+      expect(worker.opened).toEqual([AT]);
+    }
   });
 
   it("opens the app when the notification names no address", async () => {

@@ -340,6 +340,13 @@ with the images and the packaged chart, are at
   writer of the turn, the read state, the ten-minute fold, `mode: off`, or a
   send that reached neither a browser nor a normal chat). A notification that
   did not arrive now has a reason you can read.
+- **A tap on a notification now opens the page it names, in the app installed
+  to the home screen.** Before, on an iPhone the tap brought Joshua to the
+  front on the page it already showed, and the wiki page or the thread of the
+  notification was never opened. Safari in an installed app cannot be sent to
+  an address from the outside, so the worker now focuses the open window and
+  asks the app to route there, and it opens a window of its own only when no
+  window is open. An address of another site is still never followed.
 
 ## 0.3.0 - 2026-11-13
 

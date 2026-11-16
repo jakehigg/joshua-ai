@@ -229,9 +229,16 @@ worker per scope, so there is no second file.
   one.
 - `notificationclick`: it brings the window to the `url` of the payload, which
   is a path of the app, such as `/chat/w/shared/kitchen`. A window that already
-  shows that address takes the focus, an open window goes there, and with no
-  window open it opens one. An address of another site is never followed: the
-  tap opens Joshua.
+  shows that address takes the focus. With another window open, the worker
+  focuses it and asks the app to route there: it sends the window the message
+  `{ type: "joshua:navigate", url }`, and `App.tsx` routes with the router of
+  the app. Only with no window open does the worker open one
+  (`clients.openWindow`). The app routes because Safari in an installed app
+  has no `WindowClient.navigate`, and `openWindow` there brings the app to the
+  front on the page it already shows instead of opening the address, so the
+  tap went nowhere. `navigate` is left as the fallback of a window that takes
+  no message. An address of another site is never followed, by the worker or
+  by the app: the tap opens Joshua.
 
 The worker is served from `/sw.js`, so its scope is `/` and it covers the chat
 at `/chat/…` with no `Service-Worker-Allowed` header. A worker served from

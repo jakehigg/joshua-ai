@@ -196,25 +196,47 @@ self.addEventListener("push", (event) => {
   );
 });
 
+// The message the open app routes on. `App.tsx` listens for it, takes the
+// `url` when it is a path of this app, and routes there with the router.
+const NAVIGATE = "joshua:navigate";
+
 // The window the tap belongs in: the one that already shows that address, else
-// the open window, sent there, else a new one. The installed app has one
-// window, so the common path is the second one.
+// the open window, which the worker asks to route itself, else a new one. The
+// installed app has one window, so the common path is the second one.
+//
+// The open window does the routing because Safari in a home-screen app has no
+// `WindowClient.navigate`: the call answers nothing, and `openWindow` there
+// only brings the app to the front on the page it already shows, so the tap
+// went nowhere. A focus, then one message the app routes on, goes to the
+// address of the payload. `navigate` stays for a client that cannot be sent a
+// message, and `openWindow` runs only when no window is open. Every step is
+// caught, so one that fails still reaches the one below it.
 async function showAt(url) {
   const target = new URL(url, self.location.origin);
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   const here = windows.find((client) => new URL(client.url).pathname === target.pathname);
   if (here) {
-    await here.focus();
+    await here.focus().catch(() => undefined);
     return;
   }
   const first = windows[0];
-  if (first && typeof first.navigate === "function") {
-    // A browser that refuses to send a window elsewhere gets a window of its
-    // own below.
-    const moved = await first.navigate(target.href).catch(() => null);
-    if (moved) {
-      await moved.focus();
-      return;
+  if (first) {
+    // The focus comes first, so the app is in front while it routes.
+    await first.focus().catch(() => undefined);
+    if (typeof first.postMessage === "function") {
+      try {
+        first.postMessage({ type: NAVIGATE, url });
+        return;
+      } catch {
+        // A client that will not take a message is sent below instead.
+      }
+    }
+    if (typeof first.navigate === "function") {
+      const moved = await first.navigate(target.href).catch(() => null);
+      if (moved) {
+        await moved.focus().catch(() => undefined);
+        return;
+      }
     }
   }
   await self.clients.openWindow(target.href);
