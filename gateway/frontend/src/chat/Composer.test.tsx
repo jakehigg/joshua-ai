@@ -252,3 +252,81 @@ describe("the file preview", () => {
     expect(screen.queryByText("bill.pdf")).toBeNull();
   });
 });
+
+describe("Composer paste", () => {
+  beforeEach(() => pointer(true));
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  /** A paste of one file, as the browser gives it: an item and the file list. */
+  function clipboard(file: File | null) {
+    const items = file ? [{ kind: "file", type: file.type, getAsFile: () => file }] : [];
+    return { items, files: file ? [file] : [] };
+  }
+
+  function paste(target: Element, data: unknown) {
+    return fireEvent.paste(target, { clipboardData: data });
+  }
+
+  it("attaches a pasted screenshot, names it, and previews it", () => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:p", revokeObjectURL: vi.fn() }));
+    const { onSend, box } = setup();
+    const shot = new File(["pixels"], "", { type: "image/png" });
+    const prevented = !paste(box, clipboard(shot));
+    expect(prevented).toBe(true);
+    expect(document.querySelector(".preview-thumb img")?.getAttribute("src")).toBe("blob:p");
+    fireEvent.keyDown(box, { key: "Enter" });
+    const sent = onSend.mock.calls[0]?.[1] as File;
+    expect(sent.name).toMatch(/^pasted-\d{8}-\d{6}\.png$/);
+    expect(sent.type).toBe("image/png");
+  });
+
+  it("replaces the attached file, because one message takes one file", () => {
+    setup();
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const bill = new File(["%PDF"], "bill.pdf", { type: "application/pdf" });
+    const note = new File(["%PDF"], "note.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [bill] } });
+    // The form takes the paste too, so one with the box unfocused lands.
+    paste(document.querySelector("form.composer") as Element, clipboard(note));
+    expect(screen.queryByText("bill.pdf")).toBeNull();
+    expect(screen.getByText("note.pdf")).toBeTruthy();
+  });
+
+  it("refuses a pasted file over the limit and attaches nothing", () => {
+    const { box } = setup();
+    const big = new File(["x"], "", { type: "image/png" });
+    Object.defineProperty(big, "size", { value: MAX_FILE_BYTES + 1 });
+    paste(box, clipboard(big));
+    expect(screen.getByRole("alert").textContent).toMatch(/^pasted-\d{8}-\d{6}\.png is too large/);
+    expect(document.querySelector(".preview-thumb")).toBeNull();
+    expect(document.querySelector(".file-chip")).toBeNull();
+  });
+
+  it("refuses a pasted file of another type", () => {
+    const { box } = setup();
+    paste(box, clipboard(new File(["x"], "notes.zip", { type: "application/zip" })));
+    expect(screen.getByRole("alert").textContent).toBe("notes.zip is not a photo or a PDF");
+    expect(document.querySelector(".file-chip")).toBeNull();
+  });
+
+  it("leaves a text paste alone: no attachment, no prevented default", () => {
+    const { box } = setup();
+    const pdf = new File(["%PDF"], "bill.pdf", { type: "application/pdf" });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [pdf] } });
+    const notPrevented = paste(box, { items: [{ kind: "string", type: "text/plain" }], files: [] });
+    expect(notPrevented).toBe(true);
+    expect(document.querySelector(".file-chip .file-name")?.textContent).toBe("bill.pdf");
+  });
+
+  it("takes no pasted file while a turn runs", () => {
+    const { box } = setup(true);
+    const notPrevented = paste(box, clipboard(new File(["pixels"], "photo.png", { type: "image/png" })));
+    expect(notPrevented).toBe(true);
+    expect(screen.queryByText("photo.png")).toBeNull();
+    expect(document.querySelector(".preview-thumb")).toBeNull();
+  });
+});

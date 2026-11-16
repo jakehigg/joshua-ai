@@ -142,6 +142,27 @@ with the images and the packaged chart, are at
   workspace and goes to its id.
 - A wiki item of a workspace whose ref starts with `wiki/` opens the page.
   The link held the root two times and gave "not found".
+- Cmd/Ctrl+V with a screenshot on the clipboard attaches it to the message.
+  The paste takes the same files as the paperclip, a photo or a PDF up to
+  10 MB, shows the same thumbnail with its remove button, and replaces the
+  file that was attached, because a message carries one file. A pasted
+  screenshot has no name of its own, so it gets one,
+  `pasted-20261116-134500.png`. A paste of text stays a paste of text, and a
+  paste attaches nothing while Joshua works on a turn, as the paperclip is
+  off then.
+
+### Assignments
+
+- An assignment can no longer end with a stale plan. `finish` refuses while a
+  step of the plan is open, and names each open step: the worker ticks what it
+  did with `write_plan`, or marks a step it did not do as
+  `[-] <the step> — skipped: <the reason>`, then calls `finish` again. Before,
+  a worker could write its report and finish with the last steps unticked, so
+  the page of a done assignment showed "5 of 7 steps" and a next step that was
+  already done. A step whose text is only `finish` does not count: the call is
+  the proof of it. A skipped step shows in the plan and on the generated
+  report with its reason, and an assignment that ended with open steps says
+  "ended, N steps open" in place of the bar.
 
 ### Viewer
 
