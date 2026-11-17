@@ -8,10 +8,10 @@ description: Cut a release of this repository. Write the changelog entry, merge 
 A pushed tag `v<version>` makes a release. The `release` workflow runs on a
 push of a tag that matches `v*`. Nothing else makes a release.
 
-## Never tag without a request from Jake
+## Never tag without a request from the owner
 
-Jake must ask for the tag in this session. Without that request, there is no
-tag and no release.
+The owner must ask for the tag in this session. Without that request, there is
+no tag and no release.
 
 Preparation is always allowed. Write the changelog, bump the version, and
 draft the notes. Stop there.
@@ -19,8 +19,8 @@ draft the notes. Stop there.
 Do not run `git tag`. Do not push a tag. Do not create a release. Do not
 publish.
 
-A request from an earlier session is not a request. Ask Jake, and wait for the
-answer.
+A request from an earlier session is not a request. Ask the owner, and wait for
+the answer.
 
 Read `.github/workflows/release.yml` and `docs/CHANGELOG.md` before you start.
 
@@ -104,8 +104,8 @@ and push it again on the same commit.
 
 ## Checklist
 
-1. Confirm that Jake asked for the tag in this session. Without that request,
-   stop after the changelog merge.
+1. Confirm that the owner asked for the tag in this session. Without that
+   request, stop after the changelog merge.
 2. Pick the version. Read the previous tag and the entries in
    `docs/CHANGELOG.md`.
 3. Write the changelog entry in `docs/CHANGELOG.md`, with the summary and the
