@@ -8,6 +8,20 @@ description: Cut a release of this repository. Write the changelog entry, merge 
 A pushed tag `v<version>` makes a release. The `release` workflow runs on a
 push of a tag that matches `v*`. Nothing else makes a release.
 
+## Never tag without a request from Jake
+
+Jake must ask for the tag in this session. Without that request, there is no
+tag and no release.
+
+Preparation is always allowed. Write the changelog, bump the version, and
+draft the notes. Stop there.
+
+Do not run `git tag`. Do not push a tag. Do not create a release. Do not
+publish.
+
+A request from an earlier session is not a request. Ask Jake, and wait for the
+answer.
+
 Read `.github/workflows/release.yml` and `docs/CHANGELOG.md` before you start.
 
 ## What the workflow does
@@ -90,15 +104,17 @@ and push it again on the same commit.
 
 ## Checklist
 
-1. Pick the version. Read the previous tag and the entries in
+1. Confirm that Jake asked for the tag in this session. Without that request,
+   stop after the changelog merge.
+2. Pick the version. Read the previous tag and the entries in
    `docs/CHANGELOG.md`.
-2. Write the changelog entry in `docs/CHANGELOG.md`, with the summary and the
+3. Write the changelog entry in `docs/CHANGELOG.md`, with the summary and the
    "Upgrading from" section.
-3. Open the pull request for the changelog alone. Merge it into `main`.
-4. Run `git fetch origin`, then `git rev-parse origin/main`.
-5. Read the commit. Confirm that it is the changelog merge.
-6. Run `git tag v<version> <commit>`.
-7. Run `git push origin v<version>`.
-8. Watch the workflow run to the end.
-9. Confirm the four image tags, the chart asset, and the release.
-10. Confirm the pre-release mark for a `0.` version.
+4. Open the pull request for the changelog alone. Merge it into `main`.
+5. Run `git fetch origin`, then `git rev-parse origin/main`.
+6. Read the commit. Confirm that it is the changelog merge.
+7. Run `git tag v<version> <commit>`.
+8. Run `git push origin v<version>`.
+9. Watch the workflow run to the end.
+10. Confirm the four image tags, the chart asset, and the release.
+11. Confirm the pre-release mark for a `0.` version.
