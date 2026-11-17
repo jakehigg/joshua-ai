@@ -47,6 +47,16 @@ WORKSPACE_CHANNEL_TYPE = "workspace"
 WORKSPACE_FILES = ("workspace.md",)
 WORKSPACE_SHARED_FILES = ("workspace_shared.md",)
 
+# The writing style of a workspace (``store.models.WORKSPACE_STYLES``) -> the
+# file it adds. ``none`` adds nothing: Joshua writes as he does everywhere
+# else. The style file goes last, after ``workspace.md`` and
+# ``workspace_shared.md``, so it wins where it disagrees with an earlier page.
+STYLE_FILES: dict[str, tuple[str, ...]] = {
+    "none": (),
+    "ste": ("styles/ste.md",),
+    "coach": ("styles/coach.md",),
+}
+
 
 @dataclass(frozen=True)
 class Profile:
@@ -69,8 +79,13 @@ def derive_profile(
     *,
     kind: str = "message",
     voice: VoiceChannel | None = None,
+    style: str | None = None,
 ) -> Profile:
-    """Pick the profile for a turn from the chat kind, the channel, and the role."""
+    """Pick the profile for a turn from the chat kind, the channel, and the role.
+
+    ``style`` is the writing style of the workspace of the turn, when there is
+    one. It adds one file on a workspace channel, and nothing anywhere else.
+    """
     if kind == "event":
         name = "event"
     elif kind == "task":
@@ -86,6 +101,7 @@ def derive_profile(
         profile = profile.with_files(WORKSPACE_FILES)
         if channel.session_mode == "shared":
             profile = profile.with_files(WORKSPACE_SHARED_FILES)
+        profile = profile.with_files(STYLE_FILES.get(style or "none", ()))
     if voice is not None and channel.channel_type == VOICE_CHANNEL_TYPE:
         return _spoken(profile, voice)
     return profile

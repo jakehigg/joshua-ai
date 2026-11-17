@@ -3,9 +3,9 @@ every turn of it carries, and the paths that RAG skips.
 
 A workspace thread is a conversation of the channel ``workspace:<id>``. It is
 the full Joshua. Only four things differ from a normal direct chat: the model,
-the servers, the prompt files (``workspace.md``, and ``workspace_shared.md``
-for a shared workspace), and the workspace block. This module holds the pure
-parts of those. ``ConversationManager`` calls them.
+the servers, the prompt files (``workspace.md``, ``workspace_shared.md`` for a
+shared workspace, and the file of the writing style), and the workspace block.
+This module holds the pure parts of those. ``ConversationManager`` calls them.
 
 Nothing here runs for a channel of another type.
 """
@@ -62,10 +62,11 @@ def workspace_id_of(channel_id: str) -> str | None:
     return channel_id[len(prefix) :] if channel_id.startswith(prefix) else None
 
 
-def signature(workspace: Workspace) -> tuple[str | None, tuple[str, ...]]:
-    """What a session is built from: the model and the servers. A change of
-    either makes the manager rebuild the session on the next turn."""
-    return (workspace.model, tuple(workspace.servers))
+def signature(workspace: Workspace) -> tuple[str | None, tuple[str, ...], str]:
+    """What a session is built from: the model, the servers, and the writing
+    style. A change of any of them makes the manager rebuild the session on the
+    next turn."""
+    return (workspace.model, tuple(workspace.servers), workspace.style)
 
 
 def picked_servers(gateway_names: Iterable[str], workspace: Workspace) -> list[str]:

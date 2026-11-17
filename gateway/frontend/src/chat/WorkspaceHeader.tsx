@@ -1,6 +1,6 @@
 // The header of a workspace: its title and goal, and an edit drawer for the
-// goal, the notes, the servers, the model, the notify setting and the status
-// (pause, resume, archive). The notify setting says when Joshua writes to the
+// goal, the notes, the servers, the model, the writing style, the notify
+// setting and the status (pause, resume, archive). The notify setting says when Joshua writes to the
 // phone. Whether a device hears that is the device's own setting, one person's
 // and not one workspace's, so it is on the Profile page and the drawer points
 // there. A shared workspace adds "When Joshua may reach you
@@ -20,6 +20,7 @@ import {
   type Notify,
   type NotifyMode,
   type Options,
+  type Style,
   type Workspace,
   type WorkspaceStatus,
 } from "../api/workspaces";
@@ -109,6 +110,7 @@ function EditDrawer({
   const [notes, setNotes] = useState(workspace.notes);
   const [model, setModel] = useState(workspace.model ?? "");
   const [notify, setNotify] = useState<Notify>(workspace.notify);
+  const [style, setStyle] = useState<Style>(workspace.style);
   const [servers, setServers] = useState(workspace.servers);
   const [error, setError] = useState("");
 
@@ -135,7 +137,7 @@ function EditDrawer({
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (title.trim() === "") return;
-    save({ title: title.trim(), goal, notes, model, notify, servers }, true);
+    save({ title: title.trim(), goal, notes, model, notify, style, servers }, true);
   };
 
   const setStatus = (status: WorkspaceStatus) => save({ status }, true);
@@ -182,6 +184,20 @@ function EditDrawer({
           {NOTIFY.map(([value, text]) => (
             <option key={value} value={value}>
               {text}
+            </option>
+          ))}
+        </select>
+        <label className="j-field-label" htmlFor="ws-e-style">
+          Style
+        </label>
+        <select
+          id="ws-e-style"
+          value={style}
+          onChange={(e) => setStyle(e.target.value as Style)}
+        >
+          {(options?.styles ?? []).map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
             </option>
           ))}
         </select>
