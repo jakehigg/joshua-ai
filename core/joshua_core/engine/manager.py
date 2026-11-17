@@ -155,8 +155,8 @@ class _Managed:
     # True while the SDK session holds the history of the thread: it resumed
     # one, or a turn has run in it.
     has_history: bool = False
-    # For a workspace: the model and the servers it was built from. A change
-    # rebuilds the session on the next turn.
+    # For a workspace: the model, the servers, and the writing style it was
+    # built from. A change rebuilds the session on the next turn.
     workspace_sig: tuple[Any, ...] | None = None
     # For a shared workspace: the person the gateway headers name. The person
     # who writes the turn acts, so a turn of another person rebuilds the
@@ -362,7 +362,8 @@ class ConversationManager:
         repo: Repo,
         settings: JoshuaConfig,
         composer: Any,
-        derive_profile: Callable[[Any, Channel], Any],
+        # (person, channel, style=<workspace style or None>) -> Profile.
+        derive_profile: Callable[..., Any],
         gateway_url: str = "",
         gateway_token: str = "",
         agent_backend: str = "sdk",
@@ -507,9 +508,13 @@ class ConversationManager:
         person = (
             await self._repo.get_person(conversation.person_id) if conversation.person_id else None
         )
-        profile = self._derive_profile(person, channel)
-        resolved = inference_plan.resolve(self._settings, inference_plan.turn_job(profile))
         workspace = await self._workspace_of(channel)
+        # The writing style of the workspace of the turn, which adds one prompt
+        # file. There is none outside a workspace.
+        profile = self._derive_profile(
+            person, channel, style=workspace.style if workspace is not None else None
+        )
+        resolved = inference_plan.resolve(self._settings, inference_plan.turn_job(profile))
         role = self._conversation_role(channel, conversation, workspace)
         group = self._conversation_group(channel, conversation)
         group_id = group.id if group is not None else None

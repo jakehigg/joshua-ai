@@ -12,6 +12,8 @@ import { deleteJson, getJson, patchJson, postJson } from "./client";
 
 export type WorkspaceStatus = "active" | "paused" | "archived";
 export type Notify = "none" | "questions" | "questions+finishes";
+/** How Joshua writes in a workspace: the house voice, STE, or a coach. */
+export type Style = "none" | "ste" | "coach";
 
 export interface Workspace {
   id: string;
@@ -23,6 +25,7 @@ export interface Workspace {
   servers: string[];
   model: string | null;
   notify: Notify;
+  style: Style;
   status: WorkspaceStatus;
   // A shared workspace is one thread that several people write in. `members`
   // holds the ids beside the owner, and they never change after the create.
@@ -83,6 +86,13 @@ export interface ServerOption {
   description: string;
 }
 
+/** One writing style a workspace may take, with the line the picker shows. */
+export interface StyleOption {
+  id: Style;
+  name: string;
+  description: string;
+}
+
 /** One person a workspace may be shared with. The caller is not in the list. */
 export interface PersonOption {
   id: string;
@@ -90,12 +100,13 @@ export interface PersonOption {
 }
 
 /**
- * What a person may pick: the servers they may use, the models, and the
- * people they may share a workspace with.
+ * What a person may pick: the servers they may use, the models, the writing
+ * styles, and the people they may share a workspace with.
  */
 export interface Options {
   servers: ServerOption[];
   models: string[];
+  styles: StyleOption[];
   people: PersonOption[];
 }
 
@@ -103,6 +114,7 @@ export interface NewWorkspace {
   title: string;
   goal?: string;
   model?: string;
+  style?: Style;
   servers: string[];
   // The other people of a shared workspace. An empty list is a workspace of
   // the person alone.
@@ -110,7 +122,10 @@ export interface NewWorkspace {
 }
 
 export type WorkspacePatch = Partial<
-  Pick<Workspace, "title" | "goal" | "notes" | "servers" | "model" | "notify" | "status">
+  Pick<
+    Workspace,
+    "title" | "goal" | "notes" | "servers" | "model" | "notify" | "style" | "status"
+  >
 >;
 
 /** The namespace of a shared workspace, in a ref and in an address. */

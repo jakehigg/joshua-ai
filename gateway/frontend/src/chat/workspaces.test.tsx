@@ -29,6 +29,7 @@ function ws(over: Partial<Workspace> = {}): Workspace {
     servers: ["tasks"],
     model: null,
     notify: "none",
+    style: "none",
     status: "active",
     shared: false,
     members: [],
@@ -66,6 +67,13 @@ const OPTIONS = {
     { name: "github", description: "github" },
   ],
   models: ["model-a", "model-b"],
+  // The writing styles, as core names them. `none` is the default and reads
+  // "Regular".
+  styles: [
+    { id: "none", name: "Regular", description: "Joshua writes as he does everywhere else." },
+    { id: "ste", name: "Simplified Technical English", description: "Short sentences." },
+    { id: "coach", name: "Coach", description: "One next step." },
+  ],
   // The people the caller may share a workspace with; the caller is not here.
   people: [{ id: "mia", name: "Mia" }],
 };
@@ -317,6 +325,32 @@ describe("the new workspace dialog", () => {
       goal: "A meal for 8",
       model: "model-b",
       servers: ["tasks"],
+    });
+  });
+
+  it("picks a writing style on the create, and sends none as the default", async () => {
+    const { calls } = viewer({
+      "GET /api/v1/workspaces/options": OPTIONS,
+      "POST /api/v1/workspaces": ws({ slug: "docs", title: "Docs", style: "ste" }),
+    });
+    render(<NewWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    const field = (await screen.findByLabelText("Style")) as HTMLSelectElement;
+    // The default is the house voice, and it reads "Regular".
+    expect(field.value).toBe("none");
+    expect([...field.options].map((o) => o.textContent)).toEqual([
+      "Regular",
+      "Simplified Technical English",
+      "Coach",
+    ]);
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Docs" } });
+    fireEvent.change(field, { target: { value: "ste" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      title: "Docs",
+      style: "ste",
+      servers: [],
     });
   });
 
@@ -640,8 +674,26 @@ describe("the workspace header", () => {
       notes: "stay under budget",
       model: "",
       notify: "questions",
+      style: "none",
       servers: ["tasks", "github"],
     });
+  });
+
+  it("changes the writing style in the settings", async () => {
+    const { calls } = viewer({
+      "GET /api/v1/workspaces/options": OPTIONS,
+      "PATCH /api/v1/workspaces/w1": ws({ style: "coach" }),
+    });
+    const onChange = vi.fn();
+    render(<WorkspaceHeader workspace={ws({ style: "ste" })} onChange={onChange} onItems={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const field = (await screen.findByLabelText("Style")) as HTMLSelectElement;
+    // The drawer shows the style the workspace holds.
+    expect(field.value).toBe("ste");
+    fireEvent.change(field, { target: { value: "coach" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ style: "coach" });
   });
 
   it("pauses, resumes and archives with a status change", async () => {

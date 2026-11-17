@@ -27,6 +27,7 @@ reads them.
 | `servers` | The MCP servers that the workspace uses. Only servers that every person of it may use. |
 | `model` | The model of the workspace. Empty keeps the model of the chat job. |
 | `notify` | `none` (default), `questions`, or `questions+finishes`. |
+| `style` | How Joshua writes here: `none` (default), `ste`, or `coach`. See The writing style. |
 | `status` | `active`, `paused`, or `archived`. `archived` means closed: it frees the name for a new workspace, and the closed row keeps its own slug. |
 
 An item is a link: a `kind` (`document`, `artifact`, `plan`, `wiki`,
@@ -159,18 +160,42 @@ everybody something, the agent writes in the thread.
   the person may use. A shared workspace keeps the servers of its create,
   which are the servers that every person of it may use. The builtin tools
   stay as in a normal chat, with the `workspace` tools added.
-- **Prompt.** The `dm` profile and `workspace.md`. A shared workspace takes
-  the `group` profile, `workspace.md`, and `workspace_shared.md`, which tells
-  the agent that several people read the thread, that each message names its
-  writer, that `send_to_normal_chat` reaches one person, and when to use
-  `notify_user`.
+- **Prompt.** The `dm` profile and `workspace.md`, then the file of the
+  writing style. A shared workspace takes the `group` profile,
+  `workspace.md`, `workspace_shared.md`, and then the file of the writing
+  style. `workspace_shared.md` tells the agent that several people read the
+  thread, that each message names its writer, that `send_to_normal_chat`
+  reaches one person, and when to use `notify_user`.
 - **Role.** A workspace thread carries the role of its people, as a group chat
   does: `member` only when every person of it is a member.
 - **Tool search.** Off when the workspace picks `workspaces.tool_search_max_servers`
   servers or fewer (default 3). On when it picks more. Core does not know how
   many tools a server has, so the rule counts servers.
-- **Changes.** A change of `servers` or `model` applies on the next turn. Core
-  builds a new session and resumes the same conversation.
+- **Changes.** A change of `servers`, `model`, or `style` applies on the next
+  turn. Core builds a new session and resumes the same conversation.
+
+## The writing style
+
+A workspace picks one writing style. The style changes how Joshua writes in
+that thread, and in the documents he writes from it. It changes no tool, no
+model, and no permission.
+
+| `style` | What it does |
+| --- | --- |
+| `none` | The default. Joshua writes as he does everywhere else. |
+| `ste` | Simplified Technical English: one idea in each sentence, the active voice, no hedges. |
+| `coach` | Interested in what the person is trying to do, gives one concrete next step, and names a weak point plainly with what to do about it. No flattery. |
+
+Each style but `none` ships one file at
+`core/joshua_core/prompts/builtin/styles/<style>.md`. `STYLE_FILES` in
+`engine/profiles.py` maps the style to its file. The session appends the file
+last, after `workspace.md` and `workspace_shared.md`, so the style wins where
+it disagrees with an earlier page. `none` appends nothing, so the prompt is
+the one every other thread gets.
+
+A person picks the style when they create a workspace, and changes it in the
+workspace settings. The style is part of the session signature, with the
+model and the servers, so a change rebuilds the session on the next turn.
 
 ## The workspace block
 
@@ -360,8 +385,8 @@ Every `{slug}` below is a ref: a slug, an id, or two segments
 | Route | Use |
 |---|---|
 | `GET /v1/workspaces?status=` | List the workspaces the person reaches. |
-| `POST /v1/workspaces` | Create one: `title`, `goal`, `model`, `servers`, `notify`, `members`. `members` makes it shared. A taken shared slug answers 409 with the slug. |
-| `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `status`. A `status` of `archived` closes it, which frees its name for a new workspace and keeps its own slug. No route changes the people, and no route changes a slug. |
+| `POST /v1/workspaces` | Create one: `title`, `goal`, `model`, `servers`, `notify`, `style`, `members`. `members` makes it shared. A taken shared slug answers 409 with the slug. |
+| `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `style`, `status`. A `status` of `archived` closes it, which frees its name for a new workspace and keeps its own slug. No route changes the people, and no route changes a slug. |
 | `GET`, `POST /v1/workspaces/{slug}/items` | List or add items. The assignments container adds the outputs of a run that started in a workspace here, as the person of the run. |
 | `PATCH`, `DELETE /v1/workspaces/{slug}/items/{id}` | Change `pinned` or `seen`, or remove an item. |
 | `GET /v1/workspaces/{slug}/block` | The workspace block as text. |
@@ -396,7 +421,11 @@ person's alone: no route sets the mode of another person.
 otherwise). Every name in `members` must be a member of the roster, and never
 the reserved id `shared` (422 otherwise). `model` must be in
 `workspaces.models` when that list is not empty, and can be any text when it
-is empty.
+is empty. `style` must be `none`, `ste`, or `coach` (422 otherwise).
+
+`GET /v1/workspaces/options` gives the servers, the models, the people, and
+`styles`: one `{id, name, description}` for each writing style, in the order
+above. The picker of the viewer shows that list.
 
 A chat turn in a workspace goes through the channels terminal routes.
 `POST /v1/cli/turns/stream` and `GET /v1/cli/transcript` take an optional

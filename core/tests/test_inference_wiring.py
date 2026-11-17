@@ -321,7 +321,8 @@ def sdk_manager(repo: FakeRepo, tmp_path: Path, section: str = "", **kw: Any) ->
         settings=settings(section, kw.pop("extra", "")),
         composer=FakeComposer(),
         derive_profile=kw.pop(
-            "derive_profile", lambda person, channel: SimpleNamespace(name="dm", max_turns=0)
+            "derive_profile",
+            lambda person, channel, style=None: SimpleNamespace(name="dm", max_turns=0),
         ),
         agent_backend=kw.pop("backend", "sdk"),
         data_dir=tmp_path,
@@ -832,7 +833,7 @@ async def test_a_voice_profile_runs_the_voice_job(tmp_path: Path) -> None:
         "\ninference:\n  voice:\n    base_url: http://voice-llm:4000\n    api_key: ''\n",
         extra=VOICE,
         backend="stub",
-        derive_profile=lambda person, channel: SimpleNamespace(
+        derive_profile=lambda person, channel, style=None: SimpleNamespace(
             name="voice-dm", job="voice", max_turns=0
         ),
     )
@@ -957,7 +958,7 @@ async def test_an_internet_lookup_uses_the_internet_job(monkeypatch: pytest.Monk
 # ── tool search on a turn ───────────────────────────────────────────────────
 
 
-def _voice_profile(person: Any, channel: Any) -> Any:
+def _voice_profile(person: Any, channel: Any, style: str | None = None) -> Any:
     return SimpleNamespace(name="voice-dm", job="voice", max_turns=0)
 
 

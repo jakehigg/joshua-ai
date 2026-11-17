@@ -8,6 +8,17 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- **A workspace picks a writing style.** The style changes how Joshua writes
+  in that thread, and in the documents he writes from it. `none` is the
+  default, and writes as Joshua writes everywhere else. `ste` writes
+  Simplified Technical English: one idea in each sentence, the active voice,
+  no hedges, and a name beside each number. `coach` asks what you want to
+  change, finds the obstacle, and gives one next step, with the facts kept
+  exact. You pick the style when you make a workspace, and change it in the
+  settings; the picker shows "Regular" for `none`. A change applies on the
+  next turn, as a change of the model does. The style adds one prompt file
+  and changes no tool, no model, and no permission. The schema adds the
+  column `workspaces.style`.
 - A workspace can hold several people. The person who makes it picks the
   others from the roster, and all of them write in one thread, read every
   row, and see the same goal, notes, and items. Each message names the person

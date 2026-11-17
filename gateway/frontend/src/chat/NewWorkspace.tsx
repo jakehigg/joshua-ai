@@ -1,5 +1,5 @@
-// The new workspace dialog: title, goal, model, the servers, and whether the
-// workspace is shared. Shared shows the other people of the roster: the ones
+// The new workspace dialog: title, goal, model, the writing style, the
+// servers, and whether the workspace is shared. Shared shows the other people of the roster: the ones
 // ticked write in the one thread of the workspace, which then lives at
 // `/chat/w/shared/<slug>`, one address for everyone. That slug is taken from
 // the title and is one for the whole instance, so a title whose slug is taken
@@ -17,6 +17,7 @@ import {
   SHARED,
   slugOf,
   type Options,
+  type Style,
   type Workspace,
 } from "../api/workspaces";
 import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
@@ -33,6 +34,7 @@ export function NewWorkspace({
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [model, setModel] = useState("");
+  const [style, setStyle] = useState<Style>("none");
   const [picked, setPicked] = useState<string[]>([]);
   const [shared, setShared] = useState(false);
   const [members, setMembers] = useState<string[]>([]);
@@ -65,6 +67,7 @@ export function NewWorkspace({
       title: title.trim(),
       ...(goal.trim() ? { goal: goal.trim() } : {}),
       ...(model ? { model } : {}),
+      ...(style !== "none" ? { style } : {}),
       servers: picked,
       ...(shared ? { members } : {}),
     })
@@ -100,6 +103,16 @@ export function NewWorkspace({
           {(options?.models ?? []).map((m) => (
             <option key={m} value={m}>
               {m}
+            </option>
+          ))}
+        </select>
+        <label className="j-field-label" htmlFor="ws-style">
+          Style
+        </label>
+        <select id="ws-style" value={style} onChange={(e) => setStyle(e.target.value as Style)}>
+          {(options?.styles ?? []).map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
             </option>
           ))}
         </select>
