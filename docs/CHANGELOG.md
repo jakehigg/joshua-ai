@@ -220,6 +220,13 @@ with the images and the packaged chart, are at
   state of the viewer uses the one spinner, so each of them is centred both
   ways and the same size, on the phone and on the desktop. A spinner inside a
   button or a row keeps the size it had.
+- **The Profile page sets the text size of the viewer**: Small, Normal,
+  Large, or Larger. The size is the device's and not the account's, so a
+  phone stays at the normal size while a tablet is larger, and it is kept in
+  that browser alone: it goes to no server and no other device. The whole
+  viewer follows it at once, the chat and a rendered document among them, and
+  a reload opens at the chosen size. A text field never goes under 16 pixels,
+  so iOS still does not zoom in on focus.
 
 ### Usage
 

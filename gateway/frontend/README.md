@@ -23,6 +23,12 @@ npm run build
 which is never edited in a copy, and `src/viewer.css`, which holds what only
 the viewer needs. The images of the look are in `public/`.
 
+Every text size in those stylesheets is a rem of the root font, so the one
+rule on `html` in `src/index.css` sizes the whole app. `src/textSize.ts`
+holds the size of this device: the Profile page writes the choice to
+localStorage, nowhere else, and `main.tsx` puts it on the root element before
+React renders, so a reload never paints the wrong size first.
+
 Every JSON route of the viewer is under `/api/v1/`. `src/api/client.ts` holds
 the base and sends the credentials of the page.
 

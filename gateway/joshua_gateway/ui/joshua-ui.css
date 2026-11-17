@@ -1,6 +1,6 @@
 /*!
  * joshua-ui.css — the shared look of Joshua's own interfaces.
- * Version 1.0.1 ("Remix")
+ * Version 1.1.0 ("Remix")
  *
  * This is the master copy. It lives in joshua-ai at
  * gateway/joshua_gateway/ui/joshua-ui.css. Apps that want the Joshua look
@@ -43,14 +43,15 @@
   --j-bad: #ff7a7a;
   --j-bad-soft: rgba(255, 122, 122, 0.13);
 
-  /* type */
+  /* type: every size is rem of the root font below, so one rule on `html`
+     moves the whole interface. 1rem is 15px while the root is 93.75%. */
   --j-font: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --j-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --j-text-xs: 11.5px;
-  --j-text-sm: 13px;
-  --j-text-md: 15px;
-  --j-text-lg: 17px;
-  --j-text-xl: 24px;
+  --j-text-xs: 0.7667rem;
+  --j-text-sm: 0.8667rem;
+  --j-text-md: 1rem;
+  --j-text-lg: 1.1333rem;
+  --j-text-xl: 1.6rem;
 
   /* shape and space */
   --j-radius: 14px;
@@ -66,14 +67,25 @@
 /* -------------------------------------------------------------------- base */
 *, *::before, *::after { box-sizing: border-box; }
 
+/* The root font is the base of every rem in this file: 93.75% of the
+   browser's own default, which is 15px while that default is 16px. A reader
+   who sets a bigger default gets bigger text everywhere, and an app scales
+   its whole interface by overriding this one rule. */
+html { font-size: 93.75%; }
+
 html, body {
   margin: 0;
   background: var(--j-bg);
   color: var(--j-text);
-  font: var(--j-text-md)/1.5 var(--j-font);
+  font-family: var(--j-font);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
 }
+
+/* Not on `html`: a rem in the font-size of the root means the browser's
+   default, so the token there would undo the rule above. */
+body { font-size: var(--j-text-md); }
 
 a { color: var(--j-accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -139,7 +151,7 @@ h1, h2, h3 { line-height: 1.25; text-wrap: balance; }
 .j-appbar-title { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; color: var(--j-text); }
 .j-appbar-title:hover { text-decoration: none; }
 .j-appbar-title small {
-  font-size: 10.5px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--j-muted);
+  font-size: 0.7rem; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--j-muted);
 }
 .j-appbar-title strong { font-size: var(--j-text-lg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -150,7 +162,7 @@ h1, h2, h3 { line-height: 1.25; text-wrap: balance; }
 .j-nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 10px; border-radius: var(--j-radius-sm);
-  color: var(--j-muted); font-size: 14px;
+  color: var(--j-muted); font-size: 0.9333rem;
 }
 .j-nav-item:hover { color: var(--j-text); background: var(--j-surface); text-decoration: none; }
 .j-nav-item[aria-current], .j-nav-item.active { color: var(--j-text); background: var(--j-surface-2); }
@@ -167,7 +179,7 @@ h1, h2, h3 { line-height: 1.25; text-wrap: balance; }
 .j-tabs::-webkit-scrollbar { display: none; }
 .j-tab {
   padding: 11px 8px 10px; white-space: nowrap;
-  font: inherit; font-size: 14px; font-weight: 500; color: var(--j-muted);
+  font: inherit; font-size: 0.9333rem; font-weight: 500; color: var(--j-muted);
   background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
 }
 .j-tab:hover { color: var(--j-text); text-decoration: none; }
@@ -188,7 +200,7 @@ h1, h2, h3 { line-height: 1.25; text-wrap: balance; }
 .j-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   height: 38px; padding: 0 14px;
-  font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap;
+  font: inherit; font-size: 0.9333rem; font-weight: 600; white-space: nowrap;
   color: var(--j-text); background: var(--j-surface-2);
   border: 1px solid var(--j-line); border-radius: var(--j-radius-sm);
   cursor: pointer; text-decoration: none;
@@ -220,7 +232,7 @@ h1, h2, h3 { line-height: 1.25; text-wrap: balance; }
 .j-avatar {
   width: 30px; height: 30px; flex: none; border-radius: 50%;
   display: grid; place-items: center;
-  font-size: 12px; font-weight: 600; color: var(--j-text);
+  font-size: 0.8rem; font-weight: 600; color: var(--j-text);
   background: var(--j-surface-2); border: 1px solid var(--j-line);
 }
 
@@ -237,13 +249,13 @@ h1, h2, h3 { line-height: 1.25; text-wrap: balance; }
 .j-field input:focus-visible, .j-field select:focus-visible, .j-field textarea:focus-visible { outline: none; }
 .j-field input, .j-field select, .j-field textarea {
   flex: 1; min-width: 0;
-  font: inherit; font-size: 16px; /* 16px stops iOS zooming on focus */
+  font: inherit; font-size: max(16px, 1.0667rem); /* never under 16px: iOS zooms on focus */
   color: var(--j-text); background: none; border: 0; outline: 0;
 }
 .j-field textarea { padding: 10px 0; resize: vertical; min-height: 96px; line-height: 1.5; }
-.j-field.mono textarea, .j-field.mono input { font-family: var(--j-mono); font-size: 14px; }
+.j-field.mono textarea, .j-field.mono input { font-family: var(--j-mono); font-size: 0.9333rem; }
 .j-field ::placeholder { color: var(--j-faint); }
-.j-field kbd { font: 500 11px var(--j-mono); color: var(--j-faint); border: 1px solid var(--j-line); border-radius: 4px; padding: 1px 5px; }
+.j-field kbd { font: 500 0.7333rem var(--j-mono); color: var(--j-faint); border: 1px solid var(--j-line); border-radius: 4px; padding: 1px 5px; }
 .j-field-label { display: flex; flex-direction: column; gap: 6px; font-size: var(--j-text-sm); font-weight: 600; color: var(--j-muted); }
 .j-field.invalid { border-color: var(--j-bad); }
 .j-error { color: var(--j-bad); font-size: var(--j-text-sm); margin: 0; }
@@ -264,7 +276,7 @@ h1, h2, h3 { line-height: 1.25; text-wrap: balance; }
 .j-badge {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 2px 9px 2px 8px;
-  font-size: 12px; font-weight: 600; line-height: 1.6; white-space: nowrap;
+  font-size: 0.8rem; font-weight: 600; line-height: 1.6; white-space: nowrap;
   color: var(--j-muted); background: var(--j-surface-2); border-radius: var(--j-radius-pill);
 }
 .j-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
@@ -293,7 +305,7 @@ button.j-list-row { width: 100%; font: inherit; text-align: left; background: no
 .j-list-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .j-list-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .j-list-title.wrap { white-space: normal; }
-.j-list-sub { font-size: 12.5px; color: var(--j-muted); }
+.j-list-sub { font-size: 0.8333rem; color: var(--j-muted); }
 .j-list-row.done .j-list-title { color: var(--j-faint); text-decoration: line-through; }
 .j-grip { color: var(--j-faint); cursor: grab; margin-left: -4px; touch-action: none; }
 
@@ -301,7 +313,7 @@ button.j-list-row { width: 100%; font: inherit; text-align: left; background: no
 .j-card { background: var(--j-surface); border: 1px solid var(--j-line-soft); border-radius: var(--j-radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .j-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
 .j-stat { background: var(--j-surface); border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); padding: 10px; }
-.j-stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.j-stat b { display: block; font-size: 1.3333rem; font-variant-numeric: tabular-nums; }
 .j-stat span { font-size: var(--j-text-xs); color: var(--j-muted); }
 .j-stat.ok b { color: var(--j-ok); }
 .j-stat.warn b { color: var(--j-warn); }
@@ -330,14 +342,14 @@ button.j-list-row { width: 100%; font: inherit; text-align: left; background: no
 .j-toggle:checked::after { left: 18px; background: var(--j-accent-ink); }
 
 .j-stepper { display: inline-flex; align-items: center; height: 30px; flex: none; border: 1px solid var(--j-line); border-radius: var(--j-radius-sm); }
-.j-stepper button { width: 30px; height: 100%; font: inherit; font-size: 16px; color: var(--j-muted); background: none; border: 0; cursor: pointer; }
+.j-stepper button { width: 30px; height: 100%; font: inherit; font-size: 1.0667rem; color: var(--j-muted); background: none; border: 0; cursor: pointer; }
 .j-stepper button:hover { color: var(--j-text); }
-.j-stepper output, .j-stepper span { min-width: 22px; text-align: center; font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.j-stepper output, .j-stepper span { min-width: 22px; text-align: center; font-size: 0.9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* ------------------------------------------------------ feedback and empty */
 .j-toast {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; font-size: 14px;
+  padding: 10px 12px; font-size: 0.9333rem;
   background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: var(--j-radius-sm);
 }
 .j-toast.float {
@@ -349,7 +361,7 @@ button.j-list-row { width: 100%; font: inherit; text-align: left; background: no
 }
 .j-toast a, .j-toast button.link { font: inherit; font-weight: 600; color: var(--j-accent); background: none; border: 0; cursor: pointer; margin-left: auto; }
 
-.j-empty { padding: 28px 16px; text-align: center; color: var(--j-muted); font-size: 14px; }
+.j-empty { padding: 28px 16px; text-align: center; color: var(--j-muted); font-size: 0.9333rem; }
 .j-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--j-line); border-top-color: var(--j-accent); animation: j-spin .8s linear infinite; }
 /* the spinner of a whole page, which a person sees at arm's length */
 .j-spinner.lg { width: 44px; height: 44px; border-width: 3px; }
@@ -376,7 +388,7 @@ button.j-list-row { width: 100%; font: inherit; text-align: left; background: no
 
 /* ------------------------------------------------------------------ tables */
 .j-table-wrap { overflow-x: auto; border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); }
-.j-table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.j-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 .j-table th, .j-table td { padding: 8px 10px; text-align: left; vertical-align: top; border-top: 1px solid var(--j-line-soft); }
 .j-table th {
   border-top: 0; background: var(--j-surface);
@@ -385,33 +397,33 @@ button.j-list-row { width: 100%; font: inherit; text-align: left; background: no
 .j-table td.num, .j-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ---------------------------------------------------- documents (markdown) */
-.j-crumbs { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--j-muted); margin: 0; }
+.j-crumbs { display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.8333rem; color: var(--j-muted); margin: 0; }
 .j-crumbs a { color: var(--j-muted); }
 .j-crumbs a:hover { color: var(--j-text); }
 .j-doc-title { font-size: var(--j-text-xl); font-weight: 700; margin: 2px 0 0; }
-.j-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--j-muted); }
+.j-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.8333rem; color: var(--j-muted); }
 
 .j-prose { font-size: var(--j-text-md); line-height: 1.65; overflow-wrap: anywhere; }
 .j-prose > :first-child { margin-top: 0; }
 .j-prose p, .j-prose ul, .j-prose ol, .j-prose blockquote { margin: 0 0 12px; }
-.j-prose h1 { font-size: 22px; margin: 24px 0 10px; }
-.j-prose h2 { font-size: 18px; margin: 22px 0 8px; }
-.j-prose h3 { font-size: 16px; margin: 18px 0 8px; }
+.j-prose h1 { font-size: 1.4667rem; margin: 24px 0 10px; }
+.j-prose h2 { font-size: 1.2rem; margin: 22px 0 8px; }
+.j-prose h3 { font-size: 1.0667rem; margin: 18px 0 8px; }
 .j-prose a { border-bottom: 1px solid var(--j-accent-soft); }
 .j-prose a:hover { text-decoration: none; border-bottom-color: var(--j-accent); }
 .j-prose img { max-width: 100%; height: auto; border-radius: var(--j-radius-sm); }
-.j-prose code { font: 13px var(--j-mono); background: var(--j-surface-2); padding: 1px 5px; border-radius: 4px; }
-.j-prose pre { font: 12.5px/1.55 var(--j-mono); background: var(--j-surface-2); border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); padding: 10px 12px; overflow-x: auto; margin: 0 0 12px; }
+.j-prose code { font: 0.8667rem var(--j-mono); background: var(--j-surface-2); padding: 1px 5px; border-radius: 4px; }
+.j-prose pre { font: 0.8333rem/1.55 var(--j-mono); background: var(--j-surface-2); border: 1px solid var(--j-line-soft); border-radius: var(--j-radius-sm); padding: 10px 12px; overflow-x: auto; margin: 0 0 12px; }
 .j-prose pre code { background: none; padding: 0; }
 .j-prose blockquote { border-left: 2px solid var(--j-line); padding-left: 12px; color: var(--j-muted); }
 .j-prose hr { border: 0; border-top: 1px solid var(--j-line-soft); margin: 20px 0; }
-.j-prose table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; margin: 0 0 12px; font-size: 13.5px; }
+.j-prose table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; margin: 0 0 12px; font-size: 0.9rem; }
 .j-prose th, .j-prose td { border: 1px solid var(--j-line-soft); padding: 7px 10px; text-align: left; vertical-align: top; }
 .j-prose th { background: var(--j-surface); color: var(--j-muted); font-weight: 600; }
 
 /* a timeline entry, e.g. the journal */
 .j-entry { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 12px; border-left: 2px solid var(--j-line); }
-.j-entry-when { font: 500 12px var(--j-mono); color: var(--j-faint); }
+.j-entry-when { font: 500 0.8rem var(--j-mono); color: var(--j-faint); }
 .j-entry-title { font-weight: 600; color: var(--j-text); }
 
 /* ------------------------------------------------------------ preferences */

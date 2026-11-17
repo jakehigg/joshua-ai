@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError, errorText, getJson, postJson } from "../api/client";
 import { enable, forget, readStatus, sendTest, type PushStatus } from "../push";
+import { readTextScale, setTextScale, TEXT_SIZE_CHOICES, type TextScale } from "../textSize";
 import ErrorLine from "../ui/ErrorLine";
 import type { AuthMethod } from "./SignIn";
 
@@ -393,6 +394,52 @@ export function DeviceNotifications() {
   );
 }
 
+/**
+ * "Text size on this device": the card that makes every text of the viewer
+ * bigger or smaller.
+ *
+ * The choice belongs to the device and not to the account, so it goes to
+ * localStorage and to no API call: a phone stays at the normal size while an
+ * iPad is larger. `textSize.ts` puts it on the root element, where the
+ * stylesheets read it, so the change shows at once on every page: this one,
+ * the chat, and a rendered document.
+ */
+export function TextSizeCard() {
+  const [scale, setScale] = useState<TextScale>(readTextScale);
+
+  function choose(next: TextScale): void {
+    setTextScale(next);
+    setScale(next);
+  }
+
+  return (
+    <section className="j-card profile-card" aria-labelledby="profile-text-size">
+      <h2 id="profile-text-size" className="profile-card-title">
+        Text size on this device
+      </h2>
+      <p className="j-meta">
+        This size is for this device only, not for your account. Another browser or phone keeps its
+        own.
+      </p>
+      <fieldset className="profile-field profile-choices">
+        <legend className="profile-label">Size</legend>
+        {TEXT_SIZE_CHOICES.map((choice) => (
+          <label key={choice.value} className="profile-choice">
+            <input
+              type="radio"
+              name="text-scale"
+              value={choice.value}
+              checked={scale === choice.value}
+              onChange={() => choose(choice.value)}
+            />
+            <span className="profile-choice-label">{choice.label}</span>
+          </label>
+        ))}
+      </fieldset>
+    </section>
+  );
+}
+
 /** The settings of the person who signed in, on their Profile page. */
 export default function ProfileSettings() {
   return (
@@ -400,6 +447,7 @@ export default function ProfileSettings() {
       <SecretCard />
       <JoshuaCard />
       <DeviceNotifications />
+      <TextSizeCard />
     </div>
   );
 }

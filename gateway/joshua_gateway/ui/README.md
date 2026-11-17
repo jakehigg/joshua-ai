@@ -79,3 +79,9 @@ navigation. `.j-tabs.mobile-only` hides once the sidebar shows.
 
 Fonts: the stack prefers Figtree and falls back to the system font. Nothing
 is fetched from a font host.
+
+Sizes: every text size is a rem of the root font, which the file sets to
+93.75% of the browser's default, 15px while that default is 16px. An app that
+scales its whole text overrides that one rule. The viewer does it with
+`html { font-size: calc(93.75% * var(--j-text-scale, 1)); }`, where
+`--j-text-scale` is the text size the reader chose for that device.
