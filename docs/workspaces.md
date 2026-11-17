@@ -184,7 +184,7 @@ model, and no permission.
 | --- | --- |
 | `none` | The default. Joshua writes as he does everywhere else. |
 | `ste` | Simplified Technical English: one idea in each sentence, the active voice, no hedges. |
-| `coach` | Joshua coaches: he asks what the person wants to change, finds the obstacle, and gives one next step. |
+| `coach` | Interested in what the person is trying to do, gives one concrete next step, and names a weak point plainly with what to do about it. No flattery. |
 
 Each style but `none` ships one file at
 `core/joshua_core/prompts/builtin/styles/<style>.md`. `STYLE_FILES` in
