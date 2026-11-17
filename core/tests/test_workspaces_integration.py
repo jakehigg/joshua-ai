@@ -136,6 +136,8 @@ async def test_the_schema_is_idempotent_and_rejects_bad_values(seeded) -> None:
 
     with pytest.raises(psycopg.errors.CheckViolation):
         await seeded.create_workspace("alex", "Bad notify", notify="always")
+    with pytest.raises(psycopg.errors.CheckViolation):
+        await seeded.create_workspace("alex", "Bad style", style="pirate")
     ws = await seeded.create_workspace("alex", "Good")
     with pytest.raises(psycopg.errors.CheckViolation):
         await seeded.update_workspace(ws.id, status="deleted")
@@ -162,6 +164,18 @@ async def test_create_makes_the_channel_the_conversation_and_unique_slugs(seeded
     conversation = await seeded.find_conversation(f"workspace:{first.id}", "alex")
     assert conversation is not None
     assert first.notify == "none" and first.status == "active" and first.servers == ()
+    # A workspace made with no style takes the house voice.
+    assert first.style == "none"
+
+
+async def test_the_style_is_stored_on_the_create_and_on_the_change(seeded) -> None:
+    """The ``style`` column: one of ``none``, ``ste``, and ``coach``."""
+    made = await seeded.create_workspace("alex", "Rewrite the docs", style="ste")
+    assert made.style == "ste"
+    assert (await seeded.get_workspace(made.id)).style == "ste"
+    changed = await seeded.update_workspace(made.id, style="coach")
+    assert changed.style == "coach"
+    assert (await seeded.update_workspace(made.id, style="none")).style == "none"
 
 
 async def test_closing_a_workspace_frees_its_name_and_keeps_its_own_slug(seeded) -> None:
@@ -830,6 +844,7 @@ async def test_validation_of_servers_model_and_bodies(client) -> None:
     assert (await post(alex, {"title": "T", "model": "model-z"})).status_code == 422
     assert (await post(alex, {"title": ""})).status_code == 422
     assert (await post(alex, {"title": "T", "notify": "always"})).status_code == 422
+    assert (await post(alex, {"title": "T", "style": "pirate"})).status_code == 422
     assert (await post(alex, {"title": "T", "extra": 1})).status_code == 422
     made = await _create(client)
     patch = lambda b: client.patch(  # noqa: E731
@@ -838,6 +853,26 @@ async def test_validation_of_servers_model_and_bodies(client) -> None:
     assert (await patch({"servers": ["nope"]})).status_code == 422
     assert (await patch({"model": "model-z"})).status_code == 422
     assert (await patch({"status": "gone"})).status_code == 422
+    assert (await patch({"style": "pirate"})).status_code == 422
+
+
+async def test_the_routes_take_and_give_back_the_style(client) -> None:
+    """``style`` on the create, the read, and the patch. The default is
+    ``none``, which writes as Joshua writes everywhere else."""
+    plain = await _create(client, title="Plain")
+    assert plain["style"] == "none"
+    made = await _create(client, title="Docs", style="ste")
+    assert made["style"] == "ste"
+
+    got = await client.get(f"/v1/workspaces/{made['id']}", params={"person": "alex"}, headers=_h())
+    assert got.json()["style"] == "ste"
+    patched = await client.patch(
+        f"/v1/workspaces/{made['id']}",
+        params={"person": "alex"},
+        headers=_h(),
+        json={"style": "coach"},
+    )
+    assert patched.status_code == 200 and patched.json()["style"] == "coach"
 
 
 async def test_any_model_is_accepted_when_the_list_is_empty(seeded) -> None:
@@ -1052,6 +1087,11 @@ async def test_options_list_the_servers_of_the_person_and_the_models(client) -> 
     assert resp.status_code == 200
     body = resp.json()
     assert body["models"] == ["model-a", "model-b"]
+    # One line for each writing style, in the order of the store's list. The
+    # default is first and reads "Regular".
+    assert [s["id"] for s in body["styles"]] == ["none", "ste", "coach"]
+    assert body["styles"][0]["name"] == "Regular"
+    assert all(s["description"] for s in body["styles"])
     # A server with no description shows its name. A private server is hidden.
     assert body["servers"] == [
         {"name": "tasks", "description": "Tasks and projects"},

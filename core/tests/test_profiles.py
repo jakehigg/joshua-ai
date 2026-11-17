@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from joshua_core.engine.profiles import Profile, derive_profile
-from joshua_core.store.models import Channel, Person
+from pathlib import Path
+
+from joshua_core.engine import profiles
+from joshua_core.engine.profiles import STYLE_FILES, Profile, derive_profile
+from joshua_core.store.models import WORKSPACE_STYLES, Channel, Person
 
 _MEMBER = Person(id="alex", display_name="Alex", role="member")
 _GUEST = Person(id="sam", display_name="Sam", role="guest")
@@ -97,6 +100,32 @@ def test_a_guest_in_a_workspace_keeps_the_guest_profile_and_the_workspace_file()
     profile = derive_profile(_GUEST, _WORKSPACE)
     assert profile.name == "guest"
     assert profile.prompt_files == ("base.md", "guest.md", "chat.md", "speech.md", "workspace.md")
+
+
+def test_the_style_of_a_workspace_adds_its_file_last() -> None:
+    plain = derive_profile(_MEMBER, _WORKSPACE)
+    for style in ("ste", "coach"):
+        profile = derive_profile(_MEMBER, _WORKSPACE, style=style)
+        assert profile.prompt_files == (*plain.prompt_files, f"styles/{style}.md")
+    # The style file comes after ``workspace_shared.md`` too, so it wins where
+    # it disagrees with an earlier page.
+    shared = derive_profile(_MEMBER, _SHARED_WORKSPACE, style="ste")
+    assert shared.prompt_files[-2:] == ("workspace_shared.md", "styles/ste.md")
+
+
+def test_the_style_none_changes_nothing() -> None:
+    plain = derive_profile(_MEMBER, _WORKSPACE)
+    assert derive_profile(_MEMBER, _WORKSPACE, style="none").prompt_files == plain.prompt_files
+    assert derive_profile(_MEMBER, _WORKSPACE, style=None).prompt_files == plain.prompt_files
+
+
+def test_every_style_file_ships() -> None:
+    builtin = Path(profiles.__file__).parent.parent / "prompts" / "builtin"
+    assert tuple(STYLE_FILES) == WORKSPACE_STYLES
+    assert STYLE_FILES["none"] == ()
+    for files in STYLE_FILES.values():
+        for name in files:
+            assert (builtin / name).is_file(), name
 
 
 def test_with_files_appends() -> None:

@@ -16,26 +16,28 @@ checked before the body is read. A ``person`` that is not a member of
   not finished. The viewer composes that with the workers of the workspace
   into the charm beside the name.
 - ``POST /v1/workspaces`` creates one (``title``, ``goal``, ``model``,
-  ``servers``, ``notify``, ``members``). The slug comes from the title. The
-  create also makes the channel ``workspace:<id>`` and its conversation.
+  ``servers``, ``notify``, ``style``, ``members``). The slug comes from the
+  title. The create also makes the channel ``workspace:<id>`` and its
+  conversation.
   ``members`` makes it a shared workspace: one thread that the owner and the
   members write in. The slug of a shared workspace is one for everyone, so a
   taken one answers 409 and names it. The people are set here and never
   change: no body and no route adds or removes one. ``shared`` is the
   namespace of a shared workspace, so an owner or a member of that id is 422.
 - ``GET`` and ``PATCH /v1/workspaces/{slug}`` read and change one (``title``,
-  ``goal``, ``notes``, ``servers``, ``model``, ``notify``, ``status``).
-  ``{slug}`` may also be the id, or a two-segment ref: ``shared/<slug>`` for a
-  shared workspace and ``<owner>/<slug>`` for the workspace of a person. A ref
-  with a slash is taken in the path and URL-encoded alike.
+  ``goal``, ``notes``, ``servers``, ``model``, ``notify``, ``style``,
+  ``status``). ``{slug}`` may also be the id, or a two-segment ref:
+  ``shared/<slug>`` for a shared workspace and ``<owner>/<slug>`` for the
+  workspace of a person. A ref with a slash is taken in the path and
+  URL-encoded alike.
 - ``GET`` and ``POST /v1/workspaces/{slug}/items`` list and add items.
   ``DELETE /v1/workspaces/{slug}/items/{id}`` removes one and
   ``PATCH /v1/workspaces/{slug}/items/{id}`` changes ``pinned`` or ``seen``.
   The assignments container adds the outputs of a run that started in a
   workspace here, with the person of the run, so a run of a person who is not
   one of the people of that workspace adds nothing (404).
-- ``GET /v1/workspaces/options`` gives the servers, the models, and the people
-  that the person may pick.
+- ``GET /v1/workspaces/options`` gives the servers, the models, the writing
+  styles, and the people that the person may pick.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
 - ``POST /v1/workspaces/{slug}/read`` marks the thread read up to a turn id
   (``turn_id``, the id of a transcript row) for that person. The mark is
@@ -78,6 +80,7 @@ from joshua_core.store.models import (
     WORKSPACE_ITEM_KINDS,
     WORKSPACE_NOTIFY,
     WORKSPACE_STATUSES,
+    WORKSPACE_STYLES,
     Workspace,
     WorkspaceItem,
 )
@@ -95,6 +98,7 @@ WORKSPACE_REF_PATH = WORKSPACES_PATH + "/{slug:path}"
 
 Notify = Literal["none", "questions", "questions+finishes"]
 NotifyMode = Literal["off", "decide", "all"]
+Style = Literal["none", "ste", "coach"]
 Status = Literal["active", "paused", "archived"]
 Kind = Literal[
     "document",
@@ -110,9 +114,19 @@ Kind = Literal[
     "file",
 ]
 
+# The writing styles, as the picker of the viewer shows them: one name and one
+# line for each style of ``WORKSPACE_STYLES``, in that order.
+STYLES: dict[str, tuple[str, str]] = {
+    "none": ("Regular", "Joshua writes as he does everywhere else."),
+    "ste": ("Simplified Technical English", "Short sentences, active voice, no hedges."),
+    "coach": ("Coach", "Asks what you want to change, and gives one next step."),
+}
+
 # The lists above and the store's lists must stay the same.
 assert Notify.__args__ == WORKSPACE_NOTIFY  # type: ignore[attr-defined]
 assert NotifyMode.__args__ == NOTIFY_MODES  # type: ignore[attr-defined]
+assert Style.__args__ == WORKSPACE_STYLES  # type: ignore[attr-defined]
+assert tuple(STYLES) == WORKSPACE_STYLES
 assert Status.__args__ == WORKSPACE_STATUSES  # type: ignore[attr-defined]
 assert Kind.__args__ == WORKSPACE_ITEM_KINDS  # type: ignore[attr-defined]
 
@@ -127,6 +141,7 @@ class CreateBody(_Body):
     model: str | None = Field(default=None, max_length=200)
     servers: list[str] = Field(default_factory=list, max_length=100)
     notify: Notify = "none"
+    style: Style = "none"
     # The other people of a shared workspace. They are set at the create and
     # never change, so no body below holds them.
     members: list[str] = Field(default_factory=list, max_length=100)
@@ -139,6 +154,7 @@ class PatchBody(_Body):
     servers: list[str] | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=200)
     notify: Notify | None = None
+    style: Style | None = None
     status: Status | None = None
 
 
@@ -219,6 +235,7 @@ def workspace_json(workspace: Workspace) -> dict[str, Any]:
         "servers": list(workspace.servers),
         "model": workspace.model,
         "notify": workspace.notify,
+        "style": workspace.style,
         "status": workspace.status,
         "shared": workspace.shared,
         "members": list(workspace.members),
@@ -432,6 +449,7 @@ def build_workspaces_router() -> APIRouter:
                 model=(body.model or "").strip() or None,
                 servers=servers,
                 notify=body.notify,
+                style=body.style,
                 members=members,
             )
         except SlugTaken as taken:
@@ -444,9 +462,9 @@ def build_workspaces_router() -> APIRouter:
     @router.get(WORKSPACES_PATH + "/options")
     async def get_options(request: Request):  # type: ignore[no-untyped-def]
         """What a person may pick for a workspace: the servers they may use (a
-        name and one line), the models in ``workspaces.models``, and the people
-        they may share a workspace with. An empty ``models`` means any text, and
-        the list is empty."""
+        name and one line), the models in ``workspaces.models``, the writing
+        styles, and the people they may share a workspace with. An empty
+        ``models`` means any text, and the list is empty."""
         denied, person_id, _ = await _scope(request)
         if denied is not None:
             return denied
@@ -466,7 +484,15 @@ def build_workspaces_router() -> APIRouter:
             if person.id != person_id and is_member(person.role)
         ]
         return JSONResponse(
-            {"servers": servers, "models": list(settings.workspaces.models), "people": people}
+            {
+                "servers": servers,
+                "models": list(settings.workspaces.models),
+                "styles": [
+                    {"id": style, "name": name, "description": description}
+                    for style, (name, description) in STYLES.items()
+                ],
+                "people": people,
+            }
         )
 
     @router.post(WORKSPACES_PATH + "/by-id/{workspace_id}/items")
@@ -644,7 +670,7 @@ def build_workspaces_router() -> APIRouter:
         fields = body.model_dump(exclude_unset=True)
         if fields.get("title") is None:
             fields.pop("title", None)
-        for name in ("goal", "notes", "notify", "status", "servers"):
+        for name in ("goal", "notes", "notify", "style", "status", "servers"):
             if name in fields and fields[name] is None:
                 fields.pop(name)
         if "servers" in fields:

@@ -133,11 +133,11 @@ def test_an_answer_with_no_window_says_so() -> None:
 # --- which jobs get the tool -------------------------------------------------------
 
 
-def _voice_profile(person: Any, channel: Any) -> Any:
+def _voice_profile(person: Any, channel: Any, style: str | None = None) -> Any:
     return SimpleNamespace(name="voice-dm", job="voice", max_turns=0)
 
 
-def _chat_profile(person: Any, channel: Any) -> Any:
+def _chat_profile(person: Any, channel: Any, style: str | None = None) -> Any:
     return SimpleNamespace(name="default", max_turns=0)
 
 

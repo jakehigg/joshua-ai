@@ -133,7 +133,7 @@ class FakeComposer:
         return "you are joshua"
 
 
-def fake_derive_profile(person: Any, channel: Channel) -> Any:
+def fake_derive_profile(person: Any, channel: Channel, style: str | None = None) -> Any:
     return SimpleNamespace(name="default", model=None, max_turns=0)
 
 

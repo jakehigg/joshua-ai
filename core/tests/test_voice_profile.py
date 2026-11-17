@@ -176,7 +176,7 @@ def _manager(repo: FakeRepo, tmp_path: Path, ttl: int | None, **settings_kw: Any
         repo=repo,
         settings=make_settings(**settings_kw),
         composer=FakeComposer(),
-        derive_profile=lambda person, channel: _profile_for("voice-dm", ttl),
+        derive_profile=lambda person, channel, style=None: _profile_for("voice-dm", ttl),
         agent_backend="stub",
         data_dir=tmp_path,
     )
