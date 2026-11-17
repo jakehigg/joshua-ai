@@ -1,13 +1,15 @@
-"""The calls to core: the limits and the usage, with the retry rules."""
+"""The calls to core: the limits, the usage, and the history, with the retry rules."""
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 from conftest import make_settings
 from joshua_assignments.core_client import CoreClient
 from joshua_shared.contracts import UsageWriteRow
-from sdk_fakes import FakeCore
+from sdk_fakes import HISTORY_MESSAGES, FakeCore
 
 
 def row() -> UsageWriteRow:
@@ -79,3 +81,74 @@ async def test_post_usage_retries_a_5xx_and_a_connection_error_but_not_a_4xx() -
 async def test_no_core_url_is_an_error() -> None:
     with pytest.raises(RuntimeError, match="CORE_URL"):
         await CoreClient(make_settings(core_url=None)).limits()
+
+
+# --- the history of a worker ---------------------------------------------------
+
+START = datetime(2026, 3, 4, tzinfo=UTC)
+END = datetime(2026, 3, 5, tzinfo=UTC)
+
+
+async def test_search_history_sends_the_scope_and_reads_the_messages() -> None:
+    core = FakeCore()
+    answer = await core.client(make_settings()).search_history("alex", None, "receipt", 5)
+    assert answer is not None
+    assert [m.text for m in answer.messages] == [m["text"] for m in HISTORY_MESSAGES]
+    assert answer.messages[1].speaker is None
+    assert core.history_paths == ["/v1/history/search"]
+    assert core.history_bodies[0] == {
+        "person": "alex",
+        "workspace": None,
+        "query": "receipt",
+        "limit": 5,
+    }
+    assert core.history_requests[0].headers["authorization"] == "Bearer assignments-fleet-token"
+
+
+async def test_read_history_sends_the_window_and_the_cursor() -> None:
+    core = FakeCore()
+    core.history_cursor = "c-9"
+    answer = await core.client(make_settings()).read_history(
+        "alex", "thanksgiving", START, END, "c-8"
+    )
+    assert answer is not None and answer.cursor == "c-9"
+    assert core.history_paths == ["/v1/history/read"]
+    body = core.history_bodies[0]
+    assert body["person"] == "alex" and body["workspace"] == "thanksgiving"
+    assert body["start"] == "2026-03-04T00:00:00Z" and body["cursor"] == "c-8"
+
+
+@pytest.mark.parametrize("status", [400, 403, 500])
+async def test_a_history_route_that_refuses_gives_none(status: int) -> None:
+    core = FakeCore()
+    core.history_status = status
+    client = core.client(make_settings())
+    assert await client.search_history("alex", None, "receipt", 5) is None
+    assert await client.read_history("alex", None, START, END, None) is None
+
+
+async def test_a_history_answer_that_is_not_valid_or_an_error_is_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"messages": [{"direction": "in"}]})
+
+    client = CoreClient(
+        make_settings(),
+        make_client=lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    assert await client.search_history("alex", None, "x", 5) is None
+    assert await client.read_history("alex", None, START, END, None) is None
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    down = CoreClient(
+        make_settings(),
+        make_client=lambda: httpx.AsyncClient(transport=httpx.MockTransport(broken)),
+    )
+    assert await down.search_history("alex", None, "x", 5) is None
+
+
+async def test_no_core_url_gives_no_history() -> None:
+    client = CoreClient(make_settings(core_url=None))
+    assert await client.search_history("alex", None, "x", 5) is None
+    assert await client.read_history("alex", None, START, END, None) is None

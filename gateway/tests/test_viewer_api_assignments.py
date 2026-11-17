@@ -414,7 +414,14 @@ def test_one_assignment_has_its_definition_its_plan_and_no_report(data, monkeypa
     plan = answer["plan"]
     assert plan["markdown"] == PLAN
     assert plan["lines"] == PLAN.split("\n")
-    assert plan["progress"] == {"done": 1, "total": 2, "next": "fix the links", "percent": 50.0}
+    assert plan["progress"] == {
+        "done": 1,
+        "total": 2,
+        "skipped": 0,
+        "open": 1,
+        "next": "fix the links",
+        "percent": 50.0,
+    }
     assert [block["id"] for block in plan["blocks"]] == ["P1", "P3", "P4"]
     assert plan["updated"] == "5m ago"
 
@@ -572,7 +579,14 @@ def test_a_draft_says_how_to_start_it_and_has_no_cost(data, monkeypatch) -> None
     assert one["draft_line"] == am.DRAFT_LINE
     assert one["cost"] == "" and one["turns"] is None
     assert answer["plan"]["markdown"] == "" and answer["plan"]["blocks"] == []
-    assert answer["plan"]["progress"] == {"done": 0, "total": 0, "next": "", "percent": 0.0}
+    assert answer["plan"]["progress"] == {
+        "done": 0,
+        "total": 0,
+        "skipped": 0,
+        "open": 0,
+        "next": "",
+        "percent": 0.0,
+    }
 
 
 def test_a_manager_with_no_definition_text_gives_the_spec_and_no_token(data, monkeypatch) -> None:

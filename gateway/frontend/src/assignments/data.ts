@@ -156,10 +156,15 @@ export interface DefinitionData {
   goal_offset: number;
 }
 
-/** How far the task boxes of the plan are. */
+/**
+ * How far the task boxes of the plan are. `skipped` counts the steps the
+ * worker marked skipped, and `open` the steps that nobody settled.
+ */
 export interface PlanProgress {
   done: number;
   total: number;
+  skipped: number;
+  open: number;
   next: string;
   percent: number;
 }

@@ -662,7 +662,10 @@ day's transcripts, writes one journal page per person for that day at
 shared profile, and re-indexes. A day with nothing worth keeping gets no
 journal page. With `memory.daily_rollover: true` core then closes every
 session, so the next message starts a fresh one with the profile block as
-context. `memory.md` explains the rules.
+context. The first turn of that fresh session also carries one rule: when the
+message picks up work in progress, Joshua reads the last rows of the
+conversation with `read_history` before it answers. `memory.md` explains the
+rules.
 
 To run the reflection by hand, or to re-run one day, use `POST /admin/reflect`.
 

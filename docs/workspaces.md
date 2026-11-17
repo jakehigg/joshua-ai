@@ -374,6 +374,11 @@ thread after the `last_read_turn_id` of that person that somebody else wrote,
 Joshua or another person of the thread, and every such row when they have read
 nothing of it. A row of their own never counts, so sending a message and
 leaving the workspace at once leaves the count at zero.
+`GET /v1/workspaces` and `GET /v1/workspaces/{slug}` also give
+`turn_in_flight`: a turn of that thread has not finished. It comes from the
+manager's memory, so it costs no query and a restart of core clears it. The
+viewer uses it for the charm beside the name of a workspace (below).
+
 `POST /v1/workspaces/{slug}/read` takes
 `{"turn_id"}`, the id of a transcript row (0 or more), and answers
 `{"conversation", "last_read_turn_id", "last_read_at", "unread"}`. The mark is
@@ -539,9 +544,11 @@ compose and on Kubernetes, and it adds no container.
   a small two-person icon beside its name, in the rail and in the header of the
   workspace; the icon is the only mark, and no row says "Shared". A workspace
   whose thread holds rows the person has not read shows the count after the
-  title. The chat marks the thread read while its newest row is on screen, and
-  not while the tab is hidden, and the rail asks for the counts again after
-  each mark.
+  title. Beside the two-person icon, in the same place and the same style, a
+  workspace Joshua is working for, or one that waits for a person, carries the
+  charm of that (below). The chat marks the thread read while its newest row
+  is on screen, and not while the tab is hidden, and the rail asks for the
+  counts again after each mark.
 - The new workspace dialog asks for a title, a goal (optional), a model, and
   the servers. "Shared" offers the other people of the roster as checkboxes
   and shows the address the workspace will take; Create waits until at least
@@ -562,12 +569,45 @@ compose and on Kubernetes, and it adds no container.
   as text. Each item can be pinned or removed, and a form adds a link. The panel
   loads again after each finished turn and when the tab gets focus.
 
+### The charm beside the name
+
+One charm shows beside the name of a workspace, wherever the name shows: the
+rail, and the header of the workspace chat, next to the two-person icon of a
+shared one. It has two states, and a workspace with nothing running and nothing
+waiting carries no charm at all.
+
+- **Working.** Joshua has something in flight for this workspace: a turn of the
+  thread, or an assignment that is running.
+- **Waiting.** Something of it needs a person: an assignment that stopped with
+  a question or a request, or a draft that waits for a start.
+
+Working wins over waiting: Joshua is on it, so the person has nothing to do
+yet. Hover or tap gives one line of what it is, such as `assignment 31 has a
+question`, and that line is the accessible name of the icon too, because the
+charm stands for no text on screen. It is read-only: nothing on it acts.
+
+The viewer composes the state in `gateway/joshua_gateway/viewer_workspaces.py`,
+and `GET /api/v1/workspaces` and `GET /api/v1/workspaces/{slug}` carry it as
+`charm`: `{"state": "working" | "waiting", "reason": "..."}` or null. The
+sources are core's `turn_in_flight` and the assignments manager, which gives
+the runs and the drafts of the signed-in person with the workspace of each. A
+source that is not configured, or that does not answer, is left out, so the
+charm is what the other sources say and never an error. An assignment paused at
+the subscription limits carries no charm: it waits for a window to reset, which
+needs no person, and nothing of it is running.
+
+**The developer addon is not a source yet.** It has no read route for the jobs
+of a workspace, so a developer task in flight, or one that asked a question,
+shows no charm. When that route exists it is one more reader in that module;
+the merge, the routes, and the screen stay as they are.
+
 ### Viewer routes
 
 Every route is under `/api/v1/workspaces`, behind the sign-in. Each one proxies
 the route of the same name on core, with `CORE_URL` and `JOSHUA_TOKEN_VIEWER`,
 and names the signed-in person. A guest gets 403. Every write checks the
-`Origin` header. Core's status and body come back as they are.
+`Origin` header. Core's status and body come back as they are. The list and the
+read of one workspace carry one field that core does not give: `charm` (above).
 
 | Route | Core route |
 |---|---|

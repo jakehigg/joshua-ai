@@ -91,6 +91,14 @@ Every route has an allowlist of fleet identities. The list is in
   of the calls that core makes. Core stores each `ref` with the name of the
   writer, so a writer cannot reach the rows of another writer.
 
+- core's `POST /v1/history/search` and `POST /v1/history/read` admit
+  `assignments` only. They are the chat history of a worker, read-only. The
+  caller names who started the run, the person and the workspace of a
+  workspace run, and never a conversation: core turns the two into the
+  conversations of the read, so the scope of a run is applied in one place and
+  not in a prompt. A run that a shared workspace started reads that
+  workspace's thread alone, and a shared thread is in no person's scope.
+
 - core's `ANY /v1/model/{path}` admits `inference.forwarder.allowed_callers`
   (default `assignments`). It compares the bearer with the tokens of that list
   only, so every other token, also core's own, gets `401`. It sends a request

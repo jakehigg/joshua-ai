@@ -2,7 +2,8 @@
 
 A session holds the file tools and Bash (``BASE_TOOLS``) in the scratch
 directory of the assignment, the gateway MCP servers that the person may
-reach, and the in-process ``assignment`` server. It never holds WebSearch or
+reach, the in-process ``assignment`` server, and the in-process ``history``
+server when the spec allows it. It never holds WebSearch or
 WebFetch, never holds the ``assignments`` server, and loads no settings from
 the disk (``setting_sources=[]``). ``check_session_tools`` asserts this on
 every set of options before a session starts.
@@ -37,7 +38,11 @@ from claude_agent_sdk import (
     create_sdk_mcp_server,
     tool,
 )
-from joshua_shared.contracts import MODEL_FORWARDER_PATH
+from joshua_shared.contracts import (
+    HISTORY_SEARCH_DEFAULT_LIMIT,
+    HISTORY_SEARCH_MAX_LIMIT,
+    MODEL_FORWARDER_PATH,
+)
 from joshua_shared.log import get_logger
 
 from joshua_assignments.clock import Clock
@@ -47,6 +52,9 @@ logger = get_logger("joshua_assignments.session")
 BASE_TOOLS = ("Read", "Edit", "Write", "Bash", "Glob", "Grep")
 FORBIDDEN_TOOLS = ("WebFetch", "WebSearch")
 ASSIGNMENT_SERVER = "assignment"
+# The in-process read-only server of the chat history. Core applies the scope
+# of the read (``joshua_assignments/history.py``).
+HISTORY_SERVER = "history"
 # The MCP server of this container. A session never holds it, so an
 # assignment cannot start an assignment.
 MANAGER_SERVER = "assignments"
@@ -80,11 +88,16 @@ ToolHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 _ASSIGNMENT_SERVERS: weakref.WeakKeyDictionary[Any, dict[str, ToolHandler]] = (
     weakref.WeakKeyDictionary()
 )
+# The ``history`` servers that ``history_server`` made, the same way.
+_HISTORY_SERVERS: weakref.WeakKeyDictionary[Any, dict[str, ToolHandler]] = (
+    weakref.WeakKeyDictionary()
+)
 
 TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
     "write_plan": (
         "Replace your plan: Markdown, at most 64 KiB. Write it before any other tool "
-        "call, then keep it current: tick each step, add a progress line, mark the next step.",
+        "call, then keep it current: tick each step, add a progress line, mark the next "
+        "step. A step you do not do goes to `[-] <the step> — skipped: <the reason>`.",
         {
             "type": "object",
             "properties": {"markdown": {"type": "string"}},
@@ -160,7 +173,8 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
         },
     ),
     "finish": (
-        "End the assignment. Call write_report first. follow_ups is a list of short texts.",
+        "End the assignment. Call write_report first, and settle every step of your plan: "
+        "tick it or mark it skipped. follow_ups is a list of short texts.",
         {
             "type": "object",
             "properties": {
@@ -168,6 +182,52 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
                 "follow_ups": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["summary"],
+        },
+    ),
+}
+
+
+# The tools of the in-process ``history`` server. Both are read-only, and
+# neither takes a conversation or a person: the scope of the read is applied
+# in core, not here and not in a prompt.
+HISTORY_TOOL_SPECS: dict[str, tuple[str, dict[str, Any]]] = {
+    "search_history": (
+        "Search the chat history you may read, by words. Gives the time, who wrote it, "
+        "and a snippet, newest first. The scope is fixed: the conversations of the "
+        "person who started this assignment, or, for an assignment a shared workspace "
+        "started, the thread of that workspace alone.",
+        {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": 'Words to find. "a phrase", or, and -word also work.',
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": f"Maximum results (default {HISTORY_SEARCH_DEFAULT_LIMIT}, "
+                    f"most {HISTORY_SEARCH_MAX_LIMIT}).",
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    "read_history": (
+        "Read the full messages of the chat history you may read, for a time window, "
+        "oldest first. The scope is the same as search_history. Times with no offset "
+        "are local. A long window comes in pages: pass the cursor of the last result "
+        "for the next page.",
+        {
+            "type": "object",
+            "properties": {
+                "start": {"type": "string", "description": "ISO time; the window starts here."},
+                "end": {
+                    "type": "string",
+                    "description": "ISO time; the window ends here. Default: now.",
+                },
+                "cursor": {"type": "string", "description": "The cursor from the last result."},
+            },
+            "required": ["start"],
         },
     ),
 }
@@ -209,15 +269,39 @@ def assignment_server(handlers: Mapping[str, ToolHandler]) -> McpSdkServerConfig
     return server
 
 
-def server_handlers(server: Any) -> dict[str, ToolHandler] | None:
-    """The handlers of an ``assignment`` server that ``assignment_server`` made, or None."""
+def history_server(handlers: Mapping[str, ToolHandler]) -> McpSdkServerConfig:
+    """The in-process MCP server ``history``, with the tools of ``HISTORY_TOOL_SPECS``."""
+    if set(handlers) != set(HISTORY_TOOL_SPECS):
+        raise ValueError(f"the history server has the tools {sorted(HISTORY_TOOL_SPECS)}")
+    tools = [
+        tool(name, description, schema)(handlers[name])
+        for name, (description, schema) in HISTORY_TOOL_SPECS.items()
+    ]
+    server = create_sdk_mcp_server(name=HISTORY_SERVER, tools=tools)
+    _HISTORY_SERVERS[server["instance"]] = dict(handlers)
+    return server
+
+
+def _handlers_of(
+    server: Any, registry: weakref.WeakKeyDictionary[Any, dict[str, ToolHandler]]
+) -> dict[str, ToolHandler] | None:
     instance = server.get("instance") if isinstance(server, Mapping) else None
     if instance is None:
         return None
     try:
-        return _ASSIGNMENT_SERVERS.get(instance)
+        return registry.get(instance)
     except TypeError:
         return None
+
+
+def server_handlers(server: Any) -> dict[str, ToolHandler] | None:
+    """The handlers of an ``assignment`` server that ``assignment_server`` made, or None."""
+    return _handlers_of(server, _ASSIGNMENT_SERVERS)
+
+
+def history_handlers(server: Any) -> dict[str, ToolHandler] | None:
+    """The handlers of a ``history`` server that ``history_server`` made, or None."""
+    return _handlers_of(server, _HISTORY_SERVERS)
 
 
 def check_session_tools(options: Any, gateway_names: set[str], gateway_url: str) -> None:
@@ -226,8 +310,9 @@ def check_session_tools(options: Any, gateway_names: set[str], gateway_url: str)
     - ``tools`` is a list of names from ``BASE_TOOLS``, and no other built-in tool;
     - WebSearch and WebFetch are refused;
     - ``mcp_servers`` holds only the gateway servers in ``gateway_names``, each
-      an HTTP server on the gateway, and the ``assignment`` server that
-      ``assignment_server`` made; never ``assignments``;
+      an HTTP server on the gateway, the ``assignment`` server that
+      ``assignment_server`` made, and the ``history`` server that
+      ``history_server`` made; never ``assignments``;
     - the session loads no settings and no other MCP config.
     """
     tools = options.tools
@@ -248,6 +333,10 @@ def check_session_tools(options: Any, gateway_names: set[str], gateway_url: str)
         if name == ASSIGNMENT_SERVER:
             if server_handlers(server) is None:
                 raise AssertionError("the assignment server must come from assignment_server")
+            continue
+        if name == HISTORY_SERVER:
+            if history_handlers(server) is None:
+                raise AssertionError("the history server must come from history_server")
             continue
         if name not in gateway_names:
             raise AssertionError(f"the MCP server {name!r} is not in the person's gateway list")
@@ -281,15 +370,25 @@ def build_options(
     gateway_url: str,
     assignment: McpSdkServerConfig,
     resume: str | None,
+    history: McpSdkServerConfig | None = None,
 ) -> ClaudeAgentOptions:
-    """The SDK options of one slice. ``check_session_tools`` checks them."""
+    """The SDK options of one slice. ``check_session_tools`` checks them.
+
+    ``history`` is the in-process history server, or None when the ``tools``
+    of the spec leave it out: then the session holds neither history tool.
+    """
+    servers: dict[str, Any] = {**gateway, ASSIGNMENT_SERVER: assignment}
+    allowed = [*BASE_TOOLS, *(f"mcp__{ASSIGNMENT_SERVER}__{n}" for n in TOOL_SPECS)]
+    if history is not None:
+        servers[HISTORY_SERVER] = history
+        allowed += [f"mcp__{HISTORY_SERVER}__{name}" for name in HISTORY_TOOL_SPECS]
     kwargs: dict[str, Any] = {
         "system_prompt": system_prompt,
         "cwd": str(cwd),
         "tools": list(BASE_TOOLS),
-        "allowed_tools": [*BASE_TOOLS, *(f"mcp__{ASSIGNMENT_SERVER}__{n}" for n in TOOL_SPECS)],
+        "allowed_tools": allowed,
         "disallowed_tools": list(FORBIDDEN_TOOLS),
-        "mcp_servers": {**gateway, ASSIGNMENT_SERVER: assignment},
+        "mcp_servers": servers,
         "strict_mcp_config": True,
         "permission_mode": "bypassPermissions",
         "setting_sources": [],

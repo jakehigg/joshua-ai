@@ -196,6 +196,22 @@ def test_plan_progress_counts_the_boxes_and_finds_the_marked_next_step() -> None
     assert progress.percent == 50.0
 
 
+def test_plan_progress_counts_a_skipped_box_and_no_finish_step() -> None:
+    plan = (
+        "- [x] Clone.\n"
+        "- [-] Tidy the repo — skipped: the repo is read only.\n"
+        "- [ ] **Next:** File the issues.\n"
+        "- [ ] finish\n"
+    )
+    progress = rp.plan_progress(plan)
+    assert (progress.done, progress.skipped, progress.total, progress.open) == (1, 1, 3, 1)
+    assert progress.next_step == "File the issues."
+    assert progress.percent == pytest.approx(66.67, abs=0.01)
+    # A plan with every step settled is full, and has no open step.
+    full = rp.plan_progress("- [x] Clone.\n- [~] Tidy — skipped: no need.\n- [ ] finish")
+    assert (full.done, full.skipped, full.open, full.percent) == (1, 1, 0, 100.0)
+
+
 def test_plan_progress_with_no_marker_takes_the_first_open_box() -> None:
     progress = rp.plan_progress("- [x] a\n- [ ] b\n- [ ] c")
     assert progress.next_step == "b"

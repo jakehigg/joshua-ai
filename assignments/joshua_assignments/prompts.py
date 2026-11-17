@@ -7,9 +7,10 @@ installation.
 
 ``first_prompt`` starts a new session: ``RERUN`` for a re-run, the title,
 the goal, the clone
-command of each repository of the spec and each granted one, and, when the
+command of each repository of the spec and each granted one, when the
 session holds the ``documents`` server, where deliverables go
-(``DELIVERABLES``). After a lost
+(``DELIVERABLES``), and, when it holds the ``history`` server, that the chat
+history is a source (``HISTORY``). After a lost
 scratch it also names the files of ``inbox/`` that went with it.
 ``granted_text`` and ``provided_text`` are the answers of ``grant_repo``
 and ``provide_file``. ``later_prompt`` starts each later slice: the
@@ -40,7 +41,10 @@ SCRATCH_LOST = (
 RERUN = "This is a re-run of assignment {parent}; the person has changed the plan document since."
 PLAN_FIRST = "Write your plan with `write_plan` before any other tool call."
 DRY_RUN = "This is a dry run: change nothing. Write your plan and your report only."
-FINISH_LINE = "When the goal is done, write your report with `write_report`, then call `finish`."
+FINISH_LINE = (
+    "When the goal is done, settle every step of your plan, write your report with "
+    "`write_report`, then call `finish`."
+)
 NO_PROGRESS = "You made no progress last slice; if you are stuck, ask."
 REPOS_DIR = "repos"
 # The MCP server that holds a tasks list. A session can hold it or not.
@@ -52,6 +56,15 @@ DELIVERABLES = (
     "`documents/{person}/`. The server sets `author: assignment:{id}` and "
     "`assignment: {id}`. Record each one with `record_output` as an output of kind "
     "`document`, with the path as ref."
+)
+# The in-process server of the chat history. A session holds it unless the
+# ``tools`` of the spec leave it out. The line says the tools are there; the
+# scope of the read is applied in core, never by this line.
+HISTORY_SERVER = "history"
+HISTORY = (
+    "The chat history is a source: find a message with `search_history` and read a "
+    "window of messages with `read_history`. Both are read-only, and both read only "
+    "the conversations of this assignment. You may quote a message in your report."
 )
 FOLLOW_UPS_TO_TASKS = (
     "Follow-ups: also add each follow-up as a task in the tasks project {project} with "
@@ -153,14 +166,16 @@ def first_prompt(
     resumed: bool = False,
     has_tasks: bool = False,
     has_documents: bool = False,
+    has_history: bool = False,
     inbox_gone: Iterable[str] = (),
 ) -> str:
     """The first message of a new session.
 
     ``resumed`` is True when the assignment ran before but its scratch
     directory, with its session, is gone. ``has_tasks`` is True when the
-    session holds the ``tasks`` server, and ``has_documents`` when it holds
-    the ``documents`` server. ``inbox_gone`` names the files of ``inbox/``
+    session holds the ``tasks`` server, ``has_documents`` when it holds
+    the ``documents`` server, and ``has_history`` when it holds the
+    ``history`` server. ``inbox_gone`` names the files of ``inbox/``
     that went with the scratch directory.
     """
     spec = row.get("spec") or {}
@@ -187,6 +202,8 @@ def first_prompt(
     deliverables = deliverables_line(row, has_documents)
     if deliverables:
         lines.append(deliverables)
+    if has_history:
+        lines.append(HISTORY)
     follow_ups = follow_up_line(spec.get("tasks_project"), has_tasks)
     if follow_ups:
         lines.append(follow_ups)

@@ -42,6 +42,18 @@ with the images and the packaged chart, are at
 - A shared workspace now carries a small two-person icon beside its name, in
   the rail and in the header of the workspace. Before, the rail wrote the
   word "Shared" after the title, which took the room the title needed.
+- **A workspace name says whether Joshua is working or waiting for you.** One
+  charm beside the name, in the same place and the same style as the
+  two-person icon of a shared workspace, in the rail and in the chat header. A
+  spinner means Joshua has something in flight for that workspace: a turn of
+  the thread, or an assignment that is running. A question mark means
+  something there needs you: an assignment that stopped with a question or a
+  request, or a draft that waits for a start. A workspace with nothing running
+  and nothing waiting carries no charm. Hover or tap gives the one line of
+  what it is, such as "assignment 31 has a question", and a screen reader
+  reads the same line. The charm does nothing when you press it: it only says
+  what is happening. The developer addon is not a source yet, so a developer
+  task of a workspace shows no charm.
 - A workspace whose thread holds rows you have not read now shows how many,
   next to its name in the rail. The count is yours alone: in a shared
   workspace each person has a count of their own, and reading the thread
@@ -142,6 +154,44 @@ with the images and the packaged chart, are at
   workspace and goes to its id.
 - A wiki item of a workspace whose ref starts with `wiki/` opens the page.
   The link held the root two times and gave "not found".
+- Cmd/Ctrl+V with a screenshot on the clipboard attaches it to the message.
+  The paste takes the same files as the paperclip, a photo or a PDF up to
+  10 MB, shows the same thumbnail with its remove button, and replaces the
+  file that was attached, because a message carries one file. A pasted
+  screenshot has no name of its own, so it gets one,
+  `pasted-20261116-134500.png`. A paste of text stays a paste of text, and a
+  paste attaches nothing while Joshua works on a turn, as the paperclip is
+  off then.
+- **Joshua reads its own tail after the nightly rollover.** The rollover
+  closes the session each night, so the first message of a new day used to
+  reach a Joshua that remembered nothing of yesterday and asked again for what
+  it already held. The first turn of a new day now carries one rule: when the
+  message picks up work in progress, read the last rows of this conversation
+  with `read_history` before answering, and carry on from there. A later turn
+  of the same day does not carry the rule, and a message that stands on its
+  own needs no read.
+
+### Assignments
+
+- **An assignment can read the chat history.** The worker holds the two
+  read-only tools `search_history` and `read_history`, so a run that needs what
+  was said works from the messages themselves instead of a worse source. Before,
+  an assignment that asked for the history had no way to read it. What a run may
+  read is decided by who started it, and core, not the prompt, applies it: an
+  assignment a person started reads that person's conversations, and one a
+  shared workspace started reads the thread of that workspace alone, never a
+  person's other conversations. A report may quote a message as it stands. A
+  spec whose `tools` leave `history` out has neither tool.
+- An assignment can no longer end with a stale plan. `finish` refuses while a
+  step of the plan is open, and names each open step: the worker ticks what it
+  did with `write_plan`, or marks a step it did not do as
+  `[-] <the step> — skipped: <the reason>`, then calls `finish` again. Before,
+  a worker could write its report and finish with the last steps unticked, so
+  the page of a done assignment showed "5 of 7 steps" and a next step that was
+  already done. A step whose text is only `finish` does not count: the call is
+  the proof of it. A skipped step shows in the plan and on the generated
+  report with its reason, and an assignment that ended with open steps says
+  "ended, N steps open" in place of the bar.
 
 ### Viewer
 

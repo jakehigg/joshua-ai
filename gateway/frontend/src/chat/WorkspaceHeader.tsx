@@ -7,7 +7,9 @@
 // here", the notify mode of the signed-in person: it governs the `notify_user`
 // tool, it is theirs alone, and it saves as it changes. A shared workspace carries a two-person icon
 // beside its title and names its people under it, "Jake, Mia". They are not in
-// the drawer: they are set at the create and never change.
+// the drawer: they are set at the create and never change. A workspace Joshua
+// is working for, or one that waits for a person, carries the charm of that
+// beside the title too (WorkCharm.tsx).
 
 import { useContext, useEffect, useState, type FormEvent } from "react";
 import {
@@ -26,6 +28,7 @@ import { SessionContext } from "../shell/Shell";
 import { GrowTextarea, scrollFieldIntoView } from "./GrowTextarea";
 import { ServerChecklist } from "./ServerChecklist";
 import { SharedMark } from "./SharedMark";
+import { WorkCharm } from "./WorkCharm";
 
 const NOTIFY: [Notify, string][] = [
   ["none", "Never"],
@@ -261,6 +264,7 @@ export function WorkspaceHeader({
         <h1>
           {workspace.title}
           {workspace.shared && <SharedMark />}
+          <WorkCharm charm={workspace.charm} />
         </h1>
         {workspace.shared && <People workspace={workspace} />}
         {workspace.status !== "active" && <span className="subtitle">{workspace.status}</span>}

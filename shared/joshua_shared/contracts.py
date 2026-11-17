@@ -13,6 +13,10 @@ call to report the tokens of their own model calls, as a row of kind
 ``assignment`` or ``developer``. ``MODEL_FORWARDER_PATH`` is the prefix of
 core's model forwarder. ``assignment_conversation`` names the conversation
 of an assignment session, and ``assignment_of`` reads it back.
+``HistorySearchRequest`` and ``HistoryReadRequest`` are the bodies of core's
+``POST /v1/history/search`` and ``POST /v1/history/read``, which the
+assignments container calls for the ``history`` tools of a worker: the caller
+names who started the run, and core decides the conversations of that scope.
 ``LimitsResponse`` is the shape of core's
 ``GET /v1/limits``: how much of the Claude subscription limits is used.
 ``WebSearchRequest`` and ``WebSearchResponse`` are
@@ -22,6 +26,7 @@ internet agent.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -348,6 +353,84 @@ def assignment_of(identity: str | None, conversation: str | None) -> int | None:
 # the slug, or a two-segment ref, URL-encoded. The caller names the person with
 # ``person``, and a workspace that person is not in answers 404.
 WORKSPACE_ITEMS_PATH = "/v1/workspaces/{workspace}/items"
+
+# The paths of core's chat history routes, which the assignments container
+# calls for the ``history`` tools of a worker. Both are read-only. The caller
+# names who started the run, and core alone decides the conversations of that
+# scope.
+HISTORY_SEARCH_PATH = "/v1/history/search"
+HISTORY_READ_PATH = "/v1/history/read"
+HISTORY_MAX_QUERY_CHARS = 1000
+HISTORY_SEARCH_DEFAULT_LIMIT = 10
+HISTORY_SEARCH_MAX_LIMIT = 50
+# The reference of a workspace: its id, its slug, or ``<space>/<slug>``.
+HISTORY_MAX_WORKSPACE_CHARS = 200
+
+
+class HistoryScope(_Model):
+    """Who started the run that reads the history: the fields of both bodies.
+
+    ``person`` is the person the run belongs to, and ``workspace`` the
+    workspace thread it started in, when it started in one. Core turns the
+    two into the conversations that the run may read
+    (``core/joshua_core/history_api.py``); the caller never names a
+    conversation.
+    """
+
+    person: str = Field(pattern=_PERSON_PATTERN)
+    workspace: str | None = Field(default=None, max_length=HISTORY_MAX_WORKSPACE_CHARS)
+
+
+class HistorySearchRequest(HistoryScope):
+    """The body of ``POST /v1/history/search``: words to find in the scope.
+
+    ``query`` is the web search syntax of Postgres: words, ``"a phrase"``,
+    ``or``, ``-word``.
+    """
+
+    query: str = Field(min_length=1, max_length=HISTORY_MAX_QUERY_CHARS)
+    limit: int = Field(default=HISTORY_SEARCH_DEFAULT_LIMIT, ge=1, le=HISTORY_SEARCH_MAX_LIMIT)
+
+
+class HistoryReadRequest(HistoryScope):
+    """The body of ``POST /v1/history/read``: one time window of the scope.
+
+    ``start`` and ``end`` are absolute times; the caller resolves a local
+    time before it sends one. ``cursor`` is the cursor of the page before.
+    """
+
+    start: datetime
+    end: datetime | None = None
+    cursor: str | None = Field(default=None, max_length=64)
+
+
+class HistoryMessage(_Model):
+    """One message of a history answer. ``at`` is ISO 8601 in UTC.
+    ``direction`` is ``in`` for a person and ``out`` for Joshua. ``speaker``
+    names the person of a row of a thread that several people write in.
+    ``text`` is the snippet of a search and the whole message of a read, and
+    ``cut`` is True when a read cut it."""
+
+    at: str
+    direction: str
+    speaker: str | None = None
+    text: str
+    cut: bool = False
+
+
+class HistorySearchResponse(_Model):
+    """The answer of ``POST /v1/history/search``: the matches, newest first."""
+
+    messages: list[HistoryMessage]
+
+
+class HistoryReadResponse(_Model):
+    """The answer of ``POST /v1/history/read``: one page of the window, oldest
+    first, and the cursor of the next page or None."""
+
+    messages: list[HistoryMessage]
+    cursor: str | None = None
+
 
 # The path of core's subscription limits route. It has no bearer, as ``/healthz``.
 LIMITS_PATH = "/v1/limits"

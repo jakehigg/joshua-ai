@@ -446,7 +446,7 @@ describe("useTurn", () => {
 
     afterEach(() => vi.clearAllMocks());
 
-    it("shows the upload percent, then saving, then sent, then nothing when the answer starts", async () => {
+    it("shows the upload percent, then saving, then nothing once Joshua accepts", async () => {
       const sent = stubXhr();
       const { hook } = setupWith();
       act(() => {
@@ -459,7 +459,7 @@ describe("useTurn", () => {
       act(() => xhr?.uploaded(100, 100));
       expect(hook.result.current.turn.upload).toMatchObject({ phase: "saving", percent: 100 });
       act(() => xhr?.chunk(ACCEPTED));
-      expect(hook.result.current.turn.upload).toMatchObject({ phase: "sent" });
+      expect(hook.result.current.turn.upload).toBeNull();
       act(() => xhr?.chunk(sse("delta", { text: "It is" })));
       expect(hook.result.current.turn.upload).toBeNull();
       act(() => {

@@ -449,6 +449,23 @@ class ConversationManager:
             data_dir=self._data_dir,
         )
 
+    def _after_rollover(self, conversation: Conversation) -> bool:
+        """True for the first session of a conversation after the daily rollover.
+
+        The rollover stamps ``session_started_on`` with the day it ran and nulls
+        the SDK session, so a conversation with today's stamp and no session is
+        one the rollover closed last night and nobody has written in since. A
+        conversation that never rolled over (a new one, a workspace thread) has
+        no stamp, and a later turn of the same day has a session to resume.
+        """
+        if conversation.sdk_session_id is not None or conversation.session_started_on is None:
+            return False
+        try:
+            today = datetime.now(ZoneInfo(self._settings.timezone)).date()
+        except Exception:  # noqa: BLE001 — a bad tz name falls back to UTC
+            today = datetime.now(UTC).date()
+        return conversation.session_started_on == today
+
     def _resume_on(
         self, conversation: Conversation, resume: str | None, resolved: ResolvedInference
     ) -> str | None:
@@ -530,7 +547,12 @@ class ConversationManager:
         resume = self._resume_on(conversation, resume, resolved)
         memory = self._memory_block(person, channel)
         system_prompt = self._composer.compose(
-            profile, person, channel, memory, servers=gateway_names
+            profile,
+            person,
+            channel,
+            memory,
+            servers=gateway_names,
+            new_day=self._after_rollover(conversation),
         )
         mem_paths = memory_prompt.source_paths(person, channel, self._data_dir)
         mem_mtime = memory_prompt.newest_mtime(mem_paths)

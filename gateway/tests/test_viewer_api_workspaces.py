@@ -3,17 +3,22 @@
 Core is a ``httpx.MockTransport``. The tests cover the proxy of each route
 (path, method, person, body), the answer that passes through, a guest (403), a
 cross-site write (403), a missing core (503), and the sign-in.
+
+The last section covers the charm beside the name of a workspace, which the
+viewer composes from core's answer and from the assignments manager.
 """
 
 from __future__ import annotations
 
 import json
 import textwrap
+from typing import Any
 
 import httpx
 import pytest
 from conftest import bad_cookie, core_stamp, signed_in
 from joshua_gateway import viewer
+from joshua_gateway import viewer_assignments as am
 from joshua_gateway.viewer_api import workspaces
 from joshua_shared import config
 from starlette.testclient import TestClient
@@ -257,3 +262,148 @@ def test_the_routes_need_the_sign_in(client, core) -> None:
     assert client.get(BASE, auth=bad_cookie()).status_code == 401
     assert client.post(BASE, json={}, auth=bad_cookie()).status_code == 401
     assert core.requests == []
+
+
+# --- the charm beside the name ----------------------------------------------
+#
+# The list and the read carry ``charm``: Joshua is working for the workspace,
+# something of it waits for a person, or neither and there is none. The
+# sources are core's ``turn_in_flight`` and the assignments manager, which is
+# another MockTransport here.
+
+WS = "11111111-1111-1111-1111-111111111111"
+OTHER = "22222222-2222-2222-2222-222222222222"
+
+
+def row(workspace: str = WS, **fields: Any) -> dict[str, Any]:
+    return {"id": workspace, "slug": "solar", "title": "Solar install", "shared": False, **fields}
+
+
+def assignment(**fields: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "id": 31,
+        "title": "RCA: the receipts",
+        "status": "running",
+        "state": "in_progress",
+        "workspace": WS,
+    }
+    return base | fields
+
+
+def manager(
+    monkeypatch,
+    *,
+    draft: list[dict[str, Any]] | None = None,
+    in_progress: list[dict[str, Any]] | None = None,
+    down: bool = False,
+) -> None:
+    """The assignments manager of the charm: its rows by state, or no answer."""
+    rows = {"draft": draft or [], "in_progress": in_progress or []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if down:
+            raise httpx.ConnectError("no route")
+        return httpx.Response(200, json={"items": rows.get(request.url.params.get("state"), [])})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        am,
+        "from_env",
+        lambda env: am.AssignmentsClient("http://assignments", "viewer-token", transport=transport),
+    )
+
+
+def charms(client, core) -> dict[str, Any]:
+    answer = client.get(BASE, auth=ALEX)
+    assert answer.status_code == 200
+    return {w["id"]: w["charm"] for w in answer.json()["workspaces"]}
+
+
+def test_a_workspace_with_a_worker_in_flight_carries_the_working_charm(
+    client, core, monkeypatch
+) -> None:
+    """A turn of the thread that has not finished, and an assignment of
+    another workspace that is running."""
+    core.answer = httpx.Response(
+        200, json={"workspaces": [row(turn_in_flight=True), row(OTHER, title="Trip")]}
+    )
+    manager(monkeypatch, in_progress=[assignment(workspace=OTHER)])
+    marks = charms(client, core)
+    assert marks[WS] == {"state": "working", "reason": "Joshua is answering in this workspace"}
+    assert marks[OTHER] == {"state": "working", "reason": "assignment 31 is running"}
+
+
+def test_a_workspace_that_needs_a_person_carries_the_waiting_charm_and_the_reason(
+    client, core, monkeypatch
+) -> None:
+    core.answer = httpx.Response(200, json={"workspaces": [row(), row(OTHER, title="Trip")]})
+    manager(
+        monkeypatch,
+        in_progress=[
+            assignment(status="waiting", open_question="Which pantry?"),
+            assignment(
+                id=32,
+                status="waiting",
+                workspace=OTHER,
+                open_request={"kind": "repo", "ref": "pantry", "reason": "the code"},
+            ),
+        ],
+    )
+    marks = charms(client, core)
+    assert marks[WS] == {"state": "waiting", "reason": "assignment 31 has a question"}
+    assert marks[OTHER] == {"state": "waiting", "reason": "assignment 32 requests a repository"}
+
+    # A draft waits for a start, and so does its workspace.
+    manager(monkeypatch, draft=[assignment(id=33, status="draft", state="draft")])
+    assert charms(client, core)[WS] == {
+        "state": "waiting",
+        "reason": "assignment 33 waits for a start",
+    }
+
+
+def test_a_workspace_with_nothing_in_flight_and_nothing_waiting_carries_no_charm(
+    client, core, monkeypatch
+) -> None:
+    core.answer = httpx.Response(200, json={"workspaces": [row()]})
+    # An assignment of another person's workspace, one that ended, and one
+    # that waits for the limits to reset: none of them is a charm here.
+    manager(
+        monkeypatch,
+        in_progress=[
+            assignment(workspace=OTHER),
+            assignment(id=34, status="paused_limits"),
+            assignment(id=35, status="running", workspace=None),
+        ],
+    )
+    assert charms(client, core) == {WS: None}
+
+
+def test_working_wins_over_waiting_on_one_workspace(client, core, monkeypatch) -> None:
+    core.answer = httpx.Response(200, json={"workspaces": [row()]})
+    manager(
+        monkeypatch,
+        draft=[assignment(id=36, status="draft", state="draft")],
+        in_progress=[assignment()],
+    )
+    assert charms(client, core)[WS] == {"state": "working", "reason": "assignment 31 is running"}
+
+
+def test_the_read_of_one_workspace_carries_the_charm_too(client, core, monkeypatch) -> None:
+    core.answer = httpx.Response(200, json=row())
+    manager(monkeypatch, in_progress=[assignment(status="waiting")])
+    answer = client.get(f"{BASE}/{WS}", auth=ALEX)
+    assert answer.json()["charm"] == {"state": "waiting", "reason": "assignment 31 has a question"}
+
+
+def test_a_manager_that_is_absent_or_silent_leaves_the_other_sources(
+    client, core, monkeypatch
+) -> None:
+    """A source that is not configured, or that does not answer, takes nothing
+    away: the charm is what the rest of the sources say."""
+    core.answer = httpx.Response(200, json={"workspaces": [row(turn_in_flight=True)]})
+    monkeypatch.setattr(am, "from_env", lambda env: None)
+    assert charms(client, core)[WS]["state"] == "working"
+    manager(monkeypatch, down=True)
+    assert charms(client, core)[WS]["state"] == "working"
+    core.answer = httpx.Response(200, json={"workspaces": [row()]})
+    assert charms(client, core) == {WS: None}

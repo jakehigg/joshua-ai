@@ -116,6 +116,24 @@ function frame() {
   return document.querySelector(".doc-panel-frame") as HTMLIFrameElement | null;
 }
 
+// The visual viewport of a phone, which the software keyboard shrinks while
+// the layout keeps its height (viewport.ts).
+class FakeViewport extends EventTarget {
+  height = window.innerHeight;
+  offsetTop = 0;
+  move(height: number, offsetTop = 0) {
+    this.height = height;
+    this.offsetTop = offsetTop;
+    this.dispatchEvent(new Event("resize"));
+  }
+}
+
+function fakeViewport(): FakeViewport {
+  const vv = new FakeViewport();
+  vi.stubGlobal("visualViewport", vv);
+  return vv;
+}
+
 let now = 1_000_000;
 
 describe("ChatPage history", () => {
@@ -282,6 +300,23 @@ describe("ChatPage shell", () => {
     expect(screen.getAllByRole("link", { name: "Wiki" })[0]?.getAttribute("href")).toBe("/wiki/");
     expect(screen.getAllByRole("link", { name: "Documents" })[0]?.getAttribute("href")).toBe("/documents");
     expect(screen.getAllByRole("link", { name: "Chat" })[0]?.getAttribute("href")).toBe("/chat/alex");
+  });
+
+  it("fits the shell to the visible viewport, so the keyboard never covers the composer", async () => {
+    backend(() => json({ messages: [], nextBefore: null }));
+    const vv = fakeViewport();
+    const scroll = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    open();
+    await screen.findByLabelText("Message to Joshua");
+    const root = document.documentElement;
+    expect(root.classList.contains("vv-fit")).toBe(true);
+    // The keyboard opens: the shell takes the height of what shows.
+    act(() => vv.move(400, 0));
+    expect(root.style.getPropertyValue("--vvh")).toBe("400px");
+    expect(root.classList.contains("kb-open")).toBe(true);
+    // The input takes the focus: the page itself goes back to the top.
+    act(() => screen.getByLabelText("Message to Joshua").focus());
+    expect(scroll).toHaveBeenCalledWith(0, 0);
   });
 });
 
@@ -617,7 +652,7 @@ describe("ChatPage pending turn", () => {
     expect(screen.queryByText(/didn't finish sending/)).toBeNull();
   });
 
-  it("shows the upload toast while a photo goes out, and the sent toast after the ack", async () => {
+  it("shows the upload toast while a photo goes out, and nothing after the ack", async () => {
     backend(() => json({ messages: [], nextBefore: null, pending: null }));
     const sent = stubXhr();
     open();
@@ -631,9 +666,11 @@ describe("ChatPage pending turn", () => {
     act(() => sent[0]?.uploaded(100, 100));
     expect(screen.getByText("Saving your photo…")).toBeTruthy();
     act(() => sent[0]?.chunk('event: accepted\ndata: {"turn_id":"t-3"}\n\n'));
-    expect(screen.getByText("Sent — Joshua is working")).toBeTruthy();
+    // The toast is only for the upload: nothing covers the conversation while
+    // the turn runs.
+    expect(document.querySelector(".toast-progress")).toBeNull();
     act(() => sent[0]?.chunk('event: delta\ndata: {"text":"Nice"}\n\n'));
-    expect(screen.queryByText("Sent — Joshua is working")).toBeNull();
+    expect(document.querySelector(".toast-progress")).toBeNull();
     expect(screen.getByText("Nice")).toBeTruthy();
     await act(async () => {
       sent[0]?.answer(200, 'event: done\ndata: {"turn_id":"t-3","text":"Nice","tools":[]}\n\n');

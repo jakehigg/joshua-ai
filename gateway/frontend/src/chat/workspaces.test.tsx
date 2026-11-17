@@ -160,6 +160,44 @@ describe("the rail", () => {
     expect(document.querySelector(".shared-mark")).toBeNull();
   });
 
+  it("carries the working charm, the waiting one with its reason, and none", () => {
+    const rail = (rows: Workspace[]) => (
+      <MemoryRouter future={FUTURE}>
+        <Rail person="alex" workspaces={rows} open onNew={vi.fn()} onNavigate={vi.fn()} onClose={vi.fn()} />
+      </MemoryRouter>
+    );
+    // Working: a developer task of this workspace is in flight.
+    const working = render(
+      rail([ws({ charm: { state: "working", reason: "developer task running" } })]),
+    );
+    const link = screen.getByRole("link", { name: /Solar install/ });
+    expect(link.querySelector(".work-charm.working svg.j-icon")).not.toBeNull();
+    // The reason is on hover and in the accessible name; it is no text of the row.
+    expect(link.querySelector(".work-charm")?.getAttribute("title")).toBe("developer task running");
+    expect(screen.getByRole("img", { name: "Joshua is working: developer task running" })).toBeTruthy();
+    expect(link.textContent).toBe("Solar install");
+    working.unmount();
+
+    // Waiting: an assignment of it stopped with a question.
+    render(rail([ws({ charm: { state: "waiting", reason: "assignment 31 has a question" } })]));
+    const waiting = document.querySelector(".work-charm.waiting");
+    expect(waiting?.getAttribute("title")).toBe("assignment 31 has a question");
+    expect(
+      screen.getByRole("img", { name: "Waiting for you: assignment 31 has a question" }),
+    ).toBeTruthy();
+  });
+
+  it("carries no charm when nothing is in flight and nothing waits", () => {
+    show();
+    expect(document.querySelector(".work-charm")).toBeNull();
+    render(
+      <MemoryRouter future={FUTURE}>
+        <Rail person="alex" workspaces={[ws({ charm: null })]} open onNew={vi.fn()} onNavigate={vi.fn()} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(document.querySelector(".work-charm")).toBeNull();
+  });
+
   it("counts the rows a person has not read, after the name", () => {
     render(
       <MemoryRouter future={FUTURE}>
@@ -600,6 +638,35 @@ describe("the workspace header", () => {
     expect(heading.textContent).toBe("Thanksgiving");
   });
 
+  it("carries the charm beside the title, next to the shared mark", async () => {
+    viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    const shared = ws({
+      slug: "thanksgiving",
+      title: "Thanksgiving",
+      owner: "jake",
+      shared: true,
+      members: ["mia"],
+      charm: { state: "working", reason: "assignment 31 is running" },
+    });
+    const working = render(
+      <SessionContext.Provider value={session("jake", "Jake")}>
+        <WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />
+      </SessionContext.Provider>,
+    );
+    let heading = screen.getByRole("heading");
+    expect(heading.querySelector(".shared-mark svg.j-icon")).not.toBeNull();
+    expect(heading.querySelector(".work-charm.working")?.getAttribute("title")).toBe(
+      "assignment 31 is running",
+    );
+    expect(heading.textContent).toBe("Thanksgiving");
+    working.unmount();
+
+    // A workspace with nothing in flight and nothing waiting carries none.
+    render(<WorkspaceHeader workspace={ws()} onChange={vi.fn()} onItems={vi.fn()} />);
+    heading = screen.getByRole("heading");
+    expect(heading.querySelector(".work-charm")).toBeNull();
+  });
+
   it("names the people of a shared workspace under the title, and not in the drawer", async () => {
     viewer({ "GET /api/v1/workspaces/options": OPTIONS });
     const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
@@ -707,6 +774,36 @@ describe("the routes", () => {
       .find((u) => u.includes("/history"));
     expect(asked).toContain("workspace=w1");
     expect(asked).not.toContain("solar");
+  });
+
+  it("fits the shell to the visible viewport in a workspace too", async () => {
+    viewer({
+      "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
+      "GET /api/v1/workspaces/alex%2Fsolar": ws(),
+      "GET /api/v1/workspaces": { workspaces: [ws()] },
+      "GET /api/v1/workspaces/w1/items": { items: [] },
+      "GET /api/v1/chat/alex/history": { messages: [], nextBefore: null },
+    });
+    // The visual viewport of a phone, which the software keyboard shrinks
+    // while the layout keeps its height (viewport.ts).
+    const vv = Object.assign(new EventTarget(), { height: window.innerHeight, offsetTop: 0 });
+    vi.stubGlobal("visualViewport", vv);
+    render(
+      <MemoryRouter initialEntries={["/chat/w/alex/solar"]} future={FUTURE}>
+        <Routes>
+          <Route path="/chat/w/:space/:slug" element={<WorkspacePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByLabelText("Message to Joshua");
+    const root = document.documentElement;
+    expect(root.classList.contains("vv-fit")).toBe(true);
+    act(() => {
+      vv.height = 400;
+      vv.dispatchEvent(new Event("resize"));
+    });
+    expect(root.style.getPropertyValue("--vvh")).toBe("400px");
+    expect(root.classList.contains("kb-open")).toBe(true);
   });
 
   it("reads a shared thread as a group chat: own messages right, the others left and named", async () => {

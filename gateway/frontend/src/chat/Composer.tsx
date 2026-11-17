@@ -16,6 +16,12 @@
 // is not attached and says so; the backend holds the same limit. With a
 // file attached, a message with no text can be sent.
 //
+// Cmd/Ctrl+V with a file on the clipboard attaches it, as the paperclip does:
+// the same types, the same size cap, the same preview. A screenshot of the
+// operating system arrives as an image/png file with no name of its own, so
+// it gets one, pasted-YYYYMMDD-HHMMSS.png. A paste with no file is a text
+// paste and stays one.
+//
 // A message can be written while Joshua is still working on a turn: it is
 // taken and waits for that turn (useTurn.ts), and the box is emptied as
 // usual. Only a file has to wait for Joshua: the paperclip is off while a
@@ -28,6 +34,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -44,6 +51,27 @@ export const FILE_ACCEPT = "image/*,application/pdf";
 
 export function charCount(text: string): number {
   return Array.from(text.trim()).length;
+}
+
+/** True for a type that FILE_ACCEPT takes: a photo or a PDF. */
+function accepted(type: string): boolean {
+  return type.startsWith("image/") || type === "application/pdf";
+}
+
+/** The name of a pasted file that has none: pasted-YYYYMMDD-HHMMSS.<ext>. */
+function pastedName(type: string, now = new Date()): string {
+  const two = (n: number) => String(n).padStart(2, "0");
+  const day = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}`;
+  const time = `${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}`;
+  const ext = (type.split("/")[1] ?? "bin").split(/[;+]/)[0] ?? "bin";
+  return `pasted-${day}-${time}.${ext}`;
+}
+
+/** The file of a paste: the first entry of the clipboard that is a file. */
+function pastedFile(data: DataTransfer | null): File | null {
+  if (!data) return null;
+  const entry = Array.from(data.items ?? []).find((item) => item.kind === "file");
+  return entry?.getAsFile() ?? Array.from(data.files ?? [])[0] ?? null;
 }
 
 function SendIcon() {
@@ -148,18 +176,42 @@ export function Composer({ onSend, busy }: Props) {
     ref.current?.focus();
   };
 
+  // Attaches the file under name, or says why it is not attached. A paste
+  // gives a name to a file that has none.
+  const attach = (picked: File, name = picked.name) => {
+    if (picked.size > MAX_FILE_BYTES) {
+      setFile(null);
+      setFileError(`${name} is too large; the limit is ${MAX_FILE_BYTES / 1024 / 1024} MB`);
+      return;
+    }
+    setFileError(null);
+    setFile(name === picked.name ? picked : new File([picked], name, { type: picked.type }));
+  };
+
   const onPick = (e: ChangeEvent<HTMLInputElement>) => {
     const picked = e.target.files?.[0] ?? null;
     // Empty the input, so the same file can be chosen again after Remove.
     e.target.value = "";
     if (!picked) return;
-    if (picked.size > MAX_FILE_BYTES) {
+    attach(picked);
+  };
+
+  // The handler sits on the box and on the form, so a paste with the box
+  // unfocused lands too; the box's paste reaches the form as well, and
+  // defaultPrevented keeps the file from being taken twice.
+  const onPaste = (e: ClipboardEvent<HTMLElement>) => {
+    if (busy || e.defaultPrevented) return;
+    const pasted = pastedFile(e.clipboardData);
+    // No file: a text paste, which the browser does as usual.
+    if (!pasted) return;
+    e.preventDefault();
+    const name = pasted.name === "" ? pastedName(pasted.type) : pasted.name;
+    if (!accepted(pasted.type)) {
       setFile(null);
-      setFileError(`${picked.name} is too large; the limit is ${MAX_FILE_BYTES / 1024 / 1024} MB`);
+      setFileError(`${name} is not a photo or a PDF`);
       return;
     }
-    setFileError(null);
-    setFile(picked);
+    attach(pasted, name);
   };
 
   const removeFile = () => {
@@ -184,7 +236,7 @@ export function Composer({ onSend, busy }: Props) {
   };
 
   return (
-    <form className="composer" onSubmit={onSubmit}>
+    <form className="composer" onSubmit={onSubmit} onPaste={onPaste}>
       {file && <Preview file={file} onRemove={removeFile} />}
       <div className="composer-inner">
         <label className="attach" title="Attach a photo or a PDF">
@@ -199,6 +251,7 @@ export function Composer({ onSend, busy }: Props) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           placeholder="Message Joshua"
           aria-label="Message to Joshua"
           aria-invalid={tooLong || undefined}

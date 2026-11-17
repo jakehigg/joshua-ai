@@ -29,11 +29,21 @@ scratch after ``assignments.keep_failed_work``. When the scratch of an
 assignment with a session id is gone, the runner starts a new session that
 reads its plan first.
 
+``finish`` settles the plan first: it refuses while a step of the plan is
+open, and names each open step. The worker then ticks each step it did, or
+marks a step skipped with its reason, and calls ``finish`` again. A step
+whose text is only ``finish`` is no step: the call is the proof of it.
+
 The plan, the outputs, and the report are in the store (see ``report``).
 Each stop writes the report: the worker's with the cost added, or, when the
 worker wrote none, a report that the runner makes from the row. A run that
 started in a workspace also records each output as an item of that workspace,
 at the moment it is recorded (see ``workspace_items``).
+
+The session also holds the in-process ``history`` server, the chat history of
+the run, unless the ``tools`` of the spec leave ``history`` out. The runner
+sends only who started the run; core applies the scope of each read (see
+``history``).
 
 With a ``GitProxy``, each session gets a new secret for the proxy and a
 ``.gitconfig`` in its ``HOME`` that sends every ``https://`` git URL there.
@@ -50,7 +60,7 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -68,6 +78,7 @@ from joshua_shared.log import get_logger
 
 from joshua_assignments import (
     budget,
+    history,
     inbox,
     notify,
     prompts,
@@ -100,6 +111,8 @@ MAX_REQUEST_REASON = 1500
 MAX_SUMMARY = 4000
 MAX_FOLLOW_UPS = 20
 MAX_FOLLOW_UP = 500
+MAX_STEP = 200
+MAX_OPEN_STEPS = 10
 CANCEL_TIMEOUT_S = 30.0
 _LABEL_RE = re.compile(r"^[A-Za-z0-9\[][A-Za-z0-9._:/@\[\]-]{0,63}\Z")
 
@@ -113,6 +126,10 @@ IN_SCOPE_REPLY = (
     "first message, or of the message that granted it."
 )
 NO_REPORT = "write_report first. finish needs your report."
+OPEN_STEPS = (
+    "Your plan has {count} open {word}: {steps}. Tick each step you did with "
+    "write_plan, or mark a step skipped as `{skipped}`, then call finish again."
+)
 
 
 def _text(value: Any) -> str:
@@ -124,6 +141,20 @@ def _reply(text: str, is_error: bool = False) -> dict[str, Any]:
     if is_error:
         out["is_error"] = True
     return out
+
+
+def open_steps_text(steps: Sequence[str]) -> str:
+    """The refusal of ``finish`` while the plan has open steps: it names them."""
+    named = [f'"{step[:MAX_STEP]}"' for step in steps[:MAX_OPEN_STEPS]]
+    left = len(steps) - len(named)
+    if left:
+        named.append(f"and {left} more")
+    return OPEN_STEPS.format(
+        count=len(steps),
+        word="step" if len(steps) == 1 else "steps",
+        steps=", ".join(named),
+        skipped=report.SKIPPED_STEP,
+    )
 
 
 def usage_ref(assignment_id: int, n: int) -> str:
@@ -295,6 +326,16 @@ class AssignmentTools:
         row = await self.host.store.get(self.assignment_id)
         if row is None or not report.has_worker_report(row):
             return _reply(NO_REPORT, is_error=True)
+        steps = report.open_steps(row.get("plan"))
+        if steps:
+            logger.info(
+                {
+                    "message": "finish refused: open steps",
+                    "assignment_id": self.assignment_id,
+                    "steps": len(steps),
+                }
+            )
+            return _reply(open_steps_text(steps), is_error=True)
         raw = args.get("follow_ups") or []
         items = raw if isinstance(raw, list) else [raw]
         follow_ups = [_text(item)[:MAX_FOLLOW_UP] for item in items if _text(item)]
@@ -500,6 +541,27 @@ class SdkRunner:
             role="member",
         )
 
+    def _history(self, row: dict[str, Any]) -> Any:
+        """The in-process ``history`` server of the run, or None when the spec leaves it out.
+
+        ``tools`` of the spec names the servers of the session, so an
+        assignment that must not read the chat history simply does not name
+        ``history``. The scope of a read is not decided here: the server sends
+        the person and the workspace that started the run to core, and core
+        turns those into the conversations of the read (see ``history``).
+        """
+        narrow = (row.get("spec") or {}).get("tools")
+        if narrow is not None and prompts.HISTORY_SERVER not in narrow:
+            return None
+        tools = history.HistoryTools(
+            row["id"],
+            row["person_id"],
+            notify.workspace_of(row),
+            self.host.load_config().timezone,
+            self.core,
+        )
+        return session.history_server(tools.handlers())
+
     def _git_setup(self, row: dict[str, Any], home: Path) -> None:
         """Give the session a new proxy secret and its ``.gitconfig``. No proxy: no file."""
         if self.git is None or self.git.port is None:
@@ -545,6 +607,7 @@ class SdkRunner:
         self._git_setup(row, home)
         tools = AssignmentTools(assignment_id, self.host, self.sleep, self.core)
         server = session.assignment_server(tools.handlers())
+        history_mcp = self._history(row)
         env = session.session_env(
             self.environ,
             core_url=settings.core_url or "",
@@ -609,6 +672,7 @@ class SdkRunner:
                     resumed=scratch_lost,
                     has_tasks=prompts.TASKS_SERVER in held,
                     has_documents=prompts.DOCUMENTS_SERVER in held,
+                    has_history=history_mcp is not None,
                     inbox_gone=inbox_gone,
                 )
                 if answer:
@@ -630,6 +694,7 @@ class SdkRunner:
                 gateway_url=settings.gateway_url or "",
                 assignment=server,
                 resume=row.get("session_id"),
+                history=history_mcp,
             )
             n = await store.next_slice_n(assignment_id)
             checkpoints_before = tools.checkpoints

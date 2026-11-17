@@ -500,7 +500,14 @@ async def test_the_session_holds_the_persons_gateway_servers_only(tmp_path, chan
     h = Harness(tmp_path, sdk, FakeCore())
     started = await h.start()
     options = sdk.clients[0].options
-    assert set(options.mcp_servers) == {"files", "documents", "gitlab", "tasks", "assignment"}
+    assert set(options.mcp_servers) == {
+        "files",
+        "documents",
+        "gitlab",
+        "tasks",
+        "assignment",
+        "history",
+    }
     gitlab = options.mcp_servers["gitlab"]
     assert gitlab["url"] == "http://gateway:8000/gitlab"
     assert gitlab["headers"]["X-Joshua-Conversation"] == f"assignment:{started['id']}"
@@ -680,6 +687,42 @@ async def test_finish_is_refused_without_a_report() -> None:
     assert tools.finished == {"summary": "done", "follow_ups": []}
 
 
+async def test_finish_is_refused_while_a_plan_step_is_open() -> None:
+    tools = await tools_with_a_row()
+    await tools.write_report({"markdown": "# Audit\n## What was asked\nx"})
+    await tools.write_plan(
+        {
+            "markdown": "# Audit\n## Plan\n1. [x] Clone.\n2. [ ] Write the report.\n"
+            "3. [ ] **Next:** File the issues.\n"
+        }
+    )
+    reply = await tools.finish({"summary": "done"})
+    assert reply["is_error"] is True
+    assert text(reply).startswith('Your plan has 2 open steps: "Write the report.", ')
+    assert '"File the issues."' in text(reply)
+    assert "Tick each step you did with write_plan" in text(reply)
+    assert "skipped: <the reason>" in text(reply)
+    assert tools.stop_requested is False and tools.finished is None
+    # A step the worker ticks and one it marks skipped, with a reason, settle the plan.
+    await tools.write_plan(
+        {
+            "markdown": "# Audit\n## Plan\n1. [x] Clone.\n2. [x] Write the report.\n"
+            "3. [-] File the issues — skipped: the tracker is read only.\n4. [ ] finish\n"
+        }
+    )
+    assert (await tools.finish({"summary": "done"})).get("is_error") is None
+    assert tools.finished == {"summary": "done", "follow_ups": []}
+
+
+async def test_the_refusal_names_at_most_ten_open_steps() -> None:
+    tools = await tools_with_a_row()
+    await tools.write_report({"markdown": "# Audit\n## What was asked\nx"})
+    await tools.write_plan({"markdown": "\n".join(f"- [ ] step {n}" for n in range(12))})
+    reply = await tools.finish({"summary": "done"})
+    assert text(reply).startswith("Your plan has 12 open steps: ")
+    assert '"step 9", and 2 more' in text(reply) and "step 10" not in text(reply)
+
+
 async def test_write_plan_and_read_plan() -> None:
     tools = await tools_with_a_row()
     assert text(await tools.read_plan({})) == ""
@@ -822,7 +865,12 @@ async def test_the_plan_and_the_outputs_reach_a_generated_report(tmp_path, chann
             call("ask", question="Which project?"),
             result(),
         ],
-        [init(), *done("Done."), result("success")],
+        [
+            init(),
+            call("write_plan", markdown="# Audit\n## Plan\n1. [x] clone."),
+            *done("Done."),
+            result("success"),
+        ],
     )
     h = Harness(tmp_path, sdk, FakeCore())
     started = await h.start()

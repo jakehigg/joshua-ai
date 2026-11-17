@@ -200,6 +200,27 @@ def test_plan_steps_counts_the_check_boxes() -> None:
     assert "steps**" not in text
 
 
+def test_the_open_steps_of_a_plan() -> None:
+    plan = (
+        "# Plan\n1. [x] Clone.\n2. [ ] **Next:** Write the report.\n"
+        "3. [-] Tidy the repo — skipped: the repo is read only.\n4. [ ] finish\n"
+    )
+    assert report.open_steps(plan) == ["Write the report."]
+    assert report.skipped_steps(plan) == ["Tidy the repo — skipped: the repo is read only."]
+    # The ``finish`` step is no step: the call is the proof of it.
+    assert report.plan_steps(plan) == (1, 3)
+    assert report.open_steps("- [ ] `finish()`\n- [ ] **Next:** finish\n") == []
+    assert report.open_steps("No boxes.") == [] and report.open_steps(None) == []
+
+
+def test_a_generated_report_names_each_skipped_step_with_its_reason() -> None:
+    row = costly(status="failed", plan="- [x] a\n- [-] b — skipped: no data.\n- [ ] c")
+    text = report.generated(row, None, FIXED_NOW, "UTC")
+    assert report.section(text, "## Highlights").endswith(
+        "- **1 of 3 steps** are ticked in the plan.\n- **1 step skipped** b — skipped: no data."
+    )
+
+
 async def test_finalize_generates_once_and_keeps_a_worker_report() -> None:
     store = FakeStore()
     row = await store.create(person_id="alex", conversation_id=None, spec={"goal": "g"}, model="m")

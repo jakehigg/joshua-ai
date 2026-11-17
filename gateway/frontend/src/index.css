@@ -977,6 +977,17 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   opacity: 0.75;
 }
 .chat-screen .shared-mark .j-icon { width: 15px; height: 15px; }
+/* The charm of a workspace, in the same place and the same size: Joshua is
+   working for it (quiet), or it waits for a person (the accent colour). */
+.chat-screen .work-charm {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  vertical-align: -2px;
+  opacity: 0.75;
+}
+.chat-screen .work-charm .j-icon { width: 15px; height: 15px; }
+.chat-screen .work-charm.waiting { color: var(--j-accent); opacity: 1; }
 /* The rows of a thread that this person has not read, counted after the name. */
 .chat-screen .rail-unread {
   flex: none;

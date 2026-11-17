@@ -4,7 +4,9 @@
 // a workspace (api/workspaces.ts). The marked row is the workspace of the id
 // on screen: a slug may name two rows, one closed and one live. A workspace
 // with rows the person has not read carries the count of them after its name;
-// in a shared workspace that count is theirs alone.
+// in a shared workspace that count is theirs alone. A workspace Joshua is
+// working for, or one that waits for a person, carries the charm of that after
+// the name (WorkCharm.tsx).
 // Under them it repeats the app
 // navigation links of the shell (AppNav), without Chat, which the first entry
 // of the rail already is, which the shell's own sidebar shows
@@ -20,6 +22,7 @@ import { Link } from "react-router-dom";
 import { linkOf, type Workspace } from "../api/workspaces";
 import AppNav, { useNav } from "../shell/AppNav";
 import { SharedMark } from "./SharedMark";
+import { WorkCharm } from "./WorkCharm";
 import { inertProps, useMedia } from "./viewport";
 
 export function Rail({
@@ -65,6 +68,7 @@ export function Rail({
       >
         {w.title}
         {w.shared && <SharedMark />}
+        <WorkCharm charm={w.charm} />
         {(w.unread ?? 0) > 0 && (
           <span className="rail-unread" aria-label={`${w.unread} unread`}>
             {w.unread}

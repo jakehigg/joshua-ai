@@ -32,6 +32,20 @@ export interface Workspace {
   // list gives it, and it is the count of that person alone: in a shared
   // workspace every other person has one of their own.
   unread?: number;
+  // Whether Joshua is working for this workspace, or something of it waits
+  // for a person. Null, or absent, when neither is true. The viewer composes
+  // it (`gateway/joshua_gateway/viewer_workspaces.py`); the list and the read
+  // of one workspace give it.
+  charm?: Charm | null;
+}
+
+/** Joshua is working for the workspace, or it waits for a person. */
+export type CharmState = "working" | "waiting";
+
+/** The charm beside the name of a workspace, with its one line of why. */
+export interface Charm {
+  state: CharmState;
+  reason: string;
 }
 
 /**

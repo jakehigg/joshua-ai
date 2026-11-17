@@ -17,7 +17,8 @@ An assignment has four parts:
   worker sees nothing else of your chat. So the definition holds the goal,
   what "done" means, where each result goes, and each limit that you gave.
 - **The plan**: the steps of the worker, with a tick on each step that is
-  done, and the next step. The worker keeps it current while it works.
+  done, and the next step. The worker keeps it current while it works. A step
+  that the worker does not do is marked skipped, with its reason.
 - **The outputs**: what the worker made, such as a document, a task, an
   issue, or a wiki page.
 - **The report**: what you read at the end. It tells what was done, gives
@@ -183,7 +184,7 @@ The `Assignments` link in the menu of the viewer opens your assignments.
 | The list | `/assignments` | the pills `Drafts`, `In progress`, and `Completed`. Each row has the title, the status, the time, the model, and the tokens. A `question` mark shows that one waits for an answer. |
 | A draft | `/assignments/<id>` | the definition, open, with a `+` on each field and each block of the goal, and the words to say: "Tell Joshua: start assignment N". |
 | In progress | `/assignments/<id>` | the plan with a bar ("4 of 9 steps"), the next step, the last checkpoint, and the outputs so far. A notice shows an open question or a stop at the budget. The page loads again every 20 seconds. |
-| Completed | `/assignments/<id>` | the report. At the top: the decisions that wait for you, and the outputs as cards, the documents first. Then the highlights, the decisions with a text box each, what was asked, what was done, the follow-ups, and the cost. The plan, the progress, and the definition are folded at the end. |
+| Completed | `/assignments/<id>` | the report. At the top: the decisions that wait for you, and the outputs as cards, the documents first. Then the highlights, the decisions with a text box each, what was asked, what was done, the follow-ups, and the cost. The plan, the progress, and the definition are folded at the end. A run that ended with open steps says "ended, N steps open" in place of the bar. |
 | Saved | `/assignments/saved` | your saved assignments, each with its runs |
 | A document | `/documents/<owner>/<slug>` | a deliverable. The `Open` link of its output card goes there. See [documents.md](documents.md#the-documents-section-of-the-viewer). |
 
@@ -356,7 +357,8 @@ budget:
 max_turns: 200     # soft cap on model turns; default assignments.default_max_turns
 working_time: 4h   # the clock runs only while it works; default assignments.default_working_time
 repos: [gitlab.example.net/infra/gitops]   # what it may clone, each in assignments.repos
-tools: [gitlab, tasks]     # optional: the MCP servers it may use; documents always stays
+tools: [gitlab, tasks, history]   # optional: the MCP servers it may use, the chat
+                                  # history included; documents always stays
 tasks_project: joshua      # where follow-ups go
 report_to: conversation    # or a destination name
 dry_run: false     # true: plan and report, and change nothing
@@ -498,7 +500,7 @@ The session has these tools, and no other:
 
 | Tool | What it does |
 |---|---|
-| `write_plan(markdown)` | Replaces the plan. A plan above 64 KiB is refused, and the reply gives its size. |
+| `write_plan(markdown)` | Replaces the plan. A plan above 64 KiB is refused, and the reply gives its size. A step that the worker does not do goes to `[-] <the step> — skipped: <the reason>`. |
 | `read_plan()` | Gives the plan, or an empty text when there is none. |
 | `record_output(kind, ref, title)` | Adds one output to the list and gives the count. A run that a workspace started also records it as an item of that workspace. |
 | `write_report(markdown)` | Writes the report. A report above 256 KiB is refused. |
@@ -506,11 +508,48 @@ The session has these tools, and no other:
 | `wait(seconds)` | Waits up to 10 minutes. The working time continues. |
 | `ask(question)` | Stores the question, ends the slice, and stops the assignment as `waiting`. Joshua gets the question. See [questions and answers](#questions-and-answers). |
 | `request_resource(kind, ref, reason)` | Stops the assignment as `waiting` with a request: `repo` (a repository, `host/group/name`), `file` (a short name of a document), or `info` (a question, the same as `ask`). See [requests](#requests-for-a-repository-or-a-file). |
-| `finish(summary, follow_ups)` | Ends the assignment as `done` with the summary and the follow-ups. It refuses with "write_report first" when the worker wrote no report. |
+| `finish(summary, follow_ups)` | Ends the assignment as `done` with the summary and the follow-ups. It refuses with "write_report first" when the worker wrote no report, and it refuses while a step of the plan is open: the refusal names each open step, and asks the worker to tick it with `write_plan` or to mark it skipped. A step whose text is only `finish` is not a step: the call is the proof of it. |
+
+- The in-process `history` server, the chat history (see
+  [the chat history](#the-chat-history)):
+
+| Tool | What it does |
+|---|---|
+| `search_history(query, limit)` | Finds messages by words, newest first, with the time, who wrote it, and a snippet of each. `limit` is 1 to 50, 10 by default. |
+| `read_history(start, end, cursor)` | Gives the full messages of a time window, oldest first. Times with no offset are local. A long window comes in pages: the reply ends with the cursor of the next page. |
 
 The session loads no settings and no other MCP configuration from the disk. A
 check refuses to start a session with any other built-in tool, or any MCP
-server that is not on the person's list or the `assignment` server.
+server that is not on the person's list, the `assignment` server, or the
+`history` server.
+
+### The chat history
+
+A worker reads the chat history with `search_history` and `read_history`. Both
+are read-only, and neither takes a conversation, a channel, or a person: the
+scope of a read is decided by who started the assignment, in code and not as a
+rule of the prompt.
+
+- An assignment that a person started reads the conversations of that person,
+  the threads of their personal workspaces included.
+- An assignment that a shared workspace started reads the thread of that
+  workspace, and nothing else. A shared thread is one thread of several
+  people and belongs to none of them, so it is never part of a person's
+  scope, and a person's other conversations are never part of a shared
+  workspace's scope.
+
+The container has no database. It calls core `POST /v1/history/search` and
+`POST /v1/history/read` with its fleet token, and names only the person and
+the workspace of the run. Core turns those two into the conversations of the
+read, and the store query takes those ids only, so a row of another
+conversation never comes back. Core is the one place the scope is applied.
+
+A message comes back as it is, so a report may quote a turn verbatim. There is
+no redaction rule.
+
+`tools` of the spec names the `history` server, as it names a gateway server,
+so an assignment that must not read the chat history simply leaves it out: its
+session then holds neither tool. A spec with no `tools` holds both.
 
 The model and the effort come from the `models` entry that the spec names.
 The session sends its model calls to core's forwarder (`CORE_URL` and
@@ -862,6 +901,9 @@ The system prompt gives the worker these rules:
 5. Record each output when you create it.
 6. Write the report for a reader who did not watch you work, then call
    `finish`.
+7. Settle every step before you finish: tick each step that you did, or mark
+   a step that you do not do as `[-] <the step> — skipped: <the reason>`. Do
+   not write a step for `finish`.
 
 ### The report
 
@@ -911,7 +953,9 @@ worker wrote no report, the runner writes one with the same headings:
   <time>." and one sentence that says the worker wrote no report;
 - Highlights: "**Stopped at <status>**" and the reason (the stop reason,
   the limits stop, or a note that a question waits), and "**N of M
-  steps**" from the check boxes of the plan, when the plan has some;
+  steps**" from the check boxes of the plan, when the plan has some, and
+  "**N steps skipped**" with the reason of each, when the worker marked
+  some;
 - What was asked: the goal;
 - What was done: "The plan below shows the progress.", the last
   checkpoint, and the plan. Each heading of the plan goes two levels down
@@ -944,13 +988,15 @@ tools that the session holds.
 The first message gives the title, the goal, the clone command of each
 repository (of the spec, then each granted one), where deliverables go
 when the session holds `documents` (see
-[deliverables are documents](#deliverables-are-documents)), and the line
+[deliverables are documents](#deliverables-are-documents)), that the chat
+history is a source when the session holds the `history` server (see
+[the chat history](#the-chat-history)), and the line
 "Write your plan with `write_plan` before any other tool call." Each follow-up goes to `finish` and into the report. When the
 session holds the `tasks` server and the spec names `tasks_project`, the
 first message also says to add each follow-up as a task in that project.
 Each later slice starts with the budget and the last checkpoint. It ends
-with the line "When the goal is done, write your report with
-`write_report`, then call `finish`.":
+with the line "When the goal is done, settle every step of your plan, write
+your report with `write_report`, then call `finish`.":
 
 ```
 Continue. Budget: 5-hour window at 40% of your 80% ceiling, weekly at 20% of 90%,
@@ -1235,7 +1281,8 @@ item = {
   "open_request": {"kind": "repo"|"file"|"info", "ref": str, "reason": str}|null,
   "stopped_at_limits": object|null,
   "saved": {"id": int, "name": str}|null,
-  "parent_id": int|null
+  "parent_id": int|null,
+  "workspace": str|null
 }
 list   = {"items": [item, ...]}
 detail = item + {
@@ -1270,6 +1317,10 @@ comment      = {"id": int, "target": "definition"|"plan"|"report", "line_no": in
   or null, and `rerun_of` gives its id and title. `lineage` holds each run
   of the person that shares the root with this one, the oldest first, at
   most 50, this one too. A run with no re-run has only itself.
+- `workspace` is the id of the workspace that started the run, or null for a
+  run outside a workspace. A draft keeps the workspace it was asked for, and a
+  new spec does not move it. The viewer reads it for the charm beside the name
+  of that workspace ([workspaces.md](workspaces.md#the-charm-beside-the-name)).
 - `open_request` is the open request of the worker, or null. A question
   (`ask`) is a request of kind `info`. The viewer shows a request for a
   repository or a file in the notice band of the page, with its kind, its

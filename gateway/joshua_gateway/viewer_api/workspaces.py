@@ -18,6 +18,11 @@ shared workspace, ``<owner>/<slug>`` for the workspace of a person). The
 browser sends a two-segment ref URL-encoded, and it goes to core as it is:
 core resolves it for the person.
 
+The list and the read of one workspace carry one field that core does not
+give: ``charm``, ``{"state": "working" | "waiting", "reason"}`` or null. It is
+the charm beside the name of the workspace, and ``viewer_workspaces`` collects
+it from core's answer and from the assignments manager.
+
 Each route calls core with ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` and names
 the signed-in person in the ``person`` query parameter. A guest gets 403. Every
 write checks the ``Origin`` header, as the chat turn does. Core's status and
@@ -38,6 +43,8 @@ from joshua_shared.log import get_logger
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from joshua_gateway import viewer_assignments
+from joshua_gateway import viewer_workspaces as vw
 from joshua_gateway.viewer_api.edit import _origin_ok
 
 logger = get_logger("viewer.workspaces")
@@ -66,7 +73,7 @@ def _error(message: str, status: int) -> JSONResponse:
 
 
 async def _call(
-    request: Request, person: Person, method: str, suffix: str, *, write: bool
+    request: Request, person: Person, method: str, suffix: str, *, write: bool, charm: bool = False
 ) -> JSONResponse:
     """Check the person, the origin and the body, then call core."""
     if not is_member(person.role):
@@ -103,7 +110,24 @@ async def _call(
         answer = {}
     if not isinstance(answer, dict):
         answer = {}
+    if charm and response.status_code == 200:
+        await _add_charms(person, answer)
     return _json(answer, response.status_code)
+
+
+async def _add_charms(person: Person, answer: dict[str, Any]) -> None:
+    """Put the charm of each workspace on the answer of core: on every row of
+    a list, and on the one workspace of a read. ``viewer_workspaces`` collects
+    the sources of it; a source that is missing takes nothing away."""
+    rows = answer.get("workspaces")
+    workspaces = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    if not workspaces and "id" in answer:
+        workspaces = [answer]
+    marks = await vw.charms(
+        person.id, workspaces, assignments=viewer_assignments.from_env(os.environ)
+    )
+    for row in workspaces:
+        row["charm"] = vw.charm_json(marks.get(str(row.get("id"))))
 
 
 async def _parse(raw: bytes) -> dict[str, Any]:
@@ -118,7 +142,7 @@ def _slug(request: Request) -> str:
 
 
 async def list_workspaces(request: Request, person: Person) -> JSONResponse:
-    return await _call(request, person, "GET", "", write=False)
+    return await _call(request, person, "GET", "", write=False, charm=True)
 
 
 async def create(request: Request, person: Person) -> JSONResponse:
@@ -130,7 +154,7 @@ async def options(request: Request, person: Person) -> JSONResponse:
 
 
 async def read(request: Request, person: Person) -> JSONResponse:
-    return await _call(request, person, "GET", f"/{_slug(request)}", write=False)
+    return await _call(request, person, "GET", f"/{_slug(request)}", write=False, charm=True)
 
 
 async def change(request: Request, person: Person) -> JSONResponse:

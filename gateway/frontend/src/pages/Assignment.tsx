@@ -4,7 +4,8 @@
  * The page is the assignment, top to bottom: the hero with its status and
  * its numbers, what it waits for, the definition as a document, the plan
  * with its progress, the outputs and the checkpoints, and the report. A
- * draft shows its definition open and nothing of a run.
+ * draft shows its definition open and nothing of a run. A run that ended
+ * with open steps says so in place of the bar of the plan.
  *
  * A report with the headings of the report shape is the showcase
  * (`src/showcase/`): the highlights as cards, the decisions as numbered
@@ -284,6 +285,7 @@ export default function Assignment() {
             person={person}
             onComments={took("plan")}
             reload={reload}
+            ended={item.state === "completed"}
           />
           <Progress
             outputs={item.outputs}

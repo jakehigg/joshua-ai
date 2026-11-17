@@ -54,6 +54,16 @@ export const PEOPLE_ICON =
   '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/>' +
   '<path d="M16 5.2a3.5 3.5 0 0 1 0 7"/><path d="M17.5 14.2A6.5 6.5 0 0 1 21.5 20"/>';
 
+/** A spinner: Joshua is working for this workspace. */
+export const WORKING_ICON =
+  '<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>' +
+  '<path d="m5.6 5.6 2.2 2.2M16.2 16.2l2.2 2.2M18.4 5.6l-2.2 2.2M7.8 16.2l-2.2 2.2"/>';
+
+/** A question in a circle: this workspace waits for a person. */
+export const WAITING_ICON =
+  '<circle cx="12" cy="12" r="9"/>' +
+  '<path d="M9.5 9.3a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.5"/><path d="M12 16.5h.01"/>';
+
 /** The icon of the chat, which is also a link icon. */
 const CHAT_ICON = '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>';
 

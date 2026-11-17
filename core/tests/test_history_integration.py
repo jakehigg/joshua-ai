@@ -139,6 +139,32 @@ async def test_a_cursor_of_another_conversation_gives_an_empty_page(repo: Repo) 
         )
 
 
+async def test_the_conversations_of_a_person_leave_out_a_shared_thread(repo: Repo) -> None:
+    """``person_conversation_ids`` is the scope of a run that a person started.
+
+    Alex's own thread and the thread of his personal workspace are in it. The
+    thread of a shared workspace is one thread of several people and belongs to
+    none of them, so it is in nobody's scope.
+    """
+    for person in ("alex", "mia"):
+        await repo.upsert_person(person, person.title())
+    await repo.upsert_channel("imessage:+1", "imessage")
+    mine = await repo.get_or_create_conversation("imessage:+1", "alex")
+    hers = await repo.get_or_create_conversation("imessage:+1", "mia")
+    personal = await repo.create_workspace("alex", "Solar")
+    shared = await repo.create_workspace("alex", "Thanksgiving", members=["mia"])
+    personal_thread = await repo.workspace_conversation(personal)
+    shared_thread = await repo.workspace_conversation(shared)
+
+    ids = await repo.person_conversation_ids("alex")
+
+    assert set(ids) == {str(mine.id), str(personal_thread.id)}
+    assert str(shared_thread.id) not in ids
+    assert str(hers.id) not in ids
+    assert await repo.person_conversation_ids("mia") == [str(hers.id)]
+    assert await repo.person_conversation_ids("robin") == []
+
+
 async def test_the_text_search_index_exists(repo: Repo) -> None:
     async with repo._pool.connection() as conn:
         cur = await conn.execute(

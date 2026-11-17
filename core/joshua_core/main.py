@@ -46,6 +46,7 @@ from joshua_core.engine.tools import workspace as workspace_tool
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.engine.workspace import WorkspaceBlock
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
+from joshua_core.history_api import build_history_router
 from joshua_core.limits import LimitsTracker
 from joshua_core.limits_api import build_limits_router
 from joshua_core.memory import embed
@@ -530,6 +531,7 @@ def build_app() -> FastAPI:
     app.include_router(build_router())
     app.include_router(build_admin_router())
     app.include_router(build_auth_router())
+    app.include_router(build_history_router())
     app.include_router(build_profile_router())
     app.include_router(build_push_router())
     app.include_router(build_search_router())

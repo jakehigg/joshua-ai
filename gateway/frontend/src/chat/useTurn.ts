@@ -27,9 +27,10 @@
 // screen, as for a stream that broke.
 // `upload` is the state of the progress toast of a turn with a file:
 // uploading with a percent, then saving (the bytes are out, the server has not
-// said it has them), then sent after `accepted`. It goes when the answer
-// starts. While the bytes are going out, the page asks the browser to warn
-// before it is closed, and a hidden page saves the draft again.
+// said it has them). It goes as soon as Joshua has accepted the turn: the end
+// of the message list says that the turn runs, so nothing covers the
+// conversation while it does. While the bytes are going out, the page asks the
+// browser to warn before it is closed, and a hidden page saves the draft again.
 // One turn runs at a time. After a `done`, onDone runs, once the turn is
 // no longer running; the chat page refreshes the history then. When the
 // finished answer carries an `artifact` fence, onArtifact gets the document
@@ -76,7 +77,7 @@ export const STALE_MS = 45_000;
 
 // The progress toast of a turn that carries a file.
 export interface Upload {
-  phase: "uploading" | "saving" | "sent";
+  phase: "uploading" | "saving";
   // 0 to 100, while uploading.
   percent: number;
   kind: "photo" | "file";
@@ -121,11 +122,6 @@ export function useTurn(
   const flushingRef = useRef(false);
   const sendRef = useRef<(text: string, file?: File | null) => boolean>(() => false);
   const [upload, setUpload] = useState<Upload | null>(null);
-  const uploadRef = useRef<Upload | null>(null);
-  const setUploadState = useCallback((next: Upload | null) => {
-    uploadRef.current = next;
-    setUpload(next);
-  }, []);
   const draftRef = useRef<{ text: string; file: File | null } | null>(null);
   const workspaceKey = workspace ?? "";
   const onDetachedRef = useRef(onDetached);
@@ -230,7 +226,7 @@ export function useTurn(
   // warn. A page that is hidden may be thrown away, so the draft is saved again.
   const uploading = upload?.phase === "uploading";
   // A new build of the app does not reload the page while a file is going out.
-  const outgoing = upload !== null && upload !== undefined && upload.phase !== "sent";
+  const outgoing = upload !== null;
   useEffect(() => (outgoing ? holdReload() : undefined), [outgoing]);
   useEffect(() => {
     if (!uploading) return undefined;
@@ -286,18 +282,18 @@ export function useTurn(
               case "accepted":
                 acceptedId = frame.turnId || "accepted";
                 accept();
-                if (uploadRef.current) setUploadState({ ...uploadRef.current, phase: "sent" });
+                setUpload(null);
                 break;
               case "status":
                 patch({ waiting: frame.state === "queued" });
                 break;
               case "delta":
-                setUploadState(null);
+                setUpload(null);
                 streamed += frame.text;
                 if (!maybeSilentReply(streamed)) patch({ text: streamed });
                 break;
               case "done":
-                setUploadState(null);
+                setUpload(null);
                 completed = true;
                 if (isSilentReply(frame.text)) {
                   setMessages((list) => list.filter((m) => m.id !== replyId));
@@ -307,7 +303,7 @@ export function useTurn(
                 written = writtenPath(frame.text);
                 break;
               case "error":
-                setUploadState(null);
+                setUpload(null);
                 patch({ state: "failed", error: frame.message });
                 break;
               default:
@@ -325,13 +321,13 @@ export function useTurn(
               if (acceptedId !== null) return;
               const percent = Math.min(100, Math.floor((loaded / total) * 100));
               const kind = personMsg.file?.type.startsWith("image/") ? "photo" : "file";
-              setUploadState({ phase: percent >= 100 ? "saving" : "uploading", percent, kind });
+              setUpload({ phase: percent >= 100 ? "saving" : "uploading", percent, kind });
             },
           },
         );
       } catch (err) {
         if (controller.signal.aborted && !dropped) return;
-        setUploadState(null);
+        setUpload(null);
         if (acceptedId !== null && !(err instanceof ApiError)) {
           // Joshua has the turn. The answer will be in the history.
           setMessages((list) => list.filter((m) => m.id !== replyId && m.id !== personMsg.id));
@@ -363,7 +359,7 @@ export function useTurn(
         }
       }
     },
-    [person, workspace, workspaceKey, setMessages, setUploadState],
+    [person, workspace, workspaceKey, setMessages, setUpload],
   );
 
   const send = useCallback(
@@ -382,7 +378,7 @@ export function useTurn(
       draftRef.current = { text, file: file ?? null };
       void saveDraft({ person, workspace: workspaceKey, text, file: file ?? null, savedAt: Date.now() });
       if (file) {
-        setUploadState({ phase: "uploading", percent: 0, kind: file.type.startsWith("image/") ? "photo" : "file" });
+        setUpload({ phase: "uploading", percent: 0, kind: file.type.startsWith("image/") ? "photo" : "file" });
       }
       const now = new Date().toISOString();
       const personMsg: ChatMessage = {
@@ -407,7 +403,7 @@ export function useTurn(
       void run(personMsg, reply.id);
       return true;
     },
-    [run, setMessages, setUploadState, person, workspaceKey, holdMessage],
+    [run, setMessages, setUpload, person, workspaceKey, holdMessage],
   );
   sendRef.current = send;
 

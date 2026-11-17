@@ -47,6 +47,11 @@ def lede(report: str | None) -> str | None:
     return _cut(joined, MAX_LEDE) if joined else None
 
 
+def plain_step(step: str) -> str:
+    """One plan step with the ``**Next:**`` marker and each extra space taken out."""
+    return " ".join(_NEXT_RE.sub(" ", step).split())
+
+
 def next_step(plan: str | None) -> str | None:
     """The next step of ``plan``, with no check box and no marks, or None.
 
@@ -62,7 +67,7 @@ def next_step(plan: str | None) -> str | None:
     step = marked if marked is not None else next(iter(unticked), None)
     if step is None:
         return None
-    text = " ".join(_NEXT_RE.sub(" ", step).split())
+    text = plain_step(step)
     return _cut(text, MAX_NEXT_STEP) if text else None
 
 
