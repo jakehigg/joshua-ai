@@ -3,10 +3,12 @@
 // two-person icon, and every link is `/chat/w/<id>`, the permanent address of
 // a workspace (api/workspaces.ts). The marked row is the workspace of the id
 // on screen: a slug may name two rows, one closed and one live. A workspace
-// with rows the person has not read carries the count of them after its name;
+// with rows the person has not read carries the count of them;
 // in a shared workspace that count is theirs alone. A workspace Joshua is
-// working for, or one that waits for a person, carries the charm of that after
-// the name (WorkCharm.tsx).
+// working for, or one that waits for a person, carries the charm of that
+// (WorkCharm.tsx). The two-person mark, the charm and the count stand together
+// at the right edge of the row, in one column down the list, and a long title
+// truncates before them (index.css).
 // Under them it repeats the app
 // navigation links of the shell (AppNav), without Chat, which the first entry
 // of the rail already is, which the shell's own sidebar shows
@@ -66,14 +68,16 @@ export function Rail({
         aria-current={w.id === activeId ? "page" : undefined}
         onClick={onNavigate}
       >
-        {w.title}
-        {w.shared && <SharedMark />}
-        <WorkCharm charm={w.charm} />
-        {(w.unread ?? 0) > 0 && (
-          <span className="rail-unread" aria-label={`${w.unread} unread`}>
-            {w.unread}
-          </span>
-        )}
+        <span className="rail-name">{w.title}</span>
+        <span className="rail-marks">
+          {w.shared && <SharedMark />}
+          <WorkCharm charm={w.charm} />
+          {(w.unread ?? 0) > 0 && (
+            <span className="rail-unread" aria-label={`${w.unread} unread`}>
+              {w.unread}
+            </span>
+          )}
+        </span>
       </Link>
     </li>
   );

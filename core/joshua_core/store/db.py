@@ -234,6 +234,13 @@ CREATE TABLE IF NOT EXISTS workspaces (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- How Joshua writes in this workspace: `none` is the house voice and adds no
+-- prompt file, `ste` and `coach` each add one (see engine/profiles.py).
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS style TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE workspaces DROP CONSTRAINT IF EXISTS workspaces_style_check;
+ALTER TABLE workspaces ADD CONSTRAINT workspaces_style_check
+    CHECK (style IN ('none', 'ste', 'coach'));
+
 -- A shared workspace is one thread that several people write in. `members`
 -- holds the ids beside the owner, and they never change after the create.
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT FALSE;

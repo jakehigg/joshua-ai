@@ -105,6 +105,10 @@ WORKSPACE_ITEM_KINDS = (
     "file",
 )
 WORKSPACE_NOTIFY = ("none", "questions", "questions+finishes")
+# How Joshua writes in a workspace thread, and in the documents he writes from
+# it. ``none`` is the house voice and adds no prompt file. ``ste`` and
+# ``coach`` each add one file (see ``engine/profiles.py``).
+WORKSPACE_STYLES = ("none", "ste", "coach")
 WORKSPACE_STATUSES = ("active", "paused", "archived")
 
 
@@ -123,6 +127,8 @@ class Workspace:
     # None keeps the model of the chat job.
     model: str | None = None
     notify: str = "none"
+    # The writing style of this workspace: ``none``, ``ste``, or ``coach``.
+    style: str = "none"
     status: str = "active"
     # A shared workspace is one thread that several people write in. ``members``
     # holds the ids beside the owner, and they never change after the create.

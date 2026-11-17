@@ -66,7 +66,7 @@ WORKSPACE_CHANNEL_TYPE = "workspace"
 # workspace thread. ``meta.seen`` is False until a block has shown the row.
 FROM_CHAT_SOURCE = "normal_chat"
 # The columns that ``update_workspace`` may change.
-WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "status")
+WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "style", "status")
 _SLUG_MAX = 48
 # The namespace of a shared workspace in a link and in a ref: a shared one is
 # ``shared/<slug>``, a personal one ``<owner>/<slug>``. No person may hold this
@@ -169,6 +169,7 @@ def _workspace(row: dict[str, Any]) -> Workspace:
         servers=tuple(row.get("servers") or ()),
         model=row.get("model"),
         notify=row.get("notify") or "none",
+        style=row.get("style") or "none",
         status=row.get("status") or "active",
         shared=bool(row.get("shared")),
         members=tuple(row.get("members") or ()),
@@ -1374,6 +1375,7 @@ class Repo:
         model: str | None = None,
         servers: Collection[str] = (),
         notify: str = "none",
+        style: str = "none",
         members: Collection[str] = (),
     ) -> Workspace:
         """Create a workspace, its channel ``workspace:<id>`` (type ``workspace``,
@@ -1401,8 +1403,8 @@ class Repo:
                         """
                         INSERT INTO workspaces
                             (id, slug, title, owner, goal, servers, model, notify,
-                             shared, members)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             style, shared, members)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING *
                         """,
                         (
@@ -1414,6 +1416,7 @@ class Repo:
                             Json(list(servers)),
                             model,
                             notify,
+                            style,
                             shared,
                             Json(list(members)),
                         ),

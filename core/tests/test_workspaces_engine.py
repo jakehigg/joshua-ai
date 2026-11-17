@@ -236,8 +236,8 @@ class WsRepo(FakeRepo):
         return len(self.chat_rows)
 
 
-def _derive(person, channel):
-    return derive_profile(person, channel)
+def _derive(person, channel, style=None):
+    return derive_profile(person, channel, style=style)
 
 
 def make_manager(repo, tmp_path, settings=None) -> ConversationManager:
@@ -313,7 +313,7 @@ async def test_session_build_uses_the_model_servers_and_tool_search(tmp_path, mo
     # Two picked servers, limit two: tool search is off.
     assert options.tools == []
     assert options.env[TOOL_SEARCH_KEY] == ""
-    assert built.workspace_sig == ("model-b", ("tasks", "github", "secret", "nope"))
+    assert built.workspace_sig == ("model-b", ("tasks", "github", "secret", "nope"), "none")
 
 
 async def test_more_servers_than_the_limit_turn_tool_search_on(tmp_path, monkeypatch):
@@ -449,6 +449,15 @@ async def test_a_missing_workspace_row_builds_a_normal_session(tmp_path, monkeyp
     assert built.workspace_sig is None
 
 
+def test_the_signature_holds_the_model_the_servers_and_the_style() -> None:
+    assert ws.signature(_ws(model="model-b", servers=("tasks",))) == (
+        "model-b",
+        ("tasks",),
+        "none",
+    )
+    assert ws.signature(_ws(style="ste")) != ws.signature(_ws(style="coach"))
+
+
 def test_with_workspace_rewrites_the_model_tiers_on_another_server() -> None:
     env = {key: "old" for key in MODEL_TIER_KEYS}
     base = resolved(model="old", env=env)
@@ -475,6 +484,33 @@ async def test_a_changed_workspace_rebuilds_the_session(tmp_path, monkeypatch):
     changed = await manager._get_or_create(_channel(), _conversation())
     assert changed.session is not first
     assert list(changed.session._options.mcp_servers) == ["tasks", "github"]
+
+
+async def test_the_style_of_a_workspace_adds_one_file_to_its_session(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    plain = await make_manager(WsRepo(_ws()), tmp_path)._build_session(
+        _channel(), _conversation(), resume=None
+    )
+    assert not [name for name in plain.profile.prompt_files if name.startswith("styles/")]
+    assert plain.workspace_sig[2] == "none"
+
+    built = await make_manager(WsRepo(_ws(style="coach")), tmp_path)._build_session(
+        _channel(), _conversation(), resume=None
+    )
+    assert built.profile.prompt_files == (*plain.profile.prompt_files, "styles/coach.md")
+    assert built.workspace_sig[2] == "coach"
+
+
+async def test_a_changed_style_rebuilds_the_session(tmp_path, monkeypatch):
+    install_fake_sdk(monkeypatch)
+    repo = WsRepo(_ws(servers=("tasks",)))
+    manager = make_manager(repo, tmp_path)
+    first = (await manager._get_or_create(_channel(), _conversation())).session
+
+    repo.workspace = replace(repo.workspace, style="ste")
+    changed = await manager._get_or_create(_channel(), _conversation())
+    assert changed.session is not first
+    assert changed.workspace_sig[2] == "ste"
 
 
 # --- the block ---------------------------------------------------------------------
