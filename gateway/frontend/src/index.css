@@ -988,10 +988,24 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 }
 .chat-screen .work-charm .j-icon { width: 15px; height: 15px; }
 .chat-screen .work-charm.waiting { color: var(--j-accent); opacity: 1; }
+/* A workspace row of the rail: the title takes the free room and truncates,
+   the marks and the count stand together at the right edge, on one line. */
+.chat-screen .rail-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-screen .rail-marks {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
 /* The rows of a thread that this person has not read, counted after the name. */
 .chat-screen .rail-unread {
   flex: none;
-  margin-left: auto;
+  margin-left: 0.375rem;
   padding: 0 7px;
   border-radius: var(--j-radius-pill);
   background: var(--j-accent);
