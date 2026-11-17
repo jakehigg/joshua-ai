@@ -198,6 +198,38 @@ describe("the rail", () => {
     expect(document.querySelector(".work-charm")).toBeNull();
   });
 
+  it("holds the marks and the count in one group at the right edge", () => {
+    render(
+      <MemoryRouter future={FUTURE}>
+        <Rail
+          person="alex"
+          workspaces={[
+            ws({
+              shared: true,
+              members: ["mia"],
+              unread: 3,
+              charm: { state: "working", reason: "developer task running" },
+            }),
+          ]}
+          open
+          onNew={vi.fn()}
+          onNavigate={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: /Solar install/ });
+    // The title is a box of its own, so a long one truncates instead of
+    // pushing the charm and the count out of the row.
+    expect(link.querySelector(".rail-name")?.textContent).toBe("Solar install");
+    const marks = link.querySelector(".rail-marks") as HTMLElement;
+    expect([...marks.children].map((el) => el.className.split(" ")[0])).toEqual([
+      "shared-mark",
+      "work-charm",
+      "rail-unread",
+    ]);
+  });
+
   it("counts the rows a person has not read, after the name", () => {
     render(
       <MemoryRouter future={FUTURE}>
