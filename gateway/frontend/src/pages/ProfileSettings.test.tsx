@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { STORAGE_KEY } from "../textSize";
 import ProfileSettings, { type Profile } from "./ProfileSettings";
 
 function json(body: unknown, status = 200): Response {
@@ -55,6 +56,8 @@ function type(name: string, value: string): void {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.localStorage.clear();
+  document.documentElement.style.removeProperty("--j-text-scale");
 });
 
 describe("the settings of the Profile page", () => {
@@ -125,6 +128,19 @@ describe("the settings of the Profile page", () => {
     render(<ProfileSettings />);
 
     expect(await screen.findByText(/Your name and handles stay as the file sets them/)).toBeDefined();
+  });
+
+  it("sets the text size of this device, and calls no API for it", async () => {
+    const sent = stubRoutes();
+
+    render(<ProfileSettings />);
+
+    expect(await screen.findByText("Text size on this device")).toBeDefined();
+    fireEvent.click(screen.getByLabelText("Large"));
+
+    expect(window.localStorage.getItem(STORAGE_KEY)).toEqual("1.15");
+    expect(document.documentElement.style.getPropertyValue("--j-text-scale")).toEqual("1.15");
+    expect(sent).toEqual([]);
   });
 
   it("shows no secret card on an instance with no sign-in", async () => {

@@ -6,6 +6,13 @@
 @import "../../joshua_gateway/ui/joshua-ui.css";
 @import "./viewer.css";
 
+/* The text size of this device (`textSize.ts`). Every text of the two
+   stylesheets above is a rem of the root font, so this one rule moves them
+   all at once. `--j-text-scale` is the choice of the Profile page, set on
+   <html> before React renders; without it the size is the one the two
+   stylesheets ship with. */
+html { font-size: calc(93.75% * var(--j-text-scale, 1)); }
+
 /* A code block of a page, with the button that copies its text. The button
    shows on hover and on focus, so it never covers the first line. */
 .v-code { position: relative; }
@@ -750,7 +757,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   border: 1px solid var(--j-line);
   border-radius: 12px;
   background: var(--j-surface-2);
-  font-size: 16px; /* 16 px keeps iOS Safari from zooming in. */
+  font-size: max(16px, 1.0667rem); /* never under 16 px: iOS Safari would zoom in. */
   line-height: 1.5;
   /* 8 rows of 1.5em, plus the padding and the border. */
   max-height: calc(8 * 1.5em + 18px);
@@ -938,7 +945,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   padding: 7px 10px;
   border-radius: var(--j-radius-sm);
   color: var(--j-muted);
-  font-size: 14px;
+  font-size: 0.9333rem;
   text-decoration: none;
 }
 /* The current thread and the current app link look the same. */
@@ -1133,16 +1140,17 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   .chat-screen .scrim-items { display: none; }
 }
 
-/* Form controls, everywhere. Text is 16px, so iOS Safari does not zoom in on
-   focus. No fixed height: padding and line-height centre the text, so it is
-   never cut off, and 44px is a tap target. A control never grows wider than
-   its container. */
+/* Form controls, everywhere. Text is never under 16px, so iOS Safari does
+   not zoom in on focus, and it grows with the text size of the device
+   (`textSize.ts`). No fixed height: padding and line-height centre the text,
+   so it is never cut off, and 44px is a tap target. A control never grows
+   wider than its container. */
 input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
 textarea,
 select {
   box-sizing: border-box;
   max-width: 100%;
-  font-size: 16px;
+  font-size: max(16px, 1.0667rem);
   line-height: 1.4;
   min-height: 44px;
   padding-block: 10px;
@@ -1153,7 +1161,7 @@ textarea.grow { resize: none; overflow-y: hidden; field-sizing: content; min-hei
 select { text-overflow: ellipsis; }
 .chat-screen select { appearance: auto; }
 .j-field.mono input,
-.j-field.mono textarea { font-size: 16px; }
+.j-field.mono textarea { font-size: max(16px, 1.0667rem); }
 .j-field input,
 .j-field select { padding-block: 0; }
 .chat-screen .ws-dialog input:not([type="checkbox"]),
@@ -1536,7 +1544,7 @@ html.j-lock body { overflow: hidden; }
   border: 0;
   border-radius: 0;
   background: transparent;
-  font-size: 16px;
+  font-size: max(16px, 1.0667rem);
   line-height: 1.5;
   /* MAX_ROWS (5) lines of 1.5em plus the padding, then it scrolls. */
   max-height: calc(5 * 1.5em + 16px);
@@ -1819,17 +1827,17 @@ html.vv-fit .chat-screen .ws-overlay {
   box-shadow: 0 24px 60px rgb(0 0 0 / 0.45);
 }
 .signin-head { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 28px; }
-.signin-head h1 { margin: 14px 0 0; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
-.signin-head p { margin: 6px 0 0; color: var(--j-muted); font-size: 14px; }
+.signin-head h1 { margin: 14px 0 0; font-size: 1.4667rem; font-weight: 650; letter-spacing: -0.01em; }
+.signin-head p { margin: 6px 0 0; color: var(--j-muted); font-size: 0.9333rem; }
 .signin-mark { width: 48px; height: 48px; border-radius: 12px; }
 
 /* The round badge of a person. Five colors, picked from the id. */
 .signin-avatar {
   display: inline-grid; place-items: center;
   width: 44px; height: 44px; border-radius: 50%;
-  font-weight: 700; font-size: 15px; color: var(--j-bg);
+  font-weight: 700; font-size: 1rem; color: var(--j-bg);
 }
-.signin-avatar.lg { width: 60px; height: 60px; font-size: 20px; }
+.signin-avatar.lg { width: 60px; height: 60px; font-size: 1.3333rem; }
 .signin-avatar.h0 { background: #7fb2ff; }
 .signin-avatar.h1 { background: #8fd3a8; }
 .signin-avatar.h2 { background: #e0b36a; }
@@ -1858,7 +1866,7 @@ html.vv-fit .chat-screen .ws-overlay {
 .signin-person:hover { border-color: var(--j-accent); background: var(--j-accent-soft); }
 .signin-person:active { transform: scale(0.97); }
 .signin-person .signin-avatar { margin-bottom: 6px; }
-.signin-person-name { font-size: 15px; font-weight: 600; }
+.signin-person-name { font-size: 1rem; font-weight: 600; }
 .signin-person-role { font-size: var(--j-text-xs); color: var(--j-muted); text-transform: capitalize; }
 
 /* The form. */
@@ -1867,22 +1875,22 @@ html.vv-fit .chat-screen .ws-overlay {
 .signin-label-row { display: flex; align-items: baseline; justify-content: space-between; }
 .signin-label { font-size: var(--j-text-sm); font-weight: 600; color: var(--j-muted); }
 .signin-field .j-field { height: 46px; }
-.signin-field .j-field input { font-size: 16px; }
+.signin-field .j-field input { font-size: max(16px, 1.0667rem); }
 .signin-link {
   padding: 0; font: inherit; font-size: var(--j-text-sm); font-weight: 600;
   color: var(--j-accent); background: none; border: 0; cursor: pointer;
 }
 .signin-link:hover { text-decoration: underline; }
-.signin-remember { display: flex; align-items: center; gap: 10px; color: var(--j-muted); font-size: 14px; cursor: pointer; }
-.signin-submit { width: 100%; height: 46px; font-size: 15px; margin-top: 4px; }
+.signin-remember { display: flex; align-items: center; gap: 10px; color: var(--j-muted); font-size: 0.9333rem; cursor: pointer; }
+.signin-submit { width: 100%; height: 46px; font-size: 1rem; margin-top: 4px; }
 
 /* No person has a secret yet, or the instance asks for none. */
-.signin-empty { display: flex; flex-direction: column; gap: 10px; color: var(--j-muted); font-size: 14px; text-align: center; }
+.signin-empty { display: flex; flex-direction: column; gap: 10px; color: var(--j-muted); font-size: 0.9333rem; text-align: center; }
 .signin-empty p { margin: 0; }
-.signin-empty-lead { color: var(--j-text); font-size: 15px; font-weight: 600; }
+.signin-empty-lead { color: var(--j-text); font-size: 1rem; font-weight: 600; }
 .signin-empty pre {
   margin: 4px 0; padding: 12px; text-align: left; white-space: pre-wrap; word-break: break-word;
-  font: 13px/1.5 var(--j-mono); color: var(--j-text);
+  font: 0.8667rem/1.5 var(--j-mono); color: var(--j-text);
   background: var(--j-bg); border: 1px solid var(--j-line); border-radius: var(--j-radius-sm);
 }
 .signin-note { margin: 0; text-align: center; color: var(--j-muted); }
@@ -1901,7 +1909,7 @@ html.vv-fit .chat-screen .ws-overlay {
 .profile-field { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .profile-label { font-size: var(--j-text-sm); font-weight: 600; color: var(--j-muted); padding: 0; }
 .profile-hint { display: block; font-size: var(--j-text-sm); color: var(--j-faint); }
-.profile-field .j-field input { font-size: 16px; }
+.profile-field .j-field input { font-size: max(16px, 1.0667rem); }
 .profile-choices { gap: 8px; }
 .profile-choice {
   display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; cursor: pointer;
