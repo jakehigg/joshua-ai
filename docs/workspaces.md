@@ -318,7 +318,7 @@ service worker refuses one on a tap.
 person when a question in the thread is addressed to them, a decision waits on
 them, Joshua wrote a document they need, it added an item they asked for,
 somebody asked it to tell them, somebody asks it to check something with them
-("see if this works for Jake"), or a plan or a document of the workspace is
+("see if this works for Mia"), or a plan or a document of the workspace is
 settled and waits on them. The last two carry the `url` of the thing to read.
 More conversation on a subject they already know about notifies nobody.
 

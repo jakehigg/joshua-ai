@@ -399,7 +399,7 @@ with the images and the packaged chart, are at
   before. The path is a path inside Joshua and nothing else, the one rule
   `notify_person` already had, so a notification never sends a person to
   another site. Joshua now notifies a person when somebody asks it to check
-  something with them ("see if this works for Jake"), and once when a plan or
+  something with them ("see if this works for Mia"), and once when a plan or
   a document of a shared workspace is settled and waits on them, with the url
   of the thing to read. See
   [workspaces.md](workspaces.md#notifying-one-person).

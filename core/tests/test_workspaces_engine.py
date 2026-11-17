@@ -1376,7 +1376,7 @@ async def test_notify_user_needs_text_and_a_workspace_row() -> None:
 
 
 async def test_notify_user_opens_the_url_it_is_given_and_the_thread_by_default() -> None:
-    """Lauren settles the meal plan and asks Joshua to check it with Jake: the
+    """Lauren settles the meal plan and asks Joshua to check it with Alex: the
     tap lands on the document, not on the thread."""
     repo = _with_a_device()
     repo.main = Conversation(id="m", channel_id="telegram:1", person_id="alex")
@@ -1649,7 +1649,7 @@ async def test_notify_person_puts_a_path_in_the_message_of_a_normal_chat(
 async def test_notify_person_pushes_the_path_and_writes_the_address_in_a_chat(
     no_notified: None,
 ) -> None:
-    """Jake asks for the recipe: with ``viewer_url`` set the payload carries the
+    """Alex asks for the recipe: with ``viewer_url`` set the payload carries the
     path, because the service worker throws an absolute address away, and the
     tap lands on the page. The message of a normal chat carries the whole
     address, which a person clicks."""

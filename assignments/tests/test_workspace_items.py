@@ -9,19 +9,19 @@ from joshua_assignments.workspace_items import Item, item_of
 from sdk_fakes import FakeCore
 
 WORKSPACE = "11111111-1111-4111-8111-111111111111"
-DOCUMENT = "documents/jake/ha-backlog-burndown.md"
+DOCUMENT = "documents/alex/ha-backlog-burndown.md"
 
 
 def test_a_document_output_is_a_document_item_that_opens_the_page() -> None:
     item = item_of({"kind": "document", "ref": DOCUMENT, "title": "HA backlog burndown"})
     assert item == Item(
-        "document", DOCUMENT, "HA backlog burndown", "/documents/jake/ha-backlog-burndown"
+        "document", DOCUMENT, "HA backlog burndown", "/documents/alex/ha-backlog-burndown"
     )
 
 
 def test_the_kind_of_an_output_that_names_a_document_comes_from_the_path() -> None:
     assert item_of({"kind": "plan", "ref": DOCUMENT}).kind == "document"
-    assert item_of({"kind": "note", "ref": "documents/jake/report.html"}).kind == "artifact"
+    assert item_of({"kind": "note", "ref": "documents/alex/report.html"}).kind == "artifact"
 
 
 def test_a_url_output_keeps_its_address_and_an_unknown_kind_is_a_link() -> None:
@@ -58,7 +58,7 @@ async def test_an_output_of_a_run_of_a_workspace_becomes_one_item() -> None:
             "kind": "document",
             "ref": DOCUMENT,
             "title": "Burndown",
-            "url": "/documents/jake/ha-backlog-burndown",
+            "url": "/documents/alex/ha-backlog-burndown",
         }
     ]
     request = core.item_requests[0]

@@ -54,14 +54,14 @@ describe("MessageList", () => {
           msg(2, { ...person, text: "and cider", who: "Mia" }),
           msg(3, { text: "Noted." }),
           msg(4, { ...person, text: "me too", who: "Mia" }),
-          msg(5, { ...person, text: "the oven is mine", who: "Jake" }),
+          msg(5, { ...person, text: "the oven is mine", who: "Alex" }),
         ]}
         canRetry
         onRetry={() => undefined}
       />,
     );
     const names = [...document.querySelectorAll(".msg-who")].map((el) => el.textContent);
-    expect(names).toEqual(["Mia", "Mia", "Jake"]);
+    expect(names).toEqual(["Mia", "Mia", "Alex"]);
   });
 
   it("puts the signed-in person's messages at the right and the others at the left", () => {
@@ -70,13 +70,13 @@ describe("MessageList", () => {
       <MessageList
         messages={[
           msg(1, { ...person, text: "I'll bring pie", who: "Mia" }),
-          msg(2, { ...person, text: "the oven is mine", who: "Jake" }),
+          msg(2, { ...person, text: "the oven is mine", who: "Alex" }),
           msg(3, { text: "Noted." }),
           msg(4, { ...person, text: "and cider", who: "Mia" }),
         ]}
         canRetry
         onRetry={() => undefined}
-        me="Jake"
+        me="Alex"
         shared
       />,
     );
@@ -106,7 +106,7 @@ describe("MessageList", () => {
         ]}
         canRetry
         onRetry={() => undefined}
-        me="Jake"
+        me="Alex"
       />,
     );
     const sides = [...document.querySelectorAll("article.msg")].map((el) => el.className);

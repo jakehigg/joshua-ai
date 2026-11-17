@@ -156,7 +156,7 @@ when it may reach them there, under Edit → **When Joshua may reach you here**:
 | The setting | The mode | What Joshua does |
 |---|---|---|
 | Never | `off` | Nothing. The tool refuses. |
-| When the thread needs me | `decide` | It notifies you when a question in the thread is for you, a decision waits on you, it wrote a document you need, it added an item you asked for, somebody asked it to tell you, somebody asks it to check something with you ("see if this works for Jake"), or a plan or a document of the workspace is settled and waits on you. |
+| When the thread needs me | `decide` | It notifies you when a question in the thread is for you, a decision waits on you, it wrote a document you need, it added an item you asked for, somebody asked it to tell you, somebody asks it to check something with you ("see if this works for Mia"), or a plan or a document of the workspace is settled and waits on you. |
 | Every message of another person | `all` | It notifies you on every turn another person writes. |
 
 `url` is the path the tap opens, so the notification lands on the thing to

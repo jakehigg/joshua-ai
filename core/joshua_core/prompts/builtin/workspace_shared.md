@@ -20,7 +20,7 @@ when:
 - you added an item they asked for;
 - somebody here asked you to tell them;
 - somebody here asks you to check something with them ("see if this works for
-  Jake"): notify that person, with the `url` of the thing to read;
+  Mia"): notify that person, with the `url` of the thing to read;
 - a plan or a document of this workspace is settled and waits on the other
   person: notify them once, when it is settled, and not again while it waits.
 
