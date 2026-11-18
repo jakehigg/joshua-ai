@@ -710,9 +710,9 @@ describe("the workspace header", () => {
 
   it("marks a shared workspace with the two-person icon beside the title", async () => {
     viewer({ "GET /api/v1/workspaces/options": OPTIONS });
-    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "alex", shared: true, members: ["mia"] });
     render(
-      <SessionContext.Provider value={session("jake", "Jake")}>
+      <SessionContext.Provider value={session("alex", "Alex")}>
         <WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />
       </SessionContext.Provider>,
     );
@@ -727,13 +727,13 @@ describe("the workspace header", () => {
     const shared = ws({
       slug: "thanksgiving",
       title: "Thanksgiving",
-      owner: "jake",
+      owner: "alex",
       shared: true,
       members: ["mia"],
       charm: { state: "working", reason: "assignment 31 is running" },
     });
     const working = render(
-      <SessionContext.Provider value={session("jake", "Jake")}>
+      <SessionContext.Provider value={session("alex", "Alex")}>
         <WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />
       </SessionContext.Provider>,
     );
@@ -753,13 +753,13 @@ describe("the workspace header", () => {
 
   it("names the people of a shared workspace under the title, and not in the drawer", async () => {
     viewer({ "GET /api/v1/workspaces/options": OPTIONS });
-    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    const shared = ws({ slug: "thanksgiving", title: "Thanksgiving", owner: "alex", shared: true, members: ["mia"] });
     render(
-      <SessionContext.Provider value={session("jake", "Jake")}>
+      <SessionContext.Provider value={session("alex", "Alex")}>
         <WorkspaceHeader workspace={shared} onChange={vi.fn()} onItems={vi.fn()} />
       </SessionContext.Provider>,
     );
-    expect((await screen.findByText("Jake, Mia")).className).toContain("subtitle");
+    expect((await screen.findByText("Alex, Mia")).className).toContain("subtitle");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByText("Tasks and projects");
     // The people never change, so the drawer has no field for them.
@@ -767,7 +767,7 @@ describe("the workspace header", () => {
   });
 
   it("changes a shared workspace by its id, never by its slug ref", async () => {
-    const shared = ws({ id: "s4", slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    const shared = ws({ id: "s4", slug: "thanksgiving", title: "Thanksgiving", owner: "alex", shared: true, members: ["mia"] });
     const { calls } = viewer({
       "GET /api/v1/workspaces/options": OPTIONS,
       "PATCH /api/v1/workspaces/s4": shared,
@@ -780,7 +780,7 @@ describe("the workspace header", () => {
   });
 
   it("sets the notify mode of the signed-in person in a shared workspace", async () => {
-    const shared = ws({ id: "s4", slug: "thanksgiving", title: "Thanksgiving", owner: "jake", shared: true, members: ["mia"] });
+    const shared = ws({ id: "s4", slug: "thanksgiving", title: "Thanksgiving", owner: "alex", shared: true, members: ["mia"] });
     const { calls } = viewer({
       "GET /api/v1/workspaces/options": OPTIONS,
       "GET /api/v1/workspaces/s4/notify": { mode: "decide", default: "decide" },
@@ -904,7 +904,7 @@ describe("the routes", () => {
       "GET /api/v1/workspaces/shared%2Fthanksgiving": ws({
         slug: "thanksgiving",
         title: "Thanksgiving",
-        owner: "jake",
+        owner: "alex",
         shared: true,
         members: ["mia"],
       }),
@@ -913,7 +913,7 @@ describe("the routes", () => {
       "GET /api/v1/chat/mia/history": {
         messages: [
           row(1, "person", "I'll bring pie", "Mia"),
-          row(2, "person", "the oven is mine", "Jake"),
+          row(2, "person", "the oven is mine", "Alex"),
           row(3, "joshua", "Noted."),
         ],
         nextBefore: null,
@@ -931,14 +931,14 @@ describe("the routes", () => {
     const other = screen.getByText("the oven is mine").closest("article");
     expect(mine?.className).toBe("msg msg-person");
     expect(other?.className).toBe("msg msg-person msg-other");
-    expect(within(other as HTMLElement).getByText("Jake").className).toBe("msg-who");
+    expect(within(other as HTMLElement).getByText("Alex").className).toBe("msg-who");
     expect(mine?.querySelector(".msg-who")).toBeNull();
     // Each writer has a colour of their own.
     const tones = [mine, other].map((el) => el?.querySelector(".bubble")?.className);
     expect(tones[0]).not.toBe(tones[1]);
     // The answer is marked as Joshua's.
     const names = [...document.querySelectorAll(".msg-who")].map((el) => el.textContent);
-    expect(names).toEqual(["Jake", "Joshua"]);
+    expect(names).toEqual(["Alex", "Joshua"]);
   });
 
   it("keeps the layout of a personal workspace: no name and no colour", async () => {

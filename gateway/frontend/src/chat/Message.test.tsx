@@ -109,8 +109,8 @@ describe("Message", () => {
   });
 
   it("keeps the person's own message at the right, in its colour too", () => {
-    const tone = toneOf("Jake");
-    const own = show({ role: "person", text: "the oven is mine", who: "Jake", tone });
+    const tone = toneOf("Alex");
+    const own = show({ role: "person", text: "the oven is mine", who: "Alex", tone });
     expect(own.querySelector("article")?.className).toBe("msg msg-person");
     expect(own.querySelector(".bubble")?.className).toBe(`bubble ${tone}`);
   });

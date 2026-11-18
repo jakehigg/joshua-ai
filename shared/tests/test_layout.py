@@ -659,8 +659,8 @@ def test_the_wiki_gets_an_attachments_folder(tmp_path: Path) -> None:
 
 
 def test_each_attachment_root_is_built_by_the_layout(tmp_path: Path) -> None:
-    assert layout.person_attachments_root("jake", tmp_path) == (
-        tmp_path / "people" / "jake" / "attachments"
+    assert layout.person_attachments_root("alex", tmp_path) == (
+        tmp_path / "people" / "alex" / "attachments"
     )
     assert layout.shared_attachments_root(tmp_path) == tmp_path / "shared" / "attachments"
     assert layout.group_attachments_root("everyone", tmp_path) == (
@@ -682,14 +682,14 @@ def test_month_dir_reads_the_date(tmp_path: Path) -> None:
 def test_attachment_roots_lists_only_the_folders_that_exist(tmp_path: Path) -> None:
     layout.bootstrap_wiki(tmp_path)
     layout.bootstrap_shared(tmp_path)
-    (tmp_path / "people" / "jake" / "attachments").mkdir(parents=True)
+    (tmp_path / "people" / "alex" / "attachments").mkdir(parents=True)
     (tmp_path / "people" / "mia").mkdir(parents=True)
 
     roots = layout.attachment_roots(tmp_path)
 
     assert layout.wiki_attachments_root(tmp_path) in roots
     assert layout.shared_attachments_root(tmp_path) in roots
-    assert tmp_path / "people" / "jake" / "attachments" in roots
+    assert tmp_path / "people" / "alex" / "attachments" in roots
     assert tmp_path / "people" / "mia" / "attachments" not in roots
 
 
@@ -707,10 +707,10 @@ def test_data_relative_refuses_a_path_outside_the_volume(tmp_path: Path) -> None
     ("rel", "area"),
     [
         ("wiki/attachments/2026/09/a.jpg", "wiki"),
-        ("people/jake/attachments/2026/09/a.jpg", "person"),
+        ("people/alex/attachments/2026/09/a.jpg", "person"),
         ("shared/attachments/everyone/2026/09/a.jpg", "shared"),
         ("wiki/recipes/pizza.md", None),
-        ("people/jake/cli/outbox.jsonl", None),
+        ("people/alex/cli/outbox.jsonl", None),
         ("wiki/attachments", None),
         ("../wiki/attachments/a.jpg", None),
         ("", None),

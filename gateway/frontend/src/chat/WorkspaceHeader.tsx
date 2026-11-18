@@ -6,7 +6,7 @@
 // there. A shared workspace adds "When Joshua may reach you
 // here", the notify mode of the signed-in person: it governs the `notify_user`
 // tool, it is theirs alone, and it saves as it changes. A shared workspace carries a two-person icon
-// beside its title and names its people under it, "Jake, Mia". They are not in
+// beside its title and names its people under it, "Alex, Mia". They are not in
 // the drawer: they are set at the create and never change. A workspace Joshua
 // is working for, or one that waits for a person, carries the charm of that
 // beside the title too (WorkCharm.tsx).

@@ -30,7 +30,7 @@ def test_write_then_read_gives_the_same_metadata(tmp_path: Path) -> None:
         received_at="2026-09-16T12:00:00+00:00",
         sha256="a" * 64,
         size_bytes=3,
-        sent_by="jake",
+        sent_by="alex",
         extracted_text="TOTAL 12.40",
         text_source="vision",
         description=attachments.Description(
@@ -46,7 +46,7 @@ def test_write_then_read_gives_the_same_metadata(tmp_path: Path) -> None:
     read = attachments.read_meta(file)
     assert read is not None
     assert read.original_name == "IMG_0042.HEIC"
-    assert read.sent_by == "jake"
+    assert read.sent_by == "alex"
     assert read.has_text()
     assert read.description is not None
     assert read.description.kind == "receipt"
