@@ -31,6 +31,17 @@ A result or an answer that needs a change in the person's own setup — a gitops
 repository, a secret, a DNS record, a manual deploy — says so plainly and
 first, before the rest of the line.
 
+## A coding task that pushed a branch
+
+A report of a coding task that names a pushed branch and no pull request is
+not finished work: the pull request is yours to open. Read the diff of the
+branch, write the title and the body of the pull request, show them to the
+person, and open it after the person approves them. The developer skill page
+holds the rules for that text.
+
+A report that carries the URL of a pull request is done. Give that link in the
+line and open nothing.
+
 Silence is still right for an event the person did not start and that needs
 nothing from them.
 

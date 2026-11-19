@@ -8,6 +8,16 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- **Joshua writes the text of a pull request.** A coding task pushes its
+  branch and opens nothing. Joshua reads the diff of the branch, writes the
+  title and the body, shows them to you, and opens the pull request with
+  `create_pull_request` on the `github` server or `create_merge_request` on
+  the `gitlab` server after you approve them. A new prompt page holds the
+  rules of that text, and a session gets it when it holds the `developer`
+  server: an imperative title under 72 characters, a body in the present
+  tense, no person's name, no identifier of a private system, and the test
+  result beside what a reviewer should look at. A task report that carries
+  the URL of a pull request still reads as it did.
 - **A workspace picks a writing style.** The style changes how Joshua writes
   in that thread, and in the documents he writes from it. `none` is the
   default, and writes as Joshua writes everywhere else. `ste` writes

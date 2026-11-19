@@ -287,6 +287,17 @@ def test_the_documents_skill_goes_only_to_a_member_session_that_holds_the_server
     assert "## Documents" not in guest
 
 
+def test_the_developer_skill_goes_only_to_a_member_session_that_holds_the_server() -> None:
+    composer = PromptComposer()
+    profile = derive_profile(_MEMBER, _DM)
+    without = composer.compose(profile, _MEMBER, _DM, servers=["files", "documents"])
+    held = composer.compose(profile, _MEMBER, _DM, servers=["files", "developer"])
+    assert "## The developer" not in without
+    assert "## The developer" in held
+    guest = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM, servers=["developer"])
+    assert "## The developer" not in guest
+
+
 def test_the_documents_skill_says_what_a_document_is_and_how_to_keep_it() -> None:
     page = (
         Path(__file__).parents[1]
@@ -459,6 +470,55 @@ def test_the_assignments_skill_says_how_to_run_an_assignment_and_nothing_local()
         assert banned not in rest, banned
     for banned in ("write_file", "wiki", "page_path", "plan page", "developer"):
         assert banned not in lowered, banned
+
+
+def test_the_developer_skill_says_who_writes_the_pull_request_text() -> None:
+    """The developer pushes a branch and opens nothing. Joshua reads the diff,
+    writes the title and the body, and opens the pull request after the owner
+    approves it."""
+    page = (
+        Path(__file__).parents[1]
+        / "joshua_core"
+        / "prompts"
+        / "builtin"
+        / "skills"
+        / "developer.md"
+    ).read_text()
+    for words in (
+        "it\npushes a branch",
+        "It opens no pull request.",
+        "Read the diff of the branch against the base branch before you write a word.",
+        "`create_pull_request`",
+        "`create_merge_request`",
+        "One line, imperative, under 72 characters.",
+        "in the present tense, in short sentences",
+        'A person\'s name. Write "the owner".',
+        "An identifier from a private system: a task id, a project name, a\n"
+        "  workspace, a document path.",
+        'A signature, an attribution, or a "written for" line.',
+        "An issue reference, except for an issue of the same repository, and only\n"
+        "  when a closing reference is required.",
+        "an\n  internal host, an internal registry, an internal repository path, an\n"
+        "  internal change number",
+        "State the test result",
+        "what a reviewer should look at",
+        "Open the pull request only after the owner approves it.",
+    ):
+        assert words in page, words
+
+
+def test_the_event_page_sends_a_pushed_branch_to_the_pull_request_text() -> None:
+    page = (
+        Path(__file__).parents[1] / "joshua_core" / "prompts" / "builtin" / "event.md"
+    ).read_text()
+    for words in (
+        "names a pushed branch and no pull request",
+        "Read the diff of the\nbranch",
+        "write the title and the body of the pull request",
+        "open it after the person approves them",
+        "A report that carries the URL of a pull request is done.",
+    ):
+        assert words in page, words
 
 
 def test_an_empty_prompt_path_is_no_snippet(caplog) -> None:
