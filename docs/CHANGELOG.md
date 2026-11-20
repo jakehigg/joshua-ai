@@ -6,6 +6,45 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-19
+
+A workspace can now hold several people, who write in one thread and read the
+same goal, notes, and items. Joshua reaches a person on their phone with a web
+push notification, through `notify_user` in a shared workspace and
+`notify_person` from any chat. The instance has settings in the database,
+under Admin → Instance, and a secret setting is encrypted at rest. A workspace
+counts the rows you have not read, and the chat marks the thread read. The
+chat and the viewer take a long list of fixes. The usage page shows the rows
+of kind `developer`, which the developer addon writes.
+
+### Upgrading from 0.3.0
+
+Your `joshua.yaml` from 0.3.0 loads as it is. Then:
+
+1. Take a database backup first. This release adds tables, and core upgrades
+   the schema at start. `make backup` writes one.
+2. Set `JOSHUA_SETTINGS_KEY` in core's environment, a base64 32-byte key.
+   Generate one with `openssl rand -base64 32`, and keep it for the life of
+   the instance. The `settings` table encrypts a secret setting with that
+   key, and the VAPID private key of push is such a setting. In docker
+   compose, put the line in `.env`. In the chart, add it to the `joshua-core`
+   secret. See [settings.md](settings.md).
+3. At start, core adds the tables `settings`, `push_subscriptions`,
+   `notify_prefs`, and `conversation_reads`. Nothing is dropped.
+4. To turn push on, set `push.enabled`, `push.vapid_subject`,
+   `push.vapid_public_key`, and `push.vapid_private_key` under
+   Admin → Instance → Notifications. The subject is a `mailto:` or an
+   `https://` address, the public key is the base64url of 65 bytes, and the
+   private key the base64url of 32 bytes. While push is off, every push route
+   answers `503`. See [notifications.md](notifications.md), which has the
+   command that generates the pair.
+5. Each person turns notifications on once on each of their devices, from the
+   card "Notifications on this device" on the Profile page.
+6. For the output of an assignment to land as an item of its workspace,
+   `assignments` must be in `workspaces.allowed_callers`. This matters only
+   when `joshua.yaml` sets that key explicitly; the default holds
+   `assignments`.
+
 ### Chat
 
 - **A workspace picks a writing style.** The style changes how Joshua writes
