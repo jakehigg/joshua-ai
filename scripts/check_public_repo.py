@@ -68,6 +68,7 @@ RESERVED_NAMES = frozenset({"localhost", "example.com", "example.net", "example.
 # so that a reader can tell a dependency from a leak.
 ALLOWED_HOSTS = {
     "github.com": "the repository, the releases, and the workflows",
+    "api.github.com": "the GitHub releases API core reads the latest release from",
     "raw.githubusercontent.com": "a file fetched from a repository",
     "ghcr.io": "the container registry the images ship from",
     "docs.astral.sh": "the uv documentation",
