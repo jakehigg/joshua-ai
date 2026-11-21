@@ -142,7 +142,11 @@ function EditDrawer({
 
   const setStatus = (status: WorkspaceStatus) => save({ status }, true);
   // The model of a workspace may be one that the list no longer holds.
-  const models = [...new Set([...(options?.models ?? []), ...(model ? [model] : [])])];
+  const offered = options?.models ?? [];
+  const models =
+    model === "" || offered.some((m) => m.id === model)
+      ? offered
+      : [...offered, { id: model, name: model }];
   const known = new Set(options?.servers.map((s) => s.name));
   const shown = [
     ...(options?.servers ?? []),
@@ -172,8 +176,8 @@ function EditDrawer({
         <select id="ws-e-model" value={model} onChange={(e) => setModel(e.target.value)}>
           <option value="">Default</option>
           {models.map((m) => (
-            <option key={m} value={m}>
-              {m}
+            <option key={m.id} value={m.id}>
+              {m.name}
             </option>
           ))}
         </select>

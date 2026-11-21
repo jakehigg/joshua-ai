@@ -1086,7 +1086,12 @@ async def test_options_list_the_servers_of_the_person_and_the_models(client) -> 
     resp = await client.get("/v1/workspaces/options", params={"person": "alex"}, headers=_h())
     assert resp.status_code == 200
     body = resp.json()
-    assert body["models"] == ["model-a", "model-b"]
+    # Each model of the instance, with the name a person reads. These two have
+    # no name of their own, so each one reads as its id.
+    assert body["models"] == [
+        {"id": "model-a", "name": "model-a"},
+        {"id": "model-b", "name": "model-b"},
+    ]
     # One line for each writing style, in the order of the store's list. The
     # default is first and reads "Regular".
     assert [s["id"] for s in body["styles"]] == ["none", "ste", "coach"]

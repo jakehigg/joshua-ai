@@ -64,7 +64,12 @@ const OPTIONS = {
     { name: "tasks", description: "Tasks and projects" },
     { name: "github", description: "github" },
   ],
-  models: ["model-a", "model-b"],
+  // The models of the instance: the id a workspace holds, and the name a
+  // person reads.
+  models: [
+    { id: "claude-sonnet-5", name: "sonnet" },
+    { id: "model-b", name: "model-b" },
+  ],
   // The writing styles, as core names them. `none` is the default and reads
   // "Regular".
   styles: [
@@ -133,6 +138,20 @@ describe("the new workspace dialog", () => {
       model: "model-b",
       servers: ["tasks"],
     });
+  });
+
+  it("lists each model of the instance beside Default, by the name a person reads", async () => {
+    viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    render(<NewWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    const field = (await screen.findByLabelText("Model")) as HTMLSelectElement;
+    await waitFor(() => expect(field.options.length).toBe(3));
+    // Default is the empty value: the workspace runs on the model of the instance.
+    expect([...field.options].map((o) => [o.value, o.text])).toEqual([
+      ["", "Default"],
+      ["claude-sonnet-5", "sonnet"],
+      ["model-b", "model-b"],
+    ]);
+    expect(field.value).toBe("");
   });
 
   it("picks a writing style on the create, and sends none as the default", async () => {

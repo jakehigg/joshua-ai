@@ -6,6 +6,17 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Chat
+
+- **The Model select of a workspace lists each model of the instance.** It
+  showed "Default" alone on an instance that does not set
+  `workspaces.models`. The options route now answers the models of the
+  instance: `workspaces.models` when it is set, and the models of
+  `assignments.models` with no list. Each one carries the name a person reads
+  beside the id the workspace holds, so the picker shows "sonnet", not
+  `claude-sonnet-5`. "Default" is still the empty value, and a workspace with
+  no model runs on the model of the chat job.
+
 ### Admin
 
 - **The Instance page says whether a newer release exists.** The Releases

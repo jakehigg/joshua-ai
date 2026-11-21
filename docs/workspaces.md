@@ -427,6 +427,14 @@ is empty. `style` must be `none`, `ste`, or `coach` (422 otherwise).
 `styles`: one `{id, name, description}` for each writing style, in the order
 above. The picker of the viewer shows that list.
 
+The models are the models of the instance, each one an `{id, name}`: the `id`
+is what a workspace holds and what the model call names, and the `name` is
+what a person reads in the picker. The list is `workspaces.models` when it is
+set. With no list, the models are the ones of `assignments.models`, where the
+key is the name and `model` is the id, so a picker offers the models of the
+instance and not a name of its own. The Model select keeps "Default" as the
+empty value, and a workspace with no model runs on the model of the chat job.
+
 A chat turn in a workspace goes through the channels terminal routes.
 `POST /v1/cli/turns/stream` and `GET /v1/cli/transcript` take an optional
 `workspace` (a ref). Core looks the workspace up for the person. The viewer
@@ -669,8 +677,9 @@ read of one workspace carry one field that core does not give: `charm` (above).
 | `GET`, `POST /api/v1/workspaces/{slug}/notify` | `GET`, `POST /v1/workspaces/{slug}/notify` |
 
 `GET /v1/workspaces/options` returns `servers` (the servers that the person may
-use, each with a `name` and a one-line `description`), `models` (the list
-`workspaces.models`, empty when any model is allowed), and `people` (every
+use, each with a `name` and a one-line `description`), `models` (the models of
+the instance, each with the `id` the workspace holds and the `name` a person
+reads), and `people` (every
 member of the roster but the caller, each with an `id` and a `name`, to share a
 workspace with). The description is the optional `description` of the server in
 `mcp:`. Without it, the name is used. The slug `options` is reserved.
@@ -706,7 +715,7 @@ session.
 | Key | Default | Meaning |
 |---|---|---|
 | `workspaces.allowed_callers` | `viewer`, `gateway`, `assignments` | Fleet identities that may call `/v1/workspaces`. |
-| `workspaces.models` | empty | The models a workspace may pick. Empty accepts any text. |
+| `workspaces.models` | empty | The models a workspace may pick. Empty accepts any text, and the picker then offers the models of `assignments.models`. |
 | `workspaces.context_cap` | `150000` | Input tokens over which a workspace turn ends its session. |
 | `workspaces.max_turns` | `50` | The least number of agent turns that a workspace turn gets. |
 | `workspaces.tool_search_max_servers` | `3` | Servers up to which a workspace runs with tool search off. |
