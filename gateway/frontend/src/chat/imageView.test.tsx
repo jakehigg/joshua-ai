@@ -7,7 +7,8 @@ describe("the image view of the panel", () => {
     const onClose = vi.fn();
     render(<PagePanel view={{ type: "image", image: { url: "/api/v1/files/wiki/a.jpg", title: "Display" } }} onClose={onClose} />);
     expect(screen.getByAltText("Display").getAttribute("src")).toBe("/api/v1/files/wiki/a.jpg");
-    expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/api/v1/files/wiki/a.jpg");
+    // The bar holds the control that opens the photo on its own page.
+    expect(screen.getByRole("link", { name: "Open full page" }).getAttribute("href")).toBe("/api/v1/files/wiki/a.jpg");
     fireEvent.click(screen.getByRole("button", { name: "Close the item" }));
     expect(onClose).toHaveBeenCalled();
   });

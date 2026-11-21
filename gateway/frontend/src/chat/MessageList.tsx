@@ -1,5 +1,7 @@
 // The scrolling list of messages. While the reader is at the bottom, a new
-// message or new text scrolls into view. When the reader has scrolled up,
+// message or new text scrolls into view, and the list follows the answer as it
+// streams in: each row of text that arrives makes it taller, and the bottom
+// stays in view. When the reader has scrolled up,
 // the list stays put and a "new" button appears instead — except for a
 // message the reader sends: `sent` rises then, and the list goes to the
 // bottom, so they see their own message and the answer to it. "Load earlier"
@@ -117,6 +119,7 @@ export function MessageList({
   sent = 0,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const column = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const [unseen, setUnseen] = useState(false);
   // The scroll height and position before "Load earlier", to restore after.
@@ -210,14 +213,19 @@ export function MessageList({
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [readHere]);
 
-  // A growing composer or a rotated phone changes the height; stay at the bottom.
+  // The list stays at the bottom while it grows: the answer that streams in,
+  // a growing composer, a rotated phone. The observer watches the column as
+  // well as the list, because text that arrives makes the column taller and
+  // leaves the list the size it was.
   useEffect(() => {
     const el = ref.current;
+    const content = column.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (atBottom.current) el.scrollTop = el.scrollHeight;
     });
     observer.observe(el);
+    if (content) observer.observe(content);
     return () => observer.disconnect();
   }, []);
 
@@ -231,7 +239,7 @@ export function MessageList({
         aria-label="Conversation with Joshua"
         onScroll={onScroll}
       >
-        <div className="column">
+        <div className="column" ref={column}>
           {hasEarlier && (
             <button
               type="button"

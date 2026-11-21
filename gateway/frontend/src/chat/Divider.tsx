@@ -1,8 +1,9 @@
 // The handle on the divider between two panes of the chat.
 //
 // A drag changes the width of the panel, never the width of the thread, which
-// takes the rest of the row. The width is clamped to the limits of that panel
-// and kept per device (widths.ts); a double-click puts the panel back to the
+// takes the rest of the row. The panel holds between 14rem and 60 percent of
+// the window, and the width is kept on the device for that person, that panel
+// and that breakpoint (widths.ts); a double-click puts the panel back to the
 // width of its token. The handle takes the keyboard too: with the focus on it,
 // the left and the right arrow move it by STEP_PX.
 //

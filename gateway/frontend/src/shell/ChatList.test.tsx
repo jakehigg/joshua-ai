@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Workspace } from "../api/workspaces";
-import ChatList from "./ChatList";
+import ChatList, { ALL_KEY } from "./ChatList";
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
 
@@ -37,19 +37,24 @@ function ws(over: Partial<Workspace> = {}): Workspace {
 const at = (id: string, hour: number, over: Partial<Workspace> = {}) =>
   ws({ id, slug: id, title: id, updated_at: `2026-01-01T${String(hour).padStart(2, "0")}:00:00Z`, ...over });
 
-function list(rows: Workspace[]) {
+function list(rows: Workspace[], at = "/chat/alex") {
   vi.stubGlobal("fetch", vi.fn(async () => json({ workspaces: rows })));
   render(
-    <MemoryRouter initialEntries={["/chat/alex"]} future={FUTURE}>
+    <MemoryRouter initialEntries={[at]} future={FUTURE}>
       <ChatList chatPath="/chat/alex" />
     </MemoryRouter>,
   );
 }
 
 const names = () =>
-  [...document.querySelectorAll(".v-chats .j-nav-item")].map((el) => el.textContent);
+  [...document.querySelectorAll(".v-chats .j-nav-item")].map((el) =>
+    el.querySelector(".v-chat-name")?.textContent ?? el.textContent,
+  );
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+});
 
 describe("the list of the threads", () => {
   it("holds the normal chat, five workspaces, Show all and New workspace", async () => {
@@ -77,10 +82,46 @@ describe("the list of the threads", () => {
     expect(screen.queryByRole("link", { name: "a" })).toBeNull();
   });
 
-  it("leaves out a workspace that is not active, and the row with it", async () => {
+  it("keeps a paused workspace in the list and holds an archived one for Show all", async () => {
     list([at("a", 1), at("b", 2, { status: "paused" }), at("c", 3, { status: "archived" })]);
     await waitFor(() => expect(screen.getByRole("link", { name: "a" })).toBeTruthy());
-    expect(names()).toEqual(["Chat", "a", "+ New workspace"]);
+    // A paused workspace is a thread a person still reads and writes in.
+    expect(names()).toEqual(["Chat", "b", "a", "Show all", "+ New workspace"]);
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(names()).toEqual(["Chat", "b", "a", "c", "Show less", "+ New workspace"]);
+    // The archived one says so.
+    expect(
+      screen.getByRole("link", { name: /^c/ }).querySelector(".v-chat-status")?.textContent,
+    ).toBe("archived");
+  });
+
+  it("shows the workspace on screen, however old it is", async () => {
+    list(
+      [at("a", 1), at("b", 2), at("c", 3), at("d", 4), at("e", 5), at("f", 6)],
+      "/chat/w/a",
+    );
+    await waitFor(() => expect(screen.getByRole("link", { name: "f" })).toBeTruthy());
+    // The oldest of the six, and the thread on screen: it stands at the end of
+    // the five.
+    expect(names()).toEqual(["Chat", "f", "e", "d", "c", "b", "a", "Show all", "+ New workspace"]);
+    expect(screen.getByRole("link", { name: "a" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("shows an archived workspace on screen, and a paused one, by its slug address", async () => {
+    list([at("a", 1, { status: "archived", owner: "alex" })], "/chat/w/alex/a");
+    await waitFor(() => expect(screen.getByRole("link", { name: /^a/ })).toBeTruthy());
+    expect(screen.getByRole("link", { name: /^a/ }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("keeps Show all open after a reload", async () => {
+    list([at("a", 1), at("b", 2), at("c", 3), at("d", 4), at("e", 5), at("f", 6)]);
+    await waitFor(() => expect(screen.getByRole("link", { name: "f" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(window.localStorage.getItem(ALL_KEY)).toBe("1");
+    cleanup();
+    list([at("a", 1), at("b", 2), at("c", 3), at("d", 4), at("e", 5), at("f", 6)]);
+    await waitFor(() => expect(screen.getByRole("link", { name: "a" })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
   });
 
   it("marks the thread on screen, and only that one", async () => {

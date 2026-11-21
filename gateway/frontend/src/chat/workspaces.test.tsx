@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workspace, WorkspaceItem } from "../api/workspaces";
 import { SessionContext, type Session } from "../shell/Shell";
 import { ChatPage, WorkspaceLink, WorkspacePage } from "./ChatPage";
 import { DocumentPanelProvider, useDocumentPanelState } from "./DocumentPanel";
-import { GROUPS_KEY, ItemPanel, UNDO_MS } from "./ItemPanel";
+import { GROUPS_KEY, ItemPanel, UNDO_MS, orderItems } from "./ItemPanel";
 import { NewWorkspace } from "./NewWorkspace";
 import { validPerson } from "./people";
 import { WorkspaceHeader } from "./WorkspaceHeader";
@@ -227,12 +227,12 @@ describe("the new workspace dialog", () => {
   });
 });
 
-function Panel({ refreshKey = 0 }: { refreshKey?: number }) {
+function Panel({ refreshKey = 0, workspace = "w1" }: { refreshKey?: number; workspace?: string }) {
   const state = useDocumentPanelState();
   return (
     <MemoryRouter future={FUTURE}>
       <DocumentPanelProvider panel={state}>
-        <ItemPanel workspace="w1" refreshKey={refreshKey} open onClose={vi.fn()} />
+        <ItemPanel workspace={workspace} refreshKey={refreshKey} open onClose={vi.fn()} />
         <output data-testid="shown">{state.shown?.url ?? ""}</output>
       </DocumentPanelProvider>
     </MemoryRouter>
@@ -442,21 +442,42 @@ describe("the item panel", () => {
     expect(screen.queryByRole("menuitem")).toBeNull();
   });
 
-  it("folds a group with its header, keeps that, and counts the items", async () => {
+  it("folds a group with its header, keeps that per workspace, and counts the items", async () => {
     window.localStorage.clear();
-    viewer({ "GET /api/v1/workspaces/w1/items": { items } });
+    viewer({
+      "GET /api/v1/workspaces/w1/items": { items },
+      "GET /api/v1/workspaces/w2/items": { items },
+    });
     const { unmount } = render(<Panel />);
     await screen.findByText("Quote");
     const toggle = screen.getByRole("button", { name: /Links/ });
     expect(toggle.textContent).toContain("2");
     fireEvent.click(toggle);
     expect(screen.queryByText("Quote")).toBeNull();
-    expect(JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "[]")).toEqual(["link"]);
+    // The folded groups of that workspace alone.
+    expect(JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "{}")).toEqual({ w1: ["link"] });
     unmount();
     render(<Panel />);
     await screen.findByText("Pie");
     expect(screen.queryByText("Quote")).toBeNull();
+    cleanup();
+    // Another workspace keeps its own groups open.
+    render(<Panel workspace="w2" />);
+    expect(await screen.findByText("Quote")).toBeTruthy();
     window.localStorage.clear();
+  });
+
+  it("stands the rows pinned first, then the newest added first", () => {
+    const made = (id: string, added: string, pinned = false) =>
+      item({ id, title: id, ref: `https://${id}.test`, url: `https://${id}.test`, added_at: added, pinned });
+    expect(
+      orderItems([
+        made("old", "2026-01-01T00:00:00Z"),
+        made("new", "2026-01-03T00:00:00Z"),
+        made("pinned", "2026-01-02T00:00:00Z", true),
+        made("none", ""),
+      ]).map((i) => i.id),
+    ).toEqual(["pinned", "new", "old", "none"]);
   });
 
   it("marks the item open in the panel", async () => {

@@ -30,6 +30,16 @@
   font-weight: 600;
   line-height: 18px;
 }
+/* an archived workspace, which only "Show all" shows: the word stands before
+   the other marks, so the row says why it is there */
+.v-chat-status {
+  flex: none;
+  margin-left: 0.375rem;
+  color: var(--j-faint);
+  font-size: var(--j-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .v-chats-more, .v-chats-new { color: var(--j-faint); }
 /* the mark of a shared workspace, in the list of the threads and in the header
    of the workspace: two small people, quiet, after the name */

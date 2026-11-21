@@ -29,6 +29,9 @@ const ITEMS = [
   item({ id: "b", kind: "wiki", ref: "w", title: "Menu notes", url: "/wiki/menu.md" }),
   item({ id: "c", kind: "pr", ref: "p", title: "Fix the thing", url: "https://github.com/a/b/pull/1" }),
   item({ id: "d", kind: "tasks_project", ref: "trip-plan", title: "Trip plan" }),
+  item({ id: "e", kind: "file", ref: "wiki/photo.jpg", title: "Photo", url: "/api/v1/files/wiki/photo.jpg" }),
+  item({ id: "f", kind: "file", ref: "wiki/plan.pdf", title: "Plan", url: "/api/v1/files/wiki/plan.pdf" }),
+  item({ id: "g", kind: "task", ref: "t-7", title: "Call the installer", url: "https://tasks.test/t-7" }),
 ];
 
 function backend() {
@@ -157,6 +160,64 @@ describe("sheets on the chat screen", () => {
     const link = screen.getByRole("link", { name: "Open in new tab" });
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("serves every kind of item in the one sheet", async () => {
+    await open();
+    const show = async (name: string) =>
+      fireEvent.click(await screen.findByRole("button", { name, hidden: true }));
+    const close = () => fireEvent.keyDown(document, { key: "Escape" });
+
+    // A document and an HTML artifact: the document page of the viewer, which
+    // is where the sandbox of an artifact lives.
+    await show("Garden plan");
+    expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan?embed=1");
+    close();
+    await show("Mockup");
+    expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan-mockup?embed=1");
+    close();
+
+    // A wiki page, and a PDF the viewer serves: both are framed.
+    await show("Menu notes");
+    expect(frame()?.getAttribute("src")).toBe("/wiki/menu.md");
+    close();
+    await show("Plan");
+    expect(frame()?.getAttribute("src")).toBe("/api/v1/files/wiki/plan.pdf");
+    close();
+
+    // A photo, full size in the sheet.
+    await show("Photo");
+    expect(screen.getByAltText("Photo").getAttribute("src")).toBe("/api/v1/files/wiki/photo.jpg");
+    close();
+
+    // A task and a link of another site: a card with the address.
+    await show("Call the installer");
+    expect((document.querySelector(".doc-panel") as HTMLElement).textContent).toContain("Task");
+    expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe(
+      "https://tasks.test/t-7",
+    );
+    close();
+    await show("Fix the thing");
+    expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe(
+      "https://github.com/a/b/pull/1",
+    );
+    close();
+    await act(async () => undefined);
+  });
+
+  it("keeps the thread and what is typed in it while an item is open", async () => {
+    await open();
+    const thread = document.querySelector(".list") as HTMLElement;
+    const composer = screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "half a question" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Garden plan", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close the document" }));
+    // The conversation stayed mounted behind the sheet, so it keeps where it
+    // was scrolled to and what was typed.
+    expect(document.querySelector(".list")).toBe(thread);
+    expect((screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement).value).toBe(
+      "half a question",
+    );
   });
 
   it("shows a card for an item with no url", async () => {
@@ -316,6 +377,12 @@ describe("the item sheet of a workspace", () => {
     expect(box().className).toContain("full");
     const back = screen.getByRole("button", { name: "Leave full screen" });
     expect(back.getAttribute("aria-pressed")).toBe("true");
+    // The bar is still there in full screen, with the title and every control.
+    const bar = box().querySelector(".doc-panel-header") as HTMLElement;
+    expect(bar.querySelector(".doc-panel-title")?.textContent).toBe("Menu notes");
+    expect(bar.contains(back)).toBe(true);
+    expect(bar.querySelector(".doc-panel-full")).not.toBeNull();
+    expect(bar.querySelector(".doc-panel-close")).not.toBeNull();
     // The window is the whole sheet now: there is no edge to drag.
     expect(document.querySelector(".item-sheet-box .panel-divider")).toBeNull();
     fireEvent.click(back);
@@ -325,7 +392,9 @@ describe("the item sheet of a workspace", () => {
   it("holds the Tab key inside the sheet", async () => {
     await open();
     fireEvent.click(await screen.findByRole("button", { name: "Menu notes", hidden: true }));
-    const first = screen.getByRole("button", { name: "Full screen" });
+    // The bar of the sheet: the title, the control that opens the item on its
+    // own page, the full-screen control, and the X.
+    const first = screen.getByRole("link", { name: "Open full page" });
     const last = screen.getByRole("separator", { name: "Resize the item" });
     last.focus();
     fireEvent.keyDown(last, { key: "Tab" });

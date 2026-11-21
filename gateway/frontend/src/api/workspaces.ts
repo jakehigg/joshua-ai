@@ -82,6 +82,9 @@ export interface WorkspaceItem {
   added_by: string;
   pinned: boolean;
   seen: boolean;
+  // When the item was added, as core stamps it. The panel orders by it,
+  // newest first, under the pinned rows. A row with no stamp is oldest.
+  added_at?: string;
 }
 
 export interface ServerOption {
@@ -142,6 +145,17 @@ export const SHARED = "shared";
  */
 export const linkOf = (workspace: Workspace): string =>
   `/chat/w/${encodeURIComponent(workspace.id)}`;
+
+/**
+ * The other address of a workspace, `/chat/w/<space>/<slug>`, where `<space>`
+ * is `shared` for a shared workspace and the owner for a personal one. The
+ * screen of a workspace opens there too, so the list of the threads marks the
+ * thread on screen by this address as well as by `linkOf`.
+ */
+export const refLinkOf = (workspace: Workspace): string =>
+  `/chat/w/${encodeURIComponent(workspace.shared ? SHARED : workspace.owner)}/${encodeURIComponent(
+    workspace.slug,
+  )}`;
 
 // The slug core gives a title (core: store/repo.py, `slugify`), so a dialog
 // can show the address a workspace will take before it exists.

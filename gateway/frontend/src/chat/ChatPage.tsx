@@ -19,7 +19,8 @@
 // Cmd + \, fold them all or open them all (panels.ts keeps the choice per
 // browser). The phone sheets below do not use this state. The divider beside
 // each open panel is a handle: a drag gives that panel another width, and the
-// conversation takes the rest (Divider.tsx, widths.ts).
+// conversation takes the rest. The width stays on the device, for that person,
+// that panel and that breakpoint (Divider.tsx, widths.ts).
 //
 // A message that Joshua has accepted is Joshua's: closing the page or losing
 // the signal does not stop the turn. The history says which turn is `pending`
@@ -107,7 +108,7 @@ import { EMPTY_VIEW, type ChatMessage, type View } from "./store";
 import { useHistory } from "./useHistory";
 import { useTurn, type Upload } from "./useTurn";
 import { useKeyboardFit } from "./viewport";
-import { usePanelWidths } from "./widths";
+import { PanelWidthsPerson, usePanelWidths } from "./widths";
 
 const TOAST_MS = 6000;
 // How long the page waits for a broken stream's turn to show in the history.
@@ -515,12 +516,14 @@ export function ChatPage({ workspace }: { workspace?: string } = {}) {
   // A new person is a new screen, with its own history.
   return (
     <Shell section="chat">
-      <Chat
-        key={`${person}:${workspace ?? ""}`}
-        person={person}
-        workspace={workspace}
-        workspaces={workspaces}
-      />
+      <PanelWidthsPerson value={person}>
+        <Chat
+          key={`${person}:${workspace ?? ""}`}
+          person={person}
+          workspace={workspace}
+          workspaces={workspaces}
+        />
+      </PanelWidthsPerson>
     </Shell>
   );
 }
@@ -628,15 +631,17 @@ function WorkspaceScreen({ reference, toId = false }: { reference: string; toId?
   }
   return (
     <Shell section="chat">
-      <Chat
-        key={ws.id}
-        person={person}
-        me={name}
-        workspace={ws.id}
-        ws={ws}
-        onWs={setWs}
-        workspaces={workspaces}
-      />
+      <PanelWidthsPerson value={person}>
+        <Chat
+          key={ws.id}
+          person={person}
+          me={name}
+          workspace={ws.id}
+          ws={ws}
+          onWs={setWs}
+          workspaces={workspaces}
+        />
+      </PanelWidthsPerson>
     </Shell>
   );
 }

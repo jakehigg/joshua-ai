@@ -326,8 +326,12 @@ export function DocumentPanel({
 }
 
 // A photo of a message or of a workspace item shows as an image view in the
-// same sheet. Any other page of the viewer, or a card for an address that cannot be
-// framed. Same sheet and header as the document panel.
+// same sheet. Any other page of the viewer — a wiki page, an assignment, a
+// PDF the viewer serves inline — is framed, and an address that cannot be
+// framed shows as a card. Same sheet and header as the document panel: the
+// title, "Open full page" for the address of the view, the full-screen toggle
+// of the sheet, and the X. A card has no page of its own, so its one address
+// is the "Open in new tab" button of the card.
 export function PagePanel({
   view,
   onClose,
@@ -344,6 +348,9 @@ export function PagePanel({
   const closeRef = useRef<HTMLButtonElement>(null);
   const title = viewTitle(view);
   const key = view.type === "page" ? view.page.url : view.type === "image" ? view.image.url : view.card.title;
+  // The page of the item itself: the framed page, or the photo. A card has
+  // none, and offers its address in the card instead.
+  const page = view.type === "page" ? view.page.url : view.type === "image" ? view.image.url : "";
   useEffect(() => {
     closeRef.current?.focus();
   }, [view]);
@@ -351,6 +358,11 @@ export function PagePanel({
     <aside className="doc-panel" aria-label={`${title}, the item`}>
       <header className="doc-panel-header">
         <span className="doc-panel-title">{title}</span>
+        {page && (
+          <a className="doc-panel-full" href={page} target="_blank" rel="noopener noreferrer">
+            Open full page
+          </a>
+        )}
         {onFull && <FullToggle full={full} onFull={onFull} />}
         <button
           type="button"
@@ -367,9 +379,6 @@ export function PagePanel({
       ) : view.type === "image" ? (
         <div className="image-view" key={key}>
           <img src={view.image.url} alt={title} />
-          <a className="item-card-open" href={view.image.url} target="_blank" rel="noopener noreferrer">
-            Open in new tab
-          </a>
         </div>
       ) : (
         <div className="item-card">

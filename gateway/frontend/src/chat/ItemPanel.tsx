@@ -16,10 +16,11 @@
 // ellipsis after the second line, the whole title on hover), a pin mark, and
 // a "..." button. The button opens a small
 // menu with Pin or Unpin and Remove. Remove hides the row at once and says so
-// for a few seconds with an Undo; the call goes out when the time is up. A
-// pinned item is first in its group. A group folds with its header, and the
-// folded groups are kept per browser in localStorage (try/catch; without it
-// every group is open). The form that adds a link is behind "+ Add link".
+// for a few seconds with an Undo; the call goes up as `removeItem` when the
+// time is up. The rows stand pinned first, then the newest added first
+// (`orderItems`). A group folds with its header, and the folded groups of each
+// workspace are kept per browser in localStorage (try/catch; without it every
+// group is open). The form that adds a link is behind "+ Add link".
 //
 // A long list is narrowed by the filter field at the top: a part of the title
 // or of the address, in any case. While it holds text the panel says how many
@@ -153,21 +154,54 @@ export const UNDO_MS = 5000;
 
 export const GROUPS_KEY = "joshua.items.collapsedGroups";
 
-function readGroups(): string[] {
+// The folded groups of every workspace: the id of the workspace to the kinds
+// folded in it. A group folds in one workspace alone, because the kinds of one
+// workspace are not the kinds of another.
+type FoldedGroups = Record<string, string[]>;
+
+function readAllGroups(): FoldedGroups {
+  const all: FoldedGroups = {};
   try {
-    const raw = JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "[]") as unknown;
-    return Array.isArray(raw) ? raw.filter((k): k is string => typeof k === "string") : [];
+    const raw = JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "{}") as unknown;
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return all;
+    for (const [workspace, kinds] of Object.entries(raw as Record<string, unknown>)) {
+      if (Array.isArray(kinds)) {
+        all[workspace] = kinds.filter((k): k is string => typeof k === "string");
+      }
+    }
   } catch {
-    return [];
+    // No storage, or a bad value: every group is open.
   }
+  return all;
 }
 
-function saveGroups(groups: string[]): void {
+function readGroups(workspace: string): string[] {
+  return readAllGroups()[workspace] ?? [];
+}
+
+function saveGroups(workspace: string, groups: string[]): void {
   try {
-    window.localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
+    const all = { ...readAllGroups(), [workspace]: groups };
+    window.localStorage.setItem(GROUPS_KEY, JSON.stringify(all));
   } catch {
     // Kept in memory only.
   }
+}
+
+/** When an item was added, as a number. A row with no stamp is oldest. */
+const addedAt = (item: WorkspaceItem): number => {
+  const when = Date.parse(item.added_at ?? "");
+  return Number.isNaN(when) ? 0 : when;
+};
+
+/**
+ * The rows in the order the panel shows them: pinned first, then the newest
+ * added first. Rows that carry no stamp keep the order the list gave them.
+ */
+export function orderItems(items: WorkspaceItem[]): WorkspaceItem[] {
+  return [...items].sort(
+    (a, b) => Number(b.pinned) - Number(a.pinned) || addedAt(b) - addedAt(a),
+  );
 }
 
 function Entry({
@@ -272,7 +306,7 @@ export function ItemPanel({
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState("");
-  const [folded, setFolded] = useState<string[]>(readGroups);
+  const [folded, setFolded] = useState<string[]>(() => readGroups(workspace));
   // A row that was removed and can still come back, and its timer.
   const [undo, setUndo] = useState<{ item: WorkspaceItem; timer: ReturnType<typeof setTimeout> } | null>(null);
   const undoRef = useRef(undo);
@@ -357,7 +391,7 @@ export function ItemPanel({
   const toggleGroup = (kind: string) => {
     const next = folded.includes(kind) ? folded.filter((k) => k !== kind) : [...folded, kind];
     setFolded(next);
-    saveGroups(next);
+    saveGroups(workspace, next);
   };
 
   // The item the panel shows, if it is one of these.
@@ -387,7 +421,7 @@ export function ItemPanel({
   const here = dedupeItems(items.filter((item) => item.id !== undo?.item.id));
   const needle = filter.trim().toLowerCase();
   const shown = here.filter((item) => matchesItem(item, needle));
-  const ordered = [...shown].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  const ordered = orderItems(shown);
   return (
     <aside
       id="workspace-items"

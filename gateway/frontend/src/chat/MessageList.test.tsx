@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "./store";
 import { MessageList } from "./MessageList";
@@ -160,6 +160,50 @@ describe("MessageList", () => {
     );
     expect(list.scrollTop).toBe(1000);
     expect(screen.queryByRole("button", { name: "Scroll to the newest message" })).toBeNull();
+  });
+
+  it("stays at the bottom while the answer streams in", () => {
+    const observed: Element[] = [];
+    let grew = () => undefined;
+    class Observer {
+      constructor(callback: () => undefined) {
+        grew = callback;
+      }
+      observe(el: Element) {
+        observed.push(el);
+      }
+      disconnect() {
+        // Nothing to let go of here.
+      }
+    }
+    vi.stubGlobal("ResizeObserver", Observer);
+    const props = { canRetry: true, onRetry: () => undefined };
+    const { rerender } = render(<MessageList messages={[msg(5, { text: "The" })]} {...props} />);
+    const list = screen.getByRole("log");
+    let height = 400;
+    Object.defineProperty(list, "scrollHeight", { configurable: true, get: () => height });
+    Object.defineProperty(list, "clientHeight", { configurable: true, get: () => 300 });
+
+    // Each piece of the answer that arrives makes the thread taller, and the
+    // bottom stays in view.
+    height = 800;
+    rerender(<MessageList messages={[msg(5, { text: "The answer so far" })]} {...props} />);
+    expect(list.scrollTop).toBe(800);
+
+    // Text that lays out after the render does the same: the observer watches
+    // the column of the rows, which grows, and not the list alone.
+    expect(observed).toContain(document.querySelector(".column"));
+    height = 1200;
+    act(() => grew());
+    expect(list.scrollTop).toBe(1200);
+
+    // A reader who has scrolled up is not pulled back by the stream.
+    list.scrollTop = 0;
+    fireEvent.scroll(list);
+    height = 1600;
+    act(() => grew());
+    expect(list.scrollTop).toBe(0);
+    vi.unstubAllGlobals();
   });
 
   it("shows the loading state and the load error with Retry", () => {
