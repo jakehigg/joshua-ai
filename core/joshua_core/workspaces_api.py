@@ -41,8 +41,9 @@ checked before the body is read. A ``person`` that is not a member of
   the ``name`` a person reads. ``default_servers`` is the servers a new
   workspace starts with: the owner's ``workspaces.default_servers`` setting,
   kept to the servers this person may use. Each person of ``people`` carries
-  the servers they may use, so the dialog of a shared workspace pre-picks the
-  servers all of its people can use.
+  the servers they may use, kept to the servers of this caller, so the dialog
+  of a shared workspace pre-picks the servers all of its people can use and
+  names no server the instance hides from the caller.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
 - ``POST /v1/workspaces/{slug}/read`` marks the thread read up to a turn id
   (``turn_id``, the id of a transcript row) for that person. The mark is
@@ -511,13 +512,16 @@ def build_workspaces_router() -> APIRouter:
         dialog does not show it picked and the create refuse it. Each person of
         ``people`` carries the servers they may use, so the dialog intersects
         the pre-pick over the people of a shared workspace, which is the rule
-        the create applies (``_check_servers``).
+        the create applies (``_check_servers``). Those servers are kept to the
+        ones this route shows the caller, so a server the instance hides from
+        the caller is named in no entry of ``people``.
         """
         denied, person_id, _ = await _scope(request)
         if denied is not None:
             return denied
         settings = request.app.state.ctx.settings
         reach = allowed_gateway_servers(settings, person_id)
+        shown = set(reach)
         servers = [
             {
                 "name": name,
@@ -526,12 +530,15 @@ def build_workspaces_router() -> APIRouter:
             for name in reach
         ]
         # Everyone on the roster who writes, the caller apart: a guest never
-        # holds a workspace.
+        # holds a workspace. A person's servers are kept to the ones the caller
+        # sees, so a server hidden from the caller stays hidden.
         people = [
             {
                 "id": person.id,
                 "name": person.name,
-                "servers": allowed_gateway_servers(settings, person.id),
+                "servers": [
+                    name for name in allowed_gateway_servers(settings, person.id) if name in shown
+                ],
             }
             for person in settings.people
             if person.id != person_id and is_member(person.role)

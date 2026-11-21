@@ -730,7 +730,9 @@ the instance, each with the `id` the workspace holds and the `name` a person
 reads), `people` (every
 member of the roster but the caller, each with an `id`, a `name`, and the
 `servers` they may use, to share a workspace with), and `default_servers` (the
-servers a new workspace starts with). The description is the optional
+servers a new workspace starts with). The `servers` of a person are kept to
+the servers of `servers`, so a server this instance hides from the caller is
+named in no entry of `people`. The description is the optional
 `description` of the server in `mcp:`. Without it, the name is used. The slug
 `options` is reserved.
 
