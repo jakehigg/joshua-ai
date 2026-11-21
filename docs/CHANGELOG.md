@@ -87,6 +87,19 @@ with the images and the packaged chart, are at
   puts it back after it, so the run reports to the workspace the draft was
   asked for. A start from another workspace moves the run to that one.
 
+### Developer tasks
+
+- **Joshua writes the text of a pull request by a page of core.** A session
+  that holds the `developer` server gets a new skill page,
+  `prompts/builtin/skills/developer.md`, as a session with `assignments` or
+  `documents` gets theirs, and a guest gets none. The page says how the title
+  and the body of a pull request or a merge request are written: a one-line
+  imperative title under 72 characters, a body in the present tense that says
+  what the change does and why, no person named, no identifier of a private
+  system, an issue reference only for an issue of the same repository,
+  nothing of the private deployment side in a public repository, and the test
+  result with what a reviewer should look at.
+
 ### Admin
 
 - **The Instance page says whether a newer release exists.** The Releases

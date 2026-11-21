@@ -287,6 +287,47 @@ def test_the_documents_skill_goes_only_to_a_member_session_that_holds_the_server
     assert "## Documents" not in guest
 
 
+def test_the_developer_skill_goes_only_to_a_member_session_that_holds_the_server() -> None:
+    composer = PromptComposer()
+    profile = derive_profile(_MEMBER, _DM)
+    without = composer.compose(profile, _MEMBER, _DM, servers=["files", "documents"])
+    held = composer.compose(profile, _MEMBER, _DM, servers=["files", "developer"])
+    assert "## Developer tasks" not in without
+    assert "## Developer tasks" in held
+    guest = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM, servers=["developer"])
+    assert "## Developer tasks" not in guest
+
+
+def test_the_developer_skill_says_how_the_text_of_a_pull_request_is_written() -> None:
+    """The rules of the text are a page of core, not a skill of a repository a
+    worker can edit, so they are pinned here."""
+    page = (
+        Path(__file__).parents[1]
+        / "joshua_core"
+        / "prompts"
+        / "builtin"
+        / "skills"
+        / "developer.md"
+    ).read_text()
+    for words in (
+        "### Write the text of a pull request",
+        "**The title** is one line, in the imperative, under 72 characters",
+        "**The body** says what the change does and why",
+        "present\n  tense, in short sentences",
+        '**Name no person.** Write "the owner"',
+        "**Write no identifier of a private system**: no task number, no project\n"
+        "  slug, no workspace, no document path",
+        "**An issue reference** goes in only for an issue of the same repository,\n"
+        "  and only when the repository wants a closing reference",
+        "**A public repository carries nothing of the private deployment side**: no\n"
+        "  internal host name, domain or address, no internal registry, no internal\n"
+        "  repository path, and no internal change number",
+        "**State the test result**",
+        "**Say what a reviewer should look at**",
+    ):
+        assert words in page, words
+
+
 def test_the_documents_skill_says_what_a_document_is_and_how_to_keep_it() -> None:
     page = (
         Path(__file__).parents[1]
