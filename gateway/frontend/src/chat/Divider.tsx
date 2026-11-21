@@ -6,10 +6,11 @@
 // width of its token. The handle takes the keyboard too: with the focus on it,
 // the left and the right arrow move it by STEP_PX.
 //
-// It shows only where its panel is a column of the row, which is from 900px
-// for the document panel and from 1100px for the items column (index.css).
-// Narrower than that a panel is a drawer or a sheet over the thread, with no
-// divider to drag.
+// It shows only from the width where its panel has a size of its own: the
+// document panel, a column of the row or the sheet of a workspace item, from
+// 900px, and the items column from 1100px (index.css). Narrower than that a
+// panel is a drawer, or a sheet over the whole window, and there is nothing to
+// drag.
 
 import { useRef, type KeyboardEvent, type PointerEvent } from "react";
 
@@ -74,7 +75,7 @@ export function Divider({
 
   return (
     <div
-      className={`panel-divider ${panel}`}
+      className={`panel-divider divider-${panel}`}
       role="separator"
       aria-orientation="vertical"
       aria-label={label}

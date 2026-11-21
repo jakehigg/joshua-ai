@@ -256,13 +256,16 @@ describe("the side columns on a desktop", () => {
 describe("the item column and the panel", () => {
   const items = () => document.querySelector(".items") as HTMLElement;
 
-  it("steps aside while the panel is open, keeps the saved fold, and comes back", async () => {
+  it("keeps its place while the sheet is open, and the saved fold with it", async () => {
     await open();
     expect(items().className).not.toContain("collapsed");
     fireEvent.click(await screen.findByRole("button", { name: "Garden plan", hidden: true }));
-    expect(items().className).toContain("collapsed");
+    // The item stands over the row, so the column stays and the conversation
+    // keeps its width.
+    expect(items().className).not.toContain("collapsed");
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").items ?? false).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Close the document" }));
+    expect(document.querySelector(".item-sheet")).toBeNull();
     expect(items().className).not.toContain("collapsed");
   });
 
@@ -278,5 +281,56 @@ describe("the item column and the panel", () => {
     await open();
     fireEvent.click(await screen.findByRole("button", { name: "Mockup", hidden: true }));
     expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan-mockup?embed=1");
+  });
+});
+
+describe("the item sheet of a workspace", () => {
+  it("opens over the workspace as a dialog, and the dim area closes it", async () => {
+    await open();
+    const row = await screen.findByRole("button", { name: "Garden plan", hidden: true });
+    // A tap on a row gives it the focus, as a browser does.
+    row.focus();
+    fireEvent.click(row);
+    const box = document.querySelector(".item-sheet-box") as HTMLElement;
+    expect(box.getAttribute("role")).toBe("dialog");
+    expect(box.getAttribute("aria-modal")).toBe("true");
+    expect(box.getAttribute("aria-label")).toBe("garden-plan");
+    // The workspace is behind it, dimmed and still mounted.
+    expect(document.querySelector(".chat .chat-header")).not.toBeNull();
+    expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan?embed=1");
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Close the document" }),
+    );
+    fireEvent.click(screen.getByTestId("sheet-backdrop"));
+    expect(document.querySelector(".item-sheet")).toBeNull();
+    // The row that opened the item has the focus back.
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("goes full screen from the header of the sheet, and back", async () => {
+    await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Menu notes", hidden: true }));
+    const box = () => document.querySelector(".item-sheet-box") as HTMLElement;
+    expect(box().className).not.toContain("full");
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    expect(box().className).toContain("full");
+    const back = screen.getByRole("button", { name: "Leave full screen" });
+    expect(back.getAttribute("aria-pressed")).toBe("true");
+    // The window is the whole sheet now: there is no edge to drag.
+    expect(document.querySelector(".item-sheet-box .panel-divider")).toBeNull();
+    fireEvent.click(back);
+    expect(box().className).not.toContain("full");
+  });
+
+  it("holds the Tab key inside the sheet", async () => {
+    await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Menu notes", hidden: true }));
+    const first = screen.getByRole("button", { name: "Full screen" });
+    const last = screen.getByRole("separator", { name: "Resize the item" });
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
   });
 });

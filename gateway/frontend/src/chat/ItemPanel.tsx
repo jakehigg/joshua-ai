@@ -1,9 +1,10 @@
 // The item panel of a workspace, at the right of the chat: what was built or
 // collected for it, grouped by kind. Every item opens inside the chat screen,
-// in the panel (itemTarget.ts): a document or artifact, a page of the viewer,
-// or a preview card for an external link. Nothing navigates the chat tab. An
-// item with an unsafe address (links.ts) is shown as text. The item that is
-// open in the panel is marked in the list.
+// in the sheet over the workspace (itemTarget.ts, DocumentPanel.tsx): a
+// document or artifact, a page of the viewer, or a preview card for an
+// external link. Nothing navigates the chat tab. An item with an unsafe
+// address (links.ts) is shown as text. The item that is open is marked in the
+// list.
 //
 // The list holds one row for each thing the items point at: the same document
 // can be recorded twice, as a `plan` and as a `document`, or by a tool and by
@@ -24,12 +25,12 @@
 // or of the address, in any case. While it holds text the panel says how many
 // rows of how many it shows, and a button empties it.
 //
-// On a phone the screen closes this list when an item opens, so the panel is
-// visible. The list is a sheet there, with a close button. On a wide desktop
-// it is a column that folds away with » (the workspace header brings it back),
-// and it also steps aside while the panel is open (ChatPage.tsx). The list
-// loads on open, after each turn (`refreshKey`) and when the tab gets focus
-// back.
+// On a phone the screen closes this list when an item opens, so the sheet of
+// the item is the only one over the conversation. The list is a sheet there,
+// with a close button. On a wide desktop it is a column that folds away with »
+// (the workspace header brings it back), and it keeps its place while an item
+// is open (ChatPage.tsx). The list loads on open, after each turn
+// (`refreshKey`) and when the tab gets focus back.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { inertProps, useMedia } from "./viewport";

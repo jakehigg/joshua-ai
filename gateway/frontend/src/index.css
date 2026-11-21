@@ -406,9 +406,9 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 
 /* The handle of a divider between two panes: a drag changes the width of the
    panel beside it, and the conversation takes the rest (Divider.tsx). It
-   shows where its panel is a column of the row — the document panel from
-   900px, the items column from 1100px — because narrower than that the panel
-   is a drawer or a sheet, with no divider to drag. */
+   shows from the width where its panel has a size of its own — the document
+   panel, a column or the sheet of an item, from 900px, and the items column
+   from 1100px — because narrower than that a panel takes the whole window. */
 .chat-screen .panel-divider {
   display: none;
   flex: none;
@@ -454,7 +454,8 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-screen .doc-panel-close {
+.chat-screen .doc-panel-close,
+.chat-screen .doc-panel-expand {
   min-height: 32px;
   padding: 2px 12px;
 }
@@ -481,16 +482,81 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 /* Wide enough for two columns: the panel stands beside the conversation
    instead of over it. */
 @media (min-width: 900px) {
-  .chat-screen .panel-divider.doc { display: block; }
-
-.chat-screen .doc-panel {
+  .chat-screen .panel-divider.divider-doc { display: block; }
+  .chat-screen .doc-panel {
     position: relative;
     inset: auto;
     flex: 0 0 var(--doc-w, var(--j-panel-doc));
     min-width: 0;
     border-left: 1px solid var(--j-line);
   }
+}
 
+
+/* An item of a workspace over the workspace: the same panel, in a sheet in
+   the middle of the screen, with the workspace dimmed behind it and still
+   mounted, so nothing in the row of columns moves (ItemSheet in
+   DocumentPanel.tsx). Under 900px the sheet takes the window, as every sheet
+   of the chat does there; from 900px it is a box as wide as the token of the
+   document panel, or as wide as a drag left it, and the handle at its left
+   edge sizes it. Full screen takes the whole window again. */
+.chat-screen .item-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 32;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-screen .item-sheet .scrim { position: absolute; z-index: 0; }
+.chat-screen .item-sheet-box {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--j-bg);
+}
+.chat-screen .item-sheet-box > .panel-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+}
+.chat-screen .item-sheet-box .doc-panel {
+  position: static;
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-width: none;
+  border-left: 0;
+}
+@media (max-width: 899px) {
+  .chat-screen .doc-panel-expand { display: none; }
+}
+@media (min-width: 900px) {
+  .chat-screen .item-sheet-box {
+    width: var(--doc-w, var(--j-panel-doc));
+    max-width: calc(100% - 2 * var(--j-gap));
+    height: calc(100% - 2 * var(--j-gap));
+    max-height: 56rem;
+    border: 1px solid var(--j-line);
+    border-radius: var(--j-radius);
+    box-shadow: 0 24px 60px rgb(0 0 0 / 0.45);
+  }
+  .chat-screen .item-sheet-box.full {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
 }
 .chat-screen .failed-row {
   margin-top: 0;
@@ -1027,7 +1093,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 .chat-screen .item-add input { font: inherit; color: inherit; background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: 8px; padding: 6px 8px; }
 
 @media (min-width: 1100px) {
-  .chat-screen .panel-divider.items { display: block; }
+  .chat-screen .panel-divider.divider-items { display: block; }
   .chat-screen .items { position: static; display: flex; flex: 0 0 var(--items-w, var(--j-panel-items)); width: auto; }
   .chat-screen .items-toggle,
   .chat-screen .items-close { display: none; }

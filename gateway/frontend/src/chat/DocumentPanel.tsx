@@ -24,11 +24,13 @@
 // with an "Open in new tab" button. Only one view is open at a time: showing
 // one closes the other.
 //
-// The layout: a column beside the conversation on a desktop, a full-height
-// sheet over it on a phone (index.css). The sheet has a fixed header with the
-// title and a close button; the frame scrolls inside it. The conversation
-// stays mounted in both, so closing the panel gives back the scroll position
-// it had.
+// The layout: in a workspace the panel is a sheet over the workspace at every
+// width (ItemSheet below), so the columns of the row keep the widths they had.
+// In the normal chat it is a column beside the conversation on a desktop and a
+// full-height sheet over it on a phone (index.css). The header is fixed, with
+// the title and the close button, and the frame scrolls under it. The
+// conversation stays mounted in each, so closing the panel gives back the
+// scroll position it had.
 //
 // reload() is the refine loop inside one turn: the person comments on lines
 // in the panel, says "apply them", and the finished answer carries the
@@ -48,10 +50,12 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { getDocumentMeta } from "../api/client";
 import type { Artifact } from "./ArtifactCard";
+import { Divider } from "./Divider";
 import type { CardTarget, ImageTarget, ItemTarget, PageTarget } from "./itemTarget";
 
 // How often an open panel asks the viewer whether its document changed.
@@ -236,17 +240,46 @@ function frameSrc(artifact: Artifact, reloads: number): string {
   return reloads > 0 ? `${artifact.url}?embed=1&r=${reloads}` : `${artifact.url}?embed=1`;
 }
 
+/** The title of a view, for its header and for the name of the sheet. */
+export function viewTitle(view: PanelView): string {
+  return view.type === "page" ? view.page.title : view.type === "image" ? view.image.title : view.card.title;
+}
+
+/**
+ * The full-screen toggle of the sheet, in the header of the panel. It is drawn
+ * only inside the sheet, where a panel has a size to change.
+ */
+function FullToggle({ full, onFull }: { full: boolean; onFull: () => void }) {
+  return (
+    <button
+      type="button"
+      className="doc-panel-expand"
+      aria-label={full ? "Leave full screen" : "Full screen"}
+      aria-pressed={full}
+      onClick={onFull}
+    >
+      ⤢
+    </button>
+  );
+}
+
 export function DocumentPanel({
   artifact,
   reloads = 0,
   title = null,
   onClose,
+  full = false,
+  onFull,
 }: {
   artifact: Artifact;
   reloads?: number;
   /** The title the watch read from the viewer, or null until it is known. */
   title?: string | null;
   onClose: () => void;
+  /** True while the sheet takes the whole window. */
+  full?: boolean;
+  /** Turn full screen on or off; none outside the sheet. */
+  onFull?: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const src = frameSrc(artifact, reloads);
@@ -268,6 +301,7 @@ export function DocumentPanel({
         >
           Open full page
         </a>
+        {onFull && <FullToggle full={full} onFull={onFull} />}
         <button
           type="button"
           ref={closeRef}
@@ -294,9 +328,21 @@ export function DocumentPanel({
 // A photo of a message or of a workspace item shows as an image view in the
 // same sheet. Any other page of the viewer, or a card for an address that cannot be
 // framed. Same sheet and header as the document panel.
-export function PagePanel({ view, onClose }: { view: PanelView; onClose: () => void }) {
+export function PagePanel({
+  view,
+  onClose,
+  full = false,
+  onFull,
+}: {
+  view: PanelView;
+  onClose: () => void;
+  /** True while the sheet takes the whole window. */
+  full?: boolean;
+  /** Turn full screen on or off; none outside the sheet. */
+  onFull?: () => void;
+}) {
   const closeRef = useRef<HTMLButtonElement>(null);
-  const title = view.type === "page" ? view.page.title : view.type === "image" ? view.image.title : view.card.title;
+  const title = viewTitle(view);
   const key = view.type === "page" ? view.page.url : view.type === "image" ? view.image.url : view.card.title;
   useEffect(() => {
     closeRef.current?.focus();
@@ -305,6 +351,7 @@ export function PagePanel({ view, onClose }: { view: PanelView; onClose: () => v
     <aside className="doc-panel" aria-label={`${title}, the item`}>
       <header className="doc-panel-header">
         <span className="doc-panel-title">{title}</span>
+        {onFull && <FullToggle full={full} onFull={onFull} />}
         <button
           type="button"
           ref={closeRef}
@@ -342,5 +389,86 @@ export function PagePanel({ view, onClose }: { view: PanelView; onClose: () => v
         </div>
       )}
     </aside>
+  );
+}
+
+// An item of a workspace over the workspace: the panel above, in a sheet in
+// the middle of the screen, with the workspace dimmed behind it and still
+// mounted. The conversation and the item list keep the widths they had, so
+// opening an item moves nothing in the row (ChatPage.tsx).
+//
+// The sheet is a dialog: the focus starts on the close button of the panel and
+// the Tab key stays inside it, a click on the dim area closes it, Escape
+// closes it (the key handler of the chat screen), and the row that opened it
+// takes the focus back. The toggle in the header puts the sheet full screen,
+// over the whole window. From 900px the handle at its left edge sizes it, and
+// the width is kept per browser (Divider.tsx, widths.ts).
+//
+// It holds what the column holds: the document frame, the framed page of the
+// viewer, the image view and the card of an address that cannot be framed.
+
+/** The stops of the Tab key inside the sheet, in the order they stand in. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select, textarea, iframe, [tabindex]:not([tabindex="-1"])';
+
+export function ItemSheet({ panel }: { panel: DocumentPanelState }) {
+  const [full, setFull] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  // Read while the sheet renders for the first time, before the panel inside
+  // it takes the focus: this is the row that opened the item.
+  const [opener] = useState(() => document.activeElement as HTMLElement | null);
+  useEffect(
+    () => () => {
+      if (opener && document.contains(opener)) opener.focus();
+    },
+    [opener],
+  );
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab" || !box.current) return;
+    const stops = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    if (!first || !last) return;
+    const here = document.activeElement;
+    if (e.shiftKey && (here === first || !box.current.contains(here))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && here === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  const name = panel.shown
+    ? (panel.title ?? panel.shown.slug)
+    : panel.view
+      ? viewTitle(panel.view)
+      : "The item";
+  const onFull = useCallback(() => setFull((on) => !on), []);
+  return (
+    <div className="item-sheet">
+      <div className="scrim scrim-sheet" data-testid="sheet-backdrop" onClick={panel.close} />
+      <div
+        ref={box}
+        className={`item-sheet-box${full ? " full" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={name}
+        onKeyDown={onKeyDown}
+      >
+        {panel.shown ? (
+          <DocumentPanel
+            artifact={panel.shown}
+            reloads={panel.reloads}
+            title={panel.title}
+            onClose={panel.close}
+            full={full}
+            onFull={onFull}
+          />
+        ) : panel.view ? (
+          <PagePanel view={panel.view} onClose={panel.close} full={full} onFull={onFull} />
+        ) : null}
+        {!full && <Divider panel="doc" label="Resize the item" factor={2} />}
+      </div>
+    </div>
   );
 }

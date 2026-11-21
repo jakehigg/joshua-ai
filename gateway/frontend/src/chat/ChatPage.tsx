@@ -5,10 +5,13 @@
 // (useHistory), and streams turns (useTurn). Open on a document card shows
 // the viewer's document page in the panel beside the conversation
 // (DocumentPanel); the conversation stays mounted behind it, so closing the
-// panel gives back its scroll position. An item of a workspace opens in the
-// same panel (itemTarget.ts), as a document, a framed page or a card. When a turn ends with the `artifact`
-// fence of the open document, the panel reloads that frame; while it is open,
-// it also watches that document for a change made outside this chat.
+// panel gives back its scroll position. In a workspace the panel is a sheet
+// over the dimmed workspace instead (ItemSheet), with a full-screen toggle, so
+// the conversation and the item column keep their widths. An item of the
+// workspace opens there (itemTarget.ts), as a document, a framed page or a
+// card. When a turn ends with the `artifact` fence of the open document, the
+// panel reloads that frame; while it is open, it also watches that document
+// for a change made outside this chat.
 //
 // On a desktop every side column can be folded away: the app sidebar (shell)
 // and the item column, each with a « or » button in its header, and a » button
@@ -64,8 +67,8 @@
 // rows are theirs.
 //
 // On a phone the item list and the panel are sheets over the conversation, and
-// only one is open at a time: opening one closes the other. The item sheet has
-// a dimmed backdrop, and a tap on it closes the sheet. Escape closes the top
+// only one is open at a time: opening one closes the other. Each sheet has a
+// dimmed backdrop, and a tap on it closes the sheet. Escape closes the top
 // sheet (the panel, then the items). While a sheet is open the page behind it
 // does not scroll (`sheet-open`, index.css). From 1100px the item list is a
 // column, and the same state drives its close button. The hamburger of the
@@ -92,6 +95,7 @@ import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
   DocumentPanel,
   DocumentPanelProvider,
+  ItemSheet,
   PagePanel,
   useDocumentPanelState,
 } from "./DocumentPanel";
@@ -265,10 +269,11 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
   // Only one sheet at a time: a panel that opens closes the lists.
   const { close: closePanel } = panel;
   const panelOpen = panel.shown !== null || panel.view !== null;
-  // On a wide desktop the item column steps aside while the panel is open,
-  // without changing the folded state that is kept. Items, opened on purpose,
-  // closes the panel (toggleItems), and the column is back.
-  const itemsCollapsed = panels.collapsed.items || panelOpen;
+  // In a workspace the open item stands over the row as a sheet, so the item
+  // column keeps its place behind it and the conversation keeps its width.
+  // The column folds only when the person folds it. Items, opened on purpose,
+  // closes the sheet (toggleItems).
+  const itemsCollapsed = panels.collapsed.items;
   useEffect(() => {
     if (panelOpen) setItemsOpen(false);
   }, [panelOpen, panel.shown, panel.view]);
@@ -469,8 +474,9 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
             }}
           />
         )}
-        {panelOpen && <Divider panel="doc" label="Resize the document panel" />}
-        {panel.shown && (
+        {ws && panelOpen && <ItemSheet panel={panel} />}
+        {!ws && panelOpen && <Divider panel="doc" label="Resize the document panel" />}
+        {!ws && panel.shown && (
           <DocumentPanel
             artifact={panel.shown}
             reloads={panel.reloads}
@@ -478,7 +484,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
             onClose={panel.close}
           />
         )}
-        {panel.view && <PagePanel view={panel.view} onClose={panel.close} />}
+        {!ws && panel.view && <PagePanel view={panel.view} onClose={panel.close} />}
         {creating && (
           <NewWorkspace
             onClose={() => setCreating(false)}
