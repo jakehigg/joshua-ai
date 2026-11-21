@@ -29,6 +29,7 @@ from joshua_shared.inference import ANTHROPIC_ENDPOINT, ResolvedInference
 from joshua_shared.log import get_logger
 
 from joshua_core.attachments import file_attachment
+from joshua_core.delivery import VOICE_CHANNEL_TYPE
 from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import workspace as workspace_engine
 from joshua_core.engine.describe import (
@@ -51,6 +52,7 @@ from joshua_core.engine.types import (
 from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.engine.usage import Usage
 from joshua_core.memory import prompt as memory_prompt
+from joshua_core.path_links import link_paths
 from joshua_core.store.models import Channel, Conversation, Workspace
 from joshua_core.store.repo import WORKSPACE_CHANNEL_TYPE, Repo
 from joshua_core.store.usage_events import record_usage
@@ -1263,6 +1265,10 @@ class ConversationManager:
                     }
                 )
                 result = replace(result, text=FAILED_REPLY)
+            # The one place a Joshua path becomes a link: the reply is stored
+            # and delivered from here, so every text channel gets the links
+            # and the channel only renders them.
+            result = replace(result, text=self._link_paths(result.text, resolved.job, channel))
             if result.session_id and result.session_id != mc.conversation.sdk_session_id:
                 await self._repo.set_sdk_session(
                     conversation.id,
@@ -1342,6 +1348,19 @@ class ConversationManager:
                 await self._apply_context_cap(mc, channel, result)
             await self._check_mcp_failed(mc)
             return result
+
+    def _link_paths(self, text: str | None, job: str, channel: Channel) -> str | None:
+        """The reply with every Joshua path written as a Markdown link.
+
+        A channel renders that link in its own markup. A voice turn, which is
+        read out by text to speech, is never touched, and
+        ``core.path_links: false`` turns the filter off everywhere.
+        """
+        if not text or not self._settings.core.path_links:
+            return text
+        if job == inference_plan.VOICE_TURN_JOB or channel.channel_type == VOICE_CHANNEL_TYPE:
+            return text
+        return link_paths(text, self._settings.workspaces.viewer_url)
 
     @staticmethod
     def _channel_note(mc: _Managed, channel: Channel) -> str | None:

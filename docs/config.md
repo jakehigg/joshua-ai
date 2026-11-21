@@ -1308,6 +1308,19 @@ channel core folds it into the next turn itself.
 [contracts.md](contracts.md#the-hold-of-a-chat-thread) has the routes and the
 answers.
 
+## A path becomes a link
+
+A reply that names a document, a wiki page, an attachment, or a shared file
+carries a link to the page that opens it. `channels.md` has the shapes that
+become a link and what each channel shows.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `core.path_links` | `true` | Turn a Joshua path in a reply into a link. `false` sends every path as plain text. A spoken reply is never touched either way. |
+
+Telegram and iMessage need an absolute address, so a link reaches them only
+with `workspaces.viewer_url` set.
+
 ## The draft of a composer
 
 Text written in the composer of the web chat and not sent is kept in core,

@@ -31,6 +31,40 @@ so I cannot help here." A rate-limited sender never gets a reply.
 `GET /admin/guard/stats` and `GET /admin/guard/recent` show the refusals. See
 `operations.md`.
 
+## A path becomes a link
+
+A reply that names a path of Joshua's own files carries a link to the page
+that opens it. One filter in `core` finds the path and writes the link, and
+each channel writes that link in the markup it has:
+
+- the web chat shows a Markdown link, and the path is the visible text;
+- Telegram sends a link entity, and the path is the visible text;
+- iMessage has no link markup, so the path stays as it is and the address
+  follows it on its own line;
+- a spoken reply is never touched, because an address read out loud is noise.
+
+Only these shapes become a link:
+
+| Shape | Opens |
+|---|---|
+| `documents/<owner>/<slug>.md`, `documents/<owner>/<slug>.html` | the document page |
+| `wiki/<path>.md` | the wiki page |
+| `wiki/attachments/<path>` with an image or PDF extension | the file |
+| `people/<person-id>/attachments/<path>` | the file |
+| `shared/<path>` | the file |
+
+The rule is deterministic: it reads no file and no row, so a path Joshua names
+but never wrote is a link too, and that link opens the normal not-found page.
+A path inside a fenced code block, an inline code span, a link that is already
+there, an HTML anchor, or a URL is left alone, and so is anything that is not
+one of the shapes above: a Windows path, a relative path such as
+`./src/index.css`, and a word with a dot such as `index.css:66`.
+
+Telegram and iMessage open an address, not a path, so a link reaches them only
+with `workspaces.viewer_url` set to the public address of the viewer. Without
+it the path stays plain text on those two channels. `core.path_links: false`
+turns the filter off everywhere.
+
 ## The terminal
 
 The terminal needs no credential. A person who can run a command on the host

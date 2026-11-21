@@ -8,6 +8,16 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- **A path Joshua names becomes a link.** When a reply names a document, a
+  wiki page, an attachment, or a shared file, the path is a link to the page
+  that opens it: a Markdown link in the web chat, a link entity on Telegram,
+  and the path with the address under it on iMessage. The rule reads nothing,
+  so a path inside a code block, a code span, a link that is already there,
+  or a URL is left alone, and a path nobody wrote still gets a link, which
+  opens the not-found page. A spoken reply is never touched.
+  `workspaces.viewer_url` makes the address absolute, which Telegram and
+  iMessage need, and `core.path_links: false` turns the whole filter off.
+
 - **A message you send while Joshua works joins the next turn.** Before, a
   second message started a second turn of its own, which ran after the first
   one and answered the two lines apart. Now anything that arrives while a
