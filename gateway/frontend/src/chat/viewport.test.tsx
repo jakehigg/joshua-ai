@@ -3,7 +3,6 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentPanelProvider, useDocumentPanelState } from "./DocumentPanel";
 import { ItemPanel } from "./ItemPanel";
-import { Rail } from "./Rail";
 import { useKeyboardFit } from "./viewport";
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
@@ -20,39 +19,6 @@ function width(px: number) {
     };
   }) as unknown as typeof window.matchMedia;
 }
-
-function rail(open: boolean, collapsed = false) {
-  render(
-    <MemoryRouter future={FUTURE}>
-      <Rail person="alex" workspaces={[]} open={open} collapsed={collapsed} onNew={vi.fn()} onNavigate={vi.fn()} onClose={vi.fn()} />
-    </MemoryRouter>,
-  );
-  return document.getElementById("chat-rail") as HTMLElement;
-}
-
-describe("a closed rail is inert", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it("is inert on a phone until it opens", () => {
-    width(390);
-    expect(rail(false).hasAttribute("inert")).toBe(true);
-    expect(document.getElementById("chat-rail")?.getAttribute("aria-hidden")).toBe("true");
-  });
-
-  it("is not inert on a phone when it is open", () => {
-    width(390);
-    const el = rail(true);
-    expect(el.hasAttribute("inert")).toBe(false);
-    expect(el.hasAttribute("aria-hidden")).toBe(false);
-  });
-
-  it("is a column on a desktop: not inert, unless it is folded away", () => {
-    width(1200);
-    expect(rail(false).hasAttribute("inert")).toBe(false);
-    document.body.innerHTML = "";
-    expect(rail(false, true).hasAttribute("inert")).toBe(true);
-  });
-});
 
 function items(open: boolean, collapsed = false) {
   function Panel() {

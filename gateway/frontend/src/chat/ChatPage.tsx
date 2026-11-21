@@ -10,11 +10,11 @@
 // fence of the open document, the panel reloads that frame; while it is open,
 // it also watches that document for a change made outside this chat.
 //
-// On a desktop every side column can be folded away: the app sidebar (shell),
-// the rail and the item column, each with a « or » button in its header, and
-// a ☰ or » button in the chat header that brings it back. The focus button,
-// and Ctrl or Cmd + \, fold them all or open them all (panels.ts keeps the
-// choice per browser). The phone sheets below do not use this state.
+// On a desktop every side column can be folded away: the app sidebar (shell)
+// and the item column, each with a « or » button in its header, and a » button
+// in the chat header that brings it back. The focus button, and Ctrl or
+// Cmd + \, fold them all or open them all (panels.ts keeps the choice per
+// browser). The phone sheets below do not use this state.
 //
 // A message that Joshua has accepted is Joshua's: closing the page or losing
 // the signal does not stop the turn. The history says which turn is `pending`
@@ -33,12 +33,12 @@
 // every waiting message goes as one turn, with no action from the person.
 //
 // While the newest row of a workspace thread is on screen, the screen marks
-// that thread read up to it, so the rail stops counting it. The mark is the
-// signed-in person's own: in a shared workspace every other person keeps the
-// count they have.
+// that thread read up to it, so the list of the sidebar stops counting it. The
+// mark is the signed-in person's own: in a shared workspace every other person
+// keeps the count they have.
 //
-// The screen has a rail on the left (Rail.tsx): Chat, the workspaces, and
-// "+ New workspace". `/chat/:person` is the normal chat, the person's one main
+// The one list of the threads is in the app sidebar (shell/ChatList.tsx), so
+// this screen draws none. `/chat/:person` is the normal chat, the person's one main
 // thread. `/chat/w/:space/:slug` (WorkspacePage) is one workspace: the same
 // chat, with the workspace header and the item panel (ItemPanel.tsx). The
 // space is `shared` for a shared workspace and the owner for a personal one.
@@ -48,7 +48,7 @@
 // a ref may move to another row. Every link the screen builds is
 // `/chat/w/<id>`, the permanent address of a workspace. A one-segment
 // `/chat/w/:ref` opens the workspace of that id, and sends a slug to the id
-// (WorkspaceLink). A tap on another workspace in the rail only changes that
+// (WorkspaceLink). A tap on another workspace in the sidebar only changes that
 // ref, and this screen stays mounted, so the workspace it holds carries the
 // ref it was loaded for (useWorkspaceOf): until the new ref has its own
 // workspace the screen is loading, and the workspace of the ref before never
@@ -61,27 +61,28 @@
 // (MessageList.tsx, Message.tsx). The session gives the name that says which
 // rows are theirs.
 //
-// On a phone the rail, the item list and the panel are sheets over the
-// conversation, and only one is open at a time: opening one closes the
-// others. A rail or item sheet has a dimmed backdrop, and a tap on it closes
-// the sheet. Escape closes the top sheet (the panel, then the items, then the
-// rail). While a sheet is open the page behind it does not scroll
-// (`sheet-open`, index.css). From 900px the rail is a column, and from 1100px
-// so is the item list, and the same state drives their close buttons. The
-// rail also holds the app navigation links on a phone (Rail.tsx), so the chat
-// has one menu button there; a route change closes it.
+// On a phone the item list and the panel are sheets over the conversation, and
+// only one is open at a time: opening one closes the other. The item sheet has
+// a dimmed backdrop, and a tap on it closes the sheet. Escape closes the top
+// sheet (the panel, then the items). While a sheet is open the page behind it
+// does not scroll (`sheet-open`, index.css). From 1100px the item list is a
+// column, and the same state drives its close button. The hamburger of the
+// chat header opens the navigation drawer of the shell, which holds the
+// threads and the app links (Shell.tsx).
+//
+// `?new=1` on the address of the chat opens the dialog of a new workspace, so
+// the "New workspace" button of the sidebar reaches the form that lives here.
 
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError, getJson } from "../api/client";
 import { getWorkspace, linkOf, markRead, type Workspace } from "../api/workspaces";
-import Shell, { type Session } from "../shell/Shell";
+import Shell, { useNavDrawer, type Session } from "../shell/Shell";
 import ErrorLine from "../ui/ErrorLine";
 import Spinner from "../ui/Spinner";
 import { Composer } from "./Composer";
 import { NewWorkspace } from "./NewWorkspace";
 import { usePanels } from "../shell/panels";
-import { Rail } from "./Rail";
 import { clearDraft, loadDraft, type Draft } from "./draft";
 import { ItemPanel } from "./ItemPanel";
 import { useWorkspaces, type Workspaces } from "./useWorkspaces";
@@ -142,9 +143,9 @@ interface ChatProps {
 
 function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const panels = usePanels();
-  const [railOpen, setRailOpen] = useState(false);
+  const openDrawer = useNavDrawer();
   const [itemsOpen, setItemsOpen] = useState(false);
   const [itemsKey, setItemsKey] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -249,35 +250,13 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
   // closes the panel (toggleItems), and the column is back.
   const itemsCollapsed = panels.collapsed.items || panelOpen;
   useEffect(() => {
-    if (panelOpen) {
-      setRailOpen(false);
-      setItemsOpen(false);
-    }
+    if (panelOpen) setItemsOpen(false);
   }, [panelOpen, panel.shown, panel.view]);
-  const toggleRail = () => {
-    if (!railOpen) {
-      setItemsOpen(false);
-      closePanel();
-    }
-    setRailOpen(!railOpen);
-  };
   const toggleItems = () => {
-    if (!itemsOpen) {
-      setRailOpen(false);
-      closePanel();
-    }
+    if (!itemsOpen) closePanel();
     setItemsOpen(!itemsOpen);
     panels.set("items", false);
   };
-  // A route change closes the rail, which holds the app links on a phone.
-  useEffect(() => setRailOpen(false), [pathname]);
-  // The ☰ gets the focus back when the rail closes.
-  const toggleRef = useRef<HTMLButtonElement>(null);
-  const railWas = useRef(false);
-  useEffect(() => {
-    if (railWas.current && !railOpen) toggleRef.current?.focus();
-    railWas.current = railOpen;
-  }, [railOpen]);
   // Focus mode, on a desktop: Ctrl or Cmd + \ folds every side column away,
   // or opens them all again.
   const { focus } = panels;
@@ -291,18 +270,25 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [focus]);
-  const sheetOpen = railOpen || itemsOpen || panelOpen;
+  const sheetOpen = itemsOpen || panelOpen;
   useEffect(() => {
     if (!sheetOpen) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (panelOpen) closePanel();
-      else if (itemsOpen) setItemsOpen(false);
-      else setRailOpen(false);
+      else setItemsOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [sheetOpen, panelOpen, itemsOpen, closePanel]);
+  }, [sheetOpen, panelOpen, closePanel]);
+
+  // `?new=1`, from the "New workspace" button of the sidebar: the dialog opens
+  // and the query goes, so a reload of the address does not open it again.
+  useEffect(() => {
+    if (new URLSearchParams(search).get("new") !== "1") return;
+    setCreating(true);
+    navigate(pathname, { replace: true });
+  }, [search, pathname, navigate]);
 
   useEffect(() => {
     rememberPerson(person);
@@ -317,8 +303,8 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
 
   // The thread is read as far as the newest row on screen. The mark is this
   // person's own, so in a shared workspace it clears nobody else's count. The
-  // rail is loaded again, so the count beside the name goes. A mark that fails
-  // is not kept, so the next row tries again.
+  // list of the sidebar is loaded again, so the count beside the name goes. A
+  // mark that fails is not kept, so the next row tries again.
   const { reload: reloadWorkspaces } = workspaces;
   const marked = useRef(0);
   const onRead = useCallback(
@@ -337,23 +323,6 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
   return (
     <DocumentPanelProvider panel={panel}>
       <div className={`chat-screen${sheetOpen ? " sheet-open" : ""}${itemsCollapsed ? " items-collapsed" : ""}`}>
-        <Rail
-          person={person}
-          workspaces={workspaces.list}
-          activeId={ws?.id}
-          open={railOpen}
-          onNew={() => {
-            setRailOpen(false);
-            setCreating(true);
-          }}
-          onNavigate={() => setRailOpen(false)}
-          onClose={() => setRailOpen(false)}
-          collapsed={panels.collapsed.rail}
-          onCollapse={() => panels.set("rail", true)}
-        />
-        {railOpen && (
-          <div className="scrim scrim-rail" data-testid="rail-backdrop" onClick={() => setRailOpen(false)} />
-        )}
         {itemsOpen && (
           <div className="scrim scrim-items" data-testid="items-backdrop" onClick={() => setItemsOpen(false)} />
         )}
@@ -371,21 +340,10 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
             </button>
             <button
               type="button"
-              className="rail-expand"
-              aria-label="Open the workspaces column"
-              aria-expanded={!panels.collapsed.rail}
-              aria-controls="chat-rail"
-              onClick={() => panels.set("rail", false)}
-            >
-              ☰
-            </button>
-            <button
-              type="button"
-              ref={toggleRef}
-              className="rail-toggle"
-              aria-label="Show the workspaces"
-              aria-expanded={railOpen}
-              onClick={toggleRail}
+              className="j-nav-toggle"
+              aria-label="Show the navigation"
+              aria-controls="app-nav"
+              onClick={(e) => openDrawer(e.currentTarget)}
             >
               ☰
             </button>
@@ -408,7 +366,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
               type="button"
               className="focus-toggle"
               aria-label="Focus mode"
-              aria-pressed={panels.collapsed.nav && panels.collapsed.rail && (!ws || panels.collapsed.items)}
+              aria-pressed={panels.collapsed.nav && (!ws || panels.collapsed.items)}
               title="Hide or show every side column (Ctrl or Cmd + \\)"
               onClick={focus}
             >

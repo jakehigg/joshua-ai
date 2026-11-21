@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useLocation } from "react-router-dom";
 
 import { getJson, type Person } from "../api/client";
@@ -26,6 +34,21 @@ export interface Session {
  * shell then reads it itself.
  */
 export const SessionContext = createContext<Session | null>(null);
+
+/**
+ * How a screen opens the navigation drawer of the phone.
+ *
+ * The chat draws no app bar, so it has no hamburger of the shell: its own
+ * header holds one and calls this (ChatPage.tsx). `opener` is the control that
+ * opened the drawer, which takes the focus back when it closes.
+ */
+export const NavDrawerContext = createContext<(opener?: HTMLElement | null) => void>(
+  () => undefined,
+);
+
+export function useNavDrawer(): (opener?: HTMLElement | null) => void {
+  return useContext(NavDrawerContext);
+}
 
 const LABELS: Record<string, string> = Object.fromEntries(
   SECTIONS.map((item) => [item.key, item.label]),
@@ -86,10 +109,9 @@ function contentClass(section: string): string {
  * There is no search field in the app bar: the Search link of the navigation
  * opens the search page, which holds the field.
  *
- * The chat has its own compact top bar on a phone (the chat header, with the
- * hamburger of its rail, which holds the workspaces and these same links), so
- * the app bar is not drawn on the chat page at any width, and on a phone
- * there is one toggle.
+ * The chat has its own compact top bar on a phone (the chat header), so the
+ * app bar is not drawn on the chat page at any width, and the hamburger of
+ * that header opens this same drawer (`NavDrawerContext`).
  *
  * In a frame there is no navigation at all: no sidebar and no app bar, so the
  * page of the frame is the content and the person navigates in the app that
@@ -111,8 +133,15 @@ export default function Shell({
   const navCollapsed = panels.collapsed.nav;
   const toggleRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const wasOpen = useRef(false);
   const { pathname } = useLocation();
+  // The control that opened the drawer takes the focus back: the hamburger of
+  // the app bar, or the one of the chat header, which is no child of this.
+  const openDrawer = useCallback((opener?: HTMLElement | null) => {
+    openerRef.current = opener ?? null;
+    setOpen(true);
+  }, []);
 
   // A route change closes the drawer.
   useEffect(() => setOpen(false), [pathname]);
@@ -122,7 +151,7 @@ export default function Shell({
       wasOpen.current = true;
     } else if (wasOpen.current) {
       wasOpen.current = false;
-      toggleRef.current?.focus();
+      (openerRef.current ?? toggleRef.current)?.focus();
     }
     if (!open) return undefined;
     const onKey = (e: KeyboardEvent) => {
@@ -172,79 +201,81 @@ export default function Shell({
   const fill = section === "chat";
   return (
     <NavContext.Provider value={{ sections, section, owner }}>
-      <div
-        className={`j-shell has-sidebar${fill ? " fill" : ""}${navCollapsed ? " nav-collapsed" : ""}`}
-      >
-        <aside
-          className={open ? "j-sidebar open" : "j-sidebar"}
-          id="app-nav"
-          aria-label="Navigation"
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest("a")) setOpen(false);
-          }}
+      <NavDrawerContext.Provider value={openDrawer}>
+        <div
+          className={`j-shell has-sidebar${fill ? " fill" : ""}${navCollapsed ? " nav-collapsed" : ""}`}
         >
-          <div className="j-sidebar-head">
-            <a className="j-brand" href="/">
-              <img className="j-logo" src="/logo-64.png" alt="" />
-              Joshua
-            </a>
-            <button
-              type="button"
-              ref={closeRef}
-              className="j-nav-close"
-              aria-label="Close the navigation"
-              onClick={() => setOpen(false)}
-            >
-              ✕
-            </button>
-            <button
-              type="button"
-              className="j-nav-collapse"
-              aria-label="Hide the navigation"
-              aria-expanded={!navCollapsed}
-              aria-controls="app-nav"
-              onClick={() => panels.set("nav", true)}
-            >
-              «
-            </button>
-          </div>
-          <AppNav sections={sections} section={section} owner={owner} />
-        </aside>
-        {open && <div className="j-scrim" data-testid="nav-backdrop" onClick={() => setOpen(false)} />}
-        <div className="j-main">
-          <header className="j-appbar">
-            {!fill && (
+          <aside
+            className={open ? "j-sidebar open" : "j-sidebar"}
+            id="app-nav"
+            aria-label="Navigation"
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest("a")) setOpen(false);
+            }}
+          >
+            <div className="j-sidebar-head">
+              <a className="j-brand" href="/">
+                <img className="j-logo" src="/logo-64.png" alt="" />
+                Joshua
+              </a>
               <button
                 type="button"
-                ref={toggleRef}
-                className="j-nav-toggle"
-                aria-label="Show the navigation"
-                aria-expanded={open}
-                aria-controls="app-nav"
-                onClick={() => setOpen((o) => !o)}
+                ref={closeRef}
+                className="j-nav-close"
+                aria-label="Close the navigation"
+                onClick={() => setOpen(false)}
               >
-                ☰
+                ✕
               </button>
-            )}
-            <button
-              type="button"
-              className="j-nav-expand"
-              aria-label="Open the navigation column"
-              aria-expanded={!navCollapsed}
-              aria-controls="app-nav"
-              onClick={() => panels.set("nav", false)}
-            >
-              »
-            </button>
-            <img className="j-logo" src="/logo-64.png" alt="" />
-            <a className="j-appbar-title" href="/">
-              <small>Joshua</small>
-              <strong>{title(section)}</strong>
-            </a>
-          </header>
-          <main className={contentClass(section)}>{children}</main>
+              <button
+                type="button"
+                className="j-nav-collapse"
+                aria-label="Hide the navigation"
+                aria-expanded={!navCollapsed}
+                aria-controls="app-nav"
+                onClick={() => panels.set("nav", true)}
+              >
+                «
+              </button>
+            </div>
+            <AppNav sections={sections} section={section} owner={owner} />
+          </aside>
+          {open && <div className="j-scrim" data-testid="nav-backdrop" onClick={() => setOpen(false)} />}
+          <div className="j-main">
+            <header className="j-appbar">
+              {!fill && (
+                <button
+                  type="button"
+                  ref={toggleRef}
+                  className="j-nav-toggle"
+                  aria-label="Show the navigation"
+                  aria-expanded={open}
+                  aria-controls="app-nav"
+                  onClick={(e) => (open ? setOpen(false) : openDrawer(e.currentTarget))}
+                >
+                  ☰
+                </button>
+              )}
+              <button
+                type="button"
+                className="j-nav-expand"
+                aria-label="Open the navigation column"
+                aria-expanded={!navCollapsed}
+                aria-controls="app-nav"
+                onClick={() => panels.set("nav", false)}
+              >
+                »
+              </button>
+              <img className="j-logo" src="/logo-64.png" alt="" />
+              <a className="j-appbar-title" href="/">
+                <small>Joshua</small>
+                <strong>{title(section)}</strong>
+              </a>
+            </header>
+            <main className={contentClass(section)}>{children}</main>
+          </div>
         </div>
-      </div>
+      </NavDrawerContext.Provider>
     </NavContext.Provider>
   );
 }

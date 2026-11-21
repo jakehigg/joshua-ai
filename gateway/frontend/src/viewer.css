@@ -8,6 +8,42 @@
 
 /* ------------------------------------------------------------ the shell */
 .v-sections { display: flex; flex-direction: column; gap: 2px; }
+.v-section { display: flex; flex-direction: column; gap: 2px; }
+
+/* the one list of the threads, under the Chat item: the normal chat, the
+   workspaces with the newest activity first, "Show all" and the button of a
+   new workspace (shell/ChatList.tsx) */
+.v-chats { display: flex; flex-direction: column; gap: 2px; }
+/* the title takes the free room and truncates, so the marks and the count
+   stand together at the right edge of the row, in one column down the list */
+.v-chat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-chat-marks { display: flex; flex: none; align-items: center; }
+/* the rows of a thread that this person has not read, counted after the name */
+.v-chat-unread {
+  flex: none;
+  margin-left: 0.375rem;
+  padding: 0 7px;
+  border-radius: var(--j-radius-pill);
+  background: var(--j-accent);
+  color: var(--j-accent-ink);
+  font-size: var(--j-text-xs);
+  font-weight: 600;
+  line-height: 18px;
+}
+.v-chats-more, .v-chats-new { color: var(--j-faint); }
+/* the mark of a shared workspace, in the list of the threads and in the header
+   of the workspace: two small people, quiet, after the name */
+.shared-mark, .work-charm {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  vertical-align: -2px;
+  opacity: 0.75;
+}
+.shared-mark .j-icon, .work-charm .j-icon { width: 15px; height: 15px; }
+/* the charm of a workspace: Joshua is working for it (quiet), or it waits for
+   a person (the accent colour) */
+.work-charm.waiting { color: var(--j-accent); opacity: 1; }
 
 /* the search field in the app bar: on every screen, so a phone has it too */
 .v-search { flex: 1 1 160px; max-width: 320px; min-width: 0; margin: 0; }

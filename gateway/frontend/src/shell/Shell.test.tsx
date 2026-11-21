@@ -298,7 +298,7 @@ describe("the navigation drawer", () => {
     expect(isOpen()).toBe(false);
   });
 
-  it("has no hamburger in the chat, where the rail is the menu", () => {
+  it("draws no hamburger of its own in the chat, which has its own header", () => {
     stubSession();
     render(
       <MemoryRouter>
@@ -307,7 +307,7 @@ describe("the navigation drawer", () => {
         </Shell>
       </MemoryRouter>,
     );
-    expect(screen.queryByRole("button", { name: "Show the navigation" })).toBeNull();
+    expect(document.querySelector(".j-appbar .j-nav-toggle")).toBeNull();
   });
 });
 

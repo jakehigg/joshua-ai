@@ -35,6 +35,9 @@ export interface Workspace {
   // list gives it, and it is the count of that person alone: in a shared
   // workspace every other person has one of their own.
   unread?: number;
+  // When the workspace last moved, as core stamps it. The list of the sidebar
+  // orders by it, newest first (`byActivity`).
+  updated_at?: string;
   // Whether Joshua is working for this workspace, or something of it waits
   // for a person. Null, or absent, when neither is true. The viewer composes
   // it (`gateway/joshua_gateway/viewer_workspaces.py`); the list and the read
@@ -161,6 +164,21 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   const body = await getJson<{ workspaces?: Workspace[] }>(BASE);
   return Array.isArray(body.workspaces) ? body.workspaces : [];
 }
+
+/** When a workspace last moved, as a number. A row with no stamp is oldest. */
+const movedAt = (workspace: Workspace): number => {
+  const when = Date.parse(workspace.updated_at ?? "");
+  return Number.isNaN(when) ? 0 : when;
+};
+
+/**
+ * The rows of `workspaces`, newest activity first.
+ *
+ * The sort is stable, so rows that carry the same stamp, and rows that carry
+ * none, keep the order the list gave them.
+ */
+export const byActivity = (workspaces: Workspace[]): Workspace[] =>
+  [...workspaces].sort((a, b) => movedAt(b) - movedAt(a));
 
 /**
  * One workspace, by its id. The screen resolves the address it was opened at
