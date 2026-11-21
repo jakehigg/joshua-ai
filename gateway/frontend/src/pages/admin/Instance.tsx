@@ -37,6 +37,20 @@ export interface AdminSettings {
   groups: AdminSettingGroup[];
 }
 
+/** The answer of `GET /api/v1/admin/update`: the release check of core. */
+export interface AdminUpdate {
+  /** The release this instance runs, or `dev` for an image with no tag. */
+  current: string;
+  /** The tag of the latest release, or null when the check reached nothing. */
+  latest: string | null;
+  /** The page of the latest release. */
+  url: string | null;
+  /** When the last check reached GitHub. */
+  checked_at: string | null;
+  /** The one line of a check that failed, or null. */
+  error: string | null;
+}
+
 /** What a secret field says, with a value stored and without one. */
 export const SECRET_SET = "set";
 export const SECRET_NOT_SET = "not set";
@@ -52,8 +66,9 @@ export function isOn(value: string | null | undefined): boolean {
   return TRUE_WORDS.includes((value ?? "").trim().toLowerCase());
 }
 
-/** The keys of the push group this page says something of its own about. */
+/** The groups this page says something of its own about. */
 const PUSH_PREFIX = "push";
+const ADMIN_PREFIX = "admin";
 const PUBLIC_KEY = "push.vapid_public_key";
 const PRIVATE_KEY = "push.vapid_private_key";
 const SUBJECT_KEY = "push.vapid_subject";
@@ -171,6 +186,67 @@ export function draftsOf(groups: AdminSettingGroup[]): Record<string, string> {
   return drafts;
 }
 
+/** A release as a person reads it: `v0.4.1`, and a build with no tag as it is. */
+export function versionText(version: string): string {
+  const text = version.trim();
+  if (text === "") {
+    return "dev";
+  }
+  return /^\d/.test(text) ? `v${text}` : text;
+}
+
+/** True when the latest release is not the one this instance runs. */
+export function isNewer(update: AdminUpdate): boolean {
+  if (update.error !== null && update.error !== "") {
+    return false;
+  }
+  const latest = update.latest ?? "";
+  return latest !== "" && versionText(latest) !== versionText(update.current);
+}
+
+/**
+ * The one line of the release check: the running release, and the latest one
+ * beside it.
+ *
+ * A check that did not reach GitHub says so and names the time of the last
+ * good check, so the owner knows how old the latest release is. Nothing here
+ * offers an upgrade: the page reports, and the owner upgrades the way they
+ * deployed.
+ */
+export function updateLine(update: AdminUpdate): string {
+  const running = `Running ${versionText(update.current)}`;
+  if (update.error !== null && update.error !== "") {
+    if (update.checked_at === null) {
+      return `${running}. ${update.error}.`;
+    }
+    const at = new Date(update.checked_at);
+    const when = Number.isNaN(at.getTime()) ? update.checked_at : at.toLocaleString();
+    return `${running}. ${update.error}; the last good check was ${when}.`;
+  }
+  if (isNewer(update)) {
+    return `${running}, latest ${versionText(update.latest ?? "")}`;
+  }
+  return `${running}. Up to date.`;
+}
+
+/** The release check as one line, with the link to the newer release. */
+function Release({ update }: { update: AdminUpdate }) {
+  const url = update.url ?? "";
+  return (
+    <p className="j-meta">
+      {updateLine(update)}
+      {isNewer(update) && url !== "" && (
+        <>
+          {" "}
+          <a href={url} rel="noreferrer">
+            release notes
+          </a>
+        </>
+      )}
+    </p>
+  );
+}
+
 /** When a setting last changed, and who wrote it, as one line. */
 export function changedLine(setting: AdminSetting): string {
   if (setting.updated_at === null) {
@@ -199,9 +275,14 @@ export function changedLine(setting: AdminSetting): string {
  * `POST /api/v1/admin/settings`. A write of a secret needs
  * `JOSHUA_SETTINGS_KEY` on the Joshua side; without it core refuses that one
  * write, and the line of the refusal names the variable.
+ *
+ * The Releases section also shows the release check,
+ * `GET /api/v1/admin/update`: the running release and the latest one, with a
+ * link to it. The page reports a newer release and offers no upgrade.
  */
 export default function Instance() {
   const [groups, setGroups] = useState<AdminSettingGroup[] | null>(null);
+  const [update, setUpdate] = useState<AdminUpdate | null>(null);
   const [error, setError] = useState<string>("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   // The key of the secret the owner is replacing, or "" for none.
@@ -230,6 +311,23 @@ export default function Instance() {
       live = false;
     };
   }, [tick]);
+
+  // The release check, read once: core keeps its answer for six hours, and a
+  // check that did not reach GitHub is a line in the Releases section, never a
+  // dialog and never a retry.
+  useEffect(() => {
+    let live = true;
+    getJson<AdminUpdate>("/admin/update")
+      .then((answer) => {
+        if (live) {
+          setUpdate(answer);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   /** One write of one setting, and the read that follows it. */
   async function write(setting: AdminSetting, value: string): Promise<void> {
@@ -366,6 +464,7 @@ export default function Instance() {
         <h2 className="j-label">{group.label}</h2>
         {intro(group.prefix)}
         {group.prefix === PUSH_PREFIX && <p className="j-meta">{pushStatus(group.settings)}</p>}
+        {group.prefix === ADMIN_PREFIX && update !== null && <Release update={update} />}
         {group.settings.map(field)}
       </section>
     ));

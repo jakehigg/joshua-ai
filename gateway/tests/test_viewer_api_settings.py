@@ -1,6 +1,7 @@
-"""Offline tests for the Instance routes of the viewer: the settings.
+"""Offline tests for the Instance routes of the viewer: the settings and the
+release check.
 
-Core is a ``httpx.MockTransport``. The tests cover the two routes for an
+Core is a ``httpx.MockTransport``. The tests cover the three routes for an
 owner (the call to core and the answer), the 403 of a member and of a guest,
 a cross-site write, the sign-in, and that no answer and no log line carries
 the value the owner typed for a secret.
@@ -23,6 +24,7 @@ SAM = signed_in("sam")
 ALEX = signed_in("alex")
 GUS = signed_in("gus")
 BASE = "/api/v1/admin/settings"
+UPDATE = "/api/v1/admin/update"
 PRIVATE = "push.vapid_private_key"
 SECRET_VALUE = "a private key nobody may read back"
 
@@ -46,11 +48,21 @@ CONFIG = textwrap.dedent("""\
         gus: ${VIEWER_PW_GUS:-}
     """)
 
-# The two routes, as a verb, a URL and a body. The read carries none.
+# The three routes, as a verb, a URL and a body. A read carries none.
 ROUTES = (
     ("get", BASE, None),
     ("post", BASE, {"key": "push.vapid_public_key", "value": "a-public-key"}),
+    ("get", UPDATE, None),
 )
+
+# The release check, as core answers it.
+CHECKED = {
+    "current": "0.4.0",
+    "latest": "0.4.1",
+    "url": "https://github.com/jakehigg/joshua-ai/releases/0.4.1",
+    "checked_at": "2026-11-21T12:00:00+00:00",
+    "error": None,
+}
 
 # One group, as core answers it: the value of the secret is never in it.
 GROUPS = {
@@ -104,6 +116,8 @@ class Core:
             return httpx.Response(200, json=GROUPS)
         if path == "/admin/settings":
             return httpx.Response(200, json={"setting": GROUPS["groups"][0]["settings"][0]})
+        if path == "/admin/update":
+            return httpx.Response(200, json=CHECKED)
         return httpx.Response(404, json={"error": "not found"})  # pragma: no cover
 
 
@@ -154,6 +168,27 @@ def test_the_owner_reads_the_groups_and_core_hears_the_prefix(client, core) -> N
     # With no prefix the viewer asks for every group.
     assert client.get(BASE, auth=SAM).status_code == 200
     assert core.requests[-1].url.query == b""
+
+
+def test_the_owner_reads_the_release_check(client, core) -> None:
+    response = client.get(UPDATE, auth=SAM)
+    assert response.status_code == 200
+    assert response.json() == CHECKED
+    assert (core.requests[-1].method, core.requests[-1].url.path) == ("GET", "/admin/update")
+
+
+def test_a_failed_release_check_passes_through(client, core) -> None:
+    """GitHub was unreachable: the page gets the line, and no refusal."""
+    failed = {
+        **CHECKED,
+        "latest": None,
+        "url": None,
+        "error": "The release check did not reach GitHub",
+    }
+    core.answer("/admin/update", httpx.Response(200, json=failed))
+    response = client.get(UPDATE, auth=SAM)
+    assert response.status_code == 200
+    assert response.json() == failed
 
 
 def test_a_write_names_the_person_who_signed_in(client, core) -> None:

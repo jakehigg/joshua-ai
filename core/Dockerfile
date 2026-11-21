@@ -12,6 +12,12 @@ RUN uv sync --frozen --no-dev --package joshua-core
 # Runtime stage: copy the venv and only the code this member needs.
 FROM python:3.13-slim AS runtime
 
+# The release this image holds. The release workflow passes the tag; a build
+# that passes nothing leaves it empty, and core then reports "dev". The Admin
+# page shows it beside the latest release (joshua_core.update).
+ARG JOSHUA_RELEASE=""
+ENV JOSHUA_RELEASE=$JOSHUA_RELEASE
+
 # The SDK spawns the bundled Claude Code CLI, which needs Node. The CLI requires
 # Node 22 or newer (its package.json sets engines.node ">=22"). Debian trixie's
 # apt "nodejs" is 20.x, so install the Node 22 line from NodeSource instead. The

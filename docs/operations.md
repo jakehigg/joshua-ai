@@ -93,6 +93,7 @@ message text and no sender handle.
 |---|---|
 | `GET /admin/people` | the roster |
 | `POST /admin/people` | add a person: `{"id", "name", "handle", "role"}` |
+| `GET /admin/update` | the release this instance runs and the latest release of `admin.update_repo` |
 | `GET /admin/pool` | the open agent sessions |
 | `POST /admin/sessions/flush` | close every session. The next message starts a fresh one. |
 | `GET /admin/transcript/<conversation>?limit=40` | the last rows of one conversation |
@@ -484,6 +485,13 @@ grep JOSHUA_VERSION .env
 
 There is no `latest` tag on the registry. Every image reference names one
 version, so a start always gets the same three images.
+
+Admin → Instance shows the same release in one line, beside the latest release
+on GitHub: "Running v0.4.0, latest v0.4.1", with a link to it, or "Up to date"
+when the two match. Core reads the latest release once every six hours, so the
+page makes no call to GitHub on a load, and a check that did not reach GitHub
+is one line with the time of the last good check. The line reports; the update
+below is what changes the version.
 
 ## Update Joshua
 

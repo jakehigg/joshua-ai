@@ -6,6 +6,22 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Admin
+
+- **The Instance page says whether a newer release exists.** The Releases
+  section shows one line: "Running v0.4.0, latest v0.4.1", with a link to the
+  release, or "Up to date" when the two match. The running release comes from
+  the image, and an image built with no release tag says `dev`. Core reads the
+  latest release of `admin.update_repo` (`jakehigg/joshua-ai` with no setting)
+  from GitHub, unauthenticated, and keeps the answer for six hours, so a load
+  of the page makes no call to GitHub. A check that did not reach GitHub shows
+  one line with the time of the last good check, and nothing retries. The page
+  reports a newer release; it offers no upgrade, and the update is still
+  `make pull && make up`. The new routes are core's `GET /admin/update` and
+  the viewer's `GET /api/v1/admin/update`, both the owner's. See
+  [settings.md](settings.md) and
+  [operations.md](operations.md#the-version-you-run).
+
 ## 0.4.0 - 2026-11-19
 
 A workspace can now hold several people, who write in one thread and read the

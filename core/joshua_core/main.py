@@ -72,6 +72,7 @@ from joshua_core.store.repo import Repo
 from joshua_core.store.seed import seed_people
 from joshua_core.transcript_api import build_transcript_router
 from joshua_core.turns import TurnService, build_router
+from joshua_core.update import running_version
 from joshua_core.usage_api import build_usage_router
 from joshua_core.workspaces_api import build_workspaces_router
 
@@ -237,7 +238,13 @@ async def lifespan(app: FastAPI):
     await reflector.start()
     _log_group_roles(settings)
     inference_plan.log_plan(settings)
-    logger.info({"message": "joshua-core up", "agent_backend": agent_backend})
+    logger.info(
+        {
+            "message": "joshua-core up",
+            "agent_backend": agent_backend,
+            "release": running_version(),
+        }
+    )
     try:
         yield
     finally:

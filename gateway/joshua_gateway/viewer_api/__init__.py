@@ -23,7 +23,8 @@ core (``CORE_URL``). See ``viewer_api.workspaces``.
 
 The Users section has five routes under ``/api/v1/admin/users``, which proxy
 core's people and secret routes, and the Instance section has two under
-``/api/v1/admin/settings``, which proxy core's settings routes. They are the
+``/api/v1/admin/settings``, which proxy core's settings routes, and
+``/api/v1/admin/update``, which proxies core's release check. They are the
 owner's alone: a member and a guest get 403. See ``viewer_api.admin``.
 
 Web push has four routes under ``/api/v1/push``, which proxy core's ``/v1/push``
@@ -205,9 +206,11 @@ def routes() -> list[Route]:
             _require_auth(admin.remove),
             methods=["POST"],
         ),
-        # The Instance section: the settings of the instance, the owner's too.
+        # The Instance section: the settings of the instance and the release
+        # check, the owner's too.
         Route(api_path("admin/settings"), _require_auth(admin.settings)),
         Route(api_path("admin/settings"), _require_auth(admin.save_setting), methods=["POST"]),
+        Route(api_path("admin/update"), _require_auth(admin.update)),
         Route(api_path("wiki/tree"), _require_auth(wiki.tree)),
         Route(api_path("wiki"), _require_auth(wiki.content)),
         Route(api_path("files/{root}/{path:path}"), _require_auth(files.file)),

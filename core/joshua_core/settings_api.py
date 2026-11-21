@@ -57,6 +57,7 @@ from joshua_core.store.settings import (
     find_field,
     find_group,
 )
+from joshua_core.update import DEFAULT_REPO, REPO_SETTING, is_repo_name
 
 logger = get_logger("settings_api")
 
@@ -128,12 +129,24 @@ def _check_private_key(value: str) -> str:
     )
 
 
+def _check_update_repo(value: str) -> str:
+    """``admin.update_repo``: ``owner/name``, or empty for the default."""
+    text = value.strip()
+    if not text or is_repo_name(text):
+        return ""
+    return (
+        f"{REPO_SETTING} must be a repository as owner/name, "
+        f"such as {DEFAULT_REPO}: the release check reads its releases"
+    )
+
+
 # The check of each setting that has one, by key. A key with no check here
 # takes any text the route accepts.
 CHECKS: dict[str, Callable[[str], str]] = {
     SUBJECT_KEY: _check_subject,
     PUBLIC_KEY: _check_public_key,
     PRIVATE_KEY: _check_private_key,
+    REPO_SETTING: _check_update_repo,
 }
 
 

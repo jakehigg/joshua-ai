@@ -73,6 +73,10 @@ jobs:
           context: .
           file: ${{ matrix.member }}/Dockerfile
           platforms: ${{ matrix.platform.name }}
+          # The release tag goes into the image, so core can say which release
+          # it runs on the Admin page.
+          build-args: |
+            JOSHUA_RELEASE=${{ needs.version.outputs.version }}
           # The label links the package to this repository, so the package page
           # shows the source and can inherit the repository visibility.
           labels: |

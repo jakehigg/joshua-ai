@@ -27,6 +27,10 @@ in core's ``AUTH_CALLERS``, the callers of ``/auth/*``.
   ``POST /admin/settings``, with the signed-in person as the writer. Core
   knows which keys are secret, and answers 503 for a secret write with no
   ``JOSHUA_SETTINGS_KEY``.
+- ``GET /api/v1/admin/update`` — the running release and the latest release,
+  from core's ``GET /admin/update`` (``{current, latest, url, checked_at,
+  error}``). Core keeps the answer for six hours, so a load of the page makes
+  no call to GitHub. The route reports a newer release; it offers no upgrade.
 
 Core refuses, with 409, a role change or a remove that leaves no owner.
 
@@ -65,6 +69,7 @@ PEOPLE_PATH = "/admin/people"
 AUTH_PEOPLE_PATH = "/auth/people"
 SECRET_PATH = "/auth/secret/admin"
 SETTINGS_PATH = "/admin/settings"
+UPDATE_PATH = "/admin/update"
 TIMEOUT_S = 15.0
 
 # The one role that manages the roster.
@@ -265,6 +270,22 @@ async def settings(request: Request, person: Person) -> JSONResponse:
     prefix = request.query_params.get("prefix", "").strip()
     path = f"{SETTINGS_PATH}?prefix={quote(prefix)}" if prefix else SETTINGS_PATH
     status, answer = await _call("GET", path)
+    return _json(answer, status)
+
+
+async def update(request: Request, person: Person) -> JSONResponse:
+    """The running release and the latest release, as core answers them.
+
+    Core reads the latest release of ``admin.update_repo`` from GitHub and
+    keeps the answer for six hours, so a load of the page makes no call to
+    GitHub. A check that did not reach GitHub carries an ``error`` line and
+    the time of the last good check; the page says so in one line and retries
+    nothing.
+    """
+    denied = _guard(request, person, write=False, refusal=FORBIDDEN_SETTINGS)
+    if denied is not None:
+        return denied
+    status, answer = await _call("GET", UPDATE_PATH)
     return _json(answer, status)
 
 
