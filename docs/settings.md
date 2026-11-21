@@ -68,6 +68,13 @@ use, is left out of the pre-pick.
 [workspaces.md](workspaces.md#the-default-servers-of-a-new-workspace) has the
 rule.
 
+The `developer` group holds `developer.pr_skip_approval`, the switch that
+opens the pull request of a developer task without asking. With it off, which
+is every instance that has not written it, Joshua shows the owner the title
+and the body and opens the pull request when the owner approves it. A value
+that is neither a yes nor a no is refused at the write.
+[developer.md](developer.md#the-approval) has the flow.
+
 The `admin` group holds `admin.update_repo`, the repository whose latest
 release the release check reads, as `owner/name`. Empty reads
 `jakehigg/joshua-ai`, and a value that is not `owner/name` is refused at the

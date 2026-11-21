@@ -128,6 +128,7 @@ class FakeComposer:
         memory: Any = None,
         servers: Any = (),
         new_day: bool = False,
+        pr_approval: bool = True,
     ) -> str:
         self.new_days.append(new_day)
         return "you are joshua"

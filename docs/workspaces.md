@@ -482,14 +482,15 @@ not made yet.
 | a tasks project by `create_project` | the `tasks` addon | `tasks_project`, from `_project` |
 | a task by `create_task` | the `tasks` addon | **none.** The map has no rule for the tool: the addon is outside this repository, and the keys of its reply are not known here. |
 | a developer task by `develop` or `rework` | the `developer` addon | `developer_task`, from `_developer` |
-| the pull request of a developer task | the addon, after the task ends | **none.** The recorder never runs: the pull request comes back as an event on `POST /v1/events` with the workspace, not as the result of a tool call. |
+| the pull request of a developer task | Joshua, with `create_pull_request` on the `github` server or `create_merge_request` on the `gitlab` server ([developer.md](developer.md)) | **none.** The map has no rule for either tool. |
 | a file a person sends in the thread | `channels`, which stores it under `people/<id>/attachments/` | **none.** The recorder never runs: a person's message is no tool call. |
 | a `resource_link` of any MCP server | `gateway/.../workspace_items.py`, `link_items` | `link`, one per block, up to 20 |
 | anything Joshua collects itself | `core/.../engine/tools/workspace.py`, `do_add_to_workspace` | the kind the call names |
 
 The three rows with no item wait on a choice. A task of the addon needs the
-keys of its reply, a pull request needs an item on the event route, and a file
-a person sends needs a rule for which attachment of a turn is worth an item.
+keys of its reply, a pull request needs a rule for the tool of the forge in
+the map, and a file a person sends needs a rule for which attachment of a turn
+is worth an item.
 
 A session of a workspace sends `X-Joshua-Workspace: <workspace id>` to the
 gateway on every MCP server, and the gateway trusts the header only from

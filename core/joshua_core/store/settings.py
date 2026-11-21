@@ -183,6 +183,20 @@ SETTING_GROUPS: tuple[SettingGroup, ...] = (
         ),
     ),
     SettingGroup(
+        prefix="developer",
+        label="Developer tasks",
+        fields=(
+            SettingField(
+                key="developer.pr_skip_approval",
+                label="Open a pull request without asking",
+                kind=BOOL_KIND,
+                hint="Joshua shows you the title and the body of a pull request and "
+                "opens it when you approve. Turn this on to have it open the pull "
+                "request and give you the text afterwards.",
+            ),
+        ),
+    ),
+    SettingGroup(
         prefix="admin",
         label="Releases",
         fields=(

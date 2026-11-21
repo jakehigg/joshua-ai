@@ -15,9 +15,10 @@ under ``/api/v1/admin/settings/``, as the identity ``viewer``.
 holds one check per key, and a refusal is a 400 whose line says what the field
 takes: the VAPID subject must be a ``mailto:`` or an ``https://`` address,
 which is what ``py_vapid`` raises ``VapidException`` for in the middle of a
-send, each VAPID key must be base64url of the right length, and the default
-servers of a new workspace must be MCP server names. A refusal names no value:
-the private key is a secret.
+send, each VAPID key must be base64url of the right length, the default
+servers of a new workspace must be MCP server names, and the switch that skips
+the approval of a pull request must be a yes, a no, or empty. A refusal names
+no value: the private key is a secret.
 
 **No answer carries a secret value.** A field says its ``kind``, ``is_secret``
 and ``is_set``, and ``value`` is null for a secret, whether it is stored or
@@ -48,6 +49,7 @@ from joshua_shared.config import MCP_NAME_PATTERN
 from joshua_shared.log import get_logger
 
 from joshua_core.admin import authorize_settings
+from joshua_core.developer import FALSE_WORDS, SKIP_APPROVAL_KEY, TRUE_WORDS
 from joshua_core.push import PRIVATE_KEY, PUBLIC_KEY, SUBJECT_KEY
 from joshua_core.store.settings import (
     KEY_MAX,
@@ -161,6 +163,22 @@ def _check_default_servers(value: str) -> str:
     )
 
 
+def _check_skip_approval(value: str) -> str:
+    """``developer.pr_skip_approval``: a switch, so a yes, a no, or empty.
+
+    The switch of the page writes ``true`` or ``false``. A word the prompt
+    cannot read as either would leave the approval on and say nothing, so it is
+    refused here.
+    """
+    text = value.strip().lower()
+    if not text or text in TRUE_WORDS or text in FALSE_WORDS:
+        return ""
+    return (
+        f"{SKIP_APPROVAL_KEY} is a switch: write true or false. "
+        "Empty, and anything false, asks the owner before a pull request is opened"
+    )
+
+
 # The check of each setting that has one, by key. A key with no check here
 # takes any text the route accepts.
 CHECKS: dict[str, Callable[[str], str]] = {
@@ -169,6 +187,7 @@ CHECKS: dict[str, Callable[[str], str]] = {
     PRIVATE_KEY: _check_private_key,
     REPO_SETTING: _check_update_repo,
     DEFAULT_SERVERS_SETTING: _check_default_servers,
+    SKIP_APPROVAL_KEY: _check_skip_approval,
 }
 
 

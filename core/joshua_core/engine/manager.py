@@ -30,6 +30,8 @@ from joshua_shared.log import get_logger
 
 from joshua_core.attachments import file_attachment
 from joshua_core.delivery import VOICE_CHANNEL_TYPE
+from joshua_core.developer import SERVER as DEVELOPER_SERVER
+from joshua_core.developer import approval_required
 from joshua_core.engine import inference as inference_plan
 from joshua_core.engine import workspace as workspace_engine
 from joshua_core.engine.describe import (
@@ -553,6 +555,11 @@ class ConversationManager:
             header_person = acting
         resume = self._resume_on(conversation, resume, resolved)
         memory = self._memory_block(person, channel)
+        # The approval of a pull request is read only for a session that holds
+        # the developer server, so a session without it reads no setting.
+        pr_approval = (
+            await approval_required(self._repo) if DEVELOPER_SERVER in gateway_names else True
+        )
         system_prompt = self._composer.compose(
             profile,
             person,
@@ -560,6 +567,7 @@ class ConversationManager:
             memory,
             servers=gateway_names,
             new_day=self._after_rollover(conversation),
+            pr_approval=pr_approval,
         )
         mem_paths = memory_prompt.source_paths(person, channel, self._data_dir)
         mem_mtime = memory_prompt.newest_mtime(mem_paths)

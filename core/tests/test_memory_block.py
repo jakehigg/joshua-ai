@@ -131,7 +131,9 @@ class SpyComposer:
     def __init__(self) -> None:
         self.calls = 0
 
-    def compose(self, profile, person, channel, memory=None, servers=(), new_day=False) -> str:
+    def compose(
+        self, profile, person, channel, memory=None, servers=(), new_day=False, pr_approval=True
+    ) -> str:
         self.calls += 1
         return "you are joshua"
 
