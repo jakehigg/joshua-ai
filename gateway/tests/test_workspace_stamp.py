@@ -322,6 +322,39 @@ def _text_only(payload: dict) -> CallToolResult:
             {"result": {"path": "documents/alex/x.md", "created": True}},
             [("document", "documents/alex/x.md", "X", "/documents/alex/x")],
         ),
+        (
+            "files",
+            "write_file",
+            {"path": "wiki/projects/solar.md", "content": "x"},
+            {"path": "wiki/projects/solar.md", "bytes": 1},
+            [("wiki", "wiki/projects/solar.md", "", "/wiki/projects/solar.md")],
+        ),
+        (
+            "documents",
+            "promote_document",
+            {"path": "documents/alex/soup.md", "wiki_path": "wiki/recipes/soup.md"},
+            {
+                "path": "documents/alex/soup.md",
+                "wiki_path": "wiki/recipes/soup.md",
+                "bytes": 9,
+                "status": "archived",
+            },
+            [("wiki", "wiki/recipes/soup.md", "", "/wiki/recipes/soup.md")],
+        ),
+        (
+            "files",
+            "save_attachment",
+            {"path": "people/alex/attachments/2026/08/bill.pdf"},
+            {"path": "wiki/attachments/2026/08/bill-ab12cd.pdf", "link": "![bill](...)"},
+            [
+                (
+                    "file",
+                    "wiki/attachments/2026/08/bill-ab12cd.pdf",
+                    "bill-ab12cd.pdf",
+                    "/wiki/attachments/2026/08/bill-ab12cd.pdf",
+                )
+            ],
+        ),
     ],
 )
 def test_the_map_reads_each_real_result_shape(server, tool, args, reply, expected):
@@ -342,6 +375,24 @@ def test_a_refusal_and_an_unknown_tool_add_nothing_from_the_map():
     assert (
         workspace_items.items_for(
             "developer", "develop", {}, CallToolResult(content=[], is_error=True)
+        )
+        == []
+    )
+
+
+def test_a_write_outside_the_wiki_and_a_copy_outside_it_add_nothing():
+    """The two mappers of the files server read the path of the reply, and both
+    want a path in the wiki."""
+    assert workspace_items.items_for("files", "write_file", {}, _structured({"path": "a.md"})) == []
+    assert (
+        workspace_items.items_for(
+            "files", "save_attachment", {}, _structured({"path": "people/alex/a.pdf"})
+        )
+        == []
+    )
+    assert (
+        workspace_items.items_for(
+            "documents", "promote_document", {}, _structured({"path": "documents/alex/a.md"})
         )
         == []
     )

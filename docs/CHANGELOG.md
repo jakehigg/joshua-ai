@@ -58,6 +58,12 @@ with the images and the packaged chart, are at
   session can read. A single message past 4000 characters is cut, and the text
   says so. The rows before those turns stay short lines, and the handoff and
   the pointer to `search_history` and `read_history` are unchanged.
+- **The Items panel also holds a wiki page, a promoted document, and a saved
+  file.** A page written with `write_file`, the page a document becomes with
+  `promote_document`, and a file copied into the wiki with `save_attachment`
+  were made in a workspace thread and showed nowhere. Each one is now an item
+  of that workspace, with a link that opens it. `docs/workspaces.md` lists
+  every way a thing is made in a workspace turn and what records it.
 
 ### Assignments
 

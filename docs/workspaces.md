@@ -460,6 +460,37 @@ It shows what a workspace costs.
 Joshua adds items without being asked, from the tool calls of a workspace
 thread. The gateway does this. It adds no container.
 
+### What records an item
+
+Every way a thing is made or found in a workspace turn, with the code that
+records it. A row that records nothing says why: the recorder never runs for
+it, it runs and has no rule for that kind, or the thing needs a choice that is
+not made yet.
+
+| What is made or found | Where it is made | Item |
+|---|---|---|
+| an output of an assignment run: a `document`, an `artifact`, a plan | `assignments/.../sdk_runner.py`, `Run.record_output` and `Run._record_item`, with `workspace_items.item_of` | `document`, `artifact` or `plan`, when the spec holds a workspace |
+| an output of a kind core does not know | the same | a `link` item, with the url when the ref is an address |
+| the report of a run | `assignments/.../sdk_runner.py`, `Run.write_report` | none, and none is wanted: the report is on the page of the assignment, which the `assignment` item opens |
+| the run itself | `gateway/.../workspace_items.py`, `_assignment` | `assignment`, with the page of the run |
+| a document by `write_document`, and an `.html` artifact | `gateway/.../workspace_items.py`, `_document` | `document`, or `artifact` for an `.html` file |
+| a wiki page by `write_file` | `gateway/.../files_mcp/server.py`, `write_wiki_page` | `wiki`, from `_wiki_file` |
+| a page promoted by `promote_document` | `gateway/.../documents_mcp/server.py`, `_promote_document` | `wiki` for the new page, from `_promoted` |
+| a wiki page by the `joshua` or `wiki` addon | the addon's `write_page` | `wiki`, from `_wiki` |
+| a file saved by `save_attachment` | `gateway/.../files_mcp/server.py`, `_save_attachment` | `file`, from `_attachment` |
+| an entry by `write_journal_entry` | `gateway/.../files_mcp/server.py`, `_write_journal_entry` | none: the journal is Joshua's own memory, not a thing the workspace collects |
+| a tasks project by `create_project` | the `tasks` addon | `tasks_project`, from `_project` |
+| a task by `create_task` | the `tasks` addon | **none.** The map has no rule for the tool: the addon is outside this repository, and the keys of its reply are not known here. |
+| a developer task by `develop` or `rework` | the `developer` addon | `developer_task`, from `_developer` |
+| the pull request of a developer task | the addon, after the task ends | **none.** The recorder never runs: the pull request comes back as an event on `POST /v1/events` with the workspace, not as the result of a tool call. |
+| a file a person sends in the thread | `channels`, which stores it under `people/<id>/attachments/` | **none.** The recorder never runs: a person's message is no tool call. |
+| a `resource_link` of any MCP server | `gateway/.../workspace_items.py`, `link_items` | `link`, one per block, up to 20 |
+| anything Joshua collects itself | `core/.../engine/tools/workspace.py`, `do_add_to_workspace` | the kind the call names |
+
+The three rows with no item wait on a choice. A task of the addon needs the
+keys of its reply, a pull request needs an item on the event route, and a file
+a person sends needs a rule for which attachment of a turn is worth an item.
+
 A session of a workspace sends `X-Joshua-Workspace: <workspace id>` to the
 gateway on every MCP server, and the gateway trusts the header only from
 `gateway.person_header_callers`, as it does the conversation header. The header
@@ -478,6 +509,9 @@ this in the background and never fails the call: a failed post is a log line.
   | Server | Tool | Item |
   |---|---|---|
   | `documents` | `write_document` | `document`, or `artifact` for an `.html` file. `ref` is the path, and `url` is `/documents/<owner>/<slug>`. |
+  | `documents` | `promote_document` | `wiki` for the page the document became. `ref` and `url` are the `wiki_path`. |
+  | `files` | `write_file` | `wiki`. `ref` and `url` are the path, which names the root (`wiki/<path>.md`). |
+  | `files` | `save_attachment` | `file` for the copy in the wiki. `ref` and `url` are the path, and `title` is the name of the file. |
   | `joshua` or `wiki` | `write_page` | `wiki`. `ref` is the path, and `url` is `/wiki/<path>`. |
   | `tasks` | `create_project` | `tasks_project`. `ref` is the slug. |
   | `developer` | `develop`, `rework` | `developer_task`. `ref` is the `task_id`. |
