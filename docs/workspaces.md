@@ -635,8 +635,9 @@ waiting carries no charm at all.
 
 - **Working.** Joshua has something in flight for this workspace: a turn of the
   thread, or an assignment that is running.
-- **Waiting.** Something of it needs a person: an assignment that stopped with
-  a question or a request, or a draft that waits for a start.
+- **Waiting.** Something of it asks the person: an assignment that stopped with
+  a question or a request. A draft is no charm: it asks nothing, so a
+  workspace whose only open item is a draft carries none.
 
 Working wins over waiting: Joshua is on it, so the person has nothing to do
 yet. Hover or tap gives one line of what it is, such as `assignment 31 has a
@@ -651,7 +652,8 @@ the runs and the drafts of the signed-in person with the workspace of each. A
 source that is not configured, or that does not answer, is left out, so the
 charm is what the other sources say and never an error. An assignment paused at
 the subscription limits carries no charm: it waits for a window to reset, which
-needs no person, and nothing of it is running.
+needs no person, and nothing of it is running. A draft carries no charm either:
+it waits for a person to start it, which is not a question to answer.
 
 **The developer addon is not a source yet.** It has no read route for the jobs
 of a workspace, so a developer task in flight, or one that asked a question,

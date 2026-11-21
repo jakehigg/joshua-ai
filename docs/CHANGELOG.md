@@ -6,6 +6,20 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Assignments
+
+- **A draft no longer holds a workspace in "waiting".** The charm beside the
+  name of a workspace said "waiting" for an unstarted draft, which asks the
+  person nothing, so nothing could clear it. Waiting is now a question of an
+  assignment alone, and a workspace whose only open item is a draft carries no
+  charm. A workspace with a job in flight shows the working charm, whatever
+  else waits.
+- **A draft made in a workspace starts.** `start_assignment(id=...)` refused
+  it as `invalid_spec`, because the stamp of the workspace in the stored spec
+  is no field of a spec. The start takes the stamp off before the check and
+  puts it back after it, so the run reports to the workspace the draft was
+  asked for. A start from another workspace moves the run to that one.
+
 ### Chat
 
 - **The Model select of a workspace lists each model of the instance.** It

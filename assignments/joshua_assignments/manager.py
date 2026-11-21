@@ -23,7 +23,9 @@ with the same ``busy`` refusal, and clears the open request.
 
 A draft, like a run, keeps the workspace it was asked for
 (``stamp_workspace``): it waits there for a start, and a new spec does not
-move it.
+move it. The stamp is no field of the spec, so a start takes it off the stored
+spec before the check and puts it back after it (``without_workspace``). A
+start from another workspace moves the run to that one.
 
 A draft takes a new spec with ``update_draft``. ``delete_draft`` only
 removes it from view (``deleted_at``), and ``restore`` brings it back. A row
@@ -213,6 +215,25 @@ def stamp_workspace(
             spec["workspace_people"] = list(dict.fromkeys(people))
     else:
         spec.pop("workspace", None)
+
+
+def without_workspace(spec: Mapping[str, Any]) -> tuple[dict[str, Any], str | None, list[str]]:
+    """``spec`` with no stamp of a workspace, and the stamp it held.
+
+    The stamp is not a field of ``AssignmentSpec``, which refuses a field it
+    does not declare, so a stored spec gives the stamp up before a check and
+    takes it again after it (``stamp_workspace``).
+    """
+    out = dict(spec)
+    workspace = out.pop("workspace", None)
+    people = out.pop("workspace_people", None)
+    return (
+        out,
+        workspace if isinstance(workspace, str) and workspace else None,
+        [person for person in people if isinstance(person, str)]
+        if isinstance(people, list)
+        else [],
+    )
 
 
 def may_read(row: Mapping[str, Any] | None, person: str | None) -> bool:
@@ -852,7 +873,10 @@ class Manager:
     ) -> dict[str, Any]:
         """Start the draft ``row`` as itself: the run keeps the id of the draft.
 
-        Its spec is checked again, as the config can change."""
+        Its spec is checked again, as the config can change. A draft asked for
+        in a workspace keeps that workspace, so a start from anywhere reports
+        there; a start from another workspace moves the run to the one the
+        person is in."""
         if row.get("deleted_at") is not None:
             return rejected(
                 "deleted",
@@ -862,11 +886,15 @@ class Manager:
             )
         if row["status"] != DRAFT:
             return self._not_a_draft(row)
-        checked = self._check(row.get("spec") or {})
+        spec, kept, kept_people = without_workspace(row.get("spec") or {})
+        checked = self._check(spec)
         if isinstance(checked, dict):
             return checked
         _, resolved = checked
-        stamp_workspace(resolved.spec, workspace, workspace_people)
+        if workspace:
+            stamp_workspace(resolved.spec, workspace, workspace_people)
+        else:
+            stamp_workspace(resolved.spec, kept, kept_people)
         refused = await self._refuse_unknown_limits(resolved.spec)
         if refused is not None:
             return refused

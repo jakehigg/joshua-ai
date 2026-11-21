@@ -438,7 +438,8 @@ restore_assignment(id=14)
 - `start_assignment(id=...)` checks the spec again, because the
   configuration can change, then starts the draft as a new run with the same
   id. The run is the row of the draft, so the definition that the person
-  read is the definition that runs.
+  read is the definition that runs. A draft asked for in a workspace starts
+  the same way, and the run reports to that workspace.
 - `start_assignment(spec=...)` is refused with `drafts_open` while the
   person has drafts, and the refusal lists them. Joshua starts the draft
   that the person means by its id. `new: true` starts a spec for a job that
@@ -1318,9 +1319,11 @@ comment      = {"id": int, "target": "definition"|"plan"|"report", "line_no": in
   of the person that shares the root with this one, the oldest first, at
   most 50, this one too. A run with no re-run has only itself.
 - `workspace` is the id of the workspace that started the run, or null for a
-  run outside a workspace. A draft keeps the workspace it was asked for, and a
-  new spec does not move it. The viewer reads it for the charm beside the name
-  of that workspace ([workspaces.md](workspaces.md#the-charm-beside-the-name)).
+  run outside a workspace. A draft keeps the workspace it was asked for: a new
+  spec does not move it, and a start from anywhere reports there. A start from
+  another workspace moves the run to that one. The viewer reads it for the
+  charm beside the name of that workspace, which a run carries and a draft does
+  not ([workspaces.md](workspaces.md#the-charm-beside-the-name)).
 - `open_request` is the open request of the worker, or null. A question
   (`ask`) is a request of kind `info`. The viewer shows a request for a
   repository or a file in the notice band of the page, with its kind, its

@@ -66,25 +66,45 @@ def charms(rows: list[dict[str, Any]], assignments: va.AssignmentsClient | None)
     return asyncio.run(vw.charms("alex", rows, assignments=assignments))
 
 
+def waiting(**fields: Any) -> dict[str, Any]:
+    """An assignment that asked the person a question."""
+    return assignment(id=36, status="waiting", open_question="Which invoice?", **fields)
+
+
 def test_working_wins_over_waiting_when_both_are_true_of_one_workspace() -> None:
-    """A run in flight (``turn_in_flight``) and a draft that waits for a
-    start, both of the same workspace: the working charm wins."""
+    """A turn in flight (``turn_in_flight``) and an assignment with a
+    question, both of the same workspace: the working charm wins."""
     rows = [row(turn_in_flight=True)]
-    client = client_of(draft=[assignment(id=36, status="draft", state="draft")])
+    client = client_of(in_progress=[waiting()])
     marks = charms(rows, client)
     assert marks[WS] == vw.Charm(vw.WORKING, vw.TURN_REASON)
 
 
 def test_working_wins_over_waiting_from_the_assignments_source_alone() -> None:
-    """The same workspace with a draft (waiting) and a run (working), both
-    from the assignments source: working still wins."""
+    """The same workspace with an assignment that asks (waiting) and a run
+    (working), both from the assignments source: working still wins."""
     rows = [row()]
-    client = client_of(
-        draft=[assignment(id=36, status="draft", state="draft")],
-        in_progress=[assignment()],
-    )
+    client = client_of(in_progress=[waiting(), assignment()])
     marks = charms(rows, client)
     assert marks[WS] == vw.Charm(vw.WORKING, "assignment 31 is running")
+    # The other order of the same two gives the same charm.
+    client = client_of(in_progress=[assignment(), waiting()])
+    assert charms(rows, client)[WS] == vw.Charm(vw.WORKING, "assignment 31 is running")
+
+
+def test_an_assignment_that_asks_gives_the_waiting_charm() -> None:
+    """A question of an assignment is what waiting means."""
+    marks = charms([row()], client_of(in_progress=[waiting()]))
+    assert marks[WS] == vw.Charm(vw.WAITING, "assignment 36 has a question")
+
+
+def test_a_draft_alone_gives_no_charm() -> None:
+    """An unstarted draft asks the person nothing, so the workspace of it
+    carries no charm: a person could not clear one."""
+    client = client_of(draft=[assignment(id=36, status="draft", state="draft")])
+    assert charms([row()], client) == {}
+    # With a turn in flight, the charm is that turn and nothing of the draft.
+    assert charms([row(turn_in_flight=True)], client)[WS] == vw.Charm(vw.WORKING, vw.TURN_REASON)
 
 
 def test_a_source_that_is_absent_leaves_the_other_sources() -> None:
