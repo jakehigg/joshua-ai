@@ -14,7 +14,9 @@
 // and the item column, each with a « or » button in its header, and a » button
 // in the chat header that brings it back. The focus button, and Ctrl or
 // Cmd + \, fold them all or open them all (panels.ts keeps the choice per
-// browser). The phone sheets below do not use this state.
+// browser). The phone sheets below do not use this state. The divider beside
+// each open panel is a handle: a drag gives that panel another width, and the
+// conversation takes the rest (Divider.tsx, widths.ts).
 //
 // A message that Joshua has accepted is Joshua's: closing the page or losing
 // the signal does not stop the turn. The history says which turn is `pending`
@@ -94,12 +96,14 @@ import {
   useDocumentPanelState,
 } from "./DocumentPanel";
 import { rememberPerson } from "./Home";
+import { Divider } from "./Divider";
 import { MessageList } from "./MessageList";
 import { validPerson } from "./people";
 import { EMPTY_VIEW, type ChatMessage, type View } from "./store";
 import { useHistory } from "./useHistory";
 import { useTurn, type Upload } from "./useTurn";
 import { useKeyboardFit } from "./viewport";
+import { usePanelWidths } from "./widths";
 
 const TOAST_MS = 6000;
 // How long the page waits for a broken stream's turn to show in the history.
@@ -145,6 +149,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
   const panels = usePanels();
+  const widths = usePanelWidths();
   const openDrawer = useNavDrawer();
   const [itemsOpen, setItemsOpen] = useState(false);
   const [itemsKey, setItemsKey] = useState(0);
@@ -337,7 +342,10 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
 
   return (
     <DocumentPanelProvider panel={panel}>
-      <div className={`chat-screen${sheetOpen ? " sheet-open" : ""}${itemsCollapsed ? " items-collapsed" : ""}`}>
+      <div
+        className={`chat-screen${sheetOpen ? " sheet-open" : ""}${itemsCollapsed ? " items-collapsed" : ""}`}
+        style={widths.style}
+      >
         {itemsOpen && (
           <div className="scrim scrim-items" data-testid="items-backdrop" onClick={() => setItemsOpen(false)} />
         )}
@@ -447,6 +455,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
             </div>
           )}
         </div>
+        {ws && !itemsCollapsed && <Divider panel="items" label="Resize the items column" />}
         {ws && (
           <ItemPanel
             workspace={ws.id}
@@ -460,6 +469,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
             }}
           />
         )}
+        {panelOpen && <Divider panel="doc" label="Resize the document panel" />}
         {panel.shown && (
           <DocumentPanel
             artifact={panel.shown}

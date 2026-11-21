@@ -404,6 +404,24 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 }
 
 
+/* The handle of a divider between two panes: a drag changes the width of the
+   panel beside it, and the conversation takes the rest (Divider.tsx). It
+   shows where its panel is a column of the row — the document panel from
+   900px, the items column from 1100px — because narrower than that the panel
+   is a drawer or a sheet, with no divider to drag. */
+.chat-screen .panel-divider {
+  display: none;
+  flex: none;
+  width: 7px;
+  margin: 0 -3px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+}
+.chat-screen .panel-divider:hover,
+.chat-screen .panel-divider:focus-visible { background: var(--j-accent-soft); }
+
+
 /* The document panel: the viewer's own page in a frame. On a phone it is a
    sheet over the conversation, not a squeezed column; the conversation stays
    mounted behind it and keeps its scroll position. */
@@ -463,10 +481,12 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 /* Wide enough for two columns: the panel stands beside the conversation
    instead of over it. */
 @media (min-width: 900px) {
+  .chat-screen .panel-divider.doc { display: block; }
+
 .chat-screen .doc-panel {
     position: relative;
     inset: auto;
-    flex: 0 0 var(--j-panel-doc);
+    flex: 0 0 var(--doc-w, var(--j-panel-doc));
     min-width: 0;
     border-left: 1px solid var(--j-line);
   }
@@ -1007,7 +1027,8 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 .chat-screen .item-add input { font: inherit; color: inherit; background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: 8px; padding: 6px 8px; }
 
 @media (min-width: 1100px) {
-  .chat-screen .items { position: static; display: flex; flex: 0 0 var(--j-panel-items); width: auto; }
+  .chat-screen .panel-divider.items { display: block; }
+  .chat-screen .items { position: static; display: flex; flex: 0 0 var(--items-w, var(--j-panel-items)); width: auto; }
   .chat-screen .items-toggle,
   .chat-screen .items-close { display: none; }
 }
