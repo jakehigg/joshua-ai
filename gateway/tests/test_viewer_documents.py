@@ -414,7 +414,8 @@ def test_the_documents_fit_a_phone() -> None:
     assert ".a-card-unit > details.a-add[open], .a-card-unit > .a-comment" in css
     phone = css[css.index("@media (max-width: 560px)") :]
     assert "iframe.d-frame { min-height: 60vh; }" in phone
-    assert "overflow-wrap: anywhere" in css[css.index("ol.d-versions") :][:200]
+    ui = (Path(viewer.__file__).parent / "ui" / "joshua-ui.css").read_text()
+    assert ".j-wrap { overflow-wrap: anywhere; }" in ui
 
 
 def test_the_time_of_a_file_is_used_with_no_updated(data) -> None:

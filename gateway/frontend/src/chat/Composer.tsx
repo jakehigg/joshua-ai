@@ -1,10 +1,10 @@
 // The text box and the Send button, in one rounded pill: the paperclip inside
 // at the left, the round send button (an up arrow) inside at the right.
 //
-// With a mouse or trackpad (a fine pointer), Enter sends and Shift+Enter adds
-// a new line. On a touch screen a keyboard has no Shift+Enter, so Enter adds a
-// new line there and the send button sends. Enter does not send while an IME
-// composition is in progress.
+// On a device with a hardware keyboard, Enter sends and Shift+Enter adds a new
+// line. A touch keyboard has no Shift+Enter, so there the return key adds a
+// new line and the send button sends. The button sends in every case, and
+// Enter does not send while an IME composition is in progress.
 // The box is one line when empty and grows to MAX_ROWS rows, then scrolls. The hidden file input is out of the tab order, so the keyboard's
 // "next field" arrow on a phone does not stop at it. A text
 // over MAX_CHARS characters cannot be sent; the counter shows past
@@ -220,7 +220,11 @@ export function Composer({ onSend, busy }: Props) {
     ref.current?.focus();
   };
 
-  const finePointer = useMedia("(pointer: fine)");
+  // A fine pointer anywhere — a mouse, a trackpad, the trackpad of a keyboard
+  // case — means a keyboard of its own, with a Shift key. It is not always the
+  // primary pointer: a tablet in a keyboard case is `(pointer: coarse)` and
+  // `(any-pointer: fine)` at once.
+  const keyboard = useMedia("(any-pointer: fine)");
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -229,7 +233,7 @@ export function Composer({ onSend, busy }: Props) {
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter" || e.shiftKey) return;
-    if (!finePointer) return;
+    if (!keyboard) return;
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     e.preventDefault();
     submit();
@@ -256,7 +260,7 @@ export function Composer({ onSend, busy }: Props) {
           aria-label="Message to Joshua"
           aria-invalid={tooLong || undefined}
           aria-describedby={count > COUNTER_FROM ? "composer-count" : undefined}
-          enterKeyHint={finePointer ? "send" : "enter"}
+          enterKeyHint={keyboard ? "send" : "enter"}
         />
         <button type="submit" className="send" disabled={!canSend} aria-label="Send">
           <SendIcon />

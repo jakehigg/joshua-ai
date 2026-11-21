@@ -304,7 +304,10 @@ def test_the_definition_fits_a_phone() -> None:
     assert ".a-prop > .a-unit-body { grid-template-columns: minmax(0, 1fr);" in phone
     rule = css[css.index(".a-unit {") :]
     rule = rule[: rule.index("}")]
-    assert "min-width: 0" in rule and "overflow-wrap: anywhere" in rule
+    assert "min-width: 0" in rule
+    # One rule wraps a long word for the whole app, and the content column
+    # carries it, so every unit of the definition inherits it.
+    assert ".j-wrap { overflow-wrap: anywhere; }" in ui
     assert "minmax(0, 1fr)" in css[css.index(".a-prop > .a-unit-body {") :][:200]
     assert ".a-tags { display: flex; flex-wrap: wrap;" in css
     assert "overflow-x: auto" in ui[ui.index(".j-prose pre {") :][:300]

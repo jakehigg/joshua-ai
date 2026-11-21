@@ -1,13 +1,15 @@
 // The app-wide navigation links: the sections of the session, the links
-// group, "Profile", "Admin" for the owner, and "Reload". The sidebar draws them, and on a phone
-// in the chat the rail draws them too, under its workspaces, so the phone has
-// one drawer for both (Rail.tsx). The shell puts `sections` and `section` in
-// a context so the rail can read them without a second session call.
+// group, "Profile", "Admin" for the owner, and "Reload". The sidebar draws
+// them, as a column from 760px and as the drawer of the phone below it. Under
+// the Chat item it draws the one list of threads (ChatList.tsx). The shell
+// puts `sections` and `section` in a context, so a screen can read them
+// without a second session call.
 
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { requestReload } from "../pwa";
+import ChatList from "./ChatList";
 import Icon from "./Icon";
 import LinksNav from "./LinksNav";
 import { ADMIN_ICON, ME_ICON, RELOAD_ICON, section as sectionOf } from "./sections";
@@ -23,6 +25,9 @@ export const ME_SECTION = "me";
 
 /** The key of the admin area, which only the owner sees in the navigation. */
 export const ADMIN_NAV = "admin";
+
+/** The key of the chat section, which carries the list of the threads. */
+export const CHAT_SECTION = "chat";
 
 export interface NavState {
   sections: SessionSection[];
@@ -115,28 +120,27 @@ export default function AppNav({
   section,
   owner = false,
   onNavigate,
-  omit = [],
 }: NavState & {
   onNavigate?: () => void;
-  /** Section keys not to draw: the rail of the chat has its own Chat entry. */
-  omit?: string[];
 }) {
   return (
     <>
       <nav className="v-sections" aria-label="Sections">
-        {sections
-          .filter((item) => !omit.includes(item.key))
-          .map((item) => (
-          <NavItem
-            key={item.key}
-            path={item.path}
-            migrated={isMigrated(item.key)}
-            mark={current(item.key, section)}
-            onNavigate={onNavigate}
-          >
-            <Icon paths={iconOf(item.key)} />
-            {item.label}
-          </NavItem>
+        {sections.map((item) => (
+          <div key={item.key} className="v-section">
+            <NavItem
+              path={item.path}
+              migrated={isMigrated(item.key)}
+              mark={current(item.key, section)}
+              onNavigate={onNavigate}
+            >
+              <Icon paths={iconOf(item.key)} />
+              {item.label}
+            </NavItem>
+            {item.key === CHAT_SECTION && (
+              <ChatList chatPath={item.path} onNavigate={onNavigate} />
+            )}
+          </div>
         ))}
       </nav>
       <LinksNav section={section} />

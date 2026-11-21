@@ -86,7 +86,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   }
 
   return (
-    <div className="v-code">
+    <div className="v-code j-code-block">
       <button className="j-btn sm v-code-copy" type="button" onClick={copy}>
         {copied ? "copied" : "copy"}
       </button>

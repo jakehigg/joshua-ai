@@ -29,6 +29,9 @@ const ITEMS = [
   item({ id: "b", kind: "wiki", ref: "w", title: "Menu notes", url: "/wiki/menu.md" }),
   item({ id: "c", kind: "pr", ref: "p", title: "Fix the thing", url: "https://github.com/a/b/pull/1" }),
   item({ id: "d", kind: "tasks_project", ref: "trip-plan", title: "Trip plan" }),
+  item({ id: "e", kind: "file", ref: "wiki/photo.jpg", title: "Photo", url: "/api/v1/files/wiki/photo.jpg" }),
+  item({ id: "f", kind: "file", ref: "wiki/plan.pdf", title: "Plan", url: "/api/v1/files/wiki/plan.pdf" }),
+  item({ id: "g", kind: "task", ref: "t-7", title: "Call the installer", url: "https://tasks.test/t-7" }),
 ];
 
 function backend() {
@@ -89,71 +92,42 @@ describe("sheets on the chat screen", () => {
     expect(document.querySelector(".items.open")).toBeNull();
   });
 
-  it("closes the rail on the backdrop, the close button, Escape and a pick", async () => {
+  it("opens the one navigation drawer from the chat header, and a link closes it", async () => {
     await open();
-    const burger = screen.getByRole("button", { name: "Show the workspaces", hidden: true });
+    const burger = screen.getByRole("button", { name: "Show the navigation", hidden: true });
     fireEvent.click(burger);
-    expect(document.querySelector(".rail.open")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("rail-backdrop"));
-    expect(document.querySelector(".rail.open")).toBeNull();
-
-    fireEvent.click(burger);
-    fireEvent.click(screen.getByRole("button", { name: "Close the workspaces", hidden: true }));
-    expect(document.querySelector(".rail.open")).toBeNull();
-
-    fireEvent.click(burger);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(document.querySelector(".rail.open")).toBeNull();
-
-    fireEvent.click(burger);
-    fireEvent.click(screen.getByRole("button", { name: "+ New workspace", hidden: true }));
-    expect(document.querySelector(".rail.open")).toBeNull();
-
-    fireEvent.click(burger);
-    fireEvent.click(screen.getByRole("link", { name: "Chat", hidden: true }));
-    expect(document.querySelector(".rail.open")).toBeNull();
-  });
-
-  it("has one toggle on a phone, and its drawer holds the workspaces and the app links", async () => {
-    await open();
-    expect(screen.queryByRole("button", { name: "Show the navigation" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show the workspaces", hidden: true }));
-    const rail = document.querySelector(".rail.open") as HTMLElement;
-    expect(within(rail).getByRole("link", { name: "Solar install", hidden: true })).toBeTruthy();
-    expect(within(rail).getByRole("button", { name: "+ New workspace", hidden: true })).toBeTruthy();
-    expect(await within(rail).findByRole("link", { name: "Wiki", hidden: true })).toBeTruthy();
-    expect(within(rail).getByRole("link", { name: "Profile", hidden: true })).toBeTruthy();
-    // Chat is the first entry of the rail, so the app links do not repeat it,
-    // and only the thread on screen is lit.
-    expect(within(rail).getAllByRole("link", { name: "Chat", hidden: true })).toHaveLength(1);
-    const lit = [...rail.querySelectorAll("[aria-current]")].map((el) => el.textContent);
-    expect(lit).toEqual(["Solar install"]);
+    const drawer = document.querySelector(".j-sidebar.open") as HTMLElement;
+    expect(await within(drawer).findByRole("link", { name: "Wiki", hidden: true })).toBeTruthy();
+    expect(within(drawer).getByRole("link", { name: "Profile", hidden: true })).toBeTruthy();
     // The drawer takes the focus on its close button, not on a link.
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close the workspaces", hidden: true }));
-    // A tap on an app link closes the drawer.
-    fireEvent.click(within(rail).getByRole("link", { name: "Wiki", hidden: true }));
-    expect(document.querySelector(".rail.open")).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Close the navigation", hidden: true }),
+    );
+    // Escape closes it, and the hamburger of the chat header takes the focus
+    // back, though it is no child of the shell.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.querySelector(".j-sidebar.open")).toBeNull();
+    expect(document.activeElement).toBe(burger);
+
+    // A tap on a link of the drawer closes it too.
+    fireEvent.click(burger);
+    fireEvent.click(within(drawer).getByRole("link", { name: "Wiki", hidden: true }));
+    expect(document.querySelector(".j-sidebar.open")).toBeNull();
   });
 
   it("has a single top bar on a phone: the menu, the title and the items button", async () => {
     await open();
     const header = document.querySelector(".chat-header") as HTMLElement;
-    expect(within(header).getByRole("button", { name: "Show the workspaces", hidden: true })).toBeTruthy();
+    expect(within(header).getByRole("button", { name: "Show the navigation", hidden: true })).toBeTruthy();
     expect(within(header).getByRole("heading", { name: "Solar install" })).toBeTruthy();
     expect(within(header).getByRole("button", { name: "Items" })).toBeTruthy();
     // The app bar is drawn, and hidden by CSS on a phone; it holds no menu
     // button and no search of its own on this page.
-    expect(screen.queryByRole("button", { name: "Show the navigation" })).toBeNull();
+    expect(document.querySelector(".j-appbar .j-nav-toggle")).toBeNull();
     expect(document.querySelector(".j-appbar input")).toBeNull();
     expect(document.querySelector(".j-shell.fill")).not.toBeNull();
-  });
-
-  it("keeps one sheet open: the rail closes the items", async () => {
-    await open();
-    fireEvent.click(document.querySelector(".ws-header-actions button") as HTMLButtonElement);
-    fireEvent.click(screen.getByRole("button", { name: "Show the workspaces", hidden: true }));
-    expect(document.querySelector(".items.open")).toBeNull();
-    expect(document.querySelector(".rail.open")).toBeTruthy();
+    // The chat screen draws no list of workspaces of its own.
+    expect(document.querySelector(".chat-screen .v-chats")).toBeNull();
   });
 
   it("opens a document item in the panel, closes the items, and Escape closes the panel", async () => {
@@ -188,6 +162,64 @@ describe("sheets on the chat screen", () => {
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
+  it("serves every kind of item in the one sheet", async () => {
+    await open();
+    const show = async (name: string) =>
+      fireEvent.click(await screen.findByRole("button", { name, hidden: true }));
+    const close = () => fireEvent.keyDown(document, { key: "Escape" });
+
+    // A document and an HTML artifact: the document page of the viewer, which
+    // is where the sandbox of an artifact lives.
+    await show("Garden plan");
+    expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan?embed=1");
+    close();
+    await show("Mockup");
+    expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan-mockup?embed=1");
+    close();
+
+    // A wiki page, and a PDF the viewer serves: both are framed.
+    await show("Menu notes");
+    expect(frame()?.getAttribute("src")).toBe("/wiki/menu.md");
+    close();
+    await show("Plan");
+    expect(frame()?.getAttribute("src")).toBe("/api/v1/files/wiki/plan.pdf");
+    close();
+
+    // A photo, full size in the sheet.
+    await show("Photo");
+    expect(screen.getByAltText("Photo").getAttribute("src")).toBe("/api/v1/files/wiki/photo.jpg");
+    close();
+
+    // A task and a link of another site: a card with the address.
+    await show("Call the installer");
+    expect((document.querySelector(".doc-panel") as HTMLElement).textContent).toContain("Task");
+    expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe(
+      "https://tasks.test/t-7",
+    );
+    close();
+    await show("Fix the thing");
+    expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe(
+      "https://github.com/a/b/pull/1",
+    );
+    close();
+    await act(async () => undefined);
+  });
+
+  it("keeps the thread and what is typed in it while an item is open", async () => {
+    await open();
+    const thread = document.querySelector(".list") as HTMLElement;
+    const composer = screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "half a question" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Garden plan", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close the document" }));
+    // The conversation stayed mounted behind the sheet, so it keeps where it
+    // was scrolled to and what was typed.
+    expect(document.querySelector(".list")).toBe(thread);
+    expect((screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement).value).toBe(
+      "half a question",
+    );
+  });
+
   it("shows a card for an item with no url", async () => {
     await open();
     fireEvent.click(await screen.findByRole("button", { name: "Trip plan", hidden: true }));
@@ -200,21 +232,13 @@ describe("sheets on the chat screen", () => {
 });
 
 describe("the side columns on a desktop", () => {
-  const rail = () => document.querySelector(".rail") as HTMLElement;
   const items = () => document.querySelector(".items") as HTMLElement;
   const shell = () => document.querySelector(".j-shell") as HTMLElement;
   const click = (name: string) =>
     fireEvent.click(screen.getByRole("button", { name, hidden: true }));
 
-  it("folds and opens the rail, the items and the sidebar with their buttons", async () => {
+  it("folds and opens the items and the sidebar with their buttons", async () => {
     await open();
-    expect(rail().className).not.toContain("collapsed");
-    click("Hide the workspaces");
-    expect(rail().className).toContain("collapsed");
-    expect(screen.getByRole("button", { name: "Open the workspaces column", hidden: true })).toBeTruthy();
-    fireEvent.click(document.querySelector(".rail-expand") as HTMLButtonElement);
-    expect(rail().className).not.toContain("collapsed");
-
     click("Hide the items");
     expect(items().className).toContain("collapsed");
     expect(screenEl().className).toContain("items-collapsed");
@@ -229,9 +253,9 @@ describe("the side columns on a desktop", () => {
 
   it("has aria state on the buttons", async () => {
     await open();
-    const hide = screen.getByRole("button", { name: "Hide the workspaces", hidden: true });
+    const hide = screen.getByRole("button", { name: "Hide the items", hidden: true });
     expect(hide.getAttribute("aria-expanded")).toBe("true");
-    expect(hide.getAttribute("aria-controls")).toBe("chat-rail");
+    expect(hide.getAttribute("aria-controls")).toBe("workspace-items");
     fireEvent.click(hide);
     expect(hide.getAttribute("aria-expanded")).toBe("false");
   });
@@ -241,27 +265,25 @@ describe("the side columns on a desktop", () => {
     const focus = screen.getByRole("button", { name: "Focus mode", hidden: true });
     fireEvent.click(focus);
     expect(shell().className).toContain("nav-collapsed");
-    expect(rail().className).toContain("collapsed");
     expect(items().className).toContain("collapsed");
     expect(focus.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(focus);
     expect(shell().className).not.toContain("nav-collapsed");
-    expect(rail().className).not.toContain("collapsed");
     expect(items().className).not.toContain("collapsed");
     // The keyboard shortcut does the same.
     fireEvent.keyDown(document, { key: "\\", ctrlKey: true });
-    expect(rail().className).toContain("collapsed");
+    expect(items().className).toContain("collapsed");
   });
 
   it("keeps the state in localStorage and restores it", async () => {
     await open();
-    click("Hide the workspaces");
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}")).toMatchObject({ rail: true });
+    click("Hide the items");
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}")).toMatchObject({ items: true });
     cleanup();
     reloadPanels();
     await open();
-    expect(rail().className).toContain("collapsed");
-    expect(items().className).not.toContain("collapsed");
+    expect(items().className).toContain("collapsed");
+    expect(shell().className).not.toContain("nav-collapsed");
   });
 
   it("restores a stored state, and works with no storage", async () => {
@@ -270,39 +292,41 @@ describe("the side columns on a desktop", () => {
     await open();
     expect(shell().className).toContain("nav-collapsed");
     expect(items().className).toContain("collapsed");
-    expect(rail().className).not.toContain("collapsed");
     cleanup();
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("no storage");
     });
     reloadPanels();
     await open();
-    click("Hide the workspaces");
-    expect(rail().className).toContain("collapsed");
+    click("Hide the items");
+    expect(items().className).toContain("collapsed");
     vi.restoreAllMocks();
   });
 
-  it("leaves the phone drawers alone: the drawer still opens when a column is folded", async () => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ rail: true }));
+  it("leaves the phone drawer alone: the item drawer still opens when the column is folded", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: true }));
     reloadPanels();
     await open();
-    fireEvent.click(screen.getByRole("button", { name: "Show the workspaces", hidden: true }));
-    expect(document.querySelector(".rail.open")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("rail-backdrop"));
-    expect(document.querySelector(".rail.open")).toBeNull();
+    fireEvent.click(document.querySelector(".ws-header-actions button") as HTMLButtonElement);
+    expect(document.querySelector(".items.open")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("items-backdrop"));
+    expect(document.querySelector(".items.open")).toBeNull();
   });
 });
 
 describe("the item column and the panel", () => {
   const items = () => document.querySelector(".items") as HTMLElement;
 
-  it("steps aside while the panel is open, keeps the saved fold, and comes back", async () => {
+  it("keeps its place while the sheet is open, and the saved fold with it", async () => {
     await open();
     expect(items().className).not.toContain("collapsed");
     fireEvent.click(await screen.findByRole("button", { name: "Garden plan", hidden: true }));
-    expect(items().className).toContain("collapsed");
+    // The item stands over the row, so the column stays and the conversation
+    // keeps its width.
+    expect(items().className).not.toContain("collapsed");
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").items ?? false).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Close the document" }));
+    expect(document.querySelector(".item-sheet")).toBeNull();
     expect(items().className).not.toContain("collapsed");
   });
 
@@ -318,5 +342,64 @@ describe("the item column and the panel", () => {
     await open();
     fireEvent.click(await screen.findByRole("button", { name: "Mockup", hidden: true }));
     expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan-mockup?embed=1");
+  });
+});
+
+describe("the item sheet of a workspace", () => {
+  it("opens over the workspace as a dialog, and the dim area closes it", async () => {
+    await open();
+    const row = await screen.findByRole("button", { name: "Garden plan", hidden: true });
+    // A tap on a row gives it the focus, as a browser does.
+    row.focus();
+    fireEvent.click(row);
+    const box = document.querySelector(".item-sheet-box") as HTMLElement;
+    expect(box.getAttribute("role")).toBe("dialog");
+    expect(box.getAttribute("aria-modal")).toBe("true");
+    expect(box.getAttribute("aria-label")).toBe("garden-plan");
+    // The workspace is behind it, dimmed and still mounted.
+    expect(document.querySelector(".chat .chat-header")).not.toBeNull();
+    expect(frame()?.getAttribute("src")).toBe("/documents/alex/garden-plan?embed=1");
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Close the document" }),
+    );
+    fireEvent.click(screen.getByTestId("sheet-backdrop"));
+    expect(document.querySelector(".item-sheet")).toBeNull();
+    // The row that opened the item has the focus back.
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("goes full screen from the header of the sheet, and back", async () => {
+    await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Menu notes", hidden: true }));
+    const box = () => document.querySelector(".item-sheet-box") as HTMLElement;
+    expect(box().className).not.toContain("full");
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    expect(box().className).toContain("full");
+    const back = screen.getByRole("button", { name: "Leave full screen" });
+    expect(back.getAttribute("aria-pressed")).toBe("true");
+    // The bar is still there in full screen, with the title and every control.
+    const bar = box().querySelector(".doc-panel-header") as HTMLElement;
+    expect(bar.querySelector(".doc-panel-title")?.textContent).toBe("Menu notes");
+    expect(bar.contains(back)).toBe(true);
+    expect(bar.querySelector(".doc-panel-full")).not.toBeNull();
+    expect(bar.querySelector(".doc-panel-close")).not.toBeNull();
+    // The window is the whole sheet now: there is no edge to drag.
+    expect(document.querySelector(".item-sheet-box .panel-divider")).toBeNull();
+    fireEvent.click(back);
+    expect(box().className).not.toContain("full");
+  });
+
+  it("holds the Tab key inside the sheet", async () => {
+    await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Menu notes", hidden: true }));
+    // The bar of the sheet: the title, the control that opens the item on its
+    // own page, the full-screen control, and the X.
+    const first = screen.getByRole("link", { name: "Open full page" });
+    const last = screen.getByRole("separator", { name: "Resize the item" });
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
   });
 });

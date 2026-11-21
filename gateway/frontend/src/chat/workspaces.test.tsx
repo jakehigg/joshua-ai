@@ -1,14 +1,12 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workspace, WorkspaceItem } from "../api/workspaces";
-import { NavContext } from "../shell/AppNav";
 import { SessionContext, type Session } from "../shell/Shell";
 import { ChatPage, WorkspaceLink, WorkspacePage } from "./ChatPage";
 import { DocumentPanelProvider, useDocumentPanelState } from "./DocumentPanel";
-import { GROUPS_KEY, ItemPanel, UNDO_MS } from "./ItemPanel";
+import { GROUPS_KEY, ItemPanel, UNDO_MS, orderItems } from "./ItemPanel";
 import { NewWorkspace } from "./NewWorkspace";
-import { Rail } from "./Rail";
 import { validPerson } from "./people";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 
@@ -108,197 +106,6 @@ function Trail({ seen }: { seen: string[] }) {
   if (seen[seen.length - 1] !== pathname) seen.push(pathname);
   return <output data-testid="where">{pathname}</output>;
 }
-
-describe("the rail", () => {
-  const list = [
-    ws({ id: "a", slug: "solar", title: "Solar install" }),
-    ws({ id: "b", slug: "trip", title: "Trip", status: "paused" }),
-    ws({ id: "c", slug: "old", title: "Old", status: "archived" }),
-  ];
-  function show(activeId?: string, onNew = vi.fn()) {
-    render(
-      <MemoryRouter future={FUTURE}>
-        <Rail person="alex" workspaces={list} activeId={activeId} open onNew={onNew} onNavigate={vi.fn()} onClose={vi.fn()} />
-      </MemoryRouter>,
-    );
-    return onNew;
-  }
-
-  it("lists Chat, the active workspaces and the paused ones in a fold", () => {
-    show();
-    expect(screen.getByRole("link", { name: "Chat" }).getAttribute("href")).toBe("/chat/alex");
-    // The link is the permanent address of the workspace, its id.
-    expect(screen.getByRole("link", { name: "Solar install" }).getAttribute("href")).toBe("/chat/w/a");
-    expect(screen.queryByText("Old")).toBeNull();
-    const fold = screen.getByText("Paused (1)").closest("details") as HTMLDetailsElement;
-    expect(fold.open).toBe(false);
-    expect(within(fold).getByRole("link", { name: "Trip", hidden: true })).toBeTruthy();
-  });
-
-  it("marks the page on screen, by the id of the workspace", () => {
-    show("a");
-    expect(screen.getByRole("link", { name: "Solar install" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("link", { name: "Chat" }).getAttribute("aria-current")).toBeNull();
-  });
-
-  it("marks a shared workspace with the two-person icon and links it by its id", () => {
-    render(
-      <MemoryRouter future={FUTURE}>
-        <Rail
-          person="mia"
-          workspaces={[ws({ id: "s", slug: "thanksgiving", title: "Thanksgiving", owner: "alex", shared: true, members: ["mia"] })]}
-          open
-          onNew={vi.fn()}
-          onNavigate={vi.fn()}
-          onClose={vi.fn()}
-        />
-      </MemoryRouter>,
-    );
-    const link = screen.getByRole("link", { name: /Thanksgiving/ });
-    expect(link.getAttribute("href")).toBe("/chat/w/s");
-    // The icon, and no label: "Shared" is nowhere in the row.
-    expect(link.querySelector(".shared-mark svg.j-icon")).not.toBeNull();
-    expect(link.textContent).toBe("Thanksgiving");
-  });
-
-  it("marks no personal workspace", () => {
-    show();
-    const link = screen.getByRole("link", { name: "Solar install" });
-    expect(link.querySelector(".shared-mark")).toBeNull();
-    expect(document.querySelector(".shared-mark")).toBeNull();
-  });
-
-  it("carries the working charm, the waiting one with its reason, and none", () => {
-    const rail = (rows: Workspace[]) => (
-      <MemoryRouter future={FUTURE}>
-        <Rail person="alex" workspaces={rows} open onNew={vi.fn()} onNavigate={vi.fn()} onClose={vi.fn()} />
-      </MemoryRouter>
-    );
-    // Working: a developer task of this workspace is in flight.
-    const working = render(
-      rail([ws({ charm: { state: "working", reason: "developer task running" } })]),
-    );
-    const link = screen.getByRole("link", { name: /Solar install/ });
-    expect(link.querySelector(".work-charm.working svg.j-icon")).not.toBeNull();
-    // The reason is on hover and in the accessible name; it is no text of the row.
-    expect(link.querySelector(".work-charm")?.getAttribute("title")).toBe("developer task running");
-    expect(screen.getByRole("img", { name: "Joshua is working: developer task running" })).toBeTruthy();
-    expect(link.textContent).toBe("Solar install");
-    working.unmount();
-
-    // Waiting: an assignment of it stopped with a question.
-    render(rail([ws({ charm: { state: "waiting", reason: "assignment 31 has a question" } })]));
-    const waiting = document.querySelector(".work-charm.waiting");
-    expect(waiting?.getAttribute("title")).toBe("assignment 31 has a question");
-    expect(
-      screen.getByRole("img", { name: "Waiting for you: assignment 31 has a question" }),
-    ).toBeTruthy();
-  });
-
-  it("carries no charm when nothing is in flight and nothing waits", () => {
-    show();
-    expect(document.querySelector(".work-charm")).toBeNull();
-    render(
-      <MemoryRouter future={FUTURE}>
-        <Rail person="alex" workspaces={[ws({ charm: null })]} open onNew={vi.fn()} onNavigate={vi.fn()} onClose={vi.fn()} />
-      </MemoryRouter>,
-    );
-    expect(document.querySelector(".work-charm")).toBeNull();
-  });
-
-  it("holds the marks and the count in one group at the right edge", () => {
-    render(
-      <MemoryRouter future={FUTURE}>
-        <Rail
-          person="alex"
-          workspaces={[
-            ws({
-              shared: true,
-              members: ["mia"],
-              unread: 3,
-              charm: { state: "working", reason: "developer task running" },
-            }),
-          ]}
-          open
-          onNew={vi.fn()}
-          onNavigate={vi.fn()}
-          onClose={vi.fn()}
-        />
-      </MemoryRouter>,
-    );
-    const link = screen.getByRole("link", { name: /Solar install/ });
-    // The title is a box of its own, so a long one truncates instead of
-    // pushing the charm and the count out of the row.
-    expect(link.querySelector(".rail-name")?.textContent).toBe("Solar install");
-    const marks = link.querySelector(".rail-marks") as HTMLElement;
-    expect([...marks.children].map((el) => el.className.split(" ")[0])).toEqual([
-      "shared-mark",
-      "work-charm",
-      "rail-unread",
-    ]);
-  });
-
-  it("counts the rows a person has not read, after the name", () => {
-    render(
-      <MemoryRouter future={FUTURE}>
-        <Rail
-          person="alex"
-          workspaces={[ws({ unread: 3 }), ws({ id: "b", slug: "trip", title: "Trip" })]}
-          open
-          onNew={vi.fn()}
-          onNavigate={vi.fn()}
-          onClose={vi.fn()}
-        />
-      </MemoryRouter>,
-    );
-    const counted = screen.getByRole("link", { name: /Solar install/ });
-    expect(counted.querySelector(".rail-unread")?.textContent).toBe("3");
-    // A thread with nothing unread carries no count at all.
-    expect(screen.getByRole("link", { name: "Trip" }).querySelector(".rail-unread")).toBeNull();
-  });
-
-  it("gives each person of a shared workspace their own count", () => {
-    const thread = ws({ slug: "thanksgiving", title: "Thanksgiving", shared: true, members: ["mia"] });
-    const rail = (person: string, unread: number) => (
-      <MemoryRouter future={FUTURE}>
-        <Rail
-          person={person}
-          workspaces={[{ ...thread, unread }]}
-          open
-          onNew={vi.fn()}
-          onNavigate={vi.fn()}
-          onClose={vi.fn()}
-        />
-      </MemoryRouter>
-    );
-    const alex = render(rail("alex", 0));
-    expect(document.querySelector(".rail-unread")).toBeNull();
-    alex.unmount();
-    render(rail("mia", 2));
-    expect(document.querySelector(".rail-unread")?.textContent).toBe("2");
-  });
-
-  it("opens the dialog from the new workspace button", () => {
-    const onNew = show();
-    fireEvent.click(screen.getByRole("button", { name: "+ New workspace" }));
-    expect(onNew).toHaveBeenCalled();
-  });
-
-  // The chat page draws no app bar, so on a phone this drawer is the only
-  // place the Reload item of the app navigation can be reached.
-  it("repeats the app navigation, with its Reload item", () => {
-    viewer({});
-    render(
-      <MemoryRouter future={FUTURE}>
-        <NavContext.Provider value={{ sections: [{ key: "wiki", label: "Wiki", path: "/wiki/" }], section: "chat" }}>
-          <Rail person="alex" workspaces={[]} open onNew={vi.fn()} onNavigate={vi.fn()} onClose={vi.fn()} />
-        </NavContext.Provider>
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("link", { name: "Wiki" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
-  });
-});
 
 describe("the new workspace dialog", () => {
   it("creates a workspace with the picked model and servers, then hands it on", async () => {
@@ -420,17 +227,23 @@ describe("the new workspace dialog", () => {
   });
 });
 
-function Panel({ refreshKey = 0 }: { refreshKey?: number }) {
+function Panel({ refreshKey = 0, workspace = "w1" }: { refreshKey?: number; workspace?: string }) {
   const state = useDocumentPanelState();
   return (
     <MemoryRouter future={FUTURE}>
       <DocumentPanelProvider panel={state}>
-        <ItemPanel workspace="w1" refreshKey={refreshKey} open onClose={vi.fn()} />
+        <ItemPanel workspace={workspace} refreshKey={refreshKey} open onClose={vi.fn()} />
         <output data-testid="shown">{state.shown?.url ?? ""}</output>
       </DocumentPanelProvider>
     </MemoryRouter>
   );
 }
+
+// The titles of the rows on screen, in the order they stand in.
+const rows = () =>
+  [...document.querySelectorAll(".items li.item")].map(
+    (row) => row.querySelector(".item-open, .item-text")?.textContent ?? "",
+  );
 
 describe("the item panel", () => {
   const items = [
@@ -453,6 +266,32 @@ describe("the item panel", () => {
     // A javascript: address is text, never a button or an href.
     expect(screen.getByText("Sneaky").closest("button")).toBeNull();
     expect(document.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+
+  it("narrows the list by the title or the address, with the counts and a clear button", async () => {
+    viewer({ "GET /api/v1/workspaces/w1/items": { items } });
+    render(<Panel />);
+    await screen.findByText("Quote");
+    const field = screen.getByLabelText("Filter the items");
+    // No filter: every row, no count line, no clear button.
+    expect(rows()).toEqual(["Pie", "Menu notes", "Quote", "Sneaky"]);
+    expect(screen.queryByRole("button", { name: "Clear the filter" })).toBeNull();
+    // A part of a title, in any case.
+    fireEvent.change(field, { target: { value: "pI" } });
+    expect(rows()).toEqual(["Pie"]);
+    expect(document.querySelector(".item-filter-count")?.textContent).toBe("1 of 4");
+    // A part of an address.
+    fireEvent.change(field, { target: { value: "example.com" } });
+    expect(rows()).toEqual(["Quote"]);
+    expect(document.querySelector(".item-filter-count")?.textContent).toBe("1 of 4");
+    // Nothing matches: the panel says so, and the clear button brings the
+    // whole list back.
+    fireEvent.change(field, { target: { value: "nothing here" } });
+    expect(rows()).toEqual([]);
+    expect(screen.getByText("Nothing matches.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear the filter" }));
+    expect(rows()).toEqual(["Pie", "Menu notes", "Quote", "Sneaky"]);
+    expect((field as HTMLInputElement).value).toBe("");
   });
 
   it("shows a photo item as a thumbnail, not the kind icon, and a PDF with the icon", async () => {
@@ -603,21 +442,42 @@ describe("the item panel", () => {
     expect(screen.queryByRole("menuitem")).toBeNull();
   });
 
-  it("folds a group with its header, keeps that, and counts the items", async () => {
+  it("folds a group with its header, keeps that per workspace, and counts the items", async () => {
     window.localStorage.clear();
-    viewer({ "GET /api/v1/workspaces/w1/items": { items } });
+    viewer({
+      "GET /api/v1/workspaces/w1/items": { items },
+      "GET /api/v1/workspaces/w2/items": { items },
+    });
     const { unmount } = render(<Panel />);
     await screen.findByText("Quote");
     const toggle = screen.getByRole("button", { name: /Links/ });
     expect(toggle.textContent).toContain("2");
     fireEvent.click(toggle);
     expect(screen.queryByText("Quote")).toBeNull();
-    expect(JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "[]")).toEqual(["link"]);
+    // The folded groups of that workspace alone.
+    expect(JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "{}")).toEqual({ w1: ["link"] });
     unmount();
     render(<Panel />);
     await screen.findByText("Pie");
     expect(screen.queryByText("Quote")).toBeNull();
+    cleanup();
+    // Another workspace keeps its own groups open.
+    render(<Panel workspace="w2" />);
+    expect(await screen.findByText("Quote")).toBeTruthy();
     window.localStorage.clear();
+  });
+
+  it("stands the rows pinned first, then the newest added first", () => {
+    const made = (id: string, added: string, pinned = false) =>
+      item({ id, title: id, ref: `https://${id}.test`, url: `https://${id}.test`, added_at: added, pinned });
+    expect(
+      orderItems([
+        made("old", "2026-01-01T00:00:00Z"),
+        made("new", "2026-01-03T00:00:00Z"),
+        made("pinned", "2026-01-02T00:00:00Z", true),
+        made("none", ""),
+      ]).map((i) => i.id),
+    ).toEqual(["pinned", "new", "old", "none"]);
   });
 
   it("marks the item open in the panel", async () => {
@@ -1004,7 +864,8 @@ describe("the routes", () => {
       const read = calls.filter((c) => c.path.endsWith("/read"));
       expect(read.map((c) => c.body)).toEqual([{ turn_id: 8 }]);
     });
-    // The rail is loaded again, so the count beside the name is the new one.
+    // The list of the threads is loaded again, so the count beside the name is
+    // the new one.
     await waitFor(() =>
       expect(calls.filter((c) => c.path === "/api/v1/workspaces").length).toBeGreaterThan(1),
     );
@@ -1053,7 +914,8 @@ describe("the routes", () => {
     expect(screen.getByTestId("where").textContent).toBe("/chat/w/s9");
   });
 
-  // A tap in the rail changes the ref of a screen that stays mounted, so the
+  // A tap in the list of the threads changes the ref of a screen that stays
+  // mounted, so the
   // screen renders with the new ref while it still holds the workspace of the
   // one before. That workspace must never send the browser to its own
   // address, or the switch the person made is undone.
@@ -1061,7 +923,10 @@ describe("the routes", () => {
     const solar = ws({ id: "a", slug: "solar", title: "Solar install" });
     const trip = ws({ id: "b", slug: "trip", title: "Trip" });
     viewer({
-      "GET /api/v1/session": { person: { id: "alex", name: "Alex", role: "member" }, sections: [] },
+      "GET /api/v1/session": {
+        person: { id: "alex", name: "Alex", role: "member" },
+        sections: [{ key: "chat", label: "Chat", path: "/chat/alex" }],
+      },
       "GET /api/v1/workspaces/a": solar,
       "GET /api/v1/workspaces/b": trip,
       "GET /api/v1/workspaces": { workspaces: [solar, trip] },
@@ -1082,8 +947,8 @@ describe("the routes", () => {
     expect(await screen.findByRole("heading", { name: "Solar install" })).toBeTruthy();
     await screen.findByText("The solar quote");
 
-    // The link of the other workspace in the rail, as a person taps it.
-    fireEvent.click(screen.getByRole("link", { name: "Trip", hidden: true }));
+    // The link of the other workspace in the sidebar, as a person taps it.
+    fireEvent.click(await screen.findByRole("link", { name: "Trip", hidden: true }));
     expect(await screen.findByRole("heading", { name: "Trip" })).toBeTruthy();
     await screen.findByText("The trip quote");
     expect(screen.queryByRole("heading", { name: "Solar install" })).toBeNull();
@@ -1217,8 +1082,12 @@ describe("the routes", () => {
     expect(await screen.findByText("This workspace does not exist.")).toBeTruthy();
   });
 
-  it("creates from the rail and goes to the new workspace", async () => {
+  it("creates from the list of the threads and goes to the new workspace", async () => {
     viewer({
+      "GET /api/v1/session": {
+        person: { id: "alex", name: "Alex", role: "member" },
+        sections: [{ key: "chat", label: "Chat", path: "/chat/alex" }],
+      },
       "GET /api/v1/workspaces": { workspaces: [] },
       "GET /api/v1/workspaces/options": OPTIONS,
       "POST /api/v1/workspaces": ws({ id: "w7", slug: "trip", title: "Trip" }),
@@ -1232,7 +1101,7 @@ describe("the routes", () => {
         </Routes>
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "+ New workspace" }));
+    fireEvent.click(await screen.findByRole("link", { name: "+ New workspace" }));
     fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Trip" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect((await screen.findByTestId("where")).textContent).toBe("/chat/w/w7");

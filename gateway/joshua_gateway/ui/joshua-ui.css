@@ -12,6 +12,12 @@
  * the file can sit beside an app's existing CSS during a migration.
  *
  * Dark only, by design.
+ *
+ * Five breakpoints, and no sixth: 560px (two columns of a short list), 640px
+ * and the 620px of the cards of a report (cards side by side), 760px (the
+ * sidebar becomes a column), 900px (a panel becomes a column) and 1100px (the
+ * widest layout, with every column). A rule that needs another width belongs
+ * at one of these five.
  */
 
 /* ------------------------------------------------------------------ tokens */
@@ -60,8 +66,17 @@
   --j-gap: 16px;
   --j-row-y: 12px;
   --j-tap: 44px;
+  /* the reading width of a page: a document is read for a long time, so its
+     column is narrower than the chat's own --chat-width */
   --j-content: 760px;
   --j-sidebar: 240px;
+  /* one width for each panel, the default a drag may replace: the document
+     panel reaches 768px at a wide window, over the 760px of the document's
+     own column, so a document in it gets its design width */
+  --j-panel-doc: clamp(22rem, 40vw, 48rem);
+  --j-panel-items: 18rem;
+  /* a drawer on a phone: the app navigation, and the items of a workspace */
+  --j-drawer: min(18rem, 85vw);
 }
 
 /* -------------------------------------------------------------------- base */
@@ -420,6 +435,15 @@ button.j-list-row { width: 100%; font: inherit; text-align: left; background: no
 .j-prose table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; margin: 0 0 12px; font-size: 0.9rem; }
 .j-prose th, .j-prose td { border: 1px solid var(--j-line-soft); padding: 7px 10px; text-align: left; vertical-align: top; }
 .j-prose th { background: var(--j-surface); color: var(--j-muted); font-weight: 600; }
+
+/* A long word: a url, a slug, a hash. `.j-prose` wraps one already, and its
+   descendants inherit it; this is the same rule for an element outside prose.
+   A table cell is the exception: it scrolls instead of wrapping. */
+.j-wrap { overflow-wrap: anywhere; }
+
+/* A block of code keeps its lines: it scrolls sideways and never wraps, so
+   indentation and a long line read as they were written. */
+.j-code-block { white-space: pre; overflow-wrap: normal; overflow-x: auto; }
 
 /* a timeline entry, e.g. the journal */
 .j-entry { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 12px; border-left: 2px solid var(--j-line); }

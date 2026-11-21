@@ -1,9 +1,10 @@
 // The item panel of a workspace, at the right of the chat: what was built or
 // collected for it, grouped by kind. Every item opens inside the chat screen,
-// in the panel (itemTarget.ts): a document or artifact, a page of the viewer,
-// or a preview card for an external link. Nothing navigates the chat tab. An
-// item with an unsafe address (links.ts) is shown as text. The item that is
-// open in the panel is marked in the list.
+// in the sheet over the workspace (itemTarget.ts, DocumentPanel.tsx): a
+// document or artifact, a page of the viewer, or a preview card for an
+// external link. Nothing navigates the chat tab. An item with an unsafe
+// address (links.ts) is shown as text. The item that is open is marked in the
+// list.
 //
 // The list holds one row for each thing the items point at: the same document
 // can be recorded twice, as a `plan` and as a `document`, or by a tool and by
@@ -11,20 +12,26 @@
 // (`dedupeItems`). A row with no title of its own asks the viewer for the
 // title of its document, so no row is labelled with a bare path.
 //
-// A row is one line: a kind icon, the title (cut with an ellipsis, the whole
-// title on hover), a pin mark, and a "..." button. The button opens a small
+// A row takes two lines at most: a kind icon, the title (cut with an
+// ellipsis after the second line, the whole title on hover), a pin mark, and
+// a "..." button. The button opens a small
 // menu with Pin or Unpin and Remove. Remove hides the row at once and says so
-// for a few seconds with an Undo; the call goes out when the time is up. A
-// pinned item is first in its group. A group folds with its header, and the
-// folded groups are kept per browser in localStorage (try/catch; without it
-// every group is open). The form that adds a link is behind "+ Add link".
+// for a few seconds with an Undo; the call goes up as `removeItem` when the
+// time is up. The rows stand pinned first, then the newest added first
+// (`orderItems`). A group folds with its header, and the folded groups of each
+// workspace are kept per browser in localStorage (try/catch; without it every
+// group is open). The form that adds a link is behind "+ Add link".
 //
-// On a phone the screen closes this list when an item opens, so the panel is
-// visible. The list is a sheet there, with a close button. On a wide desktop
-// it is a column that folds away with » (the workspace header brings it back),
-// and it also steps aside while the panel is open (ChatPage.tsx). The list
-// loads on open, after each turn (`refreshKey`) and when the tab gets focus
-// back.
+// A long list is narrowed by the filter field at the top: a part of the title
+// or of the address, in any case. While it holds text the panel says how many
+// rows of how many it shows, and a button empties it.
+//
+// On a phone the screen closes this list when an item opens, so the sheet of
+// the item is the only one over the conversation. The list is a sheet there,
+// with a close button. On a wide desktop it is a column that folds away with »
+// (the workspace header brings it back), and it keeps its place while an item
+// is open (ChatPage.tsx). The list loads on open, after each turn
+// (`refreshKey`) and when the tab gets focus back.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { inertProps, useMedia } from "./viewport";
@@ -63,6 +70,15 @@ export function groupItems(items: WorkspaceItem[]): [string, WorkspaceItem[]][] 
 
 function label(item: WorkspaceItem): string {
   return item.title.trim() || item.ref;
+}
+
+/**
+ * True when `needle`, in lower case, is a part of the title or of the address
+ * of `item`. An empty needle matches every row.
+ */
+export function matchesItem(item: WorkspaceItem, needle: string): boolean {
+  if (needle === "") return true;
+  return `${item.title} ${item.ref} ${item.url ?? ""}`.toLowerCase().includes(needle);
 }
 
 /** The title of a row, or "" when its only label is the path it points at. */
@@ -138,21 +154,54 @@ export const UNDO_MS = 5000;
 
 export const GROUPS_KEY = "joshua.items.collapsedGroups";
 
-function readGroups(): string[] {
+// The folded groups of every workspace: the id of the workspace to the kinds
+// folded in it. A group folds in one workspace alone, because the kinds of one
+// workspace are not the kinds of another.
+type FoldedGroups = Record<string, string[]>;
+
+function readAllGroups(): FoldedGroups {
+  const all: FoldedGroups = {};
   try {
-    const raw = JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "[]") as unknown;
-    return Array.isArray(raw) ? raw.filter((k): k is string => typeof k === "string") : [];
+    const raw = JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? "{}") as unknown;
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return all;
+    for (const [workspace, kinds] of Object.entries(raw as Record<string, unknown>)) {
+      if (Array.isArray(kinds)) {
+        all[workspace] = kinds.filter((k): k is string => typeof k === "string");
+      }
+    }
   } catch {
-    return [];
+    // No storage, or a bad value: every group is open.
   }
+  return all;
 }
 
-function saveGroups(groups: string[]): void {
+function readGroups(workspace: string): string[] {
+  return readAllGroups()[workspace] ?? [];
+}
+
+function saveGroups(workspace: string, groups: string[]): void {
   try {
-    window.localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
+    const all = { ...readAllGroups(), [workspace]: groups };
+    window.localStorage.setItem(GROUPS_KEY, JSON.stringify(all));
   } catch {
     // Kept in memory only.
   }
+}
+
+/** When an item was added, as a number. A row with no stamp is oldest. */
+const addedAt = (item: WorkspaceItem): number => {
+  const when = Date.parse(item.added_at ?? "");
+  return Number.isNaN(when) ? 0 : when;
+};
+
+/**
+ * The rows in the order the panel shows them: pinned first, then the newest
+ * added first. Rows that carry no stamp keep the order the list gave them.
+ */
+export function orderItems(items: WorkspaceItem[]): WorkspaceItem[] {
+  return [...items].sort(
+    (a, b) => Number(b.pinned) - Number(a.pinned) || addedAt(b) - addedAt(a),
+  );
 }
 
 function Entry({
@@ -256,7 +305,8 @@ export function ItemPanel({
   const panel = useDocumentPanel();
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [folded, setFolded] = useState<string[]>(readGroups);
+  const [filter, setFilter] = useState("");
+  const [folded, setFolded] = useState<string[]>(() => readGroups(workspace));
   // A row that was removed and can still come back, and its timer.
   const [undo, setUndo] = useState<{ item: WorkspaceItem; timer: ReturnType<typeof setTimeout> } | null>(null);
   const undoRef = useRef(undo);
@@ -341,7 +391,7 @@ export function ItemPanel({
   const toggleGroup = (kind: string) => {
     const next = folded.includes(kind) ? folded.filter((k) => k !== kind) : [...folded, kind];
     setFolded(next);
-    saveGroups(next);
+    saveGroups(workspace, next);
   };
 
   // The item the panel shows, if it is one of these.
@@ -368,8 +418,10 @@ export function ItemPanel({
     setAdding(false);
   };
 
-  const shown = dedupeItems(items.filter((item) => item.id !== undo?.item.id));
-  const ordered = [...shown].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  const here = dedupeItems(items.filter((item) => item.id !== undo?.item.id));
+  const needle = filter.trim().toLowerCase();
+  const shown = here.filter((item) => matchesItem(item, needle));
+  const ordered = orderItems(shown);
   return (
     <aside
       id="workspace-items"
@@ -393,6 +445,32 @@ export function ItemPanel({
           »
         </button>
       </header>
+      {here.length > 0 && (
+        <div className="item-filter">
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter"
+            aria-label="Filter the items"
+          />
+          {filter !== "" && (
+            <button
+              type="button"
+              className="item-filter-clear"
+              aria-label="Clear the filter"
+              onClick={() => setFilter("")}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
+      {needle !== "" && (
+        <p className="j-meta item-filter-count" role="status">
+          {shown.length} of {here.length}
+        </p>
+      )}
       {error && (
         <p className="j-error" role="alert">
           {error}
@@ -406,7 +484,9 @@ export function ItemPanel({
           </button>
         </p>
       )}
-      {shown.length === 0 && !error && <p className="j-meta">Nothing here yet.</p>}
+      {shown.length === 0 && !error && (
+        <p className="j-meta">{needle === "" ? "Nothing here yet." : "Nothing matches."}</p>
+      )}
       {groupItems(ordered).map(([kind, list]) => {
         const closed = folded.includes(kind);
         return (

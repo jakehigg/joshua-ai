@@ -63,7 +63,9 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 
 :root,
 .chat-screen {
-  --chat-width: 860px; /* the reading width of the message column */
+  /* the reading width of the message column: a chat line is read once, so
+     the column is wider than the --j-content of a page */
+  --chat-width: 860px;
   --chat-shadow: 0 2px 12px rgb(0 0 0 / 0.5);
 
   /* Code highlight, after the GitHub dark palette. */
@@ -203,7 +205,6 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 .chat-screen .msg-person {
   align-items: flex-end;
@@ -344,7 +345,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   border-left: 2px solid var(--j-line);
   color: var(--j-text);
 }
-.chat-screen .event-raw { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.75rem var(--j-mono); }
+.chat-screen .event-raw { margin: 0; white-space: pre-wrap; font: 0.75rem var(--j-mono); }
 .chat-screen .event-raw-toggle { min-height: 32px; margin-top: 6px; font-size: 0.75rem; }
 @media (max-width: 759px) {
   /* The preview takes its own line, so the headline and badge stay readable. */
@@ -403,6 +404,24 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 }
 
 
+/* The handle of a divider between two panes: a drag changes the width of the
+   panel beside it, and the conversation takes the rest (Divider.tsx). It
+   shows from the width where its panel has a size of its own — the document
+   panel, a column or the sheet of an item, from 900px, and the items column
+   from 1100px — because narrower than that a panel takes the whole window. */
+.chat-screen .panel-divider {
+  display: none;
+  flex: none;
+  width: 7px;
+  margin: 0 -3px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+}
+.chat-screen .panel-divider:hover,
+.chat-screen .panel-divider:focus-visible { background: var(--j-accent-soft); }
+
+
 /* The document panel: the viewer's own page in a frame. On a phone it is a
    sheet over the conversation, not a squeezed column; the conversation stays
    mounted behind it and keeps its scroll position. */
@@ -435,7 +454,8 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-screen .doc-panel-close {
+.chat-screen .doc-panel-close,
+.chat-screen .doc-panel-expand {
   min-height: 32px;
   padding: 2px 12px;
 }
@@ -462,14 +482,81 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 /* Wide enough for two columns: the panel stands beside the conversation
    instead of over it. */
 @media (min-width: 900px) {
-.chat-screen .doc-panel {
+  .chat-screen .panel-divider.divider-doc { display: block; }
+  .chat-screen .doc-panel {
     position: relative;
     inset: auto;
-    flex: 0 0 min(45%, 44rem);
+    flex: 0 0 var(--doc-w, var(--j-panel-doc));
     min-width: 0;
     border-left: 1px solid var(--j-line);
   }
+}
 
+
+/* An item of a workspace over the workspace: the same panel, in a sheet in
+   the middle of the screen, with the workspace dimmed behind it and still
+   mounted, so nothing in the row of columns moves (ItemSheet in
+   DocumentPanel.tsx). Under 900px the sheet takes the window, as every sheet
+   of the chat does there; from 900px it is a box as wide as the token of the
+   document panel, or as wide as a drag left it, and the handle at its left
+   edge sizes it. Full screen takes the whole window again. */
+.chat-screen .item-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 32;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-screen .item-sheet .scrim { position: absolute; z-index: 0; }
+.chat-screen .item-sheet-box {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--j-bg);
+}
+.chat-screen .item-sheet-box > .panel-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+}
+.chat-screen .item-sheet-box .doc-panel {
+  position: static;
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-width: none;
+  border-left: 0;
+}
+@media (max-width: 899px) {
+  .chat-screen .doc-panel-expand { display: none; }
+}
+@media (min-width: 900px) {
+  .chat-screen .item-sheet-box {
+    width: var(--doc-w, var(--j-panel-doc));
+    max-width: calc(100% - 2 * var(--j-gap));
+    height: calc(100% - 2 * var(--j-gap));
+    max-height: 56rem;
+    border: 1px solid var(--j-line);
+    border-radius: var(--j-radius);
+    box-shadow: 0 24px 60px rgb(0 0 0 / 0.45);
+  }
+  .chat-screen .item-sheet-box.full {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
 }
 .chat-screen .failed-row {
   margin-top: 0;
@@ -633,10 +720,6 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   overflow-x: auto;
   font-size: 0.85rem;
   line-height: 1.5;
-}
-.chat-screen .code-block pre code {
-  white-space: pre;
-  overflow-wrap: normal;
 }
 .chat-screen .copy {
   position: absolute;
@@ -915,114 +998,41 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   }
 }
 
-/* The rail, the item panel, and the workspace dialogs of the chat screen. On a
-   phone the rail and the item panel are drawers over the chat; from 900px the
-   rail stands at the left, and from 1100px the item panel at the right. */
-.chat-screen .rail,
+/* The item panel and the workspace dialogs of the chat screen. On a phone the
+   item panel is a drawer over the chat; from 1100px it stands at the right. */
 .chat-screen .items {
   position: fixed;
   top: 0;
   bottom: 0;
+  right: 0;
   z-index: 4;
-  width: min(18rem, 85vw);
+  width: var(--j-drawer);
   display: none;
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
   padding: max(12px, env(safe-area-inset-top)) 12px 12px;
+  border-left: 1px solid var(--j-line);
   background: var(--j-bg);
 }
-.chat-screen .rail { left: 0; border-right: 1px solid var(--j-line); }
-.chat-screen .items { right: 0; border-left: 1px solid var(--j-line); }
-.chat-screen .rail.open,
 .chat-screen .items.open { display: flex; }
-.chat-screen .rail ul,
 .chat-screen .items ul { list-style: none; margin: 0; padding: 0; }
-.chat-screen .rail a:not(.j-nav-item) {
-  display: flex;
-  align-items: center;
-  min-height: 40px;
-  padding: 7px 10px;
-  border-radius: var(--j-radius-sm);
-  color: var(--j-muted);
-  font-size: 0.9333rem;
-  text-decoration: none;
-}
 /* The current thread and the current app link look the same. */
-.chat-screen .rail a[aria-current="page"],
 .j-nav-item[aria-current="page"] {
   color: var(--j-text);
   background: var(--j-surface-2);
   font-weight: 600;
 }
-.chat-screen .rail a:not(.j-nav-item):hover { color: var(--j-text); background: var(--j-surface); }
-.chat-screen .rail a[aria-current="page"]:hover { background: var(--j-surface-2); }
 .j-nav-item { min-height: 40px; }
 .j-nav-item .j-icon { flex: none; width: 18px; height: 18px; }
 /* A finger leaves no hover behind: only the current item is lit. */
 @media (hover: none) {
-  .j-nav-item:hover:not([aria-current]),
-  .chat-screen .rail a:not(.j-nav-item):hover:not([aria-current]) {
+  .j-nav-item:hover:not([aria-current]) {
     background: none;
     color: var(--j-muted);
   }
 }
-.chat-screen .rail-label {
-  margin: 12px 0 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--j-muted);
-}
-/* The mark of a shared workspace, in the rail and in the workspace header:
-   two small people, quiet, after the name. */
-.chat-screen .shared-mark {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  vertical-align: -2px;
-  opacity: 0.75;
-}
-.chat-screen .shared-mark .j-icon { width: 15px; height: 15px; }
-/* The charm of a workspace, in the same place and the same size: Joshua is
-   working for it (quiet), or it waits for a person (the accent colour). */
-.chat-screen .work-charm {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  vertical-align: -2px;
-  opacity: 0.75;
-}
-.chat-screen .work-charm .j-icon { width: 15px; height: 15px; }
-.chat-screen .work-charm.waiting { color: var(--j-accent); opacity: 1; }
-/* A workspace row of the rail: the title takes the free room and truncates,
-   the marks and the count stand together at the right edge, on one line. */
-.chat-screen .rail-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-screen .rail-marks {
-  display: flex;
-  flex: none;
-  align-items: center;
-}
-/* The rows of a thread that this person has not read, counted after the name. */
-.chat-screen .rail-unread {
-  flex: none;
-  margin-left: 0.375rem;
-  padding: 0 7px;
-  border-radius: var(--j-radius-pill);
-  background: var(--j-accent);
-  color: var(--j-accent-ink);
-  font-size: var(--j-text-xs);
-  font-weight: 600;
-  line-height: 18px;
-}
-.chat-screen .rail-new { margin-top: 8px; text-align: left; }
-.chat-screen .rail-toggle { flex: none; }
+.chat-screen .j-nav-toggle { flex: none; }
 .chat-screen .ws-title { flex: 1; min-width: 0; }
 .chat-screen .ws-goal {
   overflow: hidden;
@@ -1043,7 +1053,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 }
 .chat-screen .item a,
 .chat-screen .item-text,
-.chat-screen .item-open { min-width: 0; overflow-wrap: anywhere; }
+.chat-screen .item-open { min-width: 0; }
 .chat-screen .item-open { border: 0; background: none; padding: 0; min-height: 0; text-align: left; color: var(--j-accent); }
 .chat-screen .item-actions { display: flex; gap: 4px; }
 .chat-screen .item-actions button { min-height: 28px; padding: 0 8px; font-size: 0.75rem; }
@@ -1082,29 +1092,23 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 .chat-screen .ws-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .chat-screen .item-add input { font: inherit; color: inherit; background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: 8px; padding: 6px 8px; }
 
-@media (min-width: 900px) {
-  .chat-screen .rail { position: static; display: flex; flex: 0 0 14rem; width: auto; }
-  .chat-screen .rail-toggle { display: none; }
-}
 @media (min-width: 1100px) {
-  .chat-screen .items { position: static; display: flex; flex: 0 0 18rem; width: auto; }
+  .chat-screen .panel-divider.divider-items { display: block; }
+  .chat-screen .items { position: static; display: flex; flex: 0 0 var(--items-w, var(--j-panel-items)); width: auto; }
   .chat-screen .items-toggle,
   .chat-screen .items-close { display: none; }
 }
 
-/* Sheets on a phone. The rail and the item list are drawers with a dimmed
-   backdrop; a tap on it closes them. The document panel is a full-height
-   sheet with a fixed header, and its frame scrolls inside it. While a sheet
-   is open the page behind it does not scroll. */
+/* Sheets on a phone. The item list is a drawer with a dimmed backdrop; a tap
+   on it closes it. The document panel is a full-height sheet with a fixed
+   header, and its frame scrolls inside it. While a sheet is open the page
+   behind it does not scroll. */
 .chat-screen .scrim {
   position: fixed;
   inset: 0;
   z-index: 3;
   background: rgb(0 0 0 / 0.5);
 }
-.chat-screen .rail-header { display: flex; align-items: center; justify-content: space-between; }
-.chat-screen .rail-title { font-weight: 600; }
-.chat-screen .rail-close,
 .chat-screen .items-close { min-height: 32px; padding: 2px 12px; }
 .chat-screen .doc-panel { height: 100dvh; max-width: 100vw; overflow: hidden; }
 .chat-screen .doc-panel-title {
@@ -1125,13 +1129,12 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   overflow-y: auto;
 }
 .chat-screen .item-card-kind { color: var(--j-muted); font-size: 0.75rem; text-transform: uppercase; }
-.chat-screen .item-card-title { margin: 0; font-size: 1.125rem; overflow-wrap: anywhere; }
+.chat-screen .item-card-title { margin: 0; font-size: 1.125rem; }
 .chat-screen .item-card-address {
   margin: 0;
   color: var(--j-muted);
   font-family: var(--j-mono);
   font-size: 0.8125rem;
-  overflow-wrap: anywhere;
 }
 .chat-screen .item-card-open {
   padding: 8px 14px;
@@ -1146,8 +1149,6 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   html:has(.chat-screen.sheet-open) { overflow: hidden; }
 }
 @media (min-width: 900px) {
-  .chat-screen .rail-close,
-  .chat-screen .scrim-rail { display: none; }
   .chat-screen .doc-panel { height: auto; max-width: none; }
 }
 @media (min-width: 1100px) {
@@ -1157,7 +1158,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 /* Form controls, everywhere. Text is never under 16px, so iOS Safari does
    not zoom in on focus, and it grows with the text size of the device
    (`textSize.ts`). No fixed height: padding and line-height centre the text,
-   so it is never cut off, and 44px is a tap target. A control never grows
+   so it is never cut off, and --j-tap is a tap target. A control never grows
    wider than its container. */
 input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
 textarea,
@@ -1166,7 +1167,7 @@ select {
   max-width: 100%;
   font-size: max(16px, 1.0667rem);
   line-height: 1.4;
-  min-height: 44px;
+  min-height: var(--j-tap);
   padding-block: 10px;
   touch-action: manipulation;
 }
@@ -1182,12 +1183,12 @@ select { text-overflow: ellipsis; }
 .chat-screen .ws-dialog textarea,
 .chat-screen .ws-dialog select,
 .chat-screen .item-add input { width: 100%; padding: 10px 12px; }
-.chat-screen .composer-input { padding: 10px 12px; min-height: 44px; }
+.chat-screen .composer-input { padding: 10px 12px; min-height: var(--j-tap); }
 button,
 .j-btn,
 summary,
 label.attach { touch-action: manipulation; }
-.chat-screen button { min-height: 44px; }
+.chat-screen button { min-height: var(--j-tap); }
 .chat-screen .item-actions button { min-height: 36px; padding: 0 10px; }
 
 /* A focus ring that no overflow:hidden parent cuts off, and a pressed state. */
@@ -1206,7 +1207,6 @@ html, body { max-width: 100%; overflow-x: clip; }
 .chat-screen .chat,
 .chat-screen .ws-dialog,
 .chat-screen .ws-server span { min-width: 0; }
-.chat-screen .ws-server span { overflow-wrap: anywhere; }
 .chat-screen .ws-actions { flex-wrap: wrap; }
 
 /* The dialogs: the fields scroll in the body, the buttons stay in a footer. */
@@ -1244,13 +1244,13 @@ html, body { max-width: 100%; overflow-x: clip; }
 /* The app navigation as a drawer on a phone. From 760px the sidebar is a
    column (the master stylesheet). Below that it is off-canvas on the left,
    and the hamburger of the app bar slides it over the content, above a dimmed
-   backdrop. The rail of the chat repeats the same links on a phone, and
-   hides them where the sidebar shows. */
+   backdrop. The chat has no app bar: the hamburger of its own header opens
+   this same drawer. */
 .j-nav-toggle,
 .j-nav-close {
   flex: none;
-  min-height: 44px;
-  min-width: 44px;
+  min-height: var(--j-tap);
+  min-width: var(--j-tap);
   border: 1px solid var(--j-line);
   border-radius: 10px;
   background: var(--j-surface-2);
@@ -1277,7 +1277,7 @@ html.j-lock body { overflow: hidden; }
     bottom: 0;
     left: 0;
     z-index: 40;
-    width: min(18rem, 85vw);
+    width: var(--j-drawer);
     overflow-y: auto;
     padding: max(14px, env(safe-area-inset-top)) 10px 14px max(10px, env(safe-area-inset-left));
     border-right: 1px solid var(--j-line-soft);
@@ -1291,7 +1291,6 @@ html.j-lock body { overflow: hidden; }
     visibility: visible;
     transition: transform 0.2s ease;
   }
-  .chat-screen .rail-appnav { display: flex; flex-direction: column; gap: 2px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .j-shell.has-sidebar .j-sidebar,
@@ -1300,19 +1299,13 @@ html.j-lock body { overflow: hidden; }
 @media (min-width: 760px) {
   .j-nav-toggle,
   .j-nav-close,
-  .j-scrim,
-  .chat-screen .rail-appnav { display: none; }
-}
-@media (max-width: 759px) {
-  .chat-screen .rail-appnav { display: flex; }
+  .j-scrim { display: none; }
 }
 
 /* One compact top bar on a phone. Other pages: hamburger, logo and title in
    one row. The chat: its own header (hamburger, thread title, items button)
    and no app bar. Both honour the top safe area. The sheets sit above the
    bars. */
-.chat-screen .rail-title { display: flex; align-items: center; gap: 10px; }
-.chat-screen .rail-title .j-logo { width: 28px; height: 28px; border-radius: var(--j-radius-sm); }
 .v-search { width: 100%; max-width: 32rem; flex: none; }
 @media (max-width: 759px) {
   .j-appbar { padding-block: calc(6px + env(safe-area-inset-top, 0px)) 6px; min-height: 48px; box-sizing: border-box; }
@@ -1329,15 +1322,14 @@ html.j-lock body { overflow: hidden; }
   .chat-screen .ws-header-actions button { min-height: 40px; }
 }
 @media (max-width: 899px) {
-  .chat-screen .rail,
   .chat-screen .items { z-index: 31; }
   .chat-screen .scrim { z-index: 30; }
   .chat-screen .doc-panel { z-index: 32; }
 }
 
 /* Desktop: every side column folds away, so the person can focus. The app
-   sidebar folds from 760px, the rail from 900px, the item column from
-   1100px, the widths where each is a column. The state is in panels.ts. The
+   sidebar folds from 760px and the item column from 1100px, the widths where
+   each is a column. The state is in panels.ts. The
    conversation takes the freed room, and its message column stays at the
    reading width, centred. The chat has no app bar: its own header says where
    you are. The fold is animated, and not for a person who asked for less
@@ -1346,9 +1338,7 @@ html.j-lock body { overflow: hidden; }
 .j-nav-collapse,
 .j-nav-expand,
 .chat-screen .nav-expand,
-.chat-screen .rail-expand,
 .chat-screen .focus-toggle,
-.chat-screen .rail-collapse,
 .chat-screen .items-collapse { display: none; }
 .j-nav-collapse,
 .j-nav-expand {
@@ -1379,20 +1369,7 @@ html.j-lock body { overflow: hidden; }
   .j-shell.nav-collapsed .chat-screen .nav-expand { display: inline-grid; place-items: center; }
 }
 @media (min-width: 900px) {
-  .chat-screen .rail { transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0s; }
-  .chat-screen .rail.collapsed {
-    flex-basis: 0;
-    padding-inline: 0;
-    border-right-width: 0;
-    overflow: hidden;
-    visibility: hidden;
-    transition: flex-basis 0.2s ease, padding 0.2s ease, visibility 0s linear 0.2s;
-  }
-  .chat-screen .rail-title { display: none; }
-  .chat-screen .rail-header { justify-content: flex-end; }
-  .chat-screen .rail-collapse,
   .chat-screen .focus-toggle { display: inline-grid; place-items: center; }
-  .chat-screen .rail.collapsed ~ .chat .rail-expand { display: inline-grid; place-items: center; }
   .chat-screen .chat-header .focus-toggle { margin-left: auto; }
 }
 @media (min-width: 1100px) {
@@ -1412,8 +1389,6 @@ html.j-lock body { overflow: hidden; }
   .j-shell.has-sidebar,
   .j-shell.has-sidebar .j-sidebar,
   .j-shell.has-sidebar.nav-collapsed .j-sidebar,
-  .chat-screen .rail,
-  .chat-screen .rail.collapsed,
   .chat-screen .items,
   .chat-screen .items.collapsed { transition: none; }
 }
@@ -1431,13 +1406,17 @@ html.j-lock body { overflow: hidden; }
   font-size: 0.85rem;
   line-height: 1.5;
 }
-.v-code pre code { background: none; padding: 0; white-space: pre; overflow-wrap: normal; font-size: inherit; }
+.v-code pre code { background: none; padding: 0; font-size: inherit; }
 @media (hover: none) {
   .v-code-copy { opacity: 1; }
 }
 .d-embed { display: flex; flex-direction: column; gap: var(--j-gap); min-width: 0; }
 .d-embed .d-codefirst .v-code pre { font-size: 0.9rem; }
-.d-embed .d-codefirst { max-width: none; }
+/* In a panel the document takes the panel, not the reading column of a page,
+   and the title grows with it: about 45 characters stay on two lines at
+   352px, the narrowest the panel gets (--j-panel-doc). */
+.j-content:has(> .d-embed) { max-width: none; padding-inline: var(--j-gap); }
+.d-embed .j-doc-title { font-size: clamp(var(--j-text-lg), 4.5vw, 1.8667rem); }
 .chat-screen .doc-panel-full {
   flex: none;
   font-size: 0.8125rem;
@@ -1445,9 +1424,10 @@ html.j-lock body { overflow: hidden; }
   white-space: nowrap;
 }
 
-/* The item list: one line per item. The title is cut with an ellipsis, a "..."
-   button opens the menu of the row, a group folds with its header, and the
-   row of the item open in the panel is marked. */
+/* The item list: one row per item. The title takes two lines at most and is
+   then cut with an ellipsis, a "..." button opens the menu of the row, a group
+   folds with its header, and the row of the item open in the panel is
+   marked. */
 .chat-screen .item {
   flex-wrap: nowrap;
   justify-content: flex-start;
@@ -1463,14 +1443,38 @@ html.j-lock body { overflow: hidden; }
 .chat-screen .item .item-text {
   flex: 1;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   min-height: 32px;
-  display: flex;
-  align-items: center;
+  padding-block: 5px;
 }
+/* The filter at the top of the list: a field as wide as the column, with the
+   button that empties it inside at the right, and the counts under it. */
+.chat-screen .item-filter { position: relative; display: flex; }
+.chat-screen .item-filter input {
+  width: 100%;
+  padding: 6px 32px 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--j-surface-2);
+  border: 1px solid var(--j-line);
+  border-radius: 8px;
+}
+.chat-screen .item-filter-clear {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  min-width: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--j-muted);
+}
+.chat-screen .item-filter-count { margin: 0; }
 .chat-screen .item-pin { flex: none; font-size: 0.75rem; }
 .chat-screen .item-menu-wrap { position: relative; flex: none; }
 .chat-screen .item-more { min-height: 32px; min-width: 32px; padding: 0; }
@@ -1618,11 +1622,6 @@ html.vv-fit .chat-screen .ws-overlay {
 @media (max-width: 899px) {
   html.vv-fit .chat-screen .ws-dialog {
     height: 100%;
-  }
-  html.vv-fit .chat-screen .rail {
-    bottom: auto;
-    top: var(--vv-top, 0px);
-    height: var(--vvh);
   }
 }
 @media (max-width: 1099px) {
@@ -1848,7 +1847,7 @@ html.vv-fit .chat-screen .ws-overlay {
 /* The round badge of a person. Five colors, picked from the id. */
 .signin-avatar {
   display: inline-grid; place-items: center;
-  width: 44px; height: 44px; border-radius: 50%;
+  width: var(--j-tap); height: var(--j-tap); border-radius: 50%;
   font-weight: 700; font-size: 1rem; color: var(--j-bg);
 }
 .signin-avatar.lg { width: 60px; height: 60px; font-size: 1.3333rem; }
@@ -1903,7 +1902,7 @@ html.vv-fit .chat-screen .ws-overlay {
 .signin-empty p { margin: 0; }
 .signin-empty-lead { color: var(--j-text); font-size: 1rem; font-weight: 600; }
 .signin-empty pre {
-  margin: 4px 0; padding: 12px; text-align: left; white-space: pre-wrap; word-break: break-word;
+  margin: 4px 0; padding: 12px; text-align: left; white-space: pre-wrap;
   font: 0.8667rem/1.5 var(--j-mono); color: var(--j-text);
   background: var(--j-bg); border: 1px solid var(--j-line); border-radius: var(--j-radius-sm);
 }

@@ -35,6 +35,9 @@ export interface Workspace {
   // list gives it, and it is the count of that person alone: in a shared
   // workspace every other person has one of their own.
   unread?: number;
+  // When the workspace last moved, as core stamps it. The list of the sidebar
+  // orders by it, newest first (`byActivity`).
+  updated_at?: string;
   // Whether Joshua is working for this workspace, or something of it waits
   // for a person. Null, or absent, when neither is true. The viewer composes
   // it (`gateway/joshua_gateway/viewer_workspaces.py`); the list and the read
@@ -79,6 +82,9 @@ export interface WorkspaceItem {
   added_by: string;
   pinned: boolean;
   seen: boolean;
+  // When the item was added, as core stamps it. The panel orders by it,
+  // newest first, under the pinned rows. A row with no stamp is oldest.
+  added_at?: string;
 }
 
 export interface ServerOption {
@@ -140,6 +146,17 @@ export const SHARED = "shared";
 export const linkOf = (workspace: Workspace): string =>
   `/chat/w/${encodeURIComponent(workspace.id)}`;
 
+/**
+ * The other address of a workspace, `/chat/w/<space>/<slug>`, where `<space>`
+ * is `shared` for a shared workspace and the owner for a personal one. The
+ * screen of a workspace opens there too, so the list of the threads marks the
+ * thread on screen by this address as well as by `linkOf`.
+ */
+export const refLinkOf = (workspace: Workspace): string =>
+  `/chat/w/${encodeURIComponent(workspace.shared ? SHARED : workspace.owner)}/${encodeURIComponent(
+    workspace.slug,
+  )}`;
+
 // The slug core gives a title (core: store/repo.py, `slugify`), so a dialog
 // can show the address a workspace will take before it exists.
 const SLUG_MAX = 48;
@@ -161,6 +178,21 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   const body = await getJson<{ workspaces?: Workspace[] }>(BASE);
   return Array.isArray(body.workspaces) ? body.workspaces : [];
 }
+
+/** When a workspace last moved, as a number. A row with no stamp is oldest. */
+const movedAt = (workspace: Workspace): number => {
+  const when = Date.parse(workspace.updated_at ?? "");
+  return Number.isNaN(when) ? 0 : when;
+};
+
+/**
+ * The rows of `workspaces`, newest activity first.
+ *
+ * The sort is stable, so rows that carry the same stamp, and rows that carry
+ * none, keep the order the list gave them.
+ */
+export const byActivity = (workspaces: Workspace[]): Workspace[] =>
+  [...workspaces].sort((a, b) => movedAt(b) - movedAt(a));
 
 /**
  * One workspace, by its id. The screen resolves the address it was opened at

@@ -323,7 +323,7 @@ export default function Assignment() {
           <div className="a-head">
             <h2>Error</h2>
           </div>
-          <pre className="a-error">{item.error}</pre>
+          <pre className="a-error j-code-block">{item.error}</pre>
         </section>
       )}
     </Shell>

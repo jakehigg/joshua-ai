@@ -562,21 +562,27 @@ compose and on Kubernetes, and it adds no container.
 
 - `/chat/<person>` is the normal chat. `/chat/w/<owner>/<slug>` is a
   workspace, and `shared` stands for the owner of a shared one, so everyone in
-  it opens the same address. Every link the screen builds — the rail, the
-  header, a new workspace — is `/chat/w/<id>`, the permanent address: a closed
+  it opens the same address. Every link the screen builds — the list of the
+  threads, the header, a new workspace — is `/chat/w/<id>`, the permanent
+  address: a closed
   workspace frees its name, so a later workspace may hold its slug, and the id
   never moves. A link of one segment that is not an id still works: it finds
   the workspace and sends the browser to `/chat/w/<id>`. The id `w` is
   reserved, so no person can have it.
-- The left rail shows Chat, the active workspaces, the paused workspaces (folded),
-  and "+ New workspace". On a phone it is a drawer. A shared workspace carries
-  a small two-person icon beside its name, in the rail and in the header of the
+- The one list of the threads is in the app sidebar, under Chat: the normal
+  chat, the workspaces, "Show all", and "+ New workspace". From 760px the
+  sidebar is a column, and below it the drawer of the phone. The collapsed list
+  shows the five workspaces with the newest activity, active and paused
+  together, and the workspace on screen whatever its activity; an archived one
+  shows after "Show all" and says it is archived. "Show all" is kept on the
+  device, so the open list survives a reload. A shared workspace carries a
+  small two-person icon beside its name, in the list and in the header of the
   workspace; the icon is the only mark, and no row says "Shared". A workspace
   whose thread holds rows the person has not read shows the count after the
   title. Beside the two-person icon, in the same place and the same style, a
   workspace Joshua is working for, or one that waits for a person, carries the
   charm of that (below). The chat marks the thread read while its newest row
-  is on screen, and not while the tab is hidden, and the rail asks for the
+  is on screen, and not while the tab is hidden, and the list asks for the
   counts again after each mark.
 - The new workspace dialog asks for a title, a goal (optional), a model, and
   the servers. "Shared" offers the other people of the roster as checkboxes
@@ -592,11 +598,25 @@ compose and on Kubernetes, and it adds no container.
   the items point at: the same document recorded twice, as two kinds or by two
   writers, keeps the row that has a title and opens it, and a row with no
   title of its own asks the viewer for the title of its document, so no row is
-  labelled with a bare path. A document or an artifact opens
-  in the document panel. Another item opens in a new tab, but only when its
-  address is http(s) or a path that starts with `/`. Any other address is shown
-  as text. Each item can be pinned or removed, and a form adds a link. The panel
-  loads again after each finished turn and when the tab gets focus.
+  labelled with a bare path. The rows stand pinned first, then the newest
+  added first. A group folds with its header, and the folded groups of each
+  workspace are kept on the device. A filter field finds a row of a long list
+  by a part of its title or its address. Each item can be pinned or removed,
+  and a form adds a link. The panel loads again after each finished turn and
+  when the tab gets focus.
+- An item opens over the workspace, in a panel that never navigates the chat
+  tab: a document or an artifact in the frame of its document page, where the
+  sandbox of an artifact lives; a wiki page, a PDF, and any other page of the
+  viewer in a frame of its own; a photo full size; and an item of another site,
+  or one with no address at all, as a card with its address. The bar of the
+  panel holds the title, a control that opens the item on its own page, the
+  full-screen toggle, and the X; it stays on screen in full screen. The
+  conversation stays behind the panel, so the close gives back the thread where
+  it stood and the text in the composer. An address that is neither http(s) nor
+  a path that starts with `/` opens nothing, and the row shows it as text.
+- The divider between the conversation and a panel drags to another width. A
+  panel holds between 14rem and 60 percent of the window, and the width is kept
+  on the device for that person, that panel, and that breakpoint.
 
 ### The charm beside the name
 

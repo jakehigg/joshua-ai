@@ -1,5 +1,5 @@
-// Which side columns are collapsed on a desktop: the app sidebar (`nav`), the
-// rail of the chat (`rail`) and the item column of a workspace (`items`).
+// Which side columns are collapsed on a desktop: the app sidebar (`nav`) and
+// the item column of a workspace (`items`).
 //
 // The state is shared by the shell and the chat screen, so a collapsed
 // sidebar stays collapsed on every page, and it is kept per browser in
@@ -10,15 +10,15 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-export type Panel = "nav" | "rail" | "items";
+export type Panel = "nav" | "items";
 
-export const PANELS: Panel[] = ["nav", "rail", "items"];
+export const PANELS: Panel[] = ["nav", "items"];
 export const STORAGE_KEY = "joshua.panels.collapsed";
 
 type State = Record<Panel, boolean>;
 
 function read(): State {
-  const state: State = { nav: false, rail: false, items: false };
+  const state: State = { nav: false, items: false };
   try {
     const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}") as Partial<State>;
     for (const p of PANELS) state[p] = raw[p] === true;
@@ -61,7 +61,7 @@ export function usePanels() {
   /** Focus mode: collapse every panel, or open them all when all are collapsed. */
   const focus = useCallback(() => {
     const all = PANELS.every((p) => state[p]);
-    write({ nav: !all, rail: !all, items: !all });
+    write({ nav: !all, items: !all });
   }, []);
   return { collapsed: now, set, toggle, focus };
 }
