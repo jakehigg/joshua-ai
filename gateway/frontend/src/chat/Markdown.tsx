@@ -38,7 +38,7 @@ function CodeBlock(props: ComponentPropsWithoutRef<"pre">) {
     }
   };
   return (
-    <div className="code-block">
+    <div className="code-block j-code-block">
       <button type="button" className="copy" onClick={copy} aria-label="Copy code">
         {copied ? "Copied" : "Copy"}
       </button>

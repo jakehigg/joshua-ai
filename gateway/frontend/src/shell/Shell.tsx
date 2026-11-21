@@ -88,12 +88,19 @@ export function embedded(view: Window = window): boolean {
   }
 }
 
-/** The class of the content column: the usage page is wide, the chat fills. */
+/**
+ * The class of the content column: the usage page is wide, the chat fills.
+ *
+ * Every column carries `j-wrap`, the one long-word rule: a url, a slug or a
+ * hash wraps instead of pushing the page sideways, and the descendants of the
+ * column inherit it. A code block (`j-code-block`), a cell of a table and a
+ * row of the item list keep their words whole and scroll or clip instead.
+ */
 function contentClass(section: string): string {
   if (section === "usage") {
-    return "j-content wide";
+    return "j-content wide j-wrap";
   }
-  return section === "chat" ? "j-content fill" : "j-content";
+  return section === "chat" ? "j-content fill j-wrap" : "j-content j-wrap";
 }
 
 /**
@@ -189,7 +196,7 @@ export default function Shell({
     return (
       <div className="j-shell">
         <div className="j-main">
-          <main className="j-content">{children}</main>
+          <main className="j-content j-wrap">{children}</main>
         </div>
       </div>
     );

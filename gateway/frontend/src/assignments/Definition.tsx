@@ -139,7 +139,7 @@ export default function Definition({
           (definition.lines.length === 0 ? (
             <p className="j-faint a-def-empty">The definition is empty.</p>
           ) : (
-            <pre>
+            <pre className="j-code-block">
               <code>{definition.lines.join("\n")}</code>
             </pre>
           ))}

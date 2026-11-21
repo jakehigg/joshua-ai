@@ -63,7 +63,9 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 
 :root,
 .chat-screen {
-  --chat-width: 860px; /* the reading width of the message column */
+  /* the reading width of the message column: a chat line is read once, so
+     the column is wider than the --j-content of a page */
+  --chat-width: 860px;
   --chat-shadow: 0 2px 12px rgb(0 0 0 / 0.5);
 
   /* Code highlight, after the GitHub dark palette. */
@@ -203,7 +205,6 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 .chat-screen .msg-person {
   align-items: flex-end;
@@ -344,7 +345,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   border-left: 2px solid var(--j-line);
   color: var(--j-text);
 }
-.chat-screen .event-raw { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.75rem var(--j-mono); }
+.chat-screen .event-raw { margin: 0; white-space: pre-wrap; font: 0.75rem var(--j-mono); }
 .chat-screen .event-raw-toggle { min-height: 32px; margin-top: 6px; font-size: 0.75rem; }
 @media (max-width: 759px) {
   /* The preview takes its own line, so the headline and badge stay readable. */
@@ -465,7 +466,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 .chat-screen .doc-panel {
     position: relative;
     inset: auto;
-    flex: 0 0 min(45%, 44rem);
+    flex: 0 0 var(--j-panel-doc);
     min-width: 0;
     border-left: 1px solid var(--j-line);
   }
@@ -633,10 +634,6 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   overflow-x: auto;
   font-size: 0.85rem;
   line-height: 1.5;
-}
-.chat-screen .code-block pre code {
-  white-space: pre;
-  overflow-wrap: normal;
 }
 .chat-screen .copy {
   position: absolute;
@@ -923,7 +920,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   bottom: 0;
   right: 0;
   z-index: 4;
-  width: min(18rem, 85vw);
+  width: var(--j-drawer);
   display: none;
   flex-direction: column;
   gap: 4px;
@@ -970,7 +967,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 }
 .chat-screen .item a,
 .chat-screen .item-text,
-.chat-screen .item-open { min-width: 0; overflow-wrap: anywhere; }
+.chat-screen .item-open { min-width: 0; }
 .chat-screen .item-open { border: 0; background: none; padding: 0; min-height: 0; text-align: left; color: var(--j-accent); }
 .chat-screen .item-actions { display: flex; gap: 4px; }
 .chat-screen .item-actions button { min-height: 28px; padding: 0 8px; font-size: 0.75rem; }
@@ -1010,7 +1007,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 .chat-screen .item-add input { font: inherit; color: inherit; background: var(--j-surface-2); border: 1px solid var(--j-line); border-radius: 8px; padding: 6px 8px; }
 
 @media (min-width: 1100px) {
-  .chat-screen .items { position: static; display: flex; flex: 0 0 18rem; width: auto; }
+  .chat-screen .items { position: static; display: flex; flex: 0 0 var(--j-panel-items); width: auto; }
   .chat-screen .items-toggle,
   .chat-screen .items-close { display: none; }
 }
@@ -1045,13 +1042,12 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   overflow-y: auto;
 }
 .chat-screen .item-card-kind { color: var(--j-muted); font-size: 0.75rem; text-transform: uppercase; }
-.chat-screen .item-card-title { margin: 0; font-size: 1.125rem; overflow-wrap: anywhere; }
+.chat-screen .item-card-title { margin: 0; font-size: 1.125rem; }
 .chat-screen .item-card-address {
   margin: 0;
   color: var(--j-muted);
   font-family: var(--j-mono);
   font-size: 0.8125rem;
-  overflow-wrap: anywhere;
 }
 .chat-screen .item-card-open {
   padding: 8px 14px;
@@ -1075,7 +1071,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 /* Form controls, everywhere. Text is never under 16px, so iOS Safari does
    not zoom in on focus, and it grows with the text size of the device
    (`textSize.ts`). No fixed height: padding and line-height centre the text,
-   so it is never cut off, and 44px is a tap target. A control never grows
+   so it is never cut off, and --j-tap is a tap target. A control never grows
    wider than its container. */
 input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
 textarea,
@@ -1084,7 +1080,7 @@ select {
   max-width: 100%;
   font-size: max(16px, 1.0667rem);
   line-height: 1.4;
-  min-height: 44px;
+  min-height: var(--j-tap);
   padding-block: 10px;
   touch-action: manipulation;
 }
@@ -1100,12 +1096,12 @@ select { text-overflow: ellipsis; }
 .chat-screen .ws-dialog textarea,
 .chat-screen .ws-dialog select,
 .chat-screen .item-add input { width: 100%; padding: 10px 12px; }
-.chat-screen .composer-input { padding: 10px 12px; min-height: 44px; }
+.chat-screen .composer-input { padding: 10px 12px; min-height: var(--j-tap); }
 button,
 .j-btn,
 summary,
 label.attach { touch-action: manipulation; }
-.chat-screen button { min-height: 44px; }
+.chat-screen button { min-height: var(--j-tap); }
 .chat-screen .item-actions button { min-height: 36px; padding: 0 10px; }
 
 /* A focus ring that no overflow:hidden parent cuts off, and a pressed state. */
@@ -1124,7 +1120,6 @@ html, body { max-width: 100%; overflow-x: clip; }
 .chat-screen .chat,
 .chat-screen .ws-dialog,
 .chat-screen .ws-server span { min-width: 0; }
-.chat-screen .ws-server span { overflow-wrap: anywhere; }
 .chat-screen .ws-actions { flex-wrap: wrap; }
 
 /* The dialogs: the fields scroll in the body, the buttons stay in a footer. */
@@ -1167,8 +1162,8 @@ html, body { max-width: 100%; overflow-x: clip; }
 .j-nav-toggle,
 .j-nav-close {
   flex: none;
-  min-height: 44px;
-  min-width: 44px;
+  min-height: var(--j-tap);
+  min-width: var(--j-tap);
   border: 1px solid var(--j-line);
   border-radius: 10px;
   background: var(--j-surface-2);
@@ -1195,7 +1190,7 @@ html.j-lock body { overflow: hidden; }
     bottom: 0;
     left: 0;
     z-index: 40;
-    width: min(18rem, 85vw);
+    width: var(--j-drawer);
     overflow-y: auto;
     padding: max(14px, env(safe-area-inset-top)) 10px 14px max(10px, env(safe-area-inset-left));
     border-right: 1px solid var(--j-line-soft);
@@ -1324,13 +1319,17 @@ html.j-lock body { overflow: hidden; }
   font-size: 0.85rem;
   line-height: 1.5;
 }
-.v-code pre code { background: none; padding: 0; white-space: pre; overflow-wrap: normal; font-size: inherit; }
+.v-code pre code { background: none; padding: 0; font-size: inherit; }
 @media (hover: none) {
   .v-code-copy { opacity: 1; }
 }
 .d-embed { display: flex; flex-direction: column; gap: var(--j-gap); min-width: 0; }
 .d-embed .d-codefirst .v-code pre { font-size: 0.9rem; }
-.d-embed .d-codefirst { max-width: none; }
+/* In a panel the document takes the panel, not the reading column of a page,
+   and the title grows with it: about 45 characters stay on two lines at
+   352px, the narrowest the panel gets (--j-panel-doc). */
+.j-content:has(> .d-embed) { max-width: none; padding-inline: var(--j-gap); }
+.d-embed .j-doc-title { font-size: clamp(var(--j-text-lg), 4.5vw, 1.8667rem); }
 .chat-screen .doc-panel-full {
   flex: none;
   font-size: 0.8125rem;
@@ -1338,9 +1337,10 @@ html.j-lock body { overflow: hidden; }
   white-space: nowrap;
 }
 
-/* The item list: one line per item. The title is cut with an ellipsis, a "..."
-   button opens the menu of the row, a group folds with its header, and the
-   row of the item open in the panel is marked. */
+/* The item list: one row per item. The title takes two lines at most and is
+   then cut with an ellipsis, a "..." button opens the menu of the row, a group
+   folds with its header, and the row of the item open in the panel is
+   marked. */
 .chat-screen .item {
   flex-wrap: nowrap;
   justify-content: flex-start;
@@ -1356,13 +1356,13 @@ html.j-lock body { overflow: hidden; }
 .chat-screen .item .item-text {
   flex: 1;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   min-height: 32px;
-  display: flex;
-  align-items: center;
+  padding-block: 5px;
 }
 .chat-screen .item-pin { flex: none; font-size: 0.75rem; }
 .chat-screen .item-menu-wrap { position: relative; flex: none; }
@@ -1736,7 +1736,7 @@ html.vv-fit .chat-screen .ws-overlay {
 /* The round badge of a person. Five colors, picked from the id. */
 .signin-avatar {
   display: inline-grid; place-items: center;
-  width: 44px; height: 44px; border-radius: 50%;
+  width: var(--j-tap); height: var(--j-tap); border-radius: 50%;
   font-weight: 700; font-size: 1rem; color: var(--j-bg);
 }
 .signin-avatar.lg { width: 60px; height: 60px; font-size: 1.3333rem; }
@@ -1791,7 +1791,7 @@ html.vv-fit .chat-screen .ws-overlay {
 .signin-empty p { margin: 0; }
 .signin-empty-lead { color: var(--j-text); font-size: 1rem; font-weight: 600; }
 .signin-empty pre {
-  margin: 4px 0; padding: 12px; text-align: left; white-space: pre-wrap; word-break: break-word;
+  margin: 4px 0; padding: 12px; text-align: left; white-space: pre-wrap;
   font: 0.8667rem/1.5 var(--j-mono); color: var(--j-text);
   background: var(--j-bg); border: 1px solid var(--j-line); border-radius: var(--j-radius-sm);
 }

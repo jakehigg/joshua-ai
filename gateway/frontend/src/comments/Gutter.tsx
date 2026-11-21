@@ -411,7 +411,7 @@ export function SourceLines({
       {preamble.map((line, index) => (
         <li className="a-line a-pre" key={`pre-${index}`}>
           <span className="a-ln" />
-          <code className="a-code j-faint">{line}</code>
+          <code className="a-code j-code-block j-faint">{line}</code>
         </li>
       ))}
       {gutter.lines.map((line, index) => {
@@ -425,7 +425,7 @@ export function SourceLines({
             <a className="a-ln" href={`#S${no}`}>
               {no}
             </a>
-            <code className="a-code">{line}</code>
+            <code className="a-code j-code-block">{line}</code>
             <Plus gutter={gutter} line={no} text={line} />
           </li>
         );
