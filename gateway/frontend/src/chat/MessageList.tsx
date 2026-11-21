@@ -1,6 +1,8 @@
 // The scrolling list of messages. While the reader is at the bottom, a new
 // message or new text scrolls into view. When the reader has scrolled up,
-// the list stays put and a "new" button appears instead. "Load earlier"
+// the list stays put and a "new" button appears instead — except for a
+// message the reader sends: `sent` rises then, and the list goes to the
+// bottom, so they see their own message and the answer to it. "Load earlier"
 // at the top adds the page before; the rows on screen do not move. A time
 // line stands before the first message of a run (see stamps.ts), and in a
 // shared workspace the name of the writer stands above the first message of
@@ -92,6 +94,8 @@ interface Props {
    * row id. It is called again for each newer row that arrives.
    */
   onRead?: (serverId: number) => void;
+  /** How many messages this screen has sent: a send goes to the bottom. */
+  sent?: number;
 }
 
 export function MessageList({
@@ -110,6 +114,7 @@ export function MessageList({
   me,
   shared = false,
   onRead,
+  sent = 0,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -187,6 +192,14 @@ export function MessageList({
       readHere();
     } else setUnseen(true);
   }, [signature, toBottom, readHere]);
+
+  // A send goes to the bottom, wherever the reader stood. It runs after the
+  // effect above, so the "new" button of that one does not come up instead.
+  useLayoutEffect(() => {
+    if (sent === 0) return;
+    toBottom(false);
+    readHere();
+  }, [sent, toBottom, readHere]);
 
   // A tab that comes back shows the rows that arrived while it was hidden.
   useEffect(() => {

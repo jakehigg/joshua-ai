@@ -137,6 +137,31 @@ describe("MessageList", () => {
     expect(onRead).toHaveBeenCalledWith(7);
   });
 
+  it("goes to the bottom on a send, and stays put when a row arrives", () => {
+    const props = { canRetry: true, onRetry: () => undefined };
+    const { rerender } = render(<MessageList messages={[msg(5)]} {...props} sent={0} />);
+    const list = screen.getByRole("log");
+    Object.defineProperty(list, "scrollHeight", { configurable: true, get: () => 1000 });
+    Object.defineProperty(list, "clientHeight", { configurable: true, get: () => 300 });
+    list.scrollTop = 0;
+    fireEvent.scroll(list);
+    // The reader has scrolled up: a row that arrives leaves them where they
+    // are and offers the button instead.
+    rerender(<MessageList messages={[msg(5), msg(6)]} {...props} sent={0} />);
+    expect(list.scrollTop).toBe(0);
+    expect(screen.getByRole("button", { name: "Scroll to the newest message" })).toBeTruthy();
+    // Their own message goes into view all the same.
+    rerender(
+      <MessageList
+        messages={[msg(5), msg(6), msg(7, { role: "person", text: "mine" })]}
+        {...props}
+        sent={1}
+      />,
+    );
+    expect(list.scrollTop).toBe(1000);
+    expect(screen.queryByRole("button", { name: "Scroll to the newest message" })).toBeNull();
+  });
+
   it("shows the loading state and the load error with Retry", () => {
     const onReload = vi.fn();
     const { rerender } = render(<MessageList messages={[]} canRetry onRetry={() => undefined} status="loading" />);

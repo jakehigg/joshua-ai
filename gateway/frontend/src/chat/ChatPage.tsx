@@ -225,6 +225,21 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
     if (held.length > 0) flushHeld();
   }, [turn.running, view.pending, history.status, held, flushHeld]);
 
+  // A message sent here goes into view, in the normal chat and in a
+  // workspace alike: the counter rises on each send, and the list jumps to
+  // the bottom once the new message has rendered (MessageList.tsx). A message
+  // that arrives moves the list only while it already stands at the bottom.
+  const [sent, setSent] = useState(0);
+  const { send: sendTurn } = turn;
+  const send = useCallback(
+    (text: string, file?: File | null) => {
+      const taken = sendTurn(text, file);
+      if (taken) setSent((n) => n + 1);
+      return taken;
+    },
+    [sendTurn],
+  );
+
   // A send that did not arrive, kept by the last visit. It is offered again
   // until it is sent, or thrown away, or a new message is sent.
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -389,6 +404,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
             me={me}
             shared={ws?.shared ?? false}
             onRead={onRead}
+            sent={sent}
           />
           {draft && (
             <div className="draft-banner" role="alert">
@@ -402,7 +418,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
                 className="retry"
                 onClick={() => {
                   setDraft(null);
-                  turn.send(draft.text, draft.file);
+                  send(draft.text, draft.file);
                 }}
               >
                 Retry
@@ -419,7 +435,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
               </button>
             </div>
           )}
-          <Composer onSend={turn.send} busy={turn.running || view.pending !== null} />
+          <Composer onSend={send} busy={turn.running || view.pending !== null} />
           {turn.upload && (
             <div className="toast toast-progress" role="status">
               {uploadText(turn.upload)}
