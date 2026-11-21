@@ -1308,6 +1308,19 @@ channel core folds it into the next turn itself.
 [contracts.md](contracts.md#the-hold-of-a-chat-thread) has the routes and the
 answers.
 
+## The draft of a composer
+
+Text written in the composer of the web chat and not sent is kept in core,
+for that thread and that person alone, so it comes back after a reload and on
+another device.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `core.draft_max_age_s` | `604800` | Seconds a draft is kept after its last change: seven days. Core drops an older one, so drafts do not grow without limit. `0` turns the limit off. |
+
+[contracts.md](contracts.md#the-draft-of-a-composer) has the routes and the
+answers.
+
 ## workspaces
 
 `workspaces` controls core's `/v1/workspaces` routes and the sessions of

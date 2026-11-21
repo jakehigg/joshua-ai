@@ -31,6 +31,11 @@
 // Joshua leaves its draft in the browser (draft.ts); the next open offers to
 // send it again, and a send with a file shows a progress toast.
 //
+// Text that is typed and not sent is a draft on the server, for this thread
+// and this person (useComposerDraft.ts): the composer finds it again after a
+// reload, on another device, and when the person comes back from another
+// workspace. A send clears it.
+//
 // A message written while a turn runs is taken and waits: the hold of the
 // thread, which lives on the server (useTurn.ts), so a reload or a closed tab
 // keeps it. The list ends with each waiting message, and each can be taken
@@ -90,6 +95,7 @@ import { Composer } from "./Composer";
 import { NewWorkspace } from "./NewWorkspace";
 import { usePanels } from "../shell/panels";
 import { clearDraft, loadDraft, type Draft } from "./draft";
+import { useComposerDraft } from "./useComposerDraft";
 import { ItemPanel } from "./ItemPanel";
 import { useWorkspaces, type Workspaces } from "./useWorkspaces";
 import { WorkspaceHeader } from "./WorkspaceHeader";
@@ -249,6 +255,10 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
     },
     [sendTurn],
   );
+
+  // The unsent text of the composer, kept on the server for this thread and
+  // this person, so it is there after a reload and on another device.
+  const composerDraft = useComposerDraft(person, workspace);
 
   // A send that did not arrive, kept by the last visit. It is offered again
   // until it is sent, or thrown away, or a new message is sent.
@@ -449,7 +459,12 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
               </button>
             </div>
           )}
-          <Composer onSend={send} busy={turn.running || view.pending !== null} />
+          <Composer
+            onSend={send}
+            busy={turn.running || view.pending !== null}
+            draft={composerDraft.text}
+            onDraft={composerDraft.save}
+          />
           {turn.upload && (
             <div className="toast toast-progress" role="status">
               {uploadText(turn.upload)}

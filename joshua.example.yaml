@@ -87,6 +87,7 @@ core:
   pool_max: 20
   context_cap: 150000          # input tokens over which a turn ends its session (not a workspace); 0 is off
   hold_max_age_s: 900         # a message waiting for the running turn of its thread is dropped past this age; 0 is off
+  draft_max_age_s: 604800     # an unsent composer draft is dropped this long after its last change; 0 is off
   mcp_replace_seconds: 300     # replace a session whose client marked a gateway server failed, at most once in this time
   reflection_model: claude-sonnet-5
   scheduler_tick_seconds: 15   # how often the scheduler checks for due tasks

@@ -90,6 +90,8 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `POST /v1/cli/held` | `channels.webhooks.allowed_callers` | `{"person", "text", "workspace"?}` | core's `POST /v1/holds` reply, `400 bad_request` for an empty text, `403 unknown_person`, `503 core_unavailable` |
 | `POST /v1/cli/held/take` | `channels.webhooks.allowed_callers` | `{"person", "workspace"?}` | core's `POST /v1/holds/take` reply, `403 unknown_person`, `503 core_unavailable` |
 | `DELETE /v1/cli/held/{hold_id}?person=&workspace=` | `channels.webhooks.allowed_callers` | | core's `DELETE /v1/holds/{hold_id}` reply, `403 unknown_person`, `503 core_unavailable` |
+| `GET /v1/cli/draft?person=&workspace=` | `channels.webhooks.allowed_callers` | | core's `GET /v1/drafts` reply for `cli:<person>`, or for the workspace thread, `403 unknown_person`, `503 core_unavailable` |
+| `POST /v1/cli/draft` | `channels.webhooks.allowed_callers` | `{"person", "text", "workspace"?}` | core's `POST /v1/drafts` reply, `403 unknown_person`, `503 core_unavailable` |
 | `POST /v1/voice/chat/completions` | `channels.voice.allowed_callers` | OpenAI chat completions, plus `speaker` and `speaker_confidence` | SSE of `chat.completion.chunk`, or one `chat.completion` for `stream: false`. `400 bad_request`, `404 not_found` with no voice section, `503 core_unavailable` |
 | `GET /v1/models` | `channels.voice.allowed_callers` | | `{"object": "list", "data": [{"id": "joshua", …}]}`, `404 not_found` with no voice section |
 | `GET /admin/guard/stats` | `ADMIN_CALLERS` | | counters: `unknown_sender`, `rate_limited`, `truncated`, `refused_total` |
@@ -141,6 +143,8 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/holds` | `channels`, `laptop` | `{"channel", "person", "text"}` | `{"held": [...], "dropped": [...]}`, `400` for an empty text, `429 {"reason": "hold_full"}` past 20 messages |
 | `POST /v1/holds/take` | `channels`, `laptop` | `{"channel", "person"}` | `{"text", "held": [...], "dropped": [...]}`. It empties the hold and joins the messages, in order, one per line. |
 | `DELETE /v1/holds/{hold_id}?channel=&person=` | `channels`, `laptop` | | `{"held": [...], "dropped": [...]}`, `404 {"reason": "unknown_hold"}` |
+| `GET /v1/drafts?channel=&person=` | `channels`, `laptop` | | `{"text", "at"}`, the unsent text of that person's composer in that thread, or `{"text": "", "at": null}` |
+| `POST /v1/drafts` | `channels`, `laptop` | `{"channel", "person", "text"}` | `{"text", "at"}`, or `{"text": "", "at": null}` for an empty text, which clears the draft |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?, "source"?, "person"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
 | `GET /v1/usage?group=conversation&person=` | `usage.allowed_callers` (default `viewer`) | | `{"days", "conversations": [{"conversation_id", "workspace": {"slug", "title"} or null, "calls", "input", "output", "cache_read", "cache_write"}]}`, largest first. Only the conversations of `person`. A row with no conversation is not listed. `422` for another `group` or no `person`; `403` for a person who is not a member. |
@@ -655,6 +659,29 @@ conversation and per sender, so a group thread never mixes two people. A
 folded message older than `core.hold_max_age_s` is dropped, and core says so
 on the channel. `channels.imessage.coalesce_window_s` still merges a burst
 that arrives before a turn starts.
+
+### The draft of a composer
+
+Text that a person wrote and did not send is a **draft**. It lives in core
+(`/v1/drafts`), so a person who leaves a thread, reloads the page, or opens
+the chat on another device finds the text again.
+
+A draft is named by its thread and the person who wrote it, as a hold is, so
+the normal chat and each workspace hold their own, and in a shared workspace
+one person's draft never reaches another person's composer. `GET` reads the
+draft of one thread and person, `POST` keeps it, and a `POST` with an empty
+text clears it, which a send does too. A draft is at most 8000 characters,
+the length of a message.
+
+A draft that was not touched for `core.draft_max_age_s` (default 604800
+seconds, seven days) is dropped, so old drafts do not grow without limit. The
+store is in memory, as the hold is, so a restart of core clears it.
+
+Channels passes these through as `/v1/cli/draft`, and the viewer as
+`/api/v1/chat/<person>/draft`. The viewer's composer saves a short time after
+the person stops typing, not on every keypress.
+
+A draft waits for the person; a held message waits for the running turn.
 
 ### The voice route
 

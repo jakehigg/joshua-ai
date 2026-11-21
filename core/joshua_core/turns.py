@@ -44,6 +44,13 @@ instead of starting a second turn, and the end of the running turn sends
 everything that waited as one turn, in order, one message per line. The fold
 is per sender, so a group thread never puts the words of one person in the
 mouth of another, and it carries the attachments of each folded message.
+
+``/v1/drafts`` is the other half of a composer: the text a person wrote and
+did not send. ``GET`` reads the draft of one thread and person, and ``POST``
+keeps it, or clears it with an empty text. A draft is private to its person,
+in a shared workspace too, and it is dropped when it was not touched for
+``core.draft_max_age_s``. A draft waits for the person; a held message waits
+for the turn.
 """
 
 from __future__ import annotations
@@ -88,6 +95,11 @@ HOLD_MAX_CHARS = 8000
 # How long a message may wait for the running turn, when the settings say
 # nothing. ``core.hold_max_age_s`` is the setting.
 HOLD_MAX_AGE_S = 900.0
+
+# How long a draft is kept, and how long one may be. ``core.draft_max_age_s``
+# is the setting for the age.
+DRAFT_MAX_AGE_S = 604800.0
+DRAFT_MAX_CHARS = 8000
 
 # What a channel is told about a folded message that waited too long.
 HOLD_DROPPED = (
@@ -135,8 +147,13 @@ class HeldMessage:
         return {"id": self.id, "text": self.text, "at": self.at}
 
 
-def hold_key(channel: str, person: str) -> str:
-    """The key of one thread's hold: its channel and the person who writes it."""
+def thread_key(channel: str, person: str) -> str:
+    """The key of one thread and one person: the channel and who writes in it.
+
+    It names both of that person's states in the thread, which are kept
+    apart: the hold of what waits for the running turn, and the draft of what
+    is not sent yet.
+    """
     return f"{channel}\n{person}"
 
 
@@ -231,6 +248,63 @@ def joined(held: list[HeldMessage]) -> str:
 
 
 @dataclass
+class Draft:
+    """The text a person wrote in the composer of a thread and did not send."""
+
+    text: str
+    at: str
+    # The monotonic clock of the last save, for the age limit.
+    saved_at: float = 0.0
+
+    def as_json(self) -> dict[str, str]:
+        return {"text": self.text, "at": self.at}
+
+
+class DraftStore:
+    """The unsent text of each composer, by thread and by person.
+
+    A draft waits for the person, where a held message waits for the turn, so
+    the two are separate stores. A draft is keyed by the person who wrote it,
+    so in a shared workspace one person's draft never reaches another
+    person's composer. A draft that was not touched for ``max_age_s`` is
+    dropped, so old drafts do not grow without limit. It lives in memory, as
+    the hold does, so a restart of core clears it.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_age_s: float = DRAFT_MAX_AGE_S,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
+        self._max_age = max_age_s
+        self._clock = clock
+        self._drafts: dict[str, Draft] = {}
+
+    def _purge(self) -> None:
+        """Forget every draft that was not touched inside ``max_age_s``."""
+        if self._max_age <= 0:
+            return
+        cutoff = self._clock() - self._max_age
+        for key in [k for k, draft in self._drafts.items() if draft.saved_at < cutoff]:
+            del self._drafts[key]
+
+    def get(self, key: str) -> Draft | None:
+        self._purge()
+        return self._drafts.get(key)
+
+    def save(self, key: str, text: str) -> Draft | None:
+        """Keep the text of a composer, or forget the draft when it is empty."""
+        self._purge()
+        if not text:
+            self._drafts.pop(key, None)
+            return None
+        draft = Draft(text=text, at=datetime.now(UTC).isoformat(), saved_at=self._clock())
+        self._drafts[key] = draft
+        return draft
+
+
+@dataclass
 class Resolution:
     """The routing result for one turn."""
 
@@ -274,6 +348,7 @@ class TurnService:
         self._seen = SeenCache()
         self._max_hold_age = float(settings.core.hold_max_age_s)
         self._holds = HoldStore(max_age_s=self._max_hold_age)
+        self._drafts = DraftStore(max_age_s=float(settings.core.draft_max_age_s))
         # The messages of each conversation that wait for its running turn,
         # and how many turns of a conversation run now.
         self._folded: dict[str, list[FoldedMessage]] = {}
@@ -426,11 +501,11 @@ class TurnService:
 
     def held(self, channel: str, person: str) -> dict[str, Any]:
         """The messages a thread holds, oldest first, and the dropped ones."""
-        return self._hold_answer(hold_key(channel, person))
+        return self._hold_answer(thread_key(channel, person))
 
     def hold(self, channel: str, person: str, text: str) -> dict[str, Any] | None:
         """Hold one message of a thread, or None when the hold is full."""
-        key = hold_key(channel, person)
+        key = thread_key(channel, person)
         message = self._holds.add(key, text)
         if message is None:
             return None
@@ -438,7 +513,7 @@ class TurnService:
 
     def drop_held(self, channel: str, person: str, hold_id: str) -> dict[str, Any] | None:
         """Take one held message back before it goes, or None when it is gone."""
-        key = hold_key(channel, person)
+        key = thread_key(channel, person)
         if not self._holds.remove(key, hold_id):
             return None
         return self._hold_answer(key)
@@ -449,10 +524,24 @@ class TurnService:
         A message that waited past the age limit is not in the text. It is in
         ``dropped``, so the person is told that it was not sent.
         """
-        key = hold_key(channel, person)
+        key = thread_key(channel, person)
         held = self._holds.take(key)
         dropped = [m.as_json() for m in self._holds.dropped(key)]
         return {"text": joined(held), "held": [m.as_json() for m in held], "dropped": dropped}
+
+    # --- the draft of a composer -------------------------------------------
+
+    def draft(self, channel: str, person: str) -> dict[str, Any]:
+        """The unsent text of that person's composer in that thread. Empty
+        when they have no draft there."""
+        draft = self._drafts.get(thread_key(channel, person))
+        return draft.as_json() if draft else {"text": "", "at": None}
+
+    def save_draft(self, channel: str, person: str, text: str) -> dict[str, Any]:
+        """Keep the unsent text of a composer. An empty text clears the
+        draft, as a send does."""
+        draft = self._drafts.save(thread_key(channel, person), text)
+        return draft.as_json() if draft else {"text": "", "at": None}
 
     # --- the fold of a channel message -------------------------------------
 
@@ -768,9 +857,20 @@ class HoldBody(BaseModel):
     text: str = Field(default="", max_length=HOLD_MAX_CHARS)
 
 
+class DraftBody(BaseModel):
+    """The composer of a draft call, and the text a ``POST`` keeps for it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: str = Field(min_length=1, max_length=200)
+    person: str = Field(min_length=1, max_length=64)
+    text: str = Field(default="", max_length=DRAFT_MAX_CHARS)
+
+
 def build_router() -> APIRouter:
-    """The turns router. ``/v1/turns`` is channels-only; ``/v1/turns/stream``
-    and the ``/v1/holds`` routes also accept ``laptop`` for a ``cli`` handle."""
+    """The turns router. ``/v1/turns`` is channels-only; ``/v1/turns/stream``,
+    the ``/v1/holds`` routes, and the ``/v1/drafts`` routes also accept
+    ``laptop`` for a ``cli`` handle."""
     router = APIRouter()
 
     @router.post("/v1/turns")
@@ -834,5 +934,22 @@ def build_router() -> APIRouter:
         if answer is None:
             return JSONResponse({"reason": "unknown_hold"}, status_code=404)
         return JSONResponse(answer)
+
+    @router.get("/v1/drafts")
+    async def get_draft(  # type: ignore[no-untyped-def]
+        request: Request,
+        channel: str = Query(min_length=1, max_length=200),
+        person: str = Query(min_length=1, max_length=64),
+        _identity: str = Depends(require_identity(["channels", "laptop"])),
+    ):
+        return JSONResponse(_service(request).draft(channel, person))
+
+    @router.post("/v1/drafts")
+    async def post_draft(  # type: ignore[no-untyped-def]
+        body: DraftBody,
+        request: Request,
+        _identity: str = Depends(require_identity(["channels", "laptop"])),
+    ):
+        return JSONResponse(_service(request).save_draft(body.channel, body.person, body.text))
 
     return router

@@ -26,6 +26,11 @@
 // taken and waits for that turn (useTurn.ts), and the box is emptied as
 // usual. Only a file has to wait for Joshua: the paperclip is off while a
 // turn runs.
+//
+// Text that is not sent is a draft, kept on the server for this thread and
+// this person (useComposerDraft.ts). The box takes the loaded draft once and
+// puts the caret after it, each change goes back as the new draft, and a send
+// clears it.
 
 import {
   useEffect,
@@ -139,13 +144,37 @@ interface Props {
   // Returns true when the message was sent; the box is then emptied.
   onSend: (text: string, file?: File | null) => boolean;
   busy: boolean;
+  // The draft of this thread, from the server, or null while it loads. The
+  // box takes it once, with the caret after the text.
+  draft?: string | null;
+  // Keeps what is in the box as the draft of this thread; "" clears it.
+  onDraft?: (text: string) => void;
 }
 
-export function Composer({ onSend, busy }: Props) {
+export function Composer({ onSend, busy, draft = null, onDraft }: Props) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  // The draft fills the box once. After that the box is the person's.
+  const tookDraft = useRef(false);
+
+  const change = (value: string) => {
+    setText(value);
+    onDraft?.(value);
+  };
+
+  useEffect(() => {
+    if (draft === null || tookDraft.current) return;
+    tookDraft.current = true;
+    if (draft === "") return;
+    setText(draft);
+    const el = ref.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(draft.length, draft.length);
+    }
+  }, [draft]);
 
   const count = charCount(text);
   const tooLong = count > MAX_CHARS;
@@ -169,7 +198,7 @@ export function Composer({ onSend, busy }: Props) {
   const submit = () => {
     if (!canSend) return;
     if (onSend(text, file)) {
-      setText("");
+      change("");
       setFile(null);
       setFileError(null);
     }
@@ -253,7 +282,7 @@ export function Composer({ onSend, busy }: Props) {
           className="composer-input"
           rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => change(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           placeholder="Message Joshua"

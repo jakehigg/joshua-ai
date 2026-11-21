@@ -9,6 +9,8 @@ import {
   getHistory,
   listHeld,
   postTurn,
+  readDraft,
+  saveDraft,
   takeHeld,
   type TurnFrame,
 } from "./client";
@@ -350,5 +352,45 @@ describe("the hold", () => {
       status: 429,
       message: "too many messages are waiting",
     });
+  });
+});
+
+describe("the composer draft", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads the draft of the thread, and nothing for a body without one", async () => {
+    const fetch = vi.fn(async () => json({ text: "half a message", at: "2026-01-01T10:00:00Z" }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await readDraft("alex")).toBe("half a message");
+    expect(fetch).toHaveBeenCalledWith("/api/v1/chat/alex/draft", expect.anything());
+    await readDraft("alex", "notes");
+    expect(fetch).toHaveBeenLastCalledWith("/api/v1/chat/alex/draft?workspace=notes", expect.anything());
+    vi.stubGlobal("fetch", vi.fn(async () => json({})));
+    expect(await readDraft("alex")).toBe("");
+  });
+
+  it("keeps the draft, with the workspace in the body", async () => {
+    const fetch = vi.fn(async () => json({ text: "half a message", at: "2026-01-01T10:00:00Z" }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await saveDraft("alex", "half a message")).toBe("half a message");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/draft",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ text: "half a message" }) }),
+    );
+    await saveDraft("alex", "half a message", "notes");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/draft",
+      expect.objectContaining({ body: JSON.stringify({ text: "half a message", workspace: "notes" }) }),
+    );
+  });
+
+  it("clears the draft with an empty text", async () => {
+    const fetch = vi.fn(async () => json({ text: "", at: "" }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await saveDraft("alex", "")).toBe("");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/draft",
+      expect.objectContaining({ body: JSON.stringify({ text: "" }) }),
+    );
   });
 });

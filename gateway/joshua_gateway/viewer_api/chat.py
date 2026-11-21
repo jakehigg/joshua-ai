@@ -45,6 +45,12 @@ still running. It lives in core, so a reload or a closed tab never loses one.
 every held message in order, one per line, which the page then sends as one
 turn.
 
+The draft is the text the person wrote in the composer and did not send. It
+lives in core too, so it comes back after a reload and on another device.
+``GET /api/v1/chat/<person>/draft`` reads it (``{text, at}``) and ``POST``
+keeps it (``{"text", "workspace"}``), with an empty text to clear it. A draft
+is the signed-in person's own, in a shared workspace too.
+
 The route serves any person id that ``joshua.yaml`` knows. With no
 ``CHANNELS_URL`` or no viewer token, every route answers 503.
 
@@ -488,15 +494,16 @@ def _hold_json(answer: dict[str, Any]) -> dict[str, Any]:
     return {"held": map_held(answer.get("held")), "dropped": map_held(answer.get("dropped"))}
 
 
-async def _hold_call(
+async def _state_call(
     request: Request,
     method: str,
     *,
     path: str = "",
     text: str | None = None,
     workspace: str = "",
+    kind: str = "hold",
 ) -> dict[str, Any] | JSONResponse:
-    """Call one hold route of channels for the person of the path.
+    """Call one hold or draft route of channels for the person of the path.
 
     The answer is the body of channels, or the refusal to send the browser.
     """
@@ -507,6 +514,8 @@ async def _hold_call(
     if client is None:
         return _json({"error": NOT_CONFIGURED}, 503)
     try:
+        if kind == "draft":
+            return await client.draft(method, who, text=text, workspace=workspace)
         return await client.held(method, who, path=path, text=text, workspace=workspace)
     except ChannelsError as exc:
         return channels_error(exc)
@@ -516,8 +525,9 @@ async def _hold_call(
         await client.aclose()
 
 
-async def _hold_body(request: Request) -> tuple[str, str] | JSONResponse:
-    """The ``text`` and the ``workspace`` of a hold write, or the refusal."""
+async def _text_body(request: Request) -> tuple[str, str] | JSONResponse:
+    """The ``text`` and the ``workspace`` of a hold or draft write, or the
+    refusal."""
     try:
         payload = json.loads(await request.body() or b"{}")
     except ValueError:
@@ -538,7 +548,7 @@ async def held(request: Request, person: Person) -> JSONResponse:
         workspace = _workspace_of(request.query_params.get("workspace"))
     except _Refused as exc:
         return _json({"error": exc.message}, exc.status)
-    answer = await _hold_call(request, "GET", workspace=workspace)
+    answer = await _state_call(request, "GET", workspace=workspace)
     if isinstance(answer, JSONResponse):
         return answer
     return _json(_hold_json(answer), 200)
@@ -548,7 +558,7 @@ async def hold(request: Request, person: Person) -> JSONResponse:
     """Hold one message, written while a turn of this thread still runs."""
     if not _origin_ok(request):
         return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
-    body = await _hold_body(request)
+    body = await _text_body(request)
     if isinstance(body, JSONResponse):
         return body
     text, workspace = body
@@ -556,7 +566,7 @@ async def hold(request: Request, person: Person) -> JSONResponse:
         checked = _checked_text(text, has_file=False)
     except _Refused as exc:
         return _json({"error": exc.message}, exc.status)
-    answer = await _hold_call(request, "POST", text=checked, workspace=workspace)
+    answer = await _state_call(request, "POST", text=checked, workspace=workspace)
     if isinstance(answer, JSONResponse):
         return answer
     return _json(_hold_json(answer), 200)
@@ -566,10 +576,10 @@ async def take_held(request: Request, person: Person) -> JSONResponse:
     """Empty the hold and answer with its messages as the text of one turn."""
     if not _origin_ok(request):
         return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
-    body = await _hold_body(request)
+    body = await _text_body(request)
     if isinstance(body, JSONResponse):
         return body
-    answer = await _hold_call(request, "POST", path="/take", workspace=body[1])
+    answer = await _state_call(request, "POST", path="/take", workspace=body[1])
     if isinstance(answer, JSONResponse):
         return answer
     taken = map_held(answer.get("held"))
@@ -590,12 +600,54 @@ async def drop_held(request: Request, person: Person) -> JSONResponse:
         workspace = _workspace_of(request.query_params.get("workspace"))
     except _Refused as exc:
         return _json({"error": exc.message}, exc.status)
-    answer = await _hold_call(
+    answer = await _state_call(
         request, "DELETE", path=f"/{request.path_params['id']}", workspace=workspace
     )
     if isinstance(answer, JSONResponse):
         return answer
     return _json(_hold_json(answer), 200)
+
+
+def _draft_json(answer: dict[str, Any]) -> dict[str, Any]:
+    """The draft of a composer for the browser: the unsent text and when it
+    was saved."""
+    text = answer.get("text")
+    at = answer.get("at")
+    return {
+        "text": text if isinstance(text, str) else "",
+        "at": at if isinstance(at, str) else "",
+    }
+
+
+async def draft(request: Request, person: Person) -> JSONResponse:
+    """The unsent text of this person's composer in this thread."""
+    try:
+        workspace = _workspace_of(request.query_params.get("workspace"))
+    except _Refused as exc:
+        return _json({"error": exc.message}, exc.status)
+    answer = await _state_call(request, "GET", workspace=workspace, kind="draft")
+    if isinstance(answer, JSONResponse):
+        return answer
+    return _json(_draft_json(answer), 200)
+
+
+async def save_draft(request: Request, person: Person) -> JSONResponse:
+    """Keep the unsent text of the composer. An empty text clears the draft,
+    as a send does."""
+    if not _origin_ok(request):
+        return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
+    body = await _text_body(request)
+    if isinstance(body, JSONResponse):
+        return body
+    text, workspace = body
+    if len(text) > MAX_TEXT_CHARS:
+        return _bad(f"text: must be at most {MAX_TEXT_CHARS} characters")
+    answer = await _state_call(
+        request, "POST", text=text if text.strip() else "", workspace=workspace, kind="draft"
+    )
+    if isinstance(answer, JSONResponse):
+        return answer
+    return _json(_draft_json(answer), 200)
 
 
 def _bad(message: str) -> JSONResponse:

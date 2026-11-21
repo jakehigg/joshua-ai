@@ -48,6 +48,7 @@ class Channels:
         self.turn: httpx.Response | None = None
         self.transcript: httpx.Response = httpx.Response(200, json={"messages": []})
         self.held: httpx.Response = httpx.Response(200, json={"held": []})
+        self.draft: httpx.Response = httpx.Response(200, json={"text": "", "at": None})
         self.unreachable = False
         self.slow_s = 0.0
 
@@ -60,6 +61,8 @@ class Channels:
             return self.transcript
         if request.url.path.startswith(viewer_channels.HELD_PATH):
             return self.held
+        if request.url.path == viewer_channels.DRAFT_PATH:
+            return self.draft
         if self.slow_s:
             return httpx.Response(200, stream=_Slow(self.slow_s))
         return self.turn or httpx.Response(200, text=FRAMES)
@@ -679,4 +682,67 @@ def test_the_hold_routes_need_the_sign_in(client) -> None:
 
 def test_an_unknown_person_has_no_hold(client, channels) -> None:
     assert client.get("/api/v1/chat/nobody/held", auth=ALEX).status_code == 404
+    assert channels.requests == []
+
+
+# --- the draft ----------------------------------------------------------------
+
+DRAFT = "/api/v1/chat/alex/draft"
+DRAFT_ROW = {"text": "half a message", "at": "2026-11-14T10:00:00+00:00"}
+
+
+def test_the_composer_draft_is_read_and_kept(client, channels) -> None:
+    channels.draft = httpx.Response(200, json=DRAFT_ROW)
+    read = client.get(DRAFT, auth=ALEX)
+    saved = client.post(DRAFT, json={"text": "half a message"}, auth=ALEX)
+    assert read.status_code == 200
+    assert read.json() == DRAFT_ROW
+    assert saved.json() == DRAFT_ROW
+    assert channels.requests[0].url.path == viewer_channels.DRAFT_PATH
+    assert dict(channels.requests[0].url.params) == {"person": "alex"}
+    assert json.loads(channels.bodies[1]) == {"person": "alex", "text": "half a message"}
+
+
+def test_an_empty_composer_clears_the_draft(client, channels) -> None:
+    channels.draft = httpx.Response(200, json={"text": "", "at": None})
+    response = client.post(DRAFT, json={"text": "   "}, auth=ALEX)
+    assert response.status_code == 200
+    assert response.json() == {"text": "", "at": ""}
+    # Whitespace alone is no draft: core gets the empty text, which clears it.
+    assert json.loads(channels.bodies[0]) == {"person": "alex", "text": ""}
+
+
+def test_the_draft_of_a_workspace_is_its_own(client, channels) -> None:
+    channels.draft = httpx.Response(200, json=DRAFT_ROW)
+    client.post(DRAFT, json={"text": "later", "workspace": "solar"}, auth=ALEX)
+    client.get(DRAFT + "?workspace=solar", auth=ALEX)
+    assert json.loads(channels.bodies[0]) == {
+        "person": "alex",
+        "workspace": "solar",
+        "text": "later",
+    }
+    assert dict(channels.requests[1].url.params) == {"person": "alex", "workspace": "solar"}
+
+
+def test_a_draft_over_the_cap_is_422_and_never_reaches_channels(client, channels) -> None:
+    response = client.post(DRAFT, json={"text": "x" * (chat.MAX_TEXT_CHARS + 1)}, auth=ALEX)
+    assert response.status_code == 422
+    assert channels.requests == []
+
+
+def test_a_cross_site_draft_is_403_and_never_reaches_channels(client, channels) -> None:
+    response = client.post(
+        DRAFT, json={"text": "hi"}, auth=ALEX, headers={"Origin": "https://evil.example"}
+    )
+    assert response.status_code == 403
+    assert channels.requests == []
+
+
+def test_the_draft_routes_need_the_sign_in(client) -> None:
+    assert client.get(DRAFT, auth=bad_cookie()).status_code == 401
+    assert client.post(DRAFT, json={"text": "hi"}, auth=bad_cookie()).status_code == 401
+
+
+def test_an_unknown_person_has_no_draft(client, channels) -> None:
+    assert client.get("/api/v1/chat/nobody/draft", auth=ALEX).status_code == 404
     assert channels.requests == []

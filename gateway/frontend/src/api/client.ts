@@ -588,6 +588,29 @@ export async function takeHeld(
   return { text: typeof text === "string" ? text : "", ...holdState(body) };
 }
 
+// The draft of one composer: the text written and not sent. A draft waits for
+// the person, where a held message waits for the turn.
+
+function draftText(raw: unknown): string {
+  const text = (raw as { text?: unknown } | null)?.text;
+  return typeof text === "string" ? text : "";
+}
+
+function draftPath(person: string, workspace?: string): string {
+  const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+  return `/chat/${encodeURIComponent(person)}/draft${query}`;
+}
+
+/** The unsent text of this person's composer in this thread, or "". */
+export async function readDraft(person: string, workspace?: string): Promise<string> {
+  return draftText(await getJson<unknown>(draftPath(person, workspace)));
+}
+
+/** Keeps the unsent text of the composer. An empty text clears the draft. */
+export async function saveDraft(person: string, text: string, workspace?: string): Promise<string> {
+  return draftText(await postJson<unknown>(draftPath(person), { text, ...(workspace ? { workspace } : {}) }));
+}
+
 // What the viewer knows about one document, with none of its body. It comes
 // from the viewer's own route `GET /documents/<owner>/<slug>.json`, a
 // host-absolute path, behind the viewer's auth and the same owner checks as
