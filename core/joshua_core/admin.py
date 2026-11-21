@@ -38,6 +38,11 @@ Routes:
 - ``POST /admin/inference/check`` — send one short prompt to each distinct
   server, model, and credential of the ``inference`` jobs, and return the
   outcome of each job. The error text holds no key.
+- ``GET /admin/update`` — the running release and the latest release of the
+  repository in ``admin.update_repo`` (``{current, latest, url, checked_at,
+  error}``). Core keeps the answer for six hours, so a page load makes no call
+  to GitHub. It offers no upgrade and runs none. The callers of
+  ``AUTH_CALLERS`` read it too, because the viewer serves it to the owner.
 """
 
 from __future__ import annotations
@@ -57,7 +62,7 @@ from joshua_shared.fleet_auth import (
 )
 from joshua_shared.log import get_logger
 
-from joshua_core import people
+from joshua_core import people, update
 from joshua_core.auth_api import AUTH_CALLERS_ENV, DEFAULT_AUTH_CALLERS
 from joshua_core.engine import inference as inference_plan
 from joshua_core.memory import embed
@@ -170,6 +175,15 @@ def _authorize_admin_or_auth(request: Request, refusal: str) -> JSONResponse | N
 def authorize_roster(request: Request) -> JSONResponse | None:
     """Like ``authorize_admin``, and the callers of ``AUTH_CALLERS`` pass too."""
     return _authorize_admin_or_auth(request, "may not change the roster")
+
+
+def authorize_update(request: Request) -> JSONResponse | None:
+    """The guard of ``GET /admin/update``: an admin caller, or one of ``AUTH_CALLERS``.
+
+    The viewer is in ``AUTH_CALLERS``, and it serves the release check to the
+    owner alone.
+    """
+    return _authorize_admin_or_auth(request, "may not read the release check")
 
 
 def authorize_settings(request: Request) -> JSONResponse | None:
@@ -439,6 +453,19 @@ def build_admin_router() -> APIRouter:
             direction="in",
         )
         return JSONResponse({"conversation_id": conversation.id, "text": result.text or ""})
+
+    @router.get("/admin/update")
+    async def get_update(request: Request):  # type: ignore[no-untyped-def]
+        """The running release and the latest release of ``admin.update_repo``.
+
+        The answer is kept for six hours (``joshua_core.update``), so a load of
+        the Admin page makes no call to GitHub.
+        """
+        denied = authorize_update(request)
+        if denied is not None:
+            return denied
+        store = request.app.state.ctx.repo.settings
+        return JSONResponse(await update.answer(store))
 
     @router.post("/admin/inference/check")
     async def inference_check(request: Request):  # type: ignore[no-untyped-def]

@@ -174,6 +174,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /admin/people/{id}/remove` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"removed": true, "id"}`. The handles and the sign-in secret go; the data dirs and the transcripts stay. `404` for a person who is not on the roster, `409` for the only owner. |
 | `GET /admin/settings?prefix=` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"groups": [{"prefix", "label", "settings": [{"key", "label", "hint", "is_secret", "is_set", "value", "updated_at", "updated_by"}]}]}`. `prefix` names one group; with none, every group comes back. `value` is `null` for a secret, set or not, and `is_set` says whether one is stored. `404 {"error": …}` for a prefix no group declares. |
 | `POST /admin/settings` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"key", "value", "person"?}` | `{"setting": …}`, one field in the shape of the `GET`, so no answer carries a secret value. `400 {"error": …}` for a key no group declares, a `value` that is not a string or is over 4096 characters, an empty value for a secret, or an unknown field. `503 {"error": …}` for a write of a secret with no `JOSHUA_SETTINGS_KEY`; the error names the variable. |
+| `GET /admin/update` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"current", "latest", "url", "checked_at", "error"}`. `current` is the release of the running image, `dev` for an image built with no tag. `latest` and `url` are the tag and the page of the latest release of the repository in `admin.update_repo`, read unauthenticated from the GitHub releases API with a five second timeout. Core keeps one answer for six hours, so a load of the page makes no call to GitHub. A check that did not reach GitHub answers a null `latest` and `url`, `error` is `The release check did not reach GitHub`, and `checked_at` is the last check that did reach it, or `null` for none. |
 | `GET /admin/pool` | `ADMIN_CALLERS` | | the session pool |
 | `POST /admin/sessions/flush` | `ADMIN_CALLERS` | | `{"flushed": n}` |
 | `GET /admin/transcript/{conversation}?limit=` | `ADMIN_CALLERS` | | `{"conversation_id", "rows": […]}` |
@@ -462,6 +463,27 @@ answers `is_secret` and `is_set`, and `value` is `null` for it, whether one is
 stored or not. The owner replaces a secret by writing a new one; nothing reads
 the old one back. [settings.md](settings.md) has the store, the encryption,
 and `JOSHUA_SETTINGS_KEY`.
+
+### The release check
+
+`GET /admin/update` says which release the instance runs and which one is the
+latest. The viewer proxies it as `GET /api/v1/admin/update`, as the identity
+`viewer`, and serves it to the owner alone, beside the settings of the
+Instance section. It reports a newer release and nothing else: it offers no
+upgrade and runs none.
+
+The running release is in the image: the build writes the release tag into
+`JOSHUA_RELEASE`, and core reads it at start. An image built with no tag
+reports `dev`.
+
+The latest release comes from the GitHub releases API of the repository in the
+setting `admin.update_repo`, `jakehigg/joshua-ai` with none. The call carries
+no credential, so it gets the anonymous rate of sixty calls an hour, and it
+times out after five seconds. Core keeps the answer, good or failed, for six
+hours: a second load inside that window makes no call to GitHub, which keeps
+the real rate at a few calls a day and keeps a failed check from retrying. A
+value of the setting that is not `owner/name` is refused at the write, and the
+default stands.
 
 ### The push routes
 

@@ -29,6 +29,14 @@ with the images and the packaged chart, are at
   draft, as emptying the box does, and a draft untouched for
   `core.draft_max_age_s`, seven days by default, is dropped. In a shared
   workspace each person sees their own draft and nobody else's.
+- **The Model select of a workspace lists each model of the instance.** It
+  showed "Default" alone on an instance that does not set
+  `workspaces.models`. The options route now answers the models of the
+  instance: `workspaces.models` when it is set, and the models of
+  `assignments.models` with no list. Each one carries the name a person reads
+  beside the id the workspace holds, so the picker shows "sonnet", not
+  `claude-sonnet-5`. "Default" is still the empty value, and a workspace with
+  no model runs on the model of the chat job.
 
 ### Workspaces
 
@@ -40,6 +48,36 @@ with the images and the packaged chart, are at
   session can read. A single message past 4000 characters is cut, and the text
   says so. The rows before those turns stay short lines, and the handoff and
   the pointer to `search_history` and `read_history` are unchanged.
+
+### Assignments
+
+- **A draft no longer holds a workspace in "waiting".** The charm beside the
+  name of a workspace said "waiting" for an unstarted draft, which asks the
+  person nothing, so nothing could clear it. Waiting is now a question of an
+  assignment alone, and a workspace whose only open item is a draft carries no
+  charm. A workspace with a job in flight shows the working charm, whatever
+  else waits.
+- **A draft made in a workspace starts.** `start_assignment(id=...)` refused
+  it as `invalid_spec`, because the stamp of the workspace in the stored spec
+  is no field of a spec. The start takes the stamp off before the check and
+  puts it back after it, so the run reports to the workspace the draft was
+  asked for. A start from another workspace moves the run to that one.
+
+### Admin
+
+- **The Instance page says whether a newer release exists.** The Releases
+  section shows one line: "Running v0.4.0, latest v0.4.1", with a link to the
+  release, or "Up to date" when the two match. The running release comes from
+  the image, and an image built with no release tag says `dev`. Core reads the
+  latest release of `admin.update_repo` (`jakehigg/joshua-ai` with no setting)
+  from GitHub, unauthenticated, and keeps the answer for six hours, so a load
+  of the page makes no call to GitHub. A check that did not reach GitHub shows
+  one line with the time of the last good check, and nothing retries. The page
+  reports a newer release; it offers no upgrade, and the update is still
+  `make pull && make up`. The new routes are core's `GET /admin/update` and
+  the viewer's `GET /api/v1/admin/update`, both the owner's. See
+  [settings.md](settings.md) and
+  [operations.md](operations.md#the-version-you-run).
 
 ## 0.4.0 - 2026-11-19
 

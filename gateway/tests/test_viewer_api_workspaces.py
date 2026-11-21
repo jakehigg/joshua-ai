@@ -353,12 +353,9 @@ def test_a_workspace_that_needs_a_person_carries_the_waiting_charm_and_the_reaso
     assert marks[WS] == {"state": "waiting", "reason": "assignment 31 has a question"}
     assert marks[OTHER] == {"state": "waiting", "reason": "assignment 32 requests a repository"}
 
-    # A draft waits for a start, and so does its workspace.
+    # A draft asks the person nothing, so its workspace carries no charm.
     manager(monkeypatch, draft=[assignment(id=33, status="draft", state="draft")])
-    assert charms(client, core)[WS] == {
-        "state": "waiting",
-        "reason": "assignment 33 waits for a start",
-    }
+    assert charms(client, core)[WS] is None
 
 
 def test_a_workspace_with_nothing_in_flight_and_nothing_waiting_carries_no_charm(

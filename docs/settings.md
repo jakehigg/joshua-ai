@@ -59,6 +59,11 @@ that signs each push, and the subject a push service writes to.
 [notifications.md](notifications.md) has that feature. The store came with
 push and is not of it; any feature uses it.
 
+The `admin` group holds `admin.update_repo`, the repository whose latest
+release the release check reads, as `owner/name`. Empty reads
+`jakehigg/joshua-ai`, and a value that is not `owner/name` is refused at the
+write. [contracts.md](contracts.md#the-release-check) has the check.
+
 ## What a field holds
 
 Each field declares a **kind**. The kind says which control the Instance page
@@ -99,6 +104,12 @@ A section starts with the steps of its group, in order, and a link to the
 page of the docs that has the whole story. The push group then says in one
 line which of its keys are set and whether push is on, so the owner sees what
 is left to do without reading four fields.
+
+The Releases section shows the release check in one line: which release the
+instance runs, which one is the latest, and a link to it, or "Up to date" when
+the two match. A check that did not reach GitHub says so and names the time of
+the last good check. The line reports a newer release and offers no upgrade;
+[operations.md](operations.md#update-joshua) has the update.
 
 A plain setting shows its value in the field, and the line under it says when
 it last changed and who changed it. A switch is a checkbox: one tap writes it,

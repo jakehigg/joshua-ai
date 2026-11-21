@@ -169,6 +169,18 @@ SETTING_GROUPS: tuple[SettingGroup, ...] = (
             ),
         ),
     ),
+    SettingGroup(
+        prefix="admin",
+        label="Releases",
+        fields=(
+            SettingField(
+                key="admin.update_repo",
+                label="Release repository",
+                hint="Where the release check reads the latest release, as owner/name. "
+                "Empty reads jakehigg/joshua-ai.",
+            ),
+        ),
+    ),
 )
 
 

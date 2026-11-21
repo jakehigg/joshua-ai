@@ -92,6 +92,12 @@ export interface ServerOption {
   description: string;
 }
 
+/** One model a workspace may run on: the id it holds, the name a person reads. */
+export interface ModelOption {
+  id: string;
+  name: string;
+}
+
 /** One writing style a workspace may take, with the line the picker shows. */
 export interface StyleOption {
   id: Style;
@@ -111,7 +117,7 @@ export interface PersonOption {
  */
 export interface Options {
   servers: ServerOption[];
-  models: string[];
+  models: ModelOption[];
   styles: StyleOption[];
   people: PersonOption[];
 }

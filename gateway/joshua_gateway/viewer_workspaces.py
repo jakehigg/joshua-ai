@@ -2,9 +2,11 @@
 
 A workspace carries one charm wherever its name shows, next to the two-person
 mark of a shared one: Joshua is **working** for this workspace, or something
-of it is **waiting** for a person. A workspace with nothing running and
-nothing waiting carries no charm. The charm is read-only: it says what is
-happening and does nothing.
+of it is **waiting** for a person. Waiting is a question of an assignment or
+of a developer task, which the person answers. An unstarted draft is not a
+question, so a workspace whose only open item is a draft carries no charm. A
+workspace with nothing running and nothing waiting carries no charm. The charm
+is read-only: it says what is happening and does nothing.
 
 :func:`charms` is the one place that collects the sources and merges them, and
 the workspaces routes (``viewer_api.workspaces``) put its answer on each
@@ -100,10 +102,10 @@ def _of_assignment(item: va.Item) -> Charm | None:
         return Charm(WORKING, f"assignment {item.id} is running")
     if item.status == "waiting":
         return Charm(WAITING, f"assignment {item.id} {_asked(item)}")
-    if item.status == "draft":
-        return Charm(WAITING, f"assignment {item.id} waits for a start")
-    # An assignment paused at the subscription limits is neither: it waits for
-    # a window to reset, which needs no person, and nothing of it is running.
+    # A draft is no charm: it asked nothing of the person, so nothing of it is
+    # to clear. An assignment paused at the subscription limits is no charm
+    # either: it waits for a window to reset, which needs no person, and
+    # nothing of it is running.
     return None
 
 

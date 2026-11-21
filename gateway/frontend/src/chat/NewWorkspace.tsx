@@ -101,8 +101,8 @@ export function NewWorkspace({
         <select id="ws-model" value={model} onChange={(e) => setModel(e.target.value)}>
           <option value="">Default</option>
           {(options?.models ?? []).map((m) => (
-            <option key={m} value={m}>
-              {m}
+            <option key={m.id} value={m.id}>
+              {m.name}
             </option>
           ))}
         </select>

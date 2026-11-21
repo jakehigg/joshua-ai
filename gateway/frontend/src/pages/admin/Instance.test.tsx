@@ -4,7 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "../../App";
 import type { Session } from "../../shell/Shell";
-import { SECRET_NOT_SET, SECRET_SET, type AdminSetting, type AdminSettings } from "./Instance";
+import {
+  SECRET_NOT_SET,
+  SECRET_SET,
+  updateLine,
+  type AdminSetting,
+  type AdminSettings,
+  type AdminUpdate,
+} from "./Instance";
 
 /** The owner who writes the settings, and a member who may not. */
 function session(role: string): Session {
@@ -63,9 +70,36 @@ const ENABLED: AdminSetting = {
   updated_by: null,
 };
 
+/** The one setting of the Releases group: where the release check reads. */
+const UPDATE_REPO: AdminSetting = {
+  key: "admin.update_repo",
+  label: "Release repository",
+  hint: "Where the release check reads the latest release, as owner/name.",
+  kind: "text",
+  is_secret: false,
+  is_set: false,
+  value: "",
+  updated_at: null,
+  updated_by: null,
+};
+
+/** The release check, as `GET /api/v1/admin/update` answers it. */
+const NEWER: AdminUpdate = {
+  current: "0.4.0",
+  latest: "0.4.1",
+  url: "https://github.com/jakehigg/joshua-ai/releases/0.4.1",
+  checked_at: "2026-11-21T12:00:00+00:00",
+  error: null,
+};
+
 /** One group of the two, as the route answers it. */
 function answer(...settings: AdminSetting[]): AdminSettings {
-  return { groups: [{ prefix: "push", label: "Push notifications", settings }] };
+  return {
+    groups: [
+      { prefix: "push", label: "Push notifications", settings },
+      { prefix: "admin", label: "Releases", settings: [UPDATE_REPO] },
+    ],
+  };
 }
 
 const SETTINGS = answer(PUBLIC_KEY, PRIVATE_KEY, SUBJECT, ENABLED);
@@ -89,11 +123,21 @@ function json(body: unknown, status = 200): Response {
  * The session of the person, the settings, and every write of the page. The
  * list it gives back holds the body of each write; `status` refuses one.
  */
-function stubRoutes(role: string, settings: AdminSettings = SETTINGS, status = 200) {
+function stubRoutes(
+  role: string,
+  settings: AdminSettings = SETTINGS,
+  status = 200,
+  update: AdminUpdate | null = NEWER,
+) {
   const sent: { path: string; body: unknown }[] = [];
   vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
     if (path === "/api/v1/session") {
       return Promise.resolve(json(session(role)));
+    }
+    if (path === "/api/v1/admin/update") {
+      return update === null
+        ? Promise.resolve(json({ error: "Joshua is unreachable" }, 503))
+        : Promise.resolve(json(update));
     }
     if (path === "/api/v1/admin/settings" && init?.method !== "POST") {
       return Promise.resolve(json(settings));
@@ -281,6 +325,52 @@ describe("the admin Instance section", () => {
     fireEvent.click(secret.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("JOSHUA_SETTINGS_KEY is not set")).toBeDefined();
+  });
+
+  it("shows the running release beside the latest one, with a link to it", async () => {
+    stubRoutes("owner");
+
+    app();
+
+    expect(await screen.findByText("Running v0.4.0, latest v0.4.1")).toBeDefined();
+    const link = screen.getByRole("link", { name: "release notes" });
+    expect(link.getAttribute("href")).toEqual(NEWER.url);
+  });
+
+  it("says up to date when the two releases match", async () => {
+    stubRoutes("owner", SETTINGS, 200, { ...NEWER, latest: "0.4.0" });
+
+    app();
+
+    expect(await screen.findByText("Running v0.4.0. Up to date.")).toBeDefined();
+    expect(screen.queryByRole("link", { name: "release notes" })).toBeNull();
+  });
+
+  it("says in one line when the check did not reach GitHub", async () => {
+    const failed: AdminUpdate = {
+      ...NEWER,
+      latest: null,
+      url: null,
+      error: "The release check did not reach GitHub",
+    };
+    stubRoutes("owner", SETTINGS, 200, failed);
+
+    app();
+
+    expect(await screen.findByText(/did not reach GitHub; the last good check was/)).toBeDefined();
+    expect(screen.queryByRole("link", { name: "release notes" })).toBeNull();
+    expect(updateLine({ ...failed, checked_at: null })).toEqual(
+      "Running v0.4.0. The release check did not reach GitHub.",
+    );
+  });
+
+  it("renders the settings when the check itself does not answer", async () => {
+    stubRoutes("owner", SETTINGS, 200, null);
+
+    app();
+
+    expect(await screen.findByText("Releases")).toBeDefined();
+    expect(screen.queryByText(/^Running /)).toBeNull();
   });
 
   it("gives a member nothing at all at the address", async () => {

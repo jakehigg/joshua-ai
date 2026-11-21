@@ -155,6 +155,33 @@ async def test_a_draft_asked_for_in_a_workspace_waits_for_a_start_there(app, sto
     assert stored["workspace"] == WS and stored["workspace_people"] == ["alex", "mia"]
 
 
+async def test_a_draft_made_in_a_workspace_starts(app, store, channels) -> None:
+    """The stamp of the workspace is no field of the spec, so a start takes it
+    off the stored spec before the check: the draft starts, and it keeps the
+    workspace it was asked for, even on a start from outside one."""
+    meta = {WORKSPACE_META_KEY: WS, WORKSPACE_PEOPLE_META_KEY: ["alex", "mia"]}
+    async with mcp_session(app) as session:
+        draft = payload(await with_meta(session, "draft_assignment", {"spec": spec()}, meta))
+        started = payload(await session.call_tool("start_assignment", {"id": draft["id"]}))
+        await settle()
+    assert started["id"] == draft["id"] and started["status"] != "draft"
+    stored = store.rows[draft["id"]]["spec"]
+    assert stored["workspace"] == WS and stored["workspace_people"] == ["alex", "mia"]
+    assert channels.bodies[-1]["workspace"] == WS
+
+
+async def test_a_start_from_another_workspace_moves_the_draft(app, store) -> None:
+    other = "22222222-2222-4222-8222-222222222222"
+    async with mcp_session(app) as session:
+        draft = payload(await with_meta(session, "draft_assignment", {"spec": spec()}))
+        started = await with_meta(
+            session, "start_assignment", {"id": draft["id"]}, {WORKSPACE_META_KEY: other}
+        )
+        assert text_and_links(started)[0]["id"] == draft["id"]
+        await settle()
+    assert store.rows[draft["id"]]["spec"]["workspace"] == other
+
+
 async def test_status_from_a_workspace_returns_a_link_and_shows_the_workspace(
     app, store, channels
 ) -> None:

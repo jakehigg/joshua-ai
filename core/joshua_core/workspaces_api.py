@@ -37,7 +37,8 @@ checked before the body is read. A ``person`` that is not a member of
   workspace here, with the person of the run, so a run of a person who is not
   one of the people of that workspace adds nothing (404).
 - ``GET /v1/workspaces/options`` gives the servers, the models, the writing
-  styles, and the people that the person may pick.
+  styles, and the people that the person may pick. A model is an ``id`` and
+  the ``name`` a person reads.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
 - ``POST /v1/workspaces/{slug}/read`` marks the thread read up to a turn id
   (``turn_id``, the id of a transcript row) for that person. The mark is
@@ -328,6 +329,28 @@ def _check_model(settings: Any, model: str | None) -> JSONResponse | None:
     return None
 
 
+def workspace_models(settings: Any) -> list[dict[str, str]]:
+    """The models a workspace may pick, in the order a person sees them.
+
+    Each one is an ``id``, which the workspace holds and the model call names,
+    and a ``name``, which a person reads. ``workspaces.models`` is the list
+    when it is set, and a name of it is its id. With no list, the models of
+    the instance are the ones of ``assignments.models``, where the key is the
+    name a person reads and ``model`` is the id. Two names of one id give one
+    entry, the first of them.
+    """
+    named = settings.assignments.models
+    labels = {model.model: name for name, model in reversed(list(named.items()))}
+    picked = list(settings.workspaces.models)
+    if picked:
+        return [{"id": model, "name": labels.get(model, model)} for model in _dedupe(picked)]
+    models: list[dict[str, str]] = []
+    for name, model in named.items():
+        if model.model not in {each["id"] for each in models}:
+            models.append({"id": model.model, "name": name})
+    return models
+
+
 def _invalid(exc: ValidationError) -> JSONResponse:
     detail = exc.errors(include_url=False, include_input=False, include_context=False)
     return JSONResponse({"error": "invalid request", "detail": detail}, status_code=422)
@@ -462,9 +485,9 @@ def build_workspaces_router() -> APIRouter:
     @router.get(WORKSPACES_PATH + "/options")
     async def get_options(request: Request):  # type: ignore[no-untyped-def]
         """What a person may pick for a workspace: the servers they may use (a
-        name and one line), the models in ``workspaces.models``, the writing
-        styles, and the people they may share a workspace with. An empty
-        ``models`` means any text, and the list is empty."""
+        name and one line), the models of the instance (an ``id`` and the
+        ``name`` a person reads), the writing styles, and the people they may
+        share a workspace with."""
         denied, person_id, _ = await _scope(request)
         if denied is not None:
             return denied
@@ -486,7 +509,7 @@ def build_workspaces_router() -> APIRouter:
         return JSONResponse(
             {
                 "servers": servers,
-                "models": list(settings.workspaces.models),
+                "models": workspace_models(settings),
                 "styles": [
                     {"id": style, "name": name, "description": description}
                     for style, (name, description) in STYLES.items()
