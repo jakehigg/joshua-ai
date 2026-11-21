@@ -22,6 +22,9 @@ workspace they do not reach is never found.
 ``notify_user`` and ``notify_person`` are the two tools that reach another
 person, and both send on one chain (``_deliver_notification``): every push
 subscription of that person, then their normal chat when no browser took it.
+A push notification also writes its full text into the conversation it comes
+from, the workspace thread or the person's normal chat, because the
+notification itself carries one short line and goes away on a tap.
 
 ``notify_user`` belongs to the thread of a shared workspace. Three guards are
 in the tool and not in the prompt: it never notifies the person who wrote the
@@ -35,8 +38,9 @@ Each call writes one decision line (``_log_decision``): the person, the
 workspace, whether a notification went, and the guard that stopped it.
 
 Both tools take an optional ``url``, the path the tap opens, so a notification
-lands on the thing to read: a document, a wiki page, or the workspace thread,
-which is what ``notify_user`` opens when the call names no path. ``_app_path``
+lands on the thing to read: a document, a wiki page, or the chat that holds
+the text, which is what a call with no path opens: the workspace thread for
+``notify_user``, the person's normal chat for ``notify_person``. ``_app_path``
 is the one validator of both: a path of this app and nothing else, as the
 service worker's ``notificationclick`` refuses an address of another site.
 The push payload carries that path, because the worker follows a path; the
@@ -103,9 +107,6 @@ NOTIFY_BODY_CHARS = 160
 # one replaces the first in the browser instead of stacking up.
 NOTIFY_TITLE = "Joshua"
 NOTIFY_TAG = "from-joshua"
-# Where a ``notify_person`` notification opens when the call names no path: the
-# app itself. ``notify_user`` defaults to the thread of its workspace.
-APP_ROOT = "/"
 # What both notify tools answer for a ``url`` that is not a path of this app.
 BAD_URL = "The url must be a path inside Joshua, as /chat or /wiki."
 
@@ -254,6 +255,11 @@ def app_link(settings: JoshuaConfig, path: str) -> str:
     the path alone when ``workspaces.viewer_url`` is not set."""
     base = settings.workspaces.viewer_url
     return f"{base.rstrip('/')}{path}" if base else path
+
+
+def person_chat_path(person_id: str) -> str:
+    """The path of the normal chat of one person in the viewer."""
+    return f"/chat/{person_id}"
 
 
 def chat_path(workspace: Workspace) -> str:
@@ -427,6 +433,9 @@ async def do_notify_user(
         message=f"{text}\n\n{workspace.title}: {link}",
         deliver=deliver,
         notify=notify,
+        # The thread of this workspace is where the notification comes from,
+        # so the full text is written there.
+        record_in=conversation.id,
     )
     if not reached:
         _log_decision(target, workspace, sent=False, guard=GUARD_UNREACHED)
@@ -444,20 +453,32 @@ async def _deliver_notification(
     message: str,
     deliver: Deliver | None,
     notify: Notify | None,
+    record_in: str | None = None,
 ) -> tuple[bool, str]:
     """The one chain both notify tools send on: every push subscription of the
     person first, and their normal chat when no browser of theirs took it.
 
+    A push notification also writes ``message`` into the conversation it comes
+    from, so the text is somewhere a tap opens: the thread of the workspace
+    for ``notify_user``, and the person's normal chat for ``notify_person``.
+    The notification itself carries one short line and goes away on a tap, so
+    without that row a long text is lost. ``record_in`` names the
+    conversation; with None it is the person's main conversation. The row is
+    written whether the push service took the notification or refused it, and
+    a person with no browser to push to gets the message in their normal chat
+    as before.
+
     ``(reached, how)``: ``how`` is the half-sentence the tool answers with.
     """
+    main = await deps.repo.main_conversation(target)
     if notify is not None and await deps.repo.push_subscriptions.list_for(target):
         report = await notify(target, notification)
+        conversation_id = record_in or (main.id if main is not None else None)
+        if conversation_id is not None:
+            await deps.repo.add_notification_row(conversation_id, message)
         if report.sent:
             return True, "on their phone"
-    if deliver is None:
-        return False, ""
-    main = await deps.repo.main_conversation(target)
-    if main is None:
+    if deliver is None or main is None:
         return False, ""
     sent = await deliver(main.last_channel_id or main.channel_id, message)
     return sent, "in their normal chat"
@@ -497,7 +518,8 @@ async def do_notify_person(
     """Reach one person of the roster, from any chat: their push subscriptions,
     or their normal chat when no browser of theirs took it.
 
-    ``url`` is the path the tap opens, the app itself when the call names none.
+    ``url`` is the path the tap opens, the normal chat of that person when the
+    call names none, which is where the text of the notification is written.
     The payload of the push carries that path; the normal-chat fallback carries
     the absolute address of it.
 
@@ -514,7 +536,10 @@ async def do_notify_person(
             names = ", ".join(f"{p.name} ({p.id})" for p in candidates)
             return _reply(f"More than one person is called '{person}'. Use an id: {names}.")
         return _reply(f"'{person}' is nobody here. Use the id or the name of a person.")
-    path = _app_path(url, APP_ROOT)
+    # The normal chat of the person: the notification text is written there,
+    # so a tap with no ``url`` opens the place that holds it.
+    home = person_chat_path(target.id)
+    path = _app_path(url, home)
     if path is None:
         return _reply(BAD_URL)
     moment = now or datetime.now(UTC)
@@ -536,7 +561,7 @@ async def do_notify_person(
             url=path,
             tag=NOTIFY_TAG,
         ),
-        message=text if path == APP_ROOT else f"{text}\n\n{link}",
+        message=text if path == home else f"{text}\n\n{link}",
         deliver=deliver,
         notify=notify,
     )

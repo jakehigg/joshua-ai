@@ -36,6 +36,14 @@ Nothing about a person's conversation goes to a push service in the clear.
 Keep the `body` short anyway: a notification is a knock on the door, not the
 message.
 
+The message itself goes in the chat. Every notification Joshua sends writes
+its whole text as a message in the conversation it comes from: the thread of
+the workspace for `notify_user`, the person's normal chat for `notify_person`.
+The `url` of the payload opens that conversation, unless the call names a page
+to read, so a tap lands where the text is. A notification goes away on a tap
+and a long line does not fit on a lock screen; the message stays. A push the
+service refuses writes the message too.
+
 Two halves make one notification. Core holds the keys, the subscriptions and
 the sender. The browser asks for the permission, subscribes, shows what
 arrives, and opens the address of the payload when a person taps it. The
@@ -171,7 +179,9 @@ yours alone: it says nothing about the other people of the workspace, and
 nobody changes yours.
 
 The notification goes to the devices you subscribed, as above, and to your
-normal chat when you have no device. Three rules hold whatever the setting
+normal chat when you have no device. Its whole text is written in the thread
+of the workspace, so the line you read on the lock screen is in the thread the
+tap opens. Three rules hold whatever the setting
 is: Joshua never notifies the person who wrote the turn, it never notifies a
 person who has the thread open and read to its newest row, and one person gets
 one notification of one workspace in ten minutes. A line inside that time
@@ -198,7 +208,7 @@ and a shared one. A guest does not have it.
 |---|---|
 | `person` | an id or a name of the roster, with no regard to case |
 | `text` | one short line, the knock on the door |
-| `url` | a path inside Joshua the notification opens, `/` by default |
+| `url` | a path inside Joshua the notification opens, the person's own chat by default |
 
 The person is one of the people of the instance, not of a workspace, so this
 tool reaches anybody of this Joshua. A name that two people share is refused
@@ -208,7 +218,10 @@ to another site.
 
 It delivers on the same chain as `notify_user`: every push subscription of
 that person, and their normal chat when no browser of theirs took it. So a
-person with no device still gets the line, in the chat they already use.
+person with no device still gets the line, in the chat they already use. The
+whole text is written in that person's normal chat, which is where a tap lands
+when the call names no `url`; with a `url` the message carries the address of
+the page as well.
 
 One person gets one `notify_person` in ten minutes, and the tool keeps that
 rule itself, whoever asked for it and from whatever chat. It is held in core's

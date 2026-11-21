@@ -89,6 +89,16 @@ with the images and the packaged chart, are at
   [settings.md](settings.md) and
   [operations.md](operations.md#the-version-you-run).
 
+### Notifications
+
+- **A notification leaves its text in the chat it came from.** The line on the
+  lock screen is short and goes away on a tap, so the whole text is now a
+  message in the conversation the notification comes from: the thread of the
+  workspace for `notify_user`, the person's normal chat for `notify_person`.
+  The tap opens that conversation unless the call names a page to read, so the
+  text is where it lands. A push the service refuses writes the message too.
+  See [notifications.md](notifications.md#what-push-is).
+
 ## 0.4.0 - 2026-11-19
 
 A workspace can now hold several people, who write in one thread and read the

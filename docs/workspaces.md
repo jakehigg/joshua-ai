@@ -314,6 +314,10 @@ collapse into the newest one. A person with no subscription gets a line and a
 link in their normal chat instead. A personal workspace does not get the tool:
 nobody else writes there.
 
+The notification also writes its whole text in the thread of the workspace, as
+a message from Joshua, because the line on the lock screen is short and goes
+away on a tap. A push the service refuses writes that message too.
+
 **The url is where the tap lands**, so a notification opens the thing to read:
 a document (`/documents/<owner>/<slug>`), a wiki page (`/wiki/...`), or the
 thread of the workspace, which is what a call with no `url` opens. It is a path
