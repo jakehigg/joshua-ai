@@ -2,9 +2,13 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer, COUNTER_FROM, MAX_CHARS, MAX_FILE_BYTES, MAX_ROWS } from "./Composer";
 
-function pointer(fine: boolean) {
+// `keys(true)` is a device with a keyboard of its own, `keys(false)` a touch
+// screen alone. `primary` is the pointer of the device: a tablet in a keyboard
+// case has a keyboard and a coarse primary pointer, `keys(true, false)`.
+function keys(present: boolean, primary = present) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-    matches: query === "(pointer: fine)" ? fine : false,
+    matches:
+      query === "(any-pointer: fine)" ? present : query === "(pointer: fine)" ? primary : false,
     media: query,
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
@@ -20,10 +24,10 @@ function setup(busy = false) {
 }
 
 describe("Composer", () => {
-  beforeEach(() => pointer(true));
+  beforeEach(() => keys(true));
   afterEach(cleanup);
 
-  it("sends on Enter with a fine pointer, then empties and focuses the box", () => {
+  it("sends on Enter with a keyboard, then empties and focuses the box", () => {
     const { onSend, box } = setup();
     fireEvent.change(box, { target: { value: "hello" } });
     fireEvent.keyDown(box, { key: "Enter" });
@@ -39,8 +43,8 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("adds a new line on Enter with a coarse pointer: no send, no prevented default", () => {
-    pointer(false);
+  it("adds a new line on Enter on a touch screen: no send, no prevented default", () => {
+    keys(false);
     const { onSend, box } = setup();
     fireEvent.change(box, { target: { value: "hello" } });
     const notPrevented = fireEvent.keyDown(box, { key: "Enter" });
@@ -49,8 +53,8 @@ describe("Composer", () => {
     expect(box.getAttribute("enterkeyhint")).toBe("enter");
   });
 
-  it("sends with the button on a coarse pointer", () => {
-    pointer(false);
+  it("sends with the button on a touch screen", () => {
+    keys(false);
     const { onSend, box, send } = setup();
     fireEvent.change(box, { target: { value: "hello" } });
     fireEvent.click(send);
@@ -58,7 +62,7 @@ describe("Composer", () => {
   });
 
   it("leaves Shift+Enter to the browser on touch: no send, no prevented default", () => {
-    pointer(false);
+    keys(false);
     const { onSend, box } = setup();
     fireEvent.change(box, { target: { value: "hello" } });
     const notPrevented = fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
@@ -66,10 +70,21 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("sends on Enter on a tablet: a coarse pointer, and a keyboard beside it", () => {
+    keys(true, false);
+    const { onSend, box } = setup();
+    fireEvent.change(box, { target: { value: "hello" } });
+    const prevented = fireEvent.keyDown(box, { key: "Enter" });
+    expect(prevented).toBe(false);
+    expect(onSend).toHaveBeenCalledWith("hello", null);
+    expect(box.getAttribute("enterkeyhint")).toBe("send");
+  });
+
   it("does not send on Enter during an IME composition", () => {
     const { onSend, box } = setup();
     fireEvent.change(box, { target: { value: "hello" } });
     fireEvent.keyDown(box, { key: "Enter", keyCode: 229 });
+    fireEvent.keyDown(box, { key: "Enter", isComposing: true });
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -131,7 +146,7 @@ describe("Composer", () => {
 });
 
 describe("Composer attachment", () => {
-  beforeEach(() => pointer(true));
+  beforeEach(() => keys(true));
   afterEach(cleanup);
 
   function pick(file: File) {
@@ -221,7 +236,7 @@ describe("Composer attachment", () => {
 });
 
 describe("the file preview", () => {
-  beforeEach(() => pointer(true));
+  beforeEach(() => keys(true));
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
@@ -254,7 +269,7 @@ describe("the file preview", () => {
 });
 
 describe("Composer paste", () => {
-  beforeEach(() => pointer(true));
+  beforeEach(() => keys(true));
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
