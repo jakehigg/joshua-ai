@@ -637,7 +637,9 @@ compose and on Kubernetes, and it adds no container.
   is on screen, and not while the tab is hidden, and the list asks for the
   counts again after each mark.
 - The new workspace dialog asks for a title, a goal (optional), a model, and
-  the servers. "Shared" offers the other people of the roster as checkboxes
+  the servers. The servers start at the default set of the instance (below),
+  and a tick or an untick in the dialog wins. "Shared" offers the other people
+  of the roster as checkboxes
   and shows the address the workspace will take; Create waits until at least
   one person is picked. A title whose shared slug is taken says so. The dialog
   creates the workspace and opens it.
@@ -725,10 +727,12 @@ read of one workspace carry one field that core does not give: `charm` (above).
 `GET /v1/workspaces/options` returns `servers` (the servers that the person may
 use, each with a `name` and a one-line `description`), `models` (the models of
 the instance, each with the `id` the workspace holds and the `name` a person
-reads), and `people` (every
-member of the roster but the caller, each with an `id` and a `name`, to share a
-workspace with). The description is the optional `description` of the server in
-`mcp:`. Without it, the name is used. The slug `options` is reserved.
+reads), `people` (every
+member of the roster but the caller, each with an `id`, a `name`, and the
+`servers` they may use, to share a workspace with), and `default_servers` (the
+servers a new workspace starts with). The description is the optional
+`description` of the server in `mcp:`. Without it, the name is used. The slug
+`options` is reserved.
 
 The chat routes take `workspace` (a ref, two segments for a workspace on
 screen): `POST
@@ -771,5 +775,24 @@ session.
 
 Each `mcp:` server can have a `description`, one line (200 characters at most)
 that the new workspace dialog shows beside the name.
+
+### The default servers of a new workspace
+
+The owner sets one default set for the instance, in the viewer under
+Admin → Instance, as the setting `workspaces.default_servers`: the server
+names, separated by a comma. There is no per-person default, and the owner is
+the only role that writes it ([settings.md](settings.md)).
+
+The new workspace dialog starts with those servers ticked, and whatever the
+person leaves ticked is what the create sends: a change in the dialog wins.
+The options route drops from the pre-pick a name that this instance does not
+declare and a server the person may not use, so the dialog never shows a
+server ticked that the create would refuse (422). For a shared workspace the
+dialog keeps the pre-pick to the servers that every person of the roster of
+the workspace may use, which is the rule the create applies, and unticks the
+rest as people are added.
+
+An empty setting ticks nothing. A workspace that exists already does not
+change: the set applies at the create alone.
 
 See [config.md](config.md#workspaces).

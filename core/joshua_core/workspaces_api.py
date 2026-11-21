@@ -38,7 +38,11 @@ checked before the body is read. A ``person`` that is not a member of
   one of the people of that workspace adds nothing (404).
 - ``GET /v1/workspaces/options`` gives the servers, the models, the writing
   styles, and the people that the person may pick. A model is an ``id`` and
-  the ``name`` a person reads.
+  the ``name`` a person reads. ``default_servers`` is the servers a new
+  workspace starts with: the owner's ``workspaces.default_servers`` setting,
+  kept to the servers this person may use. Each person of ``people`` carries
+  the servers they may use, so the dialog of a shared workspace pre-picks the
+  servers all of its people can use.
 - ``GET /v1/workspaces/{slug}/block`` gives the workspace block as text.
 - ``POST /v1/workspaces/{slug}/read`` marks the thread read up to a turn id
   (``turn_id``, the id of a transcript row) for that person. The mark is
@@ -96,6 +100,10 @@ WORKSPACES_PATH = "/v1/workspaces"
 # reaches the route in the path as well as URL-encoded. It is greedy, so every
 # route of a longer path stands before these ones in this file.
 WORKSPACE_REF_PATH = WORKSPACES_PATH + "/{slug:path}"
+
+# The setting the owner writes on the Instance page: the servers a new
+# workspace starts with, as names separated by a comma. Empty picks none.
+DEFAULT_SERVERS_SETTING = "workspaces.default_servers"
 
 Notify = Literal["none", "questions", "questions+finishes"]
 NotifyMode = Literal["off", "decide", "all"]
@@ -360,6 +368,15 @@ def _dedupe(servers: list[str]) -> list[str]:
     return list(dict.fromkeys(s.strip() for s in servers if s.strip()))
 
 
+def parse_default_servers(value: str) -> list[str]:
+    """The server names of the stored setting, in order and with no duplicate.
+
+    The setting is one line of text, so the names are separated by a comma and
+    the spaces around a name do not count.
+    """
+    return _dedupe(value.split(","))
+
+
 async def _threads(repo: Any, workspaces: Collection[Workspace]) -> dict[str, str]:
     """The conversation of each workspace thread, by conversation id."""
     threads: dict[str, str] = {}
@@ -486,29 +503,51 @@ def build_workspaces_router() -> APIRouter:
     async def get_options(request: Request):  # type: ignore[no-untyped-def]
         """What a person may pick for a workspace: the servers they may use (a
         name and one line), the models of the instance (an ``id`` and the
-        ``name`` a person reads), the writing styles, and the people they may
-        share a workspace with."""
+        ``name`` a person reads), the writing styles, the people they may
+        share a workspace with, and the servers a new workspace starts with.
+
+        ``default_servers`` is the owner's setting, kept to the servers this
+        person may use: a server they cannot reach is never pre-picked, so the
+        dialog does not show it picked and the create refuse it. Each person of
+        ``people`` carries the servers they may use, so the dialog intersects
+        the pre-pick over the people of a shared workspace, which is the rule
+        the create applies (``_check_servers``).
+        """
         denied, person_id, _ = await _scope(request)
         if denied is not None:
             return denied
         settings = request.app.state.ctx.settings
+        reach = allowed_gateway_servers(settings, person_id)
         servers = [
             {
                 "name": name,
                 "description": (settings.mcp[name].description or "").strip() or name,
             }
-            for name in allowed_gateway_servers(settings, person_id)
+            for name in reach
         ]
         # Everyone on the roster who writes, the caller apart: a guest never
         # holds a workspace.
         people = [
-            {"id": person.id, "name": person.name}
+            {
+                "id": person.id,
+                "name": person.name,
+                "servers": allowed_gateway_servers(settings, person.id),
+            }
             for person in settings.people
             if person.id != person_id and is_member(person.role)
+        ]
+        stored = await request.app.state.ctx.repo.settings.get(
+            DEFAULT_SERVERS_SETTING, decrypt=False
+        )
+        default_servers = [
+            name
+            for name in parse_default_servers(stored.value if stored else "")
+            if name in set(reach)
         ]
         return JSONResponse(
             {
                 "servers": servers,
+                "default_servers": default_servers,
                 "models": workspace_models(settings),
                 "styles": [
                     {"id": style, "name": name, "description": description}

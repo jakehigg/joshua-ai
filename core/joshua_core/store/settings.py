@@ -170,6 +170,19 @@ SETTING_GROUPS: tuple[SettingGroup, ...] = (
         ),
     ),
     SettingGroup(
+        prefix="workspaces",
+        label="Workspaces",
+        fields=(
+            SettingField(
+                key="workspaces.default_servers",
+                label="Default servers for a new workspace",
+                hint="The servers a new workspace starts with, picked in its dialog, "
+                "as names separated by a comma. The person who creates the workspace "
+                "can change them. Empty picks none.",
+            ),
+        ),
+    ),
+    SettingGroup(
         prefix="admin",
         label="Releases",
         fields=(

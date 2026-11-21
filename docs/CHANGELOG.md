@@ -64,6 +64,14 @@ with the images and the packaged chart, are at
   were made in a workspace thread and showed nowhere. Each one is now an item
   of that workspace, with a link that opens it. `docs/workspaces.md` lists
   every way a thing is made in a workspace turn and what records it.
+- **A new workspace starts with the servers the owner chose.** The owner sets
+  one default set for the instance under Admin → Instance, as "Default servers
+  for a new workspace", and the new workspace dialog opens with those servers
+  ticked. A tick or an untick in the dialog wins, a server the person may not
+  use is never ticked, and a shared workspace keeps the ticks to the servers
+  every person of it may use. An empty setting ticks nothing, which is what
+  every instance does today, and a workspace that exists already does not
+  change.
 
 ### Assignments
 
