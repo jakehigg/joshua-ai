@@ -586,7 +586,7 @@ def test_a_message_written_while_a_turn_runs_is_held(client, channels) -> None:
     channels.held = httpx.Response(200, json={"held": [HELD_ROW]})
     response = client.post(HELD, json={"text": " and one more "}, auth=ALEX)
     assert response.status_code == 200
-    assert response.json() == {"held": [HELD_ROW]}
+    assert response.json() == {"held": [HELD_ROW], "dropped": []}
     assert channels.requests[0].url.path == viewer_channels.HELD_PATH
     assert json.loads(channels.bodies[0]) == {"person": "alex", "text": "and one more"}
 
@@ -596,7 +596,7 @@ def test_the_hold_is_listed_for_a_page_that_comes_back(client, channels) -> None
     response = client.get(HELD, auth=ALEX)
     assert response.status_code == 200
     # A row with no id of its own is dropped.
-    assert response.json() == {"held": [HELD_ROW]}
+    assert response.json() == {"held": [HELD_ROW], "dropped": []}
     assert dict(channels.requests[0].url.params) == {"person": "alex"}
 
 
@@ -605,7 +605,7 @@ def test_take_gives_the_held_messages_as_the_text_of_one_turn(client, channels) 
     channels.held = httpx.Response(200, json={"text": "and one more\nand this", "held": rows})
     response = client.post(HELD + "/take", json={}, auth=ALEX)
     assert response.status_code == 200
-    assert response.json() == {"text": "and one more\nand this", "held": rows}
+    assert response.json() == {"text": "and one more\nand this", "held": rows, "dropped": []}
     assert channels.requests[0].url.path == viewer_channels.HELD_PATH + "/take"
     assert json.loads(channels.bodies[0]) == {"person": "alex"}
 
@@ -614,10 +614,18 @@ def test_a_held_message_can_be_removed(client, channels) -> None:
     channels.held = httpx.Response(200, json={"held": []})
     response = client.request("DELETE", HELD + "/h1", auth=ALEX)
     assert response.status_code == 200
-    assert response.json() == {"held": []}
+    assert response.json() == {"held": [], "dropped": []}
     assert channels.requests[0].method == "DELETE"
     assert channels.requests[0].url.path == viewer_channels.HELD_PATH + "/h1"
     assert dict(channels.requests[0].url.params) == {"person": "alex"}
+
+
+def test_the_hold_reports_what_the_age_limit_dropped(client, channels) -> None:
+    dropped = {"id": "h0", "text": "all night", "at": "2026-11-14T02:00:00+00:00"}
+    channels.held = httpx.Response(200, json={"held": [], "dropped": [dropped]})
+    response = client.get(HELD, auth=ALEX)
+    assert response.status_code == 200
+    assert response.json() == {"held": [], "dropped": [dropped]}
 
 
 def test_a_hold_that_is_gone_is_404(client, channels) -> None:

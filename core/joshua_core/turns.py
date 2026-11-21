@@ -32,12 +32,25 @@ page, so a reload or a closed tab never loses a message. ``POST`` adds one,
 ``POST /v1/holds/take`` empties the hold and returns its messages joined in
 order, one per line, for the client to send as one turn. The hold lives in
 memory, as the turns in flight do, so a restart of core clears it.
+
+A message that waited longer than ``core.hold_max_age_s`` is dropped, and
+every answer of the hold routes carries it in ``dropped``, so the person is
+told that it was not sent. A held message goes with the next turn or it is
+dropped; it never runs hours later on its own.
+
+A message that arrives on a channel while a turn of that conversation runs is
+folded in the same way: ``accept`` puts it in the fold of its conversation
+instead of starting a second turn, and the end of the running turn sends
+everything that waited as one turn, in order, one message per line. The fold
+is per sender, so a group thread never puts the words of one person in the
+mouth of another, and it carries the attachments of each folded message.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import monotonic
@@ -72,6 +85,15 @@ TURN_FAILED = FAILED_REPLY
 # How many messages one thread may hold, and how long one of them may be.
 HOLD_MAX = 20
 HOLD_MAX_CHARS = 8000
+# How long a message may wait for the running turn, when the settings say
+# nothing. ``core.hold_max_age_s`` is the setting.
+HOLD_MAX_AGE_S = 900.0
+
+# What a channel is told about a folded message that waited too long.
+HOLD_DROPPED = (
+    "A message that arrived while I was working waited too long, so I did not run it. "
+    "Send it again if it still matters."
+)
 
 
 class SeenCache:
@@ -106,6 +128,8 @@ class HeldMessage:
     id: str
     text: str
     at: str
+    # The monotonic clock when the hold took the message, for the age limit.
+    held_at: float = 0.0
 
     def as_json(self) -> dict[str, str]:
         return {"id": self.id, "text": self.text, "at": self.at}
@@ -123,26 +147,64 @@ class HoldStore:
     a tab that was closed finds the messages again. ``take`` empties the hold
     and gives back what was in it, in order: the caller sends it as one turn,
     and no two callers can send it twice.
+
+    The hold is bounded in both directions: a thread holds ``max_held``
+    messages, and a message that waited longer than ``max_age_s`` is dropped.
+    ``dropped`` gives the dropped messages of a thread once, so a client that
+    comes back tells the person which messages were not sent.
     """
 
-    def __init__(self, max_held: int = HOLD_MAX) -> None:
+    def __init__(
+        self,
+        max_held: int = HOLD_MAX,
+        *,
+        max_age_s: float = HOLD_MAX_AGE_S,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
         self._max = max_held
+        self._max_age = max_age_s
+        self._clock = clock
         self._held: dict[str, list[HeldMessage]] = {}
+        self._dropped: dict[str, list[HeldMessage]] = {}
+
+    def _purge(self, key: str) -> None:
+        """Move what waited past ``max_age_s`` out of the hold of a thread."""
+        held = self._held.get(key)
+        if not held or self._max_age <= 0:
+            return
+        cutoff = self._clock() - self._max_age
+        old = [m for m in held if m.held_at < cutoff]
+        if not old:
+            return
+        self._dropped.setdefault(key, []).extend(old)
+        rest = [m for m in held if m.held_at >= cutoff]
+        if rest:
+            self._held[key] = rest
+        else:
+            self._held.pop(key, None)
 
     def list(self, key: str) -> list[HeldMessage]:
+        self._purge(key)
         return list(self._held.get(key, []))
 
     def add(self, key: str, text: str) -> HeldMessage | None:
         """Hold one message. None when the thread already holds ``max_held``."""
+        self._purge(key)
         held = self._held.setdefault(key, [])
         if len(held) >= self._max:
             return None
-        message = HeldMessage(id=uuid4().hex[:12], text=text, at=datetime.now(UTC).isoformat())
+        message = HeldMessage(
+            id=uuid4().hex[:12],
+            text=text,
+            at=datetime.now(UTC).isoformat(),
+            held_at=self._clock(),
+        )
         held.append(message)
         return message
 
     def remove(self, key: str, hold_id: str) -> bool:
         """Take one held message back. False when the hold has no such message."""
+        self._purge(key)
         held = self._held.get(key, [])
         for index, message in enumerate(held):
             if message.id == hold_id:
@@ -154,7 +216,13 @@ class HoldStore:
 
     def take(self, key: str) -> list[HeldMessage]:
         """Empty the hold of a thread and return what was in it, in order."""
+        self._purge(key)
         return self._held.pop(key, [])
+
+    def dropped(self, key: str) -> list[HeldMessage]:
+        """The messages of a thread that waited too long, once."""
+        self._purge(key)
+        return self._dropped.pop(key, [])
 
 
 def joined(held: list[HeldMessage]) -> str:
@@ -176,6 +244,16 @@ class Resolution:
     pull_only: bool = False
 
 
+@dataclass
+class FoldedMessage:
+    """A channel message that waits for the running turn of its conversation."""
+
+    resolution: Resolution
+    event: TurnEvent
+    # The monotonic clock when the fold took the message, for the age limit.
+    held_at: float
+
+
 class TurnService:
     """Resolve, run, and deliver turns. One instance per process."""
 
@@ -194,8 +272,13 @@ class TurnService:
         self._deliverer = deliverer
         self._events = events
         self._seen = SeenCache()
-        self._holds = HoldStore()
-        self._background: set[asyncio.Task[None]] = set()
+        self._max_hold_age = float(settings.core.hold_max_age_s)
+        self._holds = HoldStore(max_age_s=self._max_hold_age)
+        # The messages of each conversation that wait for its running turn,
+        # and how many turns of a conversation run now.
+        self._folded: dict[str, list[FoldedMessage]] = {}
+        self._active: dict[str, int] = {}
+        self._background: set[asyncio.Task[Any]] = set()
         # The tasks of streamed turns. A task stays here until it ends, so no
         # one drops it while the client is gone.
         self._streamed: set[asyncio.Task[None]] = set()
@@ -334,23 +417,145 @@ class TurnService:
 
     # --- the hold ----------------------------------------------------------
 
-    def held(self, channel: str, person: str) -> list[dict[str, str]]:
-        """The messages a thread holds, oldest first."""
-        return [m.as_json() for m in self._holds.list(hold_key(channel, person))]
+    def _hold_answer(self, key: str, **extra: Any) -> dict[str, Any]:
+        """The hold of a thread as a client reads it: what waits, and what the
+        age limit dropped since the last call."""
+        held = [m.as_json() for m in self._holds.list(key)]
+        dropped = [m.as_json() for m in self._holds.dropped(key)]
+        return {"held": held, "dropped": dropped, **extra}
 
-    def hold(self, channel: str, person: str, text: str) -> dict[str, str] | None:
+    def held(self, channel: str, person: str) -> dict[str, Any]:
+        """The messages a thread holds, oldest first, and the dropped ones."""
+        return self._hold_answer(hold_key(channel, person))
+
+    def hold(self, channel: str, person: str, text: str) -> dict[str, Any] | None:
         """Hold one message of a thread, or None when the hold is full."""
-        message = self._holds.add(hold_key(channel, person), text)
-        return message.as_json() if message is not None else None
+        key = hold_key(channel, person)
+        message = self._holds.add(key, text)
+        if message is None:
+            return None
+        return self._hold_answer(key, message=message.as_json())
 
-    def drop_held(self, channel: str, person: str, hold_id: str) -> bool:
-        """Take one held message back before it goes."""
-        return self._holds.remove(hold_key(channel, person), hold_id)
+    def drop_held(self, channel: str, person: str, hold_id: str) -> dict[str, Any] | None:
+        """Take one held message back before it goes, or None when it is gone."""
+        key = hold_key(channel, person)
+        if not self._holds.remove(key, hold_id):
+            return None
+        return self._hold_answer(key)
 
     def take_held(self, channel: str, person: str) -> dict[str, Any]:
-        """Empty the hold of a thread: the messages and their text as one turn."""
-        held = self._holds.take(hold_key(channel, person))
-        return {"text": joined(held), "held": [m.as_json() for m in held]}
+        """Empty the hold of a thread: the messages and their text as one turn.
+
+        A message that waited past the age limit is not in the text. It is in
+        ``dropped``, so the person is told that it was not sent.
+        """
+        key = hold_key(channel, person)
+        held = self._holds.take(key)
+        dropped = [m.as_json() for m in self._holds.dropped(key)]
+        return {"text": joined(held), "held": [m.as_json() for m in held], "dropped": dropped}
+
+    # --- the fold of a channel message -------------------------------------
+
+    def _fold_key(self, resolution: Resolution, event: TurnEvent) -> str:
+        """The fold of one sender in one conversation.
+
+        A thread folds the messages of each sender on their own, so a turn
+        never puts the words of one person in the mouth of another.
+        """
+        who = resolution.person.id if resolution.person else ""
+        if not who and event.handle is not None:
+            who = event.handle.id
+        return f"{resolution.conversation.id}\n{who}"
+
+    def _fold(self, resolution: Resolution, event: TurnEvent) -> bool:
+        """Put one message in the fold of its conversation.
+
+        False when the fold is full: the message then runs as a turn of its
+        own, which core queues behind the running one.
+        """
+        key = self._fold_key(resolution, event)
+        folded = self._folded.setdefault(key, [])
+        if len(folded) >= HOLD_MAX:
+            return False
+        folded.append(FoldedMessage(resolution=resolution, event=event, held_at=monotonic()))
+        logger.info(
+            {
+                "message": "message folded into the next turn",
+                "channel": event.channel,
+                "waiting": len(folded),
+            }
+        )
+        return True
+
+    @staticmethod
+    def _folded_event(batch: list[FoldedMessage]) -> TurnEvent:
+        """One turn from the folded messages of a sender: their texts in order,
+        one per line, and the attachments of all of them. The idempotency key
+        of a single message does not carry over."""
+        texts = [m.event.text for m in batch if m.event.text]
+        return batch[0].event.model_copy(
+            update={
+                "text": "\n".join(texts),
+                "attachments": [a for m in batch for a in m.event.attachments],
+                "message_id": None,
+            }
+        )
+
+    def _flush_fold(self, conversation_id: str) -> None:
+        """Send what arrived while a turn ran, as the next turn.
+
+        A message that waited past ``core.hold_max_age_s`` is dropped instead,
+        and the channel is told, so a message never runs hours late.
+        """
+        if self._active.get(conversation_id):
+            return
+        prefix = f"{conversation_id}\n"
+        for key in [k for k in self._folded if k.startswith(prefix)]:
+            batch = self._folded.pop(key)
+            cutoff = monotonic() - self._max_hold_age if self._max_hold_age > 0 else None
+            live = [m for m in batch if cutoff is None or m.held_at >= cutoff]
+            if len(live) < len(batch):
+                logger.info(
+                    {
+                        "message": "folded message dropped: it waited too long",
+                        "channel": batch[0].event.channel,
+                        "dropped": len(batch) - len(live),
+                    }
+                )
+                self._tell(batch[0], HOLD_DROPPED)
+            if live:
+                self._begin(live[0].resolution, self._folded_event(live))
+
+    def _tell(self, message: FoldedMessage, text: str) -> None:
+        """Send one line to the channel of a folded message."""
+        target = workspace_delivery_target(
+            channel_type=message.resolution.channel.channel_type, target=message.event.channel
+        )
+        if target is None:
+            return
+        self._watch(asyncio.create_task(self._deliverer.deliver(target, text)))
+
+    def _begin(self, resolution: Resolution, event: TurnEvent) -> None:
+        """Run one turn in the background, counted against its conversation."""
+        self._enter(resolution.conversation.id)
+        self._watch(asyncio.create_task(self._run_and_deliver(resolution, event)))
+
+    def _watch(self, task: asyncio.Task[Any]) -> None:
+        """Keep a reference to a background task until it ends."""
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    def _enter(self, conversation_id: str) -> None:
+        """Count one more turn of a conversation, so the next message folds."""
+        self._active[conversation_id] = self._active.get(conversation_id, 0) + 1
+
+    def _leave(self, conversation_id: str) -> None:
+        """Count one turn of a conversation out."""
+        left = self._active.get(conversation_id, 0) - 1
+        if left > 0:
+            self._active[conversation_id] = left
+        else:
+            self._active.pop(conversation_id, None)
 
     # --- POST /v1/turns ----------------------------------------------------
 
@@ -383,17 +588,27 @@ class TurnService:
             )
             return JSONResponse({"reason": "unknown_sender"}, status_code=403)
 
+        # A turn of this conversation runs: the message joins the next turn
+        # instead of starting a second one.
+        if self._active.get(resolution.conversation.id) and self._fold(resolution, event):
+            return JSONResponse({"accepted": True, "folded": True}, status_code=202)
+
         if self._at_capacity():
             logger.warning({"message": "turn rejected: at capacity", "channel": event.channel})
             return JSONResponse({"accepted": False, "reason": "overloaded"}, status_code=429)
 
         turn_id = "t-" + resolution.conversation.id.replace("-", "")[:12]
-        task = asyncio.create_task(self._run_and_deliver(resolution, event))
-        self._background.add(task)
-        task.add_done_callback(self._background.discard)
+        self._begin(resolution, event)
         return JSONResponse({"accepted": True, "turn_id": turn_id}, status_code=202)
 
     async def _run_and_deliver(self, resolution: Resolution, event: TurnEvent) -> None:
+        try:
+            await self._deliver_turn(resolution, event)
+        finally:
+            self._leave(resolution.conversation.id)
+            self._flush_fold(resolution.conversation.id)
+
+    async def _deliver_turn(self, resolution: Resolution, event: TurnEvent) -> None:
         try:
             result = await self._run(resolution, event)
         except Exception as exc:  # noqa: BLE001 — any turn failure still answers the channel
@@ -437,6 +652,10 @@ class TurnService:
         queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
         gone = False
         dropped = False
+        # A message that arrives on a channel while this turn runs folds into
+        # the turn that follows it.
+        conversation_id = resolution.conversation.id
+        self._enter(conversation_id)
 
         def put(name: str, data: dict[str, Any]) -> None:
             """Offer one event to the reader. It never raises into the turn."""
@@ -494,6 +713,8 @@ class TurnService:
                 )
                 put("error", {"message": str(exc)})
             finally:
+                self._leave(conversation_id)
+                self._flush_fold(conversation_id)
                 if gone:
                     logger.info(
                         {"message": "turn finished after the client left", "turn_id": turn_id}
@@ -519,9 +740,12 @@ class TurnService:
                 logger.info({"message": "client left a running turn", "turn_id": turn_id})
 
     async def drain(self) -> None:
-        """Await every in-flight background turn. Called on shutdown."""
-        tasks = [*self._background, *self._streamed]
-        if tasks:
+        """Await every in-flight background turn. Called on shutdown.
+
+        A turn that ends sends what its conversation folded as one more turn,
+        so this waits until no task is left.
+        """
+        while tasks := [*self._background, *self._streamed]:
             await asyncio.gather(*tasks, return_exceptions=True)
         if self._events is not None:
             await self._events.drain()
@@ -574,7 +798,7 @@ def build_router() -> APIRouter:
         person: str = Query(min_length=1, max_length=64),
         _identity: str = Depends(require_identity(["channels", "laptop"])),
     ):
-        return JSONResponse({"held": _service(request).held(channel, person)})
+        return JSONResponse(_service(request).held(channel, person))
 
     @router.post("/v1/holds")
     async def post_hold(  # type: ignore[no-untyped-def]
@@ -585,11 +809,10 @@ def build_router() -> APIRouter:
         text = body.text.strip()
         if not text:
             return JSONResponse({"reason": "bad_request"}, status_code=400)
-        service = _service(request)
-        message = service.hold(body.channel, body.person, text)
-        if message is None:
+        answer = _service(request).hold(body.channel, body.person, text)
+        if answer is None:
             return JSONResponse({"reason": "hold_full"}, status_code=429)
-        return JSONResponse({"message": message, "held": service.held(body.channel, body.person)})
+        return JSONResponse(answer)
 
     @router.post("/v1/holds/take")
     async def post_holds_take(  # type: ignore[no-untyped-def]
@@ -607,9 +830,9 @@ def build_router() -> APIRouter:
         person: str = Query(min_length=1, max_length=64),
         _identity: str = Depends(require_identity(["channels", "laptop"])),
     ):
-        service = _service(request)
-        if not service.drop_held(channel, person, hold_id):
+        answer = _service(request).drop_held(channel, person, hold_id)
+        if answer is None:
             return JSONResponse({"reason": "unknown_hold"}, status_code=404)
-        return JSONResponse({"held": service.held(channel, person)})
+        return JSONResponse(answer)
 
     return router

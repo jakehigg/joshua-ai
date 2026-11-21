@@ -482,6 +482,12 @@ def map_held(value: Any) -> list[dict[str, Any]]:
     return held
 
 
+def _hold_json(answer: dict[str, Any]) -> dict[str, Any]:
+    """The hold of a thread for the browser: what waits, and what the age
+    limit dropped since the last call."""
+    return {"held": map_held(answer.get("held")), "dropped": map_held(answer.get("dropped"))}
+
+
 async def _hold_call(
     request: Request,
     method: str,
@@ -535,7 +541,7 @@ async def held(request: Request, person: Person) -> JSONResponse:
     answer = await _hold_call(request, "GET", workspace=workspace)
     if isinstance(answer, JSONResponse):
         return answer
-    return _json({"held": map_held(answer.get("held"))}, 200)
+    return _json(_hold_json(answer), 200)
 
 
 async def hold(request: Request, person: Person) -> JSONResponse:
@@ -553,7 +559,7 @@ async def hold(request: Request, person: Person) -> JSONResponse:
     answer = await _hold_call(request, "POST", text=checked, workspace=workspace)
     if isinstance(answer, JSONResponse):
         return answer
-    return _json({"held": map_held(answer.get("held"))}, 200)
+    return _json(_hold_json(answer), 200)
 
 
 async def take_held(request: Request, person: Person) -> JSONResponse:
@@ -573,7 +579,7 @@ async def take_held(request: Request, person: Person) -> JSONResponse:
         if isinstance(answer.get("text"), str)
         else "\n".join(m["text"] for m in taken)
     )
-    return _json({"text": text, "held": taken}, 200)
+    return _json({"text": text, "held": taken, "dropped": map_held(answer.get("dropped"))}, 200)
 
 
 async def drop_held(request: Request, person: Person) -> JSONResponse:
@@ -589,7 +595,7 @@ async def drop_held(request: Request, person: Person) -> JSONResponse:
     )
     if isinstance(answer, JSONResponse):
         return answer
-    return _json({"held": map_held(answer.get("held"))}, 200)
+    return _json(_hold_json(answer), 200)
 
 
 def _bad(message: str) -> JSONResponse:

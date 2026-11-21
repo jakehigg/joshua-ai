@@ -349,6 +349,10 @@ class Core(_Model):
     # rows of the thread. 0 turns the cap off. A workspace uses
     # ``workspaces.context_cap``.
     context_cap: int = Field(default=150_000, ge=0)
+    # How long a message may wait for the running turn of its thread. A
+    # message that has waited longer is dropped, and the person is told; it
+    # never runs hours later on its own. 0 turns the limit off.
+    hold_max_age_s: int = Field(default=900, ge=0)
     # None uses the prompts packaged in the image. Set a path only to read a
     # prompts directory mounted into the container.
     prompts_dir: str | None = None

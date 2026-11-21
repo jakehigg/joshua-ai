@@ -134,13 +134,13 @@ Port 8000 in the container. Compose publishes it on the host as
 |---|---|---|---|
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}, "inference_overrides": int}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. `inference_overrides` counts the `inference` job blocks that set `base_url` or `model`. |
-| `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
+| `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `202 {"accepted": true, "folded": true}` when a turn of the conversation runs and the message joins the next one, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
 | `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
 | `GET /v1/transcript?channel=&person=&limit=&before=` | `channels`, `laptop` | | `{"conversation_id", "messages", "next_before"}` (below), `400 bad_request` with no `channel`, `422` for a bad `limit` or `before` |
-| `GET /v1/holds?channel=&person=` | `channels`, `laptop` | | `{"held": [{"id", "text", "at"}]}`, oldest first |
-| `POST /v1/holds` | `channels`, `laptop` | `{"channel", "person", "text"}` | `{"held": [...]}`, `400` for an empty text, `429 {"reason": "hold_full"}` past 20 messages |
-| `POST /v1/holds/take` | `channels`, `laptop` | `{"channel", "person"}` | `{"text", "held": [...]}`. It empties the hold and joins the messages, in order, one per line. |
-| `DELETE /v1/holds/{hold_id}?channel=&person=` | `channels`, `laptop` | | `{"held": [...]}`, `404 {"reason": "unknown_hold"}` |
+| `GET /v1/holds?channel=&person=` | `channels`, `laptop` | | `{"held": [{"id", "text", "at"}], "dropped": [...]}`, oldest first |
+| `POST /v1/holds` | `channels`, `laptop` | `{"channel", "person", "text"}` | `{"held": [...], "dropped": [...]}`, `400` for an empty text, `429 {"reason": "hold_full"}` past 20 messages |
+| `POST /v1/holds/take` | `channels`, `laptop` | `{"channel", "person"}` | `{"text", "held": [...], "dropped": [...]}`. It empties the hold and joins the messages, in order, one per line. |
+| `DELETE /v1/holds/{hold_id}?channel=&person=` | `channels`, `laptop` | | `{"held": [...], "dropped": [...]}`, `404 {"reason": "unknown_hold"}` |
 | `POST /v1/memory/search` | `memory.search.allowed_callers` (default `viewer`, `mcp`) | `{"query", "limit"?, "kinds"?, "source"?, "person"?}` | `{"results": [{"path", "title", "heading", "text", "kind", "score", "date"}]}`, `422` for a bad body, `503` when the embedding model is not loaded |
 | `GET /v1/usage?days=` | `usage.allowed_callers` (default `viewer`) | | `{"timezone", "days", "groups", "rows", "totals"}` (below), `422` when `days` is not an integer |
 | `GET /v1/usage?group=conversation&person=` | `usage.allowed_callers` (default `viewer`) | | `{"days", "conversations": [{"conversation_id", "workspace": {"slug", "title"} or null, "calls", "input", "output", "cache_read", "cache_write"}]}`, largest first. Only the conversations of `person`. A row with no conversation is not listed. `422` for another `group` or no `person`; `403` for a person who is not a member. |
@@ -637,10 +637,24 @@ empties the hold as it reads it, two screens never send the same message
 twice. The hold is in memory, as the turns in flight are, so a restart of
 core clears it.
 
+A message waits at most `core.hold_max_age_s` (default 900 seconds). Core
+drops a message that waited longer, so a page that was away all night never
+sends it as if it had just been written. Every hold answer carries `dropped`,
+the messages the limit took since the last call, each in the shape of a held
+one. A reader sees each dropped message once, and the viewer tells the person
+that it was not sent. `0` turns the limit off.
+
 Channels passes these through as `/v1/cli/held` for the person of the body
-or the query, and the viewer as `/api/v1/chat/<person>/held`. The iMessage
-and Telegram paths do not use the hold: they coalesce their own messages
-(`channels.imessage.coalesce_window_s`).
+or the query, and the viewer as `/api/v1/chat/<person>/held`.
+
+The hold serves the web chat, which holds a message it has already sent. On
+every other channel core folds instead: a message that arrives while a turn
+of that conversation runs joins the next turn, one message per line, and
+answers `202 {"accepted": true, "folded": true}`. The fold is per
+conversation and per sender, so a group thread never mixes two people. A
+folded message older than `core.hold_max_age_s` is dropped, and core says so
+on the channel. `channels.imessage.coalesce_window_s` still merges a burst
+that arrives before a turn starts.
 
 ### The voice route
 

@@ -207,6 +207,14 @@ export interface Held {
   at: string;
 }
 
+// The hold of one thread, as every hold call answers it: the messages that
+// wait, and the ones the server dropped because they waited past its limit.
+// A dropped message is reported once, to the screen that asks next.
+export interface HoldState {
+  held: Held[];
+  dropped: Held[];
+}
+
 // One page, oldest first. `nextBefore` is the cursor of the page before, or null.
 export interface HistoryPage {
   messages: HistoryMessage[];
@@ -524,9 +532,10 @@ export async function getHistory(
 
 // The hold of one thread: the messages written while a turn still ran.
 
-function heldList(raw: unknown): Held[] {
+function heldList(raw: unknown, key: "held" | "dropped"): Held[] {
+  const field = (raw as Record<string, unknown> | null)?.[key];
   const list: Held[] = [];
-  for (const item of Array.isArray((raw as { held?: unknown })?.held) ? (raw as { held: unknown[] }).held : []) {
+  for (const item of Array.isArray(field) ? field : []) {
     if (!item || typeof item !== "object") continue;
     const m = item as Record<string, unknown>;
     if (typeof m.id !== "string") continue;
@@ -539,6 +548,10 @@ function heldList(raw: unknown): Held[] {
   return list;
 }
 
+function holdState(raw: unknown): HoldState {
+  return { held: heldList(raw, "held"), dropped: heldList(raw, "dropped") };
+}
+
 // The path of the hold routes. `workspace` names the thread as a query value,
 // as it does for the history; a write sends it in the body instead.
 function heldPath(person: string, path = "", workspace?: string): string {
@@ -547,18 +560,18 @@ function heldPath(person: string, path = "", workspace?: string): string {
 }
 
 /** The messages this thread holds, oldest first. */
-export async function listHeld(person: string, workspace?: string): Promise<Held[]> {
-  return heldList(await getJson<unknown>(heldPath(person, "", workspace)));
+export async function listHeld(person: string, workspace?: string): Promise<HoldState> {
+  return holdState(await getJson<unknown>(heldPath(person, "", workspace)));
 }
 
 /** Holds one message, written while a turn of this thread runs. */
-export async function addHeld(person: string, text: string, workspace?: string): Promise<Held[]> {
-  return heldList(await postJson<unknown>(heldPath(person), { text, ...(workspace ? { workspace } : {}) }));
+export async function addHeld(person: string, text: string, workspace?: string): Promise<HoldState> {
+  return holdState(await postJson<unknown>(heldPath(person), { text, ...(workspace ? { workspace } : {}) }));
 }
 
 /** Takes one held message back, before it goes. */
-export async function dropHeld(person: string, id: string, workspace?: string): Promise<Held[]> {
-  return heldList(await deleteJson<unknown>(heldPath(person, `/${encodeURIComponent(id)}`, workspace)));
+export async function dropHeld(person: string, id: string, workspace?: string): Promise<HoldState> {
+  return holdState(await deleteJson<unknown>(heldPath(person, `/${encodeURIComponent(id)}`, workspace)));
 }
 
 /**
@@ -569,10 +582,10 @@ export async function dropHeld(person: string, id: string, workspace?: string): 
 export async function takeHeld(
   person: string,
   workspace?: string,
-): Promise<{ text: string; held: Held[] }> {
+): Promise<HoldState & { text: string }> {
   const body = await postJson<unknown>(heldPath(person, "/take"), workspace ? { workspace } : {});
   const text = (body as { text?: unknown })?.text;
-  return { text: typeof text === "string" ? text : "", held: heldList(body) };
+  return { text: typeof text === "string" ? text : "", ...holdState(body) };
 }
 
 // What the viewer knows about one document, with none of its body. It comes

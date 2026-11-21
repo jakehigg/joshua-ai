@@ -55,7 +55,16 @@
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { holdReload } from "../pwa";
-import { addHeld, ApiError, ConnectionLost, dropHeld as dropHeldCall, listHeld, postTurn, takeHeld } from "../api/client";
+import {
+  addHeld,
+  ApiError,
+  ConnectionLost,
+  dropHeld as dropHeldCall,
+  listHeld,
+  postTurn,
+  takeHeld,
+  type Held,
+} from "../api/client";
 import { clearDraft, saveDraft } from "./draft";
 import { parseArtifact } from "./ArtifactCard";
 import { ARTIFACT_INFO, splitFence } from "./blocks";
@@ -103,6 +112,14 @@ function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+// What the person is told about the messages the server dropped because they
+// waited past its limit. Null when it dropped none.
+export function droppedText(dropped: Held[]): string | null {
+  if (dropped.length === 0) return null;
+  if (dropped.length === 1) return "A waiting message waited too long and was not sent";
+  return `${dropped.length} waiting messages waited too long and were not sent`;
+}
+
 export function useTurn(
   person: string,
   setMessages: SetMessages,
@@ -145,19 +162,28 @@ export function useTurn(
     [],
   );
 
+  // A message the server dropped because it waited too long never goes on its
+  // own, so the person is told that it was not sent.
+  const tellDropped = useCallback((dropped: Held[]) => {
+    const text = droppedText(dropped);
+    if (text) onRefusedRef.current?.(text);
+  }, []);
+
   // What the thread held when this screen opened: the messages a page that
   // is gone wrote while a turn ran.
   useEffect(() => {
     let live = true;
     void listHeld(person, workspace)
-      .then((list) => {
-        if (live) setHeld((shown) => [...list, ...shown.filter((m) => m.sending)]);
+      .then(({ held: list, dropped }) => {
+        if (!live) return;
+        setHeld((shown) => [...list, ...shown.filter((m) => m.sending)]);
+        tellDropped(dropped);
       })
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [person, workspace]);
+  }, [person, workspace, tellDropped]);
 
   // One message that waits for the running turn. It shows at once, and the
   // server's answer replaces it, so the hold on screen is the hold core has.
@@ -166,34 +192,39 @@ export function useTurn(
       const localId = newId();
       setHeld((list) => [...list, { id: localId, text, at: new Date().toISOString(), sending: true }]);
       try {
-        const list = await addHeld(person, text, workspace);
+        const { held: list, dropped } = await addHeld(person, text, workspace);
         setHeld((shown) => [...list, ...shown.filter((m) => m.sending && m.id !== localId)]);
+        tellDropped(dropped);
       } catch (err) {
         setHeld((shown) => shown.filter((m) => m.id !== localId));
         onRefusedRef.current?.(errorText(err, "the message could not be held"));
       }
     },
-    [person, workspace],
+    [person, workspace, tellDropped],
   );
 
   const dropHeld = useCallback(
     (id: string) => {
       setHeld((list) => list.filter((m) => m.id !== id));
       void dropHeldCall(person, id, workspace)
-        .then((list) => setHeld((shown) => [...list, ...shown.filter((m) => m.sending)]))
+        .then(({ held: list, dropped }) => {
+          setHeld((shown) => [...list, ...shown.filter((m) => m.sending)]);
+          tellDropped(dropped);
+        })
         .catch((err: unknown) => {
           onRefusedRef.current?.(errorText(err, "the message could not be taken back"));
         });
     },
-    [person, workspace],
+    [person, workspace, tellDropped],
   );
 
   const flushHeld = useCallback(() => {
     if (runningRef.current || flushingRef.current) return;
     flushingRef.current = true;
     void takeHeld(person, workspace)
-      .then(({ text }) => {
+      .then(({ text, dropped }) => {
         setHeld((shown) => shown.filter((m) => m.sending));
+        tellDropped(dropped);
         if (text) sendRef.current(text);
       })
       .catch((err: unknown) => {
@@ -202,7 +233,7 @@ export function useTurn(
       .finally(() => {
         flushingRef.current = false;
       });
-  }, [person, workspace]);
+  }, [person, workspace, tellDropped]);
 
   // The page is back: a stream with no byte for STALE_MS is dead.
   useEffect(() => {

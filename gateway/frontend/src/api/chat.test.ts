@@ -292,7 +292,7 @@ describe("the hold", () => {
   it("lists the hold of the thread, and drops a row with no id", async () => {
     const fetch = vi.fn(async () => json({ held: [ROW, { text: "no id" }, null, 7] }));
     vi.stubGlobal("fetch", fetch);
-    expect(await listHeld("alex")).toEqual([ROW]);
+    expect(await listHeld("alex")).toEqual({ held: [ROW], dropped: [] });
     expect(fetch).toHaveBeenCalledWith("/api/v1/chat/alex/held", expect.anything());
   });
 
@@ -311,7 +311,7 @@ describe("the hold", () => {
   it("holds one message, with the workspace in the body", async () => {
     const fetch = vi.fn(async () => json({ held: [ROW] }));
     vi.stubGlobal("fetch", fetch);
-    expect(await addHeld("alex", "one more")).toEqual([ROW]);
+    expect(await addHeld("alex", "one more")).toEqual({ held: [ROW], dropped: [] });
     expect(fetch).toHaveBeenLastCalledWith(
       "/api/v1/chat/alex/held",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ text: "one more" }) }),
@@ -326,7 +326,7 @@ describe("the hold", () => {
   it("takes the hold as the text of one turn", async () => {
     const fetch = vi.fn(async () => json({ text: "one more\nand this", held: [ROW] }));
     vi.stubGlobal("fetch", fetch);
-    expect(await takeHeld("alex")).toEqual({ text: "one more\nand this", held: [ROW] });
+    expect(await takeHeld("alex")).toEqual({ text: "one more\nand this", held: [ROW], dropped: [] });
     expect(fetch).toHaveBeenLastCalledWith(
       "/api/v1/chat/alex/held/take",
       expect.objectContaining({ method: "POST", body: "{}" }),
@@ -335,7 +335,13 @@ describe("the hold", () => {
 
   it("reads a take with no text as nothing to send", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ held: [] })));
-    expect(await takeHeld("alex")).toEqual({ text: "", held: [] });
+    expect(await takeHeld("alex")).toEqual({ text: "", held: [], dropped: [] });
+  });
+
+  it("reads the messages the server dropped because they waited too long", async () => {
+    const dropped = { id: "h0", text: "all night", at: "2026-01-01T02:00:00Z" };
+    vi.stubGlobal("fetch", vi.fn(async () => json({ held: [ROW], dropped: [dropped] })));
+    expect(await listHeld("alex")).toEqual({ held: [ROW], dropped: [dropped] });
   });
 
   it("throws ApiError with the message of a refusal", async () => {

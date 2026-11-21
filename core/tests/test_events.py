@@ -490,7 +490,7 @@ async def test_event_kind_without_service_is_501() -> None:
 
     turns = TurnService(
         repo=EventsFakeRepo(),
-        settings=SimpleNamespace(),
+        settings=SimpleNamespace(core=SimpleNamespace(hold_max_age_s=900)),
         manager=CountingManager(),
         deliverer=make_deliverer([]),
         events=None,

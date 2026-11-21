@@ -6,6 +6,22 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Chat
+
+- **A message you send while Joshua works joins the next turn.** Before, a
+  second message started a second turn of its own, which ran after the first
+  one and answered the two lines apart. Now anything that arrives while a
+  turn of that conversation runs is folded into the next turn, in order, one
+  message per line, on iMessage, on Telegram, and on every other channel. So
+  an answer and the correction of that answer reach Joshua together.
+  `channels.imessage.coalesce_window_s` still merges a burst that arrives
+  before a turn starts.
+- A message that waits for the running turn is dropped when it has waited
+  longer than `core.hold_max_age_s`, 900 seconds by default, and the person
+  is told. So a page or an app that was away all night never sends a queued
+  message as if it had just been written. `0` turns the limit off. In the web
+  chat the hold routes report what the limit dropped, each message once.
+
 ## 0.4.0 - 2026-11-19
 
 A workspace can now hold several people, who write in one thread and read the
