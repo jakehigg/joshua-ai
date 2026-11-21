@@ -257,7 +257,7 @@ goes to the chat that exists. A group GUID is copied from `chat_id` as it is.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `coalesce_window_s` | `2.0` | Merges a burst of messages from one sender into one turn. `0` sends each message alone. |
+| `coalesce_window_s` | `2.0` | Merges a burst of messages from one sender, before a turn starts, into one turn. `0` sends each message alone. A message that arrives while a turn runs joins the next turn whatever this is. |
 | `stale_max_age_s` | `900.0` | Drops a webhook older than this. It stops a replay. `0` accepts any age. |
 | `reconcile_interval_s` | `60` | Polls BlueBubbles this often for a message the webhook missed. `0` turns the poll off. |
 | `reconcile_lookback_s` | `300` | How far back the first poll looks at start. |

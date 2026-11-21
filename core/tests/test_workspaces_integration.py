@@ -969,7 +969,7 @@ async def test_the_block_provider_against_the_real_store(seeded) -> None:
 
     text = await WorkspaceBlock(seeded)(ctx)
 
-    assert "- alex: where do we stay?" in text and "- you: A cabin, maybe." in text
+    assert "alex: where do we stay?" in text and "you: A cabin, maybe." in text
     assert "New since your last turn" in text
     for settle in ctx.after_turn:
         await settle()

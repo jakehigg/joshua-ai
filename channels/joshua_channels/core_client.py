@@ -5,9 +5,10 @@ here. ``submit_turn`` posts to ``POST /v1/turns`` and expects 202; it never
 retries an unknown sender (403) and retries an overloaded core (429) once before
 it drops the turn. ``stream_turn`` runs a turn inline and yields core's SSE
 events; tests and the later voice path use it. ``read_transcript`` reads one
-page of a conversation from ``GET /v1/transcript``, and ``call_hold`` carries
-one of the ``/v1/holds`` calls: the messages a person wrote while a turn of
-the same thread ran.
+page of a conversation from ``GET /v1/transcript``, ``call_hold`` carries one
+of the ``/v1/holds`` calls, the messages a person wrote while a turn of the
+same thread ran, and ``call_draft`` carries one of the ``/v1/drafts`` calls,
+the text a person wrote in a composer and did not send.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ TURNS_PATH = "/v1/turns"
 STREAM_PATH = "/v1/turns/stream"
 TRANSCRIPT_PATH = "/v1/transcript"
 HOLDS_PATH = "/v1/holds"
+DRAFTS_PATH = "/v1/drafts"
 
 # One retry after core answers 429, then the turn is dropped.
 BUSY_RETRY_AFTER_S = 2.0
@@ -119,9 +121,33 @@ class CoreClient:
         ``path`` is what follows ``/v1/holds`` (``/take`` or ``/<hold id>``).
         A connection failure raises ``httpx.HTTPError``.
         """
+        return await self._call(HOLDS_PATH, method, path, params=params, json=json)
+
+    async def call_draft(
+        self,
+        method: str,
+        path: str = "",
+        *,
+        params: Mapping[str, str] | None = None,
+        json: Mapping[str, str] | None = None,
+    ) -> tuple[int, dict]:
+        """Call one of core's ``/v1/drafts`` routes, the unsent text of a
+        composer, and return its status and body. A connection failure raises
+        ``httpx.HTTPError``."""
+        return await self._call(DRAFTS_PATH, method, path, params=params, json=json)
+
+    async def _call(
+        self,
+        base: str,
+        method: str,
+        path: str = "",
+        *,
+        params: Mapping[str, str] | None = None,
+        json: Mapping[str, str] | None = None,
+    ) -> tuple[int, dict]:
         response = await self._client.request(
             method,
-            f"{HOLDS_PATH}{path}",
+            f"{base}{path}",
             **({"params": dict(params)} if params else {}),
             **({"json": dict(json)} if json else {}),
         )

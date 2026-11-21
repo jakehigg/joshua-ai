@@ -6,6 +6,41 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Chat
+
+- **A message you send while Joshua works joins the next turn.** Before, a
+  second message started a second turn of its own, which ran after the first
+  one and answered the two lines apart. Now anything that arrives while a
+  turn of that conversation runs is folded into the next turn, in order, one
+  message per line, on iMessage, on Telegram, and on every other channel. So
+  an answer and the correction of that answer reach Joshua together.
+  `channels.imessage.coalesce_window_s` still merges a burst that arrives
+  before a turn starts.
+- A message that waits for the running turn is dropped when it has waited
+  longer than `core.hold_max_age_s`, 900 seconds by default, and the person
+  is told. So a page or an app that was away all night never sends a queued
+  message as if it had just been written. `0` turns the limit off. In the web
+  chat the hold routes report what the limit dropped, each message once.
+- **The composer keeps what you did not send.** Half a message typed in the
+  web chat is kept for that thread and for you alone, in core and not in the
+  page, so it is there when you come back to the workspace, after a reload,
+  and on another device. The composer saves a moment after you stop typing
+  and puts the caret after the text when it loads it. A send clears the
+  draft, as emptying the box does, and a draft untouched for
+  `core.draft_max_age_s`, seven days by default, is dropped. In a shared
+  workspace each person sees their own draft and nobody else's.
+
+### Workspaces
+
+- **A workspace that resets keeps the recent conversation word for word.**
+  The session of a workspace thread resets at `workspaces.context_cap`, and
+  the fresh session now holds the last three turns of the thread whole: each
+  message of a person and the reply to it, under their own heading, the newest
+  turn last. So a reply such as "do that one" still names a message the
+  session can read. A single message past 4000 characters is cut, and the text
+  says so. The rows before those turns stay short lines, and the handoff and
+  the pointer to `search_history` and `read_history` are unchanged.
+
 ## 0.4.0 - 2026-11-19
 
 A workspace can now hold several people, who write in one thread and read the

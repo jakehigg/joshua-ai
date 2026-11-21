@@ -618,7 +618,7 @@ async def test_the_provider_adds_the_last_rows_only_for_a_fresh_session() -> Non
     block = ws.WorkspaceBlock(repo)
 
     assert "earlier talk" not in await block(_ctx(_channel(), fresh=False))
-    assert "- alex: earlier talk" in await block(_ctx(_channel(), fresh=True))
+    assert "alex: earlier talk" in await block(_ctx(_channel(), fresh=True))
 
 
 async def test_a_section_adds_text_and_a_failing_section_is_skipped() -> None:
@@ -857,6 +857,67 @@ def test_the_fresh_block_holds_the_handoff_rows_and_history_hint() -> None:
 
 def test_a_block_with_no_fresh_rows_has_no_history_hint() -> None:
     assert ws.HISTORY_HINT not in ws.render_block(_ws(), [])
+
+
+def test_turns_group_a_message_with_the_reply_to_it() -> None:
+    rows = [
+        {"direction": "out", "content": "a reminder", "status": "ok"},
+        {"direction": "in", "content": "one", "status": "ok"},
+        {"direction": "out", "content": "first", "status": "ok"},
+        {"direction": "out", "content": "and more", "status": "ok"},
+        {"direction": "in", "content": "two", "status": "ok"},
+    ]
+    assert [[r["content"] for r in turn] for turn in ws.split_turns(rows)] == [
+        ["a reminder"],
+        ["one", "first", "and more"],
+        ["two"],
+    ]
+
+
+async def test_the_fresh_block_carries_the_last_three_turns_whole() -> None:
+    long_reply = "a" * 1000
+    repo = WsRepo(_ws())
+    for n in range(1, 6):
+        repo.tail.append({"direction": "in", "content": f"ask {n}", "status": "ok"})
+        repo.tail.append({"direction": "out", "content": f"{long_reply} {n}", "status": "ok"})
+    block = ws.WorkspaceBlock(repo)
+
+    text = await block(_ctx(_channel(), fresh=True))
+
+    # The last three turns stand whole, both sides of each, under their own
+    # heading, and the newest one is last.
+    assert ws.RECENT_TURNS_HEAD in text
+    for n in (3, 4, 5):
+        assert f"alex: ask {n}" in text
+        assert f"you: {long_reply} {n}" in text
+    assert text.index("ask 3") < text.index("ask 5")
+    # The turns before them are short lines above that heading.
+    assert "- alex: ask 1" in text and "- alex: ask 2" in text
+    assert f"- you: {long_reply} 1" not in text
+    assert text.index("- alex: ask 1") < text.index(ws.RECENT_TURNS_HEAD)
+
+
+async def test_a_rollover_after_a_reply_still_carries_the_turns() -> None:
+    """The cap ends a session after any turn, so the newest row of the thread
+    may be a reply. The carried turns hold both sides all the same."""
+    repo = WsRepo(_ws())
+    repo.tail = [
+        {"direction": "in", "content": "which roof?", "status": "ok"},
+        {"direction": "out", "content": "the south one", "status": "ok"},
+    ]
+
+    text = await ws.WorkspaceBlock(repo)(_ctx(_channel(), fresh=True))
+
+    assert "alex: which roof?" in text and "you: the south one" in text
+
+
+def test_a_carried_message_past_the_cap_is_cut_and_says_so() -> None:
+    rows = [{"direction": "in", "content": "x" * (ws.CARRIED_MESSAGE_CHARS + 500), "status": "ok"}]
+    carried, older = ws.carried_turns(rows)
+    lines = ws.turn_lines(carried, "alex")
+    assert older == []
+    assert lines[0].startswith("alex: xxx") and lines[0].endswith(ws.CUT_NOTE)
+    assert len(lines[0]) < ws.CARRIED_MESSAGE_CHARS + len(ws.CUT_NOTE) + 20
 
 
 # --- RAG ---------------------------------------------------------------------------------

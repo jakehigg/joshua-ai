@@ -13,10 +13,11 @@ handlers take the request alone (``viewer_api.session``).
 A write route takes a JSON body, and the body carries the CSRF token of its
 scope. Every write also checks the ``Origin`` header (``viewer_api.edit``).
 
-The chat has six routes: ``POST /api/v1/chat/<person>/turns`` streams one turn
-as server-sent events, ``GET /api/v1/chat/<person>/history`` gives a page
-of the conversation, and four ``held`` routes hold the messages written while
-a turn still runs. They all go to the channels container (``CHANNELS_URL``).
+The chat has eight routes: ``POST /api/v1/chat/<person>/turns`` streams one
+turn as server-sent events, ``GET /api/v1/chat/<person>/history`` gives a page
+of the conversation, four ``held`` routes hold the messages written while a
+turn still runs, and two ``draft`` routes keep the text of a composer that is
+not sent yet. They all go to the channels container (``CHANNELS_URL``).
 
 The workspaces have twelve routes under ``/api/v1/workspaces``, which proxy
 core (``CORE_URL``). See ``viewer_api.workspaces``.
@@ -143,6 +144,9 @@ def routes() -> list[Route]:
             _require_auth(chat.drop_held),
             methods=["DELETE"],
         ),
+        # The draft: the text written in the composer and not sent yet.
+        Route(api_path("chat/{person}/draft"), _require_auth(chat.draft)),
+        Route(api_path("chat/{person}/draft"), _require_auth(chat.save_draft), methods=["POST"]),
         Route(api_path("workspaces"), _require_auth(workspaces.list_workspaces)),
         Route(api_path("workspaces"), _require_auth(workspaces.create), methods=["POST"]),
         Route(api_path("workspaces/options"), _require_auth(workspaces.options)),
