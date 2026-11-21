@@ -65,6 +65,9 @@ WORKSPACE_CHANNEL_TYPE = "workspace"
 # The ``meta.source`` of a transcript row that normal chat wrote into a
 # workspace thread. ``meta.seen`` is False until a block has shown the row.
 FROM_CHAT_SOURCE = "normal_chat"
+# The ``meta.source`` of the row that holds the text of a push notification,
+# written into the conversation the notification came from.
+NOTIFICATION_SOURCE = "notification"
 # The columns that ``update_workspace`` may change.
 WORKSPACE_FIELDS = ("title", "goal", "notes", "servers", "model", "notify", "style", "status")
 _SLUG_MAX = 48
@@ -1556,6 +1559,18 @@ class Repo:
         is unseen until the workspace block shows it. No turn runs."""
         return await self.add_transcript(
             conversation_id, "inject", text, meta={"source": FROM_CHAT_SOURCE, "seen": False}
+        )
+
+    async def add_notification_row(self, conversation_id: str, text: str) -> int:
+        """Write the text of a push notification into the conversation it came
+        from, as a message from Joshua.
+
+        A notification carries one short line and goes away on a tap, so the
+        text has to stay in the chat the tap opens: the thread of a workspace
+        for a workspace notification, the person's normal chat for
+        ``notify_person``. No turn runs."""
+        return await self.add_transcript(
+            conversation_id, "out", text, meta={"source": NOTIFICATION_SOURCE}
         )
 
     async def unseen_chat_rows(self, conversation_id: str) -> list[dict[str, Any]]:

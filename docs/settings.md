@@ -59,6 +59,15 @@ that signs each push, and the subject a push service writes to.
 [notifications.md](notifications.md) has that feature. The store came with
 push and is not of it; any feature uses it.
 
+The `workspaces` group holds `workspaces.default_servers`, the MCP servers a
+new workspace starts with, as names separated by a comma. The new workspace
+dialog ticks them, and the person who creates the workspace can change them.
+Empty ticks nothing. A name that is not an MCP server name is refused at the
+write, and a server this instance does not have, or one the person may not
+use, is left out of the pre-pick.
+[workspaces.md](workspaces.md#the-default-servers-of-a-new-workspace) has the
+rule.
+
 The `admin` group holds `admin.update_repo`, the repository whose latest
 release the release check reads, as `owner/name`. Empty reads
 `jakehigg/joshua-ai`, and a value that is not `owner/name` is refused at the

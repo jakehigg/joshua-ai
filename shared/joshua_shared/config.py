@@ -357,6 +357,10 @@ class Core(_Model):
     # touched inside this time is dropped. 0 keeps a draft for the life of
     # the process.
     draft_max_age_s: int = Field(default=604_800, ge=0)
+    # Turn a Joshua path in a reply into a link: a document, a wiki page, an
+    # attachment, a shared file. One filter runs on every text channel, never
+    # on voice. false sends every path as plain text.
+    path_links: bool = True
     # None uses the prompts packaged in the image. Set a path only to read a
     # prompts directory mounted into the container.
     prompts_dir: str | None = None

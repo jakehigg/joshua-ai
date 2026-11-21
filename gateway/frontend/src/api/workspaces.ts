@@ -105,21 +105,30 @@ export interface StyleOption {
   description: string;
 }
 
-/** One person a workspace may be shared with. The caller is not in the list. */
+/**
+ * One person a workspace may be shared with. The caller is not in the list.
+ * `servers` is the servers that person may use, so a dialog keeps the
+ * pre-pick of a shared workspace to the servers everyone in it can use.
+ */
 export interface PersonOption {
   id: string;
   name: string;
+  servers?: string[];
 }
 
 /**
  * What a person may pick: the servers they may use, the models, the writing
- * styles, and the people they may share a workspace with.
+ * styles, the people they may share a workspace with, and `default_servers`,
+ * the servers a new workspace starts with. Core keeps `default_servers` to
+ * the servers this person may use, so a server they cannot reach is never
+ * pre-picked.
  */
 export interface Options {
   servers: ServerOption[];
   models: ModelOption[];
   styles: StyleOption[];
   people: PersonOption[];
+  default_servers?: string[];
 }
 
 export interface NewWorkspace {

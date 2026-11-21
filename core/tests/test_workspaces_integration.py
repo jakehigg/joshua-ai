@@ -1102,14 +1102,31 @@ async def test_options_list_the_servers_of_the_person_and_the_models(client) -> 
         {"name": "tasks", "description": "Tasks and projects"},
         {"name": "github", "description": "github"},
     ]
-    # Everyone on the roster who writes, the caller apart: never a guest.
-    assert body["people"] == [{"id": "mia", "name": "Mia"}, {"id": "robin", "name": "Robin"}]
+    # Everyone on the roster who writes, the caller apart: never a guest. Each
+    # one carries the servers they may use, kept to the servers alex sees, so
+    # the private server of mia is named nowhere.
+    assert body["people"] == [
+        {"id": "mia", "name": "Mia", "servers": ["tasks", "github"]},
+        {"id": "robin", "name": "Robin", "servers": ["tasks", "github"]},
+    ]
     mia = await client.get("/v1/workspaces/options", params={"person": "mia"}, headers=_h())
     assert [s["name"] for s in mia.json()["servers"]] == ["tasks", "github", "private"]
     assert [p["id"] for p in mia.json()["people"]] == ["alex", "robin"]
     assert (
         await client.get("/v1/workspaces/options", params={"person": "alex"})
     ).status_code == 401
+
+
+async def test_options_name_a_hidden_server_in_no_person(client) -> None:
+    # ``private`` is scoped to mia. The options of anyone else name it neither
+    # in their own servers nor in an entry of ``people``.
+    for person in ("alex", "robin"):
+        body = (
+            await client.get("/v1/workspaces/options", params={"person": person}, headers=_h())
+        ).json()
+        assert "private" not in [server["name"] for server in body["servers"]]
+        for other in body["people"]:
+            assert "private" not in other["servers"]
 
 
 async def test_a_workspace_titled_options_does_not_take_the_route_name(client) -> None:

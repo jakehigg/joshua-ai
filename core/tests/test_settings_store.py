@@ -269,7 +269,7 @@ def test_the_viewer_and_an_admin_caller_both_pass(client) -> None:
 def test_get_lists_every_declared_field(client, no_settings_key) -> None:
     # With no key in the environment: the list is not a secret read.
     answer = client.get(SETTINGS_PATH, headers=_viewer()).json()
-    assert [group["prefix"] for group in answer["groups"]] == ["push", "admin"]
+    assert [group["prefix"] for group in answer["groups"]] == ["push", "workspaces", "admin"]
     fields = _settings(answer)
     assert fields[PUBLIC] == {
         "key": PUBLIC,

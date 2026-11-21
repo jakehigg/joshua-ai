@@ -15,8 +15,9 @@ under ``/api/v1/admin/settings/``, as the identity ``viewer``.
 holds one check per key, and a refusal is a 400 whose line says what the field
 takes: the VAPID subject must be a ``mailto:`` or an ``https://`` address,
 which is what ``py_vapid`` raises ``VapidException`` for in the middle of a
-send, and each VAPID key must be base64url of the right length. A refusal
-names no value: the private key is a secret.
+send, each VAPID key must be base64url of the right length, and the default
+servers of a new workspace must be MCP server names. A refusal names no value:
+the private key is a secret.
 
 **No answer carries a secret value.** A field says its ``kind``, ``is_secret``
 and ``is_set``, and ``value`` is null for a secret, whether it is stored or
@@ -37,11 +38,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from joshua_shared.config import MCP_NAME_PATTERN
 from joshua_shared.log import get_logger
 
 from joshua_core.admin import authorize_settings
@@ -58,6 +61,7 @@ from joshua_core.store.settings import (
     find_group,
 )
 from joshua_core.update import DEFAULT_REPO, REPO_SETTING, is_repo_name
+from joshua_core.workspaces_api import DEFAULT_SERVERS_SETTING, parse_default_servers
 
 logger = get_logger("settings_api")
 
@@ -140,6 +144,23 @@ def _check_update_repo(value: str) -> str:
     )
 
 
+def _check_default_servers(value: str) -> str:
+    """``workspaces.default_servers``: MCP server names, separated by a comma.
+
+    Only the form of each name is checked here. A name this instance does not
+    declare in its ``mcp`` section, and a server the person who creates the
+    workspace cannot use, is dropped from the pre-pick by the options route,
+    so the dialog never shows a server picked that the create would refuse.
+    """
+    if all(re.match(MCP_NAME_PATTERN, name) for name in parse_default_servers(value)):
+        return ""
+    return (
+        f"{DEFAULT_SERVERS_SETTING} must be MCP server names separated by a comma, "
+        "such as files, documents: a name is lower case letters, digits and dashes. "
+        "A server this instance does not have is left out of the pre-pick"
+    )
+
+
 # The check of each setting that has one, by key. A key with no check here
 # takes any text the route accepts.
 CHECKS: dict[str, Callable[[str], str]] = {
@@ -147,6 +168,7 @@ CHECKS: dict[str, Callable[[str], str]] = {
     PUBLIC_KEY: _check_public_key,
     PRIVATE_KEY: _check_private_key,
     REPO_SETTING: _check_update_repo,
+    DEFAULT_SERVERS_SETTING: _check_default_servers,
 }
 
 

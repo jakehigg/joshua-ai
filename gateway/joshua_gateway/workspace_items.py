@@ -14,6 +14,8 @@ The items come from two places. A per-tool map, in code, reads the result of
 the tools of Joshua's own servers (the key is the server name and the tool name
 as the gateway sees them). Every MCP ``resource_link`` block of any result
 becomes a ``link`` item. A tool the map does not know adds nothing.
+``docs/workspaces.md`` lists every way a thing is made in a workspace turn and
+what records it.
 
 The recorder needs ``JOSHUA_TOKEN_GATEWAY`` (the fleet token of the gateway)
 and the address of core. ``CORE_URL`` names it. Without it, the address is the
@@ -118,6 +120,34 @@ def _wiki(args: Mapping[str, Any], reply: Mapping[str, Any]) -> list[ItemSpec]:
     return [ItemSpec("wiki", path, "", f"/wiki/{quote(path)}")]
 
 
+def _page(path: str) -> list[ItemSpec]:
+    """A ``wiki`` item for one page of the wiki, named from the root of the
+    volume (``wiki/<path>.md``), which is what the files server answers. The
+    route of the viewer names the root too, so the url is the path."""
+    if not path.startswith("wiki/") or not path.endswith(".md"):
+        return []
+    return [ItemSpec("wiki", path, "", f"/{quote(path)}")]
+
+
+def _wiki_file(args: Mapping[str, Any], reply: Mapping[str, Any]) -> list[ItemSpec]:
+    return _page(str(reply.get("path") or ""))
+
+
+def _promoted(args: Mapping[str, Any], reply: Mapping[str, Any]) -> list[ItemSpec]:
+    """The page a document was promoted to. The document itself is archived by
+    the same call, so it is no item of its own."""
+    return _page(str(reply.get("wiki_path") or ""))
+
+
+def _attachment(args: Mapping[str, Any], reply: Mapping[str, Any]) -> list[ItemSpec]:
+    """A file copied into the wiki by ``save_attachment``. The title is the
+    name of the file, because the path of a month folder reads as nothing."""
+    path = str(reply.get("path") or "")
+    if not path.startswith("wiki/attachments/"):
+        return []
+    return [ItemSpec("file", path, _text(path.rsplit("/", 1)[-1], MAX_TITLE), f"/{quote(path)}")]
+
+
 def _project(args: Mapping[str, Any], reply: Mapping[str, Any]) -> list[ItemSpec]:
     ref = str(reply.get("slug") or reply.get("id") or "")
     return [ItemSpec("tasks_project", ref, _text(reply.get("name") or args.get("name"), MAX_TITLE))]
@@ -150,6 +180,9 @@ Mapper = Callable[[Mapping[str, Any], Mapping[str, Any]], list[ItemSpec]]
 # it holds.
 TOOL_ITEMS: dict[tuple[str, str], Mapper] = {
     ("documents", "write_document"): _document,
+    ("documents", "promote_document"): _promoted,
+    ("files", "write_file"): _wiki_file,
+    ("files", "save_attachment"): _attachment,
     ("joshua", "write_page"): _wiki,
     ("wiki", "write_page"): _wiki,
     ("tasks", "create_project"): _project,

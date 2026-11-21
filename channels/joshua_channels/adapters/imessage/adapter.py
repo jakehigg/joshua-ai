@@ -40,6 +40,7 @@ from joshua_channels.adapters.imessage.normalize import unwrap_webhook
 from joshua_channels.adapters.imessage.reconcile import Reconciler
 from joshua_channels.core_client import CoreClient
 from joshua_channels.guard import Guard
+from joshua_channels.links import inline_addresses
 from joshua_channels.registry import AdapterHealth
 
 logger = get_logger("channels.imessage")
@@ -195,11 +196,13 @@ class IMessageAdapter:
     async def send(self, chat_id: str, text: str, attachments: list[Path]) -> int:
         """Send a reply as chunked text plus one BlueBubbles send per attachment.
 
-        Returns the number of BlueBubbles messages sent. Outbound media over
+        Returns the number of BlueBubbles messages sent. iMessage has no link
+        markup, so a Markdown link of the reply keeps its visible text and the
+        address follows it on a line of its own. Outbound media over
         AppleScript is unreliable; a failed attachment does not fail the reply —
         the adapter logs it and sends a short text note instead.
         """
-        chunks = chunk_text(text, self._send_chunk_chars)
+        chunks = chunk_text(inline_addresses(text), self._send_chunk_chars)
         parts = 0
         if chunks:
             await self._bb.send_chunks(chat_id, chunks)

@@ -19,13 +19,14 @@ from joshua_shared.attachments import NO_CAPTION_TEXT
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.contracts import Attachment, Chat, Handle, TurnEvent
 from joshua_shared.log import get_logger
-from telegram import LinkPreviewOptions, Message, Update
+from telegram import LinkPreviewOptions, Message, MessageEntity, Update
 from telegram.constants import ChatAction
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from joshua_channels.core_client import CoreClient
 from joshua_channels.guard import REASON_TRUNCATED, REASON_UNKNOWN, Guard
+from joshua_channels.links import LinkSpan, split_links
 from joshua_channels.registry import AdapterHealth
 
 logger = get_logger("channels.telegram")
@@ -98,6 +99,38 @@ def split_message(text: str, limit: int = TELEGRAM_MAX) -> list[str]:
     if current:
         parts.append(current)
     return parts
+
+
+def _utf16_len(text: str) -> int:
+    """The length of ``text`` in UTF-16 code units, which is how Telegram
+    counts the offset and the length of an entity."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def link_entities(chunk: str, links: list[LinkSpan], offset: int) -> list[MessageEntity]:
+    """A ``text_link`` entity for each link that stands whole in ``chunk``.
+
+    ``offset`` is where the chunk starts in the message text. Only an ``http``
+    or ``https`` address becomes an entity: Telegram opens nothing else, so a
+    link with a bare path (no ``workspaces.viewer_url``) stays plain text.
+    """
+    entities: list[MessageEntity] = []
+    for link in links:
+        start = link.start - offset
+        end = start + link.length
+        if start < 0 or end > len(chunk):
+            continue
+        if not link.url.startswith(("http://", "https://")):
+            continue
+        entities.append(
+            MessageEntity(
+                type=MessageEntity.TEXT_LINK,
+                offset=_utf16_len(chunk[:start]),
+                length=_utf16_len(chunk[start:end]),
+                url=link.url,
+            )
+        )
+    return entities
 
 
 class TelegramAdapter:
@@ -324,18 +357,24 @@ class TelegramAdapter:
     async def send(self, chat_id: str, text: str, attachments: list[Path]) -> int:
         """Send a reply as split text parts and one message per attachment.
 
-        Returns the number of Telegram messages sent. Link previews are disabled
-        on every text message, because Telegram's servers fetch a previewed URL.
+        Returns the number of Telegram messages sent. A Markdown link of the
+        reply is sent as a link entity: the visible text stays in the message
+        and the address rides beside it. Link previews are disabled on every
+        text message, because Telegram's servers fetch a previewed URL.
         """
         if self._bot is None:
             raise RuntimeError("telegram adapter not started")
         parts = 0
-        for chunk in split_message(text):
+        plain, links = split_links(text)
+        offset = 0
+        for chunk in split_message(plain):
             await self._bot.send_message(  # type: ignore[attr-defined]
                 chat_id=chat_id,
                 text=chunk,
+                entities=link_entities(chunk, links, offset) or None,
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
+            offset += len(chunk)
             parts += 1
         for path in attachments:
             if _is_image(path):

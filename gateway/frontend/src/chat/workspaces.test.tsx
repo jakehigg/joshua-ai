@@ -244,6 +244,64 @@ describe("the new workspace dialog", () => {
     );
     expect(onCreated).not.toHaveBeenCalled();
   });
+
+  // The default servers of the instance: the owner's setting, which core has
+  // already kept to the servers this person may use. `mia` may use `github`
+  // and not `tasks`, so a shared workspace with her in it narrows the
+  // pre-pick, which is the rule the create applies.
+  const WITH_DEFAULTS = {
+    ...OPTIONS,
+    default_servers: ["tasks"],
+    people: [{ id: "mia", name: "Mia", servers: ["github"] }],
+  };
+
+  const ticked = (name: RegExp) => (screen.getByLabelText(name) as HTMLInputElement).checked;
+
+  it("starts with the default servers of the instance, and a change in the dialog wins", async () => {
+    const { calls } = viewer({
+      "GET /api/v1/workspaces/options": WITH_DEFAULTS,
+      "POST /api/v1/workspaces": ws({ slug: "thanksgiving", title: "Thanksgiving" }),
+    });
+    render(<NewWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByText("Tasks and projects");
+    expect(ticked(/tasks/)).toBe(true);
+    expect(ticked(/github/)).toBe(false);
+
+    // The person unticks the default one and ticks another: that is what the
+    // create sends.
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Thanksgiving" } });
+    fireEvent.click(screen.getByLabelText(/tasks/));
+    fireEvent.click(screen.getByLabelText(/github/));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      title: "Thanksgiving",
+      servers: ["github"],
+    });
+  });
+
+  it("keeps the pre-pick to the servers every person of a shared workspace may use", async () => {
+    viewer({ "GET /api/v1/workspaces/options": WITH_DEFAULTS });
+    render(<NewWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByText("Tasks and projects");
+    expect(ticked(/tasks/)).toBe(true);
+
+    fireEvent.click(screen.getByLabelText("Shared"));
+    fireEvent.click(screen.getByLabelText("Mia"));
+    await waitFor(() => expect(ticked(/tasks/)).toBe(false));
+
+    // Nobody else in it: the pre-pick is the whole default set again.
+    fireEvent.click(screen.getByLabelText("Mia"));
+    await waitFor(() => expect(ticked(/tasks/)).toBe(true));
+  });
+
+  it("pre-picks nothing when the owner has set no default", async () => {
+    viewer({ "GET /api/v1/workspaces/options": OPTIONS });
+    render(<NewWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByText("Tasks and projects");
+    expect(ticked(/tasks/)).toBe(false);
+    expect(ticked(/github/)).toBe(false);
+  });
 });
 
 function Panel({ refreshKey = 0, workspace = "w1" }: { refreshKey?: number; workspace?: string }) {

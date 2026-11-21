@@ -157,6 +157,8 @@ class WsRepo(FakeRepo):
         self.mains: list[str] = []
         self.others: list[Workspace] = []
         self.chat_rows: list[dict[str, Any]] = []
+        # (conversation, text) of each notification written into a chat.
+        self.notification_rows: list[tuple[str, str]] = []
         self.conversations: list[tuple[str, str | None]] = []
 
     async def get_workspace(self, workspace_id: str):
@@ -234,6 +236,10 @@ class WsRepo(FakeRepo):
     async def add_chat_row(self, conversation_id, text):
         self.chat_rows.append({"id": len(self.chat_rows) + 1, "content": text, "seen": False})
         return len(self.chat_rows)
+
+    async def add_notification_row(self, conversation_id, text):
+        self.notification_rows.append((conversation_id, text))
+        return len(self.notification_rows)
 
 
 def _derive(person, channel, style=None):
@@ -1687,7 +1693,8 @@ async def test_notify_person_falls_back_to_the_normal_chat_of_a_person_with_no_d
     assert "Notified mia in their normal chat" in _text(reply)
     assert notifier.calls == []
     assert repo.mains == ["mia"]
-    # The path is the app itself, so the message is the line and nothing else.
+    # The path is their own chat, where the text is, so the message is the line
+    # and nothing else.
     assert sent == [("telegram:2", "The installer called about tomorrow")]
 
 
@@ -1837,6 +1844,110 @@ def test_notify_person_is_in_every_chat_of_a_member_and_in_none_of_a_guest(
     # An event turn has no person, so it has nobody to send as.
     nobody = _deps(WsRepo(_ws()), _channel(), person_id=None)
     assert "notify_person" not in _names(ws_tools.build_workspace_server(nobody, settings))
+
+
+# --- the text of a notification, in the chat it comes from ---------------------------------------
+
+# A line longer than the body of a notification, so the short body and the
+# whole text are two different strings.
+LONG = (
+    "The installer called: they take Tuesday morning or Thursday afternoon, and the "
+    "Thursday slot keeps the scaffolding up one more day, which the neighbour agreed "
+    "to last week. Which one do we take?"
+)
+
+
+async def test_a_workspace_notification_writes_its_whole_text_in_the_thread() -> None:
+    """The notification carries one short line and goes away on a tap, so the
+    thread it comes from holds the whole text, and the tap opens that thread."""
+    repo = _with_a_device()
+    notifier = Notifier()
+
+    reply = await _notify(repo, text=LONG, notify=notifier)
+
+    assert "Notified alex on their phone" in _text(reply)
+    _, notification = notifier.calls[0]
+    assert notification.body.endswith("...") and len(notification.body) == 160
+    assert notification.url == "/chat/w/shared/solar"
+    assert repo.notification_rows == [
+        ("c-ws", f"{LONG}\n\nSolar install: /chat/w/shared/solar"),
+    ]
+
+
+async def test_a_person_notification_writes_its_whole_text_in_their_normal_chat(
+    no_notified: None,
+) -> None:
+    """With no url the tap opens the person's own chat, which is where the text
+    is, so the message is the text and nothing else."""
+    repo = _mia_has_a_device()
+    repo.main = Conversation(id="m", channel_id="telegram:2", person_id="mia")
+    notifier = Notifier()
+
+    reply = await _notify_person(repo, text=LONG, notify=notifier)
+
+    assert "Notified mia on their phone" in _text(reply)
+    assert notifier.calls[0][1].url == "/chat/mia"
+    assert repo.notification_rows == [("m", LONG)]
+
+
+async def test_a_person_notification_with_a_path_writes_the_address_too(
+    no_notified: None,
+) -> None:
+    repo = _mia_has_a_device()
+    repo.main = Conversation(id="m", channel_id="telegram:2", person_id="mia")
+    notifier = Notifier()
+
+    await _notify_person(
+        repo,
+        text="Look at the recipe",
+        url="/wiki/recipes.md",
+        notify=notifier,
+        settings=_roster(VIEWER_URL),
+    )
+
+    assert repo.notification_rows == [
+        ("m", "Look at the recipe\n\nhttps://joshua.example.org/wiki/recipes.md"),
+    ]
+
+
+async def test_a_notification_the_push_service_refuses_still_writes_the_text() -> None:
+    """The browser took nothing, so the text is in the thread and the person's
+    normal chat carries it as well."""
+    repo = _with_a_device()
+    repo.main = Conversation(id="m", channel_id="telegram:1", person_id="alex")
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    reply = await _notify(repo, text=LONG, notify=Notifier(sent=0), deliver=deliver)
+
+    assert "Notified alex in their normal chat" in _text(reply)
+    assert repo.notification_rows == [
+        ("c-ws", f"{LONG}\n\nSolar install: /chat/w/shared/solar"),
+    ]
+    assert len(sent) == 1
+
+
+async def test_a_person_with_no_device_gets_one_message_and_no_row(no_notified: None) -> None:
+    """No notification went, so the message of the normal chat is the one
+    message of the send."""
+    repo = WsRepo(_shared_ws())
+    repo.main = Conversation(id="m", channel_id="telegram:1", person_id="alex")
+    sent: list[tuple[str, str]] = []
+
+    async def deliver(target: str, text: str) -> bool:
+        sent.append((target, text))
+        return True
+
+    await _notify(repo, notify=Notifier(), deliver=deliver)
+    plain = WsRepo(None)
+    plain.main = Conversation(id="m", channel_id="telegram:2", person_id="mia")
+    await _notify_person(plain, notify=Notifier(), deliver=deliver)
+
+    assert len(sent) == 2
+    assert repo.notification_rows == [] and plain.notification_rows == []
 
 
 def test_register_wires_the_builtin_for_every_job() -> None:

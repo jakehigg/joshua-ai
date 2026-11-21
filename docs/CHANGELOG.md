@@ -8,6 +8,16 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- **A path Joshua names becomes a link.** When a reply names a document, a
+  wiki page, an attachment, or a shared file, the path is a link to the page
+  that opens it: a Markdown link in the web chat, a link entity on Telegram,
+  and the path with the address under it on iMessage. The rule reads nothing,
+  so a path inside a code block, a code span, a link that is already there,
+  or a URL is left alone, and a path nobody wrote still gets a link, which
+  opens the not-found page. A spoken reply is never touched.
+  `workspaces.viewer_url` makes the address absolute, which Telegram and
+  iMessage need, and `core.path_links: false` turns the whole filter off.
+
 - **A message you send while Joshua works joins the next turn.** Before, a
   second message started a second turn of its own, which ran after the first
   one and answered the two lines apart. Now anything that arrives while a
@@ -48,6 +58,20 @@ with the images and the packaged chart, are at
   session can read. A single message past 4000 characters is cut, and the text
   says so. The rows before those turns stay short lines, and the handoff and
   the pointer to `search_history` and `read_history` are unchanged.
+- **The Items panel also holds a wiki page, a promoted document, and a saved
+  file.** A page written with `write_file`, the page a document becomes with
+  `promote_document`, and a file copied into the wiki with `save_attachment`
+  were made in a workspace thread and showed nowhere. Each one is now an item
+  of that workspace, with a link that opens it. `docs/workspaces.md` lists
+  every way a thing is made in a workspace turn and what records it.
+- **A new workspace starts with the servers the owner chose.** The owner sets
+  one default set for the instance under Admin → Instance, as "Default servers
+  for a new workspace", and the new workspace dialog opens with those servers
+  ticked. A tick or an untick in the dialog wins, a server the person may not
+  use is never ticked, and a shared workspace keeps the ticks to the servers
+  every person of it may use. An empty setting ticks nothing, which is what
+  every instance does today, and a workspace that exists already does not
+  change.
 
 ### Assignments
 
@@ -78,6 +102,16 @@ with the images and the packaged chart, are at
   the viewer's `GET /api/v1/admin/update`, both the owner's. See
   [settings.md](settings.md) and
   [operations.md](operations.md#the-version-you-run).
+
+### Notifications
+
+- **A notification leaves its text in the chat it came from.** The line on the
+  lock screen is short and goes away on a tap, so the whole text is now a
+  message in the conversation the notification comes from: the thread of the
+  workspace for `notify_user`, the person's normal chat for `notify_person`.
+  The tap opens that conversation unless the call names a page to read, so the
+  text is where it lands. A push the service refuses writes the message too.
+  See [notifications.md](notifications.md#what-push-is).
 
 ## 0.4.0 - 2026-11-19
 

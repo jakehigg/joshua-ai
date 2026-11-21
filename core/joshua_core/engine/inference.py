@@ -40,6 +40,8 @@ OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 
 # The job of a turn when its profile names none.
 DEFAULT_TURN_JOB = "chat"
+# The job of a spoken turn: its reply is read out by text to speech.
+VOICE_TURN_JOB = "voice"
 
 _oauth_token = ""
 

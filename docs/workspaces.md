@@ -314,6 +314,10 @@ collapse into the newest one. A person with no subscription gets a line and a
 link in their normal chat instead. A personal workspace does not get the tool:
 nobody else writes there.
 
+The notification also writes its whole text in the thread of the workspace, as
+a message from Joshua, because the line on the lock screen is short and goes
+away on a tap. A push the service refuses writes that message too.
+
 **The url is where the tap lands**, so a notification opens the thing to read:
 a document (`/documents/<owner>/<slug>`), a wiki page (`/wiki/...`), or the
 thread of the workspace, which is what a call with no `url` opens. It is a path
@@ -456,6 +460,37 @@ It shows what a workspace costs.
 Joshua adds items without being asked, from the tool calls of a workspace
 thread. The gateway does this. It adds no container.
 
+### What records an item
+
+Every way a thing is made or found in a workspace turn, with the code that
+records it. A row that records nothing says why: the recorder never runs for
+it, it runs and has no rule for that kind, or the thing needs a choice that is
+not made yet.
+
+| What is made or found | Where it is made | Item |
+|---|---|---|
+| an output of an assignment run: a `document`, an `artifact`, a plan | `assignments/.../sdk_runner.py`, `Run.record_output` and `Run._record_item`, with `workspace_items.item_of` | `document`, `artifact` or `plan`, when the spec holds a workspace |
+| an output of a kind core does not know | the same | a `link` item, with the url when the ref is an address |
+| the report of a run | `assignments/.../sdk_runner.py`, `Run.write_report` | none, and none is wanted: the report is on the page of the assignment, which the `assignment` item opens |
+| the run itself | `gateway/.../workspace_items.py`, `_assignment` | `assignment`, with the page of the run |
+| a document by `write_document`, and an `.html` artifact | `gateway/.../workspace_items.py`, `_document` | `document`, or `artifact` for an `.html` file |
+| a wiki page by `write_file` | `gateway/.../files_mcp/server.py`, `write_wiki_page` | `wiki`, from `_wiki_file` |
+| a page promoted by `promote_document` | `gateway/.../documents_mcp/server.py`, `_promote_document` | `wiki` for the new page, from `_promoted` |
+| a wiki page by the `joshua` or `wiki` addon | the addon's `write_page` | `wiki`, from `_wiki` |
+| a file saved by `save_attachment` | `gateway/.../files_mcp/server.py`, `_save_attachment` | `file`, from `_attachment` |
+| an entry by `write_journal_entry` | `gateway/.../files_mcp/server.py`, `_write_journal_entry` | none: the journal is Joshua's own memory, not a thing the workspace collects |
+| a tasks project by `create_project` | the `tasks` addon | `tasks_project`, from `_project` |
+| a task by `create_task` | the `tasks` addon | **none.** The map has no rule for the tool: the addon is outside this repository, and the keys of its reply are not known here. |
+| a developer task by `develop` or `rework` | the `developer` addon | `developer_task`, from `_developer` |
+| the pull request of a developer task | the addon, after the task ends | **none.** The recorder never runs: the pull request comes back as an event on `POST /v1/events` with the workspace, not as the result of a tool call. |
+| a file a person sends in the thread | `channels`, which stores it under `people/<id>/attachments/` | **none.** The recorder never runs: a person's message is no tool call. |
+| a `resource_link` of any MCP server | `gateway/.../workspace_items.py`, `link_items` | `link`, one per block, up to 20 |
+| anything Joshua collects itself | `core/.../engine/tools/workspace.py`, `do_add_to_workspace` | the kind the call names |
+
+The three rows with no item wait on a choice. A task of the addon needs the
+keys of its reply, a pull request needs an item on the event route, and a file
+a person sends needs a rule for which attachment of a turn is worth an item.
+
 A session of a workspace sends `X-Joshua-Workspace: <workspace id>` to the
 gateway on every MCP server, and the gateway trusts the header only from
 `gateway.person_header_callers`, as it does the conversation header. The header
@@ -474,6 +509,9 @@ this in the background and never fails the call: a failed post is a log line.
   | Server | Tool | Item |
   |---|---|---|
   | `documents` | `write_document` | `document`, or `artifact` for an `.html` file. `ref` is the path, and `url` is `/documents/<owner>/<slug>`. |
+  | `documents` | `promote_document` | `wiki` for the page the document became. `ref` and `url` are the `wiki_path`. |
+  | `files` | `write_file` | `wiki`. `ref` and `url` are the path, which names the root (`wiki/<path>.md`). |
+  | `files` | `save_attachment` | `file` for the copy in the wiki. `ref` and `url` are the path, and `title` is the name of the file. |
   | `joshua` or `wiki` | `write_page` | `wiki`. `ref` is the path, and `url` is `/wiki/<path>`. |
   | `tasks` | `create_project` | `tasks_project`. `ref` is the slug. |
   | `developer` | `develop`, `rework` | `developer_task`. `ref` is the `task_id`. |
@@ -599,7 +637,9 @@ compose and on Kubernetes, and it adds no container.
   is on screen, and not while the tab is hidden, and the list asks for the
   counts again after each mark.
 - The new workspace dialog asks for a title, a goal (optional), a model, and
-  the servers. "Shared" offers the other people of the roster as checkboxes
+  the servers. The servers start at the default set of the instance (below),
+  and a tick or an untick in the dialog wins. "Shared" offers the other people
+  of the roster as checkboxes
   and shows the address the workspace will take; Create waits until at least
   one person is picked. A title whose shared slug is taken says so. The dialog
   creates the workspace and opens it.
@@ -687,10 +727,14 @@ read of one workspace carry one field that core does not give: `charm` (above).
 `GET /v1/workspaces/options` returns `servers` (the servers that the person may
 use, each with a `name` and a one-line `description`), `models` (the models of
 the instance, each with the `id` the workspace holds and the `name` a person
-reads), and `people` (every
-member of the roster but the caller, each with an `id` and a `name`, to share a
-workspace with). The description is the optional `description` of the server in
-`mcp:`. Without it, the name is used. The slug `options` is reserved.
+reads), `people` (every
+member of the roster but the caller, each with an `id`, a `name`, and the
+`servers` they may use, to share a workspace with), and `default_servers` (the
+servers a new workspace starts with). The `servers` of a person are kept to
+the servers of `servers`, so a server this instance hides from the caller is
+named in no entry of `people`. The description is the optional
+`description` of the server in `mcp:`. Without it, the name is used. The slug
+`options` is reserved.
 
 The chat routes take `workspace` (a ref, two segments for a workspace on
 screen): `POST
@@ -733,5 +777,24 @@ session.
 
 Each `mcp:` server can have a `description`, one line (200 characters at most)
 that the new workspace dialog shows beside the name.
+
+### The default servers of a new workspace
+
+The owner sets one default set for the instance, in the viewer under
+Admin → Instance, as the setting `workspaces.default_servers`: the server
+names, separated by a comma. There is no per-person default, and the owner is
+the only role that writes it ([settings.md](settings.md)).
+
+The new workspace dialog starts with those servers ticked, and whatever the
+person leaves ticked is what the create sends: a change in the dialog wins.
+The options route drops from the pre-pick a name that this instance does not
+declare and a server the person may not use, so the dialog never shows a
+server ticked that the create would refuse (422). For a shared workspace the
+dialog keeps the pre-pick to the servers that every person of the roster of
+the workspace may use, which is the rule the create applies, and unticks the
+rest as people are added.
+
+An empty setting ticks nothing. A workspace that exists already does not
+change: the set applies at the create alone.
 
 See [config.md](config.md#workspaces).
