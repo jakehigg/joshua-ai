@@ -50,7 +50,7 @@ Only these shapes become a link:
 | `documents/<owner>/<slug>.md`, `documents/<owner>/<slug>.html` | the document page |
 | `wiki/<path>.md` | the wiki page |
 | `wiki/attachments/<path>` with an image or PDF extension | the file |
-| `people/<person-id>/attachments/<path>` | the file |
+| `people/<person-id>/attachments/<path>` | the file, at `/attachments/<path>`, the viewer's route for your own attachments |
 | `shared/<path>` | the file |
 
 The rule is deterministic: it reads no file and no row, so a path Joshua names

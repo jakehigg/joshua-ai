@@ -27,7 +27,7 @@ SHAPES = [
     (
         "Your scan is people/alex/attachments/2026/08/bill.pdf.",
         "people/alex/attachments/2026/08/bill.pdf",
-        "/people/alex/attachments/2026/08/bill.pdf",
+        "/attachments/2026/08/bill.pdf",
     ),
     (
         "It is in shared/attachments/team/2026/08/map.png.",

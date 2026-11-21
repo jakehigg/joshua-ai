@@ -21,10 +21,7 @@ SHAPES = [
     ("documents/shared/plan.html", f"{VIEWER}/documents/shared/plan"),
     ("wiki/recipes/pie.md", f"{VIEWER}/wiki/recipes/pie.md"),
     ("wiki/attachments/2026/08/plant.jpg", f"{VIEWER}/wiki/attachments/2026/08/plant.jpg"),
-    (
-        "people/alex/attachments/2026/08/bill.pdf",
-        f"{VIEWER}/people/alex/attachments/2026/08/bill.pdf",
-    ),
+    ("people/alex/attachments/2026/08/bill.pdf", f"{VIEWER}/attachments/2026/08/bill.pdf"),
     (
         "shared/attachments/team/2026/08/map.png",
         f"{VIEWER}/shared/attachments/team/2026/08/map.png",

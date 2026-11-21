@@ -85,14 +85,19 @@ def viewer_url(path: str, base_url: str | None = None) -> str:
     """The address of the viewer for one Joshua path.
 
     A document opens on its own page, which names the owner and the slug and
-    carries no extension. Every other shape opens at its path. With
-    ``base_url`` (``workspaces.viewer_url``, the public address of the viewer)
-    the address is absolute, which a channel outside the viewer needs.
+    carries no extension. A person's own attachment opens at
+    ``/attachments/<path>``, the route of the viewer for the attachments of
+    the person who is signed in, because the viewer has no route that names
+    another person. Every other shape opens at its path. With ``base_url``
+    (``workspaces.viewer_url``, the public address of the viewer) the address
+    is absolute, which a channel outside the viewer needs.
     """
     parts = path.split("/")
     if parts[0] == "documents" and len(parts) == 3:
         slug = parts[2].rsplit(".", 1)[0]
         route = f"/documents/{parts[1]}/{slug}"
+    elif parts[0] == "people" and len(parts) > 3 and parts[2] == "attachments":
+        route = "/attachments/" + "/".join(parts[3:])
     else:
         route = f"/{path}"
     return f"{base_url.rstrip('/')}{route}" if base_url else route
