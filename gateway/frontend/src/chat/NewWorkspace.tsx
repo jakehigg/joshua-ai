@@ -1,5 +1,11 @@
 // The new workspace dialog: title, goal, model, the writing style, the
-// servers, and whether the workspace is shared. Shared shows the other people of the roster: the ones
+// servers, and whether the workspace is shared. The servers start at the
+// default set of the instance, which the owner writes as
+// `workspaces.default_servers` and the options route keeps to the servers this
+// person may use; a tick or an untick in the dialog wins from then on. For a
+// shared workspace the pre-pick is kept to the servers that every person of
+// the roster may use, which is the rule the create applies.
+// Shared shows the other people of the roster: the ones
 // ticked write in the one thread of the workspace, which then lives at
 // `/chat/w/shared/<slug>`, one address for everyone. That slug is taken from
 // the title and is one for the whole instance, so a title whose slug is taken
@@ -36,6 +42,9 @@ export function NewWorkspace({
   const [model, setModel] = useState("");
   const [style, setStyle] = useState<Style>("none");
   const [picked, setPicked] = useState<string[]>([]);
+  // Whether the person has touched the checklist. Until they do, the servers
+  // follow the pre-pick, which the roster of a shared workspace narrows.
+  const [ownPick, setOwnPick] = useState(false);
   const [shared, setShared] = useState(false);
   const [members, setMembers] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -50,6 +59,20 @@ export function NewWorkspace({
       live = false;
     };
   }, []);
+
+  // The pre-pick: the default servers of the instance, kept to the ones every
+  // other person of a shared workspace may use. A person who has ticked a
+  // server of their own keeps their list, and this stops.
+  useEffect(() => {
+    if (options === null || ownPick) return;
+    const reach = (id: string) => options.people.find((p) => p.id === id)?.servers ?? null;
+    const everyone = shared ? members.map(reach) : [];
+    setPicked(
+      (options.default_servers ?? []).filter((name) =>
+        everyone.every((servers) => servers === null || servers.includes(name)),
+      ),
+    );
+  }, [options, ownPick, shared, members]);
 
   const slug = slugOf(title.trim());
   // A shared workspace with nobody in it is a workspace of one person, so
@@ -148,7 +171,14 @@ export function NewWorkspace({
             </p>
           </fieldset>
         )}
-        <ServerChecklist servers={options?.servers ?? []} picked={picked} onChange={setPicked} />
+        <ServerChecklist
+          servers={options?.servers ?? []}
+          picked={picked}
+          onChange={(next) => {
+            setOwnPick(true);
+            setPicked(next);
+          }}
+        />
         {error && (
           <p className="j-error" role="alert">
             {error}
