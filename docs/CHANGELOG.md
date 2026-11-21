@@ -22,6 +22,17 @@ with the images and the packaged chart, are at
   message as if it had just been written. `0` turns the limit off. In the web
   chat the hold routes report what the limit dropped, each message once.
 
+### Workspaces
+
+- **A workspace that resets keeps the recent conversation word for word.**
+  The session of a workspace thread resets at `workspaces.context_cap`, and
+  the fresh session now holds the last three turns of the thread whole: each
+  message of a person and the reply to it, under their own heading, the newest
+  turn last. So a reply such as "do that one" still names a message the
+  session can read. A single message past 4000 characters is cut, and the text
+  says so. The rows before those turns stay short lines, and the handoff and
+  the pointer to `search_history` and `read_history` are unchanged.
+
 ## 0.4.0 - 2026-11-19
 
 A workspace can now hold several people, who write in one thread and read the

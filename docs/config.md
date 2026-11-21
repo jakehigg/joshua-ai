@@ -1318,7 +1318,7 @@ person makes a workspace.
 |---|---|---|
 | `allowed_callers` | `viewer`, `gateway` | The fleet identities that may call `/v1/workspaces`. The viewer acts for a person; the gateway records the items of a tool call at `POST /v1/workspaces/by-id/<id>/items`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the routes off, and every caller gets 403. |
 | `models` | empty | The models that a workspace may pick. An empty list accepts any name. |
-| `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. Before the session ends, it writes a handoff. The next turn starts from the workspace block, the handoff, and the last 10 rows of the thread. At least 1000. |
+| `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. Before the session ends, it writes a handoff. The next turn starts from the workspace block, the handoff, the last three turns of the thread word for word, and a short line for each of the 10 rows before them. At least 1000. |
 | `max_turns` | `50` | The least number of agent turns that a workspace turn gets. A workspace turn reads repositories, pipelines, and documents, so it needs more than `core.max_turns`. |
 | `tool_search_max_servers` | `3` | A workspace that picks this many servers or fewer runs with tool search off. More servers turn it on. |
 | `viewer_url` | none | The public address of the viewer. `send_to_normal_chat` adds the link `<viewer_url>/chat/w/<owner>/<slug>`, with `shared` for the owner of a shared workspace. Without it, the message has the path only. |

@@ -247,8 +247,14 @@ their reasons, the running work, and the last request. Core keeps it on the
 conversation. The handoff is not a row of the thread.
 
 The next turn waits for the handoff, then starts new, from the block, the
-handoff, and the last 10 rows. A row of the person is shown whole up to 2000
-characters, and a row of Joshua is cut at 300. A line tells the session to use
+handoff, and the recent conversation: the last three turns, word for word.
+
+A turn is one message of a person and the reply to it, and both sides come
+over whole, so the session knows the message that the person is answering. A
+single message past 4000 characters is cut, and the text says it is cut,
+because three turns with large tool results are long. The rows before those
+turns are one short line each, up to 10 of them: a row of a person whole up to
+2000 characters, a row of Joshua cut at 300. A line tells the session to use
 `search_history` or `read_history` for the exact words of an earlier message.
 When the handoff fails, the session starts from the block and the rows.
 

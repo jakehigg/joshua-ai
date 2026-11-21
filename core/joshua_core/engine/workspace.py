@@ -41,16 +41,33 @@ WORKSPACE_PROMPT_FILES = ("workspace.md",)
 
 # The block lists at most this many items, pinned first, then newest first.
 BLOCK_MAX_ITEMS = 30
-# A fresh session gets this many rows of the thread, each cut short.
+# A fresh session gets this many rows of the thread as short lines: the rows
+# before the turns it carries whole.
 BLOCK_RECENT_ROWS = 10
 RECENT_ROW_CHARS = 300
 # A row of the person is short, and its exact words matter: it is cut only
 # past this length.
 PERSON_ROW_CHARS = 2000
+# A fresh session of a workspace gets this many turns whole, both sides of
+# each: a turn is one message of the person and the reply to it.
+CARRIED_TURNS = 3
+# A carried message is cut past this length, because three whole turns with
+# large tool results are long.
+CARRIED_MESSAGE_CHARS = 4000
+# What a cut carried message ends with.
+CUT_NOTE = "\n[This message is cut here. Use `read_history` for the whole text.]"
+# A fresh session of a workspace reads this many rows back: enough for the
+# carried turns and the short lines of the rows before them.
+FRESH_TAIL_ROWS = 30
+# The heading of the carried turns.
+RECENT_TURNS_HEAD = (
+    "The recent conversation of this thread, word for word, oldest first. The "
+    "newest turn is the message you are answering:"
+)
 # The line that a fresh session gets after its rows.
 HISTORY_HINT = (
-    "This thread was reset. The handoff and the rows above are short. For the "
-    "exact words of an earlier message, use `search_history` or `read_history`."
+    "This thread was reset. The handoff and the short rows above leave words out. "
+    "For the exact words of an earlier message, use `search_history` or `read_history`."
 )
 # A row from normal chat is shown in the block up to this length.
 CHAT_ROW_CHARS = 600
@@ -120,28 +137,89 @@ def _item_line(item: WorkspaceItem) -> str:
     return f"- {pin}{item.kind}: {item.title or item.ref}{ref}"
 
 
-def recent_lines(rows: list[dict[str, Any]], default_name: str | None) -> list[str]:
-    """One short line for each visible row of the thread, oldest first.
+def _visible(row: dict[str, Any]) -> bool:
+    """Whether a row of the thread is shown at all: a blank row, a silent
+    reply, and a failed turn are not."""
+    text = (row.get("content") or "").strip()
+    return bool(text) and text != SILENT_REPLY and row.get("status") != FAILED_STATUS
 
-    A row that came in is labelled with its ``meta.speaker``, the person who
-    wrote it, because a shared thread holds the rows of several people. A row
-    that names nobody takes ``default_name``.
-    """
+
+def _row_name(row: dict[str, Any], default_name: str | None) -> str:
+    """Who wrote a row: Joshua, normal chat, or the person of its
+    ``meta.speaker``, because a shared thread holds the rows of several
+    people. A row that names nobody takes ``default_name``."""
+    meta = row.get("meta") or {}
+    if meta.get("source") == FROM_CHAT_SOURCE:
+        return "from normal chat"
+    if row.get("direction") == "out":
+        return "you"
+    return meta.get("speaker") or default_name or "person"
+
+
+def recent_lines(rows: list[dict[str, Any]], default_name: str | None) -> list[str]:
+    """One short line for each visible row of the thread, oldest first."""
     lines = []
     for row in rows:
-        meta = row.get("meta") or {}
-        text = (row.get("content") or "").strip()
-        if not text or text == SILENT_REPLY or row.get("status") == FAILED_STATUS:
+        if not _visible(row):
             continue
-        if meta.get("source") == FROM_CHAT_SOURCE:
-            who, limit = "from normal chat", RECENT_ROW_CHARS
-        elif row.get("direction") == "out":
-            who, limit = "you", RECENT_ROW_CHARS
-        elif row.get("direction") == "in":
-            who, limit = meta.get("speaker") or default_name or "person", PERSON_ROW_CHARS
+        from_chat = (row.get("meta") or {}).get("source") == FROM_CHAT_SOURCE
+        person_row = row.get("direction") == "in" and not from_chat
+        limit = PERSON_ROW_CHARS if person_row else RECENT_ROW_CHARS
+        text = (row.get("content") or "").strip()
+        lines.append(f"- {_row_name(row, default_name)}: {_one_line(text, limit)}")
+    return lines
+
+
+def split_turns(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """The visible rows grouped into turns, oldest first.
+
+    A turn is one message of the person and the reply to it. A new turn opens
+    at a row that came in and follows a row that did not, so a reply, and an
+    event that lands after it, stay with the message they answer.
+    """
+    turns: list[list[dict[str, Any]]] = []
+    for row in rows:
+        if not _visible(row):
+            continue
+        opens = row.get("direction") == "in" and (
+            not turns or turns[-1][-1].get("direction") != "in"
+        )
+        if opens or not turns:
+            turns.append([row])
         else:
-            who, limit = default_name or "person", RECENT_ROW_CHARS
-        lines.append(f"- {who}: {_one_line(text, limit)}")
+            turns[-1].append(row)
+    return turns
+
+
+def carried_turns(
+    rows: list[dict[str, Any]], count: int = CARRIED_TURNS
+) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    """The last ``count`` turns of the thread, which a fresh session gets
+    whole, and the visible rows before them, which it gets as short lines."""
+    turns = split_turns(rows)
+    carried = turns[-count:] if count > 0 else []
+    taken = sum(len(turn) for turn in carried)
+    visible = [row for row in rows if _visible(row)]
+    return carried, visible[: len(visible) - taken]
+
+
+def turn_lines(turns: list[list[dict[str, Any]]], default_name: str | None) -> list[str]:
+    """The carried turns as text, oldest first, each message as it was
+    written.
+
+    Each message stands under the name of who wrote it, and a blank line
+    separates two of them. A message past ``CARRIED_MESSAGE_CHARS`` is cut,
+    and its text says so.
+    """
+    lines: list[str] = []
+    for turn in turns:
+        for row in turn:
+            if lines:
+                lines.append("")
+            text = (row.get("content") or "").strip()
+            if len(text) > CARRIED_MESSAGE_CHARS:
+                text = text[:CARRIED_MESSAGE_CHARS] + CUT_NOTE
+            lines.append(f"{_row_name(row, default_name)}: {text}")
     return lines
 
 
@@ -169,6 +247,7 @@ def render_block(
     unseen: list[WorkspaceItem] | None = None,
     chat_rows: list[str] | None = None,
     recent: list[str] | None = None,
+    turns: list[str] | None = None,
     extra: list[str] | None = None,
     handoff: str | None = None,
     notify_modes: dict[str, str] | None = None,
@@ -179,7 +258,8 @@ def render_block(
     the items (``BLOCK_MAX_ITEMS``, pinned first, then newest), the items that
     came from normal chat and are
     not yet seen, and, for a fresh session, the handoff of the last session,
-    the last rows of the thread, and the line that points at ``history``.
+    the last turns of the thread whole, short lines for the rows before them,
+    and the line that points at ``history``.
     ``chat_rows`` holds the text of the rows that normal chat sent to the
     thread and that no block has shown. ``extra`` holds the text of the
     sections that ``add_section`` registers. ``notify_modes`` is the notify
@@ -208,20 +288,30 @@ def render_block(
         lines.append("From normal chat, since your last turn:")
         lines += [f"- {_one_line(text, CHAT_ROW_CHARS)}" for text in chat_rows]
     lines += extra or []
-    lines += fresh_lines(handoff, recent)
+    lines += fresh_lines(handoff, recent, turns)
     return "\n".join(lines)
 
 
-def fresh_lines(handoff: str | None, recent: list[str] | None) -> list[str]:
-    """What a fresh session gets: the handoff, the last rows, and the line
-    that points at the ``history`` tools. Empty when there is neither a
-    handoff nor a row."""
+def fresh_lines(
+    handoff: str | None, recent: list[str] | None, turns: list[str] | None = None
+) -> list[str]:
+    """What a fresh session gets: the handoff, the rows of the thread, the
+    last turns whole, and the line that points at the ``history`` tools.
+    Empty when there is neither a handoff nor a row."""
     lines: list[str] = []
     if handoff:
         lines += ["The handoff that the last session wrote before it ended:", handoff.strip()]
     if recent:
-        lines.append("The last rows of this thread, because the session starts fresh:")
+        head = (
+            "Older rows of this thread, cut short:"
+            if turns
+            else "The last rows of this thread, because the session starts fresh:"
+        )
+        lines.append(head)
         lines += recent
+    if turns:
+        lines.append(RECENT_TURNS_HEAD)
+        lines += turns
     if lines:
         lines.append(HISTORY_HINT)
     return lines
@@ -252,10 +342,13 @@ class WorkspaceBlock:
         items = await self._repo.list_workspace_items(workspace.id)
         unseen = [i for i in items if not i.seen]
         recent: list[str] = []
+        turns: list[str] = []
         handoff: str | None = None
         if fresh:
-            rows = await self._repo.transcript_tail(conversation_id, BLOCK_RECENT_ROWS)
-            recent = recent_lines(rows, workspace.owner)
+            rows = await self._repo.transcript_tail(conversation_id, FRESH_TAIL_ROWS)
+            carried, older = carried_turns(rows)
+            turns = turn_lines(carried, workspace.owner)
+            recent = recent_lines(older[-BLOCK_RECENT_ROWS:], workspace.owner)
             handoff = await self._repo.conversation_handoff(conversation_id)
         extra = []
         for section in self._sections:
@@ -276,6 +369,7 @@ class WorkspaceBlock:
             unseen=unseen,
             chat_rows=[r["content"] for r in chat_rows],
             recent=recent,
+            turns=turns,
             extra=extra,
             handoff=handoff,
             notify_modes=modes,
