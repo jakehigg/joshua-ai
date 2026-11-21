@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -123,8 +123,9 @@ describe("one day of the journal", () => {
 
     page("/journal/2026/11/10#dinner");
 
-    await screen.findByText("Dinner at home");
-    expect(seen).toEqual(["dinner"]);
+    // The scroll is an effect, which runs after the entry is on the screen,
+    // so the wait is on the scroll itself and not on the entry.
+    await waitFor(() => expect(seen).toEqual(["dinner"]));
   });
 
   it("says what the viewer said when the day is not a day", async () => {
