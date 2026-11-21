@@ -33,3 +33,23 @@ request. The text is for a reviewer who did not see the work.
 
 A body of six short lines is better than a page. Write the chat line that
 tells the owner about the pull request in the same style.
+
+### Open the pull request
+
+A developer task that finished leaves a pushed branch and no pull request.
+Opening it is your step:
+
+1. Read what the task did: the diff of the branch it pushed, and the report
+   of the task.
+2. Compose the title and the body by the rules above.
+3. Show the text to the owner, and open the pull request when the owner
+   approves it. Make each change the owner asks for first. The approval is a
+   setting of this instance, which the owner changes under Admin → Instance;
+   when it is off, a line after this page says so and you open the pull
+   request at once.
+4. Open it with `create_pull_request` on the `github` server, or with
+   `create_merge_request` on the `gitlab` server, for the branch of the task.
+5. Tell the owner in one line what is open, and give the link.
+
+Open no second pull request for a branch that has one. When the branch has a
+merge conflict, say so to the owner and open nothing.

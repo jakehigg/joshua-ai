@@ -139,6 +139,19 @@ NEW_DAY_BLOCK = (
 # other session, so a deployment without it pays nothing.
 SERVER_SKILLS = ("assignments", "documents", "developer")
 
+# The server whose skill page has a step the instance can turn off, and the
+# block that replaces that step. The developer page tells Joshua to show the
+# text of a pull request to the owner and to open it when the owner approves.
+# With ``developer.pr_skip_approval`` on, this block follows the page and tells
+# Joshua to open it at once instead (``joshua_core/developer.py``).
+PR_APPROVAL_SERVER = "developer"
+PR_APPROVAL_OFF = (
+    "## The approval of a pull request is off\n\n"
+    "The owner has turned off the approval step for this instance. Compose the "
+    "title and the body as the developer page says, open the pull request, and "
+    "then give the owner the text and the link in one line. Do not ask first."
+)
+
 
 class PromptComposer:
     """Compose a session's system prompt from the kernel files and the identity.
@@ -203,10 +216,19 @@ class PromptComposer:
                 parts.append(text)
         return parts
 
-    def _server_skills(self, servers: Collection[str], person: Person | None) -> list[str]:
+    def _server_skills(
+        self,
+        servers: Collection[str],
+        person: Person | None,
+        *,
+        pr_approval: bool = True,
+    ) -> list[str]:
         """The skill page of each server in ``SERVER_SKILLS`` that the session holds.
 
-        A guest gets none: the servers that ship a skill are for members.
+        A guest gets none: the servers that ship a skill are for members. With
+        ``pr_approval`` false, the developer page is followed by
+        :data:`PR_APPROVAL_OFF`, so the step the owner turned off is replaced
+        where the page states it.
         """
         if person is not None and person.role == "guest":
             return []
@@ -216,6 +238,8 @@ class PromptComposer:
                 text = self._read(f"skills/{name}.md")
                 if text:
                     parts.append(text)
+                    if name == PR_APPROVAL_SERVER and not pr_approval:
+                        parts.append(PR_APPROVAL_OFF)
         return parts
 
     def channel_lines(self, channel: Channel | None) -> str:
@@ -238,12 +262,18 @@ class PromptComposer:
         memory: MemoryBlock | None = None,
         servers: Collection[str] = (),
         new_day: bool = False,
+        pr_approval: bool = True,
     ) -> str:
         """Compose the prompt. ``servers`` are the gateway servers of the session.
 
         ``new_day`` is true for the first session of a conversation after the
         daily rollover: it adds :data:`NEW_DAY_BLOCK`, which tells Joshua to read
         the tail of the conversation before it answers.
+
+        ``pr_approval`` is what the setting ``developer.pr_skip_approval`` of
+        the instance leaves: false adds :data:`PR_APPROVAL_OFF` after the
+        developer page, so Joshua opens a pull request without asking the owner
+        first.
         """
         parts: list[str] = []
         for rel in profile.prompt_files:
@@ -252,7 +282,7 @@ class PromptComposer:
                 parts.append(text)
 
         parts.extend(self._user_snippets())
-        parts.extend(self._server_skills(servers, person))
+        parts.extend(self._server_skills(servers, person, pr_approval=pr_approval))
 
         lines = self.channel_lines(channel)
         if lines:

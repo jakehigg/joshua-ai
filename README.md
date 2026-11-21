@@ -50,6 +50,8 @@ subscription. You do not need Python, and you do not need a Telegram bot.
   the background. The guide is at the top.
 - [docs/documents.md](docs/documents.md): plans, reports, and artifacts that
   you read and comment on.
+- [docs/developer.md](docs/developer.md): developer tasks, and the pull
+  request Joshua opens for a branch one pushed.
 - [docs/auth.md](docs/auth.md): how a person signs in to the viewer, and how
   the owner keeps the people.
 - [docs/settings.md](docs/settings.md): the settings the owner writes under

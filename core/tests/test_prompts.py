@@ -328,6 +328,33 @@ def test_the_developer_skill_says_how_the_text_of_a_pull_request_is_written() ->
         assert words in page, words
 
 
+def test_the_developer_skill_states_the_flow_of_a_pull_request() -> None:
+    """Core opens the pull request: the task leaves the branch, and the page
+    says who writes the text, who approves it, and which tool opens it."""
+    page = (
+        Path(__file__).parents[1]
+        / "joshua_core"
+        / "prompts"
+        / "builtin"
+        / "skills"
+        / "developer.md"
+    ).read_text()
+    for words in (
+        "### Open the pull request",
+        "A developer task that finished leaves a pushed branch and no pull request.",
+        "the diff of the branch it pushed, and the report\n   of the task",
+        "Show the text to the owner, and open the pull request when the owner\n   approves it.",
+        "The approval is a\n   setting of this instance, which the owner changes under "
+        "Admin → Instance",
+        "`create_pull_request` on the `github` server",
+        "`create_merge_request` on the `gitlab` server",
+        "Tell the owner in one line what is open, and give the link.",
+        "Open no second pull request for a branch that has one.",
+        "When the branch has a\nmerge conflict, say so to the owner and open nothing.",
+    ):
+        assert words in page, words
+
+
 def test_the_documents_skill_says_what_a_document_is_and_how_to_keep_it() -> None:
     page = (
         Path(__file__).parents[1]

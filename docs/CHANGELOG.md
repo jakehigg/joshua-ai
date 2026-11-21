@@ -99,6 +99,15 @@ with the images and the packaged chart, are at
   system, an issue reference only for an issue of the same repository,
   nothing of the private deployment side in a public repository, and the test
   result with what a reviewer should look at.
+- **Joshua opens the pull request of a developer task.** A task that finished
+  leaves a pushed branch and no pull request. Joshua reads the diff and the
+  report, composes the title and the body by the page above, shows the text to
+  the owner, and opens the pull request with `create_pull_request` on the
+  `github` server or `create_merge_request` on the `gitlab` server. Both tools
+  are there already, so an instance needs no new server. The approval is the
+  setting `developer.pr_skip_approval`, under Admin → Instance as "Open a pull
+  request without asking": every instance asks until the owner turns it on.
+  See [developer.md](developer.md).
 
 ### Admin
 
