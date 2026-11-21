@@ -239,6 +239,12 @@ function Panel({ refreshKey = 0 }: { refreshKey?: number }) {
   );
 }
 
+// The titles of the rows on screen, in the order they stand in.
+const rows = () =>
+  [...document.querySelectorAll(".items li.item")].map(
+    (row) => row.querySelector(".item-open, .item-text")?.textContent ?? "",
+  );
+
 describe("the item panel", () => {
   const items = [
     item(),
@@ -260,6 +266,32 @@ describe("the item panel", () => {
     // A javascript: address is text, never a button or an href.
     expect(screen.getByText("Sneaky").closest("button")).toBeNull();
     expect(document.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+
+  it("narrows the list by the title or the address, with the counts and a clear button", async () => {
+    viewer({ "GET /api/v1/workspaces/w1/items": { items } });
+    render(<Panel />);
+    await screen.findByText("Quote");
+    const field = screen.getByLabelText("Filter the items");
+    // No filter: every row, no count line, no clear button.
+    expect(rows()).toEqual(["Pie", "Menu notes", "Quote", "Sneaky"]);
+    expect(screen.queryByRole("button", { name: "Clear the filter" })).toBeNull();
+    // A part of a title, in any case.
+    fireEvent.change(field, { target: { value: "pI" } });
+    expect(rows()).toEqual(["Pie"]);
+    expect(document.querySelector(".item-filter-count")?.textContent).toBe("1 of 4");
+    // A part of an address.
+    fireEvent.change(field, { target: { value: "example.com" } });
+    expect(rows()).toEqual(["Quote"]);
+    expect(document.querySelector(".item-filter-count")?.textContent).toBe("1 of 4");
+    // Nothing matches: the panel says so, and the clear button brings the
+    // whole list back.
+    fireEvent.change(field, { target: { value: "nothing here" } });
+    expect(rows()).toEqual([]);
+    expect(screen.getByText("Nothing matches.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear the filter" }));
+    expect(rows()).toEqual(["Pie", "Menu notes", "Quote", "Sneaky"]);
+    expect((field as HTMLInputElement).value).toBe("");
   });
 
   it("shows a photo item as a thumbnail, not the kind icon, and a PDF with the icon", async () => {

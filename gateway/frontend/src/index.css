@@ -1364,6 +1364,30 @@ html.j-lock body { overflow: hidden; }
   min-height: 32px;
   padding-block: 5px;
 }
+/* The filter at the top of the list: a field as wide as the column, with the
+   button that empties it inside at the right, and the counts under it. */
+.chat-screen .item-filter { position: relative; display: flex; }
+.chat-screen .item-filter input {
+  width: 100%;
+  padding: 6px 32px 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--j-surface-2);
+  border: 1px solid var(--j-line);
+  border-radius: 8px;
+}
+.chat-screen .item-filter-clear {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  min-width: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--j-muted);
+}
+.chat-screen .item-filter-count { margin: 0; }
 .chat-screen .item-pin { flex: none; font-size: 0.75rem; }
 .chat-screen .item-menu-wrap { position: relative; flex: none; }
 .chat-screen .item-more { min-height: 32px; min-width: 32px; padding: 0; }

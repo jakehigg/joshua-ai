@@ -11,13 +11,18 @@
 // (`dedupeItems`). A row with no title of its own asks the viewer for the
 // title of its document, so no row is labelled with a bare path.
 //
-// A row is one line: a kind icon, the title (cut with an ellipsis, the whole
-// title on hover), a pin mark, and a "..." button. The button opens a small
+// A row takes two lines at most: a kind icon, the title (cut with an
+// ellipsis after the second line, the whole title on hover), a pin mark, and
+// a "..." button. The button opens a small
 // menu with Pin or Unpin and Remove. Remove hides the row at once and says so
 // for a few seconds with an Undo; the call goes out when the time is up. A
 // pinned item is first in its group. A group folds with its header, and the
 // folded groups are kept per browser in localStorage (try/catch; without it
 // every group is open). The form that adds a link is behind "+ Add link".
+//
+// A long list is narrowed by the filter field at the top: a part of the title
+// or of the address, in any case. While it holds text the panel says how many
+// rows of how many it shows, and a button empties it.
 //
 // On a phone the screen closes this list when an item opens, so the panel is
 // visible. The list is a sheet there, with a close button. On a wide desktop
@@ -63,6 +68,15 @@ export function groupItems(items: WorkspaceItem[]): [string, WorkspaceItem[]][] 
 
 function label(item: WorkspaceItem): string {
   return item.title.trim() || item.ref;
+}
+
+/**
+ * True when `needle`, in lower case, is a part of the title or of the address
+ * of `item`. An empty needle matches every row.
+ */
+export function matchesItem(item: WorkspaceItem, needle: string): boolean {
+  if (needle === "") return true;
+  return `${item.title} ${item.ref} ${item.url ?? ""}`.toLowerCase().includes(needle);
 }
 
 /** The title of a row, or "" when its only label is the path it points at. */
@@ -256,6 +270,7 @@ export function ItemPanel({
   const panel = useDocumentPanel();
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [filter, setFilter] = useState("");
   const [folded, setFolded] = useState<string[]>(readGroups);
   // A row that was removed and can still come back, and its timer.
   const [undo, setUndo] = useState<{ item: WorkspaceItem; timer: ReturnType<typeof setTimeout> } | null>(null);
@@ -368,7 +383,9 @@ export function ItemPanel({
     setAdding(false);
   };
 
-  const shown = dedupeItems(items.filter((item) => item.id !== undo?.item.id));
+  const here = dedupeItems(items.filter((item) => item.id !== undo?.item.id));
+  const needle = filter.trim().toLowerCase();
+  const shown = here.filter((item) => matchesItem(item, needle));
   const ordered = [...shown].sort((a, b) => Number(b.pinned) - Number(a.pinned));
   return (
     <aside
@@ -393,6 +410,32 @@ export function ItemPanel({
           »
         </button>
       </header>
+      {here.length > 0 && (
+        <div className="item-filter">
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter"
+            aria-label="Filter the items"
+          />
+          {filter !== "" && (
+            <button
+              type="button"
+              className="item-filter-clear"
+              aria-label="Clear the filter"
+              onClick={() => setFilter("")}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
+      {needle !== "" && (
+        <p className="j-meta item-filter-count" role="status">
+          {shown.length} of {here.length}
+        </p>
+      )}
       {error && (
         <p className="j-error" role="alert">
           {error}
@@ -406,7 +449,9 @@ export function ItemPanel({
           </button>
         </p>
       )}
-      {shown.length === 0 && !error && <p className="j-meta">Nothing here yet.</p>}
+      {shown.length === 0 && !error && (
+        <p className="j-meta">{needle === "" ? "Nothing here yet." : "Nothing matches."}</p>
+      )}
       {groupItems(ordered).map(([kind, list]) => {
         const closed = folded.includes(kind);
         return (
