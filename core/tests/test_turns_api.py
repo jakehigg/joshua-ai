@@ -7,6 +7,7 @@ the whole path offline — no DB, no SDK, no network.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,7 +20,14 @@ from joshua_core.engine.manager import ConversationManager
 from joshua_core.engine.types import TurnResult
 from joshua_core.main import build_app
 from joshua_core.store.models import Channel, Conversation, Person
-from joshua_core.turns import HOLD_MAX, TURN_FAILED, TurnService
+from joshua_core.turns import (
+    HOLD_DROPPED,
+    HOLD_MAX,
+    TURN_FAILED,
+    DraftStore,
+    HoldStore,
+    TurnService,
+)
 from joshua_shared import config as config_module
 from joshua_shared.http import FleetClient
 
@@ -140,6 +148,26 @@ class FailingManager:
 
     async def run_turn(self, *args: Any, **kwargs: Any) -> TurnResult:
         raise RuntimeError("boom")
+
+
+class BlockingManager:
+    """A manager whose first turn waits, so a message arrives while it runs.
+
+    ``started`` is set once the first turn runs, and ``gate`` releases it.
+    ``texts`` holds the text of each turn, in order.
+    """
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.gate = asyncio.Event()
+        self.texts: list[str] = []
+
+    async def run_turn(self, channel: Any, conversation: Any, text: str, **kwargs: Any):  # type: ignore[no-untyped-def]
+        self.texts.append(text)
+        if len(self.texts) == 1:
+            self.started.set()
+            await self.gate.wait()
+        return TurnResult(text=f"reply {len(self.texts)}")
 
 
 def make_fake_channels(received: list[dict[str, Any]]) -> FastAPI:
@@ -377,10 +405,69 @@ async def test_laptop_stream_needs_cli_handle(tmp_path) -> None:
             assert resp.status_code == 200
 
 
+# --- the fold ---------------------------------------------------------------
+
+
+async def test_messages_that_arrive_during_a_turn_join_the_next_turn(tmp_path) -> None:
+    repo = TurnsFakeRepo()
+    received: list[dict[str, Any]] = []
+    manager = BlockingManager()
+    turns = build_turns(repo, make_settings(), received, tmp_path, manager=manager)
+
+    async with core_client(turns) as client:
+        first = await client.post("/v1/turns", json=dm_event(), headers=bearer(CHANNELS_TOKEN))
+        await manager.started.wait()
+        second = await client.post(
+            "/v1/turns",
+            json=dm_event(text="in the afternoon", message_id="m-2"),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        third = await client.post(
+            "/v1/turns",
+            json=dm_event(text="no, in the morning", message_id="m-3"),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        manager.gate.set()
+        await turns.drain()
+
+    assert first.json()["turn_id"]
+    assert second.json() == {"accepted": True, "folded": True}
+    assert third.json() == {"accepted": True, "folded": True}
+    # The two messages reach the agent together, as one turn, one per line.
+    assert manager.texts == ["hello there", "in the afternoon\nno, in the morning"]
+    assert [r["text"] for r in received] == ["reply 1", "reply 2"]
+
+
+async def test_a_folded_message_that_waited_too_long_is_dropped(tmp_path) -> None:
+    repo = TurnsFakeRepo()
+    received: list[dict[str, Any]] = []
+    manager = BlockingManager()
+    settings = make_settings()
+    settings.core.hold_max_age_s = 0.01
+    turns = build_turns(repo, settings, received, tmp_path, manager=manager)
+
+    async with core_client(turns) as client:
+        await client.post("/v1/turns", json=dm_event(), headers=bearer(CHANNELS_TOKEN))
+        await manager.started.wait()
+        await client.post(
+            "/v1/turns",
+            json=dm_event(text="and one more", message_id="m-2"),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        await asyncio.sleep(0.05)
+        manager.gate.set()
+        await turns.drain()
+
+    # The message never runs hours later: it is dropped, and the person is told.
+    assert manager.texts == ["hello there"]
+    assert [r["text"] for r in received] == ["reply 1", HOLD_DROPPED]
+
+
 # --- the hold ---------------------------------------------------------------
 
 
-def hold_body(**overrides: Any) -> dict[str, Any]:
+def thread_body(**overrides: Any) -> dict[str, Any]:
+    """The body of a hold or a draft call: the thread, the person, the text."""
     body = {"channel": "cli:alex", "person": "alex"}
     body.update(overrides)
     return body
@@ -391,7 +478,7 @@ async def test_a_message_sent_while_a_turn_runs_is_held(tmp_path) -> None:
 
     async with core_client(turns) as client:
         added = await client.post(
-            "/v1/holds", json=hold_body(text="  and one more  "), headers=bearer(CHANNELS_TOKEN)
+            "/v1/holds", json=thread_body(text="  and one more  "), headers=bearer(CHANNELS_TOKEN)
         )
         listed = await client.get(
             "/v1/holds",
@@ -413,19 +500,19 @@ async def test_take_gives_the_held_messages_as_one_turn_and_empties_the_hold(tmp
     async with core_client(turns) as client:
         for text in ("first", "second", "third"):
             await client.post(
-                "/v1/holds", json=hold_body(text=text), headers=bearer(CHANNELS_TOKEN)
+                "/v1/holds", json=thread_body(text=text), headers=bearer(CHANNELS_TOKEN)
             )
         taken = await client.post(
-            "/v1/holds/take", json=hold_body(), headers=bearer(CHANNELS_TOKEN)
+            "/v1/holds/take", json=thread_body(), headers=bearer(CHANNELS_TOKEN)
         )
         again = await client.post(
-            "/v1/holds/take", json=hold_body(), headers=bearer(CHANNELS_TOKEN)
+            "/v1/holds/take", json=thread_body(), headers=bearer(CHANNELS_TOKEN)
         )
 
     assert taken.json()["text"] == "first\nsecond\nthird"
     assert [m["text"] for m in taken.json()["held"]] == ["first", "second", "third"]
     # The second caller finds nothing: the messages go as one turn, once.
-    assert again.json() == {"text": "", "held": []}
+    assert again.json() == {"text": "", "held": [], "dropped": []}
 
 
 async def test_a_held_message_can_be_removed_before_it_goes(tmp_path) -> None:
@@ -433,10 +520,10 @@ async def test_a_held_message_can_be_removed_before_it_goes(tmp_path) -> None:
 
     async with core_client(turns) as client:
         first = await client.post(
-            "/v1/holds", json=hold_body(text="keep"), headers=bearer(CHANNELS_TOKEN)
+            "/v1/holds", json=thread_body(text="keep"), headers=bearer(CHANNELS_TOKEN)
         )
         second = await client.post(
-            "/v1/holds", json=hold_body(text="drop"), headers=bearer(CHANNELS_TOKEN)
+            "/v1/holds", json=thread_body(text="drop"), headers=bearer(CHANNELS_TOKEN)
         )
         hold_id = second.json()["message"]["id"]
         removed = await client.delete(
@@ -460,10 +547,12 @@ async def test_each_thread_holds_its_own_messages(tmp_path) -> None:
     turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
 
     async with core_client(turns) as client:
-        await client.post("/v1/holds", json=hold_body(text="main"), headers=bearer(CHANNELS_TOKEN))
+        await client.post(
+            "/v1/holds", json=thread_body(text="main"), headers=bearer(CHANNELS_TOKEN)
+        )
         await client.post(
             "/v1/holds",
-            json=hold_body(channel="workspace:solar", text="in the workspace"),
+            json=thread_body(channel="workspace:solar", text="in the workspace"),
             headers=bearer(CHANNELS_TOKEN),
         )
         main = await client.get(
@@ -486,7 +575,7 @@ async def test_an_empty_message_is_not_held(tmp_path) -> None:
 
     async with core_client(turns) as client:
         resp = await client.post(
-            "/v1/holds", json=hold_body(text="   "), headers=bearer(CHANNELS_TOKEN)
+            "/v1/holds", json=thread_body(text="   "), headers=bearer(CHANNELS_TOKEN)
         )
 
     assert resp.status_code == 400
@@ -499,25 +588,146 @@ async def test_a_full_hold_refuses_the_next_message(tmp_path) -> None:
     async with core_client(turns) as client:
         for index in range(HOLD_MAX):
             ok = await client.post(
-                "/v1/holds", json=hold_body(text=f"m{index}"), headers=bearer(CHANNELS_TOKEN)
+                "/v1/holds", json=thread_body(text=f"m{index}"), headers=bearer(CHANNELS_TOKEN)
             )
             assert ok.status_code == 200
         full = await client.post(
-            "/v1/holds", json=hold_body(text="one too many"), headers=bearer(CHANNELS_TOKEN)
+            "/v1/holds", json=thread_body(text="one too many"), headers=bearer(CHANNELS_TOKEN)
         )
 
     assert full.status_code == 429
     assert full.json() == {"reason": "hold_full"}
 
 
+def test_a_held_message_past_the_age_limit_is_dropped() -> None:
+    now = [1_000.0]
+    holds = HoldStore(max_age_s=60.0, clock=lambda: now[0])
+    holds.add("thread", "sent last night")
+    now[0] += 3_600.0
+    holds.add("thread", "sent now")
+
+    assert [m.text for m in holds.list("thread")] == ["sent now"]
+    assert [m.text for m in holds.dropped("thread")] == ["sent last night"]
+    # The person is told once; the next read has nothing to say.
+    assert holds.dropped("thread") == []
+    assert [m.text for m in holds.take("thread")] == ["sent now"]
+
+
+async def test_the_hold_routes_report_what_the_age_limit_dropped(tmp_path) -> None:
+    settings = make_settings()
+    settings.core.hold_max_age_s = 0.01
+    turns = build_turns(TurnsFakeRepo(), settings, [], tmp_path)
+
+    async with core_client(turns) as client:
+        await client.post(
+            "/v1/holds", json=thread_body(text="all night"), headers=bearer(CHANNELS_TOKEN)
+        )
+        await asyncio.sleep(0.05)
+        taken = await client.post(
+            "/v1/holds/take", json=thread_body(), headers=bearer(CHANNELS_TOKEN)
+        )
+
+    # The message waited too long: it is not in the text of the next turn, and
+    # the answer says that it was dropped.
+    assert taken.json()["text"] == ""
+    assert [m["text"] for m in taken.json()["dropped"]] == ["all night"]
+
+
 async def test_holds_need_an_allowed_caller(tmp_path) -> None:
     turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
 
     async with core_client(turns) as client:
-        nobody = await client.post("/v1/holds", json=hold_body(text="hi"))
-        core = await client.post("/v1/holds", json=hold_body(text="hi"), headers=bearer(CORE_TOKEN))
+        nobody = await client.post("/v1/holds", json=thread_body(text="hi"))
+        core = await client.post(
+            "/v1/holds", json=thread_body(text="hi"), headers=bearer(CORE_TOKEN)
+        )
         laptop = await client.post(
-            "/v1/holds", json=hold_body(text="hi"), headers=bearer(LAPTOP_TOKEN)
+            "/v1/holds", json=thread_body(text="hi"), headers=bearer(LAPTOP_TOKEN)
+        )
+
+    assert nobody.status_code == 401
+    assert core.status_code == 403
+    assert laptop.status_code == 200
+
+
+# --- the draft of a composer -------------------------------------------------
+
+
+async def test_the_composer_draft_comes_back_and_a_send_clears_it(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        saved = await client.post(
+            "/v1/drafts",
+            json=thread_body(text="half a message"),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        read = await client.get(
+            "/v1/drafts",
+            params={"channel": "cli:alex", "person": "alex"},
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        cleared = await client.post(
+            "/v1/drafts", json=thread_body(text=""), headers=bearer(CHANNELS_TOKEN)
+        )
+        gone = await client.get(
+            "/v1/drafts",
+            params={"channel": "cli:alex", "person": "alex"},
+            headers=bearer(CHANNELS_TOKEN),
+        )
+
+    assert saved.json()["text"] == "half a message"
+    assert read.json()["text"] == "half a message"
+    assert read.json()["at"]
+    # An empty text clears the draft, as a send does.
+    assert cleared.json() == {"text": "", "at": None}
+    assert gone.json() == {"text": "", "at": None}
+
+
+async def test_a_draft_is_private_to_its_person(tmp_path) -> None:
+    repo = TurnsFakeRepo()
+    repo.people["sam"] = Person(id="sam", display_name="Sam", role="member")
+    turns = build_turns(repo, make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        for person, text in (("alex", "alex is typing"), ("sam", "sam is typing")):
+            await client.post(
+                "/v1/drafts",
+                json=thread_body(channel="workspace:solar", person=person, text=text),
+                headers=bearer(CHANNELS_TOKEN),
+            )
+        read = {}
+        for person in ("alex", "sam"):
+            answer = await client.get(
+                "/v1/drafts",
+                params={"channel": "workspace:solar", "person": person},
+                headers=bearer(CHANNELS_TOKEN),
+            )
+            read[person] = answer.json()["text"]
+
+    # One thread, two people: each composer holds its own draft.
+    assert read == {"alex": "alex is typing", "sam": "sam is typing"}
+
+
+def test_a_draft_past_the_age_limit_is_dropped() -> None:
+    now = [1_000.0]
+    drafts = DraftStore(max_age_s=60.0, clock=lambda: now[0])
+    drafts.save("thread", "written last night")
+    now[0] += 3_600.0
+
+    assert drafts.get("thread") is None
+
+
+async def test_drafts_need_an_allowed_caller(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        nobody = await client.post("/v1/drafts", json=thread_body(text="hi"))
+        core = await client.post(
+            "/v1/drafts", json=thread_body(text="hi"), headers=bearer(CORE_TOKEN)
+        )
+        laptop = await client.post(
+            "/v1/drafts", json=thread_body(text="hi"), headers=bearer(LAPTOP_TOKEN)
         )
 
     assert nobody.status_code == 401

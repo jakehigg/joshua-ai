@@ -9,6 +9,8 @@ import {
   getHistory,
   listHeld,
   postTurn,
+  readDraft,
+  saveDraft,
   takeHeld,
   type TurnFrame,
 } from "./client";
@@ -292,7 +294,7 @@ describe("the hold", () => {
   it("lists the hold of the thread, and drops a row with no id", async () => {
     const fetch = vi.fn(async () => json({ held: [ROW, { text: "no id" }, null, 7] }));
     vi.stubGlobal("fetch", fetch);
-    expect(await listHeld("alex")).toEqual([ROW]);
+    expect(await listHeld("alex")).toEqual({ held: [ROW], dropped: [] });
     expect(fetch).toHaveBeenCalledWith("/api/v1/chat/alex/held", expect.anything());
   });
 
@@ -311,7 +313,7 @@ describe("the hold", () => {
   it("holds one message, with the workspace in the body", async () => {
     const fetch = vi.fn(async () => json({ held: [ROW] }));
     vi.stubGlobal("fetch", fetch);
-    expect(await addHeld("alex", "one more")).toEqual([ROW]);
+    expect(await addHeld("alex", "one more")).toEqual({ held: [ROW], dropped: [] });
     expect(fetch).toHaveBeenLastCalledWith(
       "/api/v1/chat/alex/held",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ text: "one more" }) }),
@@ -326,7 +328,7 @@ describe("the hold", () => {
   it("takes the hold as the text of one turn", async () => {
     const fetch = vi.fn(async () => json({ text: "one more\nand this", held: [ROW] }));
     vi.stubGlobal("fetch", fetch);
-    expect(await takeHeld("alex")).toEqual({ text: "one more\nand this", held: [ROW] });
+    expect(await takeHeld("alex")).toEqual({ text: "one more\nand this", held: [ROW], dropped: [] });
     expect(fetch).toHaveBeenLastCalledWith(
       "/api/v1/chat/alex/held/take",
       expect.objectContaining({ method: "POST", body: "{}" }),
@@ -335,7 +337,13 @@ describe("the hold", () => {
 
   it("reads a take with no text as nothing to send", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ held: [] })));
-    expect(await takeHeld("alex")).toEqual({ text: "", held: [] });
+    expect(await takeHeld("alex")).toEqual({ text: "", held: [], dropped: [] });
+  });
+
+  it("reads the messages the server dropped because they waited too long", async () => {
+    const dropped = { id: "h0", text: "all night", at: "2026-01-01T02:00:00Z" };
+    vi.stubGlobal("fetch", vi.fn(async () => json({ held: [ROW], dropped: [dropped] })));
+    expect(await listHeld("alex")).toEqual({ held: [ROW], dropped: [dropped] });
   });
 
   it("throws ApiError with the message of a refusal", async () => {
@@ -344,5 +352,45 @@ describe("the hold", () => {
       status: 429,
       message: "too many messages are waiting",
     });
+  });
+});
+
+describe("the composer draft", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads the draft of the thread, and nothing for a body without one", async () => {
+    const fetch = vi.fn(async () => json({ text: "half a message", at: "2026-01-01T10:00:00Z" }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await readDraft("alex")).toBe("half a message");
+    expect(fetch).toHaveBeenCalledWith("/api/v1/chat/alex/draft", expect.anything());
+    await readDraft("alex", "notes");
+    expect(fetch).toHaveBeenLastCalledWith("/api/v1/chat/alex/draft?workspace=notes", expect.anything());
+    vi.stubGlobal("fetch", vi.fn(async () => json({})));
+    expect(await readDraft("alex")).toBe("");
+  });
+
+  it("keeps the draft, with the workspace in the body", async () => {
+    const fetch = vi.fn(async () => json({ text: "half a message", at: "2026-01-01T10:00:00Z" }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await saveDraft("alex", "half a message")).toBe("half a message");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/draft",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ text: "half a message" }) }),
+    );
+    await saveDraft("alex", "half a message", "notes");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/draft",
+      expect.objectContaining({ body: JSON.stringify({ text: "half a message", workspace: "notes" }) }),
+    );
+  });
+
+  it("clears the draft with an empty text", async () => {
+    const fetch = vi.fn(async () => json({ text: "", at: "" }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await saveDraft("alex", "")).toBe("");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/chat/alex/draft",
+      expect.objectContaining({ body: JSON.stringify({ text: "" }) }),
+    );
   });
 });

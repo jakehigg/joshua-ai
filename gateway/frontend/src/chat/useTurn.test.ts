@@ -681,6 +681,24 @@ describe("useTurn", () => {
       await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
     });
 
+    it("says that a waiting message was dropped because it waited too long", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({ held: [], dropped: [{ id: "h0", text: "all night", at: "2026-01-01T02:00:00Z" }] }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+        ),
+      );
+      const { hook, onRefused } = setup();
+      await waitFor(() =>
+        expect(onRefused).toHaveBeenCalledWith("A waiting message waited too long and was not sent"),
+      );
+      expect(hook.result.current.turn.held).toEqual([]);
+    });
+
     it("says in a toast that a message could not be held, and keeps none", async () => {
       const s = stream([], { hold: true });
       fakeFetch(new Response(s.body, { status: 200 }));

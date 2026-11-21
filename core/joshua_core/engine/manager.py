@@ -88,7 +88,7 @@ class TurnCtx:
     embedding: list[float] | None = None
     # True when the session has no history of its own: a first turn, a start
     # after a reset, the context cap, or a restart that could not resume. A
-    # workspace block then adds the last rows of the thread.
+    # workspace block then adds the last turns of the thread.
     fresh_session: bool = False
     # Calls that run after the turn succeeded. A provider adds one to settle
     # what it showed, such as marking workspace items seen.
@@ -1367,8 +1367,9 @@ class ConversationManager:
     async def _apply_context_cap(self, mc: _Managed, channel: Channel, result: TurnResult) -> None:
         """After a turn whose input went over the context cap, forget the SDK
         session. The next turn starts a new one. A workspace uses
-        ``workspaces.context_cap`` and restarts from the workspace block and the
-        last rows of the thread. Any other conversation uses ``core.context_cap``
+        ``workspaces.context_cap`` and restarts from the workspace block, the
+        last turns of the thread whole, and short lines for the rows before
+        them. Any other conversation uses ``core.context_cap``
         (0 is off) and restarts from the last rows of the thread."""
         is_workspace = channel.channel_type == WORKSPACE_CHANNEL_TYPE
         cap = (

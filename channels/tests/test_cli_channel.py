@@ -108,6 +108,7 @@ def test_the_router_serves_every_cli_route() -> None:
         "/v1/cli/held",
         "/v1/cli/held/take",
         "/v1/cli/held/{hold_id}",
+        "/v1/cli/draft",
     }
 
 
@@ -895,3 +896,59 @@ async def test_the_hold_passes_a_core_refusal_through(tmp_path: Path) -> None:
         )
     assert response.status_code == 404
     assert response.json() == {"reason": "unknown_hold"}
+
+
+# --- the draft -------------------------------------------------------------
+
+DRAFT_BODY = {"text": "half a message", "at": "2026-11-14T10:00:00+00:00"}
+
+
+async def test_a_draft_is_read_and_kept_for_the_thread_of_the_person(tmp_path: Path) -> None:
+    core = TranscriptCore(body=DRAFT_BODY)
+    async with _client(_make_held(tmp_path, core)) as client:
+        read = await client.get(
+            "/v1/cli/draft", params={"person": "alex"}, headers=_bearer(LAPTOP_TOKEN)
+        )
+        await client.post(
+            "/v1/cli/draft",
+            json={"person": "alex", "text": "half a message", "workspace": "solar"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert read.json() == DRAFT_BODY
+    get, save = core.requests
+    assert (get.method, get.url.path) == ("GET", "/v1/drafts")
+    assert dict(get.url.params) == {"channel": "cli:alex", "person": "alex"}
+    assert (save.method, save.url.path) == ("POST", "/v1/drafts")
+    assert json.loads(save.content) == {
+        "channel": "workspace:solar",
+        "person": "alex",
+        "text": "half a message",
+    }
+
+
+async def test_an_empty_draft_reaches_core_and_clears_it(tmp_path: Path) -> None:
+    core = TranscriptCore(body={"text": "", "at": None})
+    async with _client(_make_held(tmp_path, core)) as client:
+        response = await client.post(
+            "/v1/cli/draft", json={"person": "alex", "text": ""}, headers=_bearer(LAPTOP_TOKEN)
+        )
+    assert response.json() == {"text": "", "at": None}
+    assert json.loads(core.requests[0].content)["text"] == ""
+
+
+async def test_the_draft_refuses_an_unknown_person_and_a_caller_not_on_the_list(
+    tmp_path: Path,
+) -> None:
+    core = TranscriptCore(body=DRAFT_BODY)
+    async with _client(_make_held(tmp_path, core)) as client:
+        unknown = await client.get(
+            "/v1/cli/draft", params={"person": "nobody"}, headers=_bearer(LAPTOP_TOKEN)
+        )
+        forbidden = await client.get(
+            "/v1/cli/draft", params={"person": "alex"}, headers=_bearer(CORE_TOKEN)
+        )
+        nobody = await client.get("/v1/cli/draft", params={"person": "alex"})
+    assert unknown.status_code == 403
+    assert forbidden.status_code == 403
+    assert nobody.status_code == 401
+    assert core.requests == []

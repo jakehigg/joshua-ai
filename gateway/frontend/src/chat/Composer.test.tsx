@@ -337,6 +337,39 @@ describe("Composer paste", () => {
     expect(document.querySelector(".file-chip .file-name")?.textContent).toBe("bill.pdf");
   });
 
+  it("takes the loaded draft once, with the caret after the text", () => {
+    const onSend = vi.fn().mockReturnValue(true);
+    const onDraft = vi.fn();
+    const { rerender } = render(
+      <Composer onSend={onSend} busy={false} draft={null} onDraft={onDraft} />,
+    );
+    const box = screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement;
+    expect(box.value).toBe("");
+
+    rerender(<Composer onSend={onSend} busy={false} draft="half a message" onDraft={onDraft} />);
+    expect(box.value).toBe("half a message");
+    expect(box.selectionStart).toBe("half a message".length);
+    expect(document.activeElement).toBe(box);
+
+    // The box is the person's now: a second draft of the server never
+    // overwrites what they are typing.
+    fireEvent.change(box, { target: { value: "half a message, and more" } });
+    rerender(<Composer onSend={onSend} busy={false} draft="something else" onDraft={onDraft} />);
+    expect(box.value).toBe("half a message, and more");
+    expect(onDraft).toHaveBeenLastCalledWith("half a message, and more");
+  });
+
+  it("clears the draft on a send", () => {
+    const onSend = vi.fn().mockReturnValue(true);
+    const onDraft = vi.fn();
+    render(<Composer onSend={onSend} busy={false} draft="" onDraft={onDraft} />);
+    const box = screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "hello" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("hello", null);
+    expect(onDraft).toHaveBeenLastCalledWith("");
+  });
+
   it("takes no pasted file while a turn runs", () => {
     const { box } = setup(true);
     const notPrevented = paste(box, clipboard(new File(["pixels"], "photo.png", { type: "image/png" })));

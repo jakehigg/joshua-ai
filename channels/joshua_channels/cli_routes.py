@@ -24,6 +24,11 @@ still running. ``GET`` lists them, ``POST`` adds one, ``DELETE
 hold and returns its messages joined as the text of one turn. Each call names
 the person, and the optional ``workspace``, as a turn does.
 
+The ``/v1/cli/draft`` routes carry the draft of a composer, which core keeps
+(``/v1/drafts``): the text a person wrote and did not send. ``GET`` reads it
+and ``POST`` keeps it, or clears it with an empty text. A draft is that
+person's own, in a shared workspace too.
+
 A turn or a transcript read may name a ``workspace`` (the slug or the id). The
 turn then goes to the channel ``workspace:<name>`` and the read gets the
 thread of that workspace. Core finds the workspace for the person and refuses
@@ -315,8 +320,9 @@ def _auth(request: Request, ctx: ChannelsContext) -> JSONResponse | None:
     return None
 
 
-def _hold_thread(source: Mapping[str, Any], ctx: ChannelsContext) -> tuple[str, str] | JSONResponse:
-    """The channel and the person of a hold call, or the answer that refuses it.
+def _thread_of(source: Mapping[str, Any], ctx: ChannelsContext) -> tuple[str, str] | JSONResponse:
+    """The channel and the person of a hold or draft call, or the answer that
+    refuses it.
 
     ``source`` is the query of a read or the JSON body of a write. It names
     the person and, for a workspace thread, the ``workspace``.
@@ -331,26 +337,30 @@ def _hold_thread(source: Mapping[str, Any], ctx: ChannelsContext) -> tuple[str, 
     return _channel_id(person_id, _workspace_ref(source.get("workspace"))), person_id
 
 
-async def _hold_call(
+async def _state_call(
     ctx: ChannelsContext,
     method: str,
     path: str = "",
     *,
     params: Mapping[str, str] | None = None,
     json_body: Mapping[str, str] | None = None,
+    kind: str = "hold",
 ) -> JSONResponse:
-    """Pass one hold call on to core and answer with its status and body."""
+    """Pass one hold or draft call on to core and answer with its status and
+    body."""
     assert ctx.core_client is not None
+    call = ctx.core_client.call_hold if kind == "hold" else ctx.core_client.call_draft
     try:
-        status, body = await ctx.core_client.call_hold(method, path, params=params, json=json_body)
+        status, body = await call(method, path, params=params, json=json_body)
     except httpx.HTTPError as exc:
-        logger.warning({"message": "cli hold: core unavailable", "error": type(exc).__name__})
+        logger.warning({"message": f"cli {kind}: core unavailable", "error": type(exc).__name__})
         return JSONResponse({"reason": "core_unavailable"}, status_code=503)
     return JSONResponse(body, status_code=status)
 
 
-async def _hold_body(request: Request) -> dict[str, Any]:
-    """The JSON body of a hold write. A body that is not an object is empty."""
+async def _state_body(request: Request) -> dict[str, Any]:
+    """The JSON body of a hold or draft write. A body that is not an object is
+    empty."""
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001 — a bad body is a 400, not a 500
@@ -509,11 +519,11 @@ def build_cli_router() -> APIRouter:
         denied = _auth(request, ctx)
         if denied is not None:
             return denied
-        thread = _hold_thread(request.query_params, ctx)
+        thread = _thread_of(request.query_params, ctx)
         if isinstance(thread, JSONResponse):
             return thread
         channel, person_id = thread
-        return await _hold_call(ctx, "GET", params={"channel": channel, "person": person_id})
+        return await _state_call(ctx, "GET", params={"channel": channel, "person": person_id})
 
     @router.post("/v1/cli/held")
     async def post_cli_held(request: Request):  # type: ignore[no-untyped-def]
@@ -521,15 +531,15 @@ def build_cli_router() -> APIRouter:
         denied = _auth(request, ctx)
         if denied is not None:
             return denied
-        body = await _hold_body(request)
-        thread = _hold_thread(body, ctx)
+        body = await _state_body(request)
+        thread = _thread_of(body, ctx)
         if isinstance(thread, JSONResponse):
             return thread
         channel, person_id = thread
         text = str(body.get("text") or "")
         if not text.strip():
             return JSONResponse({"reason": "bad_request"}, status_code=400)
-        return await _hold_call(
+        return await _state_call(
             ctx, "POST", json_body={"channel": channel, "person": person_id, "text": text}
         )
 
@@ -539,11 +549,11 @@ def build_cli_router() -> APIRouter:
         denied = _auth(request, ctx)
         if denied is not None:
             return denied
-        thread = _hold_thread(await _hold_body(request), ctx)
+        thread = _thread_of(await _state_body(request), ctx)
         if isinstance(thread, JSONResponse):
             return thread
         channel, person_id = thread
-        return await _hold_call(
+        return await _state_call(
             ctx, "POST", "/take", json_body={"channel": channel, "person": person_id}
         )
 
@@ -553,12 +563,48 @@ def build_cli_router() -> APIRouter:
         denied = _auth(request, ctx)
         if denied is not None:
             return denied
-        thread = _hold_thread(request.query_params, ctx)
+        thread = _thread_of(request.query_params, ctx)
         if isinstance(thread, JSONResponse):
             return thread
         channel, person_id = thread
-        return await _hold_call(
+        return await _state_call(
             ctx, "DELETE", f"/{hold_id}", params={"channel": channel, "person": person_id}
+        )
+
+    @router.get("/v1/cli/draft")
+    async def get_cli_draft(request: Request):  # type: ignore[no-untyped-def]
+        ctx = _context(request)
+        denied = _auth(request, ctx)
+        if denied is not None:
+            return denied
+        thread = _thread_of(request.query_params, ctx)
+        if isinstance(thread, JSONResponse):
+            return thread
+        channel, person_id = thread
+        return await _state_call(
+            ctx, "GET", params={"channel": channel, "person": person_id}, kind="draft"
+        )
+
+    @router.post("/v1/cli/draft")
+    async def post_cli_draft(request: Request):  # type: ignore[no-untyped-def]
+        ctx = _context(request)
+        denied = _auth(request, ctx)
+        if denied is not None:
+            return denied
+        body = await _state_body(request)
+        thread = _thread_of(body, ctx)
+        if isinstance(thread, JSONResponse):
+            return thread
+        channel, person_id = thread
+        return await _state_call(
+            ctx,
+            "POST",
+            json_body={
+                "channel": channel,
+                "person": person_id,
+                "text": str(body.get("text") or ""),
+            },
+            kind="draft",
         )
 
     return router

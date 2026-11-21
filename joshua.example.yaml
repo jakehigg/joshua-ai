@@ -45,7 +45,7 @@ channels:
     webhook_path_secret: ${IMESSAGE_WEBHOOK_SECRET:-}
     dm_service: iMessage          # the service in a DM guid Joshua builds; 'any' on a server whose guids start with any;
     unknown_sender: drop          # iMessage never replies to a stranger unless this is 'reply'
-    coalesce_window_s: 2.0        # merge a burst from one sender into one turn; 0 disables
+    coalesce_window_s: 2.0        # merge a burst from one sender, before a turn starts, into one turn; 0 disables
     stale_max_age_s: 900.0        # drop a webhook older than this (a replay); 0 disables
     reconcile_interval_s: 60      # poll BlueBubbles for missed webhooks this often; 0 disables
     reconcile_lookback_s: 300     # how far back the poll watermark starts at boot
@@ -86,6 +86,8 @@ core:
   session_idle_seconds: 1800
   pool_max: 20
   context_cap: 150000          # input tokens over which a turn ends its session (not a workspace); 0 is off
+  hold_max_age_s: 900         # a message waiting for the running turn of its thread is dropped past this age; 0 is off
+  draft_max_age_s: 604800     # an unsent composer draft is dropped this long after its last change; 0 is off
   mcp_replace_seconds: 300     # replace a session whose client marked a gateway server failed, at most once in this time
   reflection_model: claude-sonnet-5
   scheduler_tick_seconds: 15   # how often the scheduler checks for due tasks

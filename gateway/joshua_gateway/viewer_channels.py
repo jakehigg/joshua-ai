@@ -8,8 +8,9 @@ can be set in the environment: ``CHANNELS_CONNECT_TIMEOUT_S``,
 
 One ``httpx.AsyncClient`` holds the base URL and the bearer token. A turn is
 ``POST /v1/cli/turns/stream``; the answer is ``text/event-stream``. The
-history is ``GET /v1/cli/transcript``, and the hold of a thread (the messages
-written while a turn ran) is ``/v1/cli/held``. The stream
+history is ``GET /v1/cli/transcript``, the hold of a thread (the messages
+written while a turn ran) is ``/v1/cli/held``, and the draft of a composer
+(the text that is not sent yet) is ``/v1/cli/draft``. The stream
 has no read timeout, because a turn can take minutes. A refusal before the
 stream starts raises ``ChannelsError``; a connection failure raises
 ``ChannelsUnavailable``. Neither error carries the token.
@@ -35,6 +36,7 @@ VIEWER_TOKEN_ENV = "JOSHUA_TOKEN_VIEWER"
 TURN_PATH = "/v1/cli/turns/stream"
 TRANSCRIPT_PATH = "/v1/cli/transcript"
 HELD_PATH = "/v1/cli/held"
+DRAFT_PATH = "/v1/cli/draft"
 HEALTH_PATH = "/healthz"
 LINE_END = re.compile(r"[\r\n]")
 
@@ -326,6 +328,28 @@ class ChannelsClient:
         sends them in the body, as the turn route takes them. The call uses
         the outbox timeout.
         """
+        return await self._thread_call(
+            HELD_PATH, method, person, path=path, text=text, workspace=workspace
+        )
+
+    async def draft(
+        self, method: str, person: str, *, text: str | None = None, workspace: str = ""
+    ) -> dict[str, Any]:
+        """Call the draft route of channels and return its answer: the unsent
+        text of that person's composer in that thread. A ``POST`` keeps the
+        text, and an empty text clears the draft."""
+        return await self._thread_call(DRAFT_PATH, method, person, text=text, workspace=workspace)
+
+    async def _thread_call(
+        self,
+        base: str,
+        method: str,
+        person: str,
+        *,
+        path: str = "",
+        text: str | None = None,
+        workspace: str = "",
+    ) -> dict[str, Any]:
         thread: dict[str, str] = {
             "person": person,
             **({"workspace": workspace} if workspace else {}),
@@ -334,7 +358,7 @@ class ChannelsClient:
         try:
             response = await self._client.request(
                 method,
-                f"{HELD_PATH}{path}",
+                f"{base}{path}",
                 timeout=self._outbox_timeout,
                 **({"json": body} if method == "POST" else {"params": thread}),
             )

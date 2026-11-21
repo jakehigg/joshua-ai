@@ -1295,6 +1295,32 @@ A long conversation makes every model call read its whole history. The cap ends 
 |---|---|---|
 | `core.context_cap` | `150000` | Input tokens over which a turn in a conversation that is not a workspace ends its SDK session. Before the session ends, it writes a handoff: the open questions, what waits on the person and on Joshua, the decisions, and the running work. The next turn starts a new session and gets the handoff and the last 10 rows of the thread. `0` turns the cap off. A workspace uses `workspaces.context_cap`. |
 
+## Waiting for the running turn
+
+A message that arrives while a turn of its conversation runs joins the next
+turn. In the web chat it waits in the hold of the thread; on every other
+channel core folds it into the next turn itself.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `core.hold_max_age_s` | `900` | Seconds a message may wait for the running turn of its thread. Core drops one that waited longer and tells the person, so a page or an app that was away for hours never sends it as if it had just been written. `0` turns the limit off. |
+
+[contracts.md](contracts.md#the-hold-of-a-chat-thread) has the routes and the
+answers.
+
+## The draft of a composer
+
+Text written in the composer of the web chat and not sent is kept in core,
+for that thread and that person alone, so it comes back after a reload and on
+another device.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `core.draft_max_age_s` | `604800` | Seconds a draft is kept after its last change: seven days. Core drops an older one, so drafts do not grow without limit. `0` turns the limit off. |
+
+[contracts.md](contracts.md#the-draft-of-a-composer) has the routes and the
+answers.
+
 ## workspaces
 
 `workspaces` controls core's `/v1/workspaces` routes and the sessions of
@@ -1305,7 +1331,7 @@ person makes a workspace.
 |---|---|---|
 | `allowed_callers` | `viewer`, `gateway` | The fleet identities that may call `/v1/workspaces`. The viewer acts for a person; the gateway records the items of a tool call at `POST /v1/workspaces/by-id/<id>/items`. Each one needs a `JOSHUA_TOKEN_<NAME>`. An empty value turns the routes off, and every caller gets 403. |
 | `models` | empty | The models that a workspace may pick. An empty list accepts any name. |
-| `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. Before the session ends, it writes a handoff. The next turn starts from the workspace block, the handoff, and the last 10 rows of the thread. At least 1000. |
+| `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. Before the session ends, it writes a handoff. The next turn starts from the workspace block, the handoff, the last three turns of the thread word for word, and a short line for each of the 10 rows before them. At least 1000. |
 | `max_turns` | `50` | The least number of agent turns that a workspace turn gets. A workspace turn reads repositories, pipelines, and documents, so it needs more than `core.max_turns`. |
 | `tool_search_max_servers` | `3` | A workspace that picks this many servers or fewer runs with tool search off. More servers turn it on. |
 | `viewer_url` | none | The public address of the viewer. `send_to_normal_chat` adds the link `<viewer_url>/chat/w/<owner>/<slug>`, with `shared` for the owner of a shared workspace. Without it, the message has the path only. |
