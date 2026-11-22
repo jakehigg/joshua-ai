@@ -38,6 +38,17 @@ every answer of the hold routes carries it in ``dropped``, so the person is
 told that it was not sent. A held message goes with the next turn or it is
 dropped; it never runs hours later on its own.
 
+A held message carries the files that came with it: channels lands a file
+before it holds the message, and ``POST /v1/holds`` takes the stored
+attachments beside the text. A client reads only the name and the type of
+each, never a stored path. ``POST /v1/holds/take`` answers with a
+``take_ticket`` when a taken message carried a file, and the next turn sends
+that ticket as ``held_take``. Core keeps the ticket for
+``core.hold_max_age_s``, against the channel and the person of the take, and
+redeems it once: an unknown, a used, or a foreign ticket refuses the turn with
+``unknown_hold_take``. The ticket is the whole path from the browser to a
+stored file, so a turn can never name an attachment of its own.
+
 A message that arrives on a channel while a turn of that conversation runs is
 folded in the same way: ``accept`` puts it in the fold of its conversation
 instead of starting a second turn, and the end of the running turn sends
@@ -58,7 +69,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
@@ -66,7 +77,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from joshua_shared.contracts import TurnEvent
+from joshua_shared.contracts import Attachment, TurnEvent
 from joshua_shared.fleet_auth import require_identity
 from joshua_shared.log import get_logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -135,16 +146,28 @@ class SeenCache:
 
 @dataclass
 class HeldMessage:
-    """One message that waits for the running turn of a thread to finish."""
+    """One message that waits for the running turn of a thread to finish.
+
+    ``attachments`` are the files channels landed for it. They go with the
+    message when the hold is taken, against the ticket of the take.
+    """
 
     id: str
     text: str
     at: str
     # The monotonic clock when the hold took the message, for the age limit.
     held_at: float = 0.0
+    attachments: list[Attachment] = field(default_factory=list)
 
-    def as_json(self) -> dict[str, str]:
-        return {"id": self.id, "text": self.text, "at": self.at}
+    def as_json(self) -> dict[str, Any]:
+        """The message as a client reads it: the name and the type of each
+        file, and no stored path."""
+        answer: dict[str, Any] = {"id": self.id, "text": self.text, "at": self.at}
+        if self.attachments:
+            answer["attachments"] = [
+                {"name": a.name or a.original_name or "", "mime": a.mime} for a in self.attachments
+            ]
+        return answer
 
 
 def thread_key(channel: str, person: str) -> str:
@@ -204,7 +227,9 @@ class HoldStore:
         self._purge(key)
         return list(self._held.get(key, []))
 
-    def add(self, key: str, text: str) -> HeldMessage | None:
+    def add(
+        self, key: str, text: str, attachments: list[Attachment] | None = None
+    ) -> HeldMessage | None:
         """Hold one message. None when the thread already holds ``max_held``."""
         self._purge(key)
         held = self._held.setdefault(key, [])
@@ -215,6 +240,7 @@ class HoldStore:
             text=text,
             at=datetime.now(UTC).isoformat(),
             held_at=self._clock(),
+            attachments=list(attachments or []),
         )
         held.append(message)
         return message
@@ -245,6 +271,68 @@ class HoldStore:
 def joined(held: list[HeldMessage]) -> str:
     """The held messages as the text of one turn: in order, one per line."""
     return "\n".join(message.text for message in held)
+
+
+@dataclass
+class TakeTicket:
+    """The files of one hold take, waiting for the turn that sends them."""
+
+    channel: str
+    person: str
+    attachments: list[Attachment]
+    # The monotonic clock of the take, for the age limit.
+    made_at: float
+
+
+class TicketStore:
+    """The files of each hold take, each against a one-use ticket.
+
+    A take empties the hold and leaves the stored attachments here, against
+    the channel and the person of the take. The client gets the ticket and
+    sends it with the next turn; it never learns a stored path, so a turn
+    cannot name a file of its own. ``redeem`` gives the files once, and only
+    to the thread the ticket was made for. A ticket that nothing redeemed
+    inside ``max_age_s`` is forgotten, as a held message is.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_age_s: float = HOLD_MAX_AGE_S,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
+        self._max_age = max_age_s
+        self._clock = clock
+        self._tickets: dict[str, TakeTicket] = {}
+
+    def _purge(self) -> None:
+        if self._max_age <= 0:
+            return
+        cutoff = self._clock() - self._max_age
+        for key in [k for k, t in self._tickets.items() if t.made_at < cutoff]:
+            del self._tickets[key]
+
+    def add(self, channel: str, person: str, attachments: list[Attachment]) -> str:
+        """Keep the files of one take and return the ticket of them."""
+        self._purge()
+        ticket = uuid4().hex
+        self._tickets[ticket] = TakeTicket(
+            channel=channel,
+            person=person,
+            attachments=list(attachments),
+            made_at=self._clock(),
+        )
+        return ticket
+
+    def redeem(self, ticket: str, channel: str, person: str) -> list[Attachment] | None:
+        """The files of a ticket, once. None for an unknown, a used, or a
+        foreign ticket; a foreign one is not spent."""
+        self._purge()
+        held = self._tickets.get(ticket)
+        if held is None or held.channel != channel or held.person != person:
+            return None
+        del self._tickets[ticket]
+        return held.attachments
 
 
 @dataclass
@@ -348,6 +436,7 @@ class TurnService:
         self._seen = SeenCache()
         self._max_hold_age = float(settings.core.hold_max_age_s)
         self._holds = HoldStore(max_age_s=self._max_hold_age)
+        self._takes = TicketStore(max_age_s=self._max_hold_age)
         self._drafts = DraftStore(max_age_s=float(settings.core.draft_max_age_s))
         # The messages of each conversation that wait for its running turn,
         # and how many turns of a conversation run now.
@@ -503,10 +592,17 @@ class TurnService:
         """The messages a thread holds, oldest first, and the dropped ones."""
         return self._hold_answer(thread_key(channel, person))
 
-    def hold(self, channel: str, person: str, text: str) -> dict[str, Any] | None:
-        """Hold one message of a thread, or None when the hold is full."""
+    def hold(
+        self,
+        channel: str,
+        person: str,
+        text: str,
+        attachments: list[Attachment] | None = None,
+    ) -> dict[str, Any] | None:
+        """Hold one message of a thread, with the files channels landed for
+        it, or None when the hold is full."""
         key = thread_key(channel, person)
-        message = self._holds.add(key, text)
+        message = self._holds.add(key, text, attachments)
         if message is None:
             return None
         return self._hold_answer(key, message=message.as_json())
@@ -523,11 +619,23 @@ class TurnService:
 
         A message that waited past the age limit is not in the text. It is in
         ``dropped``, so the person is told that it was not sent.
+
+        When a taken message carried a file, the answer also holds the
+        ``take_ticket`` of the files. The next turn sends it as ``held_take``,
+        and ``stream`` redeems it once.
         """
         key = thread_key(channel, person)
         held = self._holds.take(key)
         dropped = [m.as_json() for m in self._holds.dropped(key)]
-        return {"text": joined(held), "held": [m.as_json() for m in held], "dropped": dropped}
+        answer: dict[str, Any] = {
+            "text": joined(held),
+            "held": [m.as_json() for m in held],
+            "dropped": dropped,
+        }
+        attachments = [a for message in held for a in message.attachments]
+        if attachments:
+            answer["take_ticket"] = self._takes.add(channel, person, attachments)
+        return answer
 
     # --- the draft of a composer -------------------------------------------
 
@@ -718,10 +826,22 @@ class TurnService:
     # --- POST /v1/turns/stream ---------------------------------------------
 
     async def stream(self, event: TurnEvent) -> StreamingResponse | JSONResponse:
-        """Handle ``POST /v1/turns/stream``: resolve, run inline, stream SSE."""
+        """Handle ``POST /v1/turns/stream``: resolve, run inline, stream SSE.
+
+        A turn that sends ``held_take`` redeems the ticket of a hold take
+        first, and carries the files of the taken messages. An unknown, a
+        used, or a ticket of another thread refuses the turn, and no turn
+        runs.
+        """
         resolution = await self.resolve(event)
         if resolution is None:
             return JSONResponse({"reason": "unknown_sender"}, status_code=403)
+        if event.held_take is not None:
+            person = resolution.person.id if resolution.person else ""
+            released = self._takes.redeem(event.held_take, event.channel, person)
+            if released is None:
+                return JSONResponse({"reason": "unknown_hold_take"}, status_code=400)
+            event.attachments = [*event.attachments, *released]
 
         turn_id = "t-" + uuid4().hex[:12]
         return StreamingResponse(
@@ -848,13 +968,18 @@ def _service(request: Request) -> TurnService:
 
 
 class HoldBody(BaseModel):
-    """The thread of a hold call, and the message a ``POST`` adds to it."""
+    """The thread of a hold call, and the message a ``POST`` adds to it.
+
+    ``attachments`` are the files channels landed for the message before it
+    posted it, as the attachments of a turn are.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     channel: str = Field(min_length=1, max_length=200)
     person: str = Field(min_length=1, max_length=64)
     text: str = Field(default="", max_length=HOLD_MAX_CHARS)
+    attachments: list[Attachment] = []
 
 
 class DraftBody(BaseModel):
@@ -909,7 +1034,7 @@ def build_router() -> APIRouter:
         text = body.text.strip()
         if not text:
             return JSONResponse({"reason": "bad_request"}, status_code=400)
-        answer = _service(request).hold(body.channel, body.person, text)
+        answer = _service(request).hold(body.channel, body.person, text, body.attachments)
         if answer is None:
             return JSONResponse({"reason": "hold_full"}, status_code=429)
         return JSONResponse(answer)

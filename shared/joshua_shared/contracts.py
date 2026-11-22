@@ -122,6 +122,10 @@ class TurnEvent(_Model):
     framing: str | None = None
     # "main": a terminal or viewer turn that runs in the person's main thread.
     thread: Literal["main"] | None = None
+    # The ticket of a hold take, from core's ``POST /v1/holds/take``. Core
+    # redeems it once and puts the attachments of the taken messages on the
+    # turn. The caller never names a stored path.
+    held_take: str | None = None
     # An event only: the id (a UUID) of the workspace whose thread runs the
     # turn, or records the text when ``options.verbatim`` is set. Nothing is
     # delivered to a phone for it.

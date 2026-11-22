@@ -15,9 +15,9 @@ function keys(present: boolean, primary = present) {
   })) as unknown as typeof window.matchMedia;
 }
 
-function setup(busy = false) {
+function setup() {
   const onSend = vi.fn().mockReturnValue(true);
-  render(<Composer onSend={onSend} busy={busy} />);
+  render(<Composer onSend={onSend} />);
   const box = screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement;
   const send = screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
   return { onSend, box, send };
@@ -109,7 +109,7 @@ describe("Composer", () => {
   });
 
   it("sends a text message while a turn runs: it waits for the turn", () => {
-    const { onSend, box, send } = setup(true);
+    const { onSend, box, send } = setup();
     fireEvent.change(box, { target: { value: "hello" } });
     expect(send.disabled).toBe(false);
     fireEvent.keyDown(box, { key: "Enter" });
@@ -117,8 +117,8 @@ describe("Composer", () => {
     expect(box.value).toBe("");
   });
 
-  it("sends nothing with an empty box while a turn runs", () => {
-    const { onSend, box, send } = setup(true);
+  it("sends nothing with an empty box", () => {
+    const { onSend, box, send } = setup();
     fireEvent.change(box, { target: { value: "  " } });
     expect(send.disabled).toBe(true);
     fireEvent.keyDown(box, { key: "Enter" });
@@ -198,10 +198,12 @@ describe("Composer attachment", () => {
     expect(onSend).toHaveBeenCalledWith("hello", null);
   });
 
-  it("cannot attach a file while a turn runs: only text waits", () => {
-    setup(true);
+  it("keeps the paperclip live, so a message that waits for a turn carries a file", () => {
+    const { send } = setup();
     const input = screen.getByLabelText("Attach a photo or a PDF") as HTMLInputElement;
-    expect(input.disabled).toBe(true);
+    expect(input.disabled).toBe(false);
+    pick(new File(["pixels"], "photo.png", { type: "image/png" }));
+    expect(send.disabled).toBe(false);
   });
 
   it("only takes images and PDFs", () => {
@@ -249,7 +251,7 @@ describe("the file preview", () => {
 
   it("shows a photo as a thumbnail with the remove button on its corner", () => {
     vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:p", revokeObjectURL: vi.fn() }));
-    render(<Composer onSend={vi.fn()} busy={false} />);
+    render(<Composer onSend={vi.fn()} />);
     pick(new File(["x"], "photo.png", { type: "image/png" }));
     const thumb = document.querySelector(".preview-thumb") as HTMLElement;
     expect(thumb.querySelector("img")?.getAttribute("src")).toBe("blob:p");
@@ -259,7 +261,7 @@ describe("the file preview", () => {
   });
 
   it("shows a PDF as a chip with the same button", () => {
-    render(<Composer onSend={vi.fn()} busy={false} />);
+    render(<Composer onSend={vi.fn()} />);
     pick(new File(["%PDF"], "bill.pdf", { type: "application/pdf" }));
     expect(screen.getByText("bill.pdf")).toBeTruthy();
     expect(document.querySelector(".preview-thumb")).toBeNull();
@@ -341,12 +343,12 @@ describe("Composer paste", () => {
     const onSend = vi.fn().mockReturnValue(true);
     const onDraft = vi.fn();
     const { rerender } = render(
-      <Composer onSend={onSend} busy={false} draft={null} onDraft={onDraft} />,
+      <Composer onSend={onSend} draft={null} onDraft={onDraft} />,
     );
     const box = screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement;
     expect(box.value).toBe("");
 
-    rerender(<Composer onSend={onSend} busy={false} draft="half a message" onDraft={onDraft} />);
+    rerender(<Composer onSend={onSend} draft="half a message" onDraft={onDraft} />);
     expect(box.value).toBe("half a message");
     expect(box.selectionStart).toBe("half a message".length);
     expect(document.activeElement).toBe(box);
@@ -354,7 +356,7 @@ describe("Composer paste", () => {
     // The box is the person's now: a second draft of the server never
     // overwrites what they are typing.
     fireEvent.change(box, { target: { value: "half a message, and more" } });
-    rerender(<Composer onSend={onSend} busy={false} draft="something else" onDraft={onDraft} />);
+    rerender(<Composer onSend={onSend} draft="something else" onDraft={onDraft} />);
     expect(box.value).toBe("half a message, and more");
     expect(onDraft).toHaveBeenLastCalledWith("half a message, and more");
   });
@@ -362,19 +364,11 @@ describe("Composer paste", () => {
   it("clears the draft on a send", () => {
     const onSend = vi.fn().mockReturnValue(true);
     const onDraft = vi.fn();
-    render(<Composer onSend={onSend} busy={false} draft="" onDraft={onDraft} />);
+    render(<Composer onSend={onSend} draft="" onDraft={onDraft} />);
     const box = screen.getByLabelText("Message to Joshua") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "hello" } });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(onSend).toHaveBeenCalledWith("hello", null);
     expect(onDraft).toHaveBeenLastCalledWith("");
-  });
-
-  it("takes no pasted file while a turn runs", () => {
-    const { box } = setup(true);
-    const notPrevented = paste(box, clipboard(new File(["pixels"], "photo.png", { type: "image/png" })));
-    expect(notPrevented).toBe(true);
-    expect(screen.queryByText("photo.png")).toBeNull();
-    expect(document.querySelector(".preview-thumb")).toBeNull();
   });
 });

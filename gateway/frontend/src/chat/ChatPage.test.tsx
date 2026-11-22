@@ -880,6 +880,55 @@ describe("ChatPage held messages", () => {
     expect(turnBodies()).toEqual([{ text: "first" }]);
   });
 
+  it("holds a message that carries a file, names the file, and takes it back", async () => {
+    const empty = () => json({ messages: [], nextBefore: null, pending: null });
+    const { hold, turnBodies, release } = backend(empty);
+    const sent = stubXhr();
+    open();
+    await advance(0);
+    write("first");
+    await advance(0);
+    // The paperclip stays live while the turn runs.
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, {
+      target: { files: [new File(["pixels"], "photo.png", { type: "image/png" })] },
+    });
+    write("look at this");
+    await advance(0);
+    // The waiting row names the file, and no second turn went out.
+    expect(screen.getByText(WAITING)).toBeTruthy();
+    expect(screen.getByText("photo.png")).toBeTruthy();
+    expect(turnBodies()).toHaveLength(1);
+    expect(sent[0]?.url).toBe("/api/v1/chat/alex/held");
+    const form = sent[0]?.body as FormData;
+    expect(form.get("text")).toBe("look at this");
+    expect((form.get("file") as File).name).toBe("photo.png");
+
+    const row = {
+      id: "h1",
+      text: "look at this",
+      at: "2026-01-01T10:00:00Z",
+      attachments: [{ name: "photo.png", mime: "image/png" }],
+    };
+    await act(async () => {
+      sent[0]?.uploaded(1, 1);
+      sent[0]?.answer(200, JSON.stringify({ held: [row], dropped: [] }));
+    });
+    await advance(0);
+    expect(screen.getByText("photo.png")).toBeTruthy();
+
+    // The waiting message goes back before it is sent.
+    fireEvent.click(screen.getByRole("button", { name: "Remove the waiting message: look at this" }));
+    await advance(0);
+    expect(screen.queryByText(WAITING)).toBeNull();
+    expect(screen.queryByText("photo.png")).toBeNull();
+    await act(async () => release());
+    await advance(0);
+    expect(turnBodies()).toEqual([{ text: "first" }]);
+    expect(hold.texts()).toEqual([]);
+  });
+
   it("shows what the thread held when the page opens, and sends it when the turn ends", async () => {
     let pending: unknown = { turnId: "t-1", state: "running", since: SINCE, text: "first" };
     const { turnBodies, hold } = backend(

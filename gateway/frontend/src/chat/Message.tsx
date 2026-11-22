@@ -79,7 +79,8 @@ export function Working({ since, waiting = false }: { since: string; waiting?: b
 
 // A message written while a turn ran. It waits in the hold of the thread,
 // on the server, and goes with every other waiting message as the next
-// turn. Remove takes it back before it goes.
+// turn. Remove takes it back before it goes. A waiting message can carry a
+// photo or a PDF: the row names the file, as a sent message does.
 export function Held({
   message,
   onRemove,
@@ -87,9 +88,23 @@ export function Held({
   message: HeldMessage;
   onRemove: (id: string) => void;
 }) {
+  const names = message.attachments?.length
+    ? message.attachments.map((file) => file.name)
+    : message.fileName
+      ? [message.fileName]
+      : [];
   return (
     <article className="msg msg-person msg-held">
-      <div className="bubble">{message.text}</div>
+      {names.length > 0 && (
+        <div className="msg-media">
+          {names.map((name) => (
+            <FileChip key={name} name={name} />
+          ))}
+        </div>
+      )}
+      {(names.length === 0 || message.text !== NO_CAPTION) && (
+        <div className="bubble">{message.text}</div>
+      )}
       <div className="held-note">
         <span>Waiting to go with the next turn</span>
         <button

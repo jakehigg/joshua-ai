@@ -205,6 +205,9 @@ export interface Held {
   id: string;
   text: string;
   at: string;
+  // The files that came with the message. The server keeps them: a held
+  // message names them, and the next turn carries them.
+  attachments?: FileRef[];
 }
 
 // The hold of one thread, as every hold call answers it: the messages that
@@ -272,16 +275,26 @@ function parseFrame(event: string, data: string): TurnFrame {
 
 // The body of one turn: JSON, or multipart when a file comes with it. The
 // browser sets the multipart Content-Type itself, with its boundary.
-function turnBody(text: string, file?: File | null, workspace?: string): RequestInit {
+function turnBody(
+  text: string,
+  file?: File | null,
+  workspace?: string,
+  heldTake?: string,
+): RequestInit {
   if (!file) {
     return {
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify(workspace ? { text, workspace } : { text }),
+      body: JSON.stringify({
+        text,
+        ...(workspace ? { workspace } : {}),
+        ...(heldTake ? { heldTake } : {}),
+      }),
     };
   }
   const form = new FormData();
   form.append("text", text);
   if (workspace) form.append("workspace", workspace);
+  if (heldTake) form.append("heldTake", heldTake);
   form.append("file", file);
   return { headers: { Accept: "text/event-stream" }, body: form };
 }
@@ -396,6 +409,8 @@ function postTurnXhr(
 // that workspace; without it, in the main thread. The viewer sends the id of
 // the workspace: the routes take a ref as well, and a ref may name another
 // workspace later (api/workspaces.ts).
+// `heldTake` is the ticket of a hold take: the turn carries the files of the
+// messages that waited. The page sends the ticket and never a stored path.
 export async function postTurn(
   person: string,
   text: string,
@@ -404,10 +419,11 @@ export async function postTurn(
   file?: File | null,
   workspace?: string,
   hooks: TurnHooks = {},
+  heldTake?: string,
 ): Promise<void> {
   const url = `${base(person)}/turns`;
   const reader = new FrameReader(onFrame);
-  const init = turnBody(text, file, workspace);
+  const init = turnBody(text, file, workspace, heldTake);
   if (file) return postTurnXhr(url, init.body as FormData, reader, signal, hooks);
 
   let response: Response;
@@ -539,10 +555,12 @@ function heldList(raw: unknown, key: "held" | "dropped"): Held[] {
     if (!item || typeof item !== "object") continue;
     const m = item as Record<string, unknown>;
     if (typeof m.id !== "string") continue;
+    const files = fileRefs(m.attachments);
     list.push({
       id: m.id,
       text: typeof m.text === "string" ? m.text : "",
       at: typeof m.at === "string" ? m.at : "",
+      ...(files.length > 0 ? { attachments: files } : {}),
     });
   }
   return list;
@@ -564,9 +582,54 @@ export async function listHeld(person: string, workspace?: string): Promise<Hold
   return holdState(await getJson<unknown>(heldPath(person, "", workspace)));
 }
 
-/** Holds one message, written while a turn of this thread runs. */
-export async function addHeld(person: string, text: string, workspace?: string): Promise<HoldState> {
-  return holdState(await postJson<unknown>(heldPath(person), { text, ...(workspace ? { workspace } : {}) }));
+// A hold write that carries a file goes out with XMLHttpRequest, as a turn
+// with a file does: only it says how much of the upload has gone out.
+function postFormXhr(path: string, form: FormData, hooks: TurnHooks): Promise<unknown> {
+  return new Promise<unknown>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}${path}`);
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) hooks.onUploadProgress?.(e.loaded, e.total);
+    };
+    xhr.onerror = xhr.ontimeout = () => reject(new ConnectionLost("Joshua could not be reached"));
+    xhr.onload = () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(xhr.responseText);
+      } catch {
+        // The body is not JSON: the status is all there is to say.
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(apiErrorOf(xhr.status, parsed));
+        return;
+      }
+      resolve(parsed);
+    };
+    xhr.send(form);
+  });
+}
+
+/**
+ * Holds one message, written while a turn of this thread runs. A message that
+ * carries a file goes as multipart: the server lands the file where a turn's
+ * file goes, and `hooks.onUploadProgress` hears how much of it has gone out.
+ */
+export async function addHeld(
+  person: string,
+  text: string,
+  workspace?: string,
+  file?: File | null,
+  hooks: TurnHooks = {},
+): Promise<HoldState> {
+  if (!file) {
+    return holdState(await postJson<unknown>(heldPath(person), { text, ...(workspace ? { workspace } : {}) }));
+  }
+  const form = new FormData();
+  form.append("text", text);
+  if (workspace) form.append("workspace", workspace);
+  form.append("file", file);
+  return holdState(await postFormXhr(heldPath(person), form, hooks));
 }
 
 /** Takes one held message back, before it goes. */
@@ -577,15 +640,20 @@ export async function dropHeld(person: string, id: string, workspace?: string): 
 /**
  * Empties the hold and gives its messages as the text of one turn: in order,
  * one per line. The server empties it in one step, so two screens never send
- * the same held message twice.
+ * the same held message twice. `takeTicket` comes with a take that released a
+ * file: the next turn sends it as `heldTake`, and it is good for one turn.
  */
 export async function takeHeld(
   person: string,
   workspace?: string,
-): Promise<HoldState & { text: string }> {
+): Promise<HoldState & { text: string; takeTicket?: string }> {
   const body = await postJson<unknown>(heldPath(person, "/take"), workspace ? { workspace } : {});
-  const text = (body as { text?: unknown })?.text;
-  return { text: typeof text === "string" ? text : "", ...holdState(body) };
+  const { text, takeTicket } = (body ?? {}) as { text?: unknown; takeTicket?: unknown };
+  return {
+    text: typeof text === "string" ? text : "",
+    ...(typeof takeTicket === "string" && takeTicket !== "" ? { takeTicket } : {}),
+    ...holdState(body),
+  };
 }
 
 // The draft of one composer: the text written and not sent. A draft waits for

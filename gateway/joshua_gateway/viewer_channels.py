@@ -17,7 +17,9 @@ stream starts raises ``ChannelsError``; a connection failure raises
 
 A turn with a file is ``multipart/form-data``: the fields ``person`` and
 ``text`` beside one ``file`` part. httpx reads the file in chunks while it
-sends the request, so the body is never held in memory.
+sends the request, so the body is never held in memory. A held message with a
+file goes the same way, to ``POST /v1/cli/held``. A turn that sends what the
+hold released carries ``held_take``, the ticket of the take.
 """
 
 from __future__ import annotations
@@ -230,23 +232,28 @@ class ChannelsClient:
         text: str,
         attachment: Attachment | None = None,
         workspace: str = "",
+        held_take: str = "",
     ) -> TurnStream:
         """Start a turn and return its stream once channels has accepted it.
 
         With an ``attachment`` the call is ``multipart/form-data``, else JSON.
         The attachment is read in chunks as the request goes out; the caller
-        owns its stream and closes it once this call returns.
+        owns its stream and closes it once this call returns. ``held_take`` is
+        the ticket of a hold take, on a turn that sends what the hold
+        released.
         """
         headers = {"Accept": "text/event-stream"}
+        fields = {
+            "person": person,
+            "text": text,
+            **({"workspace": workspace} if workspace else {}),
+            **({"held_take": held_take} if held_take else {}),
+        }
         if attachment is None:
             request = self._client.build_request(
                 "POST",
                 TURN_PATH,
-                json={
-                    "person": person,
-                    "text": text,
-                    **({"workspace": workspace} if workspace else {}),
-                },
+                json=fields,
                 headers=headers,
                 timeout=self._stream_timeout,
             )
@@ -254,11 +261,7 @@ class ChannelsClient:
             request = self._client.build_request(
                 "POST",
                 TURN_PATH,
-                data={
-                    "person": person,
-                    "text": text,
-                    **({"workspace": workspace} if workspace else {}),
-                },
+                data=fields,
                 files={"file": attachment},
                 headers=headers,
                 timeout=self._stream_timeout,
@@ -320,16 +323,24 @@ class ChannelsClient:
         path: str = "",
         text: str | None = None,
         workspace: str = "",
+        attachment: Attachment | None = None,
     ) -> dict[str, Any]:
         """Call one of the hold routes of channels and return its answer.
 
         ``path`` is what follows ``/v1/cli/held`` (``/take`` or ``/<hold id>``).
         A read sends the person and the workspace as query values, a write
-        sends them in the body, as the turn route takes them. The call uses
-        the outbox timeout.
+        sends them in the body, as the turn route takes them. A write with an
+        ``attachment`` is ``multipart/form-data``, as a turn with a file is.
+        The call uses the outbox timeout.
         """
         return await self._thread_call(
-            HELD_PATH, method, person, path=path, text=text, workspace=workspace
+            HELD_PATH,
+            method,
+            person,
+            path=path,
+            text=text,
+            workspace=workspace,
+            attachment=attachment,
         )
 
     async def draft(
@@ -349,18 +360,27 @@ class ChannelsClient:
         path: str = "",
         text: str | None = None,
         workspace: str = "",
+        attachment: Attachment | None = None,
     ) -> dict[str, Any]:
         thread: dict[str, str] = {
             "person": person,
             **({"workspace": workspace} if workspace else {}),
         }
         body = {**thread, **({"text": text} if text is not None else {})}
+        if method != "POST":
+            send: dict[str, Any] = {"params": thread}
+        elif attachment is None:
+            send = {"json": body}
+        else:
+            send = {"data": body, "files": {"file": attachment}}
         try:
             response = await self._client.request(
                 method,
                 f"{base}{path}",
-                timeout=self._outbox_timeout,
-                **({"json": body} if method == "POST" else {"params": thread}),
+                # An upload gets the stream timeout: the bytes take as long as
+                # the line needs, and channels lands the file before it answers.
+                timeout=self._stream_timeout if attachment is not None else self._outbox_timeout,
+                **send,
             )
         except httpx.HTTPError as exc:
             raise ChannelsUnavailable(type(exc).__name__) from None
