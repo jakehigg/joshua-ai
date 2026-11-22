@@ -52,6 +52,12 @@
 // order, one per line: the page calls it once no turn of the thread runs any
 // more. The server empties the hold in one step, so two screens never send
 // the same held message twice.
+// A held message can carry one photo or one PDF. The hold write goes out as
+// multipart, with the upload toast of a turn with a file, and the server lands
+// the file and names it on the waiting message. The take of such a hold answers
+// with a ticket, and the turn that sends the taken text carries it as
+// `heldTake`: the files follow the ticket, so the page never names a stored
+// file.
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { holdReload } from "../pwa";
@@ -137,7 +143,9 @@ export function useTurn(
   const otherTurnRef = useRef(otherTurn);
   otherTurnRef.current = otherTurn;
   const flushingRef = useRef(false);
-  const sendRef = useRef<(text: string, file?: File | null) => boolean>(() => false);
+  const sendRef = useRef<(text: string, file?: File | null, heldTake?: string) => boolean>(
+    () => false,
+  );
   const [upload, setUpload] = useState<Upload | null>(null);
   const draftRef = useRef<{ text: string; file: File | null } | null>(null);
   const workspaceKey = workspace ?? "";
@@ -188,19 +196,37 @@ export function useTurn(
   // One message that waits for the running turn. It shows at once, and the
   // server's answer replaces it, so the hold on screen is the hold core has.
   const holdMessage = useCallback(
-    async (text: string) => {
+    async (text: string, file?: File | null) => {
       const localId = newId();
-      setHeld((list) => [...list, { id: localId, text, at: new Date().toISOString(), sending: true }]);
+      const kind = file?.type.startsWith("image/") ? "photo" : "file";
+      setHeld((list) => [
+        ...list,
+        {
+          id: localId,
+          text,
+          at: new Date().toISOString(),
+          sending: true,
+          ...(file ? { fileName: file.name } : {}),
+        },
+      ]);
+      if (file) setUpload({ phase: "uploading", percent: 0, kind });
       try {
-        const { held: list, dropped } = await addHeld(person, text, workspace);
+        const { held: list, dropped } = await addHeld(person, text, workspace, file, {
+          onUploadProgress: (loaded, total) => {
+            const percent = Math.min(100, Math.floor((loaded / total) * 100));
+            setUpload({ phase: percent >= 100 ? "saving" : "uploading", percent, kind });
+          },
+        });
         setHeld((shown) => [...list, ...shown.filter((m) => m.sending && m.id !== localId)]);
         tellDropped(dropped);
       } catch (err) {
         setHeld((shown) => shown.filter((m) => m.id !== localId));
         onRefusedRef.current?.(errorText(err, "the message could not be held"));
+      } finally {
+        if (file) setUpload(null);
       }
     },
-    [person, workspace, tellDropped],
+    [person, workspace, tellDropped, setUpload],
   );
 
   const dropHeld = useCallback(
@@ -222,10 +248,10 @@ export function useTurn(
     if (runningRef.current || flushingRef.current) return;
     flushingRef.current = true;
     void takeHeld(person, workspace)
-      .then(({ text, dropped }) => {
+      .then(({ text, takeTicket, dropped }) => {
         setHeld((shown) => shown.filter((m) => m.sending));
         tellDropped(dropped);
-        if (text) sendRef.current(text);
+        if (text) sendRef.current(text, null, takeTicket);
       })
       .catch((err: unknown) => {
         onRefusedRef.current?.(errorText(err, "the waiting messages could not be sent"));
@@ -280,7 +306,7 @@ export function useTurn(
   }, [uploading, person, workspaceKey]);
 
   const run = useCallback(
-    async (personMsg: ChatMessage, replyId: string) => {
+    async (personMsg: ChatMessage, replyId: string, heldTake?: string) => {
       const controller = new AbortController();
       controllerRef.current = controller;
       let completed = false;
@@ -355,6 +381,7 @@ export function useTurn(
               setUpload({ phase: percent >= 100 ? "saving" : "uploading", percent, kind });
             },
           },
+          heldTake,
         );
       } catch (err) {
         if (controller.signal.aborted && !dropped) return;
@@ -394,14 +421,13 @@ export function useTurn(
   );
 
   const send = useCallback(
-    (text: string, file?: File | null): boolean => {
+    (text: string, file?: File | null, heldTake?: string): boolean => {
       if (!text.trim() && !file) return false;
       // A turn runs: the message waits for it in the hold, on the server, and
-      // keeps its place behind the messages that already wait. A file cannot
-      // wait, so a message that carries one is not held.
+      // keeps its place behind the messages that already wait. A file waits
+      // with it: the server lands it and gives it to the turn that follows.
       if (runningRef.current || otherTurnRef.current) {
-        if (file) return false;
-        void holdMessage(text.trim());
+        void holdMessage(text.trim(), file);
         return true;
       }
       runningRef.current = true;
@@ -431,7 +457,7 @@ export function useTurn(
         forId: personMsg.id,
       };
       setMessages((list) => appendMessage(list, personMsg, reply));
-      void run(personMsg, reply.id);
+      void run(personMsg, reply.id, heldTake);
       return true;
     },
     [run, setMessages, setUpload, person, workspaceKey, holdMessage],

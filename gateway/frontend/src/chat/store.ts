@@ -56,9 +56,11 @@ export interface ChatMessage {
 
 // One held message on screen: a message written while a turn ran, which the
 // server holds for the next turn. `sending` is one the server has not
-// answered for yet.
+// answered for yet. `fileName` names the file of a message that is still
+// going out, before the server's answer names it.
 export interface HeldMessage extends Held {
   sending?: boolean;
+  fileName?: string;
 }
 
 // The messages on screen and the cursor of the page before them.

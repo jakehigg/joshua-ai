@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator, Mapping
+from typing import Any
 
 from joshua_shared.contracts import TurnAck, TurnEvent
 from joshua_shared.http import FleetClient
@@ -114,7 +115,7 @@ class CoreClient:
         path: str = "",
         *,
         params: Mapping[str, str] | None = None,
-        json: Mapping[str, str] | None = None,
+        json: Mapping[str, Any] | None = None,
     ) -> tuple[int, dict]:
         """Call one of core's ``/v1/holds`` routes and return its status and body.
 
@@ -129,7 +130,7 @@ class CoreClient:
         path: str = "",
         *,
         params: Mapping[str, str] | None = None,
-        json: Mapping[str, str] | None = None,
+        json: Mapping[str, Any] | None = None,
     ) -> tuple[int, dict]:
         """Call one of core's ``/v1/drafts`` routes, the unsent text of a
         composer, and return its status and body. A connection failure raises
@@ -143,7 +144,7 @@ class CoreClient:
         path: str = "",
         *,
         params: Mapping[str, str] | None = None,
-        json: Mapping[str, str] | None = None,
+        json: Mapping[str, Any] | None = None,
     ) -> tuple[int, dict]:
         response = await self._client.request(
             method,

@@ -24,8 +24,8 @@
 //
 // A message can be written while Joshua is still working on a turn: it is
 // taken and waits for that turn (useTurn.ts), and the box is emptied as
-// usual. Only a file has to wait for Joshua: the paperclip is off while a
-// turn runs.
+// usual. A file waits with it, so the paperclip, the paste and the send
+// button work the same while a turn runs.
 //
 // Text that is not sent is a draft, kept on the server for this thread and
 // this person (useComposerDraft.ts). The box takes the loaded draft once and
@@ -143,7 +143,6 @@ function Preview({ file, onRemove }: { file: File; onRemove: () => void }) {
 interface Props {
   // Returns true when the message was sent; the box is then emptied.
   onSend: (text: string, file?: File | null) => boolean;
-  busy: boolean;
   // The draft of this thread, from the server, or null while it loads. The
   // box takes it once, with the caret after the text.
   draft?: string | null;
@@ -151,7 +150,7 @@ interface Props {
   onDraft?: (text: string) => void;
 }
 
-export function Composer({ onSend, busy, draft = null, onDraft }: Props) {
+export function Composer({ onSend, draft = null, onDraft }: Props) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -178,9 +177,9 @@ export function Composer({ onSend, busy, draft = null, onDraft }: Props) {
 
   const count = charCount(text);
   const tooLong = count > MAX_CHARS;
-  // While Joshua works, a text message is still taken: it waits for the
-  // running turn (useTurn.ts). A file cannot wait, so it needs a free Joshua.
-  const canSend = !tooLong && (busy ? count > 0 && file === null : count > 0 || file !== null);
+  // While Joshua works, the message is still taken: it waits for the running
+  // turn, with its file (useTurn.ts).
+  const canSend = !tooLong && (count > 0 || file !== null);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -229,7 +228,7 @@ export function Composer({ onSend, busy, draft = null, onDraft }: Props) {
   // unfocused lands too; the box's paste reaches the form as well, and
   // defaultPrevented keeps the file from being taken twice.
   const onPaste = (e: ClipboardEvent<HTMLElement>) => {
-    if (busy || e.defaultPrevented) return;
+    if (e.defaultPrevented) return;
     const pasted = pastedFile(e.clipboardData);
     // No file: a text paste, which the browser does as usual.
     if (!pasted) return;
@@ -275,7 +274,7 @@ export function Composer({ onSend, busy, draft = null, onDraft }: Props) {
         <label className="attach" title="Attach a photo or a PDF">
           <ClipIcon />
           <span className="visually-hidden">Attach a photo or a PDF</span>
-          <input type="file" accept={FILE_ACCEPT} onChange={onPick} disabled={busy} tabIndex={-1} />
+          <input type="file" accept={FILE_ACCEPT} onChange={onPick} tabIndex={-1} />
         </label>
         <textarea
           ref={ref}

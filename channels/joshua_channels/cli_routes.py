@@ -24,6 +24,14 @@ still running. ``GET`` lists them, ``POST`` adds one, ``DELETE
 hold and returns its messages joined as the text of one turn. Each call names
 the person, and the optional ``workspace``, as a turn does.
 
+A held message can carry a file. ``POST /v1/cli/held`` takes JSON or
+``multipart/form-data`` (``person``, ``text``, ``workspace``, and one
+``file``), and a multipart hold lands the file with the same pipeline a turn
+uses, so the hold keeps a stored path and never bytes. A file with no text is
+the message, as on a turn. The take answers with a ``take_ticket`` for the
+files it released, and the next turn sends it back as ``held_take``: core
+redeems the ticket and puts the files on the turn.
+
 The ``/v1/cli/draft`` routes carry the draft of a composer, which core keeps
 (``/v1/drafts``): the text a person wrote and did not send. ``GET`` reads it
 and ``POST`` keeps it, or clears it with an empty text. A draft is that
@@ -69,11 +77,12 @@ CHANNEL_TYPE = "cli"
 READ_SUFFIX = ".read"
 ACKING_SUFFIX = ".acking"
 
-# The form field names of a multipart turn.
+# The form field names of a multipart turn or hold.
 PERSON_FIELD = "person"
 TEXT_FIELD = "text"
 FILE_FIELD = "file"
 WORKSPACE_FIELD = "workspace"
+HELD_TAKE_FIELD = "held_take"
 
 # The channel type of a workspace thread. Core makes the channel with the workspace.
 WORKSPACE_CHANNEL_TYPE = "workspace"
@@ -100,10 +109,11 @@ class _Part(Protocol):
 
 @dataclass
 class _Submission:
-    """One parsed turn: the person, the text, and the files to ingest.
+    """One parsed turn or hold: the person, the text, and the files to ingest.
 
     ``files`` holds ``(inbox filename, bytes)`` pairs. The JSON body carries no
-    file, so its list is always empty.
+    file, so its list is always empty. ``held_take`` is the ticket of a hold
+    take, on a turn that sends what the hold released.
     """
 
     person_id: str
@@ -111,6 +121,7 @@ class _Submission:
     # The slug or the id of a workspace, or "" for the normal terminal chat.
     workspace: str = ""
     files: list[tuple[str, bytes]] = field(default_factory=list)
+    held_take: str = ""
 
     @property
     def attachment_bytes(self) -> int:
@@ -238,11 +249,12 @@ async def _read_json(request: Request) -> _Submission | None:
         person_id=str(body.get("person") or "").strip(),
         text=str(body.get("text") or ""),
         workspace=_workspace_ref(body.get("workspace")),
+        held_take=str(body.get("held_take") or "").strip(),
     )
 
 
 async def _read_multipart(request: Request, ctx: ChannelsContext) -> _Submission | None:
-    """Parse a multipart turn, reading every ``file`` part into memory.
+    """Parse a multipart turn or hold, reading every ``file`` part into memory.
 
     A part over ``channels.limits.max_attachment_bytes`` is skipped and the turn
     still goes through, as on every other channel.
@@ -257,6 +269,7 @@ async def _read_multipart(request: Request, ctx: ChannelsContext) -> _Submission
             person_id=_field(form, PERSON_FIELD).strip(),
             text=_field(form, TEXT_FIELD),
             workspace=_workspace_ref(_field(form, WORKSPACE_FIELD)),
+            held_take=_field(form, HELD_TAKE_FIELD).strip(),
         )
         for index, part in enumerate(form.getlist(FILE_FIELD)):
             if not isinstance(part, _Part):
@@ -343,7 +356,7 @@ async def _state_call(
     path: str = "",
     *,
     params: Mapping[str, str] | None = None,
-    json_body: Mapping[str, str] | None = None,
+    json_body: Mapping[str, Any] | None = None,
     kind: str = "hold",
 ) -> JSONResponse:
     """Pass one hold or draft call on to core and answer with its status and
@@ -366,6 +379,19 @@ async def _state_body(request: Request) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 — a bad body is a 400, not a 500
         return {}
     return body if isinstance(body, dict) else {}
+
+
+async def _held_submission(request: Request, ctx: ChannelsContext) -> _Submission | None:
+    """The message a hold write adds: the person, the text, the workspace, and
+    the file of a multipart body. None for a form that cannot be parsed."""
+    if _is_multipart(request):
+        return await _read_multipart(request, ctx)
+    body = await _state_body(request)
+    return _Submission(
+        person_id=str(body.get("person") or "").strip(),
+        text=str(body.get("text") or ""),
+        workspace=_workspace_ref(body.get("workspace")),
+    )
 
 
 def build_cli_router() -> APIRouter:
@@ -428,6 +454,7 @@ def build_cli_router() -> APIRouter:
             text=text,
             attachments=attachments,
             thread=None if submission.workspace else "main",
+            held_take=submission.held_take or None,
         )
 
         return StreamingResponse(_relay(ctx, event), media_type="text/event-stream")
@@ -531,17 +558,34 @@ def build_cli_router() -> APIRouter:
         denied = _auth(request, ctx)
         if denied is not None:
             return denied
-        body = await _state_body(request)
-        thread = _thread_of(body, ctx)
+        submission = await _held_submission(request, ctx)
+        if submission is None:
+            return JSONResponse({"reason": "bad_request"}, status_code=400)
+        thread = _thread_of(
+            {"person": submission.person_id, "workspace": submission.workspace}, ctx
+        )
         if isinstance(thread, JSONResponse):
             return thread
         channel, person_id = thread
-        text = str(body.get("text") or "")
-        if not text.strip():
+        text = submission.text
+        if not (text.strip() or submission.files):
             return JSONResponse({"reason": "bad_request"}, status_code=400)
-        return await _state_call(
-            ctx, "POST", json_body={"channel": channel, "person": person_id, "text": text}
-        )
+        if submission.files and ctx.pipeline is None:
+            logger.warning(
+                {"message": "cli hold refused: no attachment pipeline", "person": person_id}
+            )
+            return JSONResponse({"reason": "pipeline_unavailable"}, status_code=503)
+
+        attachments: list[Attachment] = []
+        if submission.files:
+            attachments = await _land_files(ctx, submission.files, person_id)
+            if not text.strip():
+                # The file is the message, as on a turn with no caption.
+                text = NO_CAPTION_TEXT
+        body: dict[str, Any] = {"channel": channel, "person": person_id, "text": text}
+        if attachments:
+            body["attachments"] = [a.model_dump(mode="json") for a in attachments]
+        return await _state_call(ctx, "POST", json_body=body)
 
     @router.post("/v1/cli/held/take")
     async def post_cli_held_take(request: Request):  # type: ignore[no-untyped-def]

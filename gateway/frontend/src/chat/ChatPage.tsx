@@ -459,12 +459,7 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
               </button>
             </div>
           )}
-          <Composer
-            onSend={send}
-            busy={turn.running || view.pending !== null}
-            draft={composerDraft.text}
-            onDraft={composerDraft.save}
-          />
+          <Composer onSend={send} draft={composerDraft.text} onDraft={composerDraft.save} />
           {turn.upload && (
             <div className="toast toast-progress" role="status">
               {uploadText(turn.upload)}

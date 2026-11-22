@@ -699,6 +699,104 @@ describe("useTurn", () => {
       expect(hook.result.current.turn.held).toEqual([]);
     });
 
+    it("holds a message that carries a file, with the upload toast of a turn", async () => {
+      const s = stream([], { hold: true });
+      const fetch = fakeFetch(new Response(s.body, { status: 200 }));
+      const row = {
+        id: "h1",
+        text: "look",
+        at: "2026-01-01T10:00:00Z",
+        attachments: [{ name: "photo.png", mime: "image/png" }],
+      };
+      const sent = stubXhr();
+      const { hook } = setup();
+      // The hold of the thread arrives first, as it does on an open screen.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      act(() => {
+        hook.result.current.turn.send("first");
+      });
+      const photo = new File(["pixels"], "photo.png", { type: "image/png" });
+      act(() => {
+        expect(hook.result.current.turn.send("look", photo)).toBe(true);
+      });
+      // The waiting row names the file at once, before the server answers.
+      expect(hook.result.current.turn.held.map((m) => m.fileName)).toEqual(["photo.png"]);
+      expect(hook.result.current.turn.upload).toEqual({ phase: "uploading", percent: 0, kind: "photo" });
+      const hold = sent[0];
+      expect(hold?.url).toBe("/api/v1/chat/alex/held");
+      const form = hold?.body as FormData;
+      expect(form.get("text")).toBe("look");
+      expect((form.get("file") as File).name).toBe("photo.png");
+      act(() => hold?.uploaded(50, 100));
+      expect(hook.result.current.turn.upload).toEqual({ phase: "uploading", percent: 50, kind: "photo" });
+      act(() => hold?.answer(200, JSON.stringify({ held: [row], dropped: [] })));
+      await waitFor(() => expect(hook.result.current.turn.held[0]?.id).toBe("h1"));
+      expect(hook.result.current.turn.held[0]?.attachments).toEqual([{ name: "photo.png", mime: "image/png" }]);
+      expect(hook.result.current.turn.upload).toBeNull();
+      // The hold started no second turn.
+      expect(turnCalls(fetch)).toHaveLength(1);
+      s.release();
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+    });
+
+    it("shows a waiting message with its file when the screen opens again", async () => {
+      const row = {
+        id: "h1",
+        text: "look",
+        at: "2026-01-01T10:00:00Z",
+        attachments: [{ name: "bill.pdf", mime: "application/pdf" }],
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(JSON.stringify({ held: [row], dropped: [] }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+        ),
+      );
+      const { hook } = setup();
+      await waitFor(() => expect(hook.result.current.turn.held).toHaveLength(1));
+      expect(hook.result.current.turn.held[0]?.attachments).toEqual([
+        { name: "bill.pdf", mime: "application/pdf" },
+      ]);
+    });
+
+    it("sends the ticket of the take with the turn that follows", async () => {
+      const row = {
+        id: "h1",
+        text: "look",
+        at: "2026-01-01T10:00:00Z",
+        attachments: [{ name: "photo.png", mime: "image/png" }],
+      };
+      const calls: { path: string; init?: RequestInit }[] = [];
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(String(input), "http://test");
+          calls.push({ path: url.pathname, init });
+          if (url.pathname.endsWith("/held/take"))
+            return json({ text: "look", held: [], dropped: [], takeTicket: "9f8e7d" });
+          if (url.pathname.includes("/held")) return json({ held: [row], dropped: [] });
+          return new Response(stream([sse("done", { turn_id: "t1", text: "a cat", tools: [] })]).body, {
+            status: 200,
+          });
+        }),
+      );
+      const { hook } = setup();
+      await waitFor(() => expect(hook.result.current.turn.held).toHaveLength(1));
+      act(() => hook.result.current.turn.flushHeld());
+      await waitFor(() => expect(hook.result.current.turn.running).toBe(false));
+      const turn = calls.find((c) => c.path.endsWith("/turns"));
+      expect(JSON.parse(String(turn?.init?.body))).toEqual({ text: "look", heldTake: "9f8e7d" });
+      expect(hook.result.current.turn.held).toEqual([]);
+    });
+
     it("says in a toast that a message could not be held, and keeps none", async () => {
       const s = stream([], { hold: true });
       fakeFetch(new Response(s.body, { status: 200 }));

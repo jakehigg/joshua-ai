@@ -38,12 +38,17 @@ name of the person who wrote it.
 
 The hold is the messages the person wrote while a turn of the thread was
 still running. It lives in core, so a reload or a closed tab never loses one.
-``GET /api/v1/chat/<person>/held`` lists them (``{held: [{id, text, at}]}``),
-``POST`` adds one (``{"text", "workspace"}``), ``DELETE
+``GET /api/v1/chat/<person>/held`` lists them (``{held: [{id, text, at,
+attachments}]}``, each attachment ``{name, mime}``), ``POST`` adds one
+(``{"text", "workspace"}`` as JSON, or ``multipart/form-data`` with one
+``file`` part, capped by ``TURN_MAX_BYTES`` as a turn is), ``DELETE
 /api/v1/chat/<person>/held/<id>`` takes one back, and ``POST
 /api/v1/chat/<person>/held/take`` empties the hold and answers with ``text``:
 every held message in order, one per line, which the page then sends as one
-turn.
+turn. When a taken message carried a file, the take also answers with
+``takeTicket``, and the page sends it back as the ``heldTake`` of that turn.
+The ticket is the only way a turn reaches a stored file: the page never names
+a path.
 
 The draft is the text the person wrote in the composer and did not send. It
 lives in core too, so it comes back after a reload and on another device.
@@ -63,6 +68,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import re
 import time
 from collections.abc import AsyncIterator
@@ -118,6 +124,9 @@ PERSON_ID = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _REF_SEGMENT = r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}"
 WORKSPACE_REF = re.compile(rf"^{_REF_SEGMENT}(/{_REF_SEGMENT})?$")
 BAD_WORKSPACE = "workspace: not a workspace slug or id"
+# The ticket of a hold take, as core makes it: hex, and nothing else.
+TAKE_TICKET = re.compile(r"^[a-f0-9]{1,64}$")
+BAD_TICKET = "heldTake: not a ticket of a hold take"
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
@@ -200,12 +209,14 @@ class TurnIn(BaseModel):
 
 @dataclass
 class Turn:
-    """One turn as the body gave it. ``upload`` holds the file, when there is one."""
+    """One turn as the body gave it. ``upload`` holds the file, when there is
+    one, and ``held_take`` the ticket of a hold take."""
 
     text: str
     spoken: Any = None
     upload: Part | None = None
     workspace: str = ""
+    held_take: str = ""
 
 
 def _workspace_of(value: Any) -> str:
@@ -214,6 +225,16 @@ def _workspace_of(value: Any) -> str:
         return ""
     if not isinstance(value, str) or not WORKSPACE_REF.fullmatch(value.strip()):
         raise _Refused(422, BAD_WORKSPACE)
+    return value.strip()
+
+
+def _take_of(value: Any) -> str:
+    """The hold-take ticket of a turn body, or "" for none. A bad value is
+    refused, so only a ticket shape reaches channels."""
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or not TAKE_TICKET.fullmatch(value.strip()):
+        raise _Refused(422, BAD_TICKET)
     return value.strip()
 
 
@@ -281,7 +302,12 @@ def _json_turn(raw: bytes) -> Turn:
         turn = TurnIn.model_validate(payload)
     except ValidationError as exc:
         raise _Refused(422, _validation_message(exc)) from None
-    return Turn(turn.text, turn.spoken, workspace=_workspace_of(payload.get("workspace")))
+    return Turn(
+        turn.text,
+        turn.spoken,
+        workspace=_workspace_of(payload.get("workspace")),
+        held_take=_take_of(payload.get("heldTake")),
+    )
 
 
 def _form_turn(parts: list[Part]) -> Turn:
@@ -296,6 +322,7 @@ def _form_turn(parts: list[Part]) -> Turn:
             raise _Refused(422, f"{FILE_FIELD}: the file is empty")
         text = _checked_text(fields.get("text", ""), has_file=upload is not None)
         workspace = _workspace_of(fields.get("workspace"))
+        held_take = _take_of(fields.get("heldTake"))
     except _Refused:
         for part in parts:
             part.close()
@@ -303,24 +330,33 @@ def _form_turn(parts: list[Part]) -> Turn:
     for part in parts:
         if part is not upload:
             part.close()
-    return Turn(text, fields.get("spoken"), upload, workspace)
+    return Turn(text, fields.get("spoken"), upload, workspace, held_take)
+
+
+def _declared_size(request: Request, limit: int) -> None:
+    """Refuse a body that says it is over ``limit`` before reading it."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise _Refused(413, too_large(limit))
+
+
+async def _read_parts(request: Request, content_type: str, limit: int) -> list[Part]:
+    """The parts of a multipart body, capped at ``limit`` bytes together."""
+    try:
+        return await read_form(request.stream(), content_type, limit)
+    except BodyTooLarge:
+        raise _Refused(413, too_large(limit)) from None
+    except MultipartError:
+        raise _Refused(422, BAD_BODY) from None
 
 
 async def read_turn(request: Request, limit: int) -> Turn:
     """Read the turn from the body, JSON or multipart. Raise ``_Refused`` on a bad body."""
     content_type = request.headers.get("content-type", "")
-    declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > limit:
-        raise _Refused(413, too_large(limit))
+    _declared_size(request, limit)
     if boundary_of(content_type) is None:
         return _json_turn(await _read_capped(request, limit))
-    try:
-        parts = await read_form(request.stream(), content_type, limit)
-    except BodyTooLarge:
-        raise _Refused(413, too_large(limit)) from None
-    except MultipartError:
-        raise _Refused(422, BAD_BODY) from None
-    return _form_turn(parts)
+    return _form_turn(await _read_parts(request, content_type, limit))
 
 
 def sse_frame(event: str, data: Any) -> bytes:
@@ -451,7 +487,13 @@ async def turns(request: Request, person: Person) -> JSONResponse | StreamingRes
     if upload is not None:
         attachment = (upload.filename, upload.open(), upload.content_type or DEFAULT_FILE_TYPE)
     try:
-        stream = await client.open_turn(who, turn.text, attachment, workspace=turn.workspace)
+        stream = await client.open_turn(
+            who,
+            turn.text,
+            attachment,
+            workspace=turn.workspace,
+            held_take=turn.held_take,
+        )
     except ChannelsError as exc:
         _log_turn(who, f"refused:{exc.reason}", started, chars_in, file_bytes)
         await client.aclose()
@@ -472,19 +514,38 @@ async def turns(request: Request, person: Person) -> JSONResponse | StreamingRes
     )
 
 
+def map_held_files(value: Any) -> list[dict[str, Any]]:
+    """The files of one held message, each ``{name, mime}``. Core sends no
+    stored path for a held message, so none can be mapped to an address."""
+    files: list[dict[str, Any]] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        files.append(
+            {
+                "name": item["name"] if isinstance(item.get("name"), str) else "",
+                "mime": item["mime"] if isinstance(item.get("mime"), str) else DEFAULT_FILE_TYPE,
+            }
+        )
+    return files
+
+
 def map_held(value: Any) -> list[dict[str, Any]]:
-    """The held messages of a thread, each ``{id, text, at}``, in order."""
+    """The held messages of a thread, each ``{id, text, at}``, in order. A
+    message that carried a file also has ``attachments``."""
     held: list[dict[str, Any]] = []
     for item in value if isinstance(value, list) else []:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
             continue
-        held.append(
-            {
-                "id": item["id"],
-                "text": item["text"] if isinstance(item.get("text"), str) else "",
-                "at": item["at"] if isinstance(item.get("at"), str) else "",
-            }
-        )
+        message: dict[str, Any] = {
+            "id": item["id"],
+            "text": item["text"] if isinstance(item.get("text"), str) else "",
+            "at": item["at"] if isinstance(item.get("at"), str) else "",
+        }
+        files = map_held_files(item.get("attachments"))
+        if files:
+            message["attachments"] = files
+        held.append(message)
     return held
 
 
@@ -502,10 +563,12 @@ async def _state_call(
     text: str | None = None,
     workspace: str = "",
     kind: str = "hold",
+    attachment: Attachment | None = None,
 ) -> dict[str, Any] | JSONResponse:
     """Call one hold or draft route of channels for the person of the path.
 
     The answer is the body of channels, or the refusal to send the browser.
+    An ``attachment`` makes a hold write multipart, as a turn with a file is.
     """
     who = request.path_params["person"]
     if not _known(who):
@@ -516,7 +579,9 @@ async def _state_call(
     try:
         if kind == "draft":
             return await client.draft(method, who, text=text, workspace=workspace)
-        return await client.held(method, who, path=path, text=text, workspace=workspace)
+        return await client.held(
+            method, who, path=path, text=text, workspace=workspace, attachment=attachment
+        )
     except ChannelsError as exc:
         return channels_error(exc)
     except ChannelsUnavailable:
@@ -525,21 +590,45 @@ async def _state_call(
         await client.aclose()
 
 
+def _body_object(raw: bytes) -> dict[str, Any]:
+    """The JSON object of a write body. A body that is not an object is refused."""
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        raise _Refused(422, BAD_BODY)
+    return payload
+
+
 async def _text_body(request: Request) -> tuple[str, str] | JSONResponse:
     """The ``text`` and the ``workspace`` of a hold or draft write, or the
     refusal."""
     try:
-        payload = json.loads(await request.body() or b"{}")
-    except ValueError:
-        payload = None
-    if not isinstance(payload, dict):
-        return _json({"error": BAD_BODY}, 422)
-    try:
+        payload = _body_object(await request.body())
         workspace = _workspace_of(payload.get("workspace"))
     except _Refused as exc:
         return _json({"error": exc.message}, exc.status)
     raw = payload.get("text")
     return (raw if isinstance(raw, str) else ""), workspace
+
+
+async def read_hold(request: Request, limit: int) -> Turn:
+    """The message a hold write adds: JSON (``{"text", "workspace"}``), or
+    ``multipart/form-data`` with one ``file`` part beside those fields.
+
+    ``limit`` caps the text and the file together, as on a turn, and the 413
+    and 422 answers are the answers of the turn route.
+    """
+    content_type = request.headers.get("content-type", "")
+    _declared_size(request, limit)
+    if boundary_of(content_type) is not None:
+        return _form_turn(await _read_parts(request, content_type, limit))
+    payload = _body_object(await _read_capped(request, limit))
+    workspace = _workspace_of(payload.get("workspace"))
+    raw = payload.get("text")
+    text = _checked_text(raw if isinstance(raw, str) else "", has_file=False)
+    return Turn(text, workspace=workspace)
 
 
 async def held(request: Request, person: Person) -> JSONResponse:
@@ -555,18 +644,31 @@ async def held(request: Request, person: Person) -> JSONResponse:
 
 
 async def hold(request: Request, person: Person) -> JSONResponse:
-    """Hold one message, written while a turn of this thread still runs."""
+    """Hold one message, written while a turn of this thread still runs. The
+    message can carry one photo or one PDF, as a turn can."""
     if not _origin_ok(request):
         return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
-    body = await _text_body(request)
-    if isinstance(body, JSONResponse):
-        return body
-    text, workspace = body
+    limit = viewer_channels.ChatSettings.from_env(os.environ).turn_max_bytes
     try:
-        checked = _checked_text(text, has_file=False)
+        message = await read_hold(request, limit)
     except _Refused as exc:
         return _json({"error": exc.message}, exc.status)
-    answer = await _state_call(request, "POST", text=checked, workspace=workspace)
+    upload = message.upload
+    attachment: Attachment | None = None
+    if upload is not None:
+        attachment = (upload.filename, upload.open(), upload.content_type or DEFAULT_FILE_TYPE)
+    try:
+        answer = await _state_call(
+            request,
+            "POST",
+            text=message.text,
+            workspace=message.workspace,
+            attachment=attachment,
+        )
+    finally:
+        # The body has gone out by now, so the temporary file can go.
+        if upload is not None:
+            upload.close()
     if isinstance(answer, JSONResponse):
         return answer
     return _json(_hold_json(answer), 200)
@@ -589,7 +691,16 @@ async def take_held(request: Request, person: Person) -> JSONResponse:
         if isinstance(answer.get("text"), str)
         else "\n".join(m["text"] for m in taken)
     )
-    return _json({"text": text, "held": taken, "dropped": map_held(answer.get("dropped"))}, 200)
+    result: dict[str, Any] = {
+        "text": text,
+        "held": taken,
+        "dropped": map_held(answer.get("dropped")),
+    }
+    # The ticket of the files the take released; the page sends it with the turn.
+    ticket = answer.get("take_ticket")
+    if isinstance(ticket, str) and TAKE_TICKET.fullmatch(ticket):
+        result["takeTicket"] = ticket
+    return _json(result, 200)
 
 
 async def drop_held(request: Request, person: Person) -> JSONResponse:
