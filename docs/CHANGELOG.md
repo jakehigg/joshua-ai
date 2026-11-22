@@ -31,6 +31,11 @@ with the images and the packaged chart, are at
   is told. So a page or an app that was away all night never sends a queued
   message as if it had just been written. `0` turns the limit off. In the web
   chat the hold routes report what the limit dropped, each message once.
+- **A message that waits for the running turn can carry a photo or a PDF.**
+  In the web chat the paperclip and the paste stay live while Joshua works:
+  attach a file, send, and the message waits in the thread with its file
+  named on it. The file is stored as a turn's file is, the next turn carries
+  it, and a waiting message can still be taken back before it goes.
 - **The composer keeps what you did not send.** Half a message typed in the
   web chat is kept for that thread and for you alone, in core and not in the
   page, so it is there when you come back to the workspace, after a reload,

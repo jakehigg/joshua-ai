@@ -1299,11 +1299,12 @@ A long conversation makes every model call read its whole history. The cap ends 
 
 A message that arrives while a turn of its conversation runs joins the next
 turn. In the web chat it waits in the hold of the thread; on every other
-channel core folds it into the next turn itself.
+channel core folds it into the next turn itself. A waiting message keeps its
+photo or its PDF, and the next turn carries the file.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `core.hold_max_age_s` | `900` | Seconds a message may wait for the running turn of its thread. Core drops one that waited longer and tells the person, so a page or an app that was away for hours never sends it as if it had just been written. `0` turns the limit off. |
+| `core.hold_max_age_s` | `900` | Seconds a message may wait for the running turn of its thread. Core drops one that waited longer and tells the person, so a page or an app that was away for hours never sends it as if it had just been written. It is also how long core keeps the ticket a hold take gives for the files it released. `0` turns the limit off. |
 
 [contracts.md](contracts.md#the-hold-of-a-chat-thread) has the routes and the
 answers.

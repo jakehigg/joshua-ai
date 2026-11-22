@@ -45,6 +45,7 @@ One message or event, from `channels` to `core`.
 | `payload` | object | `null` | event data (events only) |
 | `options` | object | `null` | `verbatim: true` records the text with no model call |
 | `framing` | string | `null` | replaces the default event framing |
+| `held_take` | string | `null` | the ticket of a hold take. Core redeems it once and adds the files of the taken messages to `attachments`. |
 
 `Attachment.path` is relative to `/data`: `people/<id>/attachments/YYYY/MM/<file>`
 or `shared/…`.
@@ -87,7 +88,7 @@ Port 8000 in the container. Compose publishes it on the host as `8080`.
 | `GET /v1/cli/outbox?person=&ack=true` | `channels.webhooks.allowed_callers` | | `{"messages": [{"ts", "text", "attachments"}]}`, `403 unknown_person` |
 | `GET /v1/cli/transcript?person=&limit=&before=` | `channels.webhooks.allowed_callers` | | core's `GET /v1/transcript` reply and status for `cli:<person>`, `400 bad_request`, `403 unknown_person`, `503 core_unavailable` |
 | `GET /v1/cli/held?person=&workspace=` | `channels.webhooks.allowed_callers` | | core's `GET /v1/holds` reply for `cli:<person>`, or for the workspace thread, `403 unknown_person`, `503 core_unavailable` |
-| `POST /v1/cli/held` | `channels.webhooks.allowed_callers` | `{"person", "text", "workspace"?}` | core's `POST /v1/holds` reply, `400 bad_request` for an empty text, `403 unknown_person`, `503 core_unavailable` |
+| `POST /v1/cli/held` | `channels.webhooks.allowed_callers` | `{"person", "text", "workspace"?}`, or `multipart/form-data` with one `file` part (below) | core's `POST /v1/holds` reply, `400 bad_request` for an empty text with no file, `403 unknown_person`, `503 core_unavailable`, `503 pipeline_unavailable` |
 | `POST /v1/cli/held/take` | `channels.webhooks.allowed_callers` | `{"person", "workspace"?}` | core's `POST /v1/holds/take` reply, `403 unknown_person`, `503 core_unavailable` |
 | `DELETE /v1/cli/held/{hold_id}?person=&workspace=` | `channels.webhooks.allowed_callers` | | core's `DELETE /v1/holds/{hold_id}` reply, `403 unknown_person`, `503 core_unavailable` |
 | `GET /v1/cli/draft?person=&workspace=` | `channels.webhooks.allowed_callers` | | core's `GET /v1/drafts` reply for `cli:<person>`, or for the workspace thread, `403 unknown_person`, `503 core_unavailable` |
@@ -137,11 +138,11 @@ Port 8000 in the container. Compose publishes it on the host as
 | `GET /healthz` | open | | `{"ok": true}` |
 | `GET /readyz` | open | | `{"ok": bool, "checks": {"db": bool, "layout": bool, "embed": bool}, "inference_overrides": int}`. `200` when ready, `503` when not; `embed` does not hold `ok` down. `inference_overrides` counts the `inference` job blocks that set `base_url` or `model`. |
 | `POST /v1/turns` | `channels` | TurnEvent | `202 {"accepted": true, "turn_id": id}`, `202 {"accepted": true, "folded": true}` when a turn of the conversation runs and the message joins the next one, `200 {"accepted": false, "reason": "duplicate"}`, `403 unknown_sender`, `429 overloaded` |
-| `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender` |
+| `POST /v1/turns/stream` | `channels`, and `laptop` for a `cli` handle | TurnEvent | SSE (below), `403 unknown_sender`, `400 {"reason": "unknown_hold_take"}` for a `held_take` that is unknown, used, or of another thread |
 | `GET /v1/transcript?channel=&person=&limit=&before=` | `channels`, `laptop` | | `{"conversation_id", "messages", "next_before"}` (below), `400 bad_request` with no `channel`, `422` for a bad `limit` or `before` |
-| `GET /v1/holds?channel=&person=` | `channels`, `laptop` | | `{"held": [{"id", "text", "at"}], "dropped": [...]}`, oldest first |
-| `POST /v1/holds` | `channels`, `laptop` | `{"channel", "person", "text"}` | `{"held": [...], "dropped": [...]}`, `400` for an empty text, `429 {"reason": "hold_full"}` past 20 messages |
-| `POST /v1/holds/take` | `channels`, `laptop` | `{"channel", "person"}` | `{"text", "held": [...], "dropped": [...]}`. It empties the hold and joins the messages, in order, one per line. |
+| `GET /v1/holds?channel=&person=` | `channels`, `laptop` | | `{"held": [{"id", "text", "at", "attachments"?}], "dropped": [...]}`, oldest first. An `attachments` entry is `{"name", "mime"}`, never a path. |
+| `POST /v1/holds` | `channels`, `laptop` | `{"channel", "person", "text", "attachments"?}` | `{"held": [...], "dropped": [...]}`, `400` for an empty text, `429 {"reason": "hold_full"}` past 20 messages |
+| `POST /v1/holds/take` | `channels`, `laptop` | `{"channel", "person"}` | `{"text", "held": [...], "dropped": [...]}`, plus `take_ticket` when a taken message carried a file. It empties the hold and joins the messages, in order, one per line. |
 | `DELETE /v1/holds/{hold_id}?channel=&person=` | `channels`, `laptop` | | `{"held": [...], "dropped": [...]}`, `404 {"reason": "unknown_hold"}` |
 | `GET /v1/drafts?channel=&person=` | `channels`, `laptop` | | `{"text", "at"}`, the unsent text of that person's composer in that thread, or `{"text": "", "at": null}` |
 | `POST /v1/drafts` | `channels`, `laptop` | `{"channel", "person", "text"}` | `{"text", "at"}`, or `{"text": "", "at": null}` for an empty text, which clears the draft |
@@ -672,6 +673,31 @@ that it was not sent. `0` turns the limit off.
 
 Channels passes these through as `/v1/cli/held` for the person of the body
 or the query, and the viewer as `/api/v1/chat/<person>/held`.
+
+### A held message with a file
+
+A held message carries a photo or a PDF, as a turn does. `POST /v1/cli/held`
+on channels and `POST /api/v1/chat/<person>/held` on the viewer take
+`multipart/form-data` with one `file` part beside `person`, `text`, and the
+optional `workspace`. Channels lands the part with the pipeline a turn uses,
+so the hold keeps a stored path and never bytes, and a hold with a file and no
+text carries the placeholder text of a file with no caption. With no
+attachment pipeline, a multipart hold gets `503 pipeline_unavailable`. The
+viewer caps the text and the file together at the size a turn may carry, and
+answers `413` over it and `422` for a bad form, as its turn route does. A held
+message names its files to the browser as `{"name", "mime"}`; a stored path
+stays on the server.
+
+The take releases the files against a **ticket**. `POST /v1/holds/take`
+answers with `take_ticket` when a taken message carried a file, and the caller
+sends that ticket back as the `held_take` of the turn it then sends (the
+viewer as `heldTake`). Core keeps the ticket in memory for
+`core.hold_max_age_s`, with the channel, the person, and the released files,
+and puts the files on the turn when the ticket matches. A ticket is good for
+one turn: an unknown, a used, or a foreign ticket is refused with `400
+{"reason": "unknown_hold_take"}`, and that turn does not run. The browser
+sends a ticket and never a path, and core reads the paths of its own hold
+only, so a caller of the chat cannot name an attachment of its own.
 
 The hold serves the web chat, which holds a message it has already sent. On
 every other channel core folds instead: a message that arrives while a turn
