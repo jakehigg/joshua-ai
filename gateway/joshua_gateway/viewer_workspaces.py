@@ -24,12 +24,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from joshua_gateway import viewer_assignments as va
+from joshua_gateway import viewer_developer as vd
 
 WORKING = "working"
 WAITING = "waiting"
 
 # What the charm says of a turn of the thread that has not finished.
 TURN_REASON = "Joshua is answering in this workspace"
+
+# The most characters of a line that comes from a source as text, such as the
+# question of a developer job.
+MAX_REASON = 200
 
 
 @dataclass(frozen=True)
@@ -50,20 +55,16 @@ async def charms(
     rows: Sequence[Mapping[str, Any]],
     *,
     assignments: va.AssignmentsClient | None = None,
+    developer: vd.DeveloperClient | None = None,
 ) -> dict[str, Charm]:
     """The charm of each workspace of ``rows``, by workspace id. A workspace
     with nothing running and nothing waiting is not in the answer.
 
-    The sources today are the turn of the thread, which core answers as
-    ``turn_in_flight`` on each workspace, and the assignments manager, which
-    gives the runs and the drafts of this person, each with the workspace that
-    started it.
-
-    **The developer addon is not a source yet**: it has no read route for the
-    jobs of a workspace, so a developer task in flight, or one that asked a
-    question, carries no charm. That route is its own ticket. When it exists,
-    it is one more reader here and one more entry in the list below: the merge,
-    the routes and the frontend stay as they are.
+    The sources are the turn of the thread, which core answers as
+    ``turn_in_flight`` on each workspace, the assignments manager, which gives
+    the runs and the drafts of this person, each with the workspace that
+    started it, and the developer addon, which gives its jobs, each with the
+    channel it reports to.
 
     A source that is not configured, or that does not answer, is left out
     instead of failing: the charm is then what the other sources say.
@@ -72,6 +73,8 @@ async def charms(
     found: list[tuple[str, Charm]] = list(_from_turns(rows))
     if assignments is not None:
         found += await _from_assignments(person, assignments)
+    if developer is not None:
+        found += await _from_developer(developer)
     merged = _merge(found)
     return {workspace: charm for workspace, charm in merged.items() if workspace in ids}
 
@@ -113,6 +116,27 @@ def _asked(item: va.Item) -> str:
     """What a parked assignment asked for, as a person reads it."""
     kind = item.open_request.kind if item.open_request else ""
     return va.REQUEST_HEADINGS.get(kind, "has a question")
+
+
+async def _from_developer(client: vd.DeveloperClient) -> list[tuple[str, Charm]]:
+    """The jobs of the developer addon that have not ended, each on the
+    workspace that dispatched it. A job that reports to another channel, or to
+    none, belongs to no workspace and is left out."""
+    found: list[tuple[str, Charm]] = []
+    for job in await client.active_jobs():
+        workspace = vd.workspace_of(job.notify_channel)
+        if workspace:
+            found.append((workspace, _of_job(job)))
+    return found
+
+
+def _of_job(job: vd.Job) -> Charm:
+    """The charm of one developer job. A job that asked the person waits, with
+    the question as the line of why; a job that works says so."""
+    question = (job.question or "").strip()
+    if question:
+        return Charm(WAITING, question[:MAX_REASON])
+    return Charm(WORKING, f"developer task {job.id} is running")
 
 
 def _merge(found: Iterable[tuple[str, Charm]]) -> dict[str, Charm]:
