@@ -178,6 +178,7 @@ def _workspace(row: dict[str, Any]) -> Workspace:
         members=tuple(row.get("members") or ()),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
+        last_activity_at=row.get("last_activity_at"),
     )
 
 
@@ -977,7 +978,15 @@ class Repo:
         status: str = "ok",
         meta: dict[str, Any] | None = None,
     ) -> int:
-        """Insert one transcript row and return its id."""
+        """Insert one transcript row and return its id.
+
+        A row of a workspace thread is activity in that workspace, so it
+        stamps ``last_activity_at`` there: a person writing, Joshua answering,
+        a row that normal chat injected, the text of a notification. The
+        second statement matches the conversation to the workspace of its
+        channel, so a conversation of any other channel touches no row. The
+        stamp is what the list of the threads orders by, and it leaves the rest
+        of the workspace, ``updated_at`` with it, as it was."""
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
@@ -988,6 +997,14 @@ class Repo:
                 (conversation_id, direction, content, status, Json(meta or {})),
             )
             row = await cur.fetchone()
+            await conn.execute(
+                """
+                UPDATE workspaces w SET last_activity_at = now()
+                FROM conversations c
+                WHERE c.id = %s AND c.channel_id = 'workspace:' || w.id::text
+                """,
+                (conversation_id,),
+            )
         return int(row["id"])
 
     async def recent_transcripts(self, since: datetime) -> list[dict[str, Any]]:
@@ -1526,7 +1543,8 @@ class Repo:
 
     async def list_workspaces(self, person_id: str, status: str | None = None) -> list[Workspace]:
         """The workspaces a person reaches: the ones they own and the shared
-        ones whose members hold them, newest first."""
+        ones whose members hold them, the newest activity in the thread
+        first."""
         sql = (
             "SELECT * FROM workspaces "
             "WHERE (owner = %s OR (shared AND members @> to_jsonb(%s::text)))"
@@ -1535,7 +1553,7 @@ class Repo:
         if status is not None:
             sql += " AND status = %s"
             args.append(status)
-        sql += " ORDER BY updated_at DESC, slug"
+        sql += " ORDER BY last_activity_at DESC, slug"
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, tuple(args))
             rows = await cur.fetchall()

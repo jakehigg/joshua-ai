@@ -136,6 +136,10 @@ class Workspace:
     members: tuple[str, ...] = ()
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # When something last happened in the thread: every transcript row of it
+    # stamps this, whoever wrote it. ``updated_at`` is the last edit of the
+    # row, so the list of the threads orders by this one.
+    last_activity_at: datetime | None = None
 
     @property
     def channel_id(self) -> str:

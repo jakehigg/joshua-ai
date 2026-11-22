@@ -11,10 +11,13 @@ empty list turns the routes off, so every caller gets 403. The bearer is
 checked before the body is read. A ``person`` that is not a member of
 ``people`` gets 403, and a missing one gets 400.
 
-- ``GET /v1/workspaces?status=`` lists the workspaces. Each workspace, in the
-  list and on its own, carries ``turn_in_flight``: a turn of its thread has
-  not finished. The viewer composes that with the workers of the workspace
-  into the charm beside the name.
+- ``GET /v1/workspaces?status=`` lists the workspaces, the newest activity in
+  the thread first. ``last_activity_at`` is that stamp: core writes it on
+  every row of the thread, whoever wrote the row, and ``updated_at`` stays the
+  last edit of the workspace. Each workspace, in the list and on its own,
+  carries ``turn_in_flight``: a turn of its thread has not finished. The
+  viewer composes that with the workers of the workspace into the charm beside
+  the name.
 - ``POST /v1/workspaces`` creates one (``title``, ``goal``, ``model``,
   ``servers``, ``notify``, ``style``, ``members``). The slug comes from the
   title. The create also makes the channel ``workspace:<id>`` and its
@@ -252,6 +255,7 @@ def workspace_json(workspace: Workspace) -> dict[str, Any]:
         "channel": workspace.channel_id,
         "created_at": _iso(workspace.created_at),
         "updated_at": _iso(workspace.updated_at),
+        "last_activity_at": _iso(workspace.last_activity_at),
     }
 
 

@@ -394,7 +394,7 @@ Every `{slug}` below is a ref: a slug, an id, or two segments
 
 | Route | Use |
 |---|---|
-| `GET /v1/workspaces?status=` | List the workspaces the person reaches. |
+| `GET /v1/workspaces?status=` | List the workspaces the person reaches, the newest activity in the thread first. |
 | `POST /v1/workspaces` | Create one: `title`, `goal`, `model`, `servers`, `notify`, `style`, `members`. `members` makes it shared. A taken shared slug answers 409 with the slug. |
 | `GET`, `PATCH /v1/workspaces/{slug}` | Read or change: `title`, `goal`, `notes`, `servers`, `model`, `notify`, `style`, `status`. A `status` of `archived` closes it, which frees its name for a new workspace and keeps its own slug. No route changes the people, and no route changes a slug. |
 | `GET`, `POST /v1/workspaces/{slug}/items` | List or add items. The assignments container adds the outputs of a run that started in a workspace here, as the person of the run. |
@@ -409,6 +409,13 @@ thread after the `last_read_turn_id` of that person that somebody else wrote,
 Joshua or another person of the thread, and every such row when they have read
 nothing of it. A row of their own never counts, so sending a message and
 leaving the workspace at once leaves the count at zero.
+Each workspace carries `last_activity_at`: when something last happened in its
+thread. Every row of the thread stamps it, whoever wrote the row — a person,
+Joshua, a row that normal chat injected, the text of a notification — and the
+list orders by it, newest first, so a workspace a message arrives in stands at
+the top. `updated_at` is the last edit of the workspace row, and a message
+leaves it where it was.
+
 `GET /v1/workspaces` and `GET /v1/workspaces/{slug}` also give
 `turn_in_flight`: a turn of that thread has not finished. It comes from the
 manager's memory, so it costs no query and a restart of core clears it. The

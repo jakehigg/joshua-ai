@@ -33,9 +33,15 @@ function ws(over: Partial<Workspace> = {}): Workspace {
   };
 }
 
-// A workspace that moved at hour `hour` of one day.
+// A workspace whose thread last moved at hour `hour` of one day.
 const at = (id: string, hour: number, over: Partial<Workspace> = {}) =>
-  ws({ id, slug: id, title: id, updated_at: `2026-01-01T${String(hour).padStart(2, "0")}:00:00Z`, ...over });
+  ws({
+    id,
+    slug: id,
+    title: id,
+    last_activity_at: `2026-01-01T${String(hour).padStart(2, "0")}:00:00Z`,
+    ...over,
+  });
 
 function list(rows: Workspace[], at = "/chat/alex") {
   vi.stubGlobal("fetch", vi.fn(async () => json({ workspaces: rows })));
@@ -80,6 +86,22 @@ describe("the list of the threads", () => {
     expect(names()).toEqual(["Chat", "f", "e", "d", "c", "b", "a", "Show less", "+ New workspace"]);
     fireEvent.click(screen.getByRole("button", { name: "Show less" }));
     expect(screen.queryByRole("link", { name: "a" })).toBeNull();
+  });
+
+  it("puts the workspace a message arrived in at the top", async () => {
+    list([at("a", 1), at("b", 2)]);
+    await waitFor(() => expect(screen.getByRole("link", { name: "b" })).toBeTruthy());
+    expect(names()).toEqual(["Chat", "b", "a", "+ New workspace"]);
+    cleanup();
+
+    // A message in `a` moves the activity of its thread, so `a` is first. The
+    // last edit of each row says the opposite, and the order never reads it.
+    list([
+      at("a", 3, { updated_at: "2026-01-01T01:00:00Z" }),
+      at("b", 2, { updated_at: "2026-01-01T10:00:00Z" }),
+    ]);
+    await waitFor(() => expect(screen.getByRole("link", { name: "a" })).toBeTruthy());
+    expect(names()).toEqual(["Chat", "a", "b", "+ New workspace"]);
   });
 
   it("keeps a paused workspace in the list and holds an archived one for Show all", async () => {
