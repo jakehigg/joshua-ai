@@ -102,6 +102,17 @@ with the images and the packaged chart, are at
 
 ### Developer tasks
 
+- **A developer job lights the charm of its workspace.** The charm beside the
+  name of a workspace read the turn of the thread and the assignments manager,
+  so a workspace whose developer job was coding showed nothing. A job that has
+  not ended now shows the working charm on the workspace that dispatched it,
+  and a job that asked a question shows the waiting charm with the question as
+  the line you read on hover or tap. The viewer reads the jobs from the addon
+  with `DEVELOPER_URL` and `DEVELOPER_TOKEN`; with either one unset it asks the
+  addon nothing and the charm is what its other sources say, and an addon that
+  is slow or silent leaves the charm as it is. See
+  [workspaces.md](workspaces.md#the-charm-beside-the-name) and
+  [operations.md](operations.md#the-developer-addon-as-a-source-of-the-charm).
 - **Joshua writes the text of a pull request by a page of core.** A session
   that holds the `developer` server gets a new skill page,
   `prompts/builtin/skills/developer.md`, as a session with `assignments` or

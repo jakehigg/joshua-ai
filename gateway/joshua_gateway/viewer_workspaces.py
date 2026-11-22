@@ -136,7 +136,8 @@ def _of_job(job: vd.Job) -> Charm:
     question = (job.question or "").strip()
     if question:
         return Charm(WAITING, question[:MAX_REASON])
-    return Charm(WORKING, f"developer task {job.id} is running")
+    name = f"developer task {job.id}" if job.id else "a developer task"
+    return Charm(WORKING, f"{name} is running")
 
 
 def _merge(found: Iterable[tuple[str, Charm]]) -> dict[str, Charm]:

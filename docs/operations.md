@@ -1128,6 +1128,31 @@ assignments are not configured. When the assignments container does not
 answer, the page says so and shows nothing old. `GET /readyz` on the viewer
 reports `assignments`.
 
+### The developer addon as a source of the charm
+
+The charm beside the name of a workspace says that Joshua is working for it or
+that something of it waits for you
+([workspaces.md](workspaces.md#the-charm-beside-the-name)). The developer
+addon is one of its sources: a job of that workspace that has not ended is the
+working charm, and a job that asked a question is the waiting charm, with the
+question as the line you read.
+
+Two settings on the viewer carry the addon, as `ASSIGNMENTS_URL` carries the
+assignments container:
+
+| Setting | What it is |
+|---|---|
+| `DEVELOPER_URL` | The base address of the developer addon, such as `http://developer:8000`. |
+| `DEVELOPER_TOKEN` | The bearer the viewer sends to it, the token of its MCP endpoint. Put it in `.env`. |
+
+Both are optional, and neither has a default: with the address or the token
+unset, the viewer asks the addon nothing and the charm is what its other
+sources say. Compose and the chart set neither, because the addon runs outside
+this repository: add the two to the `environment` of the `viewer` service
+yourself. The request has a two-second timeout, so a slow addon cannot hold the
+list of the workspaces open, and a call that fails or is refused leaves the
+charm as the other sources left it and writes one log line.
+
 ### The documents section
 
 [documents.md](documents.md) is the guide for documents and artifacts: what

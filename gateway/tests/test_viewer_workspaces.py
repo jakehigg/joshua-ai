@@ -258,3 +258,10 @@ def test_a_job_and_an_assignment_of_one_workspace_merge_as_the_sources_do() -> N
     client = client_of(in_progress=[assignment()])
     marks = charms([row()], client, addon_of(job(question="Which branch?")))
     assert marks[WS] == vw.Charm(vw.WORKING, "assignment 31 is running")
+
+
+def test_a_job_with_no_id_still_says_that_it_is_running() -> None:
+    """The id names the task in the line; an addon that gives none still says
+    what the charm means."""
+    marks = charms([row()], None, addon_of(job(id="")))
+    assert marks[WS] == vw.Charm(vw.WORKING, "a developer task is running")
