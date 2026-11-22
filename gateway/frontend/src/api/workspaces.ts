@@ -35,9 +35,12 @@ export interface Workspace {
   // list gives it, and it is the count of that person alone: in a shared
   // workspace every other person has one of their own.
   unread?: number;
-  // When the workspace last moved, as core stamps it. The list of the sidebar
-  // orders by it, newest first (`byActivity`).
+  // When the workspace row was last edited, as core stamps it.
   updated_at?: string;
+  // When something last happened in the thread, as core stamps it: a message
+  // of any writer moves it. The list of the sidebar orders by it, newest
+  // first (`byActivity`).
+  last_activity_at?: string;
   // Whether Joshua is working for this workspace, or something of it waits
   // for a person. Null, or absent, when neither is true. The viewer composes
   // it (`gateway/joshua_gateway/viewer_workspaces.py`); the list and the read
@@ -194,9 +197,13 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   return Array.isArray(body.workspaces) ? body.workspaces : [];
 }
 
-/** When a workspace last moved, as a number. A row with no stamp is oldest. */
+/**
+ * When something last happened in a workspace, as a number: the activity of
+ * its thread, and the last edit of the row for an answer that carries no
+ * activity stamp. A row with neither is oldest.
+ */
 const movedAt = (workspace: Workspace): number => {
-  const when = Date.parse(workspace.updated_at ?? "");
+  const when = Date.parse(workspace.last_activity_at ?? workspace.updated_at ?? "");
   return Number.isNaN(when) ? 0 : when;
 };
 

@@ -77,6 +77,14 @@ with the images and the packaged chart, are at
   every person of it may use. An empty setting ticks nothing, which is what
   every instance does today, and a workspace that exists already does not
   change.
+- **The list of the threads orders by the activity of each thread.** It
+  ordered by the last edit of the workspace, so a workspace somebody wrote in
+  every day could sit below one that nobody had touched since its last
+  settings change. Core now stamps the activity of a thread on every row it
+  records there — a message of a person, a reply of Joshua, a line that normal
+  chat sent in — and the list of the sidebar orders by that stamp. So a
+  message moves its workspace to the top, and it changes nothing else of the
+  workspace.
 
 ### Assignments
 

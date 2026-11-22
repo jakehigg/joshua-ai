@@ -289,6 +289,54 @@ async def test_list_gives_a_person_their_own_and_the_shared_ones(seeded) -> None
     assert [w.id for w in await seeded.list_workspaces("mia", "active")] == [mine.id]
 
 
+async def test_a_message_moves_its_workspace_to_the_top_of_the_list(client, seeded) -> None:
+    """The list orders by the activity of the thread.
+
+    ``updated_at`` is the last edit of the workspace row and says nothing
+    about the thread, so a workspace somebody writes in every day would sit
+    below one that nobody has touched since its last settings change. Every
+    row of the thread stamps ``last_activity_at`` instead, whoever wrote it,
+    and the list orders by that stamp.
+    """
+    older = await seeded.create_workspace("alex", "Solar install")
+    newer = await seeded.create_workspace("alex", "Thanksgiving", members=["mia"])
+
+    async def listed() -> list[str]:
+        answer = await client.get("/v1/workspaces", params={"person": "alex"}, headers=_h())
+        return [w["slug"] for w in answer.json()["workspaces"]]
+
+    assert await listed() == ["thanksgiving", "solar-install"]
+
+    # A person writing in the older thread moves it to the top, and changes
+    # nothing else of the workspace.
+    conv = (await seeded.workspace_conversation(older)).id
+    await seeded.add_transcript(conv, "in", "the panels arrive on Friday")
+    assert await listed() == ["solar-install", "thanksgiving"]
+    moved = await seeded.get_workspace(older.id)
+    assert moved.updated_at == older.updated_at
+    assert moved.last_activity_at > older.last_activity_at
+    assert (moved.title, moved.status, moved.servers) == (older.title, older.status, older.servers)
+
+    # A row of any writer counts: Joshua answering in the shared thread, and a
+    # row that normal chat injected.
+    await seeded.add_transcript((await seeded.workspace_conversation(newer)).id, "out", "Mia does.")
+    assert await listed() == ["thanksgiving", "solar-install"]
+    await seeded.add_chat_row(conv, "a line from the normal chat")
+    assert await listed() == ["solar-install", "thanksgiving"]
+
+    # The stamp is on the answer the viewer reads.
+    answer = await client.get("/v1/workspaces", params={"person": "alex"}, headers=_h())
+    stamp = (await seeded.get_workspace(older.id)).last_activity_at
+    assert answer.json()["workspaces"][0]["last_activity_at"] == stamp.isoformat()
+
+    # A conversation that is no workspace thread moves no workspace.
+    await seeded.upsert_channel("telegram:1", "telegram", session_mode="per_person")
+    direct = await seeded.get_or_create_conversation("telegram:1", "alex")
+    before = {w.slug: w.last_activity_at for w in await seeded.list_workspaces("alex")}
+    await seeded.add_transcript(direct.id, "in", "hello")
+    assert {w.slug: w.last_activity_at for w in await seeded.list_workspaces("alex")} == before
+
+
 async def test_items_update_in_place_and_order_pinned_then_newest(seeded) -> None:
     ws = await seeded.create_workspace("alex", "Trip")
     a = await seeded.add_workspace_item(ws.id, "document", "a", "First")

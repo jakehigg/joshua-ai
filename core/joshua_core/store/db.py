@@ -241,6 +241,16 @@ ALTER TABLE workspaces DROP CONSTRAINT IF EXISTS workspaces_style_check;
 ALTER TABLE workspaces ADD CONSTRAINT workspaces_style_check
     CHECK (style IN ('none', 'ste', 'coach'));
 
+-- When something last happened in the thread of this workspace: every
+-- transcript row of it stamps this column, whoever wrote it (store/repo.py).
+-- `updated_at` is the last edit of the row and says nothing about the thread,
+-- so the list of the threads orders by this one. A row from before the column
+-- takes its `updated_at`, the newest stamp that database holds.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ;
+UPDATE workspaces SET last_activity_at = updated_at WHERE last_activity_at IS NULL;
+ALTER TABLE workspaces ALTER COLUMN last_activity_at SET DEFAULT now();
+ALTER TABLE workspaces ALTER COLUMN last_activity_at SET NOT NULL;
+
 -- A shared workspace is one thread that several people write in. `members`
 -- holds the ids beside the owner, and they never change after the create.
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT FALSE;
