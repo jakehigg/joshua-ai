@@ -26,9 +26,11 @@ from joshua_core.turns import (
     TURN_FAILED,
     DraftStore,
     HoldStore,
+    TicketStore,
     TurnService,
 )
 from joshua_shared import config as config_module
+from joshua_shared.contracts import Attachment
 from joshua_shared.http import FleetClient
 
 CHANNELS_TOKEN = "chan-tok"
@@ -631,6 +633,136 @@ async def test_the_hold_routes_report_what_the_age_limit_dropped(tmp_path) -> No
     # the answer says that it was dropped.
     assert taken.json()["text"] == ""
     assert [m["text"] for m in taken.json()["dropped"]] == ["all night"]
+
+
+class AttachmentManager:
+    """A manager that records the attachments of each turn it runs."""
+
+    def __init__(self) -> None:
+        self.files: list[list[str]] = []
+
+    async def run_turn(self, channel: Any, conversation: Any, text: str, **kwargs: Any):  # type: ignore[no-untyped-def]
+        self.files.append([a.name for a in kwargs.get("attachments") or []])
+        return TurnResult(text="ok")
+
+
+PHOTO = {"path": "attachments/2026/01/photo.png", "mime": "image/png", "name": "photo.png"}
+
+
+def cli_stream_event(**overrides: Any) -> dict[str, Any]:
+    """A viewer turn of the ``cli:alex`` thread, as channels posts it."""
+    return dm_event(
+        channel="cli:alex",
+        chat={"kind": "dm", "id": "alex"},
+        handle={"type": "cli", "id": "alex"},
+        message_id=None,
+        **overrides,
+    )
+
+
+async def test_a_held_message_keeps_its_files_and_the_take_gives_a_ticket(tmp_path) -> None:
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path)
+
+    async with core_client(turns) as client:
+        added = await client.post(
+            "/v1/holds",
+            json=thread_body(text="look at this", attachments=[PHOTO]),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        listed = await client.get(
+            "/v1/holds",
+            params={"channel": "cli:alex", "person": "alex"},
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        taken = await client.post(
+            "/v1/holds/take", json=thread_body(), headers=bearer(CHANNELS_TOKEN)
+        )
+        empty = await client.post(
+            "/v1/holds/take", json=thread_body(), headers=bearer(CHANNELS_TOKEN)
+        )
+
+    # A client reads the name and the type of each file, and no stored path.
+    files = [{"name": "photo.png", "mime": "image/png"}]
+    assert added.json()["message"]["attachments"] == files
+    assert listed.json()["held"][0]["attachments"] == files
+    assert taken.json()["held"][0]["attachments"] == files
+    assert taken.json()["take_ticket"]
+    # A take of a hold with no file carries no ticket.
+    assert "take_ticket" not in empty.json()
+
+
+async def test_the_ticket_of_a_take_carries_the_files_to_one_turn(tmp_path) -> None:
+    manager = AttachmentManager()
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path, manager=manager)
+
+    async with core_client(turns) as client:
+        await client.post(
+            "/v1/holds",
+            json=thread_body(text="look at this", attachments=[PHOTO]),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        taken = await client.post(
+            "/v1/holds/take", json=thread_body(), headers=bearer(CHANNELS_TOKEN)
+        )
+        ticket = taken.json()["take_ticket"]
+        event = cli_stream_event(text="look at this", held_take=ticket)
+        async with client.stream(
+            "POST", "/v1/turns/stream", json=event, headers=bearer(CHANNELS_TOKEN)
+        ) as first:
+            assert first.status_code == 200
+            async for _ in first.aiter_text():
+                pass
+        # The ticket is good for one turn.
+        again = await client.post("/v1/turns/stream", json=event, headers=bearer(CHANNELS_TOKEN))
+
+    assert manager.files == [["photo.png"]]
+    assert again.status_code == 400
+    assert again.json() == {"reason": "unknown_hold_take"}
+
+
+async def test_a_turn_cannot_redeem_a_ticket_of_another_thread(tmp_path) -> None:
+    manager = AttachmentManager()
+    turns = build_turns(TurnsFakeRepo(), make_settings(), [], tmp_path, manager=manager)
+
+    async with core_client(turns) as client:
+        await client.post(
+            "/v1/holds",
+            json=thread_body(channel="workspace:solar", text="look", attachments=[PHOTO]),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        taken = await client.post(
+            "/v1/holds/take",
+            json=thread_body(channel="workspace:solar"),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        ticket = taken.json()["take_ticket"]
+        # The main thread of the same person cannot spend the workspace's ticket.
+        foreign = await client.post(
+            "/v1/turns/stream",
+            json=cli_stream_event(text="look", held_take=ticket),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+        unknown = await client.post(
+            "/v1/turns/stream",
+            json=cli_stream_event(text="look", held_take="not a ticket"),
+            headers=bearer(CHANNELS_TOKEN),
+        )
+
+    assert foreign.status_code == 400
+    assert foreign.json() == {"reason": "unknown_hold_take"}
+    assert unknown.status_code == 400
+    # No turn ran for either.
+    assert manager.files == []
+
+
+def test_a_ticket_of_a_take_is_forgotten_past_the_age_limit() -> None:
+    now = [1_000.0]
+    tickets = TicketStore(max_age_s=60.0, clock=lambda: now[0])
+    files = [Attachment(path="attachments/2026/01/photo.png", mime="image/png", name="photo.png")]
+    ticket = tickets.add("cli:alex", "alex", files)
+    now[0] += 3_600.0
+
+    assert tickets.redeem(ticket, "cli:alex", "alex") is None
 
 
 async def test_holds_need_an_allowed_caller(tmp_path) -> None:

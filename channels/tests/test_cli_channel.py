@@ -869,6 +869,79 @@ async def test_an_empty_held_message_never_reaches_core(tmp_path: Path) -> None:
     assert core.requests == []
 
 
+async def test_a_multipart_held_message_lands_the_file_and_names_it_to_core(
+    tmp_path: Path,
+) -> None:
+    core = TranscriptCore(body=HELD_BODY)
+    app, _ = _make(tmp_path, core=core.client, pipeline=_pipeline(tmp_path))
+    async with _client(app) as client:
+        response = await client.post(
+            "/v1/cli/held",
+            data={"person": "alex", "text": "look at this"},
+            files=[("file", ("photo.jpg", _jpeg(), "image/jpeg"))],
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert response.status_code == 200
+    body = json.loads(core.requests[0].content)
+    assert body["channel"] == "cli:alex"
+    assert body["text"] == "look at this"
+    [attachment] = body["attachments"]
+    assert attachment["original_name"] == "photo.jpg"
+    assert attachment["mime"] == "image/jpeg"
+    # The file is where a turn's file goes.
+    assert attachment["path"].startswith(_month_prefix("alex"))
+    assert (tmp_path / attachment["path"]).exists()
+
+
+async def test_a_held_file_with_no_caption_gets_the_placeholder(tmp_path: Path) -> None:
+    core = TranscriptCore(body=HELD_BODY)
+    app, _ = _make(tmp_path, core=core.client, pipeline=_pipeline(tmp_path))
+    async with _client(app) as client:
+        response = await client.post(
+            "/v1/cli/held",
+            data={"person": "alex"},
+            files=[("file", ("photo.jpg", _jpeg(), "image/jpeg"))],
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert response.status_code == 200
+    body = json.loads(core.requests[0].content)
+    assert body["text"] == NO_CAPTION_TEXT
+    assert len(body["attachments"]) == 1
+
+
+async def test_a_multipart_hold_with_no_pipeline_is_503(tmp_path: Path) -> None:
+    core = TranscriptCore(body=HELD_BODY)
+    app, _ = _make(tmp_path, core=core.client)
+    async with _client(app) as client:
+        response = await client.post(
+            "/v1/cli/held",
+            data={"person": "alex", "text": "look at this"},
+            files=[("file", ("photo.jpg", _jpeg(), "image/jpeg"))],
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert response.status_code == 503
+    assert response.json() == {"reason": "pipeline_unavailable"}
+    assert core.requests == []
+
+
+async def test_a_turn_carries_the_ticket_of_a_hold_take(tmp_path: Path) -> None:
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    async with _client(app) as client:
+        plain = await client.post(
+            "/v1/cli/turns/stream",
+            json={"person": "alex", "text": "look at this", "held_take": "9f8e7d"},
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+        form = await client.post(
+            "/v1/cli/turns/stream",
+            data={"person": "alex", "text": "and this", "held_take": "7a6b5c"},
+            files=[("file", ("photo.jpg", _jpeg(), "image/jpeg"))],
+            headers=_bearer(LAPTOP_TOKEN),
+        )
+    assert (plain.status_code, form.status_code) == (200, 200)
+    assert [event.held_take for event in core.events] == ["9f8e7d", "7a6b5c"]
+
+
 async def test_the_hold_refuses_an_unknown_person_and_a_caller_not_on_the_list(
     tmp_path: Path,
 ) -> None:

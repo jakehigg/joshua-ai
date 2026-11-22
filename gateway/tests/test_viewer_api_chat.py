@@ -657,6 +657,79 @@ def test_an_empty_held_message_is_422_and_never_reaches_channels(client, channel
     assert channels.requests == []
 
 
+HELD_FILES = [{"name": "photo.png", "mime": "image/png"}]
+HELD_FILE_ROW = {**HELD_ROW, "attachments": HELD_FILES}
+
+
+def test_a_held_message_can_carry_a_file(client, channels) -> None:
+    channels.held = httpx.Response(200, json={"held": [HELD_FILE_ROW]})
+    response = client.post(
+        HELD,
+        data={"text": "look at this"},
+        files={"file": ("photo.png", b"pixels", "image/png")},
+        auth=ALEX,
+    )
+    assert response.status_code == 200
+    # The page reads the name and the type of the file, and no stored path.
+    assert response.json() == {"held": [HELD_FILE_ROW], "dropped": []}
+    assert channels.requests[0].url.path == viewer_channels.HELD_PATH
+    assert channels.requests[0].headers["content-type"].startswith("multipart/form-data")
+    body = channels.bodies[0]
+    assert b"pixels" in body and b'filename="photo.png"' in body and b"look at this" in body
+
+
+def test_a_held_message_with_a_file_and_no_text_reaches_channels(client, channels) -> None:
+    channels.held = httpx.Response(200, json={"held": [HELD_FILE_ROW]})
+    response = client.post(HELD, files={"file": ("photo.png", b"pixels", "image/png")}, auth=ALEX)
+    assert response.status_code == 200
+    assert channels.requests[0].headers["content-type"].startswith("multipart/form-data")
+
+
+def test_a_hold_over_the_limit_or_with_two_files_never_reaches_channels(
+    client, channels, monkeypatch
+) -> None:
+    monkeypatch.setenv("TURN_MAX_BYTES", "1024")
+    big = client.post(
+        HELD, data={"text": "a"}, files={"file": ("a.bin", b"z" * 5000, "x/y")}, auth=ALEX
+    )
+    assert big.status_code == 413
+    assert "the limit is 1 KB" in big.json()["error"]
+    two = client.post(
+        HELD, files=[("file", ("a", b"1", "x/y")), ("file", ("b", b"2", "x/y"))], auth=ALEX
+    )
+    assert two.status_code == 422 and "one file" in two.json()["error"]
+    assert channels.requests == []
+
+
+def test_the_take_carries_the_ticket_of_the_files_it_released(client, channels) -> None:
+    channels.held = httpx.Response(
+        200,
+        json={"text": "and one more", "held": [HELD_FILE_ROW], "take_ticket": "9f8e7d"},
+    )
+    response = client.post(HELD + "/take", json={}, auth=ALEX)
+    assert response.status_code == 200
+    assert response.json() == {
+        "text": "and one more",
+        "held": [HELD_FILE_ROW],
+        "dropped": [],
+        "takeTicket": "9f8e7d",
+    }
+
+
+def test_a_turn_carries_the_ticket_of_a_take_and_never_a_path(client, channels) -> None:
+    streamed = client.post(TURNS, json={"text": "look at this", "heldTake": "9f8e7d"}, auth=ALEX)
+    assert streamed.status_code == 200
+    assert json.loads(channels.bodies[0]) == {
+        "person": "alex",
+        "text": "look at this",
+        "held_take": "9f8e7d",
+    }
+    bad = client.post(TURNS, json={"text": "look", "heldTake": "../../etc/passwd"}, auth=ALEX)
+    assert bad.status_code == 422
+    assert bad.json()["error"] == "heldTake: not a ticket of a hold take"
+    assert len(channels.requests) == 1
+
+
 def test_a_cross_site_hold_is_403_and_never_reaches_channels(client, channels) -> None:
     for call in (
         lambda: client.post(
