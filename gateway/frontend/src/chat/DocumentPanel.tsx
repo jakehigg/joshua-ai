@@ -64,10 +64,14 @@ export const POLL_MS = 15_000;
 // The one line of affordance in the panel: what the `+` gutter is for.
 export const COMMENT_HINT = "Comment on a block with +; Joshua reads the comments on the next turn.";
 
+/** What the panel opens: an item, or the notes of the workspace (NotesCard.tsx). */
+export type OpenTarget = ItemTarget | { type: "notes" };
+
 export type PanelView =
   | { type: "page"; page: PageTarget }
   | { type: "card"; card: CardTarget }
-  | { type: "image"; image: ImageTarget };
+  | { type: "image"; image: ImageTarget }
+  | { type: "notes" };
 
 export interface DocumentPanelState {
   /** The document the panel shows, or null when no panel is open. */
@@ -85,7 +89,7 @@ export interface DocumentPanelState {
   live: boolean;
   show: (artifact: Artifact) => void;
   /** Open what an item points at: a document, a page of the viewer, or a card. */
-  open: (target: ItemTarget) => void;
+  open: (target: OpenTarget) => void;
   close: () => void;
   /** Reload the frame, when `path` is the document the panel has open. */
   reload: (path: string) => void;
@@ -185,7 +189,7 @@ export function useDocumentPanelState(): DocumentPanelState {
     setReloads(0);
   }, []);
   const open = useCallback(
-    (target: ItemTarget) => {
+    (target: OpenTarget) => {
       if (target.type === "document") return show(target.artifact);
       setShown(null);
       setReloads(0);
@@ -194,7 +198,9 @@ export function useDocumentPanelState(): DocumentPanelState {
           ? { type: "page", page: target.page }
           : target.type === "image"
             ? { type: "image", image: target.image }
-            : { type: "card", card: target.card },
+            : target.type === "notes"
+              ? { type: "notes" }
+              : { type: "card", card: target.card },
       );
     },
     [show],
@@ -242,6 +248,7 @@ function frameSrc(artifact: Artifact, reloads: number): string {
 
 /** The title of a view, for its header and for the name of the sheet. */
 export function viewTitle(view: PanelView): string {
+  if (view.type === "notes") return "Workspace notes";
   return view.type === "page" ? view.page.title : view.type === "image" ? view.image.title : view.card.title;
 }
 
@@ -347,7 +354,14 @@ export function PagePanel({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const title = viewTitle(view);
-  const key = view.type === "page" ? view.page.url : view.type === "image" ? view.image.url : view.card.title;
+  const key =
+    view.type === "page"
+      ? view.page.url
+      : view.type === "image"
+        ? view.image.url
+        : view.type === "card"
+          ? view.card.title
+          : "notes";
   // The page of the item itself: the framed page, or the photo. A card has
   // none, and offers its address in the card instead.
   const page = view.type === "page" ? view.page.url : view.type === "image" ? view.image.url : "";
@@ -380,7 +394,7 @@ export function PagePanel({
         <div className="image-view" key={key}>
           <img src={view.image.url} alt={title} />
         </div>
-      ) : (
+      ) : view.type === "card" ? (
         <div className="item-card">
           <span className="item-card-kind">{view.card.kindLabel}</span>
           <h2 className="item-card-title">{view.card.title}</h2>
@@ -396,7 +410,7 @@ export function PagePanel({
             </a>
           )}
         </div>
-      )}
+      ) : null}
     </aside>
   );
 }
@@ -420,7 +434,14 @@ export function PagePanel({
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select, textarea, iframe, [tabindex]:not([tabindex="-1"])';
 
-export function ItemSheet({ panel }: { panel: DocumentPanelState }) {
+export function ItemSheet({
+  panel,
+  renderNotes,
+}: {
+  panel: DocumentPanelState;
+  /** The notes of the workspace, with the full-screen toggle for its header. */
+  renderNotes?: (fullToggle: ReactNode) => ReactNode;
+}) {
   const [full, setFull] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   // Read while the sheet renders for the first time, before the panel inside
@@ -473,6 +494,8 @@ export function ItemSheet({ panel }: { panel: DocumentPanelState }) {
             full={full}
             onFull={onFull}
           />
+        ) : panel.view?.type === "notes" ? (
+          (renderNotes?.(<FullToggle full={full} onFull={onFull} />) ?? null)
         ) : panel.view ? (
           <PagePanel view={panel.view} onClose={panel.close} full={full} onFull={onFull} />
         ) : null}
