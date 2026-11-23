@@ -366,6 +366,8 @@ usage:
 #   # models:
 #   #   - claude-opus-5
 #   context_cap: 150000            # input tokens over which a workspace turn ends its session
+#   notes_max_chars: 16000         # the size limit of the notes of a workspace
+#   auto_continue_max: 3           # turns in a row core starts when a wrap-up asks to go on
 #   tool_search_max_servers: 3     # servers up to which a workspace runs with tool search off
 #   # The public address of the viewer, for the link that send_to_normal_chat adds.
 #   # viewer_url: https://joshua.example.org

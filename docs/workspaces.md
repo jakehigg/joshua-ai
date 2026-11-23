@@ -23,7 +23,7 @@ reads them.
 | `owner` | The person who made it. |
 | `shared`, `members` | `shared` is true for a workspace that several people write in, and `members` names the other people. A person who is neither the owner nor a member sees the workspace as not found. |
 | `goal` | A short paragraph. |
-| `notes` | Standing facts and rules. The agent keeps them with `update_workspace_notes`. |
+| `notes` | Standing facts and rules, in `## ` sections: the rules of the person in their words, the repositories and environments, and what Joshua checked that he may do. The agent keeps them with `update_workspace_notes_section`, one section at a time. At most `workspaces.notes_max_chars` (16000). |
 | `servers` | The MCP servers that the workspace uses. Only servers that every person of it may use. |
 | `model` | The model of the workspace. Empty keeps the model of the chat job. |
 | `notify` | `none` (default), `questions`, or `questions+finishes`. |
@@ -241,10 +241,19 @@ When the input of a workspace turn is over `workspaces.context_cap` (default
 size of the last model call of the turn.
 
 Before the old session ends, core asks it for a handoff, after the reply has
-reached the person. The handoff names the open questions in the words Joshua
-used, what waits on the person, what waits on Joshua, the decisions with
-their reasons, the running work, and the last request. Core keeps it on the
-conversation. The handoff is not a row of the thread.
+reached the person. The handoff names the messages of the person that are not
+answered yet, word for word, the open questions in the words Joshua used, the
+corrections and rules the person gave, the repositories and environments of
+the work (and the retired ones), what Joshua checked that he may do, what
+waits on the person, what waits on Joshua, the decisions with their reasons,
+the running work, and the last request. Core keeps it on the conversation.
+The handoff is not a row of the thread. Core clears the handoff of the session
+before, so a failed handoff never hands an old one to the next session.
+
+A turn that waited behind the turn that passed the cap was built for the old
+session. It starts again on the new session, after the handoff, at most
+twice. A failed turn whose input was over the cap ends its session as well,
+so a session that is too large does not fail turn after turn.
 
 The next turn waits for the handoff, then starts new, from the block, the
 handoff, and the recent conversation: the last three turns, word for word.
@@ -257,6 +266,31 @@ turns are one short line each, up to 10 of them: a row of a person whole up to
 2000 characters, a row of Joshua cut at 300. A line tells the session to use
 `search_history` or `read_history` for the exact words of an earlier message.
 When the handoff fails, the session starts from the block and the rows.
+
+The carried turns are answered already. Core builds the block before it
+writes the new message, so the heading of the carried turns says that the
+message to answer comes after the block.
+
+## Long work
+
+A workspace can hold work that runs for days. When its notes tell Joshua to
+keep working, the work goes on without the person:
+
+- A scheduled or event turn in a workspace gets a line after the framing of
+  the event: report what the event needs, then start the next piece that
+  needs nothing from the person, as the notes allow. The framing of an event
+  in normal chat says to report and stop; in a workspace that is not the end
+  of the work.
+- A workspace turn that uses all of its `max_turns` asks for a wrap-up that
+  may end with the line `[[continue]]`. Core takes the line out of the reply
+  and starts one more turn, as an event turn, that goes on with the next
+  step. In a shared workspace the person of the turn that asked acts in it.
+  At most `workspaces.auto_continue_max` (3) such turns run in a row; a turn
+  that ends without asking, or a message of a person, starts the count again.
+  Without the line, the wrap-up asks the person, as in normal chat.
+- `workspace.md` tells Joshua to check the next steps and the running work
+  before a turn ends, to ask only what the notes do not answer, and to search
+  the thread before he says that he did not do something.
 
 Every other conversation has the same cap in `core.context_cap`. See
 [config.md](config.md#context-cap). A workspace keeps its own setting, so each can
@@ -272,7 +306,8 @@ The `workspace` builtin server has these tools.
 | Tool | Where | Use |
 |---|---|---|
 | `add_to_workspace(kind, ref, title, url?, workspace?)` | every chat | Add an item. In a workspace, `workspace` defaults to this one. In a normal chat it is required: a slug or a title of a workspace the person reaches. An item added from another chat shows as new in the block. |
-| `update_workspace_notes(notes)` | workspace | Replace the notes. Keep them short, under 4000 characters. |
+| `update_workspace_notes(notes)` | workspace | Replace all of the notes, at most `workspaces.notes_max_chars` (16000) characters. |
+| `update_workspace_notes_section(heading, text)` | workspace | Replace one `## <heading>` section of the notes and keep the rest. A section that is not there is added at the end, and an empty text removes it. |
 | `send_to_normal_chat(text)` | workspace | Send `text` and a link to the workspace to the main chat of the person who wrote the turn. A turn with no person, a job event or a scheduled task, sends to the owner. One recipient, never the whole workspace. |
 | `notify_user(person, text, url?)` | shared workspace | Reach one person of this workspace: a notification on their devices, or a line and a link in their normal chat when they have none. `url` is the path the tap opens, this thread by default. A person who is not in the workspace is refused. See [Notifying one person](#notifying-one-person). |
 
@@ -791,6 +826,8 @@ session.
 | `workspaces.models` | empty | The models a workspace may pick. Empty accepts any text, and the picker then offers the models of `assignments.models`. |
 | `workspaces.context_cap` | `150000` | Input tokens over which a workspace turn ends its session. |
 | `workspaces.max_turns` | `50` | The least number of agent turns that a workspace turn gets. |
+| `workspaces.notes_max_chars` | `16000` | The size limit of the notes of a workspace, for the tools and the routes. Between 1000 and 64000. |
+| `workspaces.auto_continue_max` | `3` | The turns in a row that core starts after a wrap-up that asked to go on. `0` turns it off. |
 | `workspaces.tool_search_max_servers` | `3` | Servers up to which a workspace runs with tool search off. |
 | `workspaces.viewer_url` | none | The public address of the viewer, for the link in `send_to_normal_chat`. |
 | `workspaces.hint_sim` | `0.70` | The similarity over which normal chat gets the line "May relate to workspace X". |

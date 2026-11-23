@@ -163,7 +163,7 @@ class CreateBody(_Body):
 class PatchBody(_Body):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     goal: str | None = Field(default=None, max_length=4000)
-    notes: str | None = Field(default=None, max_length=8000)
+    notes: str | None = Field(default=None, max_length=64_000)
     servers: list[str] | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=200)
     notify: Notify | None = None
@@ -746,6 +746,15 @@ def build_workspaces_router() -> APIRouter:
         for name in ("goal", "notes", "notify", "style", "status", "servers"):
             if name in fields and fields[name] is None:
                 fields.pop(name)
+        limit = settings.workspaces.notes_max_chars
+        if len(fields.get("notes") or "") > limit:
+            return JSONResponse(
+                {
+                    "error": "invalid request",
+                    "detail": f"The notes are longer than {limit} characters.",
+                },
+                status_code=422,
+            )
         if "servers" in fields:
             fields["servers"] = _dedupe(fields["servers"])
             refused = _check_servers(settings, workspace.people, fields["servers"])

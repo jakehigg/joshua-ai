@@ -43,9 +43,12 @@ from joshua_core.engine.describe import (
 from joshua_core.engine.mcp import allowed_gateway_servers, gateway_servers
 from joshua_core.engine.tools import ToolDeps
 from joshua_core.engine.types import (
+    CONTINUE_MARKER,
+    CONTINUE_TEXT,
     FAILED_REPLY,
     HANDOFF_PROMPT,
     MAX_TURNS_ERROR,
+    WORKSPACE_WRAP_UP_PROMPT,
     WRAP_UP_PROMPT,
     Attachment,
     OnDelta,
@@ -71,6 +74,30 @@ WORKSPACE_UNATTENDED_NOTE = (
     "[This is a scheduled task in a workspace. Nothing you write here reaches the "
     "person. If the person should see it, call send_to_normal_chat.]"
 )
+
+# The line after the framing of a scheduled or event turn in a workspace. The
+# framing of an event says to report and stop, which is right for normal chat.
+# A workspace holds long work, so its rules decide whether the work goes on.
+WORKSPACE_KEEP_GOING = (
+    "[In a workspace, an event or a scheduled check is a step of the work, not "
+    "the end of it. Write the line that the event needs first. Then, if the "
+    "notes of this workspace tell you to keep working, keep the work going: "
+    "start the next piece that needs nothing from the person (dispatch it, "
+    "merge it, or schedule the check that waits for it), as the notes allow. "
+    "Do not ask the person for a step that the notes already let you take. "
+    "Stop only when no piece is ready, or when each ready piece needs the "
+    "person, and then say once what you need from them.]"
+)
+
+
+# How many times a turn starts again when its session was replaced while it
+# waited for the lock. Two resets in a row are rare; more is a fault.
+MAX_STALE_RESTARTS = 2
+
+
+class _StaleSession(Exception):
+    """A turn that waited for the lock found its session marked for
+    replacement. ``_run_turn`` starts the turn again on the new session."""
 
 
 @dataclass
@@ -171,6 +198,9 @@ class _Managed:
     # in the turn when its channel is not the one the prompt names.
     built_channel: str = ""
     last_turn_channel: str = ""
+    # The turns that core started in a row after a workspace wrap-up asked to
+    # go on. A message of a person sets it back to 0.
+    auto_continues: int = 0
 
 
 @dataclass
@@ -403,6 +433,9 @@ class ConversationManager:
         self._teardowns: set[asyncio.Task[None]] = set()
         # The turns in flight, by conversation id, oldest first.
         self._pending: dict[str, list[PendingTurn]] = {}
+        # Turns that core started on its own (a workspace that goes on), kept
+        # so the event loop does not drop them before they end.
+        self._background: set[asyncio.Task[None]] = set()
         self._reaper: asyncio.Task[None] | None = None
 
     @property
@@ -1093,6 +1126,8 @@ class ConversationManager:
         person_id: str | None = None,
         attachments: list[Attachment] | None = None,
         pull_only: bool = False,
+        retried: int = 0,
+        raw_attachments: list[Attachment] | None = None,
     ) -> TurnResult:
         """Run one turn. ``pull_only`` marks a turn from a channel that only
         pulls (the viewer) on a thread that another channel owns: the turn must
@@ -1122,6 +1157,9 @@ class ConversationManager:
         if self._url_grants is not None and direction == "in":
             # What the person wrote, and nothing the agent found for itself.
             self._url_grants.grant_from_text(conversation.id, text)
+        # A restart after a reset gets the attachments as they came in, not
+        # the prepared ones, so nothing is described or filed twice.
+        raw_attachments = attachments if raw_attachments is None else raw_attachments
         attachments, described = await self._prepare_attachments(
             attachments, role=role, person_id=turn_person_id, conversation_id=conversation.id
         )
@@ -1166,8 +1204,23 @@ class ConversationManager:
             if carried:
                 provider_notes.append(carried)
         channel_note = self._channel_note(mc, channel)
+        keep_going = (
+            WORKSPACE_KEEP_GOING
+            if channel.channel_type == WORKSPACE_CHANNEL_TYPE and direction in ("task", "inject")
+            else None
+        )
         prompt = "\n\n".join(
-            p for p in (preamble, framing, channel_note, *provider_notes, attach_note, body) if p
+            p
+            for p in (
+                preamble,
+                framing,
+                keep_going,
+                channel_note,
+                *provider_notes,
+                attach_note,
+                body,
+            )
+            if p
         )
 
         # Time-to-first-output: stamp the first streamed delta even when the
@@ -1201,161 +1254,210 @@ class ConversationManager:
         if mc.lock.locked():
             pending.state = "queued"
             await _tell(on_state, "queued")
-        async with mc.lock:
-            pending.state = "running"
-            await _tell(on_state, "running")
-            lock_wait_ms = round((monotonic() - t_lock) * 1000)
-            if shared_workspace and mc.acting_person != acting:
-                # A shared workspace: the gateway headers must name the person
-                # of this turn before it runs. The check is under the lock, so
-                # a turn that waited behind another person's turn never runs
-                # as that person.
-                await self._rebuild_locked(
-                    mc, channel, "session rebuilt (another person writes)", acting
-                )
-            mc.last_used = monotonic()
-            # Bind the in-process tools to THIS turn's channel and speaker. Safe
-            # under the per-conversation lock — turns are serialized.
-            if mc.deps is not None:
-                mc.deps.channel = channel
-                mc.deps.person_id = turn_person_id
-            # The stub backend journals to this turn's speaker; the SDK backend
-            # ignores this call. The mode gates the canned ``[[journal]]`` write.
-            set_turn = getattr(mc.session, "set_turn_context", None)
-            if set_turn is not None:
-                set_turn(turn_person_id, self._journal_modes.get(turn_person_id or "", "auto"))
-            in_meta: dict[str, Any] = {"turn_id": turn_id}
-            if speaker:
-                in_meta["speaker"] = speaker
-            if attachments:
-                in_meta["attachments"] = self._attachment_meta(attachments)
+        try:
+            async with mc.lock:
+                if mc.replace_pending and retried < MAX_STALE_RESTARTS:
+                    # The session ended while this turn waited for the lock:
+                    # a turn before it passed the context cap, or timed out.
+                    # This turn was built for the old session, so it starts
+                    # again on the new one, after the handoff.
+                    raise _StaleSession
+                pending.state = "running"
+                await _tell(on_state, "running")
+                lock_wait_ms = round((monotonic() - t_lock) * 1000)
+                if shared_workspace and mc.acting_person != acting:
+                    # A shared workspace: the gateway headers must name the person
+                    # of this turn before it runs. The check is under the lock, so
+                    # a turn that waited behind another person's turn never runs
+                    # as that person.
+                    await self._rebuild_locked(
+                        mc, channel, "session rebuilt (another person writes)", acting
+                    )
+                mc.last_used = monotonic()
+                # Bind the in-process tools to THIS turn's channel and speaker. Safe
+                # under the per-conversation lock — turns are serialized.
+                if mc.deps is not None:
+                    mc.deps.channel = channel
+                    mc.deps.person_id = turn_person_id
+                # The stub backend journals to this turn's speaker; the SDK backend
+                # ignores this call. The mode gates the canned ``[[journal]]`` write.
+                set_turn = getattr(mc.session, "set_turn_context", None)
+                if set_turn is not None:
+                    set_turn(turn_person_id, self._journal_modes.get(turn_person_id or "", "auto"))
+                in_meta: dict[str, Any] = {"turn_id": turn_id}
+                if speaker:
+                    in_meta["speaker"] = speaker
+                if attachments:
+                    in_meta["attachments"] = self._attachment_meta(attachments)
+                    if direction == "in":
+                        await self._record_workspace_files(channel, attachments, described)
+                await self._repo.add_transcript(conversation.id, direction, text, meta=in_meta)
+                try:
+                    result = await self._run_with_resume_retry(
+                        mc, channel, conversation, prompt, _timed_delta
+                    )
+                except Exception as e:  # noqa: BLE001
+                    await self._repo.add_transcript(
+                        conversation.id, "out", f"[error] {e}", status="failed"
+                    )
+                    logger.error(
+                        {
+                            "message": "turn failed",
+                            "turn_id": turn_id,
+                            "conversation_id": conversation.id,
+                            "error": str(e),
+                            "duration_ms": round((monotonic() - t_start) * 1000),
+                        }
+                    )
+                    raise
+
+                go_on = False
                 if direction == "in":
-                    await self._record_workspace_files(channel, attachments, described)
-            await self._repo.add_transcript(conversation.id, direction, text, meta=in_meta)
-            try:
-                result = await self._run_with_resume_retry(
-                    mc, channel, conversation, prompt, _timed_delta
-                )
-            except Exception as e:  # noqa: BLE001
-                await self._repo.add_transcript(
-                    conversation.id, "out", f"[error] {e}", status="failed"
-                )
-                logger.error(
-                    {
-                        "message": "turn failed",
-                        "turn_id": turn_id,
-                        "conversation_id": conversation.id,
-                        "error": str(e),
-                        "duration_ms": round((monotonic() - t_start) * 1000),
-                    }
-                )
-                raise
+                    mc.auto_continues = 0
+                if result.is_error and result.error == MAX_TURNS_ERROR:
+                    if channel.channel_type == WORKSPACE_CHANNEL_TYPE:
+                        result, go_on = await self._wrap_up_workspace(mc, result, _timed_delta)
+                    else:
+                        result = await self._wrap_up(mc, result, _timed_delta)
+                if not go_on:
+                    # The chain ended: a later wrap-up may go on again.
+                    mc.auto_continues = 0
 
-            if result.is_error and result.error == MAX_TURNS_ERROR:
-                result = await self._wrap_up(mc, result, _timed_delta)
+                mc.had_success = True
+                if not result.is_error:
+                    mc.has_history = True
+                mc.last_used = monotonic()
+                resolved = mc.inference or inference_plan.resolve(self._settings, "chat")
+                if result.is_error:
+                    # The error text can name a host. The log gets a short label,
+                    # and the person gets the failure reply.
+                    logger.warning(
+                        {
+                            "message": "turn call failed",
+                            "turn_id": turn_id,
+                            "conversation_id": conversation.id,
+                            "job": resolved.job,
+                            "endpoint": resolved.endpoint,
+                            "error": result.error or "error",
+                        }
+                    )
+                    result = replace(result, text=FAILED_REPLY)
+                # The one place a Joshua path becomes a link: the reply is stored
+                # and delivered from here, so every text channel gets the links
+                # and the channel only renders them.
+                result = replace(result, text=self._link_paths(result.text, resolved.job, channel))
+                if result.session_id and result.session_id != mc.conversation.sdk_session_id:
+                    await self._repo.set_sdk_session(
+                        conversation.id,
+                        result.session_id,
+                        last_channel_id=None if pull_only else channel.id,
+                        inference_endpoint=resolved.endpoint,
+                    )
+                    mc.conversation = replace(
+                        mc.conversation,
+                        sdk_session_id=result.session_id,
+                        inference_endpoint=resolved.endpoint,
+                    )
+                else:
+                    await self._repo.touch_conversation(
+                        conversation.id, last_channel_id=None if pull_only else channel.id
+                    )
 
-            mc.had_success = True
-            if not result.is_error:
-                mc.has_history = True
-            mc.last_used = monotonic()
-            resolved = mc.inference or inference_plan.resolve(self._settings, "chat")
-            if result.is_error:
-                # The error text can name a host. The log gets a short label,
-                # and the person gets the failure reply.
-                logger.warning(
-                    {
-                        "message": "turn call failed",
-                        "turn_id": turn_id,
-                        "conversation_id": conversation.id,
-                        "job": resolved.job,
-                        "endpoint": resolved.endpoint,
-                        "error": result.error or "error",
-                    }
-                )
-                result = replace(result, text=FAILED_REPLY)
-            # The one place a Joshua path becomes a link: the reply is stored
-            # and delivered from here, so every text channel gets the links
-            # and the channel only renders them.
-            result = replace(result, text=self._link_paths(result.text, resolved.job, channel))
-            if result.session_id and result.session_id != mc.conversation.sdk_session_id:
-                await self._repo.set_sdk_session(
-                    conversation.id,
-                    result.session_id,
-                    last_channel_id=None if pull_only else channel.id,
-                    inference_endpoint=resolved.endpoint,
-                )
-                mc.conversation = replace(
-                    mc.conversation,
-                    sdk_session_id=result.session_id,
-                    inference_endpoint=resolved.endpoint,
-                )
-            else:
-                await self._repo.touch_conversation(
-                    conversation.id, last_channel_id=None if pull_only else channel.id
-                )
-
-            metrics = {
-                "turn_id": turn_id,
-                "duration_ms": round((monotonic() - t_start) * 1000),
-                "first_output_ms": (
-                    round((first_output_at[0] - t_start) * 1000) if first_output_at else None
-                ),
-                "lock_wait_ms": lock_wait_ms,
-                "call_count": len(result.tool_calls),
-                "tools": result.tools_used,
-                # Paths the agent wrote this turn. The nightly reflection reads
-                # these to tell a skill file from a journal entry.
-                "written": written_paths(
-                    result.tool_calls,
-                    today=datetime.now(ZoneInfo(self._settings.timezone)).date(),
-                ),
-                **(
-                    {"write_failed": failed} if (failed := failed_writes(result.tool_calls)) else {}
-                ),
-            }
-            transcript_id = await self._repo.add_transcript(
-                conversation.id,
-                "out",
-                result.text or "",
-                status="failed" if result.is_error else "ok",
-                meta={
-                    "usage": result.usage,
-                    # The SDK prices a model it does not know at its own rates,
-                    # so a cost is kept only for a call to Anthropic.
-                    "cost_usd": (
-                        result.cost_usd if resolved.endpoint == ANTHROPIC_ENDPOINT else None
+                metrics = {
+                    "turn_id": turn_id,
+                    "duration_ms": round((monotonic() - t_start) * 1000),
+                    "first_output_ms": (
+                        round((first_output_at[0] - t_start) * 1000) if first_output_at else None
                     ),
-                    **metrics,
-                },
-            )
-            if isinstance(result.usage, dict):
-                await record_usage(
-                    self._repo,
-                    "chat",
-                    [Usage.from_sdk(result.usage)],
-                    model=resolved.model,
-                    endpoint=resolved.endpoint,
-                    person_id=turn_person_id,
-                    conversation_id=conversation.id,
-                    ref=f"transcript:{transcript_id}" if transcript_id is not None else None,
+                    "lock_wait_ms": lock_wait_ms,
+                    "call_count": len(result.tool_calls),
+                    "tools": result.tools_used,
+                    # Paths the agent wrote this turn. The nightly reflection reads
+                    # these to tell a skill file from a journal entry.
+                    "written": written_paths(
+                        result.tool_calls,
+                        today=datetime.now(ZoneInfo(self._settings.timezone)).date(),
+                    ),
+                    **(
+                        {"write_failed": failed}
+                        if (failed := failed_writes(result.tool_calls))
+                        else {}
+                    ),
+                }
+                transcript_id = await self._repo.add_transcript(
+                    conversation.id,
+                    "out",
+                    result.text or "",
+                    status="failed" if result.is_error else "ok",
+                    meta={
+                        "usage": result.usage,
+                        # The SDK prices a model it does not know at its own rates,
+                        # so a cost is kept only for a call to Anthropic.
+                        "cost_usd": (
+                            result.cost_usd if resolved.endpoint == ANTHROPIC_ENDPOINT else None
+                        ),
+                        **metrics,
+                    },
                 )
+                if isinstance(result.usage, dict):
+                    await record_usage(
+                        self._repo,
+                        "chat",
+                        [Usage.from_sdk(result.usage)],
+                        model=resolved.model,
+                        endpoint=resolved.endpoint,
+                        person_id=turn_person_id,
+                        conversation_id=conversation.id,
+                        ref=f"transcript:{transcript_id}" if transcript_id is not None else None,
+                    )
+                logger.info(
+                    {
+                        "message": "turn done",
+                        "conversation_id": conversation.id,
+                        "status": "failed" if result.is_error else "ok",
+                        **metrics,
+                    }
+                )
+                if not result.is_error:
+                    for settle in ctx.after_turn:
+                        try:
+                            await settle()
+                        except Exception as e:  # noqa: BLE001 — a settle never fails a turn
+                            logger.warning({"message": "after-turn step failed", "error": str(e)})
+                # A failed turn passes the cap too: a session that is too
+                # large fails each turn after it, so it must end all the same.
+                await self._apply_context_cap(mc, channel, result)
+                await self._check_mcp_failed(mc)
+                if go_on:
+                    self._continue_later(channel, conversation, mc, turn_person_id)
+                return result
+        except _StaleSession:
+            handoff = mc.handoff_task
+            if handoff is not None:
+                await asyncio.shield(handoff)
             logger.info(
                 {
-                    "message": "turn done",
+                    "message": "turn restarted on the new session",
                     "conversation_id": conversation.id,
-                    "status": "failed" if result.is_error else "ok",
-                    **metrics,
+                    "reason": mc.replace_reason,
                 }
             )
-            if not result.is_error:
-                for settle in ctx.after_turn:
-                    try:
-                        await settle()
-                    except Exception as e:  # noqa: BLE001 — a settle never fails a turn
-                        logger.warning({"message": "after-turn step failed", "error": str(e)})
-                await self._apply_context_cap(mc, channel, result)
-            await self._check_mcp_failed(mc)
-            return result
+            return await self._run_turn(
+                channel,
+                conversation,
+                text,
+                pending=pending,
+                on_state=on_state,
+                on_delta=on_delta,
+                framing=framing,
+                direction=direction,
+                speaker=speaker,
+                person_id=person_id,
+                attachments=raw_attachments,
+                pull_only=pull_only,
+                retried=retried + 1,
+                raw_attachments=raw_attachments,
+            )
 
     def _link_paths(self, text: str | None, job: str, channel: Channel) -> str | None:
         """The reply with every Joshua path written as a Markdown link.
@@ -1411,6 +1513,9 @@ class ConversationManager:
         if cap <= 0 or used is None or used <= cap:
             return
         await self._repo.clear_sdk_session(mc.conversation.id)
+        # The handoff of an earlier session must not reach the next one: if
+        # this handoff fails, the fresh session starts from the rows alone.
+        await self._repo.set_handoff(mc.conversation.id, None)
         mc.conversation = replace(mc.conversation, sdk_session_id=None)
         mc.replace_pending = True
         if is_workspace:
@@ -1542,7 +1647,14 @@ class ConversationManager:
             turns = max(turns, self._settings.workspaces.max_turns)
         return turns
 
-    async def _wrap_up(self, mc: _Managed, first: TurnResult, on_delta: OnDelta) -> TurnResult:
+    async def _wrap_up(
+        self,
+        mc: _Managed,
+        first: TurnResult,
+        on_delta: OnDelta,
+        *,
+        prompt: str = WRAP_UP_PROMPT,
+    ) -> TurnResult:
         """Get a reply for a turn that used all of its ``max_turns``.
 
         The SDK session keeps the tool work of that turn. One more message,
@@ -1559,7 +1671,7 @@ class ConversationManager:
             }
         )
         try:
-            wrap = await self._run_session(mc, WRAP_UP_PROMPT, on_delta)
+            wrap = await self._run_session(mc, prompt, on_delta)
         except Exception as e:  # noqa: BLE001 — the first result stands
             logger.warning({"message": "wrap-up failed", "error": type(e).__name__})
             return first
@@ -1581,6 +1693,80 @@ class ConversationManager:
                 n for n in [*first.tools_used, *wrap.tools_used] if not (n in seen or seen.add(n))
             ],
         )
+
+    async def _wrap_up_workspace(
+        self, mc: _Managed, first: TurnResult, on_delta: OnDelta
+    ) -> tuple[TurnResult, bool]:
+        """The wrap-up of a workspace turn that used all of its ``max_turns``.
+
+        It asks with ``WORKSPACE_WRAP_UP_PROMPT``, which lets the session ask
+        to go on with ``CONTINUE_MARKER`` instead of asking the person. The
+        reply is held and sent as one delta without the marker. Returns the
+        result and whether core starts one more turn: only when the session
+        asked and ``workspaces.auto_continue_max`` turns in a row are not used
+        up.
+        """
+        held: list[str] = []
+
+        async def hold(chunk: str) -> None:
+            held.append(chunk)
+
+        result = await self._wrap_up(mc, first, hold, prompt=WORKSPACE_WRAP_UP_PROMPT)
+        if result is first:
+            return first, False
+        text, asked = strip_continue_marker(result.text or "")
+        if asked and not text:
+            text = "Going on with the next step."
+        await on_delta(text)
+        limit = self._settings.workspaces.auto_continue_max
+        go_on = asked and mc.auto_continues < limit
+        if asked and not go_on:
+            logger.info(
+                {
+                    "message": "workspace asked to go on; limit reached",
+                    "conversation_id": mc.conversation.id,
+                    "limit": limit,
+                }
+            )
+        return replace(result, text=text), go_on
+
+    def _continue_later(
+        self,
+        channel: Channel,
+        conversation: Conversation,
+        mc: _Managed,
+        person_id: str | None = None,
+    ) -> None:
+        """Start one more workspace turn after this one, as an event turn.
+
+        It runs after the lock of this turn is free, so it queues as any
+        other turn does. ``person_id`` is the person of the turn that asked
+        to go on: in a shared workspace that person acts in the new turn too.
+        Its failure is logged and never reaches the turn that asked for it."""
+        mc.auto_continues += 1
+
+        async def go() -> None:
+            try:
+                await self.run_turn(
+                    channel,
+                    conversation,
+                    CONTINUE_TEXT,
+                    direction="inject",
+                    person_id=person_id,
+                )
+            except Exception as e:  # noqa: BLE001 — a continuation never fails a turn
+                logger.warning({"message": "workspace continue failed", "error": type(e).__name__})
+
+        logger.info(
+            {
+                "message": "workspace goes on in a new turn",
+                "conversation_id": conversation.id,
+                "count": mc.auto_continues,
+            }
+        )
+        task = asyncio.create_task(go(), name=f"continue-{conversation.id}")
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
 
     async def _run_session(self, mc: _Managed, prompt: str, on_delta: OnDelta) -> TurnResult:
         """Run one turn on ``mc.session`` inside ``inference.timeout_seconds``.
@@ -1757,6 +1943,11 @@ class ConversationManager:
         return {"sessions": sessions, "max": self._settings.core.pool_max}
 
     async def shutdown(self) -> None:
+        # A workspace that goes on must not start a session during teardown.
+        for task in list(self._background):
+            task.cancel()
+        if self._background:
+            await asyncio.gather(*self._background, return_exceptions=True)
         async with self._pool_lock:
             for mc in list(self._pool.values()):
                 await mc.session.close()
@@ -1764,6 +1955,21 @@ class ConversationManager:
         if self._teardowns:
             await asyncio.gather(*self._teardowns, return_exceptions=True)
         logger.info({"message": "manager shut down"})
+
+
+def strip_continue_marker(text: str) -> tuple[str, bool]:
+    """The reply without ``CONTINUE_MARKER``, and whether it was there.
+
+    The marker counts in the last 80 characters of the reply, also inside
+    backticks or followed by a full stop, so it never reaches the person."""
+    tail_at = max(0, len(text) - 80)
+    at = text.rfind(CONTINUE_MARKER, tail_at)
+    if at < 0:
+        return text.rstrip(), False
+    rest = text[at + len(CONTINUE_MARKER) :]
+    if rest.strip(" \t\n`.*_"):
+        return text.rstrip(), False
+    return text[:at].rstrip(" \t\n`*_").rstrip(), True
 
 
 def _sum_usage(a: Any, b: Any) -> Any:

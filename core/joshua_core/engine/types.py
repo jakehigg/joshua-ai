@@ -27,17 +27,30 @@ HANDOFF_PROMPT = (
     "[system] This session passed its context limit and ends now. The next "
     "session sees only what you write here, the last rows of the thread, and "
     "(in a workspace) the workspace block. Do not call a tool. Write a handoff "
-    "for that session, under 500 words, with these headings:\n"
+    "for that session, under 700 words, with these headings:\n"
+    "Unanswered messages: each message of the person that you have not "
+    "answered or done yet, word for word. The next session answers these "
+    "first.\n"
     "Open questions: each question you asked the person that has no answer "
     'yet, in the words you used, so a short answer such as "yes" or "the '
     'second one" makes sense.\n'
+    "Corrections: each time the person corrected you or gave you a rule in "
+    "this session, in their words. A correction wins over anything you wrote "
+    "before it.\n"
+    "Repositories and environments: each repository, branch, and environment "
+    "the work uses, with its full address, and each one the person said is "
+    "retired or out of bounds.\n"
+    "What you can do: each permission or tool path that you checked in this "
+    "session and that works, such as a merge you may make or a repository "
+    "you may push to, so the next session does not ask for it again.\n"
     "Waiting on the person: what the person must do, and why.\n"
     "Waiting on you: what you must do next.\n"
     "Decisions: each decision made, with its reason.\n"
     "Running work: each developer task, assignment, or scheduled check, its "
     "id, and what to do when it ends.\n"
     "Last request: what the person last asked for, in their words.\n"
-    "Write only the handoff. Leave out a heading that has nothing."
+    "Write only the handoff. Leave out a heading that has nothing. Write "
+    "only what you checked in this session: do not guess a fact."
 )
 
 # The message that the manager sends after a turn reaches ``max_turns``, so the
@@ -46,6 +59,29 @@ WRAP_UP_PROMPT = (
     "[system] This turn used all of its tool calls. Do not call a tool now. "
     "Reply to the person from what you already have: say what you found, what "
     "is still open, and what you would do next. Then ask whether to continue."
+)
+
+# The marker at the end of a workspace wrap-up that asks core for one more
+# turn. Core takes it out of the reply.
+CONTINUE_MARKER = "[[continue]]"
+
+# The wrap-up of a workspace turn. A workspace holds long work, so a turn that
+# used its tool calls may ask to go on instead of asking the person.
+WORKSPACE_WRAP_UP_PROMPT = (
+    "[system] This turn used all of its tool calls. Do not call a tool now. "
+    "Reply from what you already have: say what is done and what is still "
+    "open. If the notes of this workspace tell you to keep working, and the "
+    "next step needs nothing from the person, do not ask whether to continue: "
+    "name the next step, and end the reply with the line "
+    f"{CONTINUE_MARKER} alone. Core then starts a new turn, and you go on "
+    "from there. Otherwise, ask the person what you need."
+)
+
+# The text of the turn that core starts after a wrap-up that ends with
+# ``CONTINUE_MARKER``.
+CONTINUE_TEXT = (
+    "[Continue] The last turn used all of its tool calls, and you asked to go "
+    "on. Go on with the next step that you named in your last reply."
 )
 
 

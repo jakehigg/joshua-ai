@@ -1740,8 +1740,9 @@ class Repo:
                 (list(item_ids),),
             )
 
-    async def set_handoff(self, conversation_id: str, text: str) -> None:
-        """Keep the handoff that a session wrote before the context cap."""
+    async def set_handoff(self, conversation_id: str, text: str | None) -> None:
+        """Keep the handoff that a session wrote before the context cap. None
+        clears it."""
         async with self._pool.connection() as conn:
             await conn.execute(
                 "UPDATE conversations SET handoff = %s WHERE id = %s",
