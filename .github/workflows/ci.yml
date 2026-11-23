@@ -128,6 +128,17 @@ jobs:
             helm template joshua charts/joshua -f "$f" > /tmp/rendered.yaml
             kubeconform -strict -ignore-missing-schemas -summary /tmp/rendered.yaml
           done
+      # viewer.developerUrl gives the viewer DEVELOPER_URL with no other chart
+      # change. Empty, the default, must leave the variable off the pod.
+      - name: The viewer gets DEVELOPER_URL only when viewer.developerUrl is set
+        run: |
+          helm template joshua charts/joshua -f charts/joshua/ci/test-values.yaml \
+            --set viewer.enabled=true \
+            --set viewer.developerUrl=http://developer.example.com:8000 \
+            | grep -A1 'name: DEVELOPER_URL' | grep -q 'http://developer.example.com:8000'
+          helm template joshua charts/joshua -f charts/joshua/ci/test-values.yaml \
+            --set viewer.enabled=true \
+            | grep -q 'name: DEVELOPER_URL' && exit 1 || true
 
   build:
     if: github.event_name == 'push'

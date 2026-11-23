@@ -152,6 +152,10 @@ secrets:
   # JOSHUA_VIEWER_SESSION_SECRET signs the session cookie. Without it each pod
   # mints its own key at start, so a restart signs everybody out and two
   # replicas do not share a session.
+  # DEVELOPER_TOKEN is the bearer the viewer sends to the developer charm's
+  # addon, named here with viewer.developerUrl. A key can read it from the
+  # addon's own Secret, such as:
+  #   DEVELOPER_TOKEN: {name: joshua-addon-developer, key: ADDON_TOKEN}
   viewer:
     name: joshua-viewer-secrets
     keys:
@@ -306,6 +310,13 @@ viewer:
   # A whole image reference, which ignores the `image` block above. Empty means
   # the gateway image, which is where the viewer ships.
   image: ""
+  # The address of the developer charm's addon, read by
+  # gateway/joshua_gateway/viewer_developer.py. The developer charm ships in
+  # another chart, in another repository, so this chart cannot derive its
+  # address: set it to the addon's own URL. Empty means the viewer carries no
+  # DEVELOPER_URL, and the developer provider stays off. A DEVELOPER_TOKEN key
+  # of secrets.viewer is also needed; either one missing leaves the charm off.
+  developerUrl: ""
   # The viewer writes to the volume when a member trashes a wiki page, so two
   # pods must never race.
   strategy: Recreate

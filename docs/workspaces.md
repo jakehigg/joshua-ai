@@ -720,10 +720,12 @@ its workspace: a job of another channel, or of none, lights no charm. A job
 with no question is the working charm, and a job that carries a `question` is
 the waiting charm, with the question itself as the line of why, cut at 200
 characters. The two settings are `DEVELOPER_URL` and `DEVELOPER_TOKEN` on the
-viewer ([operations.md](operations.md#the-developer-addon-as-a-source-of-the-charm)).
-With either one unset the source is off and the viewer makes no call. The
-request has a two-second timeout, so a slow addon cannot hold the workspace
-list, and a call that fails or answers anything but 200 is one log line.
+viewer ([operations.md](operations.md#the-developer-addon-as-a-source-of-the-charm)):
+the chart gives them from `viewer.developerUrl` and a `DEVELOPER_TOKEN` key of
+`secrets.viewer`. With either one missing the source is off and the viewer
+makes no call. The request has a two-second timeout, so a slow addon cannot
+hold the workspace list, and a call that fails or answers anything but 200 is
+one log line.
 
 ### Viewer routes
 

@@ -1147,11 +1147,16 @@ assignments container:
 
 Both are optional, and neither has a default: with the address or the token
 unset, the viewer asks the addon nothing and the charm is what its other
-sources say. Compose and the chart set neither, because the addon runs outside
-this repository: add the two to the `environment` of the `viewer` service
-yourself. The request has a two-second timeout, so a slow addon cannot hold the
-list of the workspaces open, and a call that fails or is refused leaves the
-charm as the other sources left it and writes one log line.
+sources say. The addon runs outside this repository, so compose sets
+neither: add the two to the `environment` of the `viewer` service yourself.
+The chart gives the pod `DEVELOPER_URL` from `viewer.developerUrl`, empty by
+default: a values edit alone turns the source on. `DEVELOPER_TOKEN` needs no
+template change: it is a key of `secrets.viewer`, such as a key that reads the
+bearer from the addon's own Secret. With either `viewer.developerUrl` or the
+`DEVELOPER_TOKEN` key missing, the charm stays off. The request has a
+two-second timeout, so a slow addon cannot hold the list of the workspaces
+open, and a call that fails or is refused leaves the charm as the other
+sources left it and writes one log line.
 
 ### The documents section
 

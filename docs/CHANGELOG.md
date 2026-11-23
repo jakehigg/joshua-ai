@@ -110,7 +110,10 @@ with the images and the packaged chart, are at
   the line you read on hover or tap. The viewer reads the jobs from the addon
   with `DEVELOPER_URL` and `DEVELOPER_TOKEN`; with either one unset it asks the
   addon nothing and the charm is what its other sources say, and an addon that
-  is slow or silent leaves the charm as it is. See
+  is slow or silent leaves the charm as it is. The chart gives the viewer
+  `DEVELOPER_URL` from the new `viewer.developerUrl` value, and
+  `DEVELOPER_TOKEN` is a key of `secrets.viewer`, with no other template
+  change. See
   [workspaces.md](workspaces.md#the-charm-beside-the-name) and
   [operations.md](operations.md#the-developer-addon-as-a-source-of-the-charm).
 - **Joshua writes the text of a pull request by a page of core.** A session
