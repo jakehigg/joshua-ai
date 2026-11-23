@@ -28,10 +28,13 @@ CONFIG = textwrap.dedent("""\
     people:
       - id: alex
         name: Alex
+      - id: sam
+        name: Sam
     viewer:
       enabled: true
       users:
         alex: ${VIEWER_PW_ALEX:-}
+        sam: ${VIEWER_PW_SAM:-}
     """)
 
 FRAMES = 'event: delta\ndata: {"text": "Hel"}\n\nevent: done\ndata: {"text": "Hello"}\n\n'
@@ -179,12 +182,30 @@ def test_a_form_with_two_files_or_an_empty_one_is_422(client) -> None:
     assert no_text.status_code == 422
 
 
-def test_an_unknown_person_is_404(client) -> None:
-    for path in ("/api/v1/chat/zed/turns", "/api/v1/chat/Bad_Id/turns"):
-        response = client.post(path, json={"text": "hi"}, auth=ALEX)
-        assert response.status_code == 404
-        assert response.json() == {"error": "Joshua does not know this person"}
-    assert client.get("/api/v1/chat/zed/history", auth=ALEX).status_code == 404
+def test_a_path_that_names_another_person_is_403(client, channels) -> None:
+    """A chat route acts for the person of its path, so only the person who
+    signed in may name themselves there. A known person and an unknown one
+    get the same answer, so the answer tells nobody who Joshua knows."""
+    for who in ("sam", "zed", "Bad_Id"):
+        response = client.post(f"/api/v1/chat/{who}/turns", json={"text": "hi"}, auth=ALEX)
+        assert response.status_code == 403
+        assert response.json() == {"error": "This chat belongs to another person"}
+        for tail in ("history", "held", "draft"):
+            assert client.get(f"/api/v1/chat/{who}/{tail}", auth=ALEX).status_code == 403
+        assert (
+            client.post(f"/api/v1/chat/{who}/draft", json={"text": "x"}, auth=ALEX).status_code
+            == 403
+        )
+        assert client.post(f"/api/v1/chat/{who}/held/take", json={}, auth=ALEX).status_code == 403
+        assert client.delete(f"/api/v1/chat/{who}/held/h-1", auth=ALEX).status_code == 403
+    assert channels.requests == []
+
+
+def test_a_person_reaches_their_own_chat(client, channels) -> None:
+    """Sam signs in and reads Sam's thread; the path of Alex stays closed to Sam."""
+    sam = signed_in("sam")
+    assert client.get("/api/v1/chat/sam/history", auth=sam).status_code != 403
+    assert client.get("/api/v1/chat/alex/history", auth=sam).status_code == 403
 
 
 @pytest.mark.parametrize(
@@ -754,7 +775,7 @@ def test_the_hold_routes_need_the_sign_in(client) -> None:
 
 
 def test_an_unknown_person_has_no_hold(client, channels) -> None:
-    assert client.get("/api/v1/chat/nobody/held", auth=ALEX).status_code == 404
+    assert client.get("/api/v1/chat/nobody/held", auth=ALEX).status_code == 403
     assert channels.requests == []
 
 
@@ -817,5 +838,5 @@ def test_the_draft_routes_need_the_sign_in(client) -> None:
 
 
 def test_an_unknown_person_has_no_draft(client, channels) -> None:
-    assert client.get("/api/v1/chat/nobody/draft", auth=ALEX).status_code == 404
+    assert client.get("/api/v1/chat/nobody/draft", auth=ALEX).status_code == 403
     assert channels.requests == []
