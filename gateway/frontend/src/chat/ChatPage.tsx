@@ -97,6 +97,7 @@ import { usePanels } from "../shell/panels";
 import { clearDraft, loadDraft, type Draft } from "./draft";
 import { useComposerDraft } from "./useComposerDraft";
 import { ItemPanel } from "./ItemPanel";
+import { NotesPanel } from "./NotesCard";
 import { useWorkspaces, type Workspaces } from "./useWorkspaces";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
@@ -483,17 +484,29 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
               setItemsOpen(false);
               panels.set("items", true);
             }}
-            notes={{
-              workspace: ws,
-              onSaved: (w) => {
-                onWs?.(w);
-                workspaces.reload();
-              },
-              onAsk: (text) => send(text),
-            }}
+            notes={ws}
           />
         )}
-        {ws && panelOpen && <ItemSheet panel={panel} />}
+        {ws && panelOpen && (
+          <ItemSheet
+            panel={panel}
+            renderNotes={(fullToggle) => (
+              <NotesPanel
+                key={ws.id}
+                notes={{
+                  workspace: ws,
+                  onSaved: (w) => {
+                    onWs?.(w);
+                    workspaces.reload();
+                  },
+                  onAsk: (text) => send(text),
+                }}
+                onClose={panel.close}
+                fullToggle={fullToggle}
+              />
+            )}
+          />
+        )}
         {!ws && panelOpen && <Divider panel="doc" label="Resize the document panel" />}
         {!ws && panel.shown && (
           <DocumentPanel

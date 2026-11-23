@@ -1944,35 +1944,85 @@ html.vv-fit .chat-screen .ws-overlay {
 .profile-ok { margin: 0; font-size: var(--j-text-sm); color: var(--j-ok); }
 .profile-push-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* The notes of a workspace, first in the item panel (NotesCard.tsx). The body
-   holds a long text, so it scrolls inside after a third of the screen. */
-.chat-screen .ws-notes-card {
+/* The notes of a workspace (NotesCard.tsx). The card stands first in the item
+   panel and opens the notes in the item sheet, where a document opens too. */
+.chat-screen .ws-notes-card { margin: 0 0 12px; }
+.chat-screen .ws-notes-open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
   border: 1px solid var(--j-line);
   border-radius: 10px;
   background: var(--j-surface-2);
-  padding: 4px 10px 10px;
-  margin: 0 0 12px;
-}
-.chat-screen .ws-notes-card .item-group { margin-top: 4px; }
-.chat-screen .ws-notes-body {
-  max-height: 34vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  font-size: 0.875rem;
-  line-height: 1.45;
-}
-.chat-screen .ws-notes-body h2 { font-size: 0.9375rem; margin: 10px 0 4px; }
-.chat-screen .ws-notes-body ul { padding-left: 1.1em; margin: 4px 0; }
-.chat-screen .ws-notes-body li { margin: 2px 0; }
-.chat-screen .ws-notes-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
-.chat-screen .ws-notes-form { display: flex; flex-direction: column; gap: 6px; }
-.chat-screen .ws-notes-form textarea {
+  color: inherit;
   font: inherit;
-  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-screen .ws-notes-open:hover,
+.chat-screen .ws-notes-open.active { border-color: var(--j-accent, var(--j-line)); }
+.chat-screen .ws-notes-head { display: flex; align-items: baseline; gap: 8px; }
+.chat-screen .ws-notes-name { font-weight: 600; }
+.chat-screen .ws-notes-preview { display: flex; flex-direction: column; gap: 2px; font-size: 0.8125rem; color: var(--j-faint); }
+.chat-screen .ws-notes-preview span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The notes in the sheet: a column, the header on top, then the text that
+   scrolls, or the editor that takes all the room under the header. */
+.chat-screen .ws-notes-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.chat-screen .ws-notes-tool { min-height: 32px; padding: 0 10px; border-radius: 8px; }
+.chat-screen .ws-notes-tool.primary { font-weight: 600; }
+.chat-screen .ws-notes-read { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 24px; }
+.chat-screen .ws-notes-meta { margin: 4px 0 10px; font-size: 0.8125rem; }
+.chat-screen .ws-notes-gap { height: 8px; }
+.chat-screen .ws-notes-line { display: grid; grid-template-columns: 28px 1fr; align-items: start; border-radius: 6px; }
+.chat-screen .ws-notes-line:hover,
+.chat-screen .ws-notes-line.active { background: var(--j-surface-2); }
+.chat-screen .ws-notes-plus {
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  padding: 0;
+  border: 1px solid var(--j-line);
+  border-radius: 6px;
+  background: var(--j-bg);
+  color: var(--j-faint);
+  line-height: 1;
+  /* The tap height of every button of the chat screen would make each line
+     as tall as a button. */
+  min-height: 0;
+  opacity: 0;
+}
+.chat-screen .ws-notes-line:hover .ws-notes-plus,
+.chat-screen .ws-notes-line.active .ws-notes-plus,
+.chat-screen .ws-notes-plus:focus-visible { opacity: 1; }
+/* A touch screen has no hover: the + stays in sight. */
+@media (hover: none) { .chat-screen .ws-notes-plus { opacity: 0.6; } }
+.chat-screen .ws-notes-text { min-width: 0; padding: 2px 4px; }
+.chat-screen .ws-notes-text > :first-child { margin-top: 0; }
+.chat-screen .ws-notes-text > :last-child { margin-bottom: 0; }
+.chat-screen .ws-notes-text h2 { font-size: 1.0625rem; margin: 6px 0 2px; }
+.chat-screen .ws-notes-text ul { margin: 0; padding-left: 1.1em; }
+.chat-screen .ws-notes-line + .ws-notes-line { margin-top: 2px; }
+.chat-screen .ws-notes-sent { display: block; margin: 2px 0 4px; font-size: 0.75rem; }
+.chat-screen .ws-notes-comment { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; }
+.chat-screen .ws-notes-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.chat-screen .ws-notes-comment textarea,
+.chat-screen .ws-notes-editor textarea {
+  font: inherit;
   color: inherit;
   background: var(--j-bg);
   border: 1px solid var(--j-line);
   border-radius: 8px;
-  padding: 6px 8px;
+  padding: 8px 10px;
 }
-.chat-screen .ws-notes-form textarea.ws-notes-edit { max-height: 50vh; overflow-y: auto; resize: vertical; }
+.chat-screen .ws-notes-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 16px 12px; gap: 6px; }
+.chat-screen .ws-notes-editor textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  font-family: var(--j-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}

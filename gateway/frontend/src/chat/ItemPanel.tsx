@@ -292,7 +292,7 @@ export function ItemPanel({
   /** The id of the workspace whose items these are, never a slug ref. */
   workspace: string;
   /** The workspace whose notes stand at the top, and what a change does. */
-  notes?: { workspace: Workspace; onSaved: (w: Workspace) => void; onAsk: (text: string) => void };
+  notes?: Workspace;
   refreshKey: number;
   open: boolean;
   onClose: () => void;
@@ -450,14 +450,7 @@ export function ItemPanel({
           »
         </button>
       </header>
-      {notes && (
-        <NotesCard
-          key={notes.workspace.id}
-          workspace={notes.workspace}
-          onSaved={notes.onSaved}
-          onAsk={notes.onAsk}
-        />
-      )}
+      {notes && <NotesCard workspace={notes} />}
       {here.length > 0 && (
         <div className="item-filter">
           <input
