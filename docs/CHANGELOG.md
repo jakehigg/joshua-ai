@@ -63,6 +63,9 @@ with the images and the packaged chart, are at
   session can read. A single message past 4000 characters is cut, and the text
   says so. The rows before those turns stay short lines, and the handoff and
   the pointer to `search_history` and `read_history` are unchanged.
+  The heading of those turns says that they are answered already and that
+  the new message comes after the block, so a fresh session answers the new
+  message and not the last one again.
 - **The Items panel also holds a wiki page, a promoted document, and a saved
   file.** A page written with `write_file`, the page a document becomes with
   `promote_document`, and a file copied into the wiki with `save_attachment`

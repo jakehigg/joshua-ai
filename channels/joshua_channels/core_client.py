@@ -36,6 +36,21 @@ DRAFTS_PATH = "/v1/drafts"
 # One retry after core answers 429, then the turn is dropped.
 BUSY_RETRY_AFTER_S = 2.0
 
+# The fields that a turn leaves out when they are empty, so that a core of the
+# release before them still takes the turn. Core refuses an unknown field, and
+# the channels and core containers do not always roll at the same moment.
+OMIT_WHEN_EMPTY = frozenset({"held_take"})
+
+
+def turn_body(event: TurnEvent) -> dict[str, Any]:
+    """The JSON body of a turn. A field of ``OMIT_WHEN_EMPTY`` that is None
+    stays out of it."""
+    body = event.model_dump(mode="json")
+    for name in OMIT_WHEN_EMPTY:
+        if body.get(name) is None:
+            body.pop(name, None)
+    return body
+
 
 class CoreClient:
     """Submit turns to core over the fleet channel."""
@@ -57,7 +72,7 @@ class CoreClient:
         is retried once after ``busy_retry_after_s``; a second 429 drops the turn
         with an audit line.
         """
-        body = event.model_dump(mode="json")
+        body = turn_body(event)
         response = await self._client.post_json(TURNS_PATH, json=body)
         if response.status_code == 429:
             logger.warning(
@@ -95,7 +110,7 @@ class CoreClient:
 
     async def stream_turn(self, event: TurnEvent) -> AsyncIterator[tuple[str, dict]]:
         """Run a turn inline and yield ``(event_name, data)`` for each SSE frame."""
-        body = event.model_dump(mode="json")
+        body = turn_body(event)
         async with self._client.stream("POST", STREAM_PATH, json=body) as response:
             async for frame in _iter_sse(response):
                 yield frame

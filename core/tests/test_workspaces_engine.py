@@ -903,6 +903,24 @@ async def test_the_fresh_block_carries_the_last_three_turns_whole() -> None:
     assert text.index("- alex: ask 1") < text.index(ws.RECENT_TURNS_HEAD)
 
 
+async def test_the_carried_turns_say_the_new_message_comes_after_them() -> None:
+    """Core builds the block before it writes the incoming message, so the
+    newest carried turn is the last exchange, already answered. The heading
+    must not call it the message to answer."""
+    repo = WsRepo(_ws())
+    repo.tail = [
+        {"direction": "in", "content": "the old ask", "status": "ok"},
+        {"direction": "out", "content": "the old answer", "status": "ok"},
+    ]
+    block = ws.WorkspaceBlock(repo)
+
+    text = await block(_ctx(_channel(), fresh=True))
+
+    assert "already answered" in ws.RECENT_TURNS_HEAD
+    assert "newest turn is the message you are answering" not in text
+    assert text.index(ws.RECENT_TURNS_HEAD) < text.index("alex: the old ask")
+
+
 async def test_a_rollover_after_a_reply_still_carries_the_turns() -> None:
     """The cap ends a session after any turn, so the newest row of the thread
     may be a reply. The carried turns hold both sides all the same."""

@@ -128,3 +128,23 @@ async def test_build_core_client_from_env() -> None:
     client = build_core_client({"CORE_URL": "http://core", "JOSHUA_TOKEN_CHANNELS": "t"})
     assert client is not None
     await client.aclose()
+
+
+async def test_a_turn_with_no_held_take_leaves_the_field_out() -> None:
+    """A core of the release before ``held_take`` refuses an unknown field, so
+    a turn that takes no hold must not send it, even as null."""
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        bodies.append(json.loads(request.content))
+        return httpx.Response(202, json={"accepted": True, "turn_id": "t-1"})
+
+    client = _client(handler)
+    await client.submit_turn(_event())
+    await client.submit_turn(_event().model_copy(update={"held_take": "ticket-1"}))
+    await client.aclose()
+
+    assert "held_take" not in bodies[0]
+    assert bodies[1]["held_take"] == "ticket-1"

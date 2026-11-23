@@ -61,8 +61,9 @@ CUT_NOTE = "\n[This message is cut here. Use `read_history` for the whole text.]
 FRESH_TAIL_ROWS = 30
 # The heading of the carried turns.
 RECENT_TURNS_HEAD = (
-    "The recent conversation of this thread, word for word, oldest first. The "
-    "newest turn is the message you are answering:"
+    "The recent conversation of this thread, word for word, oldest first. "
+    "These turns are already answered. The message you are answering comes "
+    "after this block:"
 )
 # The line that a fresh session gets after its rows.
 HISTORY_HINT = (
