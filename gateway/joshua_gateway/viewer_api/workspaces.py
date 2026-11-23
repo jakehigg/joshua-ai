@@ -21,7 +21,8 @@ core resolves it for the person.
 The list and the read of one workspace carry one field that core does not
 give: ``charm``, ``{"state": "working" | "waiting", "reason"}`` or null. It is
 the charm beside the name of the workspace, and ``viewer_workspaces`` collects
-it from core's answer and from the assignments manager.
+it from core's answer, from the assignments manager, and from the developer
+addon.
 
 Each route calls core with ``CORE_URL`` and ``JOSHUA_TOKEN_VIEWER`` and names
 the signed-in person in the ``person`` query parameter. A guest gets 403. Every
@@ -43,7 +44,7 @@ from joshua_shared.log import get_logger
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from joshua_gateway import viewer_assignments
+from joshua_gateway import viewer_assignments, viewer_developer
 from joshua_gateway import viewer_workspaces as vw
 from joshua_gateway.viewer_api.edit import _origin_ok
 
@@ -124,7 +125,10 @@ async def _add_charms(person: Person, answer: dict[str, Any]) -> None:
     if not workspaces and "id" in answer:
         workspaces = [answer]
     marks = await vw.charms(
-        person.id, workspaces, assignments=viewer_assignments.from_env(os.environ)
+        person.id,
+        workspaces,
+        assignments=viewer_assignments.from_env(os.environ),
+        developer=viewer_developer.from_env(os.environ),
     )
     for row in workspaces:
         row["charm"] = vw.charm_json(marks.get(str(row.get("id"))))

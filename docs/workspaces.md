@@ -688,10 +688,11 @@ shared one. It has two states, and a workspace with nothing running and nothing
 waiting carries no charm at all.
 
 - **Working.** Joshua has something in flight for this workspace: a turn of the
-  thread, or an assignment that is running.
+  thread, an assignment that is running, or a developer job that has not ended.
 - **Waiting.** Something of it asks the person: an assignment that stopped with
-  a question or a request. A draft is no charm: it asks nothing, so a
-  workspace whose only open item is a draft carries none.
+  a question or a request, or a developer job that asked a question. A draft is
+  no charm: it asks nothing, so a workspace whose only open item is a draft
+  carries none.
 
 Working wins over waiting: Joshua is on it, so the person has nothing to do
 yet. Hover or tap gives one line of what it is, such as `assignment 31 has a
@@ -701,18 +702,28 @@ charm stands for no text on screen. It is read-only: nothing on it acts.
 The viewer composes the state in `gateway/joshua_gateway/viewer_workspaces.py`,
 and `GET /api/v1/workspaces` and `GET /api/v1/workspaces/{slug}` carry it as
 `charm`: `{"state": "working" | "waiting", "reason": "..."}` or null. The
-sources are core's `turn_in_flight` and the assignments manager, which gives
-the runs and the drafts of the signed-in person with the workspace of each. A
+sources are core's `turn_in_flight`, the assignments manager, which gives the
+runs and the drafts of the signed-in person with the workspace of each, and the
+developer addon, which gives its jobs with the channel each one reports to. A
 source that is not configured, or that does not answer, is left out, so the
 charm is what the other sources say and never an error. An assignment paused at
 the subscription limits carries no charm: it waits for a window to reset, which
 needs no person, and nothing of it is running. A draft carries no charm either:
 it waits for a person to start it, which is not a question to answer.
 
-**The developer addon is not a source yet.** It has no read route for the jobs
-of a workspace, so a developer task in flight, or one that asked a question,
-shows no charm. When that route exists it is one more reader in that module;
-the merge, the routes, and the screen stay as they are.
+**The developer addon as a source.** The viewer reads `GET /v1/jobs` on the
+addon with a bearer token, and takes the jobs that have not ended: a status of
+`dispatched` or `running` (an older service says `in_progress`). The job
+carries `notify_channel`, the channel it reports to, which is
+`workspace:<id>` for a job a workspace dispatched, and that is how a job finds
+its workspace: a job of another channel, or of none, lights no charm. A job
+with no question is the working charm, and a job that carries a `question` is
+the waiting charm, with the question itself as the line of why, cut at 200
+characters. The two settings are `DEVELOPER_URL` and `DEVELOPER_TOKEN` on the
+viewer ([operations.md](operations.md#the-developer-addon-as-a-source-of-the-charm)).
+With either one unset the source is off and the viewer makes no call. The
+request has a two-second timeout, so a slow addon cannot hold the workspace
+list, and a call that fails or answers anything but 200 is one log line.
 
 ### Viewer routes
 
