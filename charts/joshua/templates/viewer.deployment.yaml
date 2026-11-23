@@ -69,6 +69,13 @@ spec:
             - name: ASSIGNMENTS_URL
               value: http://joshua-assignments:8000
             {{- end }}
+            {{- if .Values.viewer.developerUrl }}
+            {{/* The developer charm's addon, which ships in another chart.
+                 DEVELOPER_TOKEN, the bearer the viewer sends with it, is a
+                 key of secrets.viewer below, with no template change needed. */}}
+            - name: DEVELOPER_URL
+              value: {{ .Values.viewer.developerUrl | quote }}
+            {{- end }}
             {{/* Every viewer password, in one variable, as
                  `<person-id>=<bcrypt hash>` pairs. No person is named here,
                  so nothing in this chart names your roster. */}}
