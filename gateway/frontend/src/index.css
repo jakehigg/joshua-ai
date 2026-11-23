@@ -1943,3 +1943,36 @@ html.vv-fit .chat-screen .ws-overlay {
 }
 .profile-ok { margin: 0; font-size: var(--j-text-sm); color: var(--j-ok); }
 .profile-push-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* The notes of a workspace, first in the item panel (NotesCard.tsx). The body
+   holds a long text, so it scrolls inside after a third of the screen. */
+.chat-screen .ws-notes-card {
+  border: 1px solid var(--j-line);
+  border-radius: 10px;
+  background: var(--j-surface-2);
+  padding: 4px 10px 10px;
+  margin: 0 0 12px;
+}
+.chat-screen .ws-notes-card .item-group { margin-top: 4px; }
+.chat-screen .ws-notes-body {
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+.chat-screen .ws-notes-body h2 { font-size: 0.9375rem; margin: 10px 0 4px; }
+.chat-screen .ws-notes-body ul { padding-left: 1.1em; margin: 4px 0; }
+.chat-screen .ws-notes-body li { margin: 2px 0; }
+.chat-screen .ws-notes-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.chat-screen .ws-notes-form { display: flex; flex-direction: column; gap: 6px; }
+.chat-screen .ws-notes-form textarea {
+  font: inherit;
+  font-size: 0.875rem;
+  color: inherit;
+  background: var(--j-bg);
+  border: 1px solid var(--j-line);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.chat-screen .ws-notes-form textarea.ws-notes-edit { max-height: 50vh; overflow-y: auto; resize: vertical; }

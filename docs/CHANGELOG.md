@@ -71,6 +71,9 @@ with the images and the packaged chart, are at
     environments (and the retired ones), and what Joshua checked that he may
     do. The Notes field of the workspace settings is tall enough to read and
     to edit.
+  - The notes stand first in the Items panel, under "Workspace notes". You
+    read them whole there, edit them in place, or send Joshua a change with
+    "Ask Joshua".
   - The handoff names the messages of the person that are not answered, the
     corrections, the repositories and environments, and what Joshua may do.
     Core clears an old handoff before it writes a new one.

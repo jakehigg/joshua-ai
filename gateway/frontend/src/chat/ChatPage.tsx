@@ -483,6 +483,14 @@ function Chat({ person, me, workspace, ws, onWs, workspaces }: ChatProps) {
               setItemsOpen(false);
               panels.set("items", true);
             }}
+            notes={{
+              workspace: ws,
+              onSaved: (w) => {
+                onWs?.(w);
+                workspaces.reload();
+              },
+              onAsk: (text) => send(text),
+            }}
           />
         )}
         {ws && panelOpen && <ItemSheet panel={panel} />}
