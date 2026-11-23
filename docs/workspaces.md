@@ -655,6 +655,11 @@ server behind the gateway and reads the stamp the way step 1 does.
 The chat screen of the viewer is the workspace UI. It works the same on docker
 compose and on Kubernetes, and it adds no container.
 
+- The notes stand first in the item panel, under "Workspace notes": the whole
+  text, folded with its header. "Edit notes" changes them in place, with the
+  PATCH of the workspace. "Ask Joshua" sends one message into the thread that
+  starts "Update the workspace notes:", so Joshua makes the change himself
+  with his notes tools.
 - `/chat/<person>` is the normal chat. `/chat/w/<owner>/<slug>` is a
   workspace, and `shared` stands for the owner of a shared one, so everyone in
   it opens the same address. Every link the screen builds — the list of the

@@ -43,6 +43,8 @@ import {
   type WorkspaceItem,
 } from "../api/workspaces";
 import { getDocumentMeta } from "../api/client";
+import { NotesCard } from "./NotesCard";
+import type { Workspace } from "../api/workspaces";
 import { useDocumentPanel } from "./DocumentPanel";
 import { isImageItem, itemTarget, targetKey, type ItemTarget } from "./itemTarget";
 
@@ -285,9 +287,12 @@ export function ItemPanel({
   onClose,
   collapsed = false,
   onCollapse,
+  notes,
 }: {
   /** The id of the workspace whose items these are, never a slug ref. */
   workspace: string;
+  /** The workspace whose notes stand at the top, and what a change does. */
+  notes?: { workspace: Workspace; onSaved: (w: Workspace) => void; onAsk: (text: string) => void };
   refreshKey: number;
   open: boolean;
   onClose: () => void;
@@ -445,6 +450,14 @@ export function ItemPanel({
           »
         </button>
       </header>
+      {notes && (
+        <NotesCard
+          key={notes.workspace.id}
+          workspace={notes.workspace}
+          onSaved={notes.onSaved}
+          onAsk={notes.onAsk}
+        />
+      )}
       {here.length > 0 && (
         <div className="item-filter">
           <input
