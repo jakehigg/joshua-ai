@@ -55,6 +55,25 @@ with the images and the packaged chart, are at
 
 ### Workspaces
 
+- **Long work in a workspace stays on track.** A workspace can run for days,
+  and its session resets many times. These changes keep the work going over
+  those resets:
+  - The notes hold 16000 characters (`workspaces.notes_max_chars`), and
+    Joshua changes one `## ` section at a time with the new tool
+    `update_workspace_notes_section`. `workspace.md` asks for three
+    sections: the rules of the person in their words, the repositories and
+    environments (and the retired ones), and what Joshua checked that he may
+    do. The Notes field of the workspace settings is tall enough to read and
+    to edit.
+  - The handoff names the messages of the person that are not answered, the
+    corrections, the repositories and environments, and what Joshua may do.
+    Core clears an old handoff before it writes a new one.
+  - When the notes say to keep working, an event or a scheduled turn of a
+    workspace goes on with the next piece after its report, and a turn that
+    used all of its tool calls can start one more turn on its own, up to
+    `workspaces.auto_continue_max` (3) in a row.
+  - A turn that waited behind a reset starts on the new session, and a failed
+    turn whose input was over the cap ends its session too.
 - **A workspace that resets keeps the recent conversation word for word.**
   The session of a workspace thread resets at `workspaces.context_cap`, and
   the fresh session now holds the last three turns of the thread whole: each

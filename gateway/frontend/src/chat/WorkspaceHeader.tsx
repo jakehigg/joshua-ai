@@ -169,7 +169,7 @@ function EditDrawer({
         <label className="j-field-label" htmlFor="ws-e-notes">
           Notes
         </label>
-        <GrowTextarea id="ws-e-notes" rows={5} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <GrowTextarea id="ws-e-notes" className="ws-notes" rows={12} value={notes} onChange={(e) => setNotes(e.target.value)} />
         <label className="j-field-label" htmlFor="ws-e-model">
           Model
         </label>

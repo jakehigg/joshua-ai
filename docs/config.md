@@ -1347,6 +1347,8 @@ person makes a workspace.
 | `models` | empty | The models that a workspace may pick. An empty list accepts any name. |
 | `context_cap` | `150000` | Input tokens over which a workspace turn ends its SDK session. Before the session ends, it writes a handoff. The next turn starts from the workspace block, the handoff, the last three turns of the thread word for word, and a short line for each of the 10 rows before them. At least 1000. |
 | `max_turns` | `50` | The least number of agent turns that a workspace turn gets. A workspace turn reads repositories, pipelines, and documents, so it needs more than `core.max_turns`. |
+| `notes_max_chars` | `16000` | The size limit of the notes of a workspace. The tools refuse a longer text, and the route answers 422. Between 1000 and 64000. |
+| `auto_continue_max` | `3` | When a workspace turn uses all of its `max_turns` and its wrap-up asks to go on, core starts one more turn. This is the number of such turns in a row; a message of a person starts the count again. `0` turns it off. |
 | `tool_search_max_servers` | `3` | A workspace that picks this many servers or fewer runs with tool search off. More servers turn it on. |
 | `viewer_url` | none | The public address of the viewer. `send_to_normal_chat` adds the link `<viewer_url>/chat/w/<owner>/<slug>`, with `shared` for the owner of a shared workspace. Without it, the message has the path only. |
 | `hint_sim` | `0.70` | The similarity over which normal chat gets the line "May relate to workspace X", from the `workspaces` record of the index. Between 0 and 1. |

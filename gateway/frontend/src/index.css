@@ -1222,6 +1222,12 @@ html, body { max-width: 100%; overflow-x: clip; }
   overscroll-behavior: contain;
   padding: 4px 16px 16px;
 }
+/* The body scrolls, so a field keeps its own height. Without this the column
+   squeezes a tall textarea to its min-height, and its text cannot be read. */
+.chat-screen .ws-body > * { flex-shrink: 0; }
+/* The notes can hold many sections: the field grows to half the screen, then
+   scrolls inside, and a drag of its corner makes it taller. */
+.chat-screen .ws-dialog textarea.ws-notes { max-height: 50vh; overflow-y: auto; resize: vertical; }
 .chat-screen .ws-dialog .ws-actions {
   flex: none;
   margin: 0;

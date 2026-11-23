@@ -4,8 +4,9 @@ its notes, send the person a message in normal chat, and reach another person.
 ``add_to_workspace`` is in every chat. Inside a workspace thread it adds to the
 current workspace unless the call names another. In a normal chat it must name
 one of the person's workspaces, by slug or by title, and the item shows in the
-block of that workspace as new. ``update_workspace_notes`` and
-``send_to_normal_chat`` are in a workspace thread only: the server builder reads
+block of that workspace as new. ``update_workspace_notes``,
+``update_workspace_notes_section`` and ``send_to_normal_chat`` are in a
+workspace thread only: the server builder reads
 ``deps.channel.channel_type``. ``notify_user`` is in a shared workspace thread
 only, where the builder also reads ``deps.channel.session_mode``.
 
@@ -80,8 +81,9 @@ logger = get_logger("tools.workspace")
 
 SERVER_NAME = "workspace"
 
-# The notes are in every turn of the workspace, so they stay short.
-NOTES_MAX_CHARS = 4000
+# The notes are in every turn of the workspace. ``workspaces.notes_max_chars``
+# limits them; this is its default, for a caller without settings.
+NOTES_MAX_CHARS = 16_000
 
 Deliver = Callable[[str, str], Awaitable[bool]]
 # Starts one turn in a workspace thread, in the background: (workspace, text).
@@ -233,21 +235,84 @@ async def _active(deps: ToolDeps) -> list[Workspace]:
     return await deps.repo.list_workspaces(deps.person_id, "active")
 
 
-async def do_update_workspace_notes(deps: ToolDeps, *, notes: str) -> dict[str, Any]:
+def _too_long(size: int, limit: int) -> dict[str, Any]:
+    return _reply(
+        f"The notes would be {size} characters. Keep them under {limit}: cut what is "
+        "done or old (status belongs in the tasks), and put long material in a document. "
+        "Never cut a rule that the person gave."
+    )
+
+
+async def do_update_workspace_notes(
+    deps: ToolDeps, *, notes: str, limit: int = NOTES_MAX_CHARS
+) -> dict[str, Any]:
     """Replace the notes of the current workspace."""
     if not _in_workspace(deps):
         return _reply("This chat is not a workspace.")
     notes = (notes or "").strip()
-    if len(notes) > NOTES_MAX_CHARS:
-        return _reply(
-            f"The notes are {len(notes)} characters. Keep them under {NOTES_MAX_CHARS}: "
-            "cut what is old, and put long material in a document."
-        )
+    if len(notes) > limit:
+        return _too_long(len(notes), limit)
     workspace = await _current(deps)
     if workspace is None:
         return _reply("The workspace of this chat was not found.")
     await deps.repo.update_workspace(workspace.id, notes=notes)
-    return _reply("Notes updated.")
+    return _reply(f"Notes updated ({len(notes)} of {limit} characters).")
+
+
+def _norm_heading(line: str) -> str:
+    return line.lstrip("#").strip().lower()
+
+
+def replace_notes_section(notes: str, heading: str, text: str) -> tuple[str, str]:
+    """The notes with the section ``## <heading>`` replaced by ``text``, and
+    what happened: ``replaced``, ``added`` or ``removed``.
+
+    A section is a line that starts with ``## `` and the lines after it, up to
+    the next ``## `` line. The heading matches with no regard to case or to the
+    number of ``#``. A section that is not there is added at the end. An empty
+    ``text`` removes the section."""
+    heading = heading.strip().lstrip("#").strip()
+    body = text.strip()
+    lines = notes.splitlines()
+    start = next(
+        (
+            i
+            for i, line in enumerate(lines)
+            if line.startswith("## ") and _norm_heading(line) == heading.lower()
+        ),
+        None,
+    )
+    section = [f"## {heading}", "", body] if body else []
+    if start is None:
+        if not body:
+            return notes, "removed"
+        head = notes.rstrip()
+        return ((head + "\n\n") if head else "") + "\n".join(section), "added"
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    if section:
+        # The heading keeps the words it has in the notes.
+        section[0] = lines[start]
+    tail = lines[end:]
+    new = lines[:start] + section + ([""] if section and tail else []) + tail
+    return "\n".join(new).strip(), "replaced" if body else "removed"
+
+
+async def do_update_workspace_notes_section(
+    deps: ToolDeps, *, heading: str, text: str, limit: int = NOTES_MAX_CHARS
+) -> dict[str, Any]:
+    """Replace one ``## `` section of the notes of the current workspace."""
+    if not _in_workspace(deps):
+        return _reply("This chat is not a workspace.")
+    if not (heading or "").strip().lstrip("#").strip():
+        return _reply("Name the heading of the section.")
+    workspace = await _current(deps)
+    if workspace is None:
+        return _reply("The workspace of this chat was not found.")
+    notes, what = replace_notes_section(workspace.notes or "", heading, text or "")
+    if len(notes) > limit:
+        return _too_long(len(notes), limit)
+    await deps.repo.update_workspace(workspace.id, notes=notes)
+    return _reply(f"Section {what} ({len(notes)} of {limit} characters).")
 
 
 def app_link(settings: JoshuaConfig, path: str) -> str:
@@ -741,6 +806,21 @@ _NOTES_SCHEMA = {
     "required": ["notes"],
 }
 
+_SECTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "heading": {
+            "type": "string",
+            "description": "The heading of the section without the ##, such as 'Repositories'.",
+        },
+        "text": {
+            "type": "string",
+            "description": "The new text of the section. An empty text removes the section.",
+        },
+    },
+    "required": ["heading", "text"],
+}
+
 _ITEM_SCHEMA = {
     "type": "object",
     "properties": {
@@ -877,14 +957,30 @@ def build_workspace_server(
             workspace=args.get("workspace") or None,
         )
 
+    notes_limit = settings.workspaces.notes_max_chars
+
     @tool(
         "update_workspace_notes",
-        "Replace the notes of this workspace. The notes are standing facts and rules, and "
-        "they ride in every turn: keep them short and current, and drop what is old.",
+        "Replace all of the notes of this workspace. The notes are standing facts and "
+        "rules, and they ride in every turn. To change one part, use "
+        "update_workspace_notes_section instead: it sends less and keeps the rest as it is.",
         _NOTES_SCHEMA,
     )
     async def update_workspace_notes(args: dict[str, Any]) -> dict[str, Any]:
-        return await do_update_workspace_notes(deps, notes=args.get("notes", ""))
+        return await do_update_workspace_notes(deps, notes=args.get("notes", ""), limit=notes_limit)
+
+    @tool(
+        "update_workspace_notes_section",
+        "Replace one section of the notes of this workspace: the '## <heading>' line and "
+        "the lines under it, up to the next '## ' line. A section that is not there is "
+        "added at the end, and an empty text removes it. Keep a rule of the person in "
+        "their words.",
+        _SECTION_SCHEMA,
+    )
+    async def update_workspace_notes_section(args: dict[str, Any]) -> dict[str, Any]:
+        return await do_update_workspace_notes_section(
+            deps, heading=args.get("heading", ""), text=args.get("text", ""), limit=notes_limit
+        )
 
     @tool(
         "send_to_normal_chat",
@@ -990,7 +1086,7 @@ def build_workspace_server(
     if person is not None and is_member(person.role):
         tools.append(notify_person)
     if _in_workspace(deps):
-        tools += [update_workspace_notes, send_to_normal_chat]
+        tools += [update_workspace_notes, update_workspace_notes_section, send_to_normal_chat]
         if _in_shared_workspace(deps):
             tools.append(notify_user)
     else:

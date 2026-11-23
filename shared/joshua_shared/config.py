@@ -1002,7 +1002,10 @@ class WorkspacesConfig(_Model):
     normal chat gets the line "May relate to workspace X". ``tasks_url`` is
     the address of the tasks addon: with it, the block of a workspace that
     links a tasks project lists the next steps. Without it, the section is
-    off.
+    off. ``notes_max_chars`` is the size limit of the notes of a workspace.
+    ``auto_continue_max`` is the number of turns in a row that core starts
+    when a workspace turn used all of its tool calls and asked to go on; 0
+    turns it off. A message of a person starts the count again.
     """
 
     allowed_callers: list[str] = ["viewer", "gateway", "assignments"]
@@ -1013,6 +1016,8 @@ class WorkspacesConfig(_Model):
     viewer_url: str | None = None
     hint_sim: float = Field(default=0.70, ge=0.0, le=1.0)
     tasks_url: str | None = None
+    notes_max_chars: int = Field(default=16_000, ge=1_000, le=64_000)
+    auto_continue_max: int = Field(default=3, ge=0, le=20)
 
     @field_validator("tasks_url", mode="before")
     @classmethod

@@ -149,7 +149,9 @@ class WsRepo(FakeRepo):
         self.items: list[WorkspaceItem] = list(items or [])
         self.tail: list[dict[str, Any]] = []
         self.cleared: list[str] = []
-        self.handoffs: dict[str, str] = {}
+        self.handoffs: dict[str, str | None] = {}
+        # Each handoff written, in order. The cap clears the stored one first.
+        self.handoff_log: list[str] = []
         self.seen: list[str] = []
         self.added: list[dict[str, Any]] = []
         self.notes: list[str] = []
@@ -193,8 +195,10 @@ class WsRepo(FakeRepo):
     async def clear_sdk_session(self, conversation_id: str):
         self.cleared.append(conversation_id)
 
-    async def set_handoff(self, conversation_id: str, text: str):
+    async def set_handoff(self, conversation_id: str, text: str | None):
         self.handoffs[conversation_id] = text
+        if text is not None:
+            self.handoff_log.append(text)
 
     async def conversation_handoff(self, conversation_id: str):
         return self.handoffs.get(conversation_id)
@@ -809,7 +813,7 @@ async def test_the_fresh_session_gets_the_last_rows(tmp_path, monkeypatch):
     await manager.run_turn(_CLI, _conversation(), "next")
     # The old session wrote the handoff before the fresh session started.
     assert prompts[1] == HANDOFF_PROMPT
-    handoff = repo.handoffs["c-ws"]
+    handoff = repo.handoff_log[0]
     fresh = prompts[2]
     assert "The handoff that the last session wrote before it ended:" in fresh
     assert handoff in fresh
@@ -839,7 +843,8 @@ async def test_a_failed_handoff_leaves_the_last_rows(tmp_path, monkeypatch):
     manager = _general_manager(repo, tmp_path)
     await manager.run_turn(_CLI, _conversation(), "big turn")
     await manager.run_turn(_CLI, _conversation(), "next")
-    assert repo.handoffs == {}
+    assert repo.handoff_log == []
+    assert not any(repo.handoffs.values())
     fresh = prompts[-1]
     assert "The handoff that" not in fresh
     assert "- alex: the garden plan" in fresh
@@ -1136,7 +1141,11 @@ async def test_update_notes_replaces_them_in_a_workspace_only() -> None:
     assert "not a workspace" in _text(
         await ws_tools.do_update_workspace_notes(_deps(repo, normal), notes="x")
     )
-    too_long = await ws_tools.do_update_workspace_notes(_deps(repo), notes="x" * 5000)
+    assert "Notes updated" in _text(
+        await ws_tools.do_update_workspace_notes(_deps(repo), notes="a" * 5000)
+    )
+    repo.notes.pop()
+    too_long = await ws_tools.do_update_workspace_notes(_deps(repo), notes="x" * 20_000)
     assert "Keep them under" in _text(too_long)
     assert repo.notes == ["a"]
 
@@ -1593,13 +1602,14 @@ def test_a_shared_workspace_adds_notify_user_to_the_tools_of_a_workspace(
     assert _names(server) == {
         "add_to_workspace",
         "update_workspace_notes",
+        "update_workspace_notes_section",
         "send_to_normal_chat",
         "notify_user",
         "notify_person",
     }
 
 
-def test_the_server_has_four_tools_in_a_workspace_and_six_in_normal_chat(
+def test_the_server_has_five_tools_in_a_workspace_and_six_in_normal_chat(
     listed_tools: None,
 ) -> None:
     settings = make_settings()
@@ -1611,6 +1621,7 @@ def test_the_server_has_four_tools_in_a_workspace_and_six_in_normal_chat(
     assert _names(in_ws) == {
         "add_to_workspace",
         "update_workspace_notes",
+        "update_workspace_notes_section",
         "send_to_normal_chat",
         "notify_person",
     }
@@ -2127,3 +2138,223 @@ async def test_the_scheduling_tool_notes_the_workspace_rule(monkeypatch) -> None
     )
     assert "send_to_normal_chat" in seen[0]
     assert "send_to_normal_chat" not in seen[1]
+
+
+# --- staying on track over a long workspace -----------------------------------------------
+
+
+def test_a_notes_section_is_replaced_and_the_rest_kept() -> None:
+    notes = "## Rules\n\n- one\n\n## Repositories\n\n- old repo\n\n## What I can do\n\n- merge"
+    new, what = ws_tools.replace_notes_section(notes, "repositories", "- new repo")
+    assert what == "replaced"
+    assert "- new repo" in new and "- old repo" not in new
+    assert new.index("## Rules") < new.index("## Repositories") < new.index("## What I can do")
+    assert "- one" in new and "- merge" in new
+
+
+def test_a_missing_notes_section_is_added_and_an_empty_one_removed() -> None:
+    added, what = ws_tools.replace_notes_section("## Rules\n\n- one", "## Repositories", "- a")
+    assert what == "added"
+    assert added.endswith("## Repositories\n\n- a")
+    removed, what = ws_tools.replace_notes_section(added, "Rules", "")
+    assert what == "removed"
+    assert "## Rules" not in removed and "## Repositories" in removed
+    same, what = ws_tools.replace_notes_section("x", "Nothing here", "")
+    assert (same, what) == ("x", "removed")
+
+
+async def test_the_notes_section_tool_keeps_the_limit() -> None:
+    repo = WsRepo(_ws(notes="## Rules\n\n- one"))
+    ok = await ws_tools.do_update_workspace_notes_section(
+        _deps(repo), heading="Repositories", text="- a", limit=1000
+    )
+    assert "Section added" in _text(ok)
+    assert repo.notes[-1].endswith("## Repositories\n\n- a")
+    big = await ws_tools.do_update_workspace_notes_section(
+        _deps(repo), heading="Repositories", text="x" * 2000, limit=1000
+    )
+    assert "Keep them under 1000" in _text(big)
+    assert "Name the heading" in _text(
+        await ws_tools.do_update_workspace_notes_section(_deps(repo), heading=" ## ", text="a")
+    )
+
+
+def _ws_wrap_manager(tmp_path, auto_continue_max: int = 3):
+    settings = make_settings(mcp=MCP)
+    settings.workspaces.auto_continue_max = auto_continue_max
+    return make_manager(WsRepo(_ws()), tmp_path, settings)
+
+
+async def test_a_workspace_wrap_up_that_asks_to_go_on_starts_one_more_turn(tmp_path) -> None:
+    from joshua_core.engine.types import (
+        CONTINUE_MARKER,
+        MAX_TURNS_ERROR,
+        WORKSPACE_WRAP_UP_PROMPT,
+        TurnResult,
+    )
+
+    manager = _ws_wrap_manager(tmp_path)
+    mc = SimpleNamespace(conversation=_conversation(), auto_continues=0)
+    asked: list[str] = []
+
+    async def session(_mc, prompt, on_delta):
+        asked.append(prompt)
+        await on_delta(f"Merged 12. Next: dispatch 13.\n{CONTINUE_MARKER}")
+        return TurnResult(text=f"Merged 12. Next: dispatch 13.\n{CONTINUE_MARKER}")
+
+    manager._run_session = session
+    deltas: list[str] = []
+
+    async def on_delta(chunk: str) -> None:
+        deltas.append(chunk)
+
+    first = TurnResult(text="", is_error=True, error=MAX_TURNS_ERROR)
+    result, go_on = await manager._wrap_up_workspace(mc, first, on_delta)
+
+    assert asked == [WORKSPACE_WRAP_UP_PROMPT]
+    assert go_on
+    assert CONTINUE_MARKER not in result.text
+    # The person sees the reply once, without the marker.
+    assert deltas == ["Merged 12. Next: dispatch 13."]
+
+    mc.auto_continues = 3
+    _, go_on = await manager._wrap_up_workspace(mc, first, on_delta)
+    assert not go_on
+
+
+async def test_a_workspace_wrap_up_with_no_marker_stops(tmp_path) -> None:
+    from joshua_core.engine.types import MAX_TURNS_ERROR, TurnResult
+
+    manager = _ws_wrap_manager(tmp_path)
+    mc = SimpleNamespace(conversation=_conversation(), auto_continues=0)
+
+    async def session(_mc, prompt, on_delta):
+        return TurnResult(text="Which repository is it in?")
+
+    manager._run_session = session
+
+    async def on_delta(chunk: str) -> None:
+        return None
+
+    first = TurnResult(text="", is_error=True, error=MAX_TURNS_ERROR)
+    result, go_on = await manager._wrap_up_workspace(mc, first, on_delta)
+    assert not go_on
+    assert result.text == "Which repository is it in?"
+
+
+async def test_continue_later_runs_one_event_turn(tmp_path) -> None:
+    import asyncio
+
+    from joshua_core.engine.types import CONTINUE_TEXT
+
+    manager = _ws_wrap_manager(tmp_path)
+    mc = SimpleNamespace(conversation=_conversation(), auto_continues=0)
+    calls: list[tuple[str, str]] = []
+
+    async def run_turn(channel, conversation, text, **kw):
+        calls.append((text, kw.get("direction"), kw.get("person_id")))
+
+    manager.run_turn = run_turn
+    # In a shared workspace the person who asked to go on acts again.
+    manager._continue_later(_channel(), _conversation(), mc, "blake")
+    await asyncio.gather(*list(manager._background))
+
+    assert calls == [(CONTINUE_TEXT, "inject", "blake")]
+    assert mc.auto_continues == 1
+
+
+async def test_a_workspace_event_turn_gets_the_keep_going_line(tmp_path, monkeypatch) -> None:
+    from joshua_core.engine.manager import WORKSPACE_KEEP_GOING
+
+    install_fake_sdk(monkeypatch)
+    prompts: list[str] = []
+
+    class Client(FakeSDKClient):
+        async def query(self, prompt):
+            prompts.append(prompt)
+
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", Client)
+    manager = make_manager(WsRepo(_ws()), tmp_path)
+    await manager.run_turn(
+        _channel(), _conversation(), "task 12 ended", direction="inject", framing="EVENT"
+    )
+    await manager.run_turn(_channel(), _conversation(), "hello")
+
+    assert WORKSPACE_KEEP_GOING in prompts[0]
+    assert prompts[0].index("EVENT") < prompts[0].index(WORKSPACE_KEEP_GOING)
+    assert WORKSPACE_KEEP_GOING not in prompts[1]
+
+
+async def test_a_turn_that_waited_behind_a_reset_starts_on_the_new_session(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    import asyncio
+
+    install_fake_sdk(monkeypatch)
+    prompts: list[str] = []
+
+    class Client(FakeSDKClient):
+        async def query(self, prompt):
+            prompts.append(prompt)
+
+    from joshua_core.engine import agent
+
+    monkeypatch.setattr(agent, "ClaudeSDKClient", Client)
+    repo = WsRepo(_ws())
+    manager = make_manager(repo, tmp_path)
+    await manager.run_turn(_channel(), _conversation(), "first")
+    mc = manager._pool["c-ws"]
+    old = mc.session
+
+    # Another turn holds the lock and ends its session, as the context cap
+    # does; this turn waits behind it.
+    await mc.lock.acquire()
+    waiting = asyncio.create_task(manager.run_turn(_channel(), _conversation(), "second"))
+    await asyncio.sleep(0.05)
+    mc.replace_pending = True
+    mc.replace_reason = "workspace context cap"
+    mc.lock.release()
+    with caplog.at_level("INFO"):
+        await waiting
+
+    assert "turn restarted on the new session" in caplog.text
+    assert mc.session is not old
+    assert not mc.replace_pending
+    assert "second" in prompts[-1]
+
+
+async def test_a_failed_turn_over_the_cap_still_resets(tmp_path, monkeypatch) -> None:
+    from joshua_core.engine.types import TurnResult
+
+    install_fake_sdk(monkeypatch)
+    repo = WsRepo(_ws())
+    repo.handoffs["c-ws"] = "an old handoff"
+    manager = make_manager(repo, tmp_path)
+    await manager.run_turn(_channel(), _conversation(), "first")
+    mc = manager._pool["c-ws"]
+
+    async def no_handoff(_mc):
+        return None
+
+    manager._write_handoff = no_handoff
+    failed = TurnResult(text="", is_error=True, error="http_500", context_tokens=900_000)
+    await manager._apply_context_cap(mc, _channel(), failed)
+
+    assert repo.cleared == ["c-ws"]
+    assert mc.replace_pending
+    # An earlier handoff never reaches the next session.
+    assert repo.handoffs["c-ws"] is None
+
+
+def test_the_continue_marker_is_taken_out_in_the_forms_a_model_writes() -> None:
+    from joshua_core.engine.manager import strip_continue_marker
+
+    assert strip_continue_marker("Done.\n[[continue]]") == ("Done.", True)
+    assert strip_continue_marker("Done.\n`[[continue]]`.") == ("Done.", True)
+    assert strip_continue_marker("Done.\n**[[continue]]**") == ("Done.", True)
+    assert strip_continue_marker("Done.") == ("Done.", False)
+    # A marker in the middle of the text is a word, not a request.
+    text = "I wrote [[continue]] in the notes, and the rest of the reply goes on here."
+    assert strip_continue_marker(text) == (text, False)
