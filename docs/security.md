@@ -296,6 +296,12 @@ minute. Core that answers 404 or cannot answer refuses the cookie too, and a
 failure is never cached. Every write of the viewer checks the `Origin` header,
 the sign-in and the change of a secret among them.
 
+A chat route of the viewer (`/api/v1/chat/<person>/...`: the turns, the
+history, the hold, and the draft) acts for the person of its path. The path
+must name the person of the cookie. Any other id gets 403, whether Joshua
+knows that person or not, so one person cannot read or write the chat of
+another, and the answer tells nobody who else is on the roster.
+
 The viewer serves plain HTTP. Terminate TLS at a reverse proxy, and keep the
 address on a network you trust: this is the interface of one instance for the
 people of that instance, not a service to publish.

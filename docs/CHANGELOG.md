@@ -8,6 +8,12 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- **A person reaches only their own chat.** The chat routes of the viewer
+  acted for the person named in the address, so any person who had signed in
+  could read the main thread of another, send a turn as them, and read or
+  write their hold and their draft by changing the name in the address. Each
+  route now answers 403 unless the address names the person who signed in.
+
 - **A path Joshua names becomes a link.** When a reply names a document, a
   wiki page, an attachment, or a shared file, the path is a link to the page
   that opens it: a Markdown link in the web chat, a link entity on Telegram,

@@ -56,7 +56,9 @@ lives in core too, so it comes back after a reload and on another device.
 keeps it (``{"text", "workspace"}``), with an empty text to clear it. A draft
 is the signed-in person's own, in a shared workspace too.
 
-The route serves any person id that ``joshua.yaml`` knows. With no
+Every route acts for the person of its path, so the path must name the
+person who signed in: another id gets 403, and an id that ``joshua.yaml``
+does not know gets 404. With no
 ``CHANNELS_URL`` or no viewer token, every route answers 503.
 
 Every refusal is ``{"error": "<message>"}``, with a ``reason`` when the
@@ -113,6 +115,7 @@ DEFAULT_FILE_TYPE = "application/octet-stream"
 BAD_BODY = "the body must be JSON or multipart/form-data"
 
 UNKNOWN_PERSON = "Joshua does not know this person"
+NOT_YOURS = "This chat belongs to another person"
 NOT_CONFIGURED = "chat is not configured on the Joshua side"
 UNREACHABLE = "Joshua is unreachable"
 CROSS_SITE = "the request comes from another site"
@@ -194,6 +197,22 @@ def unreachable() -> JSONResponse:
 def _known(person: str) -> bool:
     """True when ``person`` has the shape of an id and ``joshua.yaml`` knows it."""
     return bool(PERSON_ID.fullmatch(person)) and config.load().person(person) is not None
+
+
+def _own(request: Request, person: Person) -> str | JSONResponse:
+    """The person of the path, when it is the person who signed in.
+
+    A chat route acts for the person of its path: it runs their turns and
+    reads their thread. So the path must name the signed-in person, and any
+    other id is refused with 403, a known one or not, so the answer does not
+    tell who else Joshua knows."""
+    who = request.path_params["person"]
+    if who != person.id:
+        logger.warning({"message": "chat route refused: another person", "person": person.id})
+        return _json({"error": NOT_YOURS}, 403)
+    if not _known(who):
+        return _json({"error": UNKNOWN_PERSON}, 404)
+    return who
 
 
 class TurnIn(BaseModel):
@@ -468,9 +487,9 @@ async def turns(request: Request, person: Person) -> JSONResponse | StreamingRes
     """Run one turn for ``{person}`` and stream the answer as server-sent events."""
     if not _origin_ok(request):
         return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
-    who = request.path_params["person"]
-    if not _known(who):
-        return _json({"error": UNKNOWN_PERSON}, 404)
+    who = _own(request, person)
+    if isinstance(who, JSONResponse):
+        return who
     client = viewer_channels.from_env()
     if client is None:
         return _json({"error": NOT_CONFIGURED}, 503)
@@ -557,6 +576,7 @@ def _hold_json(answer: dict[str, Any]) -> dict[str, Any]:
 
 async def _state_call(
     request: Request,
+    person: Person,
     method: str,
     *,
     path: str = "",
@@ -570,9 +590,9 @@ async def _state_call(
     The answer is the body of channels, or the refusal to send the browser.
     An ``attachment`` makes a hold write multipart, as a turn with a file is.
     """
-    who = request.path_params["person"]
-    if not _known(who):
-        return _json({"error": UNKNOWN_PERSON}, 404)
+    who = _own(request, person)
+    if isinstance(who, JSONResponse):
+        return who
     client = viewer_channels.from_env()
     if client is None:
         return _json({"error": NOT_CONFIGURED}, 503)
@@ -637,7 +657,7 @@ async def held(request: Request, person: Person) -> JSONResponse:
         workspace = _workspace_of(request.query_params.get("workspace"))
     except _Refused as exc:
         return _json({"error": exc.message}, exc.status)
-    answer = await _state_call(request, "GET", workspace=workspace)
+    answer = await _state_call(request, person, "GET", workspace=workspace)
     if isinstance(answer, JSONResponse):
         return answer
     return _json(_hold_json(answer), 200)
@@ -660,6 +680,7 @@ async def hold(request: Request, person: Person) -> JSONResponse:
     try:
         answer = await _state_call(
             request,
+            person,
             "POST",
             text=message.text,
             workspace=message.workspace,
@@ -681,7 +702,7 @@ async def take_held(request: Request, person: Person) -> JSONResponse:
     body = await _text_body(request)
     if isinstance(body, JSONResponse):
         return body
-    answer = await _state_call(request, "POST", path="/take", workspace=body[1])
+    answer = await _state_call(request, person, "POST", path="/take", workspace=body[1])
     if isinstance(answer, JSONResponse):
         return answer
     taken = map_held(answer.get("held"))
@@ -712,7 +733,7 @@ async def drop_held(request: Request, person: Person) -> JSONResponse:
     except _Refused as exc:
         return _json({"error": exc.message}, exc.status)
     answer = await _state_call(
-        request, "DELETE", path=f"/{request.path_params['id']}", workspace=workspace
+        request, person, "DELETE", path=f"/{request.path_params['id']}", workspace=workspace
     )
     if isinstance(answer, JSONResponse):
         return answer
@@ -736,7 +757,7 @@ async def draft(request: Request, person: Person) -> JSONResponse:
         workspace = _workspace_of(request.query_params.get("workspace"))
     except _Refused as exc:
         return _json({"error": exc.message}, exc.status)
-    answer = await _state_call(request, "GET", workspace=workspace, kind="draft")
+    answer = await _state_call(request, person, "GET", workspace=workspace, kind="draft")
     if isinstance(answer, JSONResponse):
         return answer
     return _json(_draft_json(answer), 200)
@@ -754,7 +775,12 @@ async def save_draft(request: Request, person: Person) -> JSONResponse:
     if len(text) > MAX_TEXT_CHARS:
         return _bad(f"text: must be at most {MAX_TEXT_CHARS} characters")
     answer = await _state_call(
-        request, "POST", text=text if text.strip() else "", workspace=workspace, kind="draft"
+        request,
+        person,
+        "POST",
+        text=text if text.strip() else "",
+        workspace=workspace,
+        kind="draft",
     )
     if isinstance(answer, JSONResponse):
         return answer
@@ -881,9 +907,9 @@ def map_page(page: dict[str, Any], person: str = "") -> dict[str, Any]:
 
 async def history(request: Request, person: Person) -> JSONResponse:
     """One page of the conversation, oldest first, and the cursor of the page before."""
-    who = request.path_params["person"]
-    if not _known(who):
-        return _json({"error": UNKNOWN_PERSON}, 404)
+    who = _own(request, person)
+    if isinstance(who, JSONResponse):
+        return who
     # The values are checked after the person, so an unknown person is 404
     # whatever the query holds. No bad value reaches channels.
     size = _int(request.query_params.get("limit"), "limit", 1, MAX_LIMIT)
