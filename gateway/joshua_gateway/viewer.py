@@ -71,7 +71,10 @@ carry a cookie is still checked, so a member can sign in on an open viewer
 too.
 
 Start it with ``python -m joshua_gateway.viewer``. It refuses to start when
-``viewer.enabled`` is false. Put a reverse proxy in front for TLS; the viewer
+``viewer.enabled`` is false, and it warns about a setting that cannot work
+(:func:`startup_warnings`): a viewer nobody can read, a missing
+``JOSHUA_VIEWER_SESSION_SECRET``, and a ``viewer.anonymous`` that names a
+person. Put a reverse proxy in front for TLS; the viewer
 serves plain HTTP and binds every route behind the cookie except the probes,
 the four routes of the sign-in itself, and the files of the app, which hold
 no data and carry the sign-in form.
@@ -81,7 +84,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Any
@@ -365,6 +368,52 @@ def _now(tz: tzinfo) -> datetime:
     return datetime.now(tz)
 
 
+def startup_warnings(cfg: config.JoshuaConfig, env: Mapping[str, str]) -> list[dict[str, Any]]:
+    """What is wrong with the setup of this viewer, as log lines.
+
+    Each line names the setting that decides it and says what to set. A value
+    is never in a line: the person id of ``viewer.anonymous`` is a name on the
+    roster, and no secret is read here at all.
+
+    The three are the ones a fresh install meets: a viewer nobody can read
+    (the warning of the config, which ``make validate`` prints too), a session
+    key that is not set, so a restart signs everybody out, and an open viewer
+    that serves every request as one person.
+    """
+    lines: list[dict[str, Any]] = []
+    if config.NO_VIEWER_ACCESS_WARNING in cfg.warnings:
+        lines.append(
+            {
+                "message": config.NO_VIEWER_ACCESS_WARNING,
+                "setting": "viewer.anonymous",
+            }
+        )
+    if not env.get(viewer_session.SESSION_SECRET_ENV, "").strip():
+        lines.append(
+            {
+                "message": (
+                    f"{viewer_session.SESSION_SECRET_ENV} is not set, so this start minted a "
+                    "key of its own and no sign-in survives a restart: set the variable to a "
+                    "random value, the same one on every replica"
+                ),
+                "setting": viewer_session.SESSION_SECRET_ENV,
+            }
+        )
+    if isinstance(cfg.viewer.anonymous, str):
+        lines.append(
+            {
+                "message": (
+                    "viewer.anonymous names a person, so every request with no cookie is "
+                    "served as that person, with their role: set viewer.anonymous: false to "
+                    "ask for a sign-in"
+                ),
+                "setting": "viewer.anonymous",
+                "person": cfg.viewer.anonymous,
+            }
+        )
+    return lines
+
+
 async def healthz(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
@@ -469,6 +518,8 @@ def main() -> None:
         )
         raise SystemExit(1)
     install_healthcheck_filter()
+    for line in startup_warnings(cfg, os.environ):
+        logger.warning(line)
     logger.info(
         {
             "message": "viewer up",

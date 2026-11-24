@@ -335,6 +335,12 @@ viewer:                         # the web interface for the wiki, a person's
   # Uncomment one to turn it on:
   # anonymous: true
   # anonymous: alex
+  #
+  # With `method: anonymous` above and neither line uncommented, nobody can
+  # read the viewer: it asks for no secret, and a request with no cookie is
+  # nobody. `make validate` warns about that pair, and so does the viewer at
+  # startup. A person id here warns too, because anybody who opens the page
+  # then holds that person's role.
 
 usage:
   # Core's GET /v1/usage: the tokens of each day, for the chat, the nightly

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from conftest import bad_cookie, signed_in
 from joshua_gateway import viewer, viewer_api
+from joshua_gateway import viewer_assignments as am
 from joshua_gateway.viewer_api import session as session_api
 from joshua_shared import config
 from starlette.testclient import TestClient
@@ -79,7 +80,6 @@ def test_the_session_of_a_member_holds_every_section(client) -> None:
         "journal",
         "search",
         "usage",
-        "assignments",
         "documents",
         "chat",
     ]
@@ -114,6 +114,40 @@ def test_the_anonymous_person_is_named_as_such(anon_client) -> None:
     assert body["person"] == {"id": "anonymous", "name": "Anonymous", "role": "member"}
     assert body["anonymous"] is True
     assert "documents" in {item["key"] for item in body["sections"]}
+
+
+def test_the_anonymous_person_gets_no_chat_section(anon_client) -> None:
+    """Channels runs a turn for a person of the roster, and the anonymous
+    identity is not one, so the chat would fail the moment it opened."""
+    keys = {item["key"] for item in anon_client.get("/api/v1/session").json()["sections"]}
+    assert "chat" not in keys
+
+
+def test_the_assignments_section_needs_the_container(monkeypatch, tmp_path) -> None:
+    """Assignments is in the menu only with the container on and its address
+    in hand: the two halves of reaching it."""
+
+    runs = 0
+
+    def keys(text: str, **env: str) -> set[str]:
+        nonlocal runs
+        runs += 1
+        for name in (am.ASSIGNMENTS_URL_ENV, am.VIEWER_TOKEN_ENV):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        _data(monkeypatch, tmp_path / f"run{runs}", text)
+        client = TestClient(viewer.build_app())
+        body = client.get("/api/v1/session", auth=ALEX).json()
+        return {item["key"] for item in body["sections"]}
+
+    on = CONFIG + "assignments:\n  enabled: true\n"
+    address = {am.ASSIGNMENTS_URL_ENV: "http://assignments.test", am.VIEWER_TOKEN_ENV: "a-token"}
+    assert "assignments" in keys(on, **address)
+    # The container is off, so its address reaches nothing.
+    assert "assignments" not in keys(CONFIG, **address)
+    # The container is on, and this viewer holds no address for it.
+    assert "assignments" not in keys(on)
 
 
 def test_the_links_of_the_sidebar_are_not_in_the_session(client, data) -> None:

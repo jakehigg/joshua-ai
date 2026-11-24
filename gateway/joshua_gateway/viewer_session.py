@@ -7,7 +7,9 @@ person out of it and makes no call to core for an ordinary page. Core owns the
 roster and every hash, so the viewer holds no password of its own. A core that
 does not answer, or answers 5xx, is not a refusal: :meth:`CoreAuth.verify`
 gives None there, so the route says that Joshua is still starting instead of
-saying that the secret was wrong.
+saying that the secret was wrong. A core that answers 403 refused the caller
+and not the person: the viewer logs that ``AUTH_CALLERS`` has to name
+``viewer``, and the page keeps its one sentence.
 
 A cookie is ``<payload>.<signature>``. The payload is base64url JSON with the
 person id, the expiry, whether "remember me" was checked, and the stamp of
@@ -79,6 +81,18 @@ STAMP_TTL_S = 60
 
 CORE_URL_ENV = "CORE_URL"
 VIEWER_TOKEN_ENV = "JOSHUA_TOKEN_VIEWER"
+
+# The identity the viewer calls core with, and the setting of core that admits
+# it on ``/auth/*``. Core answers 403 there for a caller that list leaves out,
+# so the viewer says which setting to set and names the caller that is
+# missing. The person still reads one sentence, and no token is ever logged.
+VIEWER_CALLER = "viewer"
+AUTH_CALLERS_ENV = "AUTH_CALLERS"
+AUTH_CALLERS_MESSAGE = (
+    "core refused the viewer on /auth/*, so nobody can sign in: add 'viewer' "
+    "to AUTH_CALLERS of the core container"
+)
+
 VERIFY_PATH = "/auth/verify"
 SECRET_PATH = "/auth/secret"
 PEOPLE_PATH = "/auth/people"
@@ -218,6 +232,24 @@ def clear_cookie(response: Response, *, secure: bool) -> None:
 # -- core ------------------------------------------------------------------
 
 
+def _log_if_not_a_caller(response: httpx.Response, path: str) -> None:
+    """Warn when core refused the viewer itself, rather than the request.
+
+    Core's 403 on an ``/auth/*`` route is the one answer that says nothing
+    about the person: the caller is not in core's ``AUTH_CALLERS``. The page
+    keeps its one sentence, and the log says which setting to change.
+    """
+    if response.status_code == 403:
+        logger.warning(
+            {
+                "message": AUTH_CALLERS_MESSAGE,
+                "setting": AUTH_CALLERS_ENV,
+                "caller": VIEWER_CALLER,
+                "path": path,
+            }
+        )
+
+
 def _json_object(response: httpx.Response) -> dict[str, Any]:
     """The JSON object of a core answer, or {} for any other body."""
     try:
@@ -262,6 +294,7 @@ class CoreAuth:
             return None
         if response.status_code != 200:
             logger.warning({"message": "core verify refused", "status": response.status_code})
+            _log_if_not_a_caller(response, VERIFY_PATH)
             return False
         try:
             return response.json().get("ok") is True
@@ -327,6 +360,7 @@ class CoreAuth:
             return None
         if response.status_code != 200:
             logger.warning({"message": "core people refused", "status": response.status_code})
+            _log_if_not_a_caller(response, PEOPLE_PATH)
             return None
         try:
             people = response.json().get("people")

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import App from "../../App";
+import App, { NOT_THE_OWNER } from "../../App";
 import type { Session } from "../../shell/Shell";
 import {
   SECRET_NOT_SET,
@@ -373,13 +373,12 @@ describe("the admin Instance section", () => {
     expect(screen.queryByText(/^Running /)).toBeNull();
   });
 
-  it("gives a member nothing at all at the address", async () => {
+  it("tells a member that the admin pages are the owner's", async () => {
     stubRoutes("member");
 
     app();
 
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    expect(await screen.findByText(NOT_THE_OWNER)).toBeDefined();
     expect(screen.queryByText("Push notifications")).toBeNull();
-    expect(document.querySelector("main")).toBeNull();
   });
 });

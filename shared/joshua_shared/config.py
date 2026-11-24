@@ -94,6 +94,17 @@ class _Model(BaseModel):
 # What ``JoshuaConfig._check_owner`` says about a roster with no owner.
 NO_OWNER_WARNING = "no person has role 'owner'"
 
+# What ``JoshuaConfig._check_viewer`` says about a viewer nobody can read: the
+# ``anonymous`` method asks for no secret, and ``viewer.anonymous`` is not set,
+# so every page refuses every request and the sign-in page offers no form. It
+# is a warning and not a refusal, because every container reads this file and
+# the rest of the instance runs.
+NO_VIEWER_ACCESS_WARNING = (
+    "viewer.auth.method is 'anonymous' and viewer.anonymous is not set, so "
+    "nobody can read the viewer: set viewer.anonymous: true to open it without "
+    "a sign-in, or viewer.auth.method: pin (or password) to ask for a secret"
+)
+
 # What ``_validate_cli`` says about a sign-in password that is still in the
 # config or the environment. Core holds every secret now, so these are read
 # once by the import and never again.
@@ -1544,9 +1555,8 @@ class JoshuaConfig(_Model):
         capability. Raising here would stop every container of an instance
         written before the role existed.
         """
-        self._warnings = (
-            [] if any(person.role == "owner" for person in self.people) else [NO_OWNER_WARNING]
-        )
+        if not any(person.role == "owner" for person in self.people):
+            self._warnings.append(NO_OWNER_WARNING)
         return self
 
     @model_validator(mode="after")
@@ -1669,6 +1679,11 @@ class JoshuaConfig(_Model):
                 raise ValueError(
                     f"viewer.anonymous: '{anonymous}' is a {person.role}; it must name a member"
                 )
+        # The default of a fresh install: the viewer is on, it asks for no
+        # secret, and it is not open either, so every page refuses every
+        # request. The warning names the two settings that decide it.
+        if self.viewer.enabled and self.viewer.auth.method == "anonymous" and anonymous is False:
+            self._warnings.append(NO_VIEWER_ACCESS_WARNING)
         return self
 
     @model_validator(mode="after")

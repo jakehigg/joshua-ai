@@ -130,6 +130,27 @@ def test_viewer_auth_method_words() -> None:
         config.parse(with_method("magic-link"), ENV, source="test.yaml")
 
 
+def test_a_viewer_nobody_can_read_warns(tmp_path: Path, capsys) -> None:
+    """The default of a fresh install: the viewer is on, it asks for no secret,
+    and it is not open either, so every page refuses every request. It is a
+    warning, because the rest of the instance runs, and ``make validate``
+    names the setting that opens it."""
+    on = GOOD + "\nviewer:\n  enabled: true\n"
+    assert config.NO_VIEWER_ACCESS_WARNING in config.parse(on, ENV, source="test.yaml").warnings
+    open_viewer = on + "  anonymous: true\n"
+    assert config.NO_VIEWER_ACCESS_WARNING not in config.parse(open_viewer, ENV).warnings
+    with_pin = on + "  auth:\n    method: pin\n"
+    assert config.NO_VIEWER_ACCESS_WARNING not in config.parse(with_pin, ENV).warnings
+    off = GOOD + "\nviewer:\n  enabled: false\n"
+    assert config.NO_VIEWER_ACCESS_WARNING not in config.parse(off, ENV).warnings
+
+    owner = "name: Home\ntimezone: UTC\npeople:\n  - id: sam\n    name: Sam\n    role: owner\n"
+    file = tmp_path / "joshua.yaml"
+    file.write_text(owner + "viewer:\n  enabled: true\n")
+    assert config._validate_cli(str(file)) == 0
+    assert f"warning: {config.NO_VIEWER_ACCESS_WARNING}" in capsys.readouterr().out
+
+
 def test_a_roster_with_no_owner_warns_and_loads() -> None:
     """No owner is a warning, never a refusal: the instance still runs."""
     cfg = config.parse(GOOD, ENV, source="test.yaml")

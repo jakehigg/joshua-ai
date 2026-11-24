@@ -2,7 +2,7 @@ import { useContext, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { ApiError, getJson } from "./api/client";
-import Admin from "./pages/Admin";
+import Admin, { ADMIN_SECTION } from "./pages/Admin";
 import Assignment from "./pages/Assignment";
 import { ChatPage, WorkspaceLink, WorkspacePage } from "./chat/ChatPage";
 import { ChatHome } from "./chat/Home";
@@ -155,19 +155,30 @@ function SignedIn({ children }: { children: ReactNode }) {
 /** The one role that may see the admin area. */
 const OWNER_ROLE = "owner";
 
+/** What a person who is not the owner reads at an admin address. */
+export const NOT_THE_OWNER = "Only the owner may read the admin pages.";
+
 /**
  * The admin area, for the owner and for nobody else.
  *
- * The role comes from the session the app already read. Another person gets
- * what an address that no route claims gets — nothing — because the viewer
- * does not tell a member that there is a page they may not see. The routes
- * behind the page refuse them as well, so this is the sight of it and not
- * the guard of it.
+ * The role comes from the session the app already read. Another person reads
+ * one line that says whose the page is, in the shape every page a person may
+ * not read uses, so a member sees the reason instead of an empty window. A
+ * browser with no session has no role to read, so it goes to the sign-in
+ * page, as it does at every other address. The routes behind the page refuse
+ * anybody else as well, so this is the sight of it and not the guard of it.
  */
 function OwnerOnly({ children }: { children: ReactNode }) {
   const session = useContext(SessionContext);
-  if (session?.person.role !== OWNER_ROLE) {
-    return null;
+  if (session === null) {
+    return <Navigate to={SIGN_IN} replace />;
+  }
+  if (session.person.role !== OWNER_ROLE) {
+    return (
+      <Shell section={ADMIN_SECTION}>
+        <ErrorLine text={NOT_THE_OWNER} />
+      </Shell>
+    );
   }
   return <>{children}</>;
 }
