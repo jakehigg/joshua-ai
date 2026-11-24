@@ -356,10 +356,19 @@ value of the viewer Secret. The manager checks it on its read API, so the
 viewer can show each person their assignments.
 
 The network policy lets only the gateway reach the pod, and the viewer too
-when `viewer.enabled` is true. It lets the pod reach
-only gateway, channels, core, the database, DNS, and the git hosts. A network
-policy matches addresses, not names, so give the address range of each git
-host in `assignments.networkPolicy.gitHosts.cidrs`. Set
+when `viewer.enabled` is true. It lets the pod reach only gateway, channels,
+core (the model forwarder), the database, the cluster DNS, and the address
+ranges of the git hosts. A session has no route to the open web: its research
+goes to the `internet` MCP server through the gateway.
+
+The git-host ranges belong to the git proxy of the manager, which fetches from
+each host itself. A network policy matches addresses, not names, so give the
+address range of each git host in
+`assignments.networkPolicy.gitHosts.cidrs`, and leave the list empty when no
+assignment clones from a host on the open web. The proxy runs in the same
+container as the session, so a shell in the session can still reach those
+ranges on 443; the rule in the session prompt, not this policy, keeps research
+off that path. Set
 `assignments.networkPolicy.enabled: false` on a cluster with no network policy
 support. `/work` is an emptyDir unless `assignments.work.existingClaim` names a
 claim.

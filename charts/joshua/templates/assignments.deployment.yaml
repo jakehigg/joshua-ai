@@ -108,9 +108,18 @@ spec:
 {{- $np := .Values.assignments.networkPolicy }}
 ---
 {{/* Only the gateway reaches the container, and the viewer when it is on (the
-     read API). The container reaches gateway, channels, core, the database,
-     DNS, and the git hosts, and nothing else: no model server and no other
-     host on the internet. */}}
+     read API). The container reaches gateway, channels, core (the model
+     forwarder), the database, the cluster DNS, and the address ranges of the
+     git hosts, and nothing else: no model server and no other host on the
+     internet. A session holds private data, so it gets no route to the open
+     web.
+
+     The git-host ranges belong to the git proxy of the manager, which fetches
+     from the host itself (see assignments/joshua_assignments/git_proxy.py).
+     They are the one route out of this pod. The proxy runs in the same
+     container as the session, so a shell in the session can still reach those
+     ranges on 443; the rule in the session prompt, not this policy, keeps
+     research off that path. */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -183,6 +192,7 @@ spec:
         - protocol: TCP
           port: 53
     {{- if $np.gitHosts.cidrs }}
+    {{/* The one route out of the pod, for the git proxy of the manager. */}}
     - to:
         {{- range $np.gitHosts.cidrs }}
         - ipBlock:

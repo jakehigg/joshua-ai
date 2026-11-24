@@ -113,9 +113,12 @@ MCP credential. It holds one fleet token of its own, the bearers of its
 callers, the database URL, and the read token of each git host you name. The
 manager of the container puts a git token on each clone through a listener on
 `127.0.0.1`, and refuses a push, so a session never holds a git token. It keeps its rows in the schema `assignments`
-of the shared Postgres. It mounts `/data` read-only. On Kubernetes, a network
-policy lets only the gateway and the viewer reach it, and lets it reach only
-gateway, channels, core, the database, DNS, and the git hosts you name.
+of the shared Postgres. It mounts `/data` read-only. A session has no route to
+the open web: its research goes to the `internet` server with `use_internet`.
+On Kubernetes, a network policy lets only the gateway and the viewer reach it,
+and lets it reach only gateway, channels, core, the database, DNS, and the
+address ranges of the git hosts you name; with compose it is on the `closed`
+network, which has no route off the host.
 
 Each assignment runs one Claude Agent SDK session in a scratch directory, in
 slices. Before each slice, the container reads core's `GET /v1/limits`, and

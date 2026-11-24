@@ -132,6 +132,26 @@ with the images and the packaged chart, are at
   is no field of a spec. The start takes the stamp off before the check and
   puts it back after it, so the run reports to the workspace the draft was
   asked for. A start from another workspace moves the run to that one.
+- **An assignment session has no route to the open web.** A session holds
+  private data — the wiki, the documents of the person, each repository it
+  cloned — and it had raw web egress beside it, so a run could fetch a page
+  with its shell and read the text in the same place. Research now goes to the
+  `internet` server with `use_internet`, and the session prompt says that
+  `curl`, `wget`, `git`, and a fetch in Python or in Node have no route. A
+  session without that server asks Joshua for the page. The network enforces
+  it: with compose the container is on the new `closed` network, which has no
+  route off the host, and the chart allows egress to gateway, channels, core,
+  the database, DNS, and the address ranges of
+  `assignments.networkPolicy.gitHosts.cidrs` alone, now on port 443 and no
+  longer on 22. Those ranges belong to the git proxy of the manager, which
+  fetches from the git host itself.
+
+  **Upgrading with compose, with a git host on the open web.** The clone goes
+  through the proxy in the container, and the `closed` network cannot reach
+  that host. Add `- default` to the `networks` list of the `assignments`
+  service in `docker-compose.yml`, and allow the addresses of that host alone
+  in a firewall around the host. See
+  [assignments.md](assignments.md#what-the-session-can-reach).
 
 ### Developer tasks
 

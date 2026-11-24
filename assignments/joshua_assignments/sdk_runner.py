@@ -673,6 +673,7 @@ class SdkRunner:
                     has_tasks=prompts.TASKS_SERVER in held,
                     has_documents=prompts.DOCUMENTS_SERVER in held,
                     has_history=history_mcp is not None,
+                    has_internet=prompts.INTERNET_SERVER in held,
                     inbox_gone=inbox_gone,
                 )
                 if answer:

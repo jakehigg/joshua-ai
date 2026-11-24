@@ -156,6 +156,8 @@ The worker can:
   grants it later;
 - use the tools of the person, as Joshua does for that person, or fewer when
   the definition names them;
+- ask the `internet` server one question with `use_internet`, when the
+  definition keeps that server. That is the one way it reads the open web;
 - write documents in the folder of the person;
 - stop and ask Joshua a question, or ask for a repository, a file, or
   information that it does not have.
@@ -164,7 +166,9 @@ The worker cannot:
 
 - push to a repository. A change to a repository goes through another tool
   of the person, or becomes a follow-up;
-- search or read the web. It asks for a file, and Joshua gets it;
+- reach the open web from its shell. `curl`, `wget`, and a fetch in Python or
+  in Node have no route. Without the `internet` server it asks Joshua for the
+  page or the fact, and Joshua gets it;
 - clone a repository that the operator does not allow;
 - start an assignment;
 - see your chat. The definition is all that it knows;
@@ -214,7 +218,10 @@ container holds those, and no secret that core holds:
 - The gateway calls `/mcp`. The viewer calls the [read API](#the-read-api)
   with its own fleet token. On Kubernetes, a network policy lets only these
   two reach it, and lets it reach only gateway, channels, core, the
-  database, DNS, and the git hosts you name.
+  database, DNS, and the address ranges of the git hosts you name. With
+  compose it is on the `closed` network alone, which has no route off the
+  host. So a session has no route to the open web (see
+  [what the session can reach](#what-the-session-can-reach)).
 - It mounts `/data` read-only and writes nothing there.
 
 ## The tools
@@ -983,7 +990,11 @@ needs more (a repository, a file, or an answer: see
 [requests](#requests-for-a-repository-or-a-file)), the rule for a step that
 fails again and again (see [a stalled assignment](#a-stalled-assignment)), and
 the rule for
-follow-ups: each follow-up goes to `finish`. Each output goes where the goal says, with the
+follow-ups: each follow-up goes to `finish`. It also has the research rule:
+the open web is read with `use_internet` on the `internet` server, and never
+with `curl`, `wget`, `git`, or a fetch in Python or in Node, because the shell
+has no route there (see
+[what the session can reach](#what-the-session-can-reach)). Each output goes where the goal says, with the
 tools that the session holds.
 
 The first message gives the title, the goal, the clone command of each
@@ -991,7 +1002,9 @@ repository (of the spec, then each granted one), where deliverables go
 when the session holds `documents` (see
 [deliverables are documents](#deliverables-are-documents)), that the chat
 history is a source when the session holds the `history` server (see
-[the chat history](#the-chat-history)), and the line
+[the chat history](#the-chat-history)), how the session reads the open web
+(the `internet` server with `use_internet`, or not at all, and then it asks
+Joshua), and the line
 "Write your plan with `write_plan` before any other tool call." Each follow-up goes to `finish` and into the report. When the
 session holds the `tasks` server and the spec names `tasks_project`, the
 first message also says to add each follow-up as a task in that project.
@@ -1050,6 +1063,48 @@ What remains:
 
 `scripts/test-nondumpable.sh` proves the refusal and the read-only `/app`
 in the runtime image with Docker. On Linux, the unit suite runs the same test.
+
+## What the session can reach
+
+A session holds private data: the wiki and the files of the person through the
+tools of the person, the documents of the person, and each repository that it
+cloned. So it reaches three places, and no host on the open web:
+
+- **the git proxy of the manager**, on `127.0.0.1`. Every `https://` git URL
+  of the session goes there (see [repositories](#repositories));
+- **the model forwarder in core**, which puts the model credential on each
+  model call;
+- **the MCP servers of the person, through the gateway**, which is where
+  `use_internet` goes.
+
+Research on the open web goes to the `internet` server with `use_internet`,
+and never to the shell. The question leaves the session, the internet agent
+reads the page, and the answer comes back as data. So the container that
+holds the private data never fetches the page itself.
+[security.md](security.md#an-assignment-session-does-not-fetch-the-web)
+says why that split matters.
+
+Each deployment path closes the rest:
+
+- On Kubernetes, the network policy of the chart allows egress to gateway,
+  channels, core, the database, the cluster DNS, and the address ranges of
+  `assignments.networkPolicy.gitHosts.cidrs`. It names no other destination.
+- With compose, the container is on the `closed` network alone, and that
+  network has no route off the host.
+
+Two limits stay. The git proxy fetches from the git host itself and runs in
+the same container as the session, so a command in the session can still
+reach the address ranges of those hosts on port 443. The rule in the session
+prompt, not the network, keeps research off that path, and closing it needs
+the proxy in a container of its own. The cluster resolver also still answers
+for a public name, which the session then cannot reach.
+
+**With compose, a clone from a git host on the open web needs one line.** The
+`closed` network has no route to that host. Add `- default` to the `networks`
+list of the `assignments` service in `docker-compose.yml`, and allow the
+addresses of that host alone in a firewall around the host. Then a command in
+the session can reach the open web again, and only the prompt rule keeps it
+off.
 
 ## The statuses
 
@@ -1222,7 +1277,9 @@ sent before the slice ended is stored.
 7. For each git host in `assignments.platforms`, put a read token in
    `.env.assignments`, under the name that its `token_env` gives, for
    example `ASSIGNMENTS_GITLAB_TOKEN=<token>`. Only this container reads the
-   file.
+   file. A host on the open web also needs the route that
+   [what the session can reach](#what-the-session-can-reach) describes: the
+   container is on the `closed` network alone.
 8. Start the container: `make up`. It starts the assignments container
    because `assignments.enabled` is `true`.
 9. Run `make restart`, so the gateway reads the new server.
@@ -1433,6 +1490,9 @@ tells Joshua:
   or only the report. When it names no place, Joshua asks the person one
   question, or writes "the report" when the person wants only to read the
   result;
+- that the shell of an assignment has no route to the open web. When the goal
+  needs research there, `tools` keeps the `internet` server; a session without
+  it stops and asks Joshua for the page or the fact;
 - to make a draft with `draft_assignment` when the person wants to read the
   assignment first, to apply comments on it with `update_assignment`, and to
   start it with `start_assignment(id=...)` when the person says go;
