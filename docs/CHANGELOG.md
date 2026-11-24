@@ -248,7 +248,9 @@ with the images and the packaged chart, are at
   and the import then marked itself done. Such a value is now counted
   `unreadable`, the log names the person and never the value, and an import
   that wrote no row leaves the marker unset, so it runs again once the values
-  are corrected.
+  are corrected. Write the value in single quotes, as
+  `VIEWER_PASSWORDS='sam=$2b$12$...'`: Compose expands `$` in `.env`, so a
+  hash without the quotes is cut short before core reads it.
 
 - **An edit of `joshua.yaml` no longer needs a restart of the stack.** Compose
   mounted the single file, so an editor that writes a new file — `sed -i` does,
@@ -285,6 +287,26 @@ with the images and the packaged chart, are at
   and the page said that the PIN did not match. The viewer now waits for a
   healthy core, and a sign-in that core could not check says "Joshua is still
   starting. Try again in a moment." instead of blaming the PIN.
+
+### Documentation
+
+- **The quickstart holds every step of a fresh install.** A walkthrough of a
+  clean clone found ten places where a reader had to guess. `VIEWER_PASSWORDS`
+  needs single quotes, because Compose expands `$` in `.env`
+  (`.env.example`, [auth.md](auth.md)). `joshua.example.yaml` says that the
+  file is checked with `make validate`, which needs no Python on the host, and
+  that core serves the roster to the viewer through `AUTH_CALLERS`, not
+  `ADMIN_CALLERS`. The quickstart names `JOSHUA_SETTINGS_KEY`, which
+  `make init-env` does not write, with the command that makes it; says to
+  delete the example `groups` block, which otherwise keeps the handles of the
+  example people; says that a later change of the `viewer` section needs
+  `docker compose restart viewer`; reads `.env` before the `curl` that asks
+  core what it found; prints the validate output as `ok:
+  /etc/joshua/joshua.yaml`; and says that asking Joshua a question needs a
+  real model token. The sign-in page gives the whole `auth-reset` command,
+  with `docker compose exec core` in front of it, and
+  [contracts.md](contracts.md#viewer) lists the session routes and the Users
+  routes of the viewer.
 
 ## 0.4.0 - 2026-11-19
 

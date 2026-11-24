@@ -39,6 +39,24 @@ Your installation stays on that release until you change `JOSHUA_VERSION` in
 `.env`. A later `git pull` does not move it.
 [operations.md](operations.md#update-joshua) explains an update.
 
+One key the command does not write is `JOSHUA_SETTINGS_KEY`, which encrypts
+the secret settings the owner saves under Admin → Instance. Make it yourself:
+
+```
+openssl rand -base64 32
+```
+
+Put the value in `.env`, on a line of its own:
+
+```
+JOSHUA_SETTINGS_KEY=<the value openssl printed>
+```
+
+Keep the same value for the life of the instance: a key that changes makes
+every stored secret unreadable. Every step of this page works without it, and
+a write or a read of a secret setting then fails with an error that names the
+variable. [settings.md](settings.md) has the details.
+
 ## 3. Add your Claude token
 
 On a machine that has the `claude` command and your subscription, run:
@@ -82,6 +100,11 @@ writes and manages the roster in the viewer, where they add a person, change
 a role, set a sign-in secret, and remove a person. `make validate` warns when
 no one is the owner, and the file is still valid.
 
+Delete the `groups` block of the example. It names the handles of the example
+people, which are not yours, and a group that stays keeps them on your
+roster. Add your own group later, when a group chat writes to Joshua;
+[channels.md](channels.md#group-chats) has the form.
+
 Leave the `channels` section as it is. A channel with no credential is off.
 Telegram and iMessage stay off until you add their tokens.
 
@@ -91,10 +114,11 @@ Check the file:
 make validate
 ```
 
-The command prints `ok: joshua.yaml` and the number of people it found. The
-first run pulls the core image, so it takes a few minutes. `make up` in the
-next step uses the same image. If you skip this step, `make up` runs the same
-check and stops on the same error.
+The command prints `ok: /etc/joshua/joshua.yaml`, which is where the
+containers mount your file, and the number of people it found. The first run
+pulls the core image, so it takes a few minutes. `make up` in the next step
+uses the same image. If you skip this step, `make up` runs the same check and
+stops on the same error.
 
 ## 5. Start Joshua
 
@@ -185,6 +209,15 @@ make up
 `make up` starts the viewer because `viewer.enabled` is `true`. The containers
 that did not change keep running.
 
+That first `make up` is the only one that reads the new `viewer` section. The
+viewer reads `joshua.yaml` at start, so a later change there — another
+`auth.method`, or `viewer.anonymous` — takes effect after:
+
+```
+make validate
+docker compose restart viewer
+```
+
 Nobody can sign in until they have a secret. Give yourself the first one:
 
 ```
@@ -242,6 +275,12 @@ you> how do you decide what to remember?
 you> how do I update you?
 ```
 
+An answer to a question like these needs a real model token, the one you put
+on `CLAUDE_CODE_OAUTH_TOKEN` in step 3. With `AGENT_BACKEND=stub` Joshua
+answers with fixed text and reads no page, so this step tells you nothing.
+Put the token in `.env`, take the `AGENT_BACKEND=stub` line out again, and
+run `docker compose restart core`.
+
 This is the fastest way to learn the rest. Joshua reads the same pages that you
 find under `docs/`:
 
@@ -287,7 +326,7 @@ To read your notes in a browser instead of the terminal, use the viewer
 | `channels refused the message (rate_limited)` | Wait one minute. The limit is `channels.limits.per_handle_per_minute`. |
 | A container restarts again and again | `make logs` prints the reason on the first line. |
 | Joshua does not have a tool you added | Run `docker compose logs gateway`. [mcp-servers.md](mcp-servers.md#if-a-server-does-not-start) has a table of causes. |
-| An answer is wrong or out of date | Read what Joshua found: `curl -s -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" 127.0.0.1:8081/admin/kb/events` |
+| An answer is wrong or out of date | Read what Joshua found: `set -a; . ./.env; set +a; curl -s -H "Authorization: Bearer $JOSHUA_TOKEN_LAPTOP" 127.0.0.1:8081/admin/kb/events`. The first part reads the token out of `.env`; without it the request has no token and core answers `401`. |
 
 ## Where your data lives
 

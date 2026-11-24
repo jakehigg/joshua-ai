@@ -120,7 +120,11 @@ describe("the sign-in page", () => {
     page();
 
     expect(await screen.findByText("Nobody can sign in yet, because nobody has a PIN.")).toBeDefined();
-    expect(screen.getByText(/people auth-reset --id <owner id>/)).toBeDefined();
+    expect(
+      screen.getByText(
+        /docker compose exec core python -m joshua_core people auth-reset --id <owner id>/,
+      ),
+    ).toBeDefined();
     expect(screen.getByText(/under Admin → Users/)).toBeDefined();
     expect(field("secret")).toBeNull();
   });
