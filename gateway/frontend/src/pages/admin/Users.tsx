@@ -27,16 +27,23 @@ export const SECRET_NOT_SET = "Not set — can't sign in";
 type Open = { id: string; kind: "secret" | "remove" } | null;
 
 /**
- * Where a role goes, and what the button that moves it says. A guest and a
- * member are promoted, one tier at a time; an owner is demoted to a member.
- * The owner who manages the roster is never on a row of their own making:
- * the route refuses a change that would leave the instance with no owner.
+ * Where a role goes, and what each button that moves it says. A role moves
+ * one tier at a time, up and down: a guest becomes a member, a member
+ * becomes the owner or a guest again, and an owner becomes a member. The
+ * route refuses a change that would leave the instance with no owner, and
+ * the row says what it answered.
  */
-export function roleStep(role: string): { label: string; next: string } {
+export function roleSteps(role: string): { label: string; next: string }[] {
   if (role === "owner") {
-    return { label: "Demote", next: "member" };
+    return [{ label: "Demote", next: "member" }];
   }
-  return { label: "Promote", next: role === "guest" ? "member" : "owner" };
+  if (role === "guest") {
+    return [{ label: "Promote", next: "member" }];
+  }
+  return [
+    { label: "Promote", next: "owner" },
+    { label: "Demote", next: "guest" },
+  ];
 }
 
 /** What a disabled Demote or Remove says on the row of the only owner. */
@@ -116,10 +123,8 @@ export default function Users() {
     void write(`/admin/users/${encodeURIComponent(id)}/secret`, { secret });
   }
 
-  function setRole(user: AdminUser): void {
-    void write(`/admin/users/${encodeURIComponent(user.id)}/role`, {
-      role: roleStep(user.role).next,
-    });
+  function setRole(user: AdminUser, next: string): void {
+    void write(`/admin/users/${encodeURIComponent(user.id)}/role`, { role: next });
   }
 
   function remove(id: string): void {
@@ -170,7 +175,6 @@ export default function Users() {
   }
 
   function row(user: AdminUser): ReactNode {
-    const step = roleStep(user.role);
     const onlyOwner = isOnlyOwner(user, users ?? []);
     const secretButton = (
       <button
@@ -185,18 +189,18 @@ export default function Users() {
         Set secret
       </button>
     );
-    const roleButton = (
+    const roleButtons = roleSteps(user.role).map((step) => (
       <button
-        key="role"
+        key={`role-${step.next}`}
         type="button"
         className={action(false)}
         disabled={busy || onlyOwner}
         title={onlyOwner ? ONLY_OWNER : undefined}
-        onClick={() => setRole(user)}
+        onClick={() => setRole(user, step.next)}
       >
         {step.label}
       </button>
-    );
+    ));
     const removeButton = (
       <button
         key="remove"
@@ -227,8 +231,8 @@ export default function Users() {
           </td>
           <td className="v-user-actions">
             {user.has_secret
-              ? [roleButton, secretButton, removeButton]
-              : [secretButton, roleButton, removeButton]}
+              ? [...roleButtons, secretButton, removeButton]
+              : [secretButton, ...roleButtons, removeButton]}
           </td>
         </tr>
         {under !== null && (

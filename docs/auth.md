@@ -27,10 +27,13 @@ The page asks for nothing, and `viewer.anonymous` decides who a request with
 no cookie is. Both forms of it keep working:
 
 - `anonymous: true` serves every request as a member who is not a person. The
-  home page has no profile and no attachments, and the assignments section is
-  empty.
+  home page has no profile and no attachments, the assignments section is
+  empty, and the navigation offers no chat, because Joshua answers a person of
+  the roster and this identity is not one.
 - `anonymous: sam` serves every request as Sam: Sam's profile, Sam's
-  attachments, Sam's assignments, and each write as Sam.
+  attachments, Sam's assignments, and each write as Sam. The viewer warns at
+  startup that it does, and names Sam: anybody who opens the page holds
+  Sam's role, the owner's included.
 
 `viewer.anonymous` and `viewer.auth.method` are two settings. With
 `method: anonymous` the app shows no form, and `/sign-in` says that this
@@ -38,6 +41,15 @@ Joshua asks nobody to sign in. With `pin` or `password` beside
 `viewer.anonymous`, a request with no cookie is still served as the open
 identity, and a person who signs in is served as themselves. See
 [opening the viewer with no sign-in](operations.md#opening-the-viewer-with-no-sign-in).
+
+`method: anonymous` with no `viewer.anonymous` is the one combination nobody
+can read: the page asks for no secret, and a request with no cookie is
+nobody. `make validate` warns about it, and the viewer logs it at startup:
+
+```
+ok: /etc/joshua/joshua.yaml
+  warning: viewer.auth.method is 'anonymous' and viewer.anonymous is not set, so nobody can read the viewer: set viewer.anonymous: true to open it without a sign-in, or viewer.auth.method: pin (or password) to ask for a secret
+```
 
 ### pin
 
@@ -157,8 +169,9 @@ who keeps the roster from the viewer, not a capability.
 ## The Users section
 
 Sam opens Admin, the link under Profile at the bottom of the navigation, or
-`/admin/users`. Robin and Kit do not see the link, and every route behind it
-refuses them.
+`/admin/users`. Robin and Kit do not see the link, and the address itself
+says that the admin pages are the owner's. Every route behind it refuses them
+as well.
 
 The table holds one row for each person: the name and the id, the role, and
 whether that person has a secret. The secret column says `Set`, or
@@ -168,7 +181,7 @@ whether that person has a secret. The secret column says `Set`, or
 |---|---|
 | `Add a person` | one dialog: the name, the id, a handle, the role, and the secret. The secret is set in the same step, so Iris is added and can sign in at once. The handle is optional: without one, Iris uses Joshua from the viewer's chat. |
 | `Set secret` | sets the secret of that person, with no current secret. It is a first secret and a reset in one. |
-| `Promote` or `Demote` | a guest becomes a member, a member becomes an owner, an owner becomes a member. |
+| `Promote` or `Demote` | a role moves one tier, up or down: a guest becomes a member, a member becomes an owner or a guest again, an owner becomes a member. |
 | `Remove` | takes the person off the roster. Their handles and their secret go. What they wrote stays. |
 
 The secret of the dialog can stay empty. Then Iris is on the roster and
@@ -259,8 +272,12 @@ docker compose exec core python -m joshua_core people role --id sam --role owner
 
 Nothing else needs a setting. `make init-env` writes
 `JOSHUA_VIEWER_SESSION_SECRET`, which signs the cookies, so a restart keeps
-everybody signed in. Core serves the roster to the viewer because `viewer` is
-one of core's `AUTH_CALLERS`, the callers of `/auth/*`.
+everybody signed in. Without that variable the viewer mints a key of its own
+at each start, warns that it did, and every restart signs everybody out. Core
+serves the roster to the viewer because `viewer` is one of core's
+`AUTH_CALLERS`, the callers of `/auth/*`. A core whose list leaves the viewer
+out answers `403`: the sign-in page says only that sign-in is not available,
+and the viewer logs `AUTH_CALLERS` and the caller to add.
 
 [operations.md](operations.md#the-viewer) has the whole procedure, and
 [the chart README](../charts/joshua/README.md#the-viewer) has the Kubernetes

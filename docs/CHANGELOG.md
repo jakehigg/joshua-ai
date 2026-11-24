@@ -185,6 +185,38 @@ with the images and the packaged chart, are at
   [settings.md](settings.md) and
   [operations.md](operations.md#the-version-you-run).
 
+- **An admin address says whose pages these are.** `/admin/users` and
+  `/admin/instance` drew an empty window for a member and for a guest. They
+  now show one line, "Only the owner may read the admin pages.", in the shape
+  every page a person may not read uses, and a browser with no session goes to
+  the sign-in page as it does at every other address.
+
+- **The add-person dialog states the rule for an id.** A rejected id showed
+  the pattern the roster checks. The dialog now says that an id holds
+  lower-case letters, digits and hyphens, starts with a letter or a digit, and
+  is at most 32 characters long, and it checks the field before it writes.
+  Escape closes the dialog, as it closes the other dialogs of the viewer.
+
+- **A member can be made a guest again.** The row of the Users table offered
+  `Promote` alone for a member, so stepping somebody back down needed the
+  `people role` command. `Demote` now stands beside `Promote`, a role moves
+  one tier either way, and a change that would leave no owner shows what core
+  answered. See [auth.md](auth.md#the-users-section).
+
+### Viewer
+
+- **The menu offers no screen that cannot work.** Chat was in the navigation
+  of an open viewer (`viewer.anonymous: true`), where a turn came back as
+  "Joshua does not know this person", and Assignments was listed with the
+  assignments container off. A section is in the menu only when the setup can
+  serve it: Chat needs a person the roster knows, and Assignments needs
+  `assignments.enabled` and the address of the container.
+
+- **A wrong current PIN on the Profile page says so.** Every failure of the
+  form said "That change did not work." A current PIN, or password, that core
+  refused now says that it did not match. Every other failure keeps the one
+  sentence, so the page still never says which of the others it was.
+
 ### Notifications
 
 - **A notification leaves its text in the chat it came from.** The line on the
@@ -225,6 +257,28 @@ with the images and the packaged chart, are at
   mounts the folder that holds `joshua.yaml`, in every service, at the same
   path inside the container. An edit still takes effect at the next restart;
   it no longer breaks the running stack.
+
+- **A viewer nobody can read says what to set.** `viewer.enabled: true` with
+  `auth.method: anonymous` and no `viewer.anonymous` — the default of a fresh
+  install — refused every page and offered no sign-in form, and nothing said
+  why. `make validate` now warns and names the two settings, and the viewer
+  logs the same line at startup. The file is still valid and the rest of the
+  instance runs. See [auth.md](auth.md#anonymous).
+
+- **A missing `JOSHUA_VIEWER_SESSION_SECRET` is a warning at startup.**
+  Without it the viewer mints a key of its own, so every restart signed
+  everybody out with nothing in the log. The warning names the variable and
+  says that no sign-in survives a restart without it.
+
+- **A core that refuses the viewer names the setting to change.** With
+  `viewer` missing from core's `AUTH_CALLERS`, the sign-in page said only
+  "Sign-in is not available." The page keeps that sentence, and the viewer now
+  logs `AUTH_CALLERS`, the caller to add, and the route core refused.
+
+- **An open viewer that names a person warns at startup.** `viewer.anonymous:
+  <person id>` serves every request as that person, with their role, so a page
+  anybody can open holds the owner's Admin. The viewer logs the setting and
+  the person it grants.
 
 - **A correct PIN works on the first try after `make up`.** The viewer started
   beside core, so a sign-in in the first minute reached a core that was not up

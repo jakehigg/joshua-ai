@@ -6,6 +6,11 @@ the one source of the sections on the server, and the app holds the same
 table with the icons (``src/shell/sections.ts``), so the member rule and the
 person rule stay in one place.
 
+A section the setup cannot serve is not in the answer, so the menu offers no
+screen that fails the moment it is opened. :data:`WORKS` is the one place
+that rule lives: Chat needs a person the roster knows, and Assignments needs
+the assignments container.
+
 The links of the sidebar are not here: ``GET /api/v1/links`` is the one
 source of the list, and the sidebar reads it (``viewer_api.links``).
 
@@ -23,7 +28,9 @@ ending. ``viewer_session`` holds the cookie and the calls to core:
 - ``POST /api/v1/session/secret`` — ``{secret, new_secret}``: the person who
   signed in changes their own secret, with the current one, through core's
   ``POST /auth/secret``. The answer re-issues the cookie, because the change
-  moves the stamp that every outstanding cookie of that person carries.
+  moves the stamp that every outstanding cookie of that person carries. A
+  current secret core refused is 403 and says so; every other failure is one
+  sentence that says nothing of which it was.
 - ``GET /api/v1/auth-method`` — the method of the instance
   (``viewer.auth.method``) and whether the viewer is open. It needs no
   session, because the sign-in page reads it to know which form to render.
@@ -39,6 +46,7 @@ write of the viewer does.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from joshua_shared import config
@@ -47,7 +55,7 @@ from joshua_shared.log import get_logger
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from joshua_gateway import viewer_session
+from joshua_gateway import viewer_assignments, viewer_session
 from joshua_gateway.viewer_api.edit import (
     _field,  # the one reader of a JSON write body, and of the origin of a write
     _fields,
@@ -68,6 +76,11 @@ NO_CORE = "Sign-in is not available."
 # core that is not up yet, which is what a fresh stack shows. The secret was
 # never checked, so the page must not say that it was wrong.
 CORE_STARTING = "Joshua is still starting. Try again in a moment."
+# What a change of a person's own secret says when core refused the current
+# one (its 403). It is the one failure of the form the answer names: every
+# other one keeps ``CHANGE_FAILED``, so the page never says which of the
+# others it was.
+CHANGE_FAILED = "That change did not work."
 # The longest secret core takes.
 SECRET_MAX = 256
 
@@ -89,15 +102,63 @@ MEMBER_SECTIONS = frozenset({"documents"})
 PERSON_SECTIONS = frozenset({"chat"})
 
 
-def sections(person: Person) -> list[dict[str, str]]:
+def _chat_works(cfg: config.JoshuaConfig, person: Person, env: Mapping[str, str]) -> bool:
+    """The chat needs a person the roster knows.
+
+    Channels runs a turn for a person of ``people``, so the synthetic
+    anonymous identity of an open viewer has no chat: the turn would come back
+    as "Joshua does not know this person".
+    """
+    return cfg.person(person.id) is not None
+
+
+def _assignments_works(cfg: config.JoshuaConfig, person: Person, env: Mapping[str, str]) -> bool:
+    """Assignments needs the assignments container, which is off by default.
+
+    The container refuses to start without ``assignments.enabled``, so a
+    viewer that holds its address still reaches nothing while that setting is
+    false. The address and the token are the other half.
+    """
+    return cfg.assignments.enabled and viewer_assignments.from_env(env) is not None
+
+
+# What a section needs to work in this setup, by key. A section with no rule
+# here always works, and a new section gets a rule beside these ones: this
+# map is the one place the menu asks the question.
+WORKS: dict[str, Callable[[config.JoshuaConfig, Person, Mapping[str, str]], bool]] = {
+    "chat": _chat_works,
+    "assignments": _assignments_works,
+}
+
+
+def secret_label(method: str) -> str:
+    """What this instance calls the secret of a person, as the form does."""
+    return "password" if method == "password" else "PIN"
+
+
+def wrong_secret(method: str) -> str:
+    """What a change says when core refused the current secret."""
+    return f"That current {secret_label(method)} did not match."
+
+
+def sections(
+    person: Person, cfg: config.JoshuaConfig | None = None, env: Mapping[str, str] | None = None
+) -> list[dict[str, str]]:
     """The sections of a person: a guest gets no Documents.
 
-    A section of ``PERSON_SECTIONS`` gets the id of the person on its URL.
+    A section that cannot work in this setup is left out (:data:`WORKS`), so
+    the menu never offers a screen that fails as soon as it is opened. A
+    section of ``PERSON_SECTIONS`` gets the id of the person on its URL.
     """
+    cfg = config.load() if cfg is None else cfg
+    env = os.environ if env is None else env
     member = is_member(person.role)
     out: list[dict[str, str]] = []
     for key, label, url in SECTIONS:
         if not member and key in MEMBER_SECTIONS:
+            continue
+        works = WORKS.get(key)
+        if works is not None and not works(cfg, person, env):
             continue
         if key in PERSON_SECTIONS:
             url = f"{url}/{person.id}"
@@ -220,9 +281,14 @@ async def change_secret(request: Request, person: Person) -> JSONResponse:
     if not secret or not new_secret:
         return _answer({"error": "Both the current secret and the new one are needed."}, 400)
     status = await core.change_secret(person.id, secret, new_secret)
+    if status == 403:
+        # Core's one refusal of the current secret: it is wrong, or that
+        # person has none yet. Either way the current field is what to fix.
+        logger.info({"message": "viewer secret refused", "status": status})
+        return _answer({"error": wrong_secret(config.load().viewer.auth.method)}, 403)
     if status != 200:
         logger.info({"message": "viewer secret refused", "status": status})
-        return _answer({"error": "That change did not work."}, 403 if status == 403 else 503)
+        return _answer({"error": CHANGE_FAILED}, 503)
     viewer_session.forget(person.id)
     stamp = await viewer_session.current_stamp(core, person.id)
     if stamp is None:

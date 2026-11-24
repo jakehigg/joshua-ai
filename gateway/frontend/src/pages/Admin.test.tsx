@@ -2,8 +2,9 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import App from "../App";
+import App, { NOT_THE_OWNER } from "../App";
 import type { Session } from "../shell/Shell";
+import { ID_RULE } from "./admin/AddPersonDialog";
 import { ONLY_OWNER, SECRET_NOT_SET, SECRET_SET, type AdminUsers } from "./admin/Users";
 
 /** The owner who manages the roster, and a member who may not. */
@@ -37,18 +38,23 @@ function json(body: unknown, status = 200): Response {
  * The session of the person, the roster, and every write of the page. The
  * list it gives back holds the address and the body of each write.
  */
-function stubRoutes(role: string, roster: AdminUsers = ROSTER) {
+function stubRoutes(role: string, roster: AdminUsers = ROSTER, write: Response | null = null) {
   const sent: { path: string; body: unknown }[] = [];
   vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
     if (path === "/api/v1/session") {
-      return Promise.resolve(json(session(role)));
+      // The empty role is a browser with no session at all.
+      const answer = role === "" ? json({ error: "unauthorized" }, 401) : json(session(role));
+      return Promise.resolve(answer);
+    }
+    if (path === "/api/v1/auth-method") {
+      return Promise.resolve(json({ method: "password", anonymous: false }));
     }
     if (path === "/api/v1/admin/users" && init?.method !== "POST") {
       return Promise.resolve(json(roster));
     }
     if (path.startsWith("/api/v1/admin/users")) {
       sent.push({ path, body: init?.body === undefined ? null : JSON.parse(String(init.body)) });
-      return Promise.resolve(json({ ok: true }));
+      return Promise.resolve(write === null ? json({ ok: true }) : write.clone());
     }
     return Promise.resolve(json({ links: [] }));
   });
@@ -128,7 +134,7 @@ describe("the admin Users section", () => {
       "j-btn sm primary",
     );
     // A person who can sign in leads with their role instead.
-    expect(actions("Tomas")).toEqual(["Promote", "Set secret", "Remove"]);
+    expect(actions("Tomas")).toEqual(["Promote", "Demote", "Set secret", "Remove"]);
     expect(
       within(row("Tomas")).getByRole("button", { name: "Set secret" }).className,
     ).toEqual("j-btn sm");
@@ -175,6 +181,36 @@ describe("the admin Users section", () => {
         { path: "/api/v1/admin/users/mira/role", body: { role: "member" } },
       ]),
     );
+  });
+
+  it("demotes a member to a guest again", async () => {
+    const sent = stubRoutes("owner");
+
+    app();
+
+    expect(await screen.findByText("Tomas")).toBeDefined();
+    fireEvent.click(within(row("Tomas")).getByRole("button", { name: "Demote" }));
+
+    await waitFor(() =>
+      expect(sent).toEqual([{ path: "/api/v1/admin/users/tomas/role", body: { role: "guest" } }]),
+    );
+  });
+
+  it("says what the roster answered when a change leaves no owner", async () => {
+    const refusal = "the instance would have no owner";
+    const sent = stubRoutes(
+      "owner",
+      { users: [...ROSTER.users, { id: "noor", name: "Noor", role: "owner", has_secret: true }] },
+      json({ error: refusal }, 409),
+    );
+
+    app();
+
+    expect(await screen.findByText("Noor")).toBeDefined();
+    fireEvent.click(within(row("Noor")).getByRole("button", { name: "Demote" }));
+
+    expect(await screen.findByText(refusal)).toBeDefined();
+    expect(sent).toHaveLength(1);
   });
 
   it("will not demote or remove the only owner", async () => {
@@ -273,16 +309,56 @@ describe("the admin Users section", () => {
     );
   });
 
-  it("gives a member nothing at all at the address", async () => {
+  it("says the id rule in words, and closes the dialog on Escape", async () => {
+    const sent = stubRoutes("owner");
+
+    app();
+
+    expect(await screen.findByText("Mira")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Add a person" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Add a person" }));
+    fireEvent.change(document.querySelector('input[name="name"]') as HTMLInputElement, {
+      target: { value: "Nadia" },
+    });
+    fireEvent.change(document.querySelector('input[name="id"]') as HTMLInputElement, {
+      target: { value: "Nadia Khan" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "Add" }));
+
+    // The rule, and not the pattern the roster checks.
+    expect(await screen.findByText(ID_RULE)).toBeDefined();
+    expect(screen.queryByText(/\[a-z0-9\]/)).toBeNull();
+    expect(sent).toEqual([]);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("tells a member that the admin pages are the owner's", async () => {
     stubRoutes("member");
 
     app();
 
-    // What an address no route claims gives: no page, and no refusal either.
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    // The shape of every page a person may not read: the shell, and one line.
+    expect(await screen.findByText(NOT_THE_OWNER)).toBeDefined();
     expect(screen.queryByRole("navigation", { name: "Admin sections" })).toBeNull();
     expect(screen.queryByText("Mira")).toBeNull();
-    expect(screen.queryByText(/forbidden/i)).toBeNull();
-    expect(document.querySelector("main")).toBeNull();
+  });
+
+  it("tells a guest the same thing", async () => {
+    stubRoutes("guest");
+
+    app();
+
+    expect(await screen.findByText(NOT_THE_OWNER)).toBeDefined();
+  });
+
+  it("sends a browser with no session to the sign-in page", async () => {
+    stubRoutes("");
+
+    app();
+
+    expect(await screen.findByRole("heading", { name: /sign in/i })).toBeDefined();
+    expect(screen.queryByText(NOT_THE_OWNER)).toBeNull();
   });
 });

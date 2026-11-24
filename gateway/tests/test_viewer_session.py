@@ -10,6 +10,7 @@ response, the stamp that a changed secret moves, and the five routes of
 from __future__ import annotations
 
 import json
+import logging
 import textwrap
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -537,6 +538,44 @@ def test_a_wrong_current_secret_changes_nothing(client, core) -> None:
     assert core.secret == "open-sesame"
 
 
+def test_a_wrong_current_secret_says_so(monkeypatch, tmp_path, client, core) -> None:
+    """The one failure of the form the answer names, in the word the form
+    uses for the secret of this instance."""
+    from joshua_gateway.viewer_api import session as session_api
+
+    body = {"secret": "wrong", "new_secret": "new-one"}
+    response = client.post("/api/v1/session/secret", json=body, headers=ORIGIN, auth=ALEX)
+    assert response.json() == {"error": "That current password did not match."}
+
+    _data(monkeypatch, tmp_path / "pin", CONFIG_PIN)
+    pin_client = TestClient(viewer.build_app())
+    response = pin_client.post("/api/v1/session/secret", json=body, headers=ORIGIN, auth=ALEX)
+    assert response.status_code == 403
+    assert response.json() == {"error": "That current PIN did not match."}
+    assert session_api.wrong_secret("pin") == "That current PIN did not match."
+
+
+def test_every_other_failure_of_a_change_says_only_that_it_did_not_work(
+    monkeypatch, client, core
+) -> None:
+    """A core that answered 500 refused no secret: the page must not say
+    which of the other failures it was."""
+    from joshua_gateway.viewer_api import session as session_api
+
+    async def unavailable(self: Any, *args: Any) -> int:
+        return 500
+
+    monkeypatch.setattr(viewer_session.CoreAuth, "change_secret", unavailable)
+    response = client.post(
+        "/api/v1/session/secret",
+        json={"secret": "open-sesame", "new_secret": "new-one"},
+        headers=ORIGIN,
+        auth=ALEX,
+    )
+    assert response.status_code == 503
+    assert response.json() == {"error": session_api.CHANGE_FAILED}
+
+
 def test_a_change_needs_both_secrets(client) -> None:
     response = client.post(
         "/api/v1/session/secret",
@@ -582,6 +621,52 @@ def test_the_pin_method_lists_the_people_the_roster_names(monkeypatch, tmp_path,
 
 def test_the_list_of_people_is_404_for_any_other_method(client) -> None:
     assert client.get("/api/v1/sign-in/people").status_code == 404
+
+
+def test_a_core_that_refuses_the_viewer_names_auth_callers_in_the_log(
+    monkeypatch, tmp_path, core, caplog
+) -> None:
+    """Core answers 403 on ``/auth/*`` for a caller its ``AUTH_CALLERS`` leaves
+    out. The page keeps its one sentence, and the log says what to set."""
+    from joshua_gateway.viewer_api import session as session_api
+
+    _data(monkeypatch, tmp_path, CONFIG_PIN)
+    client = TestClient(viewer.build_app())
+    core.failing_status = 403
+
+    with caplog.at_level(logging.WARNING, logger="viewer.session"):
+        response = client.get("/api/v1/sign-in/people")
+
+    assert response.status_code == 503
+    assert response.json() == {"error": session_api.NO_CORE}
+    lines = [
+        r.msg for r in caplog.records if r.msg.get("setting") == viewer_session.AUTH_CALLERS_ENV
+    ]
+    assert len(lines) == 1
+    assert lines[0]["caller"] == viewer_session.VIEWER_CALLER
+    assert lines[0]["path"] == viewer_session.PEOPLE_PATH
+    assert viewer_session.AUTH_CALLERS_ENV in lines[0]["message"]
+    assert VIEWER_TOKEN not in caplog.text
+
+
+def test_a_refused_caller_on_the_sign_in_itself_is_logged_too(client, core, caplog) -> None:
+    """The other route of the form: the secret of a sign-in goes to core's
+    ``/auth/verify``, and a 403 there is the same missing caller."""
+    core.failing_status = 403
+
+    with caplog.at_level(logging.WARNING, logger="viewer.session"):
+        response = client.post(
+            "/api/v1/session/sign-in",
+            json={"person": "alex", "secret": "open-sesame"},
+            headers=ORIGIN,
+        )
+
+    assert response.status_code == 401
+    lines = [
+        r.msg for r in caplog.records if r.msg.get("setting") == viewer_session.AUTH_CALLERS_ENV
+    ]
+    assert [line["path"] for line in lines] == [viewer_session.VERIFY_PATH]
+    assert "open-sesame" not in caplog.text
 
 
 def test_the_list_of_people_with_no_core_is_503(monkeypatch, tmp_path) -> None:

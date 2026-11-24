@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError, postJson } from "../../api/client";
 import Chip from "../../ui/Chip";
@@ -18,6 +18,30 @@ export interface AddAnswer {
 }
 
 /**
+ * The rule for the id of a person, in words. The roster refuses an id that
+ * breaks it with the pattern it checks, which says the same thing to nobody,
+ * so the dialog says the rule and the owner can fix the field from it.
+ */
+export const ID_RULE =
+  "An id holds lower-case letters, digits and hyphens, starts with a letter or a " +
+  "digit, and is at most 32 characters long.";
+
+/** The same rule, to keep an id the roster refuses from leaving the dialog. */
+const ID_OK = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/**
+ * What a refused add says. The roster answers the pattern of the id it
+ * checks, and the dialog says the rule in words instead; every other refusal
+ * is the sentence the roster sent.
+ */
+function reason(exc: unknown): string {
+  if (!(exc instanceof ApiError)) {
+    return "that person was not added";
+  }
+  return exc.message.includes("id must match") ? ID_RULE : exc.message;
+}
+
+/**
  * The one dialog that adds a person: who they are, the id, the handle
  * they are known by, their role, and the secret they sign in with. The
  * handle is optional: a person with none signs in to the viewer and reaches
@@ -28,6 +52,11 @@ export interface AddAnswer {
  * looking for a second page to let them in. A blank secret is allowed: that
  * person cannot sign in yet, and the row of the table says so and offers
  * "Set secret".
+ *
+ * An id that breaks the rule of the roster never leaves the dialog: the
+ * field is checked here and the error is :data:`ID_RULE`, the rule in words,
+ * and the same sentence stands in for the pattern when the roster is the one
+ * that refuses. Escape closes the dialog, as it closes every other one.
  *
  * `onAdded` tells the table to read the roster again.
  */
@@ -46,8 +75,25 @@ export default function AddPersonDialog({
   const [error, setError] = useState<string>("");
   const [busy, setBusy] = useState<boolean>(false);
 
+  // Escape closes the dialog, as it closes the sheets of the app.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (!ID_OK.test(id.trim())) {
+      setError(ID_RULE);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -62,7 +108,7 @@ export default function AddPersonDialog({
       onClose();
     } catch (exc: unknown) {
       setBusy(false);
-      setError(exc instanceof ApiError ? exc.message : "that person was not added");
+      setError(reason(exc));
       // A refused secret is the one refusal that added the person all the
       // same, so the table reads the roster again and the row is there with
       // no secret on it.
