@@ -68,6 +68,11 @@ mcp:
     url: http://assignments:8000/mcp
     allow:
       - alex
+  internet:
+    type: http
+    url: http://upstream.example/internet
+    allow:
+      - alex
 assignments:
   enabled: true
   slice_turns: 10
@@ -505,6 +510,7 @@ async def test_the_session_holds_the_persons_gateway_servers_only(tmp_path, chan
         "documents",
         "gitlab",
         "tasks",
+        "internet",
         "assignment",
         "history",
     }
@@ -549,6 +555,22 @@ async def test_the_session_always_holds_documents_when_the_person_has_it(
         f"`documents/alex/`. The server sets `author: assignment:{started['id']}`"
     ) in client.prompt
     assert "an output of kind `document`, with the path as ref" in client.prompt
+
+
+async def test_research_goes_to_the_internet_server_and_the_shell_never_fetches(
+    tmp_path, channels
+) -> None:
+    """The shell of a session has no route to the open web, so the prompt names the route."""
+    sdk = FakeSdk([*done("ok"), result("success")], [*done("ok"), result("success")])
+    h = Harness(tmp_path, sdk, FakeCore())
+    await h.start(tools=["internet"])
+    assert set(sdk.clients[0].options.mcp_servers) == {"internet", "documents", "assignment"}
+    assert prompts.INTERNET in sdk.clients[0].prompt
+    assert prompts.NO_INTERNET not in sdk.clients[0].prompt
+    # With the server left out of the spec, the session asks Joshua instead.
+    await h.start(tools=["gitlab"])
+    assert "internet" not in sdk.clients[1].options.mcp_servers
+    assert prompts.NO_INTERNET in sdk.clients[1].prompt
 
 
 async def test_a_person_without_documents_gets_no_documents_server(tmp_path, channels) -> None:

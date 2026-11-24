@@ -33,6 +33,12 @@ When the request is not clear, ask the person one question first. Then start
 the assignment, or make a draft when the person wants to read it first (see
 below).
 
+The shell of an assignment has no route to the open web. When the goal needs
+research there, leave `tools` out, or name `internet` in it, so the session
+asks the `internet` server with `use_internet`. A session without that server
+stops and asks you for the page or the fact instead; get it yourself and
+answer with `provide_file` or `answer_assignment`.
+
 ### Draft, start, and several in a row
 
 - When the person wants to review the assignment before it runs ("create it,

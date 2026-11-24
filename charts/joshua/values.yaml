@@ -361,9 +361,11 @@ assignments:
   work:
     existingClaim: ""
     sizeLimit: 10Gi
-  # The pod may reach only gateway, channels, core, the database, DNS, and the
-  # git hosts below. Only the gateway may reach it, and the viewer too when
-  # viewer.enabled is true (the read API).
+  # The pod may reach only gateway, channels, core (the model forwarder), the
+  # database, DNS, and the git hosts below. A session gets no route to the open
+  # web: research goes to the `internet` MCP server through the gateway. Only
+  # the gateway may reach the pod, and the viewer too when viewer.enabled is
+  # true (the read API).
   networkPolicy:
     enabled: true
     # The DNS pods. The default fits a cluster that runs CoreDNS as kube-dns
@@ -373,11 +375,18 @@ assignments:
         kubernetes.io/metadata.name: kube-system
       podSelector:
         k8s-app: kube-dns
-    # A network policy matches addresses, not names. Give the address range of
-    # each git host in `assignments.repos`, such as 192.0.2.10/32.
+    # The git proxy of the manager fetches from each git host itself, so these
+    # ranges are the one route out of the pod. A network policy matches
+    # addresses, not names. Give the address range of each git host in
+    # `assignments.repos`, such as 192.0.2.10/32. Leave the list empty when no
+    # assignment clones from a host on the open web.
+    #
+    # The proxy runs in the same container as the session, so a shell in the
+    # session can still reach these ranges on 443. The rule in the session
+    # prompt, not this policy, keeps research off that path.
     gitHosts:
       cidrs: []
-      ports: [443, 22]
+      ports: [443]
     # The database when `postgres.enabled` is false: its address range.
     database:
       cidrs: []

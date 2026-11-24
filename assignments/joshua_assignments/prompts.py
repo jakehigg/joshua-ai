@@ -10,7 +10,10 @@ the goal, the clone
 command of each repository of the spec and each granted one, when the
 session holds the ``documents`` server, where deliverables go
 (``DELIVERABLES``), and, when it holds the ``history`` server, that the chat
-history is a source (``HISTORY``). After a lost
+history is a source (``HISTORY``). It always says how the session reads the
+open web: through the ``internet`` server with ``use_internet``
+(``INTERNET``), or not at all (``NO_INTERNET``), because the shell of a
+session has no route there. After a lost
 scratch it also names the files of ``inbox/`` that went with it.
 ``granted_text`` and ``provided_text`` are the answers of ``grant_repo``
 and ``provide_file``. ``later_prompt`` starts each later slice: the
@@ -56,6 +59,23 @@ DELIVERABLES = (
     "`documents/{person}/`. The server sets `author: assignment:{id}` and "
     "`assignment: {id}`. Record each one with `record_output` as an output of kind "
     "`document`, with the path as ref."
+)
+# The MCP server of the open web, through the gateway. A session holds it when
+# the person may reach it and the ``tools`` of the spec keep it. The shell of a
+# session has no route to the open web, so one of the two lines below always
+# goes into the first message.
+INTERNET_SERVER = "internet"
+INTERNET = (
+    "Research on the open web goes to the `internet` server: ask one question with "
+    "`use_internet`, and name in `urls` each address that you want read. Your shell has no "
+    "route to the open web, so never try `curl`, `wget`, `git`, or a fetch in Python or "
+    "in Node."
+)
+NO_INTERNET = (
+    "You hold no `internet` server, so you have no way to read the open web, and your "
+    "shell has no route to it. When the goal needs a document or a fact from the web, ask "
+    "Joshua for it with `request_resource` or `ask`. Never try `curl`, `wget`, `git`, or "
+    "a fetch in Python or in Node: the attempt only wastes turns."
 )
 # The in-process server of the chat history. A session holds it unless the
 # ``tools`` of the spec leave it out. The line says the tools are there; the
@@ -159,6 +179,11 @@ def deliverables_line(row: dict[str, Any], has_documents: bool) -> str | None:
     return DELIVERABLES.format(person=row["person_id"], id=row["id"])
 
 
+def internet_line(has_internet: bool) -> str:
+    """How the session reads the open web: the ``internet`` server, or not at all."""
+    return INTERNET if has_internet else NO_INTERNET
+
+
 def first_prompt(
     row: dict[str, Any],
     work: Path | None = None,
@@ -167,6 +192,7 @@ def first_prompt(
     has_tasks: bool = False,
     has_documents: bool = False,
     has_history: bool = False,
+    has_internet: bool = False,
     inbox_gone: Iterable[str] = (),
 ) -> str:
     """The first message of a new session.
@@ -174,9 +200,10 @@ def first_prompt(
     ``resumed`` is True when the assignment ran before but its scratch
     directory, with its session, is gone. ``has_tasks`` is True when the
     session holds the ``tasks`` server, ``has_documents`` when it holds
-    the ``documents`` server, and ``has_history`` when it holds the
-    ``history`` server. ``inbox_gone`` names the files of ``inbox/``
-    that went with the scratch directory.
+    the ``documents`` server, ``has_history`` when it holds the
+    ``history`` server, and ``has_internet`` when it holds the ``internet``
+    server. ``inbox_gone`` names the files of ``inbox/`` that went with the
+    scratch directory.
     """
     spec = row.get("spec") or {}
     lines = [SCRATCH_LOST] if resumed else []
@@ -204,6 +231,7 @@ def first_prompt(
         lines.append(deliverables)
     if has_history:
         lines.append(HISTORY)
+    lines.append(internet_line(has_internet))
     follow_ups = follow_up_line(spec.get("tasks_project"), has_tasks)
     if follow_ups:
         lines.append(follow_ups)

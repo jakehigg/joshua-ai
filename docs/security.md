@@ -701,6 +701,36 @@ is the fence around a mistake, not a wall against somebody who already runs a
 server and aims it at you. A person who needs that wall runs the container with
 egress to the open web alone, which the network, not this code, decides.
 
+### An assignment session does not fetch the web
+
+An assignment session is the same shape of problem, one container further
+out. It holds private data: the wiki and the files of the person through the
+tools of the person, the documents of the person, and each repository that it
+cloned. It also has a shell. If that container could fetch a page, the text of
+that page would land beside the private data, in a process that can still
+reach the network. That is the shape the internet agent exists to prevent.
+
+So the session does not fetch. Research goes to the `internet` server with
+`use_internet`: the question leaves the session, the internet agent reads the
+page with nothing else in its hands, and the answer comes back as data. A URL
+that the session composes itself also goes past the grant rule of
+`core/joshua_core/engine/url_grants.py`, which only the tool applies.
+
+The network enforces it, not the prompt alone:
+
+- On Kubernetes, the network policy of the chart allows egress to gateway,
+  channels, core, the database, the cluster DNS, and the address ranges of
+  `assignments.networkPolicy.gitHosts.cidrs`. It names no other destination.
+- With compose, the container is on the `closed` network, which has no route
+  off the host.
+
+One route out stays. The git proxy of the manager fetches from the git host
+itself, and it runs in the same container as the session, so a command in the
+session can still reach those address ranges on port 443. The rule in the
+session prompt keeps research off that path, and closing it needs the proxy in
+a container of its own.
+[assignments.md](assignments.md#what-the-session-can-reach) has the detail.
+
 ## What a compromised session can reach
 
 A prompt injection is the realistic attack: a message, a file, or a tool result
@@ -733,8 +763,11 @@ list makes it. Keep such servers on a short list.
   BlueBubbles.
 - Telegram link previews are off, so Telegram's servers never fetch a URL that
   Joshua sends.
+- `assignments` is on the `closed` compose network, which has no route off the
+  host. It reaches the other containers and nothing on the open web.
 
-Compose does not enforce egress. A firewall around the host does.
+Compose enforces no egress beyond that network, because a network has no route
+to one destination alone. A firewall around the host gives that.
 
 ## One instance, one group
 

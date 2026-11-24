@@ -10,9 +10,13 @@
 # Secrets come only from `.env` (see `.env.example`). No secret is written in
 # this file; every value is a literal or a `${VAR}` from `.env`.
 #
-# Network: compose puts every service on one default network. Only `core`
-# (Anthropic API, SDK web tools) and `gateway` (MCP upstreams) reach the
-# internet. Egress is not enforced here; that is a phase 6 concern.
+# Network: two networks, at the bottom of this file. `default` has a route to
+# the internet, which `core` (Anthropic API, SDK web tools), `gateway` (MCP
+# upstreams) and `channels` (Telegram, BlueBubbles) need. `closed` has none
+# (`internal: true`), and the assignments container is on it alone, so a shell
+# in an assignment session reaches the other containers and no host on the open
+# web. Egress to one destination alone is the job of a firewall around the
+# host, which compose cannot express.
 
 # All three app containers hold every fleet token, because each one verifies
 # the callers it trusts (see CLAUDE.md, "Identity and auth"). `make init-env`
@@ -76,6 +80,7 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    networks: [default, closed]
     # Not published on the host. Only `core` connects, over the compose network.
 
   gateway:
@@ -105,6 +110,7 @@ services:
       # `package:` entry here at start. It is not backed up, and `make nuke`
       # drops it; the next start installs everything again.
       - mcp-store:/opt/joshua-mcp
+    networks: [default, closed]
     healthcheck: *app-healthcheck
 
   core:
@@ -149,6 +155,7 @@ services:
     # reach it.
     ports:
       - "127.0.0.1:8081:8000"
+    networks: [default, closed]
     depends_on:
       postgres:
         condition: service_healthy
@@ -170,6 +177,7 @@ services:
     # this block when neither `channels.imessage` nor `channels.webhooks` runs.
     ports:
       - "8080:8000"
+    networks: [default, closed]
     depends_on:
       core:
         condition: service_healthy
@@ -216,6 +224,7 @@ services:
       - data:/data
     ports:
       - "127.0.0.1:8082:8000"
+    networks: [default, closed]
     # Core checks every sign-in, so the viewer waits for a healthy core. A
     # viewer that takes a secret before core answers refuses a correct one.
     depends_on:
@@ -268,6 +277,17 @@ services:
       - data:/data:ro
       # The scratch directory of each assignment.
       - assignments-work:/work
+    # The `closed` network alone: no route to the open web. A session holds
+    # private data — the wiki, the documents of the person, a granted
+    # repository — so it reaches the other containers and nothing else. Its
+    # research goes to the `internet` MCP server through the gateway.
+    #
+    # The git proxy of the manager fetches from a git host itself, and it runs
+    # in this container. To clone from a git host on the open web, add
+    # `- default` to this list, and allow the addresses of that host alone in a
+    # firewall around the host: compose cannot narrow a network to one
+    # destination. Then a shell in a session can reach the open web again.
+    networks: [closed]
     depends_on:
       postgres:
         condition: service_healthy
@@ -290,6 +310,17 @@ services:
       VIEWER_PASSWORDS: ${VIEWER_PASSWORDS:-}
     volumes:
       - *config-mount
+
+networks:
+  # The stack network. It has a route to the internet.
+  default:
+  # No route off the host: `internal: true` gives the network no gateway, so a
+  # container on this network alone reaches the other containers and nothing
+  # beyond them. Every container that talks to the assignments container is on
+  # it: the gateway calls `/mcp`, the viewer calls the read API, and the
+  # manager calls core, channels, and postgres.
+  closed:
+    internal: true
 
 volumes:
   pgdata:
