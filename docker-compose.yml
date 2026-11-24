@@ -42,6 +42,14 @@ x-config-vars: &config-vars
 x-runtime-vars: &runtime-vars
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
+# The config, read-only, at the path every service reads it from
+# (JOSHUA_CONFIG=/etc/joshua/joshua.yaml). The mount is the folder that holds
+# joshua.yaml, not the file itself: an editor that writes a new file — `sed -i`
+# does, and so do most editors — gives the file a new inode, and a container
+# that bind-mounted the old one keeps reading a file that is gone, until it is
+# restarted. A folder mount follows the edit.
+x-config-mount: &config-mount ".:/etc/joshua:ro"
+
 # Each app serves `/healthz` on port 8000. The slim images have no curl, so the
 # check uses python. `urlopen` exits non-zero on a non-200 response.
 x-app-healthcheck: &app-healthcheck
@@ -91,7 +99,7 @@ services:
       - path: .env.gateway
         required: false
     volumes:
-      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - *config-mount
       - data:/data
       # The MCP package store. Derived data: the gateway installs each
       # `package:` entry here at start. It is not backed up, and `make nuke`
@@ -129,7 +137,7 @@ services:
       # the variable from `.env` afterwards.
       VIEWER_PASSWORDS: ${VIEWER_PASSWORDS:-}
     volumes:
-      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - *config-mount
       - data:/data
       # The SDK config dir. A named volume keeps sessions across restarts.
       - claude-config:/home/app/.claude
@@ -156,7 +164,7 @@ services:
       JOSHUA_CONFIG: /etc/joshua/joshua.yaml
       CORE_URL: http://core:8000
     volumes:
-      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - *config-mount
       - data:/data
     # Published on the host so BlueBubbles and webhook callers reach it. Drop
     # this block when neither `channels.imessage` nor `channels.webhooks` runs.
@@ -204,10 +212,15 @@ services:
       # The chat routes (/api/v1/chat/...) call channels, with the same token.
       CHANNELS_URL: http://channels:8000
     volumes:
-      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - *config-mount
       - data:/data
     ports:
       - "127.0.0.1:8082:8000"
+    # Core checks every sign-in, so the viewer waits for a healthy core. A
+    # viewer that takes a secret before core answers refuses a correct one.
+    depends_on:
+      core:
+        condition: service_healthy
     healthcheck: *app-healthcheck
 
   # Long jobs that run for a member in the background. Off by default; `make
@@ -251,7 +264,7 @@ services:
       - path: .env.assignments
         required: false
     volumes:
-      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - *config-mount
       - data:/data:ro
       # The scratch directory of each assignment.
       - assignments-work:/work
@@ -276,7 +289,7 @@ services:
       <<: *config-vars
       VIEWER_PASSWORDS: ${VIEWER_PASSWORDS:-}
     volumes:
-      - ./joshua.yaml:/etc/joshua/joshua.yaml:ro
+      - *config-mount
 
 volumes:
   pgdata:

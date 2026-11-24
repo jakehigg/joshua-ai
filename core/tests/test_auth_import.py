@@ -135,6 +135,60 @@ async def test_import_skips_a_person_off_the_roster(monkeypatch: pytest.MonkeyPa
     assert set(repo.secrets) == {"alex"}
 
 
+# --- the bcrypt format ------------------------------------------------------
+
+
+# A hash cut short: it starts with `$2b$` and is not a hash.
+TRUNCATED_HASH = ALEX_HASH[:21]
+
+
+async def test_a_reference_that_is_not_a_bcrypt_hash_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A truncated hash is counted unreadable, not stored, and leaves the
+    import to run again once the value is corrected."""
+    lines: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        auth_import.logger, "info", lambda payload: lines.append(payload), raising=False
+    )
+    repo = FakeRepo()
+
+    summary = await import_once(repo, _settings(alex=TRUNCATED_HASH))
+
+    assert summary == {"ran": True, "imported": 0, "skipped": 0, "unreadable": 2}
+    assert repo.secrets == {}
+    # Nothing was imported, so the marker stays unset and a corrected value
+    # still imports.
+    assert repo.marker is None
+    # The log names the person whose value was refused, and never the value.
+    refused = [line for line in lines if line["message"] == "auth import unreadable"]
+    assert {line["person"] for line in refused} == {"alex", "mia"}
+    assert not [line for line in lines if TRUNCATED_HASH in str(line)]
+
+    summary = await import_once(repo, _settings(alex=ALEX_HASH))
+
+    assert summary == {"ran": True, "imported": 1, "skipped": 0, "unreadable": 1}
+    assert repo.secrets == {"alex": ALEX_HASH}
+    assert repo.marker == {"id": "viewer_passwords", "rows_written": 1}
+
+
+def test_only_a_whole_bcrypt_hash_passes_the_format_check() -> None:
+    assert auth_import.is_bcrypt_hash(ALEX_HASH)
+    assert auth_import.is_bcrypt_hash("$2a$12$" + "a" * 53)
+    assert auth_import.is_bcrypt_hash("$2y$12$" + "a" * 53)
+    for value in (
+        TRUNCATED_HASH,
+        "",
+        "a-plain-password",
+        "$2b$12$short",
+        "$2c$12$" + "a" * 53,
+        "$2b$ab$" + "a" * 53,
+        ALEX_HASH + "x",
+        ALEX_HASH[:-1] + "!",
+    ):
+        assert not auth_import.is_bcrypt_hash(value), value
+
+
 # --- rule a: the marker, never "the table is empty" ------------------------
 
 

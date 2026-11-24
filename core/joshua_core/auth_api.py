@@ -15,9 +15,12 @@ routes off, so every caller gets 403.
   the roster. The answer never says which of the three it was.
 - ``POST /auth/secret`` — ``{person, secret, new_secret}``: a person changes
   their own secret and sends the current one. A wrong current secret, and a
-  person who has none yet, get 403.
+  person who has none yet, get 403. A new secret that is empty, or only
+  whitespace, is 400: an empty secret matches no input, so it would lock the
+  person out.
 - ``POST /auth/secret/admin`` — ``{person, new_secret}``: set the secret of a
-  person without the current one, for a first sign-in or a reset.
+  person without the current one, for a first sign-in or a reset. An empty new
+  secret is 400 here too.
 - ``DELETE /auth/secret/{person_id}`` — drop the secret of a person.
 - ``GET /auth/people`` — the ids of the people who have a secret. A person
   with no secret is absent. It carries no time: the viewer renders this list
@@ -55,13 +58,34 @@ BCRYPT_ROUNDS = 12
 # call, because a longer one raises.
 BCRYPT_MAX_BYTES = 72
 
+# What a caller that passes no secret is told. An empty secret, and one of
+# whitespace alone, hashes to a value that no input ever matches, so storing
+# one takes the person's way in away with no error.
+EMPTY_SECRET = "an auth secret cannot be empty"
+
+
+class EmptySecretError(ValueError):
+    """The secret to store is empty, or whitespace alone."""
+
+
+def is_empty_secret(secret: str) -> bool:
+    """True when ``secret`` holds nothing but whitespace."""
+    return not secret.strip()
+
 
 def _secret_bytes(secret: str) -> bytes:
     return secret.encode("utf-8")[:BCRYPT_MAX_BYTES]
 
 
 def hash_secret(secret: str) -> str:
-    """The bcrypt hash of ``secret``."""
+    """The bcrypt hash of ``secret``.
+
+    Every path that stores a secret hashes it here, so the one check against
+    an empty secret lives here: :class:`EmptySecretError` for a secret that is
+    empty or whitespace alone, and no caller can store one.
+    """
+    if is_empty_secret(secret):
+        raise EmptySecretError(EMPTY_SECRET)
     return bcrypt.hashpw(_secret_bytes(secret), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode(
         "utf-8"
     )
@@ -104,16 +128,21 @@ class VerifyBody(_Body):
 class ChangeBody(_Body):
     person: str = Field(min_length=1, max_length=64)
     secret: str = Field(min_length=1, max_length=256)
-    new_secret: str = Field(min_length=1, max_length=256)
+    # An empty new secret reaches the handler, which names the rule it broke.
+    new_secret: str = Field(max_length=256)
 
 
 class SetBody(_Body):
     person: str = Field(min_length=1, max_length=64)
-    new_secret: str = Field(min_length=1, max_length=256)
+    new_secret: str = Field(max_length=256)
 
 
 def _unknown_person() -> JSONResponse:
     return JSONResponse({"error": "unknown person"}, status_code=404)
+
+
+def _empty_secret() -> JSONResponse:
+    return JSONResponse({"error": EMPTY_SECRET}, status_code=400)
 
 
 async def _on_roster(request: Request, person_id: str) -> bool:
@@ -139,6 +168,8 @@ def build_auth_router() -> APIRouter:
         repo = request.app.state.ctx.repo
         if not await _on_roster(request, body.person):
             return _unknown_person()
+        if is_empty_secret(body.new_secret):
+            return _empty_secret()
         if not verify_secret(body.secret, await repo.get_auth_secret(body.person)):
             logger.info({"message": "auth secret refused", "caller": caller})
             return JSONResponse({"error": "wrong secret"}, status_code=403)
@@ -153,6 +184,8 @@ def build_auth_router() -> APIRouter:
         repo = request.app.state.ctx.repo
         if not await _on_roster(request, body.person):
             return _unknown_person()
+        if is_empty_secret(body.new_secret):
+            return _empty_secret()
         await repo.set_auth_secret(body.person, hash_secret(body.new_secret))
         logger.info({"message": "auth secret set", "caller": caller})
         return JSONResponse({"ok": True, "person": body.person})

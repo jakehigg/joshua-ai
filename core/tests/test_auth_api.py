@@ -228,6 +228,34 @@ def test_the_admin_route_is_404_for_an_unknown_person(client) -> None:
     assert "nobody" not in client.repo.secrets
 
 
+# --- an empty secret -------------------------------------------------------
+
+
+@pytest.mark.parametrize("empty", ["", "   ", "\t\n"])
+def test_an_empty_new_secret_is_refused_and_changes_nothing(client, empty: str) -> None:
+    """An empty secret matches no input, so neither route stores one."""
+    before = client.repo.secrets["alex"]
+
+    reset = _call(client, "POST", "/auth/secret/admin", person="alex", new_secret=empty)
+    assert reset.status_code == 400
+    assert reset.json() == {"error": auth_api.EMPTY_SECRET}
+
+    change = _call(client, "POST", "/auth/secret", person="alex", secret=SECRET, new_secret=empty)
+    assert change.status_code == 400
+    assert change.json() == {"error": auth_api.EMPTY_SECRET}
+
+    assert client.repo.secrets["alex"] == before
+    assert "mia" not in client.repo.secrets
+
+
+@pytest.mark.parametrize("empty", ["", "   "])
+def test_hash_secret_refuses_an_empty_secret(empty: str) -> None:
+    """The one point every path that stores a secret goes through."""
+    with pytest.raises(auth_api.EmptySecretError) as exc:
+        hash_secret(empty)
+    assert str(exc.value) == auth_api.EMPTY_SECRET
+
+
 # --- DELETE /auth/secret/{person_id} ---------------------------------------
 
 

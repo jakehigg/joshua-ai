@@ -15,7 +15,9 @@ ending. ``viewer_session`` holds the cookie and the calls to core:
 - ``POST /api/v1/session/sign-in`` — ``{person, secret, remember?}``. Core
   checks the secret (``POST /auth/verify``) and the answer carries the
   cookie. A wrong secret, a person who is not on the roster, and one with no
-  secret all get the same 401, so the answer says nothing about who exists.
+  secret all get the same 401, so the answer says nothing about who exists. A
+  core that could not check the secret is 503 and says that Joshua is still
+  starting: it refused nothing.
 - ``POST /api/v1/session/sign-out`` — clears the cookie. It needs no session,
   so a cookie the viewer no longer accepts can still be thrown away.
 - ``POST /api/v1/session/secret`` — ``{secret, new_secret}``: the person who
@@ -58,9 +60,14 @@ logger = get_logger("viewer")
 # not on the roster, and a person with no secret, so the answer tells nobody
 # which of the three it was.
 SIGN_IN_FAILED = "That sign-in did not work."
-# What a request says when the viewer cannot reach core: there is no sign-in
-# without core, because core holds every secret.
+# What a secret change, the pin list, and the profile routes say when the
+# viewer cannot reach core: core holds every secret and the roster, so none of
+# them works without it.
 NO_CORE = "Sign-in is not available."
+# What the sign-in says when core could not answer: an outage, a 5xx, or a
+# core that is not up yet, which is what a fresh stack shows. The secret was
+# never checked, so the page must not say that it was wrong.
+CORE_STARTING = "Joshua is still starting. Try again in a moment."
 # The longest secret core takes.
 SECRET_MAX = 256
 
@@ -141,24 +148,35 @@ async def sign_in(request: Request) -> JSONResponse:
     is not on the roster, and a person with no secret all get one refusal, so
     the answer says nothing about who exists. ``remember`` gives the cookie a
     month; without it the browser drops it when it closes.
+
+    A core that could not check the secret is the other answer, 503: it has
+    refused nothing, so the page says that Joshua is still starting. Those two
+    sentences are everything the route says about a sign-in that did not work.
     """
     fields = await _fields(request)
     if fields is None or not _origin_ok(request):
         return _answer({"error": SIGN_IN_FAILED}, 403)
     core = viewer_session.from_env(os.environ)
     if core is None:
-        return _answer({"error": NO_CORE}, 503)
+        return _answer({"error": CORE_STARTING}, 503)
     person_id = _field(fields, "person").strip()
     secret = _secret(fields, "secret")
     remember = fields.get("remember") is True
-    ok = bool(person_id) and bool(secret) and await core.verify(person_id, secret)
+    if not person_id or not secret:
+        logger.info({"message": "viewer sign-in refused"})
+        return _answer({"error": SIGN_IN_FAILED}, 401)
+    verified = await core.verify(person_id, secret)
+    if verified is None:
+        logger.info({"message": "viewer sign-in unavailable"})
+        return _answer({"error": CORE_STARTING}, 503)
     person = config.load().person(person_id)
-    if not ok or person is None:
+    if not verified or person is None:
         logger.info({"message": "viewer sign-in refused"})
         return _answer({"error": SIGN_IN_FAILED}, 401)
     stamp = await viewer_session.current_stamp(core, person_id)
     if stamp is None:
-        return _answer({"error": NO_CORE}, 503)
+        logger.info({"message": "viewer sign-in unavailable"})
+        return _answer({"error": CORE_STARTING}, 503)
     logger.info({"message": "viewer sign-in", "person": person_id, "remember": remember})
     response = _answer({"ok": True, "person": person_json(person)})
     viewer_session.set_cookie(

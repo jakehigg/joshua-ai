@@ -4,7 +4,10 @@ A person signs in on a form of the React app, the viewer asks core to check the
 secret (``POST /auth/verify``), and the answer carries one signed cookie,
 ``joshua_session``. Every later request is that cookie: the viewer reads the
 person out of it and makes no call to core for an ordinary page. Core owns the
-roster and every hash, so the viewer holds no password of its own.
+roster and every hash, so the viewer holds no password of its own. A core that
+does not answer, or answers 5xx, is not a refusal: :meth:`CoreAuth.verify`
+gives None there, so the route says that Joshua is still starting instead of
+saying that the secret was wrong.
 
 A cookie is ``<payload>.<signature>``. The payload is base64url JSON with the
 person id, the expiry, whether "remember me" was checked, and the stamp of
@@ -237,12 +240,14 @@ class CoreAuth:
     def _client(self) -> FleetClient:
         return FleetClient(self._base_url, self._token, TIMEOUT_S, transport=self._transport)
 
-    async def verify(self, person_id: str, secret: str) -> bool:
-        """True when core says the secret is that person's.
+    async def verify(self, person_id: str, secret: str) -> bool | None:
+        """What core says about a secret: True, False, or None for no answer.
 
         Core answers ``ok: false`` for a wrong secret, for a person with no
         secret, and for one who is not on the roster, and never says which.
-        Core that cannot answer is false too: no sign-in without core.
+        None is a core that could not say: an outage, or a 5xx. The caller
+        keeps the two apart, because a core that is still starting has not
+        refused anything.
         """
         try:
             async with self._client() as client:
@@ -251,7 +256,10 @@ class CoreAuth:
                 )
         except httpx.HTTPError as exc:
             logger.warning({"message": "core verify failed", "error": type(exc).__name__})
-            return False
+            return None
+        if response.status_code >= 500:
+            logger.warning({"message": "core verify unavailable", "status": response.status_code})
+            return None
         if response.status_code != 200:
             logger.warning({"message": "core verify refused", "status": response.status_code})
             return False

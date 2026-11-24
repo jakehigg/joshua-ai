@@ -11,7 +11,8 @@ secret of any person, and the viewer serves these routes to the owner alone.
 Routes:
 
 - ``GET /admin/people`` / ``POST /admin/people`` — read and extend the roster.
-  The handle is optional.
+  The handle is optional. An id that is already on the roster is 409 and
+  changes nothing: the route adds a person, and never overwrites one.
 - ``POST /admin/people/{id}/role`` — change the role of a person (body
   ``{role}``). Only the role changes.
 - ``POST /admin/people/{id}/remove`` — mark a person removed, drop their
@@ -232,6 +233,14 @@ def build_admin_router() -> APIRouter:
         if not isinstance(body, dict):
             return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
         repo = request.app.state.ctx.repo
+        # The route adds a person. An id the roster already holds is 409
+        # before any write, so the person who holds it keeps their name, their
+        # role, their handles and their secret. An id whose person was removed
+        # is free again.
+        person_id = str(body.get("id", "")).strip()
+        taken = await repo.get_person(person_id)
+        if taken is not None and taken.role != "removed":
+            return JSONResponse({"error": f"the id {person_id} is taken"}, status_code=409)
         try:
             result = await people.add_person(
                 repo,

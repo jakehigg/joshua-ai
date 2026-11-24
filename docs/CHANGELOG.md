@@ -195,6 +195,43 @@ with the images and the packaged chart, are at
   text is where it lands. A push the service refuses writes the message too.
   See [notifications.md](notifications.md#what-push-is).
 
+### Sign-in and setup
+
+- **An empty sign-in secret is refused.** `people auth-reset --id X --secret
+  ''` used to report success, replace the real secret with an empty one, and
+  lock the person out, because an empty secret matches no input. The command
+  now prints `an auth secret cannot be empty`, exits non-zero, and writes
+  nothing, and the routes that set a secret answer 400 with the same sentence.
+  A secret of spaces alone is empty too. See [auth.md](auth.md#reset-a-secret).
+
+- **A person id is never taken twice.** `POST /admin/people` with an id that
+  the roster already holds answered 201 and replaced that person. It now
+  answers 409 and changes nothing: the person who holds the id keeps their
+  name, their role, their handles, and their secret. The id of a person who
+  was removed is free again.
+
+- **The one-time password import checks the format of a hash.** A value of
+  `VIEWER_PASSWORDS` that looks like a bcrypt hash and is not one — a hash cut
+  short, for example — was stored as a hash, which nobody could sign in with,
+  and the import then marked itself done. Such a value is now counted
+  `unreadable`, the log names the person and never the value, and an import
+  that wrote no row leaves the marker unset, so it runs again once the values
+  are corrected.
+
+- **An edit of `joshua.yaml` no longer needs a restart of the stack.** Compose
+  mounted the single file, so an editor that writes a new file — `sed -i` does,
+  and so do most editors — left the containers reading a file that was gone,
+  and every turn answered `config file not found` until a restart. Compose now
+  mounts the folder that holds `joshua.yaml`, in every service, at the same
+  path inside the container. An edit still takes effect at the next restart;
+  it no longer breaks the running stack.
+
+- **A correct PIN works on the first try after `make up`.** The viewer started
+  beside core, so a sign-in in the first minute reached a core that was not up
+  and the page said that the PIN did not match. The viewer now waits for a
+  healthy core, and a sign-in that core could not check says "Joshua is still
+  starting. Try again in a moment." instead of blaming the PIN.
+
 ## 0.4.0 - 2026-11-19
 
 A workspace can now hold several people, who write in one thread and read the

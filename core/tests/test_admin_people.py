@@ -79,6 +79,31 @@ def test_post_people_conflict_is_400(client) -> None:
     assert "already belongs" in resp.json()["error"]
 
 
+def test_post_people_with_an_id_that_is_taken_is_409(client) -> None:
+    """The route adds a person; it never overwrites one. The stored person
+    keeps their name, their role, their handles and their secret."""
+    client.repo.secrets["alex"] = "$2b$04$hash"
+    resp = client.post(
+        "/admin/people",
+        headers=_laptop(),
+        json={"id": "alex", "name": "Someone Else", "handle": "telegram:555", "role": "guest"},
+    )
+    assert resp.status_code == 409
+    assert "taken" in resp.json()["error"]
+    assert client.repo.people["alex"] == Person(id="alex", display_name="Alex", role="member")
+    assert client.repo.handles == {("telegram", "9"): "alex"}
+    assert client.repo.secrets == {"alex": "$2b$04$hash"}
+    assert not (client.data_dir / "people.yaml").exists()
+
+
+def test_post_people_takes_the_id_of_a_removed_person_again(client) -> None:
+    """A removed id is free: an operator can add that person back."""
+    client.repo.people["ghost"] = Person(id="ghost", display_name="Ghost", role="removed")
+    resp = client.post("/admin/people", headers=_laptop(), json={"id": "ghost", "name": "Ghost"})
+    assert resp.status_code == 201
+    assert client.repo.people["ghost"].role == "member"
+
+
 def test_post_people_bad_body_is_400(client) -> None:
     resp = client.post("/admin/people", headers=_laptop(), json=["not", "an", "object"])
     assert resp.status_code == 400

@@ -101,6 +101,16 @@ def test_cli_auth_reset(monkeypatch, tmp_path, capsys) -> None:
     assert "auth secret set for alex" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("empty", ["", "   "])
+def test_cli_auth_reset_refuses_an_empty_secret(monkeypatch, tmp_path, capsys, empty) -> None:
+    """An empty secret would lock the person out, so nothing is written."""
+    repo = PeopleFakeRepo([Person(id="alex", display_name="Alex", role="member")])
+    rc = _run_cli(monkeypatch, repo, ["auth-reset", "--id", "alex", "--secret", empty], tmp_path)
+    assert rc == 1
+    assert repo.secrets == {}
+    assert auth_api.EMPTY_SECRET in capsys.readouterr().err
+
+
 def test_cli_auth_reset_refuses_a_person_off_the_roster(monkeypatch, tmp_path, capsys) -> None:
     repo = PeopleFakeRepo([Person(id="ghost", display_name="Ghost", role="removed")])
     assert _run_cli(monkeypatch, repo, ["auth-reset", "--id", "nobody", "--secret", "s"], tmp_path)
