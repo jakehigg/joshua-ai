@@ -875,6 +875,56 @@ The gateway trusts these headers only from the identities in
 identity gets `403` on an MCP route. A group id that is not in `groups` is
 400.
 
+## viewer
+
+The viewer runs from the gateway image, as a process of its own, on port 8000
+in the container. Compose publishes it on `127.0.0.1:8082`. Its caller is a
+browser, never a container: the credential is the signed session cookie
+`joshua_session`, not a fleet token, and no route here takes a bearer. A
+request with no cookie gets `401 {"error": "sign in to read this"}` unless
+`viewer.anonymous` serves it. Every write also checks the `Origin` header,
+and a request from another site is `403`. Every answer is
+`application/json` and is never cached.
+
+The viewer holds no secret and no database. It calls core with its own fleet
+token, `JOSHUA_TOKEN_VIEWER`, for everything below (`/auth/*`,
+`/admin/people`, `/admin/settings`), so a core that does not answer is `503`
+here.
+
+A viewer route that proxies another container stands with the route it calls:
+the settings routes, the release check, the push routes, and the workspace
+notify mode with core's, and the chat routes with those of channels. The
+routes of the pages that read the data volume — the wiki, the journal, the
+search, the documents, the files, and the editor — serve the React app alone;
+`gateway/joshua_gateway/viewer_api/` holds them.
+
+### The session routes
+
+| Route | Session | Request | Reply |
+|---|---|---|---|
+| `GET /api/v1/session` | needed | | `{"person": {"id", "name", "role"}, "anonymous": bool, "sections": [{"key", "label", "path"}], "chat_url", "timezone"}`. The sections are the navigation of that person: a guest gets no Documents, Chat is left out unless the roster knows the person, and Assignments unless the assignments container runs. |
+| `POST /api/v1/session/sign-in` | no | `{"person", "secret", "remember"?}` | `{"ok": true, "person": {…}}`, with the session cookie: a cookie of the browser session, or of thirty days with `remember`. `401 {"error": "That sign-in did not work."}` for a wrong secret, a person who is not on the roster, and a person with no secret alike. `403` for a body that is not a JSON object or a cross-site origin. `503 {"error": "Joshua is still starting. Try again in a moment."}` when core could not check the secret: nothing was refused. |
+| `POST /api/v1/session/sign-out` | no | empty | `{"ok": true}`, and the cookie is cleared. It needs no session, so a cookie the viewer no longer accepts can still be thrown away. `403` for a cross-site origin. |
+| `POST /api/v1/session/secret` | needed | `{"secret", "new_secret"}` | `{"ok": true}`, with a new cookie, because the change moves the stamp every outstanding cookie of that person carries: this browser stays signed in and every other one signs out. `400` when either field is empty. `403 {"error": "That current PIN did not match."}`, `password` in place of `PIN` on that method, when core refused the current secret. `503` for every other failure. |
+| `GET /api/v1/auth-method` | no | | `{"method": "anonymous" \| "pin" \| "password", "anonymous": bool}`: what the sign-in page draws, and whether a request with no cookie is served. The page reads it before there is a session. |
+| `GET /api/v1/sign-in/people` | no | | `{"people": [{"id", "name", "role"}]}`: the people core says can sign in, named as the roster names them. A person core names who is not on the roster is left out. `404` on any method but `pin`, so no other instance renders a roster to a stranger. `503` when core did not answer. |
+
+### The Users routes
+
+The Users section of Admin. Every route is the owner's: a person whose role is
+not `owner` gets `403 {"error": "the roster is the owner's"}` before any call
+to core. Core's status and body pass through as they are, so a change that
+would leave the roster with no owner is `409`, and so is an add of an id the
+roster already holds.
+
+| Route | Request | Reply |
+|---|---|---|
+| `GET /api/v1/admin/users` | | `{"users": [{"id", "name", "role", "has_secret"}]}`: the roster of `joshua.yaml`, with `has_secret` from core's `GET /auth/people`. `503` when core's answer holds no list of people, so the page never says that nobody can sign in because core said nothing. |
+| `POST /api/v1/admin/users` | `{"id", "name", "handle"?, "role"?, "secret"?}` | `201` and core's answer plus `secret_set`, which says whether the secret was set: the route calls `POST /admin/people` and then `POST /auth/secret/admin`. With no `secret` the person is added and `secret_set` is `false`. A secret core refused answers its status, with `secret_set` `false` and an `error`, and the person stays added. `422` for a body that is not a JSON object. The role of an add that names none is `member`. |
+| `POST /api/v1/admin/users/{id}/secret` | `{"secret"}` | core's answer to `POST /auth/secret/admin`: the first secret of a person, or a reset, with no current one. `400 {"error": "a secret is needed"}` for an empty secret, `422` for a body that is not a JSON object. |
+| `POST /api/v1/admin/users/{id}/role` | `{"role"}` | core's answer to `POST /admin/people/{id}/role`. `422` for a body that is not a JSON object. |
+| `POST /api/v1/admin/users/{id}/remove` | empty | core's answer to `POST /admin/people/{id}/remove`: the person is off the roster, and their handles and their secret go with them. |
+
 ## assignments
 
 Port 8000 in the container. Compose does not publish it. The gateway calls

@@ -53,7 +53,7 @@ ok: /etc/joshua/joshua.yaml
 
 ### pin
 
-1. The page shows the people who can sign in, under "Who are you?": Sam,
+1. The page shows the people who can sign in, under "Who is signing in?": Sam,
    Robin, Theo. The list comes from core, and it holds only the people who
    have a secret.
    While nobody has a secret, the list is empty. The page then says that
@@ -300,9 +300,17 @@ stored for nobody; the log names the person and never the value. A run that
 wrote no row writes no marker either, so the import runs again once the
 values are corrected.
 
-Compose gives `VIEWER_PASSWORDS` from `.env` to core. Delete `viewer.users`
-and `VIEWER_PASSWORDS` after that first start. Nothing reads them again, and
-`make validate` warns while either one is there.
+Compose gives `VIEWER_PASSWORDS` from `.env` to core. Write the value in
+single quotes:
+
+```
+VIEWER_PASSWORDS='sam=$2b$12$...'
+```
+
+Compose expands `$` in `.env`, so a bcrypt hash written without the quotes
+reaches core cut short, which is the `unreadable` case above. Delete
+`viewer.users` and `VIEWER_PASSWORDS` after that first start. Nothing reads
+them again, and `make validate` warns while either one is there.
 
 ## What this sign-in does not do
 

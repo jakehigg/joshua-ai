@@ -185,9 +185,11 @@ function NoSecrets({ label }: { label: SecretLabel }) {
   return (
     <div className="signin-empty">
       <p className="signin-empty-lead">Nobody can sign in yet, because nobody has a {label}.</p>
-      <p>Set a {label} for the owner first. Run this command in the core container:</p>
+      <p>Set a {label} for the owner first. Run this command where the stack runs:</p>
       <pre className="j-wrap">
-        <code>{`python -m joshua_core people auth-reset --id <owner id> --secret '<${label}>'`}</code>
+        <code>
+          {`docker compose exec core python -m joshua_core people auth-reset --id <owner id> --secret '<${label}>'`}
+        </code>
       </pre>
       <p>Then the owner signs in and sets a {label} for each other person under Admin → Users.</p>
     </div>

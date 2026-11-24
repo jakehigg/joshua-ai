@@ -3,10 +3,10 @@
 # reference them as ${VAR:-}, as the channels section below shows. The ${VAR:-}
 # form expands to the empty string where the variable is not set, so only the
 # container that owns a secret defines it, and an empty credential turns the
-# feature off. Validate a file
-# before you deploy it:
+# feature off. Validate your joshua.yaml before you deploy it. The check runs
+# in the core image, so the host needs no Python:
 #
-#   python -m joshua_shared.config validate joshua.example.yaml
+#   make validate
 
 name: Home
 timezone: America/New_York
@@ -320,8 +320,9 @@ viewer:                         # the web interface for the wiki, a person's
   #   password    ask for a person id and a password
   #
   # The owner sets each secret, adds a person, changes a role, and takes a
-  # person off the roster under Admin -> Users. Core serves that section only
-  # when its ADMIN_CALLERS names `viewer` (default `laptop,ci`).
+  # person off the roster under Admin -> Users. Core serves that section to
+  # the viewer because its AUTH_CALLERS names `viewer` (the default), so this
+  # needs no setting of your own.
   auth:
     method: anonymous           # anonymous | pin | password
   #
