@@ -12,7 +12,9 @@ the role of the only owner.
 
 ``auth-reset`` sets the sign-in secret of a person who is locked out. It writes
 the hash to the database itself, with no HTTP hop, so an operator at the
-console needs no token and no running viewer.
+console needs no token and no running viewer. A secret that is empty, or
+whitespace alone, is refused and nothing is written: such a secret matches no
+input, so it would lock the person out instead.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from joshua_core import people
-from joshua_core.auth_api import hash_secret
+from joshua_core.auth_api import EMPTY_SECRET, hash_secret, is_empty_secret
 from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
 
@@ -97,7 +99,8 @@ async def _auth_reset(repo: Repo, args: argparse.Namespace) -> int:
     """Set the sign-in secret of a person on the live roster.
 
     A person who was never added, or who was removed, gets nothing: a secret
-    without a person is a way in that no roster shows.
+    without a person is a way in that no roster shows. ``main`` has already
+    refused an empty secret, so nothing here can write one.
     """
     person = await repo.get_person(args.id)
     if person is None or person.role == "removed":
@@ -130,6 +133,11 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    secret = getattr(args, "secret", None)
+    if secret is not None and is_empty_secret(secret):
+        # Before the database opens, so an empty secret changes nothing.
+        print(EMPTY_SECRET, file=sys.stderr)
+        return 1
     handlers: dict[str, Callable[[Repo, argparse.Namespace], Awaitable[int]]] = {
         "add": _add,
         "list": _list,

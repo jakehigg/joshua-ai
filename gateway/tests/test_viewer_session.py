@@ -61,11 +61,15 @@ class FakeCore:
         self.stamps: dict[str, str] = {"alex": STAMP, "mia": STAMP}
         self.requests: list[httpx.Request] = []
         self.unreachable = False
+        # The status of every answer while core is up and not ready yet.
+        self.failing_status: int | None = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         if self.unreachable:
             raise httpx.ConnectError("down", request=request)
+        if self.failing_status is not None:
+            return httpx.Response(self.failing_status, text="not ready")
         path = request.url.path
         body = json.loads(request.content) if request.content else {}
         if path == viewer_session.VERIFY_PATH:
@@ -383,6 +387,45 @@ def test_every_refused_sign_in_says_the_same_thing(client, body: dict[str, Any])
     from joshua_gateway.viewer_api import session as session_api
 
     response = client.post("/api/v1/session/sign-in", json=body, headers=ORIGIN)
+    assert response.status_code == 401
+    assert response.json() == {"error": session_api.SIGN_IN_FAILED}
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize("outage", ["unreachable", 500, 503])
+def test_a_core_that_cannot_check_the_secret_says_joshua_is_still_starting(
+    client, core, outage
+) -> None:
+    """A core that does not answer, or answers 5xx, refused nothing: the
+    sign-in says that Joshua is still starting, not that the PIN was wrong."""
+    from joshua_gateway.viewer_api import session as session_api
+
+    if outage == "unreachable":
+        core.unreachable = True
+    else:
+        core.failing_status = outage
+
+    response = client.post(
+        "/api/v1/session/sign-in",
+        json={"person": "alex", "secret": "open-sesame"},
+        headers=ORIGIN,
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"error": session_api.CORE_STARTING}
+    assert "set-cookie" not in response.headers
+
+
+def test_a_core_that_rejects_the_secret_says_the_sign_in_did_not_work(client, core) -> None:
+    """The other failure: core answered, and the secret is not that person's."""
+    from joshua_gateway.viewer_api import session as session_api
+
+    response = client.post(
+        "/api/v1/session/sign-in",
+        json={"person": "alex", "secret": "not-the-pin"},
+        headers=ORIGIN,
+    )
+
     assert response.status_code == 401
     assert response.json() == {"error": session_api.SIGN_IN_FAILED}
     assert "set-cookie" not in response.headers

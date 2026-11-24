@@ -162,15 +162,15 @@ Port 8000 in the container. Compose publishes it on the host as
 | `DELETE /v1/push/subscribe` | `AUTH_CALLERS` | `person` query parameter, `{"endpoint"}` | `{"removed": true}`. The delete is that person's alone: `404 {"error": "this browser is not subscribed"}` for an endpoint they do not have. `503` while push is not configured. |
 | `POST /v1/push/test` | `AUTH_CALLERS` | `person` query parameter, empty body | `{"sent", "failed", "dropped", "held", "error"}`, the counts of that person's browsers. `404` when they have no subscription, `503` while push is not configured. |
 | `POST /auth/verify` | `AUTH_CALLERS` (default `viewer`) | `{"person", "secret"}` | `{"ok": bool}`. `ok` is `false` for a wrong secret, for a person with no secret, and for a person who is not on the roster; the answer never says which of the three. |
-| `POST /auth/secret` | `AUTH_CALLERS` | `{"person", "secret", "new_secret"}` | `{"ok": true, "person"}`. A person changes their own secret and sends the current one: `403 {"error": "wrong secret"}` for a wrong one and for a person who has none yet, `404` for a person who is not on the roster. |
-| `POST /auth/secret/admin` | `AUTH_CALLERS` | `{"person", "new_secret"}` | `{"ok": true, "person"}`. The secret of a person without the current one, for a first sign-in or a reset. `404` for a person who is not on the roster. |
+| `POST /auth/secret` | `AUTH_CALLERS` | `{"person", "secret", "new_secret"}` | `{"ok": true, "person"}`. A person changes their own secret and sends the current one: `403 {"error": "wrong secret"}` for a wrong one and for a person who has none yet, `404` for a person who is not on the roster, `400 {"error": "an auth secret cannot be empty"}` for a `new_secret` of whitespace alone. |
+| `POST /auth/secret/admin` | `AUTH_CALLERS` | `{"person", "new_secret"}` | `{"ok": true, "person"}`. The secret of a person without the current one, for a first sign-in or a reset. `404` for a person who is not on the roster, `400 {"error": "an auth secret cannot be empty"}` for a `new_secret` of whitespace alone. |
 | `DELETE /auth/secret/{person_id}` | `AUTH_CALLERS` | | `{"ok": true, "person", "deleted": bool}`. `deleted` is `false` when that person had no secret. `404` for a person who is not on the roster. |
 | `GET /auth/people` | `AUTH_CALLERS` | | `{"people": […]}`, the ids of the people who have a secret. A person with no secret is absent, and no row carries a time. |
 | `GET /auth/people/{person_id}` | `AUTH_CALLERS` | | `{"person", "updated_at"}`, when that person's secret last changed. `404 {"error": "no secret"}` for a person who has none, `404` for one who is not on the roster. |
 | `GET /people/{person_id}/profile` | `AUTH_CALLERS` | | `{"prompt", "journal", "in_config"}`. `prompt` is the text of the personal instructions of that person to Joshua, or `null` for none. Core reads it from the snippet file at the path the roster holds. `journal` is `auto`, `ask`, or `off`. `in_config` is `true` when `joshua.yaml` also names the person, so an edit overrides the config file. `404` for a person who is not on the roster. |
 | `POST /people/{person_id}/profile` | `AUTH_CALLERS` | `{"prompt"?, "journal"?}` | The new profile, in the shape of the `GET`. A person edits only their own entry, and only these two fields. `prompt` is text in and text out. Core writes the text to `<data_dir>/people/<id>/prompt.md` and sets `prompt` in the people file to that path. An empty string or `null` clears `prompt`, writes `""` as the path, and removes the file, and a `prompt` over 4000 characters is `400`. A `journal` outside the three values is `400`, as is an unknown field or an empty body. `404` for a person who is not on the roster. |
 | `GET /admin/people` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"people": […]}` |
-| `POST /admin/people` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"id", "name", "handle"?, "role"?}` | `201 {"person": …}`, `400 {"error": …}`, `409` when it takes the role of the only owner. `handle` is `<type>:<value>`; with none, the person has no handle. |
+| `POST /admin/people` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"id", "name", "handle"?, "role"?}` | `201 {"person": …}`, `400 {"error": …}`, `409 {"error": "the id <id> is taken"}` for an id the roster holds, and `409` when it takes the role of the only owner. The route adds a person and never overwrites one; the id of a removed person is free again. `handle` is `<type>:<value>`; with none, the person has no handle. |
 | `POST /admin/people/{id}/role` | `ADMIN_CALLERS`, `AUTH_CALLERS` | `{"role"}` (`member`, `guest`, or `owner`) | `{"person": …}` with only the role changed, `400 {"error": …}` for another role, `404` for a person who is not on the roster, `409` for the only owner |
 | `POST /admin/people/{id}/remove` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"removed": true, "id"}`. The handles and the sign-in secret go; the data dirs and the transcripts stay. `404` for a person who is not on the roster, `409` for the only owner. |
 | `GET /admin/settings?prefix=` | `ADMIN_CALLERS`, `AUTH_CALLERS` | | `{"groups": [{"prefix", "label", "settings": [{"key", "label", "hint", "is_secret", "is_set", "value", "updated_at", "updated_by"}]}]}`. `prefix` names one group; with none, every group comes back. `value` is `null` for a secret, set or not, and `is_set` says whether one is stored. `404 {"error": …}` for a prefix no group declares. |
@@ -403,9 +403,10 @@ way `ADMIN_CALLERS` is checked on every admin route: a missing or invalid
 bearer is `401`, an identity outside the list is `403`, and an empty list
 turns the routes off, so every caller gets `403`.
 
-`person` is a person id of 1 to 64 characters, `secret` and `new_secret` are 1
-to 256 characters, and an unknown field is `422`. No answer and no log line
-ever carries a secret or a hash. `GET /auth/people` carries no time, because
+`person` is a person id of 1 to 64 characters, `secret` and `new_secret` are
+at most 256 characters, and an unknown field is `422`. A `new_secret` that is
+empty, or whitespace alone, is `400`: such a secret matches no input, so no
+route stores one. No answer and no log line ever carries a secret or a hash. `GET /auth/people` carries no time, because
 the viewer renders that list on a page with no session, and when each person
 last changed their secret stays out of it;
 `GET /auth/people/{person_id}` carries the time of one person, because the
@@ -427,7 +428,7 @@ section calls those three and `POST /auth/secret/admin` for the owner, as the
 identity `viewer`. The roster routes admit the callers of `AUTH_CALLERS` as
 well as those of `ADMIN_CALLERS`, so the viewer needs no admin setting, and it
 gets no other admin route. A change that would leave the roster with no owner
-is `409`.
+is `409`, and so is an add of an id the roster already holds.
 
 ### The settings routes
 

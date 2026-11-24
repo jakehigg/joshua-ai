@@ -21,14 +21,22 @@ Four rules hold it:
 - **Never stop core.** Every failure is logged and swallowed, and the marker
   stays unset, so the next start tries again. One line names each person id,
   and one summary line closes the run. No line carries a secret or a hash.
+- **Nothing imported, no marker.** A run that wrote no row leaves the marker
+  unset, so a run that read nothing but broken values is repeatable once they
+  are corrected.
 
 A reference that starts with ``$2`` is already a bcrypt hash and is stored as
-it is; anything else is a literal password and is hashed first.
+it is; anything else is a literal password and is hashed first. Either way the
+value that would be stored is checked against the bcrypt format first, so a
+truncated or mistyped hash is counted ``unreadable`` instead of becoming a
+secret that nobody can sign in with. The log names the person, never the
+value.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from joshua_shared.config import JoshuaConfig
@@ -44,6 +52,15 @@ VIEWER_PASSWORDS_ENV = "VIEWER_PASSWORDS"
 VIEWER_PW_PREFIX = "VIEWER_PW_"
 # A reference that starts with this is a bcrypt hash, not a password.
 BCRYPT_PREFIX = "$2"
+# The whole shape of a bcrypt hash: the version, the cost, and the 53
+# characters of salt and digest — 60 characters in all. A value that claims to
+# be a hash and does not match this one is not a hash.
+BCRYPT_RE = re.compile(r"^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$")
+
+
+def is_bcrypt_hash(value: str) -> bool:
+    """True when ``value`` is a bcrypt hash, by its shape alone."""
+    return bool(BCRYPT_RE.match(value))
 
 
 def _passwords_from_env() -> dict[str, str]:
@@ -81,7 +98,9 @@ async def import_once(repo: Repo, settings: JoshuaConfig) -> dict[str, Any]:
     """Import the viewer passwords into ``auth_secret``, once ever.
 
     Returns a summary: ``ran`` is False when the marker was already set or the
-    import failed. Raises nothing: core starts whatever happens here.
+    import failed. The marker is written only when a row was, so a run that
+    imported nothing runs again at the next start. Raises nothing: core starts
+    whatever happens here.
     """
     summary: dict[str, Any] = {"ran": False, "imported": 0, "skipped": 0, "unreadable": 0}
     try:
@@ -120,10 +139,23 @@ async def import_once(repo: Repo, settings: JoshuaConfig) -> dict[str, Any]:
                 secret_hash = (
                     reference if reference.startswith(BCRYPT_PREFIX) else hash_secret(reference)
                 )
+                if not is_bcrypt_hash(secret_hash):
+                    # A reference that claims to be a hash and is not: storing
+                    # it would be a secret that matches no input.
+                    unreadable.append(person_id)
+                    logger.info(
+                        {
+                            "message": "auth import unreadable",
+                            "person": person_id,
+                            "why": "not a bcrypt hash",
+                        }
+                    )
+                    continue
                 await repo.set_auth_secret(person_id, secret_hash, conn=conn)
                 imported.append(person_id)
                 logger.info({"message": "auth import imported", "person": person_id})
-            await repo.set_auth_import_marker(len(imported), conn=conn)
+            if imported:
+                await repo.set_auth_import_marker(len(imported), conn=conn)
     except Exception as exc:  # noqa: BLE001 — the import never stops core
         # The marker stays unset, so the next start tries the whole import
         # again. The transaction took the half-written rows with it.

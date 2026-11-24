@@ -68,6 +68,11 @@ says the same line for a wrong secret, for a person who is not on the roster,
 and for a person with no secret, so the page tells a stranger nothing about
 who is there.
 
+A core that could not check the secret says the other line: "Joshua is still
+starting. Try again in a moment." Core holds every secret, so a core that is
+not up yet, or that answers with an error, has refused nothing, and the page
+does not blame the secret. Those two lines are everything the sign-in says.
+
 ## The one secret
 
 A PIN and a password are the same thing. A secret is any string, from a
@@ -223,6 +228,11 @@ It writes the hash straight to the database, so it needs no token and no
 running viewer, and it prints no secret. A person who is not on the roster
 gets nothing: a secret without a person is a way in that no roster shows.
 
+An empty secret, and one of whitespace alone, is refused: the command prints
+`an auth secret cannot be empty`, exits non-zero, and writes nothing. Such a
+secret would match no input and lock the person out. Every other way of
+setting a secret refuses it too.
+
 When nobody is the owner, an operator names one the same way:
 
 ```
@@ -265,6 +275,13 @@ no secret yet, and marks the import done in a table of its own. It overwrites
 nothing, and the marker, not the state of the secrets, is what stops it: a
 restart, a restored database, and a roster whose secrets were all dropped
 never run it a second time.
+
+A value of those three sources is either a bcrypt hash, which is stored as it
+is, or a password, which is hashed first. A value that looks like a hash and
+is not one — a hash cut short, for example — is counted `unreadable` and
+stored for nobody; the log names the person and never the value. A run that
+wrote no row writes no marker either, so the import runs again once the
+values are corrected.
 
 Compose gives `VIEWER_PASSWORDS` from `.env` to core. Delete `viewer.users`
 and `VIEWER_PASSWORDS` after that first start. Nothing reads them again, and
