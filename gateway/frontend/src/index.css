@@ -502,9 +502,13 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
    the middle of the screen, with the workspace dimmed behind it and still
    mounted, so nothing in the row of columns moves (ItemSheet in
    DocumentPanel.tsx). Under 900px the sheet takes the window, as every sheet
-   of the chat does there; from 900px it is a box as wide as the token of the
-   document panel, or as wide as a drag left it, and the handle at its left
-   edge sizes it. Full screen takes the whole window again. */
+   of the chat does there; from 900px it is a box as wide as --panel-sheet
+   (most of the window, because a document or a mockup needs the room), or as
+   wide as a drag left it, and the handle at its left edge sizes it. Full
+   screen takes the whole window again. */
+.chat-screen {
+  --panel-sheet: clamp(40rem, 80vw, 100rem);
+}
 .chat-screen .item-sheet {
   position: fixed;
   inset: 0;
@@ -544,7 +548,7 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
 }
 @media (min-width: 900px) {
   .chat-screen .item-sheet-box {
-    width: var(--doc-w, var(--j-panel-doc));
+    width: var(--sheet-w, var(--panel-sheet));
     max-width: calc(100% - 2 * var(--j-gap));
     height: calc(100% - 2 * var(--j-gap));
     max-height: 56rem;

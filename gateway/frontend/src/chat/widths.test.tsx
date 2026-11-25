@@ -5,6 +5,8 @@ import { Divider, STEP_PX } from "./Divider";
 import {
   MAX_SHARE,
   MIN_REM,
+  SHEET_MAX_SHARE,
+  clampWidth,
   PanelWidthsPerson,
   STORAGE_KEY,
   breakpointOf,
@@ -15,7 +17,7 @@ import {
 
 // The key one width is kept under on this window: the person, the breakpoint
 // of the window, and the panel.
-const key = (panel: "items" | "doc", person = "alex") =>
+const key = (panel: "items" | "doc" | "sheet", person = "alex") =>
   keyOf(person, breakpointOf(window.innerWidth), panel);
 
 // The handle sizes the element after it, which is the panel. jsdom measures
@@ -66,6 +68,34 @@ describe("the divider of a panel", () => {
     expect(kept()[key("items")]).toBe(Math.round(window.innerWidth * MAX_SHARE));
     fireEvent.pointerMove(handle, { clientX: 4000, pointerId: 1 });
     expect(kept()[key("items")]).toBe(Math.round(remPx(MIN_REM)));
+  });
+
+  it("lets the sheet of an item take most of the window, and no other panel", () => {
+    expect(SHEET_MAX_SHARE).toBeGreaterThan(MAX_SHARE);
+    expect(clampWidth(100_000, "sheet")).toBe(Math.round(window.innerWidth * SHEET_MAX_SHARE));
+    expect(clampWidth(100_000, "doc")).toBe(Math.round(window.innerWidth * MAX_SHARE));
+    expect(clampWidth(100_000, "items")).toBe(Math.round(window.innerWidth * MAX_SHARE));
+  });
+
+  it("keeps the width of the sheet apart from the width of the document panel", () => {
+    reloadWidths();
+    render(
+      <PanelWidthsPerson value="alex">
+        <div className="chat-screen">
+          <Divider panel="sheet" label="Resize the item" factor={2} />
+          <aside data-testid="sheet" />
+        </div>
+      </PanelWidthsPerson>,
+    );
+    const sheet = screen.getByTestId("sheet");
+    Object.defineProperty(sheet, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ width: 600 }) as DOMRect,
+    });
+    const handle = screen.getByRole("separator", { name: "Resize the item" });
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(kept()[key("sheet")]).toBeGreaterThan(600);
+    expect(kept()[key("doc")]).toBeUndefined();
   });
 
   it("moves by one step with the arrow keys", () => {

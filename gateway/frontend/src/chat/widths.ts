@@ -1,5 +1,6 @@
 // How wide a person dragged a panel of the chat: the items column of a
-// workspace (`items`) and the document panel (`doc`).
+// workspace (`items`), the document panel (`doc`), and the sheet of a
+// workspace item (`sheet`).
 //
 // A layout width is the choice of one device, so it is kept per browser in
 // localStorage and never on the account. One browser holds one width for each
@@ -11,10 +12,12 @@
 //
 // The token of the stylesheet is the default: a panel that was never dragged,
 // and one that a double-click on its handle reset, is as wide as
-// --j-panel-items or --j-panel-doc says (joshua-ui.css). A width that is kept
+// --j-panel-items or --j-panel-doc says (joshua-ui.css), or --panel-sheet
+// (index.css). A width that is kept
 // comes to the chat screen as a custom property, which the stylesheet takes
 // over the token. A drag is clamped to the limits below, so a panel holds
-// between MIN_REM and MAX_SHARE of the window and the thread keeps room.
+// between MIN_REM and MAX_SHARE of the window and the thread keeps room. The
+// sheet stands over the thread, not beside it, so it may take SHEET_MAX_SHARE.
 //
 // Whose widths these are comes from `PanelWidthsPerson`, which the chat screen
 // puts around the conversation. With no person named, the widths are those of
@@ -30,15 +33,17 @@ import {
   type CSSProperties,
 } from "react";
 
-export type Panel = "items" | "doc";
+export type Panel = "items" | "doc" | "sheet";
 
-export const PANELS: Panel[] = ["items", "doc"];
+export const PANELS: Panel[] = ["items", "doc", "sheet"];
 export const STORAGE_KEY = "joshua.panels.widths";
 
 /** How narrow a panel goes, in rem. */
 export const MIN_REM = 14;
 /** How much of the window a panel takes at most. */
 export const MAX_SHARE = 0.6;
+/** How much of the window the sheet of a workspace item takes at most. */
+export const SHEET_MAX_SHARE = 0.96;
 
 /**
  * The breakpoints of the chat row, as index.css draws them: a phone, where a
@@ -130,10 +135,11 @@ export function remPx(rem: number): number {
   return rem * (Number.isFinite(root) && root > 0 ? root : 16);
 }
 
-/** `px`, held between MIN_REM and MAX_SHARE of the window. */
-export function clampWidth(px: number): number {
+/** `px`, held between MIN_REM and the largest share of the window for `panel`. */
+export function clampWidth(px: number, panel: Panel = "doc"): number {
   const min = remPx(MIN_REM);
-  const max = Math.max(min, window.innerWidth * MAX_SHARE);
+  const share = panel === "sheet" ? SHEET_MAX_SHARE : MAX_SHARE;
+  const max = Math.max(min, window.innerWidth * share);
   return Math.round(Math.min(max, Math.max(min, px)));
 }
 
@@ -152,7 +158,7 @@ export function usePanelWidths(): PanelWidths {
   const breakpoint = useBreakpoint();
   const set = useCallback(
     (panel: Panel, px: number) =>
-      write({ ...state, [keyOf(person, breakpoint, panel)]: clampWidth(px) }),
+      write({ ...state, [keyOf(person, breakpoint, panel)]: clampWidth(px, panel) }),
     [person, breakpoint],
   );
   const reset = useCallback(
