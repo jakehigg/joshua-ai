@@ -1,6 +1,6 @@
-## The sandbox
+## Code execution
 
-The `sandbox` tools run Python 3 in a container that has no network.
+The `code-execution` tools run Python 3 in a container that has no network.
 `run_python` runs code, and `reset_python` starts again clean.
 
 ### When to compute

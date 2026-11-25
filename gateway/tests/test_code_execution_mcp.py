@@ -1,9 +1,9 @@
-"""The sandbox MCP: the kernel of each conversation, the files that go in and
+"""The code execution MCP: the kernel of each conversation, the files that go in and
 come out, the limits of a run, and who gets the tools.
 
 The Jupyter server is a fake here: an in-memory folder tree and a kernel whose
-run gives a scripted ``Execution``. ``test_sandbox_jupyter.py`` tests the client
-against a fake server over HTTP, and ``test_sandbox_live.py`` runs the real
+run gives a scripted ``Execution``. ``test_code_execution_jupyter.py`` tests the client
+against a fake server over HTTP, and ``test_code_execution_live.py`` runs the real
 image. A few tests host the builtin in a gateway app, so the person and role
 hand-off runs as in production.
 """
@@ -19,16 +19,16 @@ from pathlib import Path
 
 import pytest
 from conftest import gateway_session, joshua_yaml
+from joshua_gateway.code_execution_mcp import server as ce_server
+from joshua_gateway.code_execution_mcp.jupyter import CodeExecutionError, Entry, Execution
+from joshua_gateway.code_execution_mcp.server import CodeExecution, _Request
 from joshua_gateway.files_mcp import server as files_server
 from joshua_gateway.main import lifespan
-from joshua_gateway.sandbox_mcp import server as sandbox_server
-from joshua_gateway.sandbox_mcp.jupyter import Entry, Execution, SandboxError
-from joshua_gateway.sandbox_mcp.server import Sandbox, _Request
 from joshua_shared import config
-from joshua_shared.config import SandboxConfig
+from joshua_shared.config import CodeExecutionConfig
 
 ALEX = _Request(person="alex", member=True, conversation="conv-alex")
-URL = "http://sandbox.test:8888"
+URL = "http://code-execution.test:8888"
 
 
 @dataclass
@@ -109,9 +109,9 @@ def data_root(tmp_path):
     return root
 
 
-def make(data_root: Path, fake: FakeJupyter | None = None, **settings) -> Sandbox:
-    cfg = SandboxConfig(enabled=True, url=URL, **settings)
-    return Sandbox(cfg, fake or FakeJupyter(), data_root)
+def make(data_root: Path, fake: FakeJupyter | None = None, **settings) -> CodeExecution:
+    cfg = CodeExecutionConfig(enabled=True, url=URL, **settings)
+    return CodeExecution(cfg, fake or FakeJupyter(), data_root)
 
 
 def text_of(result) -> str:
@@ -200,7 +200,7 @@ async def test_the_sweep_removes_old_folders_that_no_kernel_uses(data_root):
 
 async def test_the_first_call_sweeps_whatever_the_clock_reads(data_root, monkeypatch):
     # A fresh host has a small monotonic clock: the first sweep must still run.
-    monkeypatch.setattr(sandbox_server.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(ce_server.time, "monotonic", lambda: 5.0)
     fake = FakeJupyter()
     box = make(data_root, fake, folder_ttl_hours=1)
     fake.dirs["conversations/c-old"] = datetime.now(UTC) - timedelta(hours=2)
@@ -252,7 +252,7 @@ async def test_a_file_the_person_may_not_read_is_refused(data_root, path):
     (data_root / "documents" / "mia" / "plan.md").write_text("secret")
     fake = FakeJupyter()
     box = make(data_root, fake)
-    with pytest.raises(SandboxError):
+    with pytest.raises(CodeExecutionError):
         await box.run(ALEX, {"code": "1", "files": [path]})
     assert fake.started == []
     assert not any(b"secret" in data for data in fake.files.values())
@@ -261,7 +261,7 @@ async def test_a_file_the_person_may_not_read_is_refused(data_root, path):
 async def test_inputs_over_the_size_limit_are_refused(data_root):
     (data_root / "wiki" / "big.md").write_bytes(b"x" * 4096)
     box = make(data_root, max_input_bytes=2048)
-    with pytest.raises(SandboxError, match="larger than 2048 bytes"):
+    with pytest.raises(CodeExecutionError, match="larger than 2048 bytes"):
         await box.run(ALEX, {"code": "1", "files": ["wiki/big.md"]})
 
 
@@ -365,35 +365,35 @@ async def test_the_timeout_of_a_call_never_passes_the_limit(data_root):
     ],
 )
 async def test_a_bad_call_is_refused(data_root, args):
-    with pytest.raises(SandboxError):
+    with pytest.raises(CodeExecutionError):
         await make(data_root).run(ALEX, args)
 
 
 # -- who gets the tools -------------------------------------------------------
 
 
-def sandbox_yaml() -> str:
+def code_execution_yaml() -> str:
     return textwrap.dedent("""\
-        sandbox:
+        code-execution:
           kind: builtin
           allow: all
         """)
 
 
 @pytest.fixture
-def sandbox_app(gateway, config_path, monkeypatch, data_root):
-    """A gateway app with the sandbox builtin, on a fake Jupyter server."""
+def code_execution_app(gateway, config_path, monkeypatch, data_root):
+    """A gateway app with the code-execution builtin, on a fake Jupyter server."""
 
     def _make(enabled: bool = True, fake: FakeJupyter | None = None):
-        app = gateway(sandbox_yaml())
-        extra = f"sandbox:\n  enabled: {str(enabled).lower()}\n  url: {URL}\n"
-        config_path.write_text(joshua_yaml(sandbox_yaml()) + extra)
+        app = gateway(code_execution_yaml())
+        extra = f"code_execution:\n  enabled: {str(enabled).lower()}\n  url: {URL}\n"
+        config_path.write_text(joshua_yaml(code_execution_yaml()) + extra)
         monkeypatch.setattr(config, "_cache", None)
         monkeypatch.setenv(files_server.DATA_ENV, str(data_root))
-        monkeypatch.setenv(sandbox_server.TOKEN_ENV, "test-token")
-        cfg = SandboxConfig(enabled=enabled, url=URL)
+        monkeypatch.setenv(ce_server.TOKEN_ENV, "test-token")
+        cfg = CodeExecutionConfig(enabled=enabled, url=URL)
         monkeypatch.setitem(
-            sandbox_server._SANDBOXES, URL, Sandbox(cfg, fake or FakeJupyter(), data_root)
+            ce_server._EXECUTORS, URL, CodeExecution(cfg, fake or FakeJupyter(), data_root)
         )
         return app
 
@@ -407,11 +407,11 @@ ALEX_HEADERS = {
 }
 
 
-async def test_a_member_runs_code_through_the_gateway(sandbox_app):
+async def test_a_member_runs_code_through_the_gateway(code_execution_app):
     fake = FakeJupyter()
-    app = sandbox_app(fake=fake)
+    app = code_execution_app(fake=fake)
     async with lifespan(app):
-        async with gateway_session(app, "/sandbox", "core", ALEX_HEADERS) as session:
+        async with gateway_session(app, "/code-execution", "core", ALEX_HEADERS) as session:
             tools = await session.list_tools()
             result = await session.call_tool("run_python", {"code": "print(1)"})
     assert sorted(t.name for t in tools.tools) == ["reset_python", "run_python"]
@@ -420,12 +420,12 @@ async def test_a_member_runs_code_through_the_gateway(sandbox_app):
     assert fake.codes == ["print(1)"]
 
 
-async def test_a_guest_gets_no_sandbox_tools_and_a_call_is_refused(sandbox_app):
+async def test_a_guest_gets_no_code_execution_tools_and_a_call_is_refused(code_execution_app):
     fake = FakeJupyter()
-    app = sandbox_app(fake=fake)
+    app = code_execution_app(fake=fake)
     headers = {"X-Joshua-Person": "mia", "X-Joshua-Role": "guest"}
     async with lifespan(app):
-        async with gateway_session(app, "/sandbox", "core", headers) as session:
+        async with gateway_session(app, "/code-execution", "core", headers) as session:
             tools = await session.list_tools()
             result = await session.call_tool("run_python", {"code": "print(1)"})
     assert tools.tools == []
@@ -433,11 +433,11 @@ async def test_a_guest_gets_no_sandbox_tools_and_a_call_is_refused(sandbox_app):
     assert fake.codes == []
 
 
-async def test_the_sandbox_off_has_no_tools_and_runs_nothing(sandbox_app):
+async def test_code_execution_off_has_no_tools_and_runs_nothing(code_execution_app):
     fake = FakeJupyter()
-    app = sandbox_app(enabled=False, fake=fake)
+    app = code_execution_app(enabled=False, fake=fake)
     async with lifespan(app):
-        async with gateway_session(app, "/sandbox", "core", ALEX_HEADERS) as session:
+        async with gateway_session(app, "/code-execution", "core", ALEX_HEADERS) as session:
             tools = await session.list_tools()
             result = await session.call_tool("run_python", {"code": "print(1)"})
     assert tools.tools == []
@@ -445,24 +445,24 @@ async def test_the_sandbox_off_has_no_tools_and_runs_nothing(sandbox_app):
     assert fake.codes == []
 
 
-async def test_a_sandbox_with_no_token_says_so(sandbox_app, monkeypatch):
-    app = sandbox_app()
-    monkeypatch.setenv(sandbox_server.TOKEN_ENV, "")
-    monkeypatch.delitem(sandbox_server._SANDBOXES, URL)
+async def test_code_execution_with_no_token_says_so(code_execution_app, monkeypatch):
+    app = code_execution_app()
+    monkeypatch.setenv(ce_server.TOKEN_ENV, "")
+    monkeypatch.delitem(ce_server._EXECUTORS, URL)
     async with lifespan(app):
-        async with gateway_session(app, "/sandbox", "core", ALEX_HEADERS) as session:
+        async with gateway_session(app, "/code-execution", "core", ALEX_HEADERS) as session:
             result = await session.call_tool("run_python", {"code": "print(1)"})
     assert result.is_error is True
-    assert "SANDBOX_TOKEN" in text_of(result)
+    assert "CODE_EXECUTION_TOKEN" in text_of(result)
 
 
-def test_the_config_warns_when_the_server_is_listed_but_the_sandbox_is_off():
+def test_the_config_warns_when_the_server_is_listed_but_code_execution_is_off():
     cfg = config.JoshuaConfig.model_validate(
         {
             "name": "T",
             "timezone": "UTC",
             "people": [{"id": "alex", "name": "Alex"}],
-            "mcp": {"sandbox": {"kind": "builtin", "allow": "all"}},
+            "mcp": {"code-execution": {"kind": "builtin", "allow": "all"}},
         }
     )
-    assert config.SANDBOX_OFF_WARNING in cfg.warnings
+    assert config.CODE_EXECUTION_OFF_WARNING in cfg.warnings

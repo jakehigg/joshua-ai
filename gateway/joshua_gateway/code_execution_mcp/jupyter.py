@@ -1,6 +1,6 @@
 """A small client of the Jupyter server REST and kernel APIs.
 
-The sandbox container runs the stock ``jupyter server``. This client uses
+The code execution container runs the stock ``jupyter server``. This client uses
 three parts of its API, and no extension:
 
 - ``/api/kernels`` starts, interrupts and shuts down a kernel. A kernel starts
@@ -41,8 +41,8 @@ REQUEST_TIMEOUT_S = 30.0
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
-class SandboxError(Exception):
-    """A request to the sandbox failed. The message is safe to give the agent."""
+class CodeExecutionError(Exception):
+    """A request to the code execution container failed. The message is safe to give the agent."""
 
     def __init__(self, message: str):
         super().__init__(message)
@@ -128,15 +128,19 @@ class Jupyter:
                 if resp.status == 404 and missing_ok:
                     return None
                 if resp.status >= 400:
-                    raise SandboxError(f"the sandbox refused to {what} ({resp.status})")
+                    raise CodeExecutionError(
+                        f"the code execution container refused to {what} ({resp.status})"
+                    )
                 if resp.status == 204:
                     return {}
                 text = await resp.text()
                 return json.loads(text) if text else {}
-        except SandboxError:
+        except CodeExecutionError:
             raise
         except (aiohttp.ClientError, TimeoutError, json.JSONDecodeError) as exc:
-            raise SandboxError(f"the sandbox did not answer a request to {what}") from exc
+            raise CodeExecutionError(
+                f"the code execution container did not answer a request to {what}"
+            ) from exc
 
     # -- kernels -------------------------------------------------------------
 
@@ -147,7 +151,7 @@ class Jupyter:
         )
         kernel_id = found.get("id") if isinstance(found, dict) else None
         if not isinstance(kernel_id, str) or not kernel_id:
-            raise SandboxError("the sandbox started no kernel")
+            raise CodeExecutionError("the code execution container started no kernel")
         return kernel_id
 
     async def kernel_alive(self, kernel_id: str) -> bool:
@@ -232,17 +236,17 @@ class Jupyter:
                         aiohttp.WSMsgType.CLOSING,
                         aiohttp.WSMsgType.ERROR,
                     ):
-                        raise SandboxError("the kernel closed the connection during the run")
+                        raise CodeExecutionError("the kernel closed the connection during the run")
                     if frame.type != aiohttp.WSMsgType.TEXT:
                         continue
                     if _absorb(out, json.loads(frame.data), msg_id):
                         return out
-        except SandboxError:
+        except CodeExecutionError:
             raise
         except (aiohttp.ClientError, json.JSONDecodeError, asyncio.CancelledError) as exc:
             if isinstance(exc, asyncio.CancelledError):
                 raise
-            raise SandboxError("the sandbox did not answer the run") from exc
+            raise CodeExecutionError("the code execution container did not answer the run") from exc
 
     # -- contents ------------------------------------------------------------
 
@@ -295,7 +299,7 @@ class Jupyter:
         )
         content = found.get("content") if isinstance(found, dict) else None
         if not isinstance(content, str):
-            raise SandboxError("the sandbox gave a file with no content")
+            raise CodeExecutionError("the code execution container gave a file with no content")
         return base64.b64decode(content)
 
     async def delete(self, path: str) -> None:

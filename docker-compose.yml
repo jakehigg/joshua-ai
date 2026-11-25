@@ -93,9 +93,9 @@ services:
       # The items of a tool call from a workspace go to core, with
       # JOSHUA_TOKEN_GATEWAY. This is also the default in code.
       CORE_URL: http://core:8000
-      # The token of the Jupyter server in the sandbox container, for the
-      # `sandbox` builtin. Empty when the sandbox is off.
-      SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
+      # The token of the Jupyter server in the code execution container, for
+      # the `code-execution` builtin. Empty when code execution is off.
+      CODE_EXECUTION_TOKEN: ${CODE_EXECUTION_TOKEN:-}
     # Every upstream credential an `mcp:` entry names with `${VAR:-}`: one
     # `NAME=value` line per variable in `.env.gateway`, which is yours and is
     # gitignored. It is optional, so a stack with no upstream credential starts
@@ -113,7 +113,7 @@ services:
       # `package:` entry here at start. It is not backed up, and `make nuke`
       # drops it; the next start installs everything again.
       - mcp-store:/opt/joshua-mcp
-    networks: [default, closed, sandbox]
+    networks: [default, closed, code-execution]
     healthcheck: *app-healthcheck
 
   core:
@@ -298,18 +298,18 @@ services:
         condition: service_healthy
     healthcheck: *app-healthcheck
 
-  # The code sandbox: the stock Jupyter scipy image, which runs Python for the
-  # `sandbox` builtin of the gateway. Off by default; `make up` starts it when
-  # joshua.yaml sets `sandbox.enabled: true`. docs/sandbox.md has the design.
+  # Code execution: the stock Jupyter scipy image, which runs Python for the
+  # `code-execution` builtin of the gateway. Off by default; `make up` starts it when
+  # joshua.yaml sets `code_execution.enabled: true`. docs/code-execution.md has the design.
   #
-  # It is on the `sandbox` network alone, with the gateway: no route to the
+  # It is on the `code-execution` network alone, with the gateway: no route to the
   # open web, and no other container reaches it. It mounts no volume of the
   # stack and holds no credential except its own Jupyter token. The gateway
   # copies the files of a run in. Its only writable storage is the two tmpfs
   # mounts, so a restart starts it empty.
-  sandbox:
+  code-execution:
     image: quay.io/jupyter/scipy-notebook:2026-11-23@sha256:21b93d2df02daa665b11442282d01f96d5a639e8ca9045cfd296e2896709b2fc
-    profiles: ["sandbox"]
+    profiles: ["code-execution"]
     restart: unless-stopped
     user: "1000:100"
     # Jupyter turns its auth off with an empty token, so the container refuses
@@ -317,8 +317,8 @@ services:
     command:
       - sh
       - -c
-      - 'test -n "$$JUPYTER_TOKEN" || { echo "JUPYTER_TOKEN is empty: set SANDBOX_TOKEN in .env" >&2; exit 1; }; exec jupyter server "$$@"'
-      - sandbox
+      - 'test -n "$$JUPYTER_TOKEN" || { echo "JUPYTER_TOKEN is empty: set CODE_EXECUTION_TOKEN in .env" >&2; exit 1; }; exec jupyter server "$$@"'
+      - code-execution
       - --ServerApp.ip=0.0.0.0
       - --ServerApp.port=8888
       - --ServerApp.root_dir=/home/jovyan
@@ -331,8 +331,8 @@ services:
       - --MappingKernelManager.cull_connected=True
     environment:
       # The server reads its token from JUPYTER_TOKEN. The gateway sends the
-      # same value as SANDBOX_TOKEN.
-      JUPYTER_TOKEN: ${SANDBOX_TOKEN:-}
+      # same value as CODE_EXECUTION_TOKEN.
+      JUPYTER_TOKEN: ${CODE_EXECUTION_TOKEN:-}
     read_only: true
     tmpfs:
       - /home/jovyan:uid=1000,gid=100,mode=0700,size=2g
@@ -342,7 +342,7 @@ services:
     mem_limit: 4g
     cpus: 2
     pids_limit: 256
-    networks: [sandbox]
+    networks: [code-execution]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/api')"]
       interval: 10s
@@ -377,9 +377,9 @@ networks:
   closed:
     internal: true
   # No route off the host, and two containers only: the gateway, which
-  # calls the Jupyter server, and the sandbox. The code of a run reaches
+  # calls the Jupyter server, and the code execution container. The code of a run reaches
   # nothing else.
-  sandbox:
+  code-execution:
     internal: true
 
 volumes:

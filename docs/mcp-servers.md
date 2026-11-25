@@ -176,9 +176,10 @@ Mark the listing tool `read` in `tools.class`, so that its class is clear.
 
 ## The builtin servers
 
-Two servers run inside the gateway and need no package: `files`, for the
-wiki and the attachments, and `documents`, for the plans, reports, and other
-documents of the members. Turn each one on with one entry:
+Three servers run inside the gateway and need no package: `files`, for the
+wiki and the attachments, `documents`, for the plans, reports, and other
+documents of the members, and `code-execution`, which runs Python in a
+container with no network. Turn each one on with one entry:
 
 ```yaml
 mcp:
@@ -188,7 +189,13 @@ mcp:
   documents:
     kind: builtin
     allow: all
+  code-execution:
+    kind: builtin
+    allow: all
 ```
+
+`code-execution` also needs `code_execution.enabled: true` and its container.
+[code-execution.md](code-execution.md) has the steps.
 
 `documents` gives its tools to a member only, whatever `allow` says. The
 session of an assignment always holds `documents` when the person may reach

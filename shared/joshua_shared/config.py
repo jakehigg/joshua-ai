@@ -52,7 +52,7 @@ _PERSON_ID_RE = PERSON_ID_RE
 MCP_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,31}$"
 _MCP_NAME_RE = re.compile(MCP_NAME_PATTERN)
 # Builtin servers run in-process in the gateway. Only these names are valid.
-BUILTIN_SERVER_NAMES = ("files", "documents", "sandbox", "viewer", "research")
+BUILTIN_SERVER_NAMES = ("files", "documents", "code-execution", "viewer", "research")
 MCP_TRANSPORTS = ("stdio", "http", "sse")
 # Memory source adapters the indexer can wire. ``files`` is the kernel and is
 # always active; the rest are optional and land with their own tickets.
@@ -99,9 +99,10 @@ NO_OWNER_WARNING = "no person has role 'owner'"
 # so every page refuses every request and the sign-in page offers no form. It
 # is a warning and not a refusal, because every container reads this file and
 # the rest of the instance runs.
-SANDBOX_OFF_WARNING = (
-    "mcp.sandbox is set but sandbox.enabled is false, so the sandbox server has "
-    "no tools: set sandbox.enabled: true and start the sandbox container"
+CODE_EXECUTION_OFF_WARNING = (
+    "mcp.code-execution is set but code_execution.enabled is false, so the code-execution "
+    "server has no tools: set code_execution.enabled: true and start the code execution "
+    "container"
 )
 NO_VIEWER_ACCESS_WARNING = (
     "viewer.auth.method is 'anonymous' and viewer.anonymous is not set, so "
@@ -1088,23 +1089,23 @@ class LimitsConfig(_Model):
         return frozenset(jobs)
 
 
-# --- sandbox -----------------------------------------------------------------
+# --- code execution ----------------------------------------------------------
 
 
-class SandboxConfig(_Model):
-    """The code sandbox: a Jupyter server in its own container, with no network.
+class CodeExecutionConfig(_Model):
+    """Code execution: a Jupyter server in its own container, with no network.
 
-    The ``sandbox`` builtin of the gateway runs Python there for the agent:
+    The ``code-execution`` builtin of the gateway runs Python there for the agent:
     one kernel for each conversation, so a table loaded in one call is still
     loaded in the next. ``enabled: false``, the default, gives the server no
     tools, and the container is not started. ``url`` is the Jupyter server as
-    the gateway reaches it. The token is ``SANDBOX_TOKEN`` in the environment
+    the gateway reaches it. The token is ``CODE_EXECUTION_TOKEN`` in the environment
     of the gateway, and the same value is ``JUPYTER_TOKEN`` in the container.
-    ``docs/sandbox.md`` has the design and the limits.
+    ``docs/code-execution.md`` has the design and the limits.
     """
 
     enabled: bool = False
-    url: str = "http://sandbox:8888"
+    url: str = "http://code-execution:8888"
     # One run stops after this many seconds: the kernel is interrupted, then
     # shut down when it does not stop.
     run_timeout_s: int = Field(default=120, ge=5, le=900)
@@ -1123,7 +1124,7 @@ class SandboxConfig(_Model):
     @classmethod
     def _check_url(cls, value: str) -> str:
         if not value.startswith(("http://", "https://")):
-            raise ValueError("sandbox.url must start with http:// or https://")
+            raise ValueError("code_execution.url must start with http:// or https://")
         return value.rstrip("/")
 
 
@@ -1573,13 +1574,15 @@ class JoshuaConfig(_Model):
     inference: Inference = Inference()
     gateway: GatewayConfig = GatewayConfig()
     assignments: Assignments = Assignments()
-    sandbox: SandboxConfig = SandboxConfig()
+    code_execution: CodeExecutionConfig = CodeExecutionConfig()
 
     # What is worth saying about this config without refusing to load it. The
     # validate command prints each line; a container reads the config and runs.
     _warnings: list[str] = PrivateAttr(default_factory=list)
 
-    @field_validator("limits", "gateway", "assignments", "workspaces", "sandbox", mode="before")
+    @field_validator(
+        "limits", "gateway", "assignments", "workspaces", "code_execution", mode="before"
+    )
     @classmethod
     def _empty_limits(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.
@@ -1731,9 +1734,9 @@ class JoshuaConfig(_Model):
         return self
 
     @model_validator(mode="after")
-    def _check_sandbox(self) -> JoshuaConfig:
-        if "sandbox" in self.mcp and not self.sandbox.enabled:
-            self._warnings.append(SANDBOX_OFF_WARNING)
+    def _check_code_execution(self) -> JoshuaConfig:
+        if "code-execution" in self.mcp and not self.code_execution.enabled:
+            self._warnings.append(CODE_EXECUTION_OFF_WARNING)
         return self
 
     @model_validator(mode="after")

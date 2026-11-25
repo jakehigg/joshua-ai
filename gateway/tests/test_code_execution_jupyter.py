@@ -1,8 +1,8 @@
-"""The Jupyter client of the sandbox, against a fake Jupyter server on 127.0.0.1.
+"""The Jupyter client of code execution, against a fake Jupyter server on 127.0.0.1.
 
 The fake speaks the parts of the Jupyter server API that the client uses: the
 kernels, the contents, and the kernel websocket with the JSON wire format. It
-checks the token on each request. ``test_sandbox_live.py`` runs the same calls
+checks the token on each request. ``test_code_execution_live.py`` runs the same calls
 against the real image.
 """
 
@@ -15,7 +15,7 @@ import json
 import pytest
 from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestServer
-from joshua_gateway.sandbox_mcp.jupyter import Jupyter, SandboxError, strip_ansi
+from joshua_gateway.code_execution_mcp.jupyter import CodeExecutionError, Jupyter, strip_ansi
 
 TOKEN = "test-token"
 
@@ -212,15 +212,15 @@ async def test_files_go_in_come_out_and_a_tree_is_removed(client):
 
 async def test_a_wrong_token_is_a_refusal_that_names_no_secret(fake):
     jupyter = Jupyter(str(fake.server.make_url("")).rstrip("/"), "wrong")
-    with pytest.raises(SandboxError) as exc:
+    with pytest.raises(CodeExecutionError) as exc:
         await jupyter.start_kernel("c")
     await jupyter.close()
-    assert exc.value.message == "the sandbox refused to start a kernel (403)"
+    assert exc.value.message == "the code execution container refused to start a kernel (403)"
 
 
 async def test_no_server_is_a_plain_error():
     jupyter = Jupyter("http://127.0.0.1:9", TOKEN)
-    with pytest.raises(SandboxError, match="did not answer"):
+    with pytest.raises(CodeExecutionError, match="did not answer"):
         await jupyter.start_kernel("c")
     await jupyter.close()
 

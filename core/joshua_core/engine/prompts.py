@@ -137,7 +137,7 @@ NEW_DAY_BLOCK = (
 # The MCP servers that ship a skill page, ``builtin/skills/<server>.md``. The
 # page goes into the prompt of a session that holds the server, and of no
 # other session, so a deployment without it pays nothing.
-SERVER_SKILLS = ("assignments", "documents", "developer", "sandbox")
+SERVER_SKILLS = ("assignments", "documents", "developer", "code-execution")
 
 # The server whose skill page has a step the instance can turn off, and the
 # block that replaces that step. The developer page tells Joshua to show the

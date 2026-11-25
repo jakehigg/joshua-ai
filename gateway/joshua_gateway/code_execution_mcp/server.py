@@ -1,6 +1,6 @@
-"""The sandbox MCP server, hosted in-process by the gateway as the ``sandbox`` builtin.
+"""The code execution MCP server: the in-process ``code-execution`` builtin of the gateway.
 
-It runs Python for the agent in the sandbox container: a stock Jupyter server
+It runs Python for the agent in the code execution container: a stock Jupyter server
 in a container of its own, with no network except the one route from the
 gateway. The agent counts, filters, joins and charts data there, and does not
 do arithmetic in its head.
@@ -10,7 +10,7 @@ conversation starts a kernel in the folder of that conversation, and the next
 calls use the same kernel. A table that one call loads is still loaded in the
 next call. ``reset_python`` shuts the kernel down and removes the folder. The
 Jupyter server shuts down a kernel that is idle for too long
-(``docs/sandbox.md``). A request with no conversation gets a kernel for that
+(``docs/code-execution.md``). A request with no conversation gets a kernel for that
 one call.
 
 **Files.** ``files`` names files that the person may read: a path of the files
@@ -23,9 +23,9 @@ of each run.
 
 **Access.** Members only, as for documents: a guest, and a request with no
 role, gets no tools. The person and the role come from the request, never from
-a tool argument. With ``sandbox.enabled: false`` the list of tools is empty.
+a tool argument. With ``code_execution.enabled: false`` the list of tools is empty.
 
-**What the sandbox cannot do.** It has no route to the network, and it holds no
+**What code execution cannot do.** It has no route to the network, and it holds no
 credential except its own Jupyter token. It sees only the files that a call
 copies in. Every kernel runs in the same container, so one conversation's code
 can read the folder of another conversation. ``docs/security.md`` records
@@ -49,19 +49,19 @@ from typing import Any
 
 import mcp_types as types
 from joshua_shared import layout
-from joshua_shared.config import SandboxConfig, is_member
+from joshua_shared.config import CodeExecutionConfig, is_member
 from joshua_shared.log import get_logger
 from mcp.server.lowlevel import Server
 
+from joshua_gateway.code_execution_mcp.jupyter import CodeExecutionError, Execution, Jupyter
 from joshua_gateway.files_mcp.paths import MEMBER, UNKNOWN, PathError, resolve
 from joshua_gateway.files_mcp.paths import roots as roots_for_role
 from joshua_gateway.observability import conversation_ctx, identity_ctx, person_ctx, role_ctx
-from joshua_gateway.sandbox_mcp.jupyter import Execution, Jupyter, SandboxError
 
-_logger = get_logger("sandbox_mcp")
+_logger = get_logger("code_execution_mcp")
 
 # The environment variable of the gateway that holds the Jupyter token.
-TOKEN_ENV = "SANDBOX_TOKEN"
+TOKEN_ENV = "CODE_EXECUTION_TOKEN"
 # The folder under the Jupyter root that holds one folder for each conversation.
 CONVERSATIONS = "conversations"
 INPUT = "in"
@@ -91,15 +91,15 @@ _IMAGE_SUFFIXES = {
     ".webp": "image/webp",
 }
 
-_MEMBERS_ONLY = "the sandbox is for members"
-_OFF = "the sandbox is off: sandbox.enabled is false"
-_NO_TOKEN = f"the sandbox has no token: set {TOKEN_ENV} in the environment of the gateway"
+_MEMBERS_ONLY = "code execution is for members"
+_OFF = "code execution is off: code_execution.enabled is false"
+_NO_TOKEN = f"code execution has no token: set {TOKEN_ENV} in the environment of the gateway"
 
 TOOLS = [
     types.Tool(
         name="run_python",
         description=(
-            "Run Python 3 code in the sandbox, a container with no network. Use it "
+            "Run Python 3 code in a container with no network. Use it "
             "for any count, filter, sort, comparison, join, or total of more than a "
             "few rows, and for a chart. pandas, numpy, scipy, matplotlib, seaborn, "
             "openpyxl and scikit-learn are installed; pip cannot install more. The "
@@ -154,10 +154,10 @@ class _Request:
     conversation: str | None
 
 
-class Sandbox:
+class CodeExecution:
     """The kernels of the conversations, and one run at a time for each of them."""
 
-    def __init__(self, settings: SandboxConfig, client: Jupyter, root_dir: Path) -> None:
+    def __init__(self, settings: CodeExecutionConfig, client: Jupyter, root_dir: Path) -> None:
         self.settings = settings
         self.client = client
         self.root_dir = root_dir
@@ -222,14 +222,14 @@ class Sandbox:
     async def run(self, req: _Request, args: dict[str, Any]) -> types.CallToolResult:
         code = args.get("code")
         if not isinstance(code, str) or not code.strip():
-            raise SandboxError("code is empty")
+            raise CodeExecutionError("code is empty")
         if len(code) > MAX_CODE_CHARS:
-            raise SandboxError(f"code is longer than {MAX_CODE_CHARS} characters")
+            raise CodeExecutionError(f"code is longer than {MAX_CODE_CHARS} characters")
         paths = args.get("files") or []
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
-            raise SandboxError("files must be a list of paths")
+            raise CodeExecutionError("files must be a list of paths")
         if len(paths) > MAX_FILES:
-            raise SandboxError(f"a run takes at most {MAX_FILES} files")
+            raise CodeExecutionError(f"a run takes at most {MAX_FILES} files")
         timeout = _timeout(args.get("timeout_s"), self.settings.run_timeout_s)
         inputs = _read_inputs(req, paths, self.root_dir, self.settings.max_input_bytes)
 
@@ -260,7 +260,7 @@ class Sandbox:
                     await self._drop(key, remove_folder=True)
         _logger.info(
             {
-                "message": "sandbox run",
+                "message": "code execution run",
                 "files": len(inputs),
                 "outputs": len(outputs),
                 "error": result.error is not None,
@@ -319,7 +319,7 @@ def _timeout(raw: Any, limit: int) -> float:
     if raw is None:
         return float(limit)
     if isinstance(raw, bool) or not isinstance(raw, int | float) or raw <= 0:
-        raise SandboxError("timeout_s must be a positive number")
+        raise CodeExecutionError("timeout_s must be a positive number")
     return float(min(raw, limit))
 
 
@@ -343,13 +343,13 @@ def _read_inputs(
             try:
                 _, abs_path = resolve(path, roots, write=False)
             except PathError as exc:
-                raise SandboxError(f"{path}: {exc.message}") from exc
+                raise CodeExecutionError(f"{path}: {exc.message}") from exc
         if not abs_path.is_file():
-            raise SandboxError(f"{path}: file not found")
+            raise CodeExecutionError(f"{path}: file not found")
         size = abs_path.stat().st_size
         total += size
         if total > max_bytes:
-            raise SandboxError(f"the files of one run are larger than {max_bytes} bytes")
+            raise CodeExecutionError(f"the files of one run are larger than {max_bytes} bytes")
         out.append((_unique(abs_path.name, taken), abs_path.read_bytes(), path))
     return out
 
@@ -357,17 +357,17 @@ def _read_inputs(
 def _document_path(req: _Request, path: str, root_dir: Path) -> Path:
     parts = PurePosixPath(path).parts
     if len(parts) != 3 or ".." in parts or "\x00" in path:
-        raise SandboxError(f"{path}: a document path is documents/<owner>/<slug>.md")
+        raise CodeExecutionError(f"{path}: a document path is documents/<owner>/<slug>.md")
     owner, name = parts[1], parts[2]
     own = req.person if req.person and req.person != UNKNOWN else None
     if owner not in (own, layout.DOCUMENTS_SHARED):
-        raise SandboxError(f"{path}: that folder is not yours")
+        raise CodeExecutionError(f"{path}: that folder is not yours")
     if name.startswith(".") or not name.endswith((".md", ".html")):
-        raise SandboxError(f"{path}: a document path is documents/<owner>/<slug>.md")
+        raise CodeExecutionError(f"{path}: a document path is documents/<owner>/<slug>.md")
     base = Path(os.path.realpath(layout.documents_root(root_dir)))
     abs_path = layout.documents_owner_dir(owner, root_dir) / name
     if not Path(os.path.realpath(abs_path)).is_relative_to(base):
-        raise SandboxError(f"{path}: path escapes documents")
+        raise CodeExecutionError(f"{path}: path escapes documents")
     return abs_path
 
 
@@ -466,34 +466,34 @@ def _role_from_config(person: str) -> str | None:
     return entry.role if entry is not None else None
 
 
-# One Sandbox for each Jupyter URL, so a rebuild of the server keeps the kernels.
-_SANDBOXES: dict[str, Sandbox] = {}
+# One CodeExecution for each Jupyter URL, so a rebuild of the server keeps the kernels.
+_EXECUTORS: dict[str, CodeExecution] = {}
 
 
-def build_sandbox_server(
+def build_code_execution_server(
     root_dir: Path,
-    settings: SandboxConfig,
+    settings: CodeExecutionConfig,
     *,
     token: str | None = None,
     role_for: Callable[[str], str | None] | None = None,
     client: Jupyter | None = None,
 ) -> Server:
-    """Build the sandbox ``Server`` for a data volume at ``root_dir``.
+    """Build the code execution ``Server`` for a data volume at ``root_dir``.
 
-    ``token`` defaults to ``SANDBOX_TOKEN`` from the environment. ``client`` is
+    ``token`` defaults to ``CODE_EXECUTION_TOKEN`` from the environment. ``client`` is
     a seam for the tests.
     """
     roles = role_for or _role_from_config
     secret = (token if token is not None else os.environ.get(TOKEN_ENV, "")).strip()
-    sandbox: Sandbox | None = None
+    executor: CodeExecution | None = None
     if settings.enabled and secret:
         if client is not None:
-            sandbox = Sandbox(settings, client, root_dir)
+            executor = CodeExecution(settings, client, root_dir)
         else:
-            sandbox = _SANDBOXES.get(settings.url)
-            if sandbox is None:
-                sandbox = Sandbox(settings, Jupyter(settings.url, secret), root_dir)
-                _SANDBOXES[settings.url] = sandbox
+            executor = _EXECUTORS.get(settings.url)
+            if executor is None:
+                executor = CodeExecution(settings, Jupyter(settings.url, secret), root_dir)
+                _EXECUTORS[settings.url] = executor
 
     def request() -> _Request:
         person = person_ctx.get()
@@ -515,18 +515,18 @@ def build_sandbox_server(
         args = params.arguments or {}
         try:
             if not settings.enabled:
-                raise SandboxError(_OFF)
+                raise CodeExecutionError(_OFF)
             req = request()
             if not req.member:
-                raise SandboxError(_MEMBERS_ONLY)
-            if sandbox is None:
-                raise SandboxError(_NO_TOKEN)
+                raise CodeExecutionError(_MEMBERS_ONLY)
+            if executor is None:
+                raise CodeExecutionError(_NO_TOKEN)
             if params.name == "run_python":
-                return await sandbox.run(req, args)
+                return await executor.run(req, args)
             if params.name == "reset_python":
-                return await sandbox.reset(req)
-            raise SandboxError(f"unknown tool: {params.name}")
-        except SandboxError as exc:
+                return await executor.reset(req)
+            raise CodeExecutionError(f"unknown tool: {params.name}")
+        except CodeExecutionError as exc:
             return _error(exc.message)
 
-    return Server("sandbox", on_list_tools=on_list_tools, on_call_tool=on_call_tool)
+    return Server("code-execution", on_list_tools=on_list_tools, on_call_tool=on_call_tool)

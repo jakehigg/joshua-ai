@@ -1,16 +1,17 @@
-"""The sandbox against the real image: a Jupyter server in a container.
+"""Code execution against the real image: a Jupyter server in a container.
 
-These tests need the sandbox container, so they are integration tests. The
-`sandbox` job of CI starts the pinned image with the command of the compose
-file and sets ``SANDBOX_TEST_URL`` and ``SANDBOX_TEST_TOKEN``. Locally::
+These tests need the code execution container, so they are integration tests. The
+`code-execution` job of CI starts the pinned image with the command of the compose
+file and sets ``CODE_EXECUTION_TEST_URL`` and ``CODE_EXECUTION_TEST_TOKEN``. Locally::
 
     docker run -d -p 127.0.0.1:18888:8888 -e JUPYTER_TOKEN=t <image> \\
         jupyter server --ServerApp.ip=0.0.0.0 --ServerApp.root_dir=/home/jovyan
-    SANDBOX_TEST_URL=http://127.0.0.1:18888 SANDBOX_TEST_TOKEN=t \\
-        uv run --package joshua-gateway pytest gateway/tests/test_sandbox_live.py -m integration
+    CODE_EXECUTION_TEST_URL=http://127.0.0.1:18888 CODE_EXECUTION_TEST_TOKEN=t \\
+        uv run --package joshua-gateway \
+            pytest gateway/tests/test_code_execution_live.py -m integration
 
 The network of the container is not under test here: CI runs it with a route
-out. ``tests/test_sandbox_isolation.py`` asserts the networks of both
+out. ``tests/test_code_execution_isolation.py`` asserts the networks of both
 deployment paths.
 """
 
@@ -21,16 +22,18 @@ import uuid
 from pathlib import Path
 
 import pytest
-from joshua_gateway.sandbox_mcp.jupyter import Jupyter
-from joshua_gateway.sandbox_mcp.server import Sandbox, _Request
-from joshua_shared.config import SandboxConfig
+from joshua_gateway.code_execution_mcp.jupyter import Jupyter
+from joshua_gateway.code_execution_mcp.server import CodeExecution, _Request
+from joshua_shared.config import CodeExecutionConfig
 
-URL = os.environ.get("SANDBOX_TEST_URL", "")
-TOKEN = os.environ.get("SANDBOX_TEST_TOKEN", "")
+URL = os.environ.get("CODE_EXECUTION_TEST_URL", "")
+TOKEN = os.environ.get("CODE_EXECUTION_TEST_TOKEN", "")
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(not URL or not TOKEN, reason="SANDBOX_TEST_URL and SANDBOX_TEST_TOKEN"),
+    pytest.mark.skipif(
+        not URL or not TOKEN, reason="CODE_EXECUTION_TEST_URL and CODE_EXECUTION_TEST_TOKEN"
+    ),
 ]
 
 # Two exports of one reading list. The second has one book less, and one book
@@ -58,8 +61,10 @@ def data_root(tmp_path: Path) -> Path:
 @pytest.fixture
 async def box(data_root: Path):
     client = Jupyter(URL, TOKEN)
-    sandbox = Sandbox(SandboxConfig(enabled=True, url=URL, run_timeout_s=60), client, data_root)
-    yield sandbox
+    executor = CodeExecution(
+        CodeExecutionConfig(enabled=True, url=URL, run_timeout_s=60), client, data_root
+    )
+    yield executor
     await client.close()
 
 

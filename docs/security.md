@@ -22,9 +22,9 @@ Every ability the agent has is an MCP server:
   the subscription limits, and `use_internet`, which asks the internet agent
   one question.
 - Behind `gateway`: the `files` server and every server you add in `mcp:`.
-  The optional `sandbox` server runs Python that the agent writes, in a
-  container of its own with no network. See
-  [The code sandbox](#the-code-sandbox).
+  The optional `code-execution` server runs Python that the agent writes, in
+  a container of its own with no network. See
+  [Code execution](#code-execution).
 
 If a task seems to need a built-in tool, the task is wrong. Add an MCP server
 instead.
@@ -734,14 +734,16 @@ session prompt keeps research off that path, and closing it needs the proxy in
 a container of its own.
 [assignments.md](assignments.md#what-the-session-can-reach) has the detail.
 
-## The code sandbox
+## Code execution
 
-The `sandbox` builtin runs Python that the agent writes. It is off by default.
-The code runs in the sandbox container, never in the gateway or in core:
-[sandbox.md](sandbox.md) has the design.
+The `code-execution` builtin runs Python that the agent writes. It is off by
+default. The code runs in the code execution container, never in the gateway
+or in core:
+[code-execution.md](code-execution.md) has the design.
 
-- **No network.** On compose, the container is on the `sandbox` network alone,
-  which is `internal: true` and holds the gateway and the sandbox only. On
+- **No network.** On compose, the container is on the `code-execution` network
+  alone, which is `internal: true` and holds only the gateway and the
+  container. On
   Kubernetes, the NetworkPolicy of the chart admits the gateway pod on port
   8888 and allows no egress, DNS included. The code cannot send data out, so a
   prompt injection that steers the code cannot use it to leak.
@@ -762,7 +764,7 @@ conversation can read the folder of another conversation. It can read the
 Jupyter token from its environment and so control the other kernels. A run
 that takes all the memory or CPU slows the others until its timeout stops it.
 The owner accepts this for one instance of one group: the network block is the
-control that keeps data in, and every person who reaches the sandbox is a
+control that keeps data in, and every person who reaches code execution is a
 member of the same instance. A container for each conversation is the next
 step if a deployment needs more separation.
 
@@ -783,10 +785,10 @@ that tells the agent to do something. This is what it can do at most:
   sent, a source of an earlier answer, or a page its own search returned. A
   private detail the agent puts in the question can leave in a search query.
 
-With the sandbox on, it can also run Python in the sandbox container, which
-reaches no network and holds no credential.
+With code execution on, it can also run Python in the code execution
+container, which reaches no network and holds no credential.
 
-It cannot read a token. It cannot run a command outside the sandbox. It cannot fetch a URL of its
+It cannot read a token. It cannot run a command outside the code execution container. It cannot fetch a URL of its
 own choosing, because the worker reads only a page it was given. A server that acts
 on the world, such as home automation, is exactly as exposed as its `allow`
 list makes it. Keep such servers on a short list.
@@ -803,7 +805,7 @@ list makes it. Keep such servers on a short list.
   Joshua sends.
 - `assignments` is on the `closed` compose network, which has no route off the
   host. It reaches the other containers and nothing on the open web.
-- `sandbox` is on the `sandbox` compose network alone, which has no route off
+- `code-execution` is on the `code-execution` compose network alone, which has no route off
   the host and holds only the gateway. It reaches nothing.
 
 Compose enforces no egress beyond that network, because a network has no route
@@ -828,5 +830,5 @@ other's shared files on one instance.
   credential. Keep `.env` private.
 - A `package` MCP server runs in the gateway's container with no sandbox. See
   [Package MCP servers](#package-mcp-servers).
-- Every kernel of the code sandbox shares one container. See
+- Every kernel of code execution shares one container. See
   [Known limitation: one container for every kernel](#known-limitation-one-container-for-every-kernel).

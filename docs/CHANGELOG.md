@@ -6,17 +6,17 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
-### Sandbox
+### Code execution
 
-- **Joshua can run Python.** The new `sandbox` builtin runs code in a
+- **Joshua can run Python.** The new `code-execution` builtin runs code in a
   container of its own: the stock Jupyter scipy image, with no network and no
   credential of the instance. Joshua uses it to count, filter, compare, and
   chart data from a file, so a number comes from code and not from a read of
   the file. Each conversation keeps its own kernel, so a table loaded once is
-  there for the next question. The sandbox is off by default: set
-  `sandbox.enabled: true`, add `sandbox` under `mcp:`, and run `make up`, or
-  set `sandbox.enabled` in the chart. Every kernel shares one container, and
-  `docs/security.md` records that as a known limitation. `docs/sandbox.md` has
+  there for the next question. Code execution is off by default: set
+  `code_execution.enabled: true`, add `code-execution` under `mcp:`, and run
+  `make up`, or set `codeExecution.enabled` in the chart. Every kernel shares one container, and
+  `docs/security.md` records that as a known limitation. `docs/code-execution.md` has
   the steps.
 
 ### Chat
