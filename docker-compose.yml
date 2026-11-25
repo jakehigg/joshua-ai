@@ -93,6 +93,9 @@ services:
       # The items of a tool call from a workspace go to core, with
       # JOSHUA_TOKEN_GATEWAY. This is also the default in code.
       CORE_URL: http://core:8000
+      # The token of the Jupyter server in the sandbox container, for the
+      # `sandbox` builtin. Empty when the sandbox is off.
+      SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
     # Every upstream credential an `mcp:` entry names with `${VAR:-}`: one
     # `NAME=value` line per variable in `.env.gateway`, which is yours and is
     # gitignored. It is optional, so a stack with no upstream credential starts
@@ -110,7 +113,7 @@ services:
       # `package:` entry here at start. It is not backed up, and `make nuke`
       # drops it; the next start installs everything again.
       - mcp-store:/opt/joshua-mcp
-    networks: [default, closed]
+    networks: [default, closed, sandbox]
     healthcheck: *app-healthcheck
 
   core:
@@ -295,6 +298,58 @@ services:
         condition: service_healthy
     healthcheck: *app-healthcheck
 
+  # The code sandbox: the stock Jupyter scipy image, which runs Python for the
+  # `sandbox` builtin of the gateway. Off by default; `make up` starts it when
+  # joshua.yaml sets `sandbox.enabled: true`. docs/sandbox.md has the design.
+  #
+  # It is on the `sandbox` network alone, with the gateway: no route to the
+  # open web, and no other container reaches it. It mounts no volume of the
+  # stack and holds no credential except its own Jupyter token. The gateway
+  # copies the files of a run in. Its only writable storage is the two tmpfs
+  # mounts, so a restart starts it empty.
+  sandbox:
+    image: quay.io/jupyter/scipy-notebook:2026-11-23@sha256:21b93d2df02daa665b11442282d01f96d5a639e8ca9045cfd296e2896709b2fc
+    profiles: ["sandbox"]
+    restart: unless-stopped
+    user: "1000:100"
+    # Jupyter turns its auth off with an empty token, so the container refuses
+    # to start without one.
+    command:
+      - sh
+      - -c
+      - 'test -n "$$JUPYTER_TOKEN" || { echo "JUPYTER_TOKEN is empty: set SANDBOX_TOKEN in .env" >&2; exit 1; }; exec jupyter server "$$@"'
+      - sandbox
+      - --ServerApp.ip=0.0.0.0
+      - --ServerApp.port=8888
+      - --ServerApp.root_dir=/home/jovyan
+      - --ServerApp.open_browser=False
+      - --ServerApp.allow_remote_access=True
+      - --ServerApp.terminals_enabled=False
+      # A kernel that is idle for 30 minutes is shut down.
+      - --MappingKernelManager.cull_idle_timeout=1800
+      - --MappingKernelManager.cull_interval=300
+      - --MappingKernelManager.cull_connected=True
+    environment:
+      # The server reads its token from JUPYTER_TOKEN. The gateway sends the
+      # same value as SANDBOX_TOKEN.
+      JUPYTER_TOKEN: ${SANDBOX_TOKEN:-}
+    read_only: true
+    tmpfs:
+      - /home/jovyan:uid=1000,gid=100,mode=0700,size=2g
+      - /tmp:size=512m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 4g
+    cpus: 2
+    pids_limit: 256
+    networks: [sandbox]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/api')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
   # `make validate`: check joshua.yaml once, and exit. It runs from the core
   # image and has no network. It gets the channel credentials and the old
   # viewer passwords only to report on them: the summary names a channel only
@@ -320,6 +375,11 @@ networks:
   # it: the gateway calls `/mcp`, the viewer calls the read API, and the
   # manager calls core, channels, and postgres.
   closed:
+    internal: true
+  # No route off the host, and two containers only: the gateway, which
+  # calls the Jupyter server, and the sandbox. The code of a run reaches
+  # nothing else.
+  sandbox:
     internal: true
 
 volumes:

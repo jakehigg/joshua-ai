@@ -1,0 +1,164 @@
+{{- if .Values.sandbox.enabled }}
+{{/* The code sandbox: the stock Jupyter scipy image, which runs Python for the
+     `sandbox` builtin of the gateway. docs/sandbox.md has the design.
+
+     Two switches turn it on, and both are needed. This one puts the pod in the
+     cluster. `sandbox.enabled: true` inside `config` gives the builtin its
+     tools. Set `sandbox.url` in `config` to http://joshua-sandbox:8888.
+
+     The pod mounts no volume of the instance, holds no credential except its
+     own Jupyter token, and gets no service account token. Its only writable
+     storage is two emptyDir volumes, so a new pod starts empty. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joshua-sandbox
+  labels:
+    app.kubernetes.io/name: joshua-sandbox
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  # The gateway keeps one kernel id for each conversation, and a second pod
+  # would not know it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-sandbox
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: joshua-sandbox
+        {{- include "joshua.labels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 100
+        runAsNonRoot: true
+        fsGroup: 100
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sandbox
+          image: {{ .Values.sandbox.image }}
+          imagePullPolicy: IfNotPresent
+          {{/* Jupyter turns its auth off with an empty token, so the
+               container refuses to start without one. */}}
+          command:
+            - sh
+            - -c
+            - 'test -n "$JUPYTER_TOKEN" || { echo "JUPYTER_TOKEN is empty" >&2; exit 1; }; exec jupyter server "$@"'
+            - sandbox
+            - --ServerApp.ip=0.0.0.0
+            - --ServerApp.port=8888
+            - --ServerApp.root_dir=/home/jovyan
+            - --ServerApp.open_browser=False
+            - --ServerApp.allow_remote_access=True
+            - --ServerApp.terminals_enabled=False
+            - --MappingKernelManager.cull_idle_timeout={{ .Values.sandbox.cullIdleSeconds }}
+            - --MappingKernelManager.cull_interval=300
+            - --MappingKernelManager.cull_connected=True
+          ports:
+            - containerPort: 8888
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 100
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.sandbox) | nindent 12 }}
+          resources:
+            {{- toYaml .Values.sandbox.resources | nindent 12 }}
+          {{/* The probes run in the pod, so the network policy needs no rule
+               for the kubelet. GET /api answers with no token. */}}
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/api')"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/api')"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: home
+              mountPath: /home/jovyan
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: home
+          emptyDir:
+            sizeLimit: {{ .Values.sandbox.workSizeLimit }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: joshua-sandbox
+  labels:
+    app.kubernetes.io/name: joshua-sandbox
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: joshua-sandbox
+  ports:
+    - name: http
+      port: 8888
+      targetPort: 8888
+---
+{{/* Only the gateway reaches the pod, and the pod reaches nothing: the egress
+     list is empty, so there is no DNS and no route to the cluster or the
+     internet. A reply to the gateway is part of the connection that the
+     gateway opened, so the policy allows it. This policy is not optional: the
+     sandbox without it is a shell with a network. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: joshua-sandbox
+  labels:
+    app.kubernetes.io/name: joshua-sandbox
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-sandbox
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: joshua-gateway
+      ports:
+        - protocol: TCP
+          port: 8888
+  egress: []
+{{- end }}

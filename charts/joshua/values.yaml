@@ -142,6 +142,9 @@ secrets:
       # The optional key of the SearXNG instance of internet.search. The
       # gateway calls SearXNG, so only the gateway gets it.
       SEARXNG_API_KEY: {}
+      # The token of the Jupyter server in the sandbox pod, for the `sandbox`
+      # builtin. It is read from the sandbox Secret, so the two always agree.
+      SANDBOX_TOKEN: {name: joshua-sandbox-secrets, key: JUPYTER_TOKEN}
   # The viewer reads the volume. With JOSHUA_TOKEN_VIEWER it calls core (the
   # sign-in, the search by meaning and the usage) and the assignments
   # container (the assignments of a person and the comments on a definition).
@@ -170,6 +173,13 @@ secrets:
   # read token of each git host in assignments.platforms as one more key,
   # under the name that its token_env gives, such as ASSIGNMENTS_GITLAB_TOKEN.
   # Only the manager reads it; a session clones through the manager.
+  # The sandbox pod holds one credential: the token of its own Jupyter
+  # server. The gateway reads the same key as SANDBOX_TOKEN.
+  sandbox:
+    name: joshua-sandbox-secrets
+    keys:
+      # The server must never start without a token.
+      JUPYTER_TOKEN: {optional: false}
   assignments:
     name: joshua-assignments-secrets
     keys:
@@ -401,6 +411,33 @@ assignments:
     limits:
       cpu: "2"
       memory: 2Gi
+
+# The code sandbox: the stock Jupyter scipy image, which runs Python for the
+# `sandbox` builtin of the gateway. Off by default. docs/sandbox.md has the
+# whole setup.
+#
+# Two switches turn it on, and both are needed:
+#   sandbox.enabled here      puts the pod in the cluster
+#   sandbox.enabled in config gives the builtin its tools
+# Set `sandbox.url: http://joshua-sandbox:8888` in config, and add the
+# `sandbox` entry under `mcp:`. The pod always gets its network policy: only
+# the gateway reaches it, and it reaches nothing.
+sandbox:
+  enabled: false
+  # A stock image, pinned by digest. It holds Python, pandas, numpy, scipy,
+  # matplotlib, seaborn, openpyxl and scikit-learn.
+  image: quay.io/jupyter/scipy-notebook:2026-11-23@sha256:21b93d2df02daa665b11442282d01f96d5a639e8ca9045cfd296e2896709b2fc
+  # A kernel that is idle this many seconds is shut down.
+  cullIdleSeconds: 1800
+  # The emptyDir that holds the conversation folders.
+  workSizeLimit: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 4Gi
 
 # Only channels is reachable from outside the cluster, for a webhook. core and
 # gateway are never exposed.

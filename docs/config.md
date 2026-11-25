@@ -1415,6 +1415,37 @@ start. Before that call, core gives the last saved value, or
 token from `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`. See
 [contracts.md](contracts.md#the-limits-route).
 
+## sandbox
+
+`sandbox` controls the code sandbox: a Jupyter server in a container of its
+own, with no network, where the `sandbox` builtin runs Python for the agent.
+It is off by default. [sandbox.md](sandbox.md) has the design and the steps.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `enabled` | `false` | `true` gives the `sandbox` server its tools, and `make up` starts the container. |
+| `url` | `http://sandbox:8888` | The Jupyter server, as the gateway reaches it. On Kubernetes, `http://joshua-sandbox:8888`. |
+| `run_timeout_s` | `120` | A run stops after this many seconds (5 to 900). |
+| `max_output_chars` | `20000` | The text of one result. The rest is cut. |
+| `max_input_bytes` | `26214400` | The input files of one run together. |
+| `max_kernels` | `4` | The kernels at the same time (1 to 32). |
+| `folder_ttl_hours` | `24` | A folder that no kernel uses is removed after this time. |
+
+The token is `SANDBOX_TOKEN` in the environment of the gateway, and the same
+value is `JUPYTER_TOKEN` in the sandbox container. The sandbox also needs the
+server entry:
+
+```yaml
+sandbox:
+  enabled: true
+mcp:
+  sandbox:
+    kind: builtin
+    allow: all
+```
+
+`make validate` warns when `mcp.sandbox` is set and `sandbox.enabled` is false.
+
 ## assignments
 
 `assignments` controls the assignments container, which runs long jobs for a
