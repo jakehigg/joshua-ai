@@ -80,7 +80,12 @@ li.a-line:hover > .v-plus, .v-plus:focus-visible { opacity: 1; }
   --hl-meta: #e3b341;
   --hl-deletion-bg: #490202;
   --hl-addition-bg: #04260f;
+}
 
+/* The layout of the chat screen, on the screen alone and never on :root: a
+   flex root shrinks the body of every page to the width of its content, and
+   a document in the frame of a sheet then fills a third of the sheet. */
+.chat-screen {
   flex: 1;
   min-height: 0;
   display: flex;

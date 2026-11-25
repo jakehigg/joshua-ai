@@ -21,6 +21,10 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- **An artifact fills the item sheet again.** On a desktop, an HTML document
+  in the sheet of a workspace item showed in a narrow column on the left of
+  the sheet. It now takes the full width of the sheet.
+
 - **A person reaches only their own chat.** The chat routes of the viewer
   acted for the person named in the address, so any person who had signed in
   could read the main thread of another, send a turn as them, and read or
