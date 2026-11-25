@@ -21,6 +21,10 @@ with the images and the packaged chart, are at
 
 ### Chat
 
+- **The item sheet is wider on a desktop.** It takes most of the window
+  (80 percent, from 40rem to 100rem) in place of the width of the document
+  panel. A drag of its edge is kept apart from the document panel, and may
+  take up to 96 percent of the window.
 - **An artifact fills the item sheet again.** On a desktop, an HTML document
   in the sheet of a workspace item showed in a narrow column on the left of
   the sheet. It now takes the full width of the sheet.

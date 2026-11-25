@@ -499,7 +499,7 @@ export function ItemSheet({
         ) : panel.view ? (
           <PagePanel view={panel.view} onClose={panel.close} full={full} onFull={onFull} />
         ) : null}
-        {!full && <Divider panel="doc" label="Resize the item" factor={2} />}
+        {!full && <Divider panel="sheet" label="Resize the item" factor={2} />}
       </div>
     </div>
   );
