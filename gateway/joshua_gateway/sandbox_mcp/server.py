@@ -164,7 +164,8 @@ class Sandbox:
         self._slots: dict[str, _Slot] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._start_lock = asyncio.Lock()
-        self._last_sweep = 0.0
+        # None until the first sweep, which runs at the first call.
+        self._last_sweep: float | None = None
 
     # -- kernels -------------------------------------------------------------
 
@@ -205,7 +206,7 @@ class Sandbox:
     async def sweep(self) -> None:
         """Remove the conversation folders that no kernel used for the TTL."""
         now = time.monotonic()
-        if now - self._last_sweep < SWEEP_EVERY_S:
+        if self._last_sweep is not None and now - self._last_sweep < SWEEP_EVERY_S:
             return
         self._last_sweep = now
         live = {slot.folder for slot in self._slots.values()}

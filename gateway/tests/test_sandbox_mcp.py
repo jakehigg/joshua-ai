@@ -198,6 +198,16 @@ async def test_the_sweep_removes_old_folders_that_no_kernel_uses(data_root):
     assert "conversations/c-new" in fake.dirs
 
 
+async def test_the_first_call_sweeps_whatever_the_clock_reads(data_root, monkeypatch):
+    # A fresh host has a small monotonic clock: the first sweep must still run.
+    monkeypatch.setattr(sandbox_server.time, "monotonic", lambda: 5.0)
+    fake = FakeJupyter()
+    box = make(data_root, fake, folder_ttl_hours=1)
+    fake.dirs["conversations/c-old"] = datetime.now(UTC) - timedelta(hours=2)
+    await box.run(ALEX, {"code": "1"})
+    assert "conversations/c-old" not in fake.dirs
+
+
 # -- the files of a run -------------------------------------------------------
 
 
